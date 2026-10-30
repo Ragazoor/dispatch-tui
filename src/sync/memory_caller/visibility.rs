@@ -52,6 +52,32 @@ impl Scope {
 }
 
 impl Tables {
+    /// `unseen_items`, as the sender sees it: the module's definition run over
+    /// these tables, and nothing for anyone but a super-admin.
+    pub(super) fn unseen_items_for(&self, who: &str) -> Vec<module::UnseenItem> {
+        if !self.is_super_admin(who) {
+            return Vec::new();
+        }
+        let private_epics: Vec<module::Epic> = self
+            .epics
+            .values()
+            .filter(|e| e.visibility == module::VISIBILITY_PRIVATE)
+            .cloned()
+            .collect();
+        let private_packages: Vec<module::WorkPackage> = self
+            .work_packages
+            .values()
+            .filter(|p| p.visibility == module::VISIBILITY_PRIVATE)
+            .cloned()
+            .collect();
+        module::unseen_items_of(
+            &private_epics,
+            &private_packages,
+            |id| self.epics.get(&id).cloned(),
+            |workspace_id, user| self.has_member(workspace_id, user),
+        )
+    }
+
     fn has_member(&self, workspace_id: i64, who: &str) -> bool {
         self.memberships
             .values()

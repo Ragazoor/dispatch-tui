@@ -435,3 +435,110 @@ pub(crate) fn first_workspace_of(ctx: &ReducerContext, who: &str) -> Option<i64>
         .map(|m| m.workspace_id)
         .min()
 }
+
+/// One row of the `unseen_items` view (`admin-surfaces.allium: UnseenItem`):
+/// a private epic or package nobody can see. Never a title or any content.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug, PartialEq, Eq)]
+pub struct UnseenItem {
+    /// `"epic"` or `"work_package"`, as `super_admin_delete_unseen_item` takes it.
+    pub kind: String,
+    pub item_id: i64,
+    pub workspace_id: i64,
+    /// The creator's identity; `""` for a private item with no creator.
+    pub creator: String,
+    pub created_at: String,
+}
+
+/// `admin-surfaces.allium: UnseenItemListingContents`, over what a view can
+/// read, so the view and `MemoryReducerCaller` run one definition. A view reads
+/// through indexes only, so the caller hands in the private epics and packages
+/// (a point read on the `visibility` index) and a way to find one epic by id.
+/// An item is unseen when its creator is not a member of its workspace. An
+/// epic under a private ancestor is part of that ancestor's row, so only the
+/// topmost private epic is listed. Ordered by workspace id, kind, then id.
+pub fn unseen_items_of(
+    private_epics: &[Epic],
+    private_packages: &[WorkPackage],
+    epic_by_id: impl Fn(i64) -> Option<Epic>,
+    is_member: impl Fn(i64, &str) -> bool,
+) -> Vec<UnseenItem> {
+    let under_private = |epic: &Epic| {
+        let mut parent = epic.parent_epic_id;
+        for _ in 0..PRIVATE_WALK_LIMIT {
+            let Some(p) = epic_by_id(parent) else {
+                return false;
+            };
+            if p.visibility == VISIBILITY_PRIVATE {
+                return true;
+            }
+            parent = p.parent_epic_id;
+        }
+        false
+    };
+    let mut items: Vec<UnseenItem> = private_epics
+        .iter()
+        .filter(|e| !under_private(e) && !is_member(e.workspace_id, &e.created_by))
+        .map(|e| UnseenItem {
+            kind: WORK_PACKAGE_ITEM_EPIC.to_string(),
+            item_id: e.id,
+            workspace_id: e.workspace_id,
+            creator: e.created_by.clone(),
+            created_at: e.created_at.clone(),
+        })
+        .chain(
+            private_packages
+                .iter()
+                .filter(|p| !is_member(p.workspace_id, &p.created_by))
+                .map(|p| UnseenItem {
+                    kind: "work_package".to_string(),
+                    item_id: p.id,
+                    workspace_id: p.workspace_id,
+                    creator: p.created_by.clone(),
+                    created_at: p.created_at.clone(),
+                }),
+        )
+        .collect();
+    items.sort_by(|a, b| {
+        (a.workspace_id, &a.kind, a.item_id).cmp(&(b.workspace_id, &b.kind, b.item_id))
+    });
+    items
+}
+
+/// `admin-surfaces.allium: UnseenItemListingContents`, served per caller: the
+/// private items nobody can see, for a super-admin, and nothing for anyone
+/// else. Every read is a point read: a non-super-admin's run reads one profile
+/// row, so a write to epics does not re-run it, and a super-admin's reads the
+/// private rows only.
+#[spacetimedb::view(accessor = unseen_items, public)]
+fn unseen_items(ctx: &spacetimedb::ViewContext) -> Vec<UnseenItem> {
+    let who = ctx.sender().to_hex().to_string();
+    if !ctx
+        .db
+        .user_profiles()
+        .identity()
+        .find(&who)
+        .is_some_and(|p| p.is_super_admin)
+    {
+        return Vec::new();
+    }
+    let private = VISIBILITY_PRIVATE.to_string();
+    let epics: Vec<Epic> = ctx.db.epics().visibility().filter(&private).collect();
+    let packages: Vec<WorkPackage> = ctx
+        .db
+        .work_packages()
+        .visibility()
+        .filter(&private)
+        .collect();
+    unseen_items_of(
+        &epics,
+        &packages,
+        |id| ctx.db.epics().id().find(id),
+        |workspace_id, user| {
+            ctx.db
+                .memberships()
+                .workspace_id()
+                .filter(&workspace_id)
+                .any(|m| m.user == user)
+        },
+    )
+}

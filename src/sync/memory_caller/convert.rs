@@ -32,6 +32,17 @@ macro_rules! mirror {
 }
 
 mirror!(
+    module::UnseenItem,
+    bindings::UnseenItem {
+        kind,
+        item_id,
+        workspace_id,
+        creator,
+        created_at,
+    }
+);
+
+mirror!(
     module::Task,
     bindings::Task {
         id,

@@ -321,6 +321,26 @@ impl MemoryReducerCaller {
         self.lock().next_task_id = id;
     }
 
+    /// What the `unseen_items` view would now hold for this sender, pushed to
+    /// the rows. Called by the writes that change who is a super-admin, who is
+    /// a member, what is private or what exists; the double has no view to
+    /// re-run.
+    fn refresh_unseen_items(&self, tables: &Tables) {
+        self.rows.replace_unseen_items(
+            tables
+                .unseen_items_for(&self.sender)
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        );
+    }
+
+    /// The listing this store's sender would read from the `unseen_items`
+    /// view; for the conformance suite to compare with the live view.
+    pub fn unseen_items(&self) -> Vec<module::UnseenItem> {
+        self.lock().unseen_items_for(&self.sender)
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Tables> {
         self.tables.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -354,19 +374,27 @@ impl ReducerCaller for MemoryReducerCaller {
     }
 
     async fn claim_super_admin(&self) -> Result<ReducerOutcome> {
-        self.apply_claim_super_admin()
+        let outcome = self.apply_claim_super_admin();
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn grant_super_admin(&self, user: String) -> Result<ReducerOutcome> {
-        self.apply_set_super_admin(user, true)
+        let outcome = self.apply_set_super_admin(user, true);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn revoke_super_admin(&self, user: String) -> Result<ReducerOutcome> {
-        self.apply_set_super_admin(user, false)
+        let outcome = self.apply_set_super_admin(user, false);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn set_epic_visibility(&self, id: EpicId, visibility: String) -> Result<ReducerOutcome> {
-        self.apply_set_epic_visibility(id, visibility)
+        let outcome = self.apply_set_epic_visibility(id, visibility);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn set_work_package_visibility(
@@ -374,7 +402,9 @@ impl ReducerCaller for MemoryReducerCaller {
         id: WorkPackageId,
         visibility: String,
     ) -> Result<ReducerOutcome> {
-        self.apply_set_work_package_visibility(id, visibility)
+        let outcome = self.apply_set_work_package_visibility(id, visibility);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn super_admin_delete_unseen_item(
@@ -382,7 +412,9 @@ impl ReducerCaller for MemoryReducerCaller {
         kind: String,
         item_id: i64,
     ) -> Result<ReducerOutcome> {
-        self.apply_super_admin_delete_unseen_item(kind, item_id)
+        let outcome = self.apply_super_admin_delete_unseen_item(kind, item_id);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn create_workspace(&self, name: String) -> Result<ReducerOutcome> {
@@ -394,7 +426,9 @@ impl ReducerCaller for MemoryReducerCaller {
     }
 
     async fn delete_workspace(&self, workspace_id: i64) -> Result<ReducerOutcome> {
-        self.apply_delete_workspace(workspace_id)
+        let outcome = self.apply_delete_workspace(workspace_id);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn add_member(
@@ -403,7 +437,9 @@ impl ReducerCaller for MemoryReducerCaller {
         user: String,
         role: String,
     ) -> Result<ReducerOutcome> {
-        self.apply_add_member(workspace_id, user, role)
+        let outcome = self.apply_add_member(workspace_id, user, role);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn set_member_role(&self, membership_id: i64, role: String) -> Result<ReducerOutcome> {
@@ -411,7 +447,9 @@ impl ReducerCaller for MemoryReducerCaller {
     }
 
     async fn remove_member(&self, membership_id: i64) -> Result<ReducerOutcome> {
-        self.apply_remove_member(membership_id)
+        let outcome = self.apply_remove_member(membership_id);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome> {

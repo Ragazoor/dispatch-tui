@@ -93,6 +93,7 @@ impl __sdk::__query_builder::HasCols for Epic {
 pub struct EpicIxCols {
     pub id: __sdk::__query_builder::IxCol<Epic, i64>,
     pub parent_epic_id: __sdk::__query_builder::IxCol<Epic, i64>,
+    pub visibility: __sdk::__query_builder::IxCol<Epic, String>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Epic {
@@ -101,6 +102,7 @@ impl __sdk::__query_builder::HasIxCols for Epic {
         EpicIxCols {
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
             parent_epic_id: __sdk::__query_builder::IxCol::new(table_name, "parent_epic_id"),
+            visibility: __sdk::__query_builder::IxCol::new(table_name, "visibility"),
         }
     }
 }

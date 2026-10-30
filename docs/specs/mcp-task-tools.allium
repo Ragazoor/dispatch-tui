@@ -129,13 +129,16 @@ rule ToolsAdvertiseAnnotations {
     -- Every tool in the list carries `annotations` with a `title` and the four
     -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
     -- nothing (get_task, list_tasks, list_epics, query_learnings,
-    -- query_usage, read_context, list_keybindings, list_work_packages).
+    -- query_usage, read_context, list_keybindings, list_work_packages,
+    -- list_workspaces, list_unseen_items).
     -- managed_feed_config is NOT in that list: its no-argument call reads but
     -- its other calls write, so it is declared idempotent (see
     -- epics.allium: ManagedFeedConfigViaMcp, @guidance).
     -- destructiveHint is true only where a call removes or closes something
     -- that cannot be restored by another call (delete_learning, exit_session,
-    -- update_work_package, whose delete form removes the package);
+    -- update_work_package, whose delete form removes the package;
+    -- update_workspace and set_workspace_member, whose delete and remove forms
+    -- remove the workspace or the membership; delete_unseen_item);
     -- it is false on a read-only tool. idempotentHint is true where repeating
     -- the identical call leaves the same state. openWorldHint is false on every
     -- tool: dispatch reaches no system outside itself through them.

@@ -784,6 +784,39 @@ pub trait PeopleStore: Send + Sync {
     /// The workspaces the identity this connection writes as belongs to, by
     /// id. Empty with no settled identity.
     async fn my_workspaces(&self) -> Vec<crate::models::WorkspaceRef>;
+
+    /// What the admin screen and the list tools show: the workspaces the
+    /// person administers or belongs to (all, for a super-admin), the
+    /// directory, and the unseen-item listing. Read from the rows this board
+    /// holds; nothing is asked of the store.
+    async fn admin_snapshot(&self) -> crate::models::AdminSnapshot;
+    /// `workspaces.allium: ClaimSuperAdmin`.
+    async fn claim_super_admin(&self) -> Result<()>;
+    /// `GrantSuperAdmin` (`granted`) or `RevokeSuperAdmin`, for `identity`.
+    async fn set_super_admin(&self, identity: &str, granted: bool) -> Result<()>;
+    /// `CreateWorkspace`; the store trims and bounds the name.
+    async fn create_workspace(&self, name: &str) -> Result<()>;
+    /// `RenameWorkspace`.
+    async fn rename_workspace(&self, workspace_id: i64, name: &str) -> Result<()>;
+    /// `DeleteWorkspace`; refused while it holds an epic or package.
+    async fn delete_workspace(&self, workspace_id: i64) -> Result<()>;
+    /// `AddMember`.
+    async fn add_member(
+        &self,
+        workspace_id: i64,
+        identity: &str,
+        role: crate::models::MemberRole,
+    ) -> Result<()>;
+    /// `SetMemberRole`.
+    async fn set_member_role(
+        &self,
+        membership_id: i64,
+        role: crate::models::MemberRole,
+    ) -> Result<()>;
+    /// `RemoveMember`.
+    async fn remove_member(&self, membership_id: i64) -> Result<()>;
+    /// `SuperAdminDeletesUnseenItem`; `kind` is `"epic"` or `"work_package"`.
+    async fn delete_unseen_item(&self, kind: &str, item_id: i64) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1275,6 +1308,17 @@ impl Store {
     ) -> Self {
         self.memory_caller = Some(caller);
         self
+    }
+
+    /// A second person in the directory, as their first connection would have
+    /// registered them: for a test about people.
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(clippy::expect_used)]
+    pub fn seed_person(&self, identity: &str, display_name: &str) {
+        self.memory_caller
+            .as_ref()
+            .expect("seed_person needs an in-memory handle")
+            .seed_person(identity, display_name);
     }
 
     /// [`DispatchRequestStore::give_agent`] without the trait in scope.

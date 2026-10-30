@@ -48,3 +48,8 @@ mod agents;
 /// launch's outcome and a phoenix respawn do to the schedule.
 #[cfg(test)]
 mod schedules;
+
+/// `admin-surfaces.allium: UnseenItemListingContents`, as the pure function the
+/// `unseen_items` view runs (`visibility.rs`).
+#[cfg(test)]
+mod unseen_items;

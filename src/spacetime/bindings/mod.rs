@@ -170,6 +170,8 @@ pub mod todo_type;
 pub mod todos_table;
 pub mod try_record_stop_reducer;
 pub mod unlink_work_package_item_reducer;
+pub mod unseen_item_type;
+pub mod unseen_items_table;
 pub mod unseen_task_type;
 pub mod unseen_tasks_table;
 pub mod unsubscribe_from_epic_reducer;
@@ -352,6 +354,8 @@ pub use todo_type::Todo;
 pub use todos_table::*;
 pub use try_record_stop_reducer::try_record_stop;
 pub use unlink_work_package_item_reducer::unlink_work_package_item;
+pub use unseen_item_type::UnseenItem;
+pub use unseen_items_table::*;
 pub use unseen_task_type::UnseenTask;
 pub use unseen_tasks_table::*;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
@@ -1669,6 +1673,7 @@ pub struct DbUpdate {
     task_watchers: __sdk::TableUpdate<TaskWatcher>,
     tasks: __sdk::TableUpdate<Task>,
     todos: __sdk::TableUpdate<Todo>,
+    unseen_items: __sdk::TableUpdate<UnseenItem>,
     unseen_tasks: __sdk::TableUpdate<UnseenTask>,
     usage_events: __sdk::TableUpdate<UsageEvent>,
     user_profiles: __sdk::TableUpdate<UserProfile>,
@@ -1761,6 +1766,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "todos" => db_update
                     .todos
                     .append(todos_table::parse_table_update(table_update)?),
+                "unseen_items" => db_update
+                    .unseen_items
+                    .append(unseen_items_table::parse_table_update(table_update)?),
                 "unseen_tasks" => db_update
                     .unseen_tasks
                     .append(unseen_tasks_table::parse_table_update(table_update)?),
@@ -1910,6 +1918,8 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.workspaces = cache
             .apply_diff_to_table::<Workspace>("workspaces", &self.workspaces)
             .with_updates_by_pk(|row| &row.id);
+        diff.unseen_items =
+            cache.apply_diff_to_table::<UnseenItem>("unseen_items", &self.unseen_items);
 
         diff
     }
@@ -1994,6 +2004,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "todos" => db_update
                     .todos
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "unseen_items" => db_update
+                    .unseen_items
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "unseen_tasks" => db_update
                     .unseen_tasks
@@ -2104,6 +2117,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "todos" => db_update
                     .todos
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "unseen_items" => db_update
+                    .unseen_items
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "unseen_tasks" => db_update
                     .unseen_tasks
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2163,6 +2179,7 @@ pub struct AppliedDiff<'r> {
     task_watchers: __sdk::TableAppliedDiff<'r, TaskWatcher>,
     tasks: __sdk::TableAppliedDiff<'r, Task>,
     todos: __sdk::TableAppliedDiff<'r, Todo>,
+    unseen_items: __sdk::TableAppliedDiff<'r, UnseenItem>,
     unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
     usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
     user_profiles: __sdk::TableAppliedDiff<'r, UserProfile>,
@@ -2268,6 +2285,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<Task>("tasks", &self.tasks, event);
         callbacks.invoke_table_row_callbacks::<Todo>("todos", &self.todos, event);
+        callbacks.invoke_table_row_callbacks::<UnseenItem>(
+            "unseen_items",
+            &self.unseen_items,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<UnseenTask>(
             "unseen_tasks",
             &self.unseen_tasks,
@@ -2980,6 +3002,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         task_watchers_table::register_table(client_cache);
         tasks_table::register_table(client_cache);
         todos_table::register_table(client_cache);
+        unseen_items_table::register_table(client_cache);
         unseen_tasks_table::register_table(client_cache);
         usage_events_table::register_table(client_cache);
         user_profiles_table::register_table(client_cache);
@@ -3014,6 +3037,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "task_watchers",
         "tasks",
         "todos",
+        "unseen_items",
         "unseen_tasks",
         "usage_events",
         "user_profiles",

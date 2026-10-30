@@ -13,6 +13,7 @@ use crate::mcp::trajectory;
 use crate::mcp::McpState;
 use chrono::Utc;
 
+use super::admin;
 use super::context;
 use super::epics;
 use super::keybindings;
@@ -651,6 +652,115 @@ Returns the saved name.",
                 "name": { "type": "string", "description": "The display name, 1 to 64 characters after trimming." }
             },
             "required": ["name"]
+        };
+
+    async read_only "list_workspaces" => admin::handle_list_workspaces,
+        "List the workspaces you can see, who is in each and in which role, who the super-admins are, \
+and the directory of every person by display name and short identity. Use it to find the \
+workspace_id and the person to name in create_epic, set_workspace_member and set_super_admin: \
+people are named by display name, and the directory tells two people with one name apart by \
+identity. A person sees the workspaces they belong to; a super-admin sees all of them. It \
+also says when claim_super_admin would work. It returns no epics, tasks or other content.",
+        {
+            "type": "object",
+            "properties": {
+                "workspace_id": { "type": "integer", "description": "Show only this workspace and its members, and leave out the directory of people. Omit to list every workspace you can see." }
+            }
+        };
+
+    async write "create_workspace" => admin::handle_create_workspace,
+        "Create a workspace: a place where people collaborate, holding epics and work packages. Only a \
+super-admin may. The new workspace has no members, not even you; add people, yourself included, \
+with set_workspace_member. Names are unique across the store, trimmed, and at most 64 characters. \
+Returns the new workspace's id and name.",
+        {
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "The workspace name, 1 to 64 characters after trimming, not already used by another workspace." }
+            },
+            "required": ["name"]
+        };
+
+    async destructive "update_workspace" => admin::handle_update_workspace,
+        "Rename a workspace with name, or delete it with delete=true; give exactly one. A super-admin or \
+an admin of the workspace may rename it. Only a super-admin may delete, and only an empty \
+workspace: one still holding an epic or work package, private ones included, is refused, so empty \
+it first (list_unseen_items and delete_unseen_item reach private items nobody can see). Deleting \
+removes its memberships and its learnings and cannot be undone. Returns what changed.",
+        {
+            "type": "object",
+            "properties": {
+                "workspace_id": { "type": "integer", "description": "The workspace to rename or delete, from list_workspaces." },
+                "name": { "type": "string", "description": "The new name, 1 to 64 characters after trimming, not used by another workspace. Give this or delete, not both." },
+                "delete": { "type": "boolean", "description": "When true, delete the workspace. Give this or name, not both. False is the same as leaving it out." }
+            },
+            "required": ["workspace_id"]
+        };
+
+    async destructive "set_workspace_member" => admin::handle_set_workspace_member,
+        "Add a person to a workspace, change their role there, or remove them; one call does one of the \
+three. Give role to add the person (if they are not a member) or to change their role (if they are); \
+give remove=true to take them out. A super-admin or an admin of the workspace may. Removing a \
+person does not touch their epics or packages: their public ones stay for the others, their \
+private ones are then seen by nobody until they rejoin or a super-admin deletes them. Returns what \
+changed.",
+        {
+            "type": "object",
+            "properties": {
+                "workspace_id": { "type": "integer", "description": "The workspace, from list_workspaces." },
+                "person": { "type": "string", "description": "The person's display name, or their identity (or its first 8 or more characters) when two people share a name. A name more than one person has is refused with the matches." },
+                "role": { "type": "string", "enum": ["admin", "member"], "description": "The role to give: admin can manage the workspace's members, member cannot. Adds the person when they are not a member. Give this or remove, not both." },
+                "remove": { "type": "boolean", "description": "When true, remove the person from the workspace; they must be a member. Give this or role, not both. False is the same as leaving it out." }
+            },
+            "required": ["workspace_id", "person"]
+        };
+
+    async idempotent "set_super_admin" => admin::handle_set_super_admin,
+        "Make a person a super-admin or stop them being one. Only a super-admin may. A super-admin \
+manages every workspace and may delete private items nobody can see, but cannot read them. \
+Repeating a call that already holds changes nothing. Taking the role from the last super-admin is \
+refused. To become the first one yourself, use claim_super_admin. Returns the person's name and \
+their new standing.",
+        {
+            "type": "object",
+            "properties": {
+                "person": { "type": "string", "description": "The person's display name, or their identity (or its first 8 or more characters) when two people share a name." },
+                "super_admin": { "type": "boolean", "description": "true makes the person a super-admin; false revokes it." }
+            },
+            "required": ["person", "super_admin"]
+        };
+
+    async write "claim_super_admin" => admin::handle_claim_super_admin,
+        "Make yourself the first super-admin. It works only while the store has none, and then once: \
+after that it is refused and a super-admin uses set_super_admin to add more. You are the person \
+whose board this agent runs under. Takes no arguments. Returns your new standing.",
+        {
+            "type": "object",
+            "properties": {}
+        };
+
+    async read_only "list_unseen_items" => admin::handle_list_unseen_items,
+        "List private epics and work packages that nobody can see any more because their creator has \
+left the workspace. Only a super-admin sees any; for anyone else the list is empty. Each entry is \
+its kind, id, workspace, creator and created date, never a title or content. The only thing to \
+do with one is delete_unseen_item.",
+        {
+            "type": "object",
+            "properties": {}
+        };
+
+    async destructive "delete_unseen_item" => admin::handle_delete_unseen_item,
+        "Permanently delete a private epic or work package that nobody can see, chosen from \
+list_unseen_items. Only a super-admin may. An epic is deleted with its sub-epics and tasks, and is \
+refused while any task in it is not done. A public item, or an id that does not exist, is refused \
+in the same words. It cannot be undone, and you never read what you delete.",
+        {
+            "type": "object",
+            "properties": {
+                "kind": { "type": "string", "enum": ["epic", "work_package"], "description": "The kind of item, as list_unseen_items names it." },
+                "item_id": { "type": "integer", "description": "The item's id from list_unseen_items." }
+            },
+            "required": ["kind", "item_id"]
         };
 
     async idempotent "set_verify_command" => tasks::handle_set_verify_command,

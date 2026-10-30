@@ -828,7 +828,8 @@ surface WorkspaceAdministration {
 
     @guidance
         -- Both a TUI surface and MCP tools (agents are first-class MCP
-        -- users), in the follow-up work.
+        -- users): admin-surfaces.allium (task #98522) specs the screen, the
+        -- tools and how a person is found by display name.
 }
 
 surface SuperAdministration {
@@ -850,6 +851,11 @@ surface SuperAdministration {
         SuperAdminDeletesUnseenItem(item)
 
     @guarantee UnseenItemListingShowsNoContent
+        -- Served by the module's `unseen_items` view (admin-surfaces.allium:
+        -- UnseenItemListingContents), which is empty for anyone but a
+        -- super-admin; task #98690 folds it into the per-caller views. The
+        -- delete keeps DeleteEpic's every-task-done guard (the code calls
+        -- validate_epic_deletable), so the hatch never tears down running work.
         -- The listing of private items whose creator is no longer a member
         -- of their workspace shows kind, id, workspace, creator and created
         -- date. Never a title, description or any child row.
@@ -860,8 +866,6 @@ surface SuperAdministration {
 ------------------------------------------------------------
 
 open question "A repo-scoped learning recorded by an agent working a main-board task has no workspace to inherit. Store it user-scoped, or ask the recorder to name a workspace?"
-
-open question "SuperAdminDeletesUnseenItem says the delete goes through the normal delete path, but super_admin_delete_unseen_item skips DeleteEpic's every-task-done guard, so a private epic with running tasks is deleted outright (its worktrees are not torn down). Should the escape hatch keep the done guard, or is skipping it intended?"
 
 open question "WritesRequireSight covers every reducer that changes a task or epic, but the agent-hook reducers (try_record_stop, record_pre_tool_use, record_notification, record_user_prompt_submit, mark_pr_learnings_gate_shown, subagent_*), ingest_feed and ensure_managed_epics write with no sight check. Are host-internal calls on the host's own task exempt like the operator, or must they check sight too?"
 

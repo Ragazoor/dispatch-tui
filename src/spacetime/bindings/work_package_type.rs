@@ -60,6 +60,7 @@ impl __sdk::__query_builder::HasCols for WorkPackage {
 pub struct WorkPackageIxCols {
     pub created_by: __sdk::__query_builder::IxCol<WorkPackage, String>,
     pub id: __sdk::__query_builder::IxCol<WorkPackage, i64>,
+    pub visibility: __sdk::__query_builder::IxCol<WorkPackage, String>,
 }
 
 impl __sdk::__query_builder::HasIxCols for WorkPackage {
@@ -68,6 +69,7 @@ impl __sdk::__query_builder::HasIxCols for WorkPackage {
         WorkPackageIxCols {
             created_by: __sdk::__query_builder::IxCol::new(table_name, "created_by"),
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            visibility: __sdk::__query_builder::IxCol::new(table_name, "visibility"),
         }
     }
 }

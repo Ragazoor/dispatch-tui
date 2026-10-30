@@ -162,6 +162,10 @@ struct Rows {
     /// read-enforcement task serves them through per-caller views.
     workspaces: BTreeMap<i64, bindings::Workspace>,
     memberships: BTreeMap<i64, bindings::Membership>,
+    /// `admin-surfaces.allium: UnseenItem`, from the `unseen_items` view: empty
+    /// unless this person is a super-admin. A view row has no primary key, so
+    /// it is keyed by (kind, id), which names one item.
+    unseen_items: BTreeMap<(String, i64), bindings::UnseenItem>,
     settings: BTreeMap<String, bindings::Setting>,
     /// Task #4971. Unconditionally subscribed, like `learnings`/`usage_events`
     /// above — a retirement record is not scoped by owner or host either.
@@ -231,6 +235,7 @@ impl Rows {
             && self.user_profiles.is_empty()
             && self.workspaces.is_empty()
             && self.memberships.is_empty()
+            && self.unseen_items.is_empty()
             && self.settings.is_empty()
             && self.retired_feed_items.is_empty()
             && self.work_packages.is_empty()
@@ -589,6 +594,53 @@ impl SharedRows {
         self.write(|rows| rows.memberships.remove(&id).is_some());
     }
 
+    /// A row entered the `unseen_items` view. An update is INSERT(new) then
+    /// DELETE(old) on the same key, so this replaces what is held.
+    pub fn upsert_unseen_item(&self, row: &bindings::UnseenItem) {
+        self.write(|rows| {
+            rows.unseen_items
+                .insert((row.kind.clone(), row.item_id), row.clone());
+            true
+        });
+    }
+
+    /// A row left the `unseen_items` view: removed only while the held row is
+    /// the one that left, so the DELETE of an update never erases the INSERT
+    /// that replaced it (`sync.allium: AViewUpdateNeverErasesTheRow`).
+    pub fn retire_unseen_item(&self, old: &bindings::UnseenItem) {
+        self.write(|rows| {
+            let key = (old.kind.clone(), old.item_id);
+            if rows.unseen_items.get(&key) == Some(old) {
+                rows.unseen_items.remove(&key);
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// Replace the whole listing. A test double that has no view to push rows
+    /// recomputes the listing after a write and hands it over here.
+    pub fn replace_unseen_items(&self, items: Vec<bindings::UnseenItem>) {
+        self.write(|rows| {
+            let next: BTreeMap<(String, i64), bindings::UnseenItem> = items
+                .into_iter()
+                .map(|i| ((i.kind.clone(), i.item_id), i))
+                .collect();
+            if rows.unseen_items == next {
+                return false;
+            }
+            rows.unseen_items = next;
+            true
+        });
+    }
+
+    /// Every unseen item, ordered by (kind, id). Empty for anyone but a
+    /// super-admin.
+    pub fn unseen_items(&self) -> Vec<bindings::UnseenItem> {
+        self.read(|rows| rows.unseen_items.values().cloned().collect())
+    }
+
     /// Every workspace, by id.
     pub fn workspaces(&self) -> Vec<bindings::Workspace> {
         self.read(|rows| rows.workspaces.values().cloned().collect())
@@ -597,6 +649,11 @@ impl SharedRows {
     /// Every membership, by id.
     pub fn memberships(&self) -> Vec<bindings::Membership> {
         self.read(|rows| rows.memberships.values().cloned().collect())
+    }
+
+    /// Every profile, by identity: the directory of people.
+    pub fn user_profiles(&self) -> Vec<bindings::UserProfile> {
+        self.read(|rows| rows.user_profiles.values().cloned().collect())
     }
 
     /// Whether `identity` holds the super-admin flag.

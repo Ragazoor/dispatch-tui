@@ -193,6 +193,7 @@ pub struct Epic {
     /// [`VISIBILITY_PUBLIC`] or [`VISIBILITY_PRIVATE`]
     /// (`core.allium: Epic.visibility`).
     #[default("public")]
+    #[index(btree)]
     pub visibility: String,
 }
 
@@ -631,6 +632,7 @@ pub struct WorkPackage {
     pub workspace_id: i64,
     /// [`VISIBILITY_PUBLIC`] or [`VISIBILITY_PRIVATE`].
     #[default("public")]
+    #[index(btree)]
     pub visibility: String,
 }
 

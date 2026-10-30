@@ -1,3 +1,4 @@
+mod admin;
 mod context;
 mod epics;
 mod hooks;
@@ -1362,6 +1363,20 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("create_work_package", json!({"title": "t"})),
         ("list_work_packages", json!({})),
         ("update_work_package", json!({"work_package_id": 1})),
+        ("list_workspaces", json!({})),
+        ("create_workspace", json!({"name": "n"})),
+        ("update_workspace", json!({"workspace_id": 1})),
+        (
+            "set_workspace_member",
+            json!({"workspace_id": 1, "person": "p"}),
+        ),
+        (
+            "set_super_admin",
+            json!({"person": "p", "super_admin": true}),
+        ),
+        ("claim_super_admin", json!({})),
+        ("list_unseen_items", json!({})),
+        ("delete_unseen_item", json!({"kind": "epic", "item_id": 1})),
     ];
 
     let covered: std::collections::BTreeSet<&str> = payloads.iter().map(|(n, _)| *n).collect();
@@ -1541,8 +1556,17 @@ fn tool_definitions_carry_annotations() {
         "read_context",
         "list_keybindings",
         "list_work_packages",
+        "list_workspaces",
+        "list_unseen_items",
     ];
-    const DESTRUCTIVE: &[&str] = &["delete_learning", "exit_session", "update_work_package"];
+    const DESTRUCTIVE: &[&str] = &[
+        "delete_learning",
+        "exit_session",
+        "update_work_package",
+        "update_workspace",
+        "set_workspace_member",
+        "delete_unseen_item",
+    ];
     let defs = tool_definitions();
     for tool in defs["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();

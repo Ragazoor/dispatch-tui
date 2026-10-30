@@ -13,9 +13,9 @@ use crate::spacetime::bindings::{
     MembershipsTableAccess as _, PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _,
     RepoPathsTableAccess as _, RetiredFeedItemsTableAccess as _, SessionRequestsTableAccess as _,
     SettingsTableAccess as _, SubscriptionHandle, SubscriptionsTableAccess as _,
-    TasksTableAccess as _, UnseenTasksTableAccess as _, UsageEventsTableAccess as _,
-    UserProfilesTableAccess as _, WorkPackageLinksTableAccess as _, WorkPackagesTableAccess as _,
-    WorkspacesTableAccess as _,
+    TasksTableAccess as _, UnseenItemsTableAccess as _, UnseenTasksTableAccess as _,
+    UsageEventsTableAccess as _, UserProfilesTableAccess as _, WorkPackageLinksTableAccess as _,
+    WorkPackagesTableAccess as _, WorkspacesTableAccess as _,
 };
 use crate::sync::subtree::SubtreeCover;
 
@@ -209,6 +209,14 @@ impl SpacetimeSdkConnector {
             remove_membership,
             |row: &bindings::Membership| row.id
         );
+        // A view's rows have no primary key, so no `on_update`: an update is an
+        // insert then a delete, and the delete must not erase the insert.
+        let rows = self.rows.clone();
+        db.unseen_items()
+            .on_insert(move |_, row| rows.upsert_unseen_item(row));
+        let rows = self.rows.clone();
+        db.unseen_items()
+            .on_delete(move |_, row| rows.retire_unseen_item(row));
         wire!(
             self,
             db,

@@ -64,6 +64,10 @@ pub(in crate::sync) fn subscription_queries(
         // until the read-enforcement task replaces them with views.
         "SELECT * FROM workspaces".to_string(),
         "SELECT * FROM memberships".to_string(),
+        // Private items nobody can see (`admin-surfaces.allium:
+        // UnseenItemListing`): a per-caller view, empty unless this person is
+        // a super-admin. Ids and creators only, never a title.
+        "SELECT * FROM unseen_items".to_string(),
         // The user board: epic-less tasks this person owns.
         format!("SELECT * FROM tasks WHERE owner = '{owner}'"),
         // own_creations (sync.allium: SubscribeOnceIdentityIsSettled):

@@ -77,7 +77,10 @@ pub use epics::*;
 
 pub mod people;
 pub mod visibility;
-pub use people::{shown_name, WorkspaceRef, NO_WORKSPACE};
+pub use people::{
+    resolve_person, shown_name, AdminSnapshot, DirectoryPerson, MemberRole, UnseenItemRow,
+    WorkspaceDetail, WorkspaceMember, WorkspaceRef, NO_WORKSPACE,
+};
 pub use visibility::Visibility;
 pub mod work_packages;
 pub use work_packages::*;
