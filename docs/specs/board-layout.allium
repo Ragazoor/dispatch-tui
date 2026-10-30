@@ -920,7 +920,8 @@ entity FoldedEpics {
 -- The board has two independent controls over what it shows (decided
 -- 2026-10-16, task #77840):
 --   - The LENS says HOW the board is read: every card, or only the cards with
---     a live session; grouped under epics, or flattened. One key cycles it.
+--     a live session; grouped under epics, or flattened. Only-active always
+--     comes with flattening (see "Dropped lens" below). One key cycles it.
 --   - The board FILTER says WHICH work is on the board at all: repos, epics
 --     and work packages. It is set in the board-filter overlay (`f`, below).
 --
