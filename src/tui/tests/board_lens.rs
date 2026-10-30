@@ -85,8 +85,7 @@ fn the_flat_active_lens_hides_tasks_without_a_session() {
     let mut live = make_task(2, TaskStatus::Running);
     live.tmux_window = Some(crate::models::test_tmux_window("task-2"));
     let mut app = App::new(vec![idle, live]);
-    app.handle_key(tab());
-    app.handle_key(tab());
+    cycle_lens_to(&mut app, Lens::FlatActive);
     let ids: Vec<_> = app
         .view()
         .tasks_for_current_view()
@@ -94,14 +93,4 @@ fn the_flat_active_lens_hides_tasks_without_a_session() {
         .map(|t| t.id)
         .collect();
     assert_eq!(ids, vec![TaskId(2)]);
-}
-
-#[test]
-fn only_active_never_holds_without_flattening() {
-    let mut app = App::new(vec![]);
-    for _ in 0..3 {
-        app.handle_key(tab());
-        let lens = app.filter.lens;
-        assert!(!lens.only_active() || lens.flattened(), "{lens:?}");
-    }
 }

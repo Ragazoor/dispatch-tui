@@ -581,7 +581,7 @@ async fn flat_view_epic_breadcrumb_is_purple() {
     t1.epic_id = Some(crate::models::EpicId(10));
     t1.sort_order = Some(10);
     app.board.tasks = vec![t1];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.selection_mut().set_column(2); // Running
     let buf = render_to_buffer(&mut app, 120, 30);
 

@@ -524,7 +524,7 @@ fn flat_package_board() -> App {
         link(7, task_item(2)),
         link(7, task_item(3)),
     ];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     enter_package(&mut app, 7);
     app
 }

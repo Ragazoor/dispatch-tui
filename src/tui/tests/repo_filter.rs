@@ -57,7 +57,7 @@ fn flattened_board_respects_repo_filter() {
     out_repo.epic_id = Some(EpicId(10));
     out_repo.repo_path = "/excluded".to_string();
     app.board.tasks = vec![in_repo, out_repo];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.filter.repos = vec!["/included".to_string()].into_iter().collect();
 
     let visible = app.view().tasks_for_current_view();

@@ -73,7 +73,7 @@ pub enum Lens {
 impl Lens {
     /// Whether only tasks with a live session are shown.
     pub fn only_active(self) -> bool {
-        matches!(self, Lens::FlatActive)
+        self == Lens::FlatActive
     }
 
     /// Whether the Running, Review and Done columns are flattened.
@@ -95,25 +95,6 @@ impl Lens {
             Lens::Flat => Lens::Everything,
             Lens::FlatActive => Lens::Flat,
         }
-    }
-
-    /// The lens with the given switches. Lets a test say "flattened" without
-    /// naming which of the two flattened lenses it means. Only-active without
-    /// flattening is not a lens, so asking for it panics.
-    #[cfg(test)]
-    pub fn from_switches(only_active: bool, flattened: bool) -> Self {
-        match (only_active, flattened) {
-            (false, false) => Lens::Everything,
-            (false, true) => Lens::Flat,
-            (true, true) => Lens::FlatActive,
-            (true, false) => panic!("only-active without flattening is not a lens"),
-        }
-    }
-
-    /// This lens with flattening set to `on`, only-active unchanged.
-    #[cfg(test)]
-    pub fn with_flattened(self, on: bool) -> Self {
-        Self::from_switches(self.only_active(), on)
     }
 }
 

@@ -211,7 +211,7 @@ fn navigate_row_clamps_to_task_count_in_flat_mode_with_epic_headers() {
 
     let mut app = App::new(vec![t1, t2]);
     app.board.epics = vec![make_epic(10)];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.selection_mut().set_column(2); // Running = nav col 2
 
     // Navigate far past the end — should clamp to last selectable task (row 1).

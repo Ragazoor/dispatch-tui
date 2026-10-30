@@ -204,7 +204,7 @@ fn flattened_board_shows_running_subtasks_but_not_backlog() {
     running_subtask.epic_id = Some(EpicId(10));
     app.board.tasks = vec![standalone, backlog_subtask, running_subtask];
     app.board.epics = vec![make_epic(10)];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
 
     let ids = visible_task_ids(&app);
     // Standalone backlog task is always visible
@@ -228,7 +228,7 @@ fn flattened_board_is_recursive_through_nested_epics() {
     let mut t_leaf = make_task(2, TaskStatus::Running);
     t_leaf.epic_id = Some(EpicId(20));
     app.board.tasks = vec![t_root, t_leaf];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
 
     // Backlog is NOT flattened: the root epic card shows, not the individual task
     let backlog = app.view().column_items_for_status(TaskStatus::Backlog);
@@ -258,7 +258,7 @@ fn flattened_board_hides_epic_cards_in_active_columns_only() {
     let mut child = make_epic(20);
     child.parent_epic_id = Some(EpicId(10));
     app.board.epics = vec![make_epic(10), child];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
 
     // Running/Review columns: epic cards are hidden (tasks surface via EpicHeader)
     for status in [TaskStatus::Running, TaskStatus::Review] {
@@ -297,7 +297,7 @@ fn flattened_epic_view_shows_only_that_subtree() {
     let mut b = make_task(2, TaskStatus::Backlog);
     b.epic_id = Some(EpicId(20));
     app.board.tasks = vec![a, b];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new_for_epic(),

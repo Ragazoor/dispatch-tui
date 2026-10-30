@@ -212,7 +212,7 @@ fn sub_epic_cards_inside_an_epic_view_are_placed_per_column() {
 #[test]
 fn flattened_done_column_surfaces_descendant_tasks_and_drops_the_epic_card() {
     let mut app = app_with_epic_spread_over_all_columns();
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
 
     let items = app.view().column_items_for_status(TaskStatus::Done);
     assert!(
@@ -230,7 +230,7 @@ fn flattened_done_column_surfaces_descendant_tasks_and_drops_the_epic_card() {
 #[test]
 fn flattened_backlog_keeps_its_epic_cards() {
     let mut app = app_with_epic_spread_over_all_columns();
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -251,7 +251,7 @@ fn flattened_backlog_keeps_its_epic_cards() {
 fn flattened_mode_draws_no_card_for_an_epic_with_no_backlog_work() {
     let mut app = App::new(vec![epic_task(1, 1, TaskStatus::Done)]);
     app.board.epics.push(make_epic(1));
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
 
     assert!(
         epic_columns(&app, 1).is_empty(),

@@ -110,7 +110,7 @@ fn folding_an_epic_hides_its_cards_but_keeps_its_header() {
         owned(3, SubStatus::Active, 20),
     ]);
     app.board.epics = vec![make_epic(10), make_epic(20)];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
 
     let items = app
@@ -154,7 +154,7 @@ fn folding_an_epic_hides_it_across_every_section_in_the_column() {
         owned(2, SubStatus::NeedsInput, 10),
     ]);
     app.board.epics = vec![make_epic(10)];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
 
     let items = app
@@ -183,7 +183,7 @@ fn folding_an_epic_hides_it_across_every_section_in_the_column() {
 fn an_orphan_tasks_card_is_unaffected_by_any_epic_fold() {
     let mut app = App::new(vec![owned(1, SubStatus::Active, 10), running(2)]);
     app.board.epics = vec![make_epic(10)];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
 
     let items = app
@@ -207,7 +207,7 @@ fn running(id: i64) -> Task {
 fn an_epic_fold_does_nothing_in_an_unflattened_column() {
     let mut app = App::new(vec![owned(1, SubStatus::Active, 10)]);
     app.board.epics = vec![make_epic(10)];
-    app.filter.lens = app.filter.lens.with_flattened(false);
+    app.filter.lens = crate::tui::types::Lens::Everything;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
 
     let items = app
@@ -257,7 +257,7 @@ fn folding_app() -> App {
         owned(3, SubStatus::Active, 20),
     ]);
     app.board.epics = vec![make_epic(10), make_epic(20)];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.selection_mut().set_column(2); // Running = nav col 2
     app
 }
@@ -324,7 +324,7 @@ fn space_and_enter_unfold_a_folded_epic_header() {
 #[test]
 fn shift_z_is_a_no_op_on_a_card_with_no_epic() {
     let mut app = App::new(vec![running(1)]);
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.selection_mut().set_column(2);
     app.handle_key(make_shift_key(KeyCode::Char('Z')));
     assert!(!app.epic_folds.is_folded(TaskStatus::Running, EpicId(10)));
@@ -333,7 +333,7 @@ fn shift_z_is_a_no_op_on_a_card_with_no_epic() {
 #[test]
 fn shift_z_is_a_no_op_in_an_unflattened_column() {
     let mut app = folding_app();
-    app.filter.lens = app.filter.lens.with_flattened(false);
+    app.filter.lens = crate::tui::types::Lens::Everything;
     app.handle_key(make_shift_key(KeyCode::Char('Z')));
     assert!(!app.epic_folds.is_folded(TaskStatus::Running, EpicId(10)));
 }
@@ -427,7 +427,7 @@ fn a_live_search_query_reopens_a_folded_epic_holding_a_match() {
     needle.title = "findme".to_string();
     let mut app = App::new(vec![needle, owned(2, SubStatus::Active, 10)]);
     app.board.epics = vec![make_epic(10)];
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
     app.search.query = "findme".to_string();
 

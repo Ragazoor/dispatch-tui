@@ -237,10 +237,14 @@ pub(in crate::tui) fn first_bracket_fg(buf: &Buffer, row: u16) -> Option<Color> 
     None
 }
 
-/// Step the lens forward (the Tab path) until flattening is flipped and
-/// only-active is unchanged — what the old `F` toggle did in one press.
+/// Step the lens forward (the Tab path) to `flat` from an unflattened lens,
+/// or back to `everything` from a flattened one.
 pub(in crate::tui) fn flip_flattened(app: &mut App) {
-    let target = app.filter.lens.with_flattened(!app.filter.lens.flattened());
+    let target = if app.filter.lens.flattened() {
+        crate::tui::types::Lens::Everything
+    } else {
+        crate::tui::types::Lens::Flat
+    };
     cycle_lens_to(app, target);
 }
 

@@ -54,7 +54,7 @@ fn on_running_card(app: &mut App) {
 fn enter_on_a_flattened_task_jumps_to_its_epic_through_every_ancestor() {
     let mut app = App::new(vec![running_in(1, Some(30))]);
     app.board.epics = tree(&[]);
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     on_running_card(&mut app);
 
     enter(&mut app);
@@ -66,7 +66,7 @@ fn enter_on_a_flattened_task_jumps_to_its_epic_through_every_ancestor() {
 fn q_after_a_jump_climbs_one_epic_and_shift_q_returns_to_the_board() {
     let mut app = App::new(vec![running_in(1, Some(30))]);
     app.board.epics = tree(&[]);
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     on_running_card(&mut app);
     enter(&mut app);
 
@@ -88,7 +88,7 @@ fn shift_q_on_the_board_does_nothing() {
 #[test]
 fn enter_on_a_flattened_epicless_task_does_nothing() {
     let mut app = App::new(vec![running_in(1, None)]);
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     on_running_card(&mut app);
 
     enter(&mut app);
@@ -100,7 +100,7 @@ fn enter_on_a_flattened_epicless_task_does_nothing() {
 fn flattened_jump_inside_an_epic_view_starts_below_that_epic() {
     let mut app = App::new(vec![running_in(1, Some(30))]);
     app.board.epics = tree(&[]);
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
         EpicId(20),
     )));
@@ -126,7 +126,7 @@ fn enter_on_an_unflattened_task_still_opens_detail() {
 fn i_opens_detail_on_a_flattened_task() {
     let mut app = App::new(vec![running_in(1, Some(30))]);
     app.board.epics = tree(&[]);
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     on_running_card(&mut app);
 
     press(&mut app, 'i');

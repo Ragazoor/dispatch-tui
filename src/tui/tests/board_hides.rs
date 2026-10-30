@@ -62,7 +62,7 @@ fn hiding_an_epic_removes_its_card() {
 #[test]
 fn hiding_an_epic_hides_every_task_in_its_subtree_in_the_flat_lens() {
     let mut app = tree_app();
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     assert!(cards(&app).1.contains(&TaskId(20)));
 
     app.filter.hidden_epics.insert(EpicId(1));
@@ -124,7 +124,7 @@ fn a_search_cannot_bring_back_a_hidden_epic() {
 #[test]
 fn a_task_a_visible_package_links_stays_hidden_under_a_hidden_epic() {
     let mut app = tree_app();
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.board.work_packages = vec![make_package(7, "P7")];
     app.board.work_package_links = vec![link(7, WorkPackageItem::Task(TaskId(10)))];
     app.filter.hidden_epics.insert(EpicId(1));
@@ -273,7 +273,7 @@ fn closing_the_overlay_leaves_an_epic_view_the_user_just_hid() {
 }
 
 #[test]
-fn a_live_task_under_a_hidden_child_does_not_keep_the_parent_under_the_active_lens() {
+fn a_live_task_under_a_hidden_child_does_not_keep_the_parent_under_the_flat_active_lens() {
     // Backlog: the one column the flat_active lens leaves grouped.
     let mut live = epic_task(20, 2, TaskStatus::Backlog);
     live.tmux_window = Some(crate::models::test_tmux_window("task-20"));

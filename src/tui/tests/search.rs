@@ -678,7 +678,7 @@ fn flattened_columns_build_no_search_index() {
     // question, so the pass must stay unbuilt even with a query live. Backlog
     // is exempt from flattening, so it still asks.
     let mut app = multi_column_searchable_board();
-    app.filter.lens = app.filter.lens.with_flattened(true);
+    app.filter.lens = crate::tui::types::Lens::Flat;
     let builds = count_index_builds(|| {
         for status in [TaskStatus::Running, TaskStatus::Review] {
             let _ = app
