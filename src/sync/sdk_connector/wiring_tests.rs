@@ -75,3 +75,22 @@ fn a_replacing_subscribe_re_asks_for_cached_levels_under_a_followed_epic() {
     assert!(!subtree.cover.covers(9));
     assert!(!queries.is_empty());
 }
+
+/// Behind a view there is no `on_update`: a reparent is an insert of the held
+/// epic under its new parent, and that insert widens the ask once.
+#[test]
+fn a_held_epic_re_delivered_under_a_covered_parent_widens_once() {
+    let mut subtree = Subtree::default();
+    subtree.cover.follow(1, &[]);
+    let known = [(5, 1)];
+    let first = widen_queries(&mut subtree, 5, 1, &known);
+    assert_eq!(first.len(), 2);
+    assert!(widen_queries(&mut subtree, 5, 1, &known).is_empty());
+}
+
+#[test]
+fn a_held_epic_re_delivered_under_an_uncovered_parent_widens_nothing() {
+    let mut subtree = Subtree::default();
+    subtree.cover.follow(1, &[]);
+    assert!(widen_queries(&mut subtree, 5, 2, &[(5, 2)]).is_empty());
+}

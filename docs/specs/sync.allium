@@ -814,6 +814,15 @@ rule AViewUpdateNeverErasesTheRow {
         -- tasks and epics. This rule is built for those two first; each
         -- later table adds its own retire method, and a view table is wired
         -- with on_insert and on_delete only (no on_update exists for it).
+        -- `wire_view!` (sdk_connector/wiring.rs) is that wiring: a view's
+        -- delete goes to the table's retire method, never to its remove.
+        --
+        -- A REPARENT BEHIND A VIEW STILL WIDENS. There is no on_update to
+        -- compare old and new parent, but the insert of the new row is an
+        -- on_insert like any other, and SubEpicDelivered counts it: an epic
+        -- held under one parent that arrives again under a covered parent
+        -- widens the ask, once (SubtreeCover only grows). The delete of the
+        -- old row widens nothing.
 }
 
 rule ASubscriptionRowWidensTheAsk {

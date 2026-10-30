@@ -81,3 +81,25 @@ fn an_epic_leaving_the_view_is_removed() {
     rows.retire_epic(&epic("only"));
     assert!(rows.epic(EpicId(7)).is_none());
 }
+
+#[test]
+fn an_unseen_item_update_pair_keeps_the_new_row_in_either_order() {
+    let item = |creator: &str| bindings::UnseenItem {
+        kind: "epic".into(),
+        item_id: 7,
+        workspace_id: 1,
+        creator: creator.into(),
+        created_at: "2026-09-18 10:00:00".into(),
+    };
+    let rows = SharedRows::new();
+    rows.upsert_unseen_item(&item("old"));
+    rows.upsert_unseen_item(&item("new"));
+    rows.retire_unseen_item(&item("old"));
+    assert_eq!(rows.unseen_items()[0].creator, "new");
+
+    let rows = SharedRows::new();
+    rows.upsert_unseen_item(&item("old"));
+    rows.retire_unseen_item(&item("old"));
+    rows.upsert_unseen_item(&item("new"));
+    assert_eq!(rows.unseen_items()[0].creator, "new");
+}

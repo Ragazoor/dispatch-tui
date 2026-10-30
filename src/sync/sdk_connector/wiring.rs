@@ -38,6 +38,19 @@ macro_rules! wire {
     }};
 }
 
+// One view table's two callbacks. A view's rows have no primary key in the
+// bindings, so there is no `on_update`: an update is INSERT(new) then
+// DELETE(old), and the delete goes to a retire method that removes the row
+// only while it is still the one held (`AViewUpdateNeverErasesTheRow`).
+macro_rules! wire_view {
+    ($wiring:expr, $db:expr, $table:ident, $upsert:ident, $retire:ident) => {{
+        let rows = $wiring.rows.clone();
+        $db.$table().on_insert(move |_, row| rows.$upsert(row));
+        let rows = $wiring.rows.clone();
+        $db.$table().on_delete(move |_, row| rows.$retire(row));
+    }};
+}
+
 impl SpacetimeSdkConnector {
     /// Re-ask for the sub-epic levels of epics this connection already holds,
     /// after a replacing subscribe reset the walk. See [`reseed_queries`].
@@ -209,14 +222,13 @@ impl SpacetimeSdkConnector {
             remove_membership,
             |row: &bindings::Membership| row.id
         );
-        // A view's rows have no primary key, so no `on_update`: an update is an
-        // insert then a delete, and the delete must not erase the insert.
-        let rows = self.rows.clone();
-        db.unseen_items()
-            .on_insert(move |_, row| rows.upsert_unseen_item(row));
-        let rows = self.rows.clone();
-        db.unseen_items()
-            .on_delete(move |_, row| rows.retire_unseen_item(row));
+        wire_view!(
+            self,
+            db,
+            unseen_items,
+            upsert_unseen_item,
+            retire_unseen_item
+        );
         wire!(
             self,
             db,
