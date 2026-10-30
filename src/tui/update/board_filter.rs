@@ -40,17 +40,11 @@ impl App {
         };
 
         // A standing query shows every match, so folds are set aside.
-        let no_folds = std::collections::HashSet::new();
-        let folded = if query.is_empty() {
-            &overlay.folded_epics
-        } else {
-            &no_folds
-        };
         let mut walk = SubtreeWalk {
             children: &children,
             epics,
             hidden,
-            folded,
+            open: query.is_empty().then_some(&overlay.open_epics),
             qualifies: &qualifies,
             out: vec![],
         };
@@ -130,9 +124,9 @@ impl App {
         if !row.has_children {
             return vec![];
         }
-        let folded = &mut self.filter_overlay.folded_epics;
-        if !folded.remove(&row.id) {
-            folded.insert(row.id);
+        let open = &mut self.filter_overlay.open_epics;
+        if !open.remove(&row.id) {
+            open.insert(row.id);
         }
         self.clamp_epic_cursor();
         self.dirty = true;
@@ -140,16 +134,14 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_toggle_all_filter_epic_folds(&mut self) -> Vec<Command> {
-        if !self.filter_overlay.folded_epics.is_empty() {
-            self.filter_overlay.folded_epics.clear();
+        // A folded parent hides any folded descendant, so a visible fold is
+        // enough to tell whether anything is folded.
+        if self.filter_epic_rows().iter().any(|r| r.folded) {
+            // A leaf in the set is harmless: only a row with children folds.
+            let all = self.board.epics.iter().map(|e| e.id);
+            self.filter_overlay.open_epics.extend(all);
         } else {
-            // Unfolded, every parent is listed with its children.
-            let parents = self
-                .filter_epic_rows()
-                .into_iter()
-                .filter(|r| r.has_children)
-                .map(|r| r.id);
-            self.filter_overlay.folded_epics.extend(parents);
+            self.filter_overlay.open_epics.clear();
         }
         self.clamp_epic_cursor();
         self.dirty = true;
@@ -321,7 +313,8 @@ struct SubtreeWalk<'a> {
     children: &'a HashMap<Option<EpicId>, Vec<usize>>,
     epics: &'a [crate::models::Epic],
     hidden: &'a std::collections::HashSet<EpicId>,
-    folded: &'a std::collections::HashSet<EpicId>,
+    /// The unfolded epics; `None` while a query stands and folds are ignored.
+    open: Option<&'a std::collections::HashSet<EpicId>>,
     qualifies: &'a dyn Fn(usize) -> bool,
     out: Vec<FilterEpicRow>,
 }
@@ -351,7 +344,7 @@ impl SubtreeWalk<'_> {
             let at = self.out.len();
             self.walk(Some(e.id), depth + 1, parent_hidden || own_hidden);
             let has_children = self.out.len() > at;
-            let is_folded = has_children && self.folded.contains(&e.id);
+            let is_folded = has_children && self.open.is_some_and(|o| !o.contains(&e.id));
             if is_folded {
                 self.out.truncate(at);
             }

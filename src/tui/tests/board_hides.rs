@@ -302,6 +302,9 @@ fn space_that_drops_a_row_keeps_the_epic_cursor_on_the_list() {
         crate::tui::messages::BoardFilterMessage::Start,
     ));
     app.filter_overlay.tab = crate::tui::types::FilterTab::Epics;
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::ToggleAllEpicFolds,
+    ));
     app.filter_overlay.epic_cursor = 2; // the hidden done epic, last row
     app.update(Message::BoardFilter(
         crate::tui::messages::BoardFilterMessage::ToggleEpic(EpicId(3)),

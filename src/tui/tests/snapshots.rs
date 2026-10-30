@@ -837,6 +837,8 @@ fn snapshot_board_filter_epics_tab() {
     app.update(Message::BoardFilter(BoardFilterMessage::SwitchTab(
         crate::tui::types::MoveDirection::Forward,
     )));
+    // Every epic starts folded; unfold them to show the tree.
+    app.update(Message::BoardFilter(BoardFilterMessage::ToggleAllEpicFolds));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

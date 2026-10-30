@@ -735,9 +735,9 @@ pub struct FilterOverlayState {
     /// `/` on the Epics tab: narrows the tree by title. The overlay's own, not
     /// the board search.
     pub epic_query: String,
-    /// `z` on the Epics tab: epics whose subtree is folded away. Ignored while
-    /// a query stands.
-    pub folded_epics: std::collections::HashSet<EpicId>,
+    /// `z` on the Epics tab: epics whose subtree is unfolded. Every other
+    /// epic starts folded. Ignored while a query stands.
+    pub open_epics: std::collections::HashSet<EpicId>,
 }
 
 // ---------------------------------------------------------------------------

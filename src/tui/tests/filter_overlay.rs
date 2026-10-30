@@ -111,15 +111,47 @@ fn digits_toggle_repos_only_on_the_repos_tab() {
 
 #[test]
 fn the_epics_tab_lists_not_done_epics_as_an_indented_tree() {
-    let mut app = overlay_app();
-    press(&mut app, KeyCode::Tab);
+    let app = unfolded_epics_tab();
     assert_eq!(epic_rows(&app), vec![(EpicId(1), 0), (EpicId(2), 1)]);
 }
 
 #[test]
-fn d_shows_done_epics_too() {
+fn the_epics_tab_starts_with_every_epic_folded() {
+    let app = epics_tab();
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
+    assert!(app.filter_epic_rows()[0].folded);
+}
+
+#[test]
+fn a_nested_parent_starts_folded_when_its_parent_is_unfolded() {
     let mut app = overlay_app();
+    app.board
+        .epics
+        .push(epic(4, Some(2), "Delta", TaskStatus::Running));
     press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('z'));
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0), (EpicId(2), 1)]);
+    assert!(app.filter_epic_rows()[1].folded);
+}
+
+#[test]
+fn an_epic_that_arrives_while_the_overlay_is_open_starts_folded() {
+    let mut app = unfolded_epics_tab();
+    app.board
+        .epics
+        .push(epic(4, None, "Delta", TaskStatus::Running));
+    app.board
+        .epics
+        .push(epic(5, Some(4), "Echo", TaskStatus::Running));
+    let rows = app.filter_epic_rows();
+    let delta = rows.iter().find(|r| r.id == EpicId(4)).unwrap();
+    assert!(delta.folded);
+    assert!(!rows.iter().any(|r| r.id == EpicId(5)));
+}
+
+#[test]
+fn d_shows_done_epics_too() {
+    let mut app = unfolded_epics_tab();
     press(&mut app, KeyCode::Char('d'));
     assert_eq!(
         epic_rows(&app),
@@ -144,6 +176,7 @@ fn a_not_done_child_of_a_done_parent_keeps_its_parent_row() {
         .epics
         .push(epic(4, Some(3), "Delta", TaskStatus::Running));
     press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('Z'));
     let rows = epic_rows(&app);
     assert!(rows.contains(&(EpicId(3), 0)));
     assert!(rows.contains(&(EpicId(4), 1)));
@@ -164,6 +197,7 @@ fn a_child_of_a_hidden_parent_is_marked_hidden_by_parent() {
     let mut app = overlay_app();
     app.filter.hidden_epics.insert(EpicId(1));
     press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('Z'));
     let marks: Vec<_> = app.filter_epic_rows().iter().map(|r| r.mark).collect();
     assert_eq!(
         marks,
@@ -267,9 +301,16 @@ fn epics_tab() -> App {
     app
 }
 
+/// The Epics tab with every epic unfolded by `Z`.
+fn unfolded_epics_tab() -> App {
+    let mut app = epics_tab();
+    press(&mut app, KeyCode::Char('Z'));
+    app
+}
+
 #[test]
 fn z_folds_the_epic_under_the_cursor_and_hides_its_subtree() {
-    let mut app = epics_tab();
+    let mut app = unfolded_epics_tab();
     press(&mut app, KeyCode::Char('z'));
     assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
     assert!(app.filter_epic_rows()[0].folded);
@@ -279,7 +320,7 @@ fn z_folds_the_epic_under_the_cursor_and_hides_its_subtree() {
 
 #[test]
 fn z_on_a_leaf_does_nothing() {
-    let mut app = epics_tab();
+    let mut app = unfolded_epics_tab();
     press(&mut app, KeyCode::Char('j'));
     press(&mut app, KeyCode::Char('z'));
     assert_eq!(epic_rows(&app).len(), 2);
@@ -289,21 +330,37 @@ fn z_on_a_leaf_does_nothing() {
 fn z_does_nothing_on_the_other_tabs() {
     let mut app = overlay_app();
     press(&mut app, KeyCode::Char('z'));
-    assert!(app.filter_overlay.folded_epics.is_empty());
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
 }
 
 #[test]
-fn capital_z_folds_every_parent_then_unfolds_all() {
+fn capital_z_unfolds_all_then_folds_every_parent() {
     let mut app = epics_tab();
     press(&mut app, KeyCode::Char('Z'));
-    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
-    press(&mut app, KeyCode::Char('Z'));
     assert_eq!(epic_rows(&app).len(), 2);
+    press(&mut app, KeyCode::Char('Z'));
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
+}
+
+#[test]
+fn capital_z_unfolds_all_while_any_parent_is_folded() {
+    let mut app = overlay_app();
+    app.board
+        .epics
+        .push(epic(4, None, "Delta", TaskStatus::Running));
+    app.board
+        .epics
+        .push(epic(5, Some(4), "Echo", TaskStatus::Running));
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('z'));
+    press(&mut app, KeyCode::Char('Z'));
+    assert_eq!(epic_rows(&app).len(), 4);
 }
 
 #[test]
 fn folding_does_not_change_what_is_hidden() {
-    let mut app = epics_tab();
+    let mut app = unfolded_epics_tab();
     press(&mut app, KeyCode::Char(' '));
     press(&mut app, KeyCode::Char('z'));
     assert!(app.filter.hidden_epics.contains(&EpicId(1)));
@@ -317,7 +374,6 @@ fn folding_does_not_change_what_is_hidden() {
 #[test]
 fn a_standing_query_ignores_folds() {
     let mut app = epics_tab();
-    press(&mut app, KeyCode::Char('z'));
     press(&mut app, KeyCode::Char('/'));
     type_str(&mut app, "bet");
     assert_eq!(epic_rows(&app), vec![(EpicId(1), 0), (EpicId(2), 1)]);
@@ -326,18 +382,17 @@ fn a_standing_query_ignores_folds() {
 }
 
 #[test]
-fn reopening_the_overlay_unfolds_everything() {
-    let mut app = epics_tab();
-    press(&mut app, KeyCode::Char('z'));
+fn reopening_the_overlay_folds_everything_again() {
+    let mut app = unfolded_epics_tab();
     press(&mut app, KeyCode::Esc);
     press(&mut app, KeyCode::Char('f'));
     press(&mut app, KeyCode::Tab);
-    assert_eq!(epic_rows(&app).len(), 2);
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
 }
 
 #[test]
 fn the_epics_tab_draws_fold_markers() {
-    let mut app = epics_tab();
+    let mut app = unfolded_epics_tab();
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(buffer_contains(&buf, "▾"));
     press(&mut app, KeyCode::Char('z'));

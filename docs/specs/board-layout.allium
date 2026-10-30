@@ -1160,10 +1160,14 @@ rule ToggleHiddenWorkPackage {
 --   (folded) before its checkbox; a leaf carries neither. `z` folds or
 --   unfolds the row under the cursor, hiding or showing its whole subtree;
 --   `z` on a leaf does nothing. `Z` folds every epic that has children, or,
---   when any is already folded, unfolds them all. Every epic starts unfolded.
---   The cursor stays on the row it was on, and a fold never changes whether
---   an epic is hidden: a folded hidden parent still hides its children.
---   Folds are the overlay's own and are gone when it closes. While a title
+--   when any is already folded, unfolds them all. Every epic starts folded,
+--   so the tab opens on the top-level epics alone: with about 150 epics
+--   nested up to five levels, an open tree was hard to move through (task
+--   #98724). An epic that arrives while the overlay is open starts folded
+--   too. The first `Z` therefore unfolds everything. The cursor stays on
+--   the row it was on, and a fold never changes whether an epic is hidden:
+--   a folded hidden parent still hides its children. Folds are the
+--   overlay's own: reopening it folds every epic again. While a title
 --   query stands, folds are ignored so a match is never tucked away; the
 --   tree folds again when the query is cleared. `z` and `Z` do nothing on
 --   the other tabs.
