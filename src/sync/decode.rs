@@ -424,6 +424,8 @@ pub fn learning(row: &bindings::Learning) -> Decoded<Learning> {
             .transpose()?,
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
+        workspace_id: row.workspace_id,
+        author: row.author.clone(),
     })
 }
 

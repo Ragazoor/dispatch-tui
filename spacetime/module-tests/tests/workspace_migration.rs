@@ -64,6 +64,7 @@ fn learning(scope: &str) -> Learning {
         updated_at: "2026-09-19 10:00:00".into(),
         embedding: None,
         workspace_id: 0,
+        author: String::new(),
     }
 }
 
@@ -299,12 +300,13 @@ fn deleting_an_empty_workspace_removes_its_learnings() {
     let (store, workspace) = store_with_root_and_default();
     store
         .call("alice", |ctx| {
-            create_learning(
+            seed_learnings(
                 ctx,
-                Learning {
+                vec![Learning {
+                    id: 1,
                     workspace_id: workspace,
                     ..learning("repo")
-                },
+                }],
             )
         })
         .expect("learning");

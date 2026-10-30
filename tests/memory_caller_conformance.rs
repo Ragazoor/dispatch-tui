@@ -279,6 +279,7 @@ fn blank_learning() -> bindings::Learning {
         updated_at: "2020-01-01 00:00:00.000".into(),
         embedding: None,
         workspace_id: 0,
+        author: String::new(),
     }
 }
 
@@ -299,6 +300,8 @@ struct LearningShape {
     upvote_count: i64,
     has_last_upvoted_at: bool,
     created_at: chrono::DateTime<chrono::Utc>,
+    workspace_id: i64,
+    author: String,
 }
 
 fn learning_shape(l: &dispatch_tui::models::Learning) -> LearningShape {
@@ -314,6 +317,8 @@ fn learning_shape(l: &dispatch_tui::models::Learning) -> LearningShape {
         upvote_count: l.upvote_count,
         has_last_upvoted_at: l.last_upvoted_at.is_some(),
         created_at: l.created_at,
+        workspace_id: l.workspace_id,
+        author: l.author.clone(),
     }
 }
 
@@ -512,6 +517,8 @@ mod data_rules;
 mod dispatch_requests;
 #[path = "memory_caller_conformance/feeds.rs"]
 mod feeds;
+#[path = "memory_caller_conformance/learning_placement.rs"]
+mod learning_placement;
 #[path = "memory_caller_conformance/pr_state.rs"]
 mod pr_state;
 #[path = "memory_caller_conformance/scenario.rs"]

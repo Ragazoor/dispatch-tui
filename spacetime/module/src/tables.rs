@@ -420,6 +420,12 @@ pub struct Learning {
     /// a default, so the module still automigrates.
     #[default(0)]
     pub workspace_id: i64,
+    /// Who recorded it (`core.allium: Learning.author`), in `Host.owner`'s
+    /// spelling, stamped by [`create_learning`]. Empty on a learning that
+    /// predates workspaces, which nobody can claim. A learning with no
+    /// workspace is seen only by its author.
+    #[default("")]
+    pub author: String,
 }
 
 /// One row per surfacing event of a learning to a task

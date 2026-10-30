@@ -46,6 +46,7 @@ fn burning_learning_verdicts_moves_its_counter_past_the_ceiling() {
         "updated_at": "2026-10-26 10:00:00",
         "embedding": {"none": []},
         "workspace_id": 0,
+        "author": "",
     });
     let created = instance.call("create_learning", &[&learning.to_string()]);
     assert!(created.status.success(), "{}", describe(&created));

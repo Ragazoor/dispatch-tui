@@ -106,6 +106,14 @@ pub fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) {
 #[spacetimedb::reducer]
 pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String> {
     validate_learning_scope(&row.scope, &row.scope_ref)?;
+    // The store places a learning itself (`LearningVisibility`): a client
+    // names neither its author nor its workspace.
+    let caller = caller_identity(ctx);
+    let row = Learning {
+        workspace_id: learning_workspace(ctx, &row, &caller),
+        author: caller,
+        ..row
+    };
     if !is_operator(ctx) && !learning_scope_seen(ctx, &row) {
         return Err(format!(
             "{} {} does not exist",

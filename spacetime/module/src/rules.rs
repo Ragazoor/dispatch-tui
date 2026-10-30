@@ -58,6 +58,9 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 21: `create_learning` stamps a learning's author and workspace itself, and a
+///    learning with no workspace is seen only by its author (`learning.rs`,
+///    `visibility.rs`).
 /// 20: the `unseen_items` view — the private epics and packages nobody can see,
 ///    for a super-admin and nobody else — and a btree index on the `visibility`
 ///    column of epics and work packages. A board that subscribes to the view
@@ -101,7 +104,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 20;
+pub const RULES_VERSION: i64 = 21;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

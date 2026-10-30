@@ -187,6 +187,7 @@ pub(crate) fn blank_learning() -> Learning {
         updated_at: String::new(),
         embedding: None,
         workspace_id: 0,
+        author: String::new(),
     }
 }
 

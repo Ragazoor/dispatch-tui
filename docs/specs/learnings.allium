@@ -96,6 +96,25 @@ use "./core.allium" as core
 --   scope=epic    → scope_ref = str(task.epic_id)  [error if task has no epic]
 --   scope=task    → scope_ref = str(task.id)
 
+-- Who sees a learning (workspaces.allium: LearningVisibility, D8)
+--
+-- The store stamps two things on every new learning and a client cannot choose
+-- them: author (the recorder's identity) and workspace.
+--   scope=user    → no workspace; only the author sees it.
+--   scope=epic    → the epic's workspace.
+--   scope=task    → the task's epic's workspace; none for a main-board task.
+--   scope=repo    → the workspace of the recording task's epic; none when the
+--                   task is on the main board or there is no task.
+-- A learning with no workspace is private to its author. A learning with a
+-- workspace is seen by that workspace's members, and an epic- or task-scoped
+-- one only while its item is also visible to the reader. A pre-workspace
+-- learning with no author and no workspace stays visible to everyone.
+--
+-- Every read path applies this one predicate for the caller: query_learnings,
+-- the dispatch-prompt injection, get_learning, rate_learning and
+-- delete_learning. An unseen learning is never returned and never gets a
+-- retrieval row, and acting on it answers "not found".
+
 ------------------------------------------------------------
 -- Priority Ordering
 ------------------------------------------------------------

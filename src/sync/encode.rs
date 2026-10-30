@@ -482,8 +482,10 @@ pub fn create_learning_row(
         created_at: now.to_string(),
         updated_at: now.to_string(),
         embedding: row.embedding.map(<[u8]>::to_vec),
-        // Placed by `workspaces.allium: LearningVisibility`'s create path.
+        // Placed by the store (`workspaces.allium: LearningVisibility`), which
+        // overwrites both whatever is sent.
         workspace_id: 0,
+        author: String::new(),
     }
 }
 

@@ -21,6 +21,8 @@ fn seed(id: i64, scope: LearningScope, count: i64) -> Learning {
         last_upvoted_at: None,
         created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
         updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        workspace_id: 0,
+        author: String::new(),
     }
 }
 

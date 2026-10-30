@@ -169,6 +169,12 @@ pub struct Learning {
     pub last_upvoted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// The store's workspace id; `0` for none, which makes the learning
+    /// private to its author (`workspaces.allium: LearningVisibility`).
+    pub workspace_id: i64,
+    /// Who recorded it, in the store's identity spelling; empty on a learning
+    /// from before workspaces.
+    pub author: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +273,72 @@ pub struct LearningRetrieval {
     pub learning_id: LearningId,
     pub source: RetrievalSource,
     pub retrieved_at: DateTime<Utc>,
+}
+
+impl Learning {
+    /// Whether `reader` sees this learning (`workspaces.allium:
+    /// LearningVisibility`): a learning with a workspace goes to that
+    /// workspace's members, one with none to its author alone, and one from
+    /// before workspaces (no workspace, no author) to everyone. Whether an
+    /// epic- or task-scoped learning's item is visible is the store's to
+    /// decide; a retrieval only reaches epic learnings of the reader's own
+    /// epic and never task-scoped ones.
+    pub fn seen_by(&self, reader: Option<&str>, reader_workspaces: &[i64]) -> bool {
+        if self.workspace_id != 0 {
+            return reader_workspaces.contains(&self.workspace_id);
+        }
+        self.author.is_empty() || reader == Some(self.author.as_str())
+    }
+}
+
+#[cfg(test)]
+mod seen_by_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn learning(workspace_id: i64, author: &str) -> Learning {
+        let at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        Learning {
+            id: LearningId(1),
+            kind: LearningKind::Pitfall,
+            summary: "s".into(),
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo".into()),
+            tags: vec![],
+            status: LearningStatus::Approved,
+            source_task_id: None,
+            upvote_count: 0,
+            last_upvoted_at: None,
+            created_at: at,
+            updated_at: at,
+            workspace_id,
+            author: author.into(),
+        }
+    }
+
+    #[test]
+    fn a_workspace_learning_goes_to_its_members() {
+        let l = learning(7, "alice");
+        assert!(l.seen_by(Some("bob"), &[7]));
+        assert!(!l.seen_by(Some("bob"), &[8]));
+        assert!(!l.seen_by(None, &[]));
+    }
+
+    #[test]
+    fn a_learning_with_no_workspace_goes_to_its_author_alone() {
+        let l = learning(0, "alice");
+        assert!(l.seen_by(Some("alice"), &[]));
+        assert!(!l.seen_by(Some("bob"), &[7]));
+        assert!(!l.seen_by(None, &[]));
+    }
+
+    #[test]
+    fn a_learning_from_before_workspaces_goes_to_everyone() {
+        let l = learning(0, "");
+        assert!(l.seen_by(Some("bob"), &[]));
+        assert!(l.seen_by(None, &[]));
+    }
 }
 
 #[cfg(test)]

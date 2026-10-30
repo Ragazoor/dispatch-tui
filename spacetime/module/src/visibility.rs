@@ -378,11 +378,11 @@ pub(crate) fn check_subtree_all_seen(
     }
 }
 
-/// Whether the caller sees what a learning is scoped to: an epic- or
-/// task-scoped learning only while its item is visible, and any learning that
-/// carries a workspace only to that workspace's members. A user-scoped
-/// learning has no stored author, so it is not narrowed here (see the open
-/// question in `workspaces.allium`).
+/// Whether the caller sees a learning (`workspaces.allium:
+/// LearningVisibility`): an epic- or task-scoped learning only while its item
+/// is visible, a learning with a workspace only to that workspace's members,
+/// and a learning with none only to its author. A learning that predates
+/// workspaces has no author and no workspace, and stays visible to everyone.
 pub fn learning_scope_seen(ctx: &ReducerContext, learning: &Learning) -> bool {
     let caller = caller_identity(ctx);
     let item_id = learning
@@ -405,7 +405,38 @@ pub fn learning_scope_seen(ctx: &ReducerContext, learning: &Learning) -> bool {
         _ => true,
     };
     item_seen
-        && (learning.workspace_id == 0 || workspace_has_member(ctx, learning.workspace_id, &caller))
+        && if learning.workspace_id == 0 {
+            learning.author.is_empty() || learning.author == caller
+        } else {
+            workspace_has_member(ctx, learning.workspace_id, &caller)
+        }
+}
+
+/// The workspace a new learning belongs to, or `0` for none
+/// (`workspaces.allium: LearningVisibility`). A recording task the caller
+/// cannot see counts for nothing, so naming someone else's task places no
+/// learning in their workspace.
+pub(crate) fn learning_workspace(ctx: &ReducerContext, row: &Learning, caller: &str) -> i64 {
+    let id_of = |r: &Option<String>| r.as_deref().and_then(|r| r.parse::<i64>().ok());
+    let epic_workspace = |epic_id: i64| {
+        ctx.db
+            .epics()
+            .id()
+            .find(epic_id)
+            .map_or(0, |e| e.workspace_id)
+    };
+    match row.scope.as_str() {
+        "epic" => id_of(&row.scope_ref).map_or(0, epic_workspace),
+        "task" => id_of(&row.scope_ref)
+            .and_then(|id| ctx.db.tasks().id().find(id))
+            .map_or(0, |t| epic_workspace(t.epic_id)),
+        "repo" => row
+            .source_task_id
+            .and_then(|id| ctx.db.tasks().id().find(id))
+            .filter(|t| task_visible_to(ctx, t, caller))
+            .map_or(0, |t| epic_workspace(t.epic_id)),
+        _ => 0,
+    }
 }
 
 /// The learning `id`, when it exists and the caller may see it.

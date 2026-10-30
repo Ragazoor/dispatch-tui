@@ -47,6 +47,7 @@ fn learning(summary: &str) -> bindings::Learning {
         updated_at: "2026-10-05 10:00:00".into(),
         embedding: None,
         workspace_id: 0,
+        author: String::new(),
     }
 }
 

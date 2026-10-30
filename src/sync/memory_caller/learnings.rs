@@ -89,6 +89,8 @@ impl MemoryReducerCaller {
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         let scope = self.scope();
         let mut tables = self.lock();
+        // The store places a learning itself (`LearningVisibility`).
+        let row = tables.settle_new_learning(&scope, row);
         if !tables.learning_visible(&scope, &row) {
             return Err(anyhow::anyhow!(
                 "the shared store refused: {} {} does not exist",

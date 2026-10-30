@@ -351,6 +351,7 @@ mirror!(
         updated_at,
         embedding,
         workspace_id,
+        author,
     }
 );
 

@@ -159,6 +159,7 @@ fn blank_learning(id: i64, summary: &str, source_task_id: Option<i64>) -> Learni
         updated_at: "2026-09-19 10:00:00".into(),
         embedding: None,
         workspace_id: 0,
+        author: String::new(),
     }
 }
 

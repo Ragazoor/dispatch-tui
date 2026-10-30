@@ -169,7 +169,47 @@ impl Tables {
             _ => true,
         };
         item_seen
-            && (learning.workspace_id == 0 || self.has_member(learning.workspace_id, &scope.who))
+            && if learning.workspace_id == 0 {
+                learning.author.is_empty() || learning.author == scope.who
+            } else {
+                self.has_member(learning.workspace_id, &scope.who)
+            }
+    }
+
+    /// `LearningVisibility`: the row a new learning is stored as, its author
+    /// and workspace stamped here whatever the caller sent.
+    pub(super) fn settle_new_learning(
+        &self,
+        scope: &Scope,
+        row: module::Learning,
+    ) -> module::Learning {
+        if !scope.on {
+            return row;
+        }
+        module::Learning {
+            workspace_id: self.learning_workspace(scope, &row),
+            author: scope.who.clone(),
+            ..row
+        }
+    }
+
+    /// The workspace a new learning belongs to, `0` for none: the twin of the
+    /// module's `learning_workspace`.
+    fn learning_workspace(&self, scope: &Scope, row: &module::Learning) -> i64 {
+        let id_of = |r: &Option<String>| r.as_deref().and_then(|r| r.parse::<i64>().ok());
+        let epic_workspace = |epic_id: i64| self.epics.get(&epic_id).map_or(0, |e| e.workspace_id);
+        match row.scope.as_str() {
+            "epic" => id_of(&row.scope_ref).map_or(0, epic_workspace),
+            "task" => id_of(&row.scope_ref)
+                .and_then(|id| self.tasks.get(&id))
+                .map_or(0, |t| epic_workspace(t.epic_id)),
+            "repo" => row
+                .source_task_id
+                .and_then(|id| self.tasks.get(&id))
+                .filter(|t| self.task_visible(scope, t))
+                .map_or(0, |t| epic_workspace(t.epic_id)),
+            _ => 0,
+        }
     }
 
     /// The task `id`, when it exists and the caller may see it.

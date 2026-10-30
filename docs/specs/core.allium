@@ -1227,7 +1227,8 @@ entity Learning {
                           -- verdict. May be negative. Feeds retrieval ranking and
                           -- the stale-cleanup eligibility check (upvote_count <= 0).
     last_upvoted_at: Timestamp?
-    workspace: Workspace?    -- the workspace a learning belongs to; null exactly when scope = user, which is private to its author instead (workspaces.allium: LearningVisibility)
+    workspace: Workspace?    -- the workspace a learning belongs to; null means private to its author (every user-scoped learning, and any other whose item or recorder has no workspace; workspaces.allium: LearningVisibility)
+    author: UserIdentity?    -- who recorded it, stamped by the store; null only on a learning that predates workspaces
     created_at: Timestamp
     updated_at: Timestamp
 

@@ -544,5 +544,6 @@ fn learning_json(
         "updated_at": "2026-09-26 10:00:00",
         "embedding": {"some": embedding},
         "workspace_id": 0,
+        "author": "",
     })
 }

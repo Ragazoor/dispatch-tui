@@ -650,6 +650,7 @@ rule LearningVisibility {
     when: LearningRecorded(learning, recorder)
 
     ensures:
+        learning.author = recorder
         if learning.scope = user:
             learning.workspace = null
         else if learning.scope = epic or learning.scope = task:
@@ -658,12 +659,25 @@ rule LearningVisibility {
             learning.workspace = recording_workspace(recorder)
 
     @guidance
-        -- D8. A user-scoped learning is seen only by its author. Others are
-        -- seen by members of their workspace, and an epic- or task-scoped
-        -- one also only while its item is visible to the reader.
+        -- D8. The store stamps author (the recorder's identity) and workspace
+        -- itself; a client cannot choose either. A learning with a workspace
+        -- is seen by that workspace's members, and an epic- or task-scoped
+        -- one also only while its item is visible to the reader. A learning
+        -- with no workspace is seen only by its author: that is every
+        -- user-scoped learning, and every other learning whose item or
+        -- recorder has no workspace.
         -- recording_workspace is the workspace of the recording agent's
-        -- task's epic; for a main-board task it is open (see Open
-        -- Questions).
+        -- task's epic. A repo-scoped learning recorded from a main-board
+        -- task, or by a person with no task, has none, so it is private to
+        -- its author like the user board it came from (resolved with the
+        -- user, task #98523; there is no personal workspace, D2). The
+        -- same holds for a task-scoped learning on a main-board task.
+        -- A learning that predates workspaces has no author. One with a
+        -- workspace keeps that workspace's members; a user-scoped one stays
+        -- visible to everyone, as it was, since nobody can claim it.
+        -- query_learnings, prompt injection and get_learning all apply the
+        -- same reader predicate, so an agent is never shown, and never
+        -- records a retrieval of, a learning its host's owner cannot see.
 }
 
 -- Migration --------------------------------------------------
@@ -864,8 +878,6 @@ surface SuperAdministration {
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
-
-open question "A repo-scoped learning recorded by an agent working a main-board task has no workspace to inherit. Store it user-scoped, or ask the recorder to name a workspace?"
 
 open question "WritesRequireSight covers every reducer that changes a task or epic, but the agent-hook reducers (try_record_stop, record_pre_tool_use, record_notification, record_user_prompt_submit, mark_pr_learnings_gate_shown, subagent_*), ingest_feed and ensure_managed_epics write with no sight check. Are host-internal calls on the host's own task exempt like the operator, or must they check sight too?"
 
