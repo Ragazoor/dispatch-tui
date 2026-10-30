@@ -63,6 +63,7 @@ mod session_requests;
 mod tasks_epics;
 mod unseen;
 mod user_profiles;
+mod views;
 mod visibility;
 mod work_packages;
 mod workspaces;

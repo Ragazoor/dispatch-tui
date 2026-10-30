@@ -99,6 +99,55 @@
 -- RULES_VERSION and BOARD_RULES_VERSION move together. New columns are
 -- appended last with a default, or the module will not automigrate.
 
+-- THE PER-CALLER VIEWS (task #98690). One view per question the board asks,
+-- each answering for ctx.sender() and each built on the module's own
+-- visible_to predicates, never a copy of them (the module and the in-memory
+-- store run one function over two sets of tables). Rows are the table's own
+-- row type, so a card needs no second lookup.
+--
+--   own_epics, own_tasks, own_packages: what the caller created, plus the
+--     epic-less tasks they own, kept only while visible_to still holds (a
+--     member who left a workspace loses their own items in it).
+--   covered_epics: the epics the caller follows and every descendant, walked
+--     by the SERVER at any depth, stopping at an epic the caller cannot see.
+--   covered_tasks: the tasks of the covered epics.
+--   visible_epics, visible_tasks, visible_packages: everything visible in a
+--     workspace the caller belongs to; a client narrows with
+--     WHERE workspace_id = N (WHERE epic_id = N for tasks).
+--   Rows about a task (agents, dispatch_requests, session_requests,
+--     unseen_tasks, task_subagents, learning_retrievals, learning_verdicts):
+--     one view each, serving the rows of the tasks the board holds (own
+--     tasks and covered tasks). Never wider than the task's own visibility.
+--   unseen_tasks is the caller's own marks only.
+--   task_watchers is dead (no reducer writes it), so its view is the
+--     tasks-held rule above like the rest.
+--   poll_owners follow their scope: an epic-scoped row is served while the
+--     epic is visible, a task-scoped row while the task is.
+--   work_package_links: one row per link, served while the package AND the
+--     linked item are both visible to the caller.
+--   visible_learnings: the learnings LearningVisibility lets the caller see.
+--   own_settings: settings of the hosts the caller owns (D9), and no one
+--     else's. Host rows stay readable by all (they carry no task content).
+--   visible_workspaces, visible_memberships: the workspaces the caller
+--     belongs to and their membership rows (a super-admin sees every one).
+--
+-- Every column a view filters on has a btree index, and every read in a view
+-- is a point read, so a write to an unrelated row never re-runs it.
+-- The operator (the publisher identity) is not served by views: it reads the
+-- tables directly, which is what makes it the trust boundary.
+--
+-- DISPOSITIONS, agreed with the user (task #98690). todos, task_shells,
+-- retired_feed_items and filter_presets become private with no view: no
+-- client reads them. handed_out_agent_names stays public (names carry no task
+-- content and every board needs the whole set). dispatch_request_timeouts and
+-- session_request_timeouts become private. todos and task_shells are dead; a
+-- table with rows is refused by a publish that drops it, so dropping them
+-- waits for a check that every live store holds none.
+--
+-- THE PRIVATE FLIP IS NOT IN THIS TASK. The board still subscribes to the
+-- tables themselves, so they stay public until #98691 rewires the board onto
+-- these views and makes the tables private in the same change.
+
 use "./core.allium" as core
 use "./work-packages.allium" as wp
 
@@ -882,3 +931,9 @@ surface SuperAdministration {
 open question "WritesRequireSight covers every reducer that changes a task or epic, but the agent-hook reducers (try_record_stop, record_pre_tool_use, record_notification, record_user_prompt_submit, mark_pr_learnings_gate_shown, subagent_*), ingest_feed and ensure_managed_epics write with no sight check. Are host-internal calls on the host's own task exempt like the operator, or must they check sight too?"
 
 open question "SetWorkPackageVisibility has no counterpart to EpicIsPrivateOnlyWithACreator, and the store does not stamp created_by on a new package. Should a package with no creator be refused as private?"
+
+open question "usage_events rows name no task (only an actor), so the 'visible exactly when the task they name is' guarantee cannot be applied to them as written. Proposed: serve a caller their own events (actor equals their identity) and keep the table out of the covered views. #98691 decides."
+
+open question "'PR poll state' has no table of its own: the PR state lives on the task and poll_owners (scope task) follows its task. Is anything else meant?"
+
+open question "visible_workspaces serves the workspaces the caller belongs to. A super-admin must also list workspaces they are not in, but a view cannot scan a table and Workspace has no integer column to range over (a primary key has no range read, and a string index takes no range). #98691 decides: an appended defaulted column, or a reducer-written row set."

@@ -41,6 +41,7 @@ impl __sdk::__query_builder::HasCols for UnseenTask {
 /// Provides typed access to indexed columns for query building.
 pub struct UnseenTaskIxCols {
     pub id: __sdk::__query_builder::IxCol<UnseenTask, String>,
+    pub subscriber: __sdk::__query_builder::IxCol<UnseenTask, String>,
     pub task_id: __sdk::__query_builder::IxCol<UnseenTask, i64>,
 }
 
@@ -49,6 +50,7 @@ impl __sdk::__query_builder::HasIxCols for UnseenTask {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         UnseenTaskIxCols {
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            subscriber: __sdk::__query_builder::IxCol::new(table_name, "subscriber"),
             task_id: __sdk::__query_builder::IxCol::new(table_name, "task_id"),
         }
     }

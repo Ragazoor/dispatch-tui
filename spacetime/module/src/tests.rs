@@ -53,3 +53,8 @@ mod schedules;
 /// `unseen_items` view runs (`visibility.rs`).
 #[cfg(test)]
 mod unseen_items;
+
+/// `workspaces.allium: THE PER-CALLER VIEWS`, as the functions the views run
+/// (`views.rs`), over a plain in-test store.
+#[cfg(test)]
+mod views;

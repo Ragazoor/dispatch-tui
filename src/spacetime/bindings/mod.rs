@@ -21,6 +21,8 @@ pub mod claim_session_request_reducer;
 pub mod claim_super_admin_reducer;
 pub mod clear_setting_reducer;
 pub mod close_task_reducer;
+pub mod covered_epics_table;
+pub mod covered_tasks_table;
 pub mod create_epic_reducer;
 pub mod create_learning_reducer;
 pub mod create_task_reducer;
@@ -69,6 +71,11 @@ pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod membership_type;
 pub mod memberships_table;
 pub mod override_poll_owner_reducer;
+pub mod own_epics_table;
+pub mod own_packages_table;
+pub mod own_settings_table;
+pub mod own_tasks_table;
+pub mod own_unseen_tasks_table;
 pub mod patch_epic_reducer;
 pub mod patch_learning_reducer;
 pub mod patch_task_reducer;
@@ -181,6 +188,21 @@ pub mod usage_event_type;
 pub mod usage_events_table;
 pub mod user_profile_type;
 pub mod user_profiles_table;
+pub mod visible_agents_table;
+pub mod visible_dispatch_requests_table;
+pub mod visible_epics_table;
+pub mod visible_learning_retrievals_table;
+pub mod visible_learning_verdicts_table;
+pub mod visible_learnings_table;
+pub mod visible_memberships_table;
+pub mod visible_packages_table;
+pub mod visible_poll_owners_table;
+pub mod visible_session_requests_table;
+pub mod visible_task_subagents_table;
+pub mod visible_task_watchers_table;
+pub mod visible_tasks_table;
+pub mod visible_work_package_links_table;
+pub mod visible_workspaces_table;
 pub mod work_package_item_ref_type;
 pub mod work_package_link_type;
 pub mod work_package_links_table;
@@ -205,6 +227,8 @@ pub use claim_session_request_reducer::claim_session_request;
 pub use claim_super_admin_reducer::claim_super_admin;
 pub use clear_setting_reducer::clear_setting;
 pub use close_task_reducer::close_task;
+pub use covered_epics_table::*;
+pub use covered_tasks_table::*;
 pub use create_epic_reducer::create_epic;
 pub use create_learning_reducer::create_learning;
 pub use create_task_reducer::create_task;
@@ -253,6 +277,11 @@ pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use membership_type::Membership;
 pub use memberships_table::*;
 pub use override_poll_owner_reducer::override_poll_owner;
+pub use own_epics_table::*;
+pub use own_packages_table::*;
+pub use own_settings_table::*;
+pub use own_tasks_table::*;
+pub use own_unseen_tasks_table::*;
 pub use patch_epic_reducer::patch_epic;
 pub use patch_learning_reducer::patch_learning;
 pub use patch_task_reducer::patch_task;
@@ -365,6 +394,21 @@ pub use usage_event_type::UsageEvent;
 pub use usage_events_table::*;
 pub use user_profile_type::UserProfile;
 pub use user_profiles_table::*;
+pub use visible_agents_table::*;
+pub use visible_dispatch_requests_table::*;
+pub use visible_epics_table::*;
+pub use visible_learning_retrievals_table::*;
+pub use visible_learning_verdicts_table::*;
+pub use visible_learnings_table::*;
+pub use visible_memberships_table::*;
+pub use visible_packages_table::*;
+pub use visible_poll_owners_table::*;
+pub use visible_session_requests_table::*;
+pub use visible_task_subagents_table::*;
+pub use visible_task_watchers_table::*;
+pub use visible_tasks_table::*;
+pub use visible_work_package_links_table::*;
+pub use visible_workspaces_table::*;
 pub use work_package_item_ref_type::WorkPackageItemRef;
 pub use work_package_link_type::WorkPackageLink;
 pub use work_package_links_table::*;
@@ -1648,6 +1692,8 @@ Reducer::RecordBaseBranch{
 #[doc(hidden)]
 pub struct DbUpdate {
     agents: __sdk::TableUpdate<Agent>,
+    covered_epics: __sdk::TableUpdate<Epic>,
+    covered_tasks: __sdk::TableUpdate<Task>,
     dispatch_request_timeouts: __sdk::TableUpdate<DispatchRequestTimeout>,
     dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
     epics: __sdk::TableUpdate<Epic>,
@@ -1658,6 +1704,11 @@ pub struct DbUpdate {
     learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
     learnings: __sdk::TableUpdate<Learning>,
     memberships: __sdk::TableUpdate<Membership>,
+    own_epics: __sdk::TableUpdate<Epic>,
+    own_packages: __sdk::TableUpdate<WorkPackage>,
+    own_settings: __sdk::TableUpdate<Setting>,
+    own_tasks: __sdk::TableUpdate<Task>,
+    own_unseen_tasks: __sdk::TableUpdate<UnseenTask>,
     poll_owners: __sdk::TableUpdate<PollOwner>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
@@ -1677,6 +1728,21 @@ pub struct DbUpdate {
     unseen_tasks: __sdk::TableUpdate<UnseenTask>,
     usage_events: __sdk::TableUpdate<UsageEvent>,
     user_profiles: __sdk::TableUpdate<UserProfile>,
+    visible_agents: __sdk::TableUpdate<Agent>,
+    visible_dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
+    visible_epics: __sdk::TableUpdate<Epic>,
+    visible_learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
+    visible_learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
+    visible_learnings: __sdk::TableUpdate<Learning>,
+    visible_memberships: __sdk::TableUpdate<Membership>,
+    visible_packages: __sdk::TableUpdate<WorkPackage>,
+    visible_poll_owners: __sdk::TableUpdate<PollOwner>,
+    visible_session_requests: __sdk::TableUpdate<SessionRequest>,
+    visible_task_subagents: __sdk::TableUpdate<TaskSubagent>,
+    visible_task_watchers: __sdk::TableUpdate<TaskWatcher>,
+    visible_tasks: __sdk::TableUpdate<Task>,
+    visible_work_package_links: __sdk::TableUpdate<WorkPackageLink>,
+    visible_workspaces: __sdk::TableUpdate<Workspace>,
     work_package_links: __sdk::TableUpdate<WorkPackageLink>,
     work_packages: __sdk::TableUpdate<WorkPackage>,
     workspaces: __sdk::TableUpdate<Workspace>,
@@ -1691,6 +1757,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "agents" => db_update
                     .agents
                     .append(agents_table::parse_table_update(table_update)?),
+                "covered_epics" => db_update
+                    .covered_epics
+                    .append(covered_epics_table::parse_table_update(table_update)?),
+                "covered_tasks" => db_update
+                    .covered_tasks
+                    .append(covered_tasks_table::parse_table_update(table_update)?),
                 "dispatch_request_timeouts" => db_update.dispatch_request_timeouts.append(
                     dispatch_request_timeouts_table::parse_table_update(table_update)?,
                 ),
@@ -1721,6 +1793,21 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "memberships" => db_update
                     .memberships
                     .append(memberships_table::parse_table_update(table_update)?),
+                "own_epics" => db_update
+                    .own_epics
+                    .append(own_epics_table::parse_table_update(table_update)?),
+                "own_packages" => db_update
+                    .own_packages
+                    .append(own_packages_table::parse_table_update(table_update)?),
+                "own_settings" => db_update
+                    .own_settings
+                    .append(own_settings_table::parse_table_update(table_update)?),
+                "own_tasks" => db_update
+                    .own_tasks
+                    .append(own_tasks_table::parse_table_update(table_update)?),
+                "own_unseen_tasks" => db_update
+                    .own_unseen_tasks
+                    .append(own_unseen_tasks_table::parse_table_update(table_update)?),
                 "poll_owners" => db_update
                     .poll_owners
                     .append(poll_owners_table::parse_table_update(table_update)?),
@@ -1778,6 +1865,51 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "user_profiles" => db_update
                     .user_profiles
                     .append(user_profiles_table::parse_table_update(table_update)?),
+                "visible_agents" => db_update
+                    .visible_agents
+                    .append(visible_agents_table::parse_table_update(table_update)?),
+                "visible_dispatch_requests" => db_update.visible_dispatch_requests.append(
+                    visible_dispatch_requests_table::parse_table_update(table_update)?,
+                ),
+                "visible_epics" => db_update
+                    .visible_epics
+                    .append(visible_epics_table::parse_table_update(table_update)?),
+                "visible_learning_retrievals" => db_update.visible_learning_retrievals.append(
+                    visible_learning_retrievals_table::parse_table_update(table_update)?,
+                ),
+                "visible_learning_verdicts" => db_update.visible_learning_verdicts.append(
+                    visible_learning_verdicts_table::parse_table_update(table_update)?,
+                ),
+                "visible_learnings" => db_update
+                    .visible_learnings
+                    .append(visible_learnings_table::parse_table_update(table_update)?),
+                "visible_memberships" => db_update
+                    .visible_memberships
+                    .append(visible_memberships_table::parse_table_update(table_update)?),
+                "visible_packages" => db_update
+                    .visible_packages
+                    .append(visible_packages_table::parse_table_update(table_update)?),
+                "visible_poll_owners" => db_update
+                    .visible_poll_owners
+                    .append(visible_poll_owners_table::parse_table_update(table_update)?),
+                "visible_session_requests" => db_update.visible_session_requests.append(
+                    visible_session_requests_table::parse_table_update(table_update)?,
+                ),
+                "visible_task_subagents" => db_update.visible_task_subagents.append(
+                    visible_task_subagents_table::parse_table_update(table_update)?,
+                ),
+                "visible_task_watchers" => db_update.visible_task_watchers.append(
+                    visible_task_watchers_table::parse_table_update(table_update)?,
+                ),
+                "visible_tasks" => db_update
+                    .visible_tasks
+                    .append(visible_tasks_table::parse_table_update(table_update)?),
+                "visible_work_package_links" => db_update.visible_work_package_links.append(
+                    visible_work_package_links_table::parse_table_update(table_update)?,
+                ),
+                "visible_workspaces" => db_update
+                    .visible_workspaces
+                    .append(visible_workspaces_table::parse_table_update(table_update)?),
                 "work_package_links" => db_update
                     .work_package_links
                     .append(work_package_links_table::parse_table_update(table_update)?),
@@ -1918,8 +2050,64 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.workspaces = cache
             .apply_diff_to_table::<Workspace>("workspaces", &self.workspaces)
             .with_updates_by_pk(|row| &row.id);
+        diff.covered_epics =
+            cache.apply_diff_to_table::<Epic>("covered_epics", &self.covered_epics);
+        diff.covered_tasks =
+            cache.apply_diff_to_table::<Task>("covered_tasks", &self.covered_tasks);
+        diff.own_epics = cache.apply_diff_to_table::<Epic>("own_epics", &self.own_epics);
+        diff.own_packages =
+            cache.apply_diff_to_table::<WorkPackage>("own_packages", &self.own_packages);
+        diff.own_settings =
+            cache.apply_diff_to_table::<Setting>("own_settings", &self.own_settings);
+        diff.own_tasks = cache.apply_diff_to_table::<Task>("own_tasks", &self.own_tasks);
+        diff.own_unseen_tasks =
+            cache.apply_diff_to_table::<UnseenTask>("own_unseen_tasks", &self.own_unseen_tasks);
         diff.unseen_items =
             cache.apply_diff_to_table::<UnseenItem>("unseen_items", &self.unseen_items);
+        diff.visible_agents =
+            cache.apply_diff_to_table::<Agent>("visible_agents", &self.visible_agents);
+        diff.visible_dispatch_requests = cache.apply_diff_to_table::<DispatchRequest>(
+            "visible_dispatch_requests",
+            &self.visible_dispatch_requests,
+        );
+        diff.visible_epics =
+            cache.apply_diff_to_table::<Epic>("visible_epics", &self.visible_epics);
+        diff.visible_learning_retrievals = cache.apply_diff_to_table::<LearningRetrieval>(
+            "visible_learning_retrievals",
+            &self.visible_learning_retrievals,
+        );
+        diff.visible_learning_verdicts = cache.apply_diff_to_table::<LearningVerdict>(
+            "visible_learning_verdicts",
+            &self.visible_learning_verdicts,
+        );
+        diff.visible_learnings =
+            cache.apply_diff_to_table::<Learning>("visible_learnings", &self.visible_learnings);
+        diff.visible_memberships = cache
+            .apply_diff_to_table::<Membership>("visible_memberships", &self.visible_memberships);
+        diff.visible_packages =
+            cache.apply_diff_to_table::<WorkPackage>("visible_packages", &self.visible_packages);
+        diff.visible_poll_owners = cache
+            .apply_diff_to_table::<PollOwner>("visible_poll_owners", &self.visible_poll_owners);
+        diff.visible_session_requests = cache.apply_diff_to_table::<SessionRequest>(
+            "visible_session_requests",
+            &self.visible_session_requests,
+        );
+        diff.visible_task_subagents = cache.apply_diff_to_table::<TaskSubagent>(
+            "visible_task_subagents",
+            &self.visible_task_subagents,
+        );
+        diff.visible_task_watchers = cache.apply_diff_to_table::<TaskWatcher>(
+            "visible_task_watchers",
+            &self.visible_task_watchers,
+        );
+        diff.visible_tasks =
+            cache.apply_diff_to_table::<Task>("visible_tasks", &self.visible_tasks);
+        diff.visible_work_package_links = cache.apply_diff_to_table::<WorkPackageLink>(
+            "visible_work_package_links",
+            &self.visible_work_package_links,
+        );
+        diff.visible_workspaces =
+            cache.apply_diff_to_table::<Workspace>("visible_workspaces", &self.visible_workspaces);
 
         diff
     }
@@ -1929,6 +2117,12 @@ impl __sdk::DbUpdate for DbUpdate {
             match &table_rows.table[..] {
                 "agents" => db_update
                     .agents
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "covered_epics" => db_update
+                    .covered_epics
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "covered_tasks" => db_update
+                    .covered_tasks
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "dispatch_request_timeouts" => db_update
                     .dispatch_request_timeouts
@@ -1959,6 +2153,21 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "memberships" => db_update
                     .memberships
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "own_epics" => db_update
+                    .own_epics
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "own_packages" => db_update
+                    .own_packages
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "own_settings" => db_update
+                    .own_settings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "own_tasks" => db_update
+                    .own_tasks
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "own_unseen_tasks" => db_update
+                    .own_unseen_tasks
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "poll_owners" => db_update
                     .poll_owners
@@ -2016,6 +2225,51 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "user_profiles" => db_update
                     .user_profiles
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_agents" => db_update
+                    .visible_agents
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_dispatch_requests" => db_update
+                    .visible_dispatch_requests
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_epics" => db_update
+                    .visible_epics
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_learning_retrievals" => db_update
+                    .visible_learning_retrievals
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_learning_verdicts" => db_update
+                    .visible_learning_verdicts
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_learnings" => db_update
+                    .visible_learnings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_memberships" => db_update
+                    .visible_memberships
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_packages" => db_update
+                    .visible_packages
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_poll_owners" => db_update
+                    .visible_poll_owners
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_session_requests" => db_update
+                    .visible_session_requests
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_task_subagents" => db_update
+                    .visible_task_subagents
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_task_watchers" => db_update
+                    .visible_task_watchers
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_tasks" => db_update
+                    .visible_tasks
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_work_package_links" => db_update
+                    .visible_work_package_links
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_workspaces" => db_update
+                    .visible_workspaces
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "work_package_links" => db_update
                     .work_package_links
@@ -2042,6 +2296,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "agents" => db_update
                     .agents
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "covered_epics" => db_update
+                    .covered_epics
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "covered_tasks" => db_update
+                    .covered_tasks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "dispatch_request_timeouts" => db_update
                     .dispatch_request_timeouts
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2071,6 +2331,21 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "memberships" => db_update
                     .memberships
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "own_epics" => db_update
+                    .own_epics
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "own_packages" => db_update
+                    .own_packages
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "own_settings" => db_update
+                    .own_settings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "own_tasks" => db_update
+                    .own_tasks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "own_unseen_tasks" => db_update
+                    .own_unseen_tasks
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "poll_owners" => db_update
                     .poll_owners
@@ -2129,6 +2404,51 @@ impl __sdk::DbUpdate for DbUpdate {
                 "user_profiles" => db_update
                     .user_profiles
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_agents" => db_update
+                    .visible_agents
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_dispatch_requests" => db_update
+                    .visible_dispatch_requests
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_epics" => db_update
+                    .visible_epics
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_learning_retrievals" => db_update
+                    .visible_learning_retrievals
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_learning_verdicts" => db_update
+                    .visible_learning_verdicts
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_learnings" => db_update
+                    .visible_learnings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_memberships" => db_update
+                    .visible_memberships
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_packages" => db_update
+                    .visible_packages
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_poll_owners" => db_update
+                    .visible_poll_owners
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_session_requests" => db_update
+                    .visible_session_requests
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_task_subagents" => db_update
+                    .visible_task_subagents
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_task_watchers" => db_update
+                    .visible_task_watchers
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_tasks" => db_update
+                    .visible_tasks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_work_package_links" => db_update
+                    .visible_work_package_links
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_workspaces" => db_update
+                    .visible_workspaces
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "work_package_links" => db_update
                     .work_package_links
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2154,6 +2474,8 @@ impl __sdk::DbUpdate for DbUpdate {
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
     agents: __sdk::TableAppliedDiff<'r, Agent>,
+    covered_epics: __sdk::TableAppliedDiff<'r, Epic>,
+    covered_tasks: __sdk::TableAppliedDiff<'r, Task>,
     dispatch_request_timeouts: __sdk::TableAppliedDiff<'r, DispatchRequestTimeout>,
     dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
     epics: __sdk::TableAppliedDiff<'r, Epic>,
@@ -2164,6 +2486,11 @@ pub struct AppliedDiff<'r> {
     learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
     learnings: __sdk::TableAppliedDiff<'r, Learning>,
     memberships: __sdk::TableAppliedDiff<'r, Membership>,
+    own_epics: __sdk::TableAppliedDiff<'r, Epic>,
+    own_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
+    own_settings: __sdk::TableAppliedDiff<'r, Setting>,
+    own_tasks: __sdk::TableAppliedDiff<'r, Task>,
+    own_unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
     poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
@@ -2183,6 +2510,21 @@ pub struct AppliedDiff<'r> {
     unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
     usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
     user_profiles: __sdk::TableAppliedDiff<'r, UserProfile>,
+    visible_agents: __sdk::TableAppliedDiff<'r, Agent>,
+    visible_dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
+    visible_epics: __sdk::TableAppliedDiff<'r, Epic>,
+    visible_learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
+    visible_learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
+    visible_learnings: __sdk::TableAppliedDiff<'r, Learning>,
+    visible_memberships: __sdk::TableAppliedDiff<'r, Membership>,
+    visible_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
+    visible_poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
+    visible_session_requests: __sdk::TableAppliedDiff<'r, SessionRequest>,
+    visible_task_subagents: __sdk::TableAppliedDiff<'r, TaskSubagent>,
+    visible_task_watchers: __sdk::TableAppliedDiff<'r, TaskWatcher>,
+    visible_tasks: __sdk::TableAppliedDiff<'r, Task>,
+    visible_work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
+    visible_workspaces: __sdk::TableAppliedDiff<'r, Workspace>,
     work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
     work_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
     workspaces: __sdk::TableAppliedDiff<'r, Workspace>,
@@ -2200,6 +2542,8 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
         callbacks.invoke_table_row_callbacks::<Agent>("agents", &self.agents, event);
+        callbacks.invoke_table_row_callbacks::<Epic>("covered_epics", &self.covered_epics, event);
+        callbacks.invoke_table_row_callbacks::<Task>("covered_tasks", &self.covered_tasks, event);
         callbacks.invoke_table_row_callbacks::<DispatchRequestTimeout>(
             "dispatch_request_timeouts",
             &self.dispatch_request_timeouts,
@@ -2234,6 +2578,19 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<Learning>("learnings", &self.learnings, event);
         callbacks.invoke_table_row_callbacks::<Membership>("memberships", &self.memberships, event);
+        callbacks.invoke_table_row_callbacks::<Epic>("own_epics", &self.own_epics, event);
+        callbacks.invoke_table_row_callbacks::<WorkPackage>(
+            "own_packages",
+            &self.own_packages,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Setting>("own_settings", &self.own_settings, event);
+        callbacks.invoke_table_row_callbacks::<Task>("own_tasks", &self.own_tasks, event);
+        callbacks.invoke_table_row_callbacks::<UnseenTask>(
+            "own_unseen_tasks",
+            &self.own_unseen_tasks,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<PollOwner>("poll_owners", &self.poll_owners, event);
         callbacks.invoke_table_row_callbacks::<RepoBaseBranch>(
             "repo_base_branches",
@@ -2303,6 +2660,73 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<UserProfile>(
             "user_profiles",
             &self.user_profiles,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Agent>(
+            "visible_agents",
+            &self.visible_agents,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<DispatchRequest>(
+            "visible_dispatch_requests",
+            &self.visible_dispatch_requests,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Epic>("visible_epics", &self.visible_epics, event);
+        callbacks.invoke_table_row_callbacks::<LearningRetrieval>(
+            "visible_learning_retrievals",
+            &self.visible_learning_retrievals,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<LearningVerdict>(
+            "visible_learning_verdicts",
+            &self.visible_learning_verdicts,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Learning>(
+            "visible_learnings",
+            &self.visible_learnings,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Membership>(
+            "visible_memberships",
+            &self.visible_memberships,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<WorkPackage>(
+            "visible_packages",
+            &self.visible_packages,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<PollOwner>(
+            "visible_poll_owners",
+            &self.visible_poll_owners,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<SessionRequest>(
+            "visible_session_requests",
+            &self.visible_session_requests,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<TaskSubagent>(
+            "visible_task_subagents",
+            &self.visible_task_subagents,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<TaskWatcher>(
+            "visible_task_watchers",
+            &self.visible_task_watchers,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Task>("visible_tasks", &self.visible_tasks, event);
+        callbacks.invoke_table_row_callbacks::<WorkPackageLink>(
+            "visible_work_package_links",
+            &self.visible_work_package_links,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Workspace>(
+            "visible_workspaces",
+            &self.visible_workspaces,
             event,
         );
         callbacks.invoke_table_row_callbacks::<WorkPackageLink>(
@@ -2977,6 +3401,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         agents_table::register_table(client_cache);
+        covered_epics_table::register_table(client_cache);
+        covered_tasks_table::register_table(client_cache);
         dispatch_request_timeouts_table::register_table(client_cache);
         dispatch_requests_table::register_table(client_cache);
         epics_table::register_table(client_cache);
@@ -2987,6 +3413,11 @@ impl __sdk::SpacetimeModule for RemoteModule {
         learning_verdicts_table::register_table(client_cache);
         learnings_table::register_table(client_cache);
         memberships_table::register_table(client_cache);
+        own_epics_table::register_table(client_cache);
+        own_packages_table::register_table(client_cache);
+        own_settings_table::register_table(client_cache);
+        own_tasks_table::register_table(client_cache);
+        own_unseen_tasks_table::register_table(client_cache);
         poll_owners_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
@@ -3006,12 +3437,29 @@ impl __sdk::SpacetimeModule for RemoteModule {
         unseen_tasks_table::register_table(client_cache);
         usage_events_table::register_table(client_cache);
         user_profiles_table::register_table(client_cache);
+        visible_agents_table::register_table(client_cache);
+        visible_dispatch_requests_table::register_table(client_cache);
+        visible_epics_table::register_table(client_cache);
+        visible_learning_retrievals_table::register_table(client_cache);
+        visible_learning_verdicts_table::register_table(client_cache);
+        visible_learnings_table::register_table(client_cache);
+        visible_memberships_table::register_table(client_cache);
+        visible_packages_table::register_table(client_cache);
+        visible_poll_owners_table::register_table(client_cache);
+        visible_session_requests_table::register_table(client_cache);
+        visible_task_subagents_table::register_table(client_cache);
+        visible_task_watchers_table::register_table(client_cache);
+        visible_tasks_table::register_table(client_cache);
+        visible_work_package_links_table::register_table(client_cache);
+        visible_workspaces_table::register_table(client_cache);
         work_package_links_table::register_table(client_cache);
         work_packages_table::register_table(client_cache);
         workspaces_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "agents",
+        "covered_epics",
+        "covered_tasks",
         "dispatch_request_timeouts",
         "dispatch_requests",
         "epics",
@@ -3022,6 +3470,11 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "learning_verdicts",
         "learnings",
         "memberships",
+        "own_epics",
+        "own_packages",
+        "own_settings",
+        "own_tasks",
+        "own_unseen_tasks",
         "poll_owners",
         "repo_base_branches",
         "repo_paths",
@@ -3041,6 +3494,21 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "unseen_tasks",
         "usage_events",
         "user_profiles",
+        "visible_agents",
+        "visible_dispatch_requests",
+        "visible_epics",
+        "visible_learning_retrievals",
+        "visible_learning_verdicts",
+        "visible_learnings",
+        "visible_memberships",
+        "visible_packages",
+        "visible_poll_owners",
+        "visible_session_requests",
+        "visible_task_subagents",
+        "visible_task_watchers",
+        "visible_tasks",
+        "visible_work_package_links",
+        "visible_workspaces",
         "work_package_links",
         "work_packages",
         "workspaces",

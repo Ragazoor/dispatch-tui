@@ -86,6 +86,7 @@ mod tables;
 mod tasks_epics;
 mod unseen;
 mod user_profile;
+mod views;
 mod visibility;
 mod workspace;
 
@@ -112,6 +113,7 @@ pub use tables::*;
 pub use tasks_epics::*;
 pub use unseen::*;
 pub use user_profile::*;
+pub use views::*;
 pub use visibility::*;
 pub use workspace::*;
 

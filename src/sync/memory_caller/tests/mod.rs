@@ -131,4 +131,5 @@ mod rules;
 mod schedules;
 mod session_requests;
 mod tasks;
+mod views;
 mod workspace_migration;

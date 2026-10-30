@@ -84,6 +84,7 @@ pub struct Task {
     /// until the seeding client backfills the seeding user onto them
     /// (`spacetime-seed.allium: BackfillTaskOwner`). No new row can widen the
     /// gap, because every writer goes through [`write_task`].
+    #[index(btree)]
     #[default("")]
     pub owner: String,
     /// When this task last entered done, or `""`. The Done column's ordering
@@ -110,6 +111,7 @@ pub struct Task {
     /// `owner` and `completed_at` are: appending is the only automigratable
     /// position. `""` for a row created before this column existed, and never
     /// backfilled.
+    #[index(btree)]
     #[default("")]
     pub created_by: String,
     /// The retired task alias (`agents.allium`, step A5). Blank and never
@@ -182,12 +184,14 @@ pub struct Epic {
     /// it. `""` for a row created before this column existed, or created by an
     /// unidentified process (e.g. a feed's grouped sub-epics), and never
     /// backfilled.
+    #[index(btree)]
     #[default("")]
     pub created_by: String,
     /// The workspace this epic lives in (`core.allium: Epic.workspace`), as
     /// [`Workspace::id`]. `0` until [`migrate_store_to_workspaces`] puts every
     /// existing epic in the default workspace; a sub-epic shares its parent's.
     /// Appended last, with a default, so the module still automigrates.
+    #[index(btree)]
     #[default(0)]
     pub workspace_id: i64,
     /// [`VISIBILITY_PUBLIC`] or [`VISIBILITY_PRIVATE`]
@@ -418,12 +422,14 @@ pub struct Learning {
     /// Learning.workspace`), as [`Workspace::id`]; `0` for a user-scoped
     /// learning, which is private to its author instead. Appended last, with
     /// a default, so the module still automigrates.
+    #[index(btree)]
     #[default(0)]
     pub workspace_id: i64,
     /// Who recorded it (`core.allium: Learning.author`), in `Host.owner`'s
     /// spelling, stamped by [`create_learning`]. Empty on a learning that
     /// predates workspaces, which nobody can claim. A learning with no
     /// workspace is seen only by its author.
+    #[index(btree)]
     #[default("")]
     pub author: String,
 }
@@ -525,6 +531,7 @@ pub struct Host {
     /// startup window: a host minted offline on first run has none yet, and an
     /// install that never reaches a store never will. See "Absence is a
     /// sentinel, not a null" in this file's header.
+    #[index(btree)]
     #[default("")]
     pub owner: String,
 }
@@ -601,6 +608,7 @@ pub struct Subscription {
     /// The empty-string default is unreachable rather than meaningful: nothing
     /// has ever written a subscription, so there is no existing row for it to
     /// apply to. `seed_subscriptions` rejects it outright.
+    #[index(btree)]
     #[default("")]
     pub subscriber: String,
 }
@@ -634,6 +642,7 @@ pub struct WorkPackage {
     /// The workspace this package lives in (`work-packages.allium:
     /// WorkPackage.workspace`); `0` until the migration places it. Appended
     /// last, with a default, like every column since `sort_order`.
+    #[index(btree)]
     #[default(0)]
     pub workspace_id: i64,
     /// [`VISIBILITY_PUBLIC`] or [`VISIBILITY_PRIVATE`].
@@ -691,6 +700,7 @@ pub struct UnseenTask {
     #[index(btree)]
     pub task_id: i64,
     /// The `UserIdentity` that has not yet seen the task.
+    #[index(btree)]
     pub subscriber: String,
 }
 

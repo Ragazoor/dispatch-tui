@@ -41,6 +41,7 @@ impl __sdk::__query_builder::HasCols for Host {
 /// Provides typed access to indexed columns for query building.
 pub struct HostIxCols {
     pub id: __sdk::__query_builder::IxCol<Host, String>,
+    pub owner: __sdk::__query_builder::IxCol<Host, String>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Host {
@@ -48,6 +49,7 @@ impl __sdk::__query_builder::HasIxCols for Host {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         HostIxCols {
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            owner: __sdk::__query_builder::IxCol::new(table_name, "owner"),
         }
     }
 }

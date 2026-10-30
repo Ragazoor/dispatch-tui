@@ -486,6 +486,29 @@ pub fn column(instance: &Instance, query: &str) -> String {
     }
 }
 
+/// Every value of the first column of `query`, sorted, as text.
+pub fn column_values(instance: &Instance, query: &str) -> Vec<String> {
+    let raw = instance.sql(query);
+    let line = raw
+        .lines()
+        .find(|l| l.trim_start().starts_with('['))
+        .unwrap_or_else(|| panic!("no JSON in sql output:\n{raw}"));
+    let parsed: serde_json::Value = serde_json::from_str(line).expect("parse sql output");
+    let mut values: Vec<String> = parsed[0]["rows"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .map(|row| match &row[0] {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    values.sort();
+    values
+}
+
 /// Whether a query returned nothing.
 pub fn no_rows(instance: &Instance, query: &str) -> bool {
     let raw = instance.sql(query);

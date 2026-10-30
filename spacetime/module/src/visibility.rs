@@ -24,36 +24,26 @@ pub fn is_operator(ctx: &ReducerContext) -> bool {
 }
 
 /// `is_super_admin(who)`.
-pub fn is_super_admin(ctx: &ReducerContext, who: &str) -> bool {
-    ctx.db
-        .user_profiles()
-        .identity()
-        .find(&who.to_string())
-        .is_some_and(|p| p.is_super_admin)
+pub fn is_super_admin(r: &impl StoreReads, who: &str) -> bool {
+    r.profile(who).is_some_and(|p| p.is_super_admin)
 }
 
 /// `workspace.has_member(who)`.
-pub fn workspace_has_member(ctx: &ReducerContext, workspace_id: i64, who: &str) -> bool {
-    ctx.db
-        .memberships()
-        .workspace_id()
-        .filter(&workspace_id)
-        .any(|m| m.user == who)
+pub fn workspace_has_member(r: &impl StoreReads, workspace_id: i64, who: &str) -> bool {
+    r.members_of(workspace_id).iter().any(|m| m.user == who)
 }
 
 /// `workspace.is_admin(who)`.
-pub fn workspace_has_admin(ctx: &ReducerContext, workspace_id: i64, who: &str) -> bool {
-    ctx.db
-        .memberships()
-        .workspace_id()
-        .filter(&workspace_id)
+pub fn workspace_has_admin(r: &impl StoreReads, workspace_id: i64, who: &str) -> bool {
+    r.members_of(workspace_id)
+        .iter()
         .any(|m| m.user == who && m.role == ROLE_ADMIN)
 }
 
 /// `Epic.private_holder`: the creator of the nearest private epic at or above
 /// `epic`, or `None` when the epic is public all the way up. `Some("")` is a
 /// private epic with no creator, which nobody holds.
-fn private_holder(ctx: &ReducerContext, epic: &Epic) -> Option<String> {
+fn private_holder(r: &impl StoreReads, epic: &Epic) -> Option<String> {
     let mut current = epic.clone();
     for _ in 0..PRIVATE_WALK_LIMIT {
         if current.visibility == VISIBILITY_PRIVATE {
@@ -62,17 +52,17 @@ fn private_holder(ctx: &ReducerContext, epic: &Epic) -> Option<String> {
         if current.parent_epic_id == 0 {
             return None;
         }
-        current = ctx.db.epics().id().find(current.parent_epic_id)?;
+        current = r.epic(current.parent_epic_id)?;
     }
     None
 }
 
 /// `Epic.visible_to(who)`.
-pub fn epic_visible_to(ctx: &ReducerContext, epic: &Epic, who: &str) -> bool {
-    if !workspace_has_member(ctx, epic.workspace_id, who) {
+pub fn epic_visible_to(r: &impl StoreReads, epic: &Epic, who: &str) -> bool {
+    if !workspace_has_member(r, epic.workspace_id, who) {
         return false;
     }
-    match private_holder(ctx, epic) {
+    match private_holder(r, epic) {
         None => true,
         Some(holder) => !holder.is_empty() && holder == who,
     }
@@ -80,20 +70,17 @@ pub fn epic_visible_to(ctx: &ReducerContext, epic: &Epic, who: &str) -> bool {
 
 /// `Task.visible_to(who)`: an epic task follows its epic, an epic-less task is
 /// its owner's alone.
-pub fn task_visible_to(ctx: &ReducerContext, task: &Task, who: &str) -> bool {
+pub fn task_visible_to(r: &impl StoreReads, task: &Task, who: &str) -> bool {
     if task.epic_id == 0 {
         return !task.owner.is_empty() && task.owner == who;
     }
-    ctx.db
-        .epics()
-        .id()
-        .find(task.epic_id)
-        .is_some_and(|epic| epic_visible_to(ctx, &epic, who))
+    r.epic(task.epic_id)
+        .is_some_and(|epic| epic_visible_to(r, &epic, who))
 }
 
 /// `WorkPackage.visible_to(who)`.
-pub fn package_visible_to(ctx: &ReducerContext, package: &WorkPackage, who: &str) -> bool {
-    workspace_has_member(ctx, package.workspace_id, who)
+pub fn package_visible_to(r: &impl StoreReads, package: &WorkPackage, who: &str) -> bool {
+    workspace_has_member(r, package.workspace_id, who)
         && (package.visibility == VISIBILITY_PUBLIC || package.created_by == who)
 }
 
@@ -379,36 +366,31 @@ pub(crate) fn check_subtree_all_seen(
 }
 
 /// Whether the caller sees a learning (`workspaces.allium:
-/// LearningVisibility`): an epic- or task-scoped learning only while its item
-/// is visible, a learning with a workspace only to that workspace's members,
-/// and a learning with none only to its author. A learning that predates
-/// workspaces has no author and no workspace, and stays visible to everyone.
+/// LearningVisibility`).
 pub fn learning_scope_seen(ctx: &ReducerContext, learning: &Learning) -> bool {
-    let caller = caller_identity(ctx);
+    learning_seen_by(ctx, learning, &caller_identity(ctx))
+}
+
+/// Whether `who` sees a learning (`workspaces.allium: LearningVisibility`): an
+/// epic- or task-scoped learning only while its item is visible, a learning
+/// with a workspace only to that workspace's members, and a learning with none
+/// only to its author. A learning that predates workspaces has no author and
+/// no workspace, and stays visible to everyone.
+pub fn learning_seen_by(r: &impl StoreReads, learning: &Learning, caller: &str) -> bool {
     let item_id = learning
         .scope_ref
         .as_deref()
         .and_then(|r| r.parse::<i64>().ok());
     let item_seen = match (learning.scope.as_str(), item_id) {
-        ("epic", Some(id)) => ctx
-            .db
-            .epics()
-            .id()
-            .find(id)
-            .is_none_or(|e| epic_visible_to(ctx, &e, &caller)),
-        ("task", Some(id)) => ctx
-            .db
-            .tasks()
-            .id()
-            .find(id)
-            .is_none_or(|t| task_visible_to(ctx, &t, &caller)),
+        ("epic", Some(id)) => r.epic(id).is_none_or(|e| epic_visible_to(r, &e, caller)),
+        ("task", Some(id)) => r.task(id).is_none_or(|t| task_visible_to(r, &t, caller)),
         _ => true,
     };
     item_seen
         && if learning.workspace_id == 0 {
             learning.author.is_empty() || learning.author == caller
         } else {
-            workspace_has_member(ctx, learning.workspace_id, &caller)
+            workspace_has_member(r, learning.workspace_id, caller)
         }
 }
 

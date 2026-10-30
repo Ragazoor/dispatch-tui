@@ -79,14 +79,18 @@ impl __sdk::__query_builder::HasCols for Learning {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct LearningIxCols {
+    pub author: __sdk::__query_builder::IxCol<Learning, String>,
     pub id: __sdk::__query_builder::IxCol<Learning, i64>,
+    pub workspace_id: __sdk::__query_builder::IxCol<Learning, i64>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Learning {
     type IxCols = LearningIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         LearningIxCols {
+            author: __sdk::__query_builder::IxCol::new(table_name, "author"),
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            workspace_id: __sdk::__query_builder::IxCol::new(table_name, "workspace_id"),
         }
     }
 }

@@ -91,18 +91,22 @@ impl __sdk::__query_builder::HasCols for Epic {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct EpicIxCols {
+    pub created_by: __sdk::__query_builder::IxCol<Epic, String>,
     pub id: __sdk::__query_builder::IxCol<Epic, i64>,
     pub parent_epic_id: __sdk::__query_builder::IxCol<Epic, i64>,
     pub visibility: __sdk::__query_builder::IxCol<Epic, String>,
+    pub workspace_id: __sdk::__query_builder::IxCol<Epic, i64>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Epic {
     type IxCols = EpicIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         EpicIxCols {
+            created_by: __sdk::__query_builder::IxCol::new(table_name, "created_by"),
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
             parent_epic_id: __sdk::__query_builder::IxCol::new(table_name, "parent_epic_id"),
             visibility: __sdk::__query_builder::IxCol::new(table_name, "visibility"),
+            workspace_id: __sdk::__query_builder::IxCol::new(table_name, "workspace_id"),
         }
     }
 }

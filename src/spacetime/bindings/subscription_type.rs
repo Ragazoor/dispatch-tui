@@ -41,6 +41,7 @@ impl __sdk::__query_builder::HasCols for Subscription {
 /// Provides typed access to indexed columns for query building.
 pub struct SubscriptionIxCols {
     pub id: __sdk::__query_builder::IxCol<Subscription, String>,
+    pub subscriber: __sdk::__query_builder::IxCol<Subscription, String>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Subscription {
@@ -48,6 +49,7 @@ impl __sdk::__query_builder::HasIxCols for Subscription {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         SubscriptionIxCols {
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            subscriber: __sdk::__query_builder::IxCol::new(table_name, "subscriber"),
         }
     }
 }
