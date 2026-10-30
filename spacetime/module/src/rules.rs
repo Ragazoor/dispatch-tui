@@ -58,6 +58,12 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 19: visibility on create and change, and sight on writes — a root epic or
+///    package names a workspace the caller belongs to, a sub-epic takes its
+///    parent's, `set_epic_visibility`, `set_work_package_visibility` and
+///    `super_admin_delete_unseen_item`, and every reducer that touches a task,
+///    epic, package or learning treats one the caller cannot see as one that
+///    does not exist (`visibility.rs`).
 /// 18: `update_task` — the board's relink and patch of a task in one
 ///    transaction, and the completion stamp on entering Done that its patch
 ///    cannot override (`tasks_epics.rs`).
@@ -91,7 +97,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 18;
+pub const RULES_VERSION: i64 = 19;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

@@ -361,6 +361,7 @@ async fn an_epic_born_with_feed_fields_is_one_write() {
                 sort_order: Some(42),
                 feed_command: Some("gh api x"),
                 feed_interval_secs: Some(300),
+                ..Default::default()
             },
         )
         .await
@@ -422,6 +423,8 @@ async fn a_work_package_create_carries_the_creator_and_a_trimmed_title() {
             "  Window 1 ",
             "the plan",
             &[WorkPackageItem::Task(TaskId(4))],
+            1,
+            crate::models::Visibility::Public,
         )
         .await
         .unwrap();
@@ -444,7 +447,10 @@ async fn a_work_package_create_carries_the_creator_and_a_trimmed_title() {
 async fn a_board_with_no_identity_cannot_create_a_work_package() {
     let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
 
-    assert!(writer.create_work_package("W", "", &[]).await.is_err());
+    assert!(writer
+        .create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .is_err());
     assert!(caller.sent().is_empty());
 }
 

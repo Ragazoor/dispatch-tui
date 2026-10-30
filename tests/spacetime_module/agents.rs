@@ -19,7 +19,7 @@ fn the_backfill_moves_a_pre_a4_tasks_session_facts_onto_its_agent() {
     let instance = published_instance();
     register_own_hosts(&instance);
     let mut row = task_json(1, "t", "running", 0, "host-a");
-    row["owner"] = serde_json::json!("user-me");
+    row["owner"] = serde_json::json!(instance.identity());
     row["worktree"] = serde_json::json!("/wt/1-t");
     row["tmux_window"] = serde_json::json!("task-1");
     row["last_pre_tool_use_at"] = serde_json::json!("2026-10-16 11:00:00");

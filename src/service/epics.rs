@@ -48,6 +48,8 @@ pub struct UpdateEpicParams {
     pub feed_append_only: Option<bool>,
     /// Triple-state: None = no change, Some(Some(id)) = reparent, Some(None) = make root.
     pub parent_epic_id: Option<Option<EpicId>>,
+    /// `workspaces.allium: SetEpicVisibility`. A workspace never changes.
+    pub visibility: Option<crate::models::Visibility>,
 }
 
 impl UpdateEpicParams {
@@ -67,6 +69,7 @@ impl UpdateEpicParams {
             group_by_repo: None,
             feed_append_only: None,
             parent_epic_id: None,
+            visibility: None,
         }
     }
 
@@ -92,6 +95,7 @@ impl UpdateEpicParams {
             group_by_repo,
             feed_append_only,
             parent_epic_id,
+            visibility,
         } = self;
 
         [
@@ -107,6 +111,7 @@ impl UpdateEpicParams {
             ("group_by_repo", group_by_repo.is_some()),
             ("feed_append_only", feed_append_only.is_some()),
             ("parent_epic_id", parent_epic_id.is_some()),
+            ("visibility", visibility.is_some()),
         ]
         .into_iter()
         .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -140,6 +145,11 @@ pub struct CreateEpicParams {
     pub parent_epic_id: Option<EpicId>,
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,
+    /// The workspace a root epic is created in. Ignored for a sub-epic, which
+    /// takes its parent's (`workspaces.allium: CreateEpicInWorkspace`); `0`
+    /// is none, which the store refuses for a root epic.
+    pub workspace_id: i64,
+    pub visibility: crate::models::Visibility,
 }
 
 // ---------------------------------------------------------------------------
@@ -196,10 +206,13 @@ impl EpicService {
         // rejected on the follow-up patch, leaving a half-created epic behind.
         validate_feed_interval("feed_interval_secs", params.feed_interval_secs)?;
 
+        // A sub-epic lives in its parent's workspace, whatever was asked.
+        let mut workspace_id = params.workspace_id;
         if let Some(parent_id) = params.parent_epic_id {
-            self.db.get_epic(parent_id).await.ok_or_else(|| {
+            let parent = self.db.get_epic(parent_id).await.ok_or_else(|| {
                 ServiceError::NotFound(format!("Parent epic {} not found", parent_id.0))
             })?;
+            workspace_id = parent.workspace_id;
         }
 
         // One write: the sort order and feed fields ride in the create row, so
@@ -215,6 +228,8 @@ impl EpicService {
                     sort_order: params.sort_order,
                     feed_command: params.feed_command.as_deref(),
                     feed_interval_secs: params.feed_interval_secs,
+                    workspace_id,
+                    visibility: params.visibility,
                 },
             )
             .await?;
@@ -393,6 +408,9 @@ impl EpicService {
         // `patch_epic` recalculates the epic and its ancestors, and the parent
         // it left, in the same transaction (store-split.allium X3).
         self.db.patch_epic(epic_id, &patch).await?;
+        if let Some(visibility) = params.visibility {
+            self.db.set_epic_visibility(epic_id, visibility).await?;
+        }
 
         // What this call wrote to completed_at. A call that sets Done may have
         // been stamped by the module, so the stamp is read back rather than

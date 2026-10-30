@@ -539,7 +539,9 @@ async fn every_store_mutation_reaches_the_transport() {
     .await
     .unwrap();
 
-    db.create_work_package("W", "", &[]).await.unwrap();
+    db.create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
     db.patch_work_package(WorkPackageId(1), Some("W2"), None, None)
         .await
         .unwrap();

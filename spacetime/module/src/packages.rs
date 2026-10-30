@@ -74,6 +74,7 @@ pub fn apply_work_package_patch(
 #[spacetimedb::reducer]
 pub fn create_work_package(ctx: &ReducerContext, row: WorkPackage) -> Result<(), String> {
     validate_work_package_title(&row.title)?;
+    check_new_package(ctx, &row)?;
     let title = row.title.trim().to_string();
     ctx.db.work_packages().insert(WorkPackage {
         id: 0,
@@ -94,8 +95,10 @@ pub fn create_work_package_with_links(
     links: Vec<WorkPackageItemRef>,
 ) -> Result<(), String> {
     validate_work_package_title(&row.title)?;
+    check_new_package(ctx, &row)?;
     for item in &links {
         validate_item_exists(ctx, item)?;
+        check_link_allowed(ctx, &row, &item.kind, item.item_id)?;
     }
     let title = row.title.trim().to_string();
     let package = ctx.db.work_packages().insert(WorkPackage {
@@ -122,7 +125,7 @@ pub fn update_work_package_with_links(
     unlink: Vec<WorkPackageItemRef>,
     link: Vec<WorkPackageItemRef>,
 ) -> Result<(), String> {
-    let Some(mut row) = ctx.db.work_packages().id().find(id) else {
+    let Some(mut row) = visible_package(ctx, id) else {
         return Err(format!("no work package {id}"));
     };
     if let Some(both) = link.iter().find(|i| unlink.contains(i)) {
@@ -133,6 +136,7 @@ pub fn update_work_package_with_links(
     }
     for item in &link {
         validate_item_exists(ctx, item)?;
+        check_link_allowed(ctx, &row, &item.kind, item.item_id)?;
     }
     if !patch.is_empty() {
         apply_work_package_patch(&mut row, patch)?;
@@ -160,7 +164,7 @@ pub fn patch_work_package(
     id: i64,
     patch: WorkPackagePatch,
 ) -> Result<(), String> {
-    let Some(mut row) = ctx.db.work_packages().id().find(id) else {
+    let Some(mut row) = visible_package(ctx, id) else {
         return Err(format!("no work package {id}"));
     };
     apply_work_package_patch(&mut row, patch)?;
@@ -173,6 +177,16 @@ pub fn patch_work_package(
 /// nothing else. Idempotent on a missing package, like [`delete_epic`].
 #[spacetimedb::reducer]
 pub fn delete_work_package(ctx: &ReducerContext, id: i64) -> Result<(), String> {
+    if visible_package(ctx, id).is_none() {
+        return Ok(());
+    }
+    delete_package_rows(ctx, id);
+    Ok(())
+}
+
+/// The package row and its links, with no sight check: [`delete_work_package`]
+/// and `super_admin_delete_unseen_item` decide who may.
+pub(crate) fn delete_package_rows(ctx: &ReducerContext, id: i64) {
     let links: Vec<String> = ctx
         .db
         .work_package_links()
@@ -184,7 +198,6 @@ pub fn delete_work_package(ctx: &ReducerContext, id: i64) -> Result<(), String> 
         ctx.db.work_package_links().id().delete(&link);
     }
     ctx.db.work_packages().id().delete(id);
-    Ok(())
 }
 
 fn validate_item_exists(ctx: &ReducerContext, item: &WorkPackageItemRef) -> Result<(), String> {
@@ -242,6 +255,10 @@ pub fn link_work_package_item(
     item_id: i64,
 ) -> Result<(), String> {
     validate_link_target(ctx, work_package_id, &kind, item_id)?;
+    let Some(package) = visible_package(ctx, work_package_id) else {
+        return Err(format!("no work package {work_package_id}"));
+    };
+    check_link_allowed(ctx, &package, &kind, item_id)?;
     insert_link_if_absent(ctx, work_package_id, WorkPackageItemRef { kind, item_id });
     Ok(())
 }
@@ -254,6 +271,9 @@ pub fn unlink_work_package_item(
     kind: String,
     item_id: i64,
 ) -> Result<(), String> {
+    if visible_package(ctx, work_package_id).is_none() {
+        return Ok(());
+    }
     let id = work_package_link_id(work_package_id, &kind, item_id);
     ctx.db.work_package_links().id().delete(&id);
     Ok(())

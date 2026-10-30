@@ -71,6 +71,9 @@ pub fn mark_epic_seen(
     if subscriber.trim().is_empty() {
         return Err("cannot mark seen without an identity".into());
     }
+    if visible_epic(ctx, epic_id).is_none() {
+        return Ok(());
+    }
     for task in ctx.db.tasks().epic_id().filter(&epic_id) {
         ctx.db
             .unseen_tasks()

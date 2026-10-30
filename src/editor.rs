@@ -107,11 +107,23 @@ pub struct EpicEditorFields {
     /// Parsed seconds, or `None` if the section was empty or unparseable.
     /// Parse failures are recorded in `errors`.
     pub feed_interval_secs: Option<i64>,
+    /// `None` when the section was empty or unparseable (the latter is in
+    /// `errors`).
+    pub visibility: Option<crate::models::Visibility>,
     pub errors: Vec<EditorParseError>,
 }
 
 const DESCRIPTION_SECTIONS: &[&str] = &["DESCRIPTION"];
-const EPIC_SECTIONS: &[&str] = &["TITLE", "DESCRIPTION", "FEED_COMMAND", "FEED_INTERVAL_SECS"];
+/// `WORKSPACE` is shown for reference and never read back: an epic stays in
+/// its workspace (`workspaces.allium: EpicStaysInItsWorkspace`).
+const EPIC_SECTIONS: &[&str] = &[
+    "TITLE",
+    "DESCRIPTION",
+    "FEED_COMMAND",
+    "FEED_INTERVAL_SECS",
+    "VISIBILITY",
+    "WORKSPACE",
+];
 const TASK_SECTIONS: &[&str] = &[
     "TITLE",
     "DESCRIPTION",
@@ -247,11 +259,13 @@ pub fn format_epic_for_editor(epic: &Epic) -> String {
         .map(|n| n.to_string())
         .unwrap_or_default();
     format!(
-        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- FEED_COMMAND ---\n{}\n--- FEED_INTERVAL_SECS ---\n{}\n",
+        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- FEED_COMMAND ---\n{}\n--- FEED_INTERVAL_SECS ---\n{}\n--- VISIBILITY ---\n{}\n--- WORKSPACE ---\n{}\n",
         esc(&epic.title),
         esc(&epic.description),
         esc(feed_cmd),
-        feed_interval
+        feed_interval,
+        epic.visibility,
+        epic.workspace_id
     )
 }
 
@@ -304,11 +318,19 @@ pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
         interval_parse_failure_message,
         &mut errors,
     );
+    let visibility = parse_section(
+        single_line(s.remove("VISIBILITY")),
+        "VISIBILITY",
+        crate::models::Visibility::parse,
+        |raw| format!("unknown visibility: {raw:?} (valid: public, private)"),
+        &mut errors,
+    );
     EpicEditorFields {
         title: single_line(s.remove("TITLE")),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
         feed_command: single_line(s.remove("FEED_COMMAND")),
         feed_interval_secs,
+        visibility,
         errors,
     }
 }
@@ -482,6 +504,9 @@ pub struct EpicEditApplied {
     pub description: String,
     pub feed_command: FieldUpdate,
     pub feed_interval_secs: Option<i64>,
+    /// `Some` only when the edit changes it, so an untouched section writes
+    /// nothing.
+    pub visibility: Option<crate::models::Visibility>,
 }
 
 /// Apply parsed epic editor fields on top of the epic's existing values.
@@ -500,6 +525,7 @@ pub fn apply_epic_editor_fields(epic: &Epic, fields: EpicEditorFields) -> EpicEd
         },
         feed_command: FieldUpdate::from_string(fields.feed_command),
         feed_interval_secs: fields.feed_interval_secs,
+        visibility: fields.visibility.filter(|v| *v != epic.visibility),
     }
 }
 

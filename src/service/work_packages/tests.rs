@@ -40,6 +40,7 @@ fn create(title: &str, link: Vec<Item>) -> CreateWorkPackageParams {
         title: title.into(),
         description: String::new(),
         link,
+        ..Default::default()
     }
 }
 
@@ -57,6 +58,7 @@ async fn create_makes_the_package_and_links_the_named_items() {
             title: " Window 1 ".into(),
             description: "first maintenance window".into(),
             link: vec![Item::Task(t), Item::Epic(e)],
+            ..Default::default()
         })
         .await
         .unwrap();

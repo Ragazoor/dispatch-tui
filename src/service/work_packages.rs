@@ -21,6 +21,10 @@ pub struct CreateWorkPackageParams {
     pub description: String,
     /// Items to link once the package exists (`LinkItem`, idempotent).
     pub link: Vec<WorkPackageItem>,
+    /// The workspace the package lives in; required (`0` is none, which the
+    /// store refuses). `workspaces.allium: CreateWorkPackageInWorkspace`.
+    pub workspace_id: i64,
+    pub visibility: crate::models::Visibility,
 }
 
 /// Input to [`WorkPackageService::update_work_package`]. `None` leaves a field
@@ -33,6 +37,8 @@ pub struct UpdateWorkPackageParams {
     pub sort_order: Option<i64>,
     pub link: Vec<WorkPackageItem>,
     pub unlink: Vec<WorkPackageItem>,
+    /// `workspaces.allium: SetWorkPackageVisibility`.
+    pub visibility: Option<crate::models::Visibility>,
 }
 
 impl UpdateWorkPackageParams {
@@ -45,11 +51,13 @@ impl UpdateWorkPackageParams {
             sort_order: None,
             link: Vec::new(),
             unlink: Vec::new(),
+            visibility: None,
         }
     }
 
     fn changes_anything(&self) -> bool {
-        self.title.is_some()
+        self.visibility.is_some()
+            || self.title.is_some()
             || self.description.is_some()
             || self.sort_order.is_some()
             || !self.link.is_empty()
@@ -91,7 +99,13 @@ impl WorkPackageService {
     ) -> Result<WorkPackageId, ServiceError> {
         let id = self
             .db
-            .create_work_package(&params.title, &params.description, &params.link)
+            .create_work_package(
+                &params.title,
+                &params.description,
+                &params.link,
+                params.workspace_id,
+                params.visibility,
+            )
             .await?;
         Ok(id)
     }
@@ -137,8 +151,8 @@ impl WorkPackageService {
     ) -> Result<Vec<WorkPackageItem>, ServiceError> {
         if !params.changes_anything() {
             return Err(ServiceError::Validation(
-                "update_work_package needs at least one of title, description, sort_order, or \
-                 a link or unlink list"
+                "update_work_package needs at least one of title, description, sort_order, visibility, \
+                 or a link or unlink list"
                     .into(),
             ));
         }
@@ -161,16 +175,28 @@ impl WorkPackageService {
                 .filter(|i| !linked.contains(i))
                 .collect()
         };
-        self.db
-            .update_work_package(
-                params.id,
-                params.title.as_deref(),
-                params.description.as_deref(),
-                params.sort_order,
-                &params.unlink,
-                &params.link,
-            )
-            .await?;
+        let has_other_change = params.title.is_some()
+            || params.description.is_some()
+            || params.sort_order.is_some()
+            || !params.link.is_empty()
+            || !params.unlink.is_empty();
+        if has_other_change {
+            self.db
+                .update_work_package(
+                    params.id,
+                    params.title.as_deref(),
+                    params.description.as_deref(),
+                    params.sort_order,
+                    &params.unlink,
+                    &params.link,
+                )
+                .await?;
+        }
+        if let Some(visibility) = params.visibility {
+            self.db
+                .set_work_package_visibility(params.id, visibility)
+                .await?;
+        }
         Ok(not_linked)
     }
 

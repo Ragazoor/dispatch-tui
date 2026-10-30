@@ -51,6 +51,13 @@ fn burning_learning_verdicts_moves_its_counter_past_the_ceiling() {
     assert!(created.status.success(), "{}", describe(&created));
     let learning_id = column(&instance, "SELECT id FROM learnings");
 
+    // The retrieval and the verdict name a task the caller can see: a user-board
+    // task of its own (`WritesRequireSight`).
+    let mut task = task_json(7, "rated", "backlog", 0, "");
+    task["owner"] = serde_json::json!(instance.identity());
+    let seeded = instance.call("seed_tasks", &[&serde_json::json!([task]).to_string()]);
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
     let retrieved = instance.call("record_learning_retrieval", &["7", &learning_id, "\"rag\""]);
     assert!(retrieved.status.success(), "{}", describe(&retrieved));
     let verdicts = serde_json::json!([{"learning_id": learning_id.parse::<i64>().unwrap(), "verdict": "helped"}]);

@@ -835,7 +835,7 @@ pub fn request_wrap_up(
     }
     require_acting_for(ctx, &host)?;
     validate_wrap_up_action(&action)?;
-    let Some(task) = ctx.db.tasks().id().find(task_id) else {
+    let Some(task) = visible_task(ctx, task_id) else {
         return Err(format!("task {task_id} no longer exists"));
     };
     validate_wrap_up_request(&task, &host, task_has_open_session_request(ctx, task_id))?;
@@ -939,7 +939,7 @@ pub fn request_exit_session(
     action: String,
     pr_url: String,
 ) -> Result<(), String> {
-    let Some(task) = ctx.db.tasks().id().find(task_id) else {
+    let Some(task) = visible_task(ctx, task_id) else {
         return Err(format!("task {task_id} no longer exists"));
     };
     let sessions: Vec<SessionRequest> = ctx
@@ -1006,7 +1006,7 @@ pub fn request_exit_session(
 /// epic chain runs. A missing task is refused.
 #[spacetimedb::reducer]
 pub fn close_task(ctx: &ReducerContext, task_id: i64, host: String) -> Result<(), String> {
-    let Some(task) = ctx.db.tasks().id().find(task_id) else {
+    let Some(task) = visible_task(ctx, task_id) else {
         return Err(format!("task {task_id} no longer exists"));
     };
     let stamp = now(ctx);

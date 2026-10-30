@@ -271,6 +271,8 @@ pub(in crate::tui) fn make_package(id: i64, title: &str) -> crate::models::WorkP
         description: String::new(),
         sort_order: None,
         created_by: None,
+        workspace_id: 0,
+        visibility: crate::models::Visibility::Public,
         created_at: at,
         updated_at: at,
     }

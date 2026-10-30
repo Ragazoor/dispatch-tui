@@ -300,7 +300,7 @@ fn register_own_hosts(instance: &Instance) {
 /// the ordinary "task exists" seed these tests build on.
 fn running_task(instance: &Instance, id: i64) {
     let mut row = task_json(id, "t", "running", 0, "");
-    row["owner"] = serde_json::json!("user-me");
+    row["owner"] = serde_json::json!(instance.identity());
     // The hook facts are the current agent's (agents A4), and a task with a
     // worktree gets one from the backfill.
     row["worktree"] = serde_json::json!(format!("/wt/{id}-t"));

@@ -30,10 +30,11 @@ impl MemoryReducerCaller {
         review_decision: String,
     ) -> Result<ReducerOutcome> {
         outcome((|| {
+            let scope = self.scope();
             let mut tables = self.lock();
             self.acting_for(&tables, &host)?;
             module::validate_pr_status_report(&state, &review_decision)?;
-            let Some(row) = tables.tasks.get(&task.0).cloned() else {
+            let Some(row) = tables.visible_task(&scope, task.0) else {
                 return Ok(());
             };
             let prior_status = row.status.clone();
@@ -72,9 +73,10 @@ impl MemoryReducerCaller {
         _reason: String,
     ) -> Result<ReducerOutcome> {
         outcome((|| {
+            let scope = self.scope();
             let mut tables = self.lock();
             self.acting_for(&tables, &host)?;
-            let Some(row) = tables.tasks.get(&task.0).cloned() else {
+            let Some(row) = tables.visible_task(&scope, task.0) else {
                 return Ok(());
             };
             if let Some(next) = module::apply_pr_unreadable(row, &self.now()) {

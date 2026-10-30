@@ -140,6 +140,22 @@ pub trait ReducerCaller: Send + Sync {
     async fn grant_super_admin(&self, user: String) -> Result<ReducerOutcome>;
     /// `workspaces.allium: RevokeSuperAdmin`; refused for the last one.
     async fn revoke_super_admin(&self, user: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: SetEpicVisibility`; `visibility` is `"public"` or
+    /// `"private"`.
+    async fn set_epic_visibility(&self, id: EpicId, visibility: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: SetWorkPackageVisibility`.
+    async fn set_work_package_visibility(
+        &self,
+        id: WorkPackageId,
+        visibility: String,
+    ) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: SuperAdminDeletesUnseenItem`; `kind` is `"epic"` or
+    /// `"work_package"`.
+    async fn super_admin_delete_unseen_item(
+        &self,
+        kind: String,
+        item_id: i64,
+    ) -> Result<ReducerOutcome>;
     /// `workspaces.allium: CreateWorkspace`.
     async fn create_workspace(&self, name: String) -> Result<ReducerOutcome>;
     /// `workspaces.allium: RenameWorkspace`.

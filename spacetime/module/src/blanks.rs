@@ -85,7 +85,7 @@ pub fn blank_epic() -> Epic {
     }
 }
 
-pub(crate) fn blank_workspace() -> Workspace {
+pub fn blank_workspace() -> Workspace {
     Workspace {
         id: 0,
         name: String::new(),
@@ -94,7 +94,7 @@ pub(crate) fn blank_workspace() -> Workspace {
     }
 }
 
-pub(crate) fn blank_membership() -> Membership {
+pub fn blank_membership() -> Membership {
     Membership {
         id: 0,
         workspace_id: 0,
@@ -127,7 +127,7 @@ pub(crate) fn blank_watcher() -> TaskWatcher {
     }
 }
 
-pub(crate) fn blank_work_package() -> WorkPackage {
+pub fn blank_work_package() -> WorkPackage {
     WorkPackage {
         id: 0,
         title: String::new(),

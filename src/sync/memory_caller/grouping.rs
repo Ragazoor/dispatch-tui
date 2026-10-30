@@ -151,7 +151,11 @@ impl MemoryReducerCaller {
     /// Mirrors `regroup_epic`.
     pub(super) fn apply_regroup_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
         let root = root.0;
+        let scope = self.scope();
         let mut tables = self.lock();
+        if tables.visible_epic(&scope, root).is_none() {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
         let tasks: Vec<module::Task> = tables
             .tasks
             .values()
@@ -179,7 +183,11 @@ impl MemoryReducerCaller {
 
     /// Mirrors `flatten_epic`.
     pub(super) fn apply_flatten_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
+        let scope = self.scope();
         let mut tables = self.lock();
+        if tables.visible_epic(&scope, root.0).is_none() {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
         Ok(match self.flatten_epic_rows(&mut tables, root.0) {
             Ok(()) => ReducerOutcome::Applied(vec![]),
             Err(why) => ReducerOutcome::Refused(why),

@@ -3,6 +3,17 @@
 /// `workspaces.allium: config.identity_prefix_length`, in characters.
 const IDENTITY_PREFIX_LENGTH: usize = 8;
 
+/// What a person in no workspace is told when they try to create an epic or
+/// a package (`workspaces.allium: NameWorkspaceAndVisibilityFromBoard`).
+pub const NO_WORKSPACE: &str = "You belong to no workspace; ask a super-admin to add you";
+
+/// A workspace as a person picks one: its store id and name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRef {
+    pub id: i64,
+    pub name: String,
+}
+
 /// How a person is named wherever a card or a tool result names them
 /// (`CreatorIsShownByName`): their display name, or the identity's short
 /// prefix when they have set none. The one place the board does this; the

@@ -31,7 +31,7 @@ fn set_name(store: &Store, who: &str, name: &str) -> Result<(), String> {
 
 #[test]
 fn connecting_registers_a_profile_with_no_name_and_no_admin_rights() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     let row = profile(&store, "alice").expect("a profile");
     assert_eq!(row.display_name, "");
@@ -41,7 +41,7 @@ fn connecting_registers_a_profile_with_no_name_and_no_admin_rights() {
 
 #[test]
 fn reconnecting_keeps_the_one_profile_and_its_name() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     set_name(&store, "alice", "Alice").expect("set");
     connect(&store, "alice");
@@ -52,7 +52,7 @@ fn reconnecting_keeps_the_one_profile_and_its_name() {
 
 #[test]
 fn a_name_is_trimmed() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     set_name(&store, "alice", "  Alice Smith \n").expect("set");
     assert_eq!(
@@ -63,7 +63,7 @@ fn a_name_is_trimmed() {
 
 #[test]
 fn a_blank_name_is_refused_and_the_old_name_stays() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     set_name(&store, "alice", "Alice").expect("set");
     assert!(set_name(&store, "alice", "   ").is_err());
@@ -73,7 +73,7 @@ fn a_blank_name_is_refused_and_the_old_name_stays() {
 
 #[test]
 fn a_name_over_the_limit_is_refused_and_one_at_the_limit_is_kept() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     assert!(set_name(&store, "alice", &"x".repeat(65)).is_err());
     assert_eq!(profile(&store, "alice").unwrap().display_name, "");
@@ -83,21 +83,21 @@ fn a_name_over_the_limit_is_refused_and_one_at_the_limit_is_kept() {
 
 #[test]
 fn the_limit_counts_characters_not_bytes() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     set_name(&store, "alice", &"å".repeat(64)).expect("64 characters");
 }
 
 #[test]
 fn setting_a_name_without_a_profile_is_refused() {
-    let store = Store::new();
+    let store = Store::bare();
     assert!(set_name(&store, "alice", "Alice").is_err());
     assert!(profile(&store, "alice").is_none());
 }
 
 #[test]
 fn a_person_sets_only_their_own_name() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     connect(&store, "bob");
     set_name(&store, "alice", "Alice").expect("set");
@@ -113,7 +113,7 @@ fn a_person_with_no_name_is_shown_by_the_identity_prefix() {
 
 #[test]
 fn a_name_with_control_or_invisible_characters_is_refused() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     for bad in [
         "Al\nice",

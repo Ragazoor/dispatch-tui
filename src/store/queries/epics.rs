@@ -57,6 +57,7 @@ impl super::super::EpicCrud for Store {
             birth.sort_order,
             birth.feed_command,
             birth.feed_interval_secs,
+            (birth.workspace_id, birth.visibility),
             &identity,
             &now,
         );
@@ -98,6 +99,17 @@ impl super::super::EpicCrud for Store {
         }
         self.caller
             .patch_epic(id, encode::epic_patch(patch))
+            .await?
+            .applied()
+    }
+
+    async fn set_epic_visibility(
+        &self,
+        id: EpicId,
+        visibility: crate::models::Visibility,
+    ) -> Result<()> {
+        self.caller
+            .set_epic_visibility(id, visibility.as_str().to_string())
             .await?
             .applied()
     }

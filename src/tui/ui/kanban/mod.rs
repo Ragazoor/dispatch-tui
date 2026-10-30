@@ -14,9 +14,9 @@ mod tests;
 
 use super::input_form::{
     confirm_retry_lines, input_base_branch_lines, input_description_lines,
-    input_epic_description_lines, input_epic_title_lines, input_model_lines, input_repo_path_lines,
-    input_tag_lines, input_title_lines, input_wrap_up_mode_lines, quick_dispatch_lines, FormStyles,
-    MODEL_STEP_LINES, PHOENIX_ARMED_TAG_STEP_LINES,
+    input_epic_description_lines, input_epic_title_lines, input_model_lines, input_placement_lines,
+    input_repo_path_lines, input_tag_lines, input_title_lines, input_wrap_up_mode_lines,
+    quick_dispatch_lines, FormStyles, MODEL_STEP_LINES, PHOENIX_ARMED_TAG_STEP_LINES,
 };
 use super::shared::{push_hint_spans, render_top_indicators, rounded_block};
 use crate::palette::{
@@ -230,7 +230,8 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
         | InputMode::InputWrapUpMode
         | InputMode::ConfirmRetry(_)
         | InputMode::InputEpicTitle
-        | InputMode::InputEpicDescription => 8,
+        | InputMode::InputEpicDescription
+        | InputMode::InputPlacement => 8,
         _ => 0,
     }
 }
@@ -551,13 +552,17 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         InputMode::ConfirmRetry(id) => confirm_retry_lines(app, *id),
         InputMode::InputEpicTitle => input_epic_title_lines(app, area, &styles),
         InputMode::InputEpicDescription => input_epic_description_lines(app, area, &styles),
+        InputMode::InputPlacement => input_placement_lines(app, area, &styles),
         _ => return false,
     };
 
     let is_epic_input = matches!(
         app.input.mode,
         InputMode::InputEpicTitle | InputMode::InputEpicDescription
-    );
+    ) || matches!(
+        app.input.placement.as_ref().map(|p| &p.target),
+        Some(crate::tui::types::PlacementFor::Epic)
+    ) && app.input.mode == InputMode::InputPlacement;
 
     let block_title = match &app.input.mode {
         InputMode::QuickDispatch => " Quick Dispatch ",

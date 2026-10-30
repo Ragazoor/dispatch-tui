@@ -86,6 +86,7 @@ mod tables;
 mod tasks_epics;
 mod unseen;
 mod user_profile;
+mod visibility;
 mod workspace;
 
 pub use agent::*;
@@ -111,6 +112,7 @@ pub use tables::*;
 pub use tasks_epics::*;
 pub use unseen::*;
 pub use user_profile::*;
+pub use visibility::*;
 pub use workspace::*;
 
 #[cfg(test)]

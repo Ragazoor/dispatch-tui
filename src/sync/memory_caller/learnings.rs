@@ -87,7 +87,15 @@ impl MemoryReducerCaller {
             // a caller cannot tell the two backends apart from the error text
             // alone — see `create_task`'s matching comment.
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        let scope = self.scope();
         let mut tables = self.lock();
+        if !tables.learning_visible(&scope, &row) {
+            return Err(anyhow::anyhow!(
+                "the shared store refused: {} {} does not exist",
+                row.scope,
+                row.scope_ref.as_deref().unwrap_or("")
+            ));
+        }
         let id = Self::assign_id(0, &mut tables.next_learning_id);
         let row = module::Learning { id, ..row };
         tables.learnings.insert(id, row.clone());
@@ -101,8 +109,9 @@ impl MemoryReducerCaller {
         patch: bindings::LearningPatch,
     ) -> Result<ReducerOutcome> {
         let id = id.0;
+        let scope = self.scope();
         let mut tables = self.lock();
-        let Some(mut row) = tables.learnings.get(&id).cloned() else {
+        let Some(mut row) = tables.visible_learning(&scope, id) else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
         module::apply_learning_patch(&mut row, module::LearningPatch::from(patch));
@@ -114,8 +123,11 @@ impl MemoryReducerCaller {
 
     pub(super) fn apply_delete_learning(&self, id: LearningId) -> Result<ReducerOutcome> {
         let id = id.0;
+        let scope = self.scope();
         let mut tables = self.lock();
-        if !self.delete_learning_cascade(&mut tables, id) {
+        if tables.visible_learning(&scope, id).is_none()
+            || !self.delete_learning_cascade(&mut tables, id)
+        {
             return Ok(ReducerOutcome::Refused(format!("learning {id} not found")));
         }
         Ok(ReducerOutcome::Applied(vec![]))
@@ -159,7 +171,13 @@ impl MemoryReducerCaller {
         from: EpicId,
         to: EpicId,
     ) -> Result<ReducerOutcome> {
+        let scope = self.scope();
         let mut tables = self.lock();
+        if tables.visible_epic(&scope, from.0).is_none()
+            || tables.visible_epic(&scope, to.0).is_none()
+        {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
         self.rescope_learnings(&mut tables, from.0, to.0);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -173,7 +191,16 @@ impl MemoryReducerCaller {
         let task_id = task_id.0;
         let learning_id = learning_id.0;
         let source = source.as_str().to_string();
+        let scope = self.scope();
         let mut tables = self.lock();
+        if scope.on()
+            && (tables.visible_task(&scope, task_id).is_none()
+                || tables.visible_learning(&scope, learning_id).is_none())
+        {
+            return Ok(ReducerOutcome::Refused(format!(
+                "task {task_id} or learning {learning_id} does not exist"
+            )));
+        }
         let id = Self::assign_id(0, &mut tables.next_learning_retrieval_id);
         let row = module::LearningRetrieval {
             id,
@@ -205,7 +232,11 @@ impl MemoryReducerCaller {
         verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> Result<ReducerOutcome> {
         let task_id = task_id.0;
+        let scope = self.scope();
         let mut tables = self.lock();
+        if scope.on() && tables.visible_task(&scope, task_id).is_none() {
+            return Ok(ReducerOutcome::Refused(format!("task {task_id} not found")));
+        }
         for (learning_id, _) in &verdicts {
             let retrieved = tables
                 .learning_retrievals

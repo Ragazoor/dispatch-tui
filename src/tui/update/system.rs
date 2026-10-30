@@ -337,7 +337,7 @@ impl App {
             }
             InputMode::InputEpicDescription => {
                 super::epic_input::apply_epic_description(&mut self.input, value);
-                self.finish_epic_creation()
+                self.begin_placement(PlacementFor::Epic)
             }
             _ => vec![],
         }

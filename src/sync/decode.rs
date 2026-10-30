@@ -283,6 +283,12 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
             tracing::warn!(count, value = %row.origin, "unknown epic origin from the shared store; defaulting to manual");
             EpicOrigin::Manual
         }),
+        workspace_id: row.workspace_id,
+        visibility: crate::models::Visibility::parse(&row.visibility).unwrap_or_else(|| {
+            let count = super::bump_decode_fallback();
+            tracing::warn!(count, value = %row.visibility, "unknown epic visibility from the shared store; treating it as public");
+            crate::models::Visibility::Public
+        }),
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
@@ -298,6 +304,12 @@ pub fn work_package(row: &bindings::WorkPackage) -> Decoded<WorkPackage> {
         description: row.description.clone(),
         sort_order: row.sort_order,
         created_by: text(&row.created_by).map(str::to_owned),
+        workspace_id: row.workspace_id,
+        visibility: crate::models::Visibility::parse(&row.visibility).unwrap_or_else(|| {
+            let count = super::bump_decode_fallback();
+            tracing::warn!(count, value = %row.visibility, "unknown package visibility from the shared store; treating it as public");
+            crate::models::Visibility::Public
+        }),
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
     })

@@ -423,6 +423,7 @@ impl TuiRuntime {
                 description: Some(applied.description.clone()),
                 feed_command: Some(applied.feed_command.clone()),
                 feed_interval_secs: Some(applied.feed_interval_secs),
+                visibility: applied.visibility,
                 ..UpdateEpicParams::for_epic(epic_id)
             })
             .await
@@ -446,6 +447,9 @@ impl TuiRuntime {
             updated.feed_command = None;
         }
         updated.feed_interval_secs = applied.feed_interval_secs;
+        if let Some(visibility) = applied.visibility {
+            updated.visibility = visibility;
+        }
         let feed_command_changed =
             updated.feed_command.is_some() && updated.feed_command != original_feed_command;
         let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(

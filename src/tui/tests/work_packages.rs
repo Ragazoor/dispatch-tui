@@ -929,6 +929,10 @@ fn the_picker_cursor_stops_at_the_new_package_row() {
 #[test]
 fn the_new_package_row_creates_a_package_linked_to_the_item() {
     let mut app = picker_board();
+    app.input.workspaces = vec![crate::models::WorkspaceRef {
+        id: 4,
+        name: "Core".into(),
+    }];
     app.handle_key(make_key(KeyCode::Char('w')));
     app.handle_key(make_key(KeyCode::Char('j')));
     app.handle_key(make_key(KeyCode::Char('j')));
@@ -940,12 +944,21 @@ fn the_new_package_row_creates_a_package_linked_to_the_item() {
     for c in "Window 3".chars() {
         app.handle_key(make_key(KeyCode::Char(c)));
     }
+    // The title leads to the workspace and visibility step; nothing is
+    // created until it is answered.
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Enter)));
+    assert!(cmds.is_empty(), "{cmds:?}");
+    assert_eq!(app.input.mode, InputMode::InputPlacement);
+    app.handle_key(make_key(KeyCode::Char(' ')));
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Enter)));
     assert!(
         matches!(
             cmds.as_slice(),
-            [Command::WorkPackage(WorkPackageCommand::Create { title, item })]
-                if title == "Window 3" && *item == task_item(3)
+            [Command::WorkPackage(WorkPackageCommand::Create { title, item, workspace_id, visibility })]
+                if title == "Window 3"
+                    && *item == task_item(3)
+                    && *workspace_id == 4
+                    && *visibility == crate::models::Visibility::Private
         ),
         "{cmds:?}"
     );
@@ -1292,4 +1305,35 @@ async fn package_view_frame_is_teal_not_epic_purple() {
         cells().all(|(x, y)| buf[(x, y)].bg != ratatui::style::Color::Rgb(24, 20, 34)),
         "package view must not use the epic purple panel tint"
     );
+}
+
+#[test]
+fn escape_at_the_package_placement_step_creates_nothing_and_returns_to_the_picker() {
+    let mut app = picker_board();
+    app.handle_key(make_key(KeyCode::Char('w')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Enter));
+    for c in "Window 3".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::InputPlacement);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty(), "{cmds:?}");
+    assert_eq!(picker_cursor(&app), 2);
+    assert!(app.input.placement.is_none());
+}
+
+#[test]
+fn opening_the_new_package_title_asks_for_the_workspaces() {
+    let mut app = picker_board();
+    app.handle_key(make_key(KeyCode::Char('w')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::People(crate::tui::commands::PeopleCommand::LoadWorkspaces)
+    )));
 }

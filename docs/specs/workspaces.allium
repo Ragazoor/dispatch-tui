@@ -508,6 +508,73 @@ rule LinkOnlyInsideTheWorkspace {
         -- may be linked anywhere and stays private to its owner (D6).
 }
 
+-- Naming a workspace and a visibility, from the board and over MCP ---------
+--
+-- Task #98519. Agents are first-class users: each board rule has an MCP twin
+-- (docs/mcp-tool-design.md).
+
+rule NameWorkspaceAndVisibilityViaMcp {
+    when: McpCreateEpic(title, workspace_id?, visibility?, parent_epic_id?)
+       or McpCreateWorkPackage(title, workspace_id, visibility?)
+       or McpUpdateEpic(epic, visibility)
+       or McpUpdateWorkPackage(package, visibility)
+
+    ensures:
+        EpicCreated(epic, workspace_id, parent_epic_id, visibility ?? public)
+        WorkPackageCreated(package, workspace_id, visibility ?? public)
+        SetEpicVisibility(epic, visibility)
+        SetWorkPackageVisibility(package, visibility)
+
+    @guidance
+        -- create_epic: workspace_id is required for a root epic and left
+        -- out for a sub-epic (parent_epic_id given), which takes the
+        -- parent's; naming one with a parent is refused, so a caller never
+        -- thinks it chose a workspace it did not. create_work_package:
+        -- workspace_id is always required. There is no default workspace and
+        -- no inheritance from the agent's task (a required parameter, with the
+        -- person's workspaces and their ids named in the tool description and
+        -- in the refusal for a missing or unknown one).
+        -- visibility is "public" or "private", default public. update_epic
+        -- and update_work_package take visibility only: a workspace never
+        -- changes (EpicStaysInItsWorkspace). Every refusal is the store's.
+        -- Results name the workspace and the visibility; list_epics and
+        -- list_work_packages show both. list_work_packages also shows the
+        -- creator by display name (CreatorIsShownByName); an epic row does
+        -- not carry its creator on the board yet.
+}
+
+rule NameWorkspaceAndVisibilityFromBoard {
+    when: EpicOrPackageFormOpened(kind, parent?)
+
+    let mine = Memberships.where(m => m.user = caller())
+
+    ensures:
+        if parent = null:
+            WorkspaceChosen(form, if mine.count = 1: mine.first.workspace else: ChoiceRequired)
+        VisibilityChosen(form, public)
+
+    @guidance
+        -- The new-epic and new-package forms (and the editors that create
+        -- from them) end with a Workspace field and a Visibility field.
+        -- Workspace shows only when the person belongs to more than one
+        -- workspace, preselected to the first; with exactly one it is used
+        -- without asking. A person in none cannot create an epic or package,
+        -- and sees "You belong to no workspace; ask a super-admin to add you".
+        -- A sub-epic form has no Workspace field (the parent's is used).
+        -- The step is one screen after the title (and, for an epic, the
+        -- description): j/k move between workspaces, Space or h/l toggle
+        -- visibility (default public; private shows a lock marker), Enter
+        -- creates, Esc leaves nothing created (a package returns to its
+        -- picker). The workspaces are read when the form opens; a person in
+        -- none is refused there, not at the end.
+        -- Editing an epic (`e`, the pop-out document) shows a VISIBILITY
+        -- section, changeable, and a WORKSPACE section that is read-only and
+        -- ignored on save. A package's visibility switches with `V` on its
+        -- card, which shows "private" when it is. Who may change either is
+        -- the store's call (SetEpicVisibility / SetWorkPackageVisibility);
+        -- its refusal shows in the error popup.
+}
+
 -- The escape hatch -------------------------------------------
 
 rule SuperAdminDeletesUnseenItem {
@@ -520,9 +587,15 @@ rule SuperAdminDeletesUnseenItem {
 
     @guidance
         -- D3. item is a private epic (with its subtree, as any epic delete)
-        -- or a private work package. The super-admin chooses it from
+        -- or a private work package. item_is_private holds for an epic that
+        -- is private itself or sits under a private ancestor (D5: a private
+        -- epic hides its whole subtree), and for a package whose own
+        -- visibility is private. A public item is refused, so the hatch is
+        -- no way around DeleteEpic for ordinary items. The super-admin chooses it from
         -- UnseenItemListing, which shows no titles or contents, and the
-        -- delete goes through the normal delete path.
+        -- delete goes through the normal delete path: an epic still needs
+        -- every task in its subtree done (DeleteEpic's guard), so the hatch
+        -- never tears down running work.
 }
 
 -- Writes ------------------------------------------------------
@@ -541,6 +614,34 @@ rule WritesRequireSight {
         -- item, so a refusal cannot be used to probe for a private one.
         -- Teammates may still act on each other's work in a workspace they
         -- share (learning #90175); this narrows that to work they can see.
+        --
+        -- UnseenIsAsMissing (task #98519). An item the caller cannot see is
+        -- answered exactly as an item that does not exist: a reducer that
+        -- ignores a missing id ignores an unseen one, and one that refuses a
+        -- missing id refuses an unseen one with the same words. So the
+        -- answer never tells a caller whether a private item is there.
+        -- One exception is named: deleting an epic cascades through its
+        -- subtree, so it is refused ("cannot delete right now") when the
+        -- subtree holds an epic the caller cannot see, rather than taking
+        -- someone's private sub-epic with it.
+        --
+        -- The operator (the store's own scheduled calls and its publisher
+        -- identity) is exempt from every sight check: it is the trust
+        -- boundary (see READ ENFORCEMENT), not a person with a membership.
+        --
+        -- Module-made epics. A feed's grouped and role-routed sub-epics
+        -- inherit the parent's workspace. A managed feed's root epics
+        -- (ensure_managed_epics) are created in the calling person's
+        -- lowest-numbered workspace, and not at all for a person in none.
+        --
+        -- Hooks and ingest. The agent hooks (stop, pre-tool, notification,
+        -- prompt, subagent), PR-learnings gate and feed ingest are writes like
+        -- any other: an unseen task or epic is answered as a missing one. A
+        -- managed root epic is found only among epics the caller can see, so a
+        -- second person in another workspace gets a root of their own.
+        --
+        -- Created-by. A new epic with no creator is stamped with the caller,
+        -- so a private epic always has someone to be private to.
 }
 
 -- Learnings and settings -------------------------------------
@@ -611,10 +712,6 @@ rule MigrateStoreToWorkspaces {
         -- promotes. Existing epic-less tasks keep their owner and become
         -- private to them; ownerless ones wait for the first super-admin
         -- (AdoptOwnerlessUserBoardTasks).
-        --
-        -- Until CreateEpicInWorkspace lands (task #98519), an epic or package
-        -- created after the migration carries workspace 0 and visibility
-        -- public: the columns exist, the create path does not yet fill them.
         --
         -- Snapshots: user_profiles, workspaces and memberships are shared
         -- tables (spacetime-seed.allium: SharedTable), so a restore keeps
@@ -763,3 +860,9 @@ surface SuperAdministration {
 ------------------------------------------------------------
 
 open question "A repo-scoped learning recorded by an agent working a main-board task has no workspace to inherit. Store it user-scoped, or ask the recorder to name a workspace?"
+
+open question "SuperAdminDeletesUnseenItem says the delete goes through the normal delete path, but super_admin_delete_unseen_item skips DeleteEpic's every-task-done guard, so a private epic with running tasks is deleted outright (its worktrees are not torn down). Should the escape hatch keep the done guard, or is skipping it intended?"
+
+open question "WritesRequireSight covers every reducer that changes a task or epic, but the agent-hook reducers (try_record_stop, record_pre_tool_use, record_notification, record_user_prompt_submit, mark_pr_learnings_gate_shown, subagent_*), ingest_feed and ensure_managed_epics write with no sight check. Are host-internal calls on the host's own task exempt like the operator, or must they check sight too?"
+
+open question "SetWorkPackageVisibility has no counterpart to EpicIsPrivateOnlyWithACreator, and the store does not stamp created_by on a new package. Should a package with no creator be refused as private?"

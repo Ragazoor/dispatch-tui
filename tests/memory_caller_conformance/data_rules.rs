@@ -38,7 +38,8 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         // Epics the scenario creates are seen through `own_creations`
         // (`created_by = identity`), so the twin writes as the same identity.
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
-            .with_sender(accepted.identity.clone());
+            .with_sender(accepted.identity.clone())
+            .with_workspace_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -48,6 +49,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        join_default_workspace(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
 
         let mut woken = rows_real.changed();

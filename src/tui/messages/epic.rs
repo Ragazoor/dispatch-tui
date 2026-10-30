@@ -83,7 +83,7 @@ impl EpicMessage {
             }
             EpicMessage::SubmitDescription(v) => {
                 epic_input::apply_epic_description(&mut app.input, v);
-                app.finish_epic_creation()
+                app.begin_placement(crate::tui::types::PlacementFor::Epic)
             }
             EpicMessage::ToggleSelect(id) => {
                 app.select.toggle_epic(id);

@@ -290,6 +290,30 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::Workspace("revoke_super_admin"))
     }
 
+    async fn set_epic_visibility(
+        &self,
+        _id: crate::models::EpicId,
+        _visibility: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("set_epic_visibility"))
+    }
+
+    async fn set_work_package_visibility(
+        &self,
+        _id: crate::models::WorkPackageId,
+        _visibility: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("set_work_package_visibility"))
+    }
+
+    async fn super_admin_delete_unseen_item(
+        &self,
+        _kind: String,
+        _item_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("super_admin_delete_unseen_item"))
+    }
+
     async fn create_workspace(&self, _name: String) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::Workspace("create_workspace"))
     }

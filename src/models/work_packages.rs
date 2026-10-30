@@ -22,6 +22,9 @@ pub struct WorkPackage {
     /// the creator's display name, or their identity's prefix when they have
     /// set none. `None` when the store holds no creator.
     pub created_by: Option<String>,
+    /// The workspace this package lives in, as the store's workspace id.
+    pub workspace_id: i64,
+    pub visibility: crate::models::Visibility,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

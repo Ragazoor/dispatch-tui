@@ -288,6 +288,8 @@ fn app_with_package_selected() -> App {
         description: String::new(),
         sort_order: None,
         created_by: None,
+        workspace_id: 0,
+        visibility: crate::models::Visibility::Public,
         created_at: at,
         updated_at: at,
     }];
@@ -439,6 +441,16 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardPickerTag => one(draft_app(InputMode::InputTag)),
         N::BoardPickerWrapUpMode => one(draft_app(InputMode::InputWrapUpMode)),
         N::BoardPickerModel => one(draft_app(InputMode::InputModel)),
+        N::BoardPickerPlacement => {
+            let mut app = draft_app(InputMode::InputPlacement);
+            app.input.placement = Some(crate::tui::types::Placement {
+                target: crate::tui::types::PlacementFor::Epic,
+                visibility: crate::models::Visibility::Public,
+                workspace: 0,
+                names_workspace: true,
+            });
+            one(app)
+        }
         N::BoardPickerQuickDispatch => one(draft_app(InputMode::QuickDispatch)),
         N::BoardPickerMoveToEpic => one(with_move_task_picker()),
         N::BoardPickerReparentEpic => one(with_reparent_picker()),

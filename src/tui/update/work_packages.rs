@@ -3,7 +3,7 @@
 //! from a package card.
 
 use crate::models::{WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink};
-use crate::tui::commands::WorkPackageCommand;
+use crate::tui::commands::{PeopleCommand, WorkPackageCommand};
 
 use super::super::types::*;
 use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
@@ -114,7 +114,7 @@ impl App {
         let Some(package) = self.board.work_packages.get(cursor) else {
             self.input.mode = InputMode::InputWorkPackageTitle(item);
             self.input.clear_buffer();
-            return vec![];
+            return vec![Command::People(PeopleCommand::LoadWorkspaces)];
         };
         let id = package.id;
         let link = WorkPackageLink {
@@ -158,15 +158,29 @@ impl App {
         let InputMode::InputWorkPackageTitle(item) = self.input.mode else {
             return vec![];
         };
-        self.input
-            .reopen_link_picker(item, self.board.work_packages.len());
         let title = title.trim().to_string();
         if title.is_empty() {
+            self.input
+                .reopen_link_picker(item, self.board.work_packages.len());
             return vec![];
         }
-        vec![Command::WorkPackage(WorkPackageCommand::Create {
-            title,
-            item,
+        self.begin_placement(PlacementFor::Package { title, item })
+    }
+
+    /// `V` on a package card: switch it between public and private. The store
+    /// decides who may (`SetWorkPackageVisibility`); its refusal shows in the
+    /// error popup, and the card changes when the store's row does.
+    pub(in crate::tui) fn handle_toggle_work_package_visibility(
+        &mut self,
+        id: WorkPackageId,
+    ) -> Vec<Command> {
+        let Some(package) = self.board.find_work_package(id) else {
+            return vec![];
+        };
+        let visibility = package.visibility.toggled();
+        vec![Command::WorkPackage(WorkPackageCommand::SetVisibility {
+            id,
+            visibility,
         })]
     }
 

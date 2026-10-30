@@ -17,7 +17,7 @@ fn package_row(title: &str) -> WorkPackage {
         created_by: "user-a".into(),
         created_at: "2026-10-09 10:00:00".into(),
         updated_at: "2026-10-09 10:00:00".into(),
-        workspace_id: 0,
+        workspace_id: TEST_WORKSPACE,
         visibility: "public".into(),
     }
 }

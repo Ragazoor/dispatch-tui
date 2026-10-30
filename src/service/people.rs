@@ -22,4 +22,10 @@ impl PeopleService {
     pub async fn set_display_name(&self, name: &str) -> Result<String, ServiceError> {
         Ok(self.db.set_display_name(name).await?)
     }
+
+    /// The workspaces the caller belongs to: what a root epic or package may
+    /// be created in.
+    pub async fn my_workspaces(&self) -> Vec<crate::models::WorkspaceRef> {
+        self.db.my_workspaces().await
+    }
 }

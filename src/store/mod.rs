@@ -546,6 +546,11 @@ pub struct EpicBirth<'a> {
     pub sort_order: Option<i64>,
     pub feed_command: Option<&'a str>,
     pub feed_interval_secs: Option<i64>,
+    /// The workspace a root epic lives in; a sub-epic's is its parent's, and
+    /// the service fills it in. `0` is none: the store refuses it for a root
+    /// epic.
+    pub workspace_id: i64,
+    pub visibility: crate::models::Visibility,
 }
 
 /// Epic mutations, layered on top of the read surface. The
@@ -588,6 +593,12 @@ pub trait EpicCrud: EpicRead {
         cve_interval_secs: Option<i64>,
     ) -> Result<()>;
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
+    /// `workspaces.allium: SetEpicVisibility`.
+    async fn set_epic_visibility(
+        &self,
+        id: EpicId,
+        visibility: crate::models::Visibility,
+    ) -> Result<()>;
     async fn delete_epic(&self, id: EpicId) -> Result<()>;
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
     /// `epics.allium: RegroupEpic`, decided and applied by the store in one
@@ -625,7 +636,15 @@ pub trait WorkPackageCrud: WorkPackageRead {
         title: &str,
         description: &str,
         links: &[WorkPackageItem],
+        workspace_id: i64,
+        visibility: crate::models::Visibility,
     ) -> Result<WorkPackageId>;
+    /// `workspaces.allium: SetWorkPackageVisibility`.
+    async fn set_work_package_visibility(
+        &self,
+        id: WorkPackageId,
+        visibility: crate::models::Visibility,
+    ) -> Result<()>;
     /// The patch, then every unlink, then every link, in one store
     /// transaction. `None` leaves a field alone; an unlink of an item that is
     /// not linked is a silent success.
@@ -762,6 +781,9 @@ pub trait PeopleStore: Send + Sync {
     /// identity this connection writes as. The store trims, bounds and refuses
     /// a blank or over-long name; answers the name it saved.
     async fn set_display_name(&self, name: &str) -> Result<String>;
+    /// The workspaces the identity this connection writes as belongs to, by
+    /// id. Empty with no settled identity.
+    async fn my_workspaces(&self) -> Vec<crate::models::WorkspaceRef>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1225,6 +1247,10 @@ impl Store {
         // (`workspaces.allium: RegisterUserProfile`); a memory store has no
         // connect event, so the fixture does it.
         memory.register_user_profile();
+        // The first connection to a real store also creates its default
+        // workspace and makes every known person a member
+        // (`MigrateStoreToWorkspaces`), so a root epic has somewhere to go.
+        memory.migrate_store_to_workspaces();
         let caller: Arc<dyn s::ReducerCaller> = memory.clone();
         let identity = Arc::new(s::SettledIdentity::default());
         identity.settle(MEMORY_USER_ID);

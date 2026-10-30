@@ -38,7 +38,8 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
-            .with_sender(accepted.identity.clone());
+            .with_sender(accepted.identity.clone())
+            .with_workspace_rules();
         // sync.allium: SubscribeToThisHostsSessionRequests — and the dispatch
         // requests the chain writes, which the same host asks for.
         connector
@@ -50,6 +51,7 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        join_default_workspace(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
 
         let mut woken = rows_real.changed();

@@ -100,8 +100,55 @@ fn blank_epic() -> bindings::Epic {
         feed_append_only: false,
         completed_at: String::new(),
         created_by: String::new(),
-        workspace_id: 0,
+        workspace_id: DEFAULT_WORKSPACE,
         visibility: "public".into(),
+    }
+}
+
+/// The workspace `join_default_workspace` puts the test identity in, which the
+/// store's first connection created (`MigrateStoreToWorkspaces`).
+const DEFAULT_WORKSPACE: i64 = 1;
+
+/// Make the test identity a super-admin and a member of the default workspace
+/// on BOTH arms, so the epics and packages a scenario creates pass
+/// `CreateEpicInWorkspace` and `WritesRequireSight`. The twin enforces the
+/// workspace rules too. The real store registers a profile when the connection
+/// opens, so the claim is retried until it exists.
+async fn join_default_workspace(
+    real: &SdkReducerCaller,
+    mem: &MemoryReducerCaller,
+    identity: &str,
+) {
+    mem.register_user_profile();
+    mem.migrate_store_to_workspaces();
+    let claimed = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let outcome = real.claim_super_admin().await.unwrap();
+            match outcome {
+                ReducerOutcome::Applied(_) => break,
+                ReducerOutcome::Refused(why) if why.contains("no profile") => {
+                    // Each retry is a round trip to the store, so no timer
+                    // is needed between them; the outer timeout bounds it.
+                    tokio::task::yield_now().await;
+                }
+                ReducerOutcome::Refused(why) => panic!("claim_super_admin refused: {why}"),
+            }
+        }
+    })
+    .await;
+    claimed.expect("the real store registers a profile");
+    mem.claim_super_admin().await.unwrap().applied().unwrap();
+    for caller in [real as &dyn ReducerCaller, mem as &dyn ReducerCaller] {
+        caller
+            .add_member(
+                DEFAULT_WORKSPACE,
+                identity.to_string(),
+                "member".to_string(),
+            )
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
     }
 }
 

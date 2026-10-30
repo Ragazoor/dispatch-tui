@@ -50,6 +50,7 @@ fn a_parent_cycle_is_refused_at_the_reducer() {
                 Epic {
                     title: "b".into(),
                     parent_epic_id: a,
+                    workspace_id: TEST_WORKSPACE,
                     ..blank_epic()
                 },
             )
@@ -81,6 +82,7 @@ fn a_task_created_in_a_grouped_epic_lands_in_its_repo_sub_epic() {
                 Epic {
                     title: "root".into(),
                     group_by_repo: true,
+                    workspace_id: TEST_WORKSPACE,
                     ..blank_epic()
                 },
             )

@@ -140,10 +140,12 @@ pub mod session_request_timeouts_table;
 pub mod session_request_type;
 pub mod session_requests_table;
 pub mod set_display_name_reducer;
+pub mod set_epic_visibility_reducer;
 pub mod set_member_role_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
+pub mod set_work_package_visibility_reducer;
 pub mod setting_type;
 pub mod settings_table;
 pub mod sub_status_update_type;
@@ -154,6 +156,7 @@ pub mod subagent_stop_reducer;
 pub mod subscribe_to_epic_reducer;
 pub mod subscription_type;
 pub mod subscriptions_table;
+pub mod super_admin_delete_unseen_item_reducer;
 pub mod task_patch_type;
 pub mod task_shell_type;
 pub mod task_shells_table;
@@ -319,10 +322,12 @@ pub use session_request_timeouts_table::*;
 pub use session_request_type::SessionRequest;
 pub use session_requests_table::*;
 pub use set_display_name_reducer::set_display_name;
+pub use set_epic_visibility_reducer::set_epic_visibility;
 pub use set_member_role_reducer::set_member_role;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
+pub use set_work_package_visibility_reducer::set_work_package_visibility;
 pub use setting_type::Setting;
 pub use settings_table::*;
 pub use sub_status_update_type::SubStatusUpdate;
@@ -333,6 +338,7 @@ pub use subagent_stop_reducer::subagent_stop;
 pub use subscribe_to_epic_reducer::subscribe_to_epic;
 pub use subscription_type::Subscription;
 pub use subscriptions_table::*;
+pub use super_admin_delete_unseen_item_reducer::super_admin_delete_unseen_item;
 pub use task_patch_type::TaskPatch;
 pub use task_shell_type::TaskShell;
 pub use task_shells_table::*;
@@ -710,6 +716,10 @@ pub enum Reducer {
     SetDisplayName {
         name: String,
     },
+    SetEpicVisibility {
+        epic_id: i64,
+        visibility: String,
+    },
     SetMemberRole {
         membership_id: i64,
         role: String,
@@ -725,6 +735,10 @@ pub enum Reducer {
     SetVerifyCommand {
         path: String,
         command: String,
+    },
+    SetWorkPackageVisibility {
+        work_package_id: i64,
+        visibility: String,
     },
     SubagentClear {
         task_id: i64,
@@ -746,6 +760,10 @@ pub enum Reducer {
     SubscribeToEpic {
         subscriber: String,
         epic_id: i64,
+    },
+    SuperAdminDeleteUnseenItem {
+        kind: String,
+        item_id: i64,
     },
     TryRecordStop {
         id: i64,
@@ -872,10 +890,12 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedWorkPackages { .. } => "seed_work_packages",
             Reducer::SeedWorkspaces { .. } => "seed_workspaces",
             Reducer::SetDisplayName { .. } => "set_display_name",
+            Reducer::SetEpicVisibility { .. } => "set_epic_visibility",
             Reducer::SetMemberRole { .. } => "set_member_role",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
+            Reducer::SetWorkPackageVisibility { .. } => "set_work_package_visibility",
             Reducer::SubagentClear { .. } => "subagent_clear",
             Reducer::SubagentClearAndVoidPendingStop { .. } => {
                 "subagent_clear_and_void_pending_stop"
@@ -883,6 +903,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SubagentStart { .. } => "subagent_start",
             Reducer::SubagentStop { .. } => "subagent_stop",
             Reducer::SubscribeToEpic { .. } => "subscribe_to_epic",
+            Reducer::SuperAdminDeleteUnseenItem { .. } => "super_admin_delete_unseen_item",
             Reducer::TryRecordStop { .. } => "try_record_stop",
             Reducer::UnlinkWorkPackageItem { .. } => "unlink_work_package_item",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
@@ -1482,6 +1503,13 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&set_display_name_reducer::SetDisplayNameArgs {
                 name: name.clone(),
 }),
+            Reducer::SetEpicVisibility{
+                epic_id,
+                visibility,
+}             => __sats::bsatn::to_vec(&set_epic_visibility_reducer::SetEpicVisibilityArgs {
+                epic_id: epic_id.clone(),
+                visibility: visibility.clone(),
+}),
             Reducer::SetMemberRole{
                 membership_id,
                 role,
@@ -1509,6 +1537,13 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&set_verify_command_reducer::SetVerifyCommandArgs {
                 path: path.clone(),
                 command: command.clone(),
+}),
+            Reducer::SetWorkPackageVisibility{
+                work_package_id,
+                visibility,
+}             => __sats::bsatn::to_vec(&set_work_package_visibility_reducer::SetWorkPackageVisibilityArgs {
+                work_package_id: work_package_id.clone(),
+                visibility: visibility.clone(),
 }),
             Reducer::SubagentClear{
                 task_id,
@@ -1546,6 +1581,13 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&subscribe_to_epic_reducer::SubscribeToEpicArgs {
                 subscriber: subscriber.clone(),
                 epic_id: epic_id.clone(),
+}),
+            Reducer::SuperAdminDeleteUnseenItem{
+                kind,
+                item_id,
+}             => __sats::bsatn::to_vec(&super_admin_delete_unseen_item_reducer::SuperAdminDeleteUnseenItemArgs {
+                kind: kind.clone(),
+                item_id: item_id.clone(),
 }),
             Reducer::TryRecordStop{
                 id,

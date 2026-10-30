@@ -150,7 +150,11 @@ fn description_editor_result_for_epic() {
     let cmds = app.update(Message::Editor(
         crate::tui::messages::EditorMessage::DescriptionResult("epic desc\nline 2".to_string()),
     ));
-    // Description submit now completes creation immediately
+    // The description leads to the workspace and visibility step; Enter there
+    // completes creation.
+    assert_eq!(app.input.mode, InputMode::InputPlacement);
+    assert!(cmds.is_empty());
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
         c,

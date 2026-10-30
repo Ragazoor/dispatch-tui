@@ -109,6 +109,10 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
         InputMode::InputWrapUpMode => {
             hint_text(app, "Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip", YELLOW)
         }
+        InputMode::InputPlacement => hint(
+            "[Space] public/private  [j/k] workspace  [Enter] create  [Esc] cancel",
+            YELLOW,
+        ),
         InputMode::InputModel => {
             let seeded = app.input.task_draft.as_ref().and_then(|d| d.model);
             hint_text(app, &crate::tui::ui::model_prompt(seeded), YELLOW)

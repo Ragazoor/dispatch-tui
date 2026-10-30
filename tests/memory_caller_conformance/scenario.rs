@@ -47,11 +47,14 @@ fn memory_caller_matches_the_real_reducers() {
         // The host-naming reducers below act for "host-a" and "host-b", which
         // D11 lets only their owner do (`store-split.allium`): register both
         // as this connection's own, on both sides.
-        let mem = mem.with_sender(accepted.identity.clone());
+        let mem = mem
+            .with_sender(accepted.identity.clone())
+            .with_workspace_rules();
         // The first connection to the real store also migrated it, while it was
         // empty (`MigrateStoreToWorkspaces`): it gets its default workspace.
         mem.migrate_store_to_workspaces();
         mem.migrate_store_to_workspaces(); // once
+        join_default_workspace(&real, &mem, &accepted.identity).await;
         for host in ["host-a", "host-b"] {
             for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
                 caller
@@ -119,15 +122,43 @@ fn memory_caller_matches_the_real_reducers() {
         };
 
         // -- create_epic (two: the task's home, and a destination to move it to) --
-        let epic_id_real = real.create_epic(blank_epic()).await.unwrap().0;
+        let epic_id_real = real
+            .create_epic(bindings::Epic {
+                created_by: accepted.identity.clone(),
+                ..blank_epic()
+            })
+            .await
+            .unwrap()
+            .0;
         wait_for!(rows_real.epic(EpicId(epic_id_real)).is_some());
-        let epic_id_mem = mem.create_epic(blank_epic()).await.unwrap().0;
+        let epic_id_mem = mem
+            .create_epic(bindings::Epic {
+                created_by: accepted.identity.clone(),
+                ..blank_epic()
+            })
+            .await
+            .unwrap()
+            .0;
         assert_eq!(epic_id_real, epic_id_mem, "generated epic id");
         compare_epic(epic_id_real);
 
-        let epic2_id_real = real.create_epic(blank_epic()).await.unwrap().0;
+        let epic2_id_real = real
+            .create_epic(bindings::Epic {
+                created_by: accepted.identity.clone(),
+                ..blank_epic()
+            })
+            .await
+            .unwrap()
+            .0;
         wait_for!(rows_real.epic(EpicId(epic2_id_real)).is_some());
-        let epic2_id_mem = mem.create_epic(blank_epic()).await.unwrap().0;
+        let epic2_id_mem = mem
+            .create_epic(bindings::Epic {
+                created_by: accepted.identity.clone(),
+                ..blank_epic()
+            })
+            .await
+            .unwrap()
+            .0;
         assert_eq!(epic2_id_real, epic2_id_mem, "generated second epic id");
         compare_epic(epic2_id_real);
 
@@ -382,9 +413,7 @@ fn memory_caller_matches_the_real_reducers() {
                 .map(|m| (m.id, m.workspace_id, m.user, m.role))
                 .collect::<Vec<_>>()
         };
-        // Not a super-admin yet: creating is refused.
-        both!(create_workspace("Platform".to_string()), Refused);
-        both!(claim_super_admin(), Applied);
+        // Claimed at the start (`join_default_workspace`).
         wait_for!(rows_real.is_super_admin(me));
         assert!(rows_mem.is_super_admin(me));
         both!(claim_super_admin(), Refused); // only while none exists
@@ -425,12 +454,20 @@ fn memory_caller_matches_the_real_reducers() {
             add_member(platform, me.to_string(), "admin".to_string()),
             Refused
         ); // duplicate
-        wait_for!(rows_real.memberships().len() == 1);
-        let membership = rows_real.memberships()[0].id;
+        wait_for!(rows_real.memberships().len() == 2); // Default, Platform
+        let membership = rows_real
+            .memberships()
+            .iter()
+            .find(|m| m.workspace_id == platform)
+            .map(|m| m.id)
+            .unwrap();
         both!(set_member_role(membership, "owner".to_string()), Refused);
         both!(set_member_role(999, "admin".to_string()), Refused);
         both!(set_member_role(membership, "admin".to_string()), Applied);
-        wait_for!(rows_real.memberships()[0].role == "admin");
+        wait_for!(rows_real
+            .memberships()
+            .iter()
+            .any(|m| m.id == membership && m.role == "admin"));
         assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
         assert_eq!(membership_view(&rows_real), membership_view(&rows_mem));
         both!(remove_member(999), Refused);
@@ -440,12 +477,14 @@ fn memory_caller_matches_the_real_reducers() {
             Applied
         );
         wait_for!(
-            rows_real.memberships().len() == 1 && rows_real.memberships()[0].id != membership
+            rows_real.memberships().len() == 2
+                && !rows_real.memberships().iter().any(|m| m.id == membership)
         );
         // Deleting takes the workspace's memberships with it and leaves the rest.
         both!(delete_workspace(99), Refused);
         both!(delete_workspace(platform), Applied);
-        wait_for!(rows_real.workspaces().len() == 2 && rows_real.memberships().is_empty());
+        // Only the default workspace's membership is left.
+        wait_for!(rows_real.workspaces().len() == 2 && rows_real.memberships().len() == 1);
         assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
         assert_eq!(membership_view(&rows_real), membership_view(&rows_mem));
 
@@ -1147,7 +1186,7 @@ fn memory_caller_matches_the_real_reducers() {
             created_by: accepted.identity.clone(),
             created_at: "2026-01-01 00:00:00.000".into(),
             updated_at: "2026-01-01 00:00:00.000".into(),
-            workspace_id: 0,
+            workspace_id: DEFAULT_WORKSPACE,
             visibility: "public".into(),
         };
         let package_real = real.create_work_package(package_row()).await.unwrap();

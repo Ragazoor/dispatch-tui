@@ -18,7 +18,11 @@ impl MemoryReducerCaller {
     ) -> Result<WorkPackageId> {
         module::validate_work_package_title(&row.title)
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        let scope = self.scope();
         let mut tables = self.lock();
+        tables
+            .check_new_package(&scope, &module::WorkPackage::from(row.clone()))
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         let id = Self::assign_id(0, &mut tables.next_work_package_id);
         let row = module::WorkPackage {
             id,
@@ -39,9 +43,17 @@ impl MemoryReducerCaller {
         links: Vec<WorkPackageItem>,
     ) -> Result<WorkPackageId> {
         module::validate_work_package_title(&row.title).map_err(StoreRefusal)?;
+        let scope = self.scope();
         let mut tables = self.lock();
+        let candidate = module::WorkPackage::from(row.clone());
+        tables
+            .check_new_package(&scope, &candidate)
+            .map_err(StoreRefusal)?;
         for item in &links {
             Self::require_item(&tables, *item).map_err(StoreRefusal)?;
+            tables
+                .check_link_allowed(&scope, &candidate, item.kind(), item.raw_id())
+                .map_err(StoreRefusal)?;
         }
         let id = Self::assign_id(0, &mut tables.next_work_package_id);
         let row = module::WorkPackage {
@@ -68,8 +80,9 @@ impl MemoryReducerCaller {
         link: Vec<WorkPackageItem>,
     ) -> Result<ReducerOutcome> {
         let patch = module::WorkPackagePatch::from(patch);
+        let scope = self.scope();
         let mut tables = self.lock();
-        let Some(mut row) = tables.work_packages.get(&id.0).cloned() else {
+        let Some(mut row) = tables.visible_package(&scope, id.0) else {
             return Ok(ReducerOutcome::Refused(format!("no work package {id}")));
         };
         if let Some(both) = link.iter().find(|i| unlink.contains(i)) {
@@ -81,6 +94,9 @@ impl MemoryReducerCaller {
         }
         for item in &link {
             if let Err(why) = Self::require_item(&tables, *item) {
+                return Ok(ReducerOutcome::Refused(why));
+            }
+            if let Err(why) = tables.check_link_allowed(&scope, &row, item.kind(), item.raw_id()) {
                 return Ok(ReducerOutcome::Refused(why));
             }
         }
@@ -109,8 +125,9 @@ impl MemoryReducerCaller {
         patch: bindings::WorkPackagePatch,
     ) -> Result<ReducerOutcome> {
         let patch = module::WorkPackagePatch::from(patch);
+        let scope = self.scope();
         let mut tables = self.lock();
-        let Some(mut row) = tables.work_packages.get(&id.0).cloned() else {
+        let Some(mut row) = tables.visible_package(&scope, id.0) else {
             return Ok(ReducerOutcome::Refused(format!("no work package {id}")));
         };
         if let Err(why) = module::apply_work_package_patch(&mut row, patch) {
@@ -123,18 +140,27 @@ impl MemoryReducerCaller {
     }
 
     pub(super) fn apply_delete_work_package(&self, id: WorkPackageId) -> Result<ReducerOutcome> {
+        let scope = self.scope();
         let mut tables = self.lock();
+        if tables.visible_package(&scope, id.0).is_none() {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
+        self.delete_package_rows(&mut tables, id);
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// The package row and its links, with no sight check.
+    pub(super) fn delete_package_rows(&self, tables: &mut Tables, id: WorkPackageId) {
         let links: Vec<String> = tables
             .work_package_links
             .values()
             .filter(|l| l.work_package_id == id.0)
             .map(|l| l.id.clone())
             .collect();
-        self.delete_work_package_link_rows(&mut tables, links);
+        self.delete_work_package_link_rows(tables, links);
         if tables.work_packages.remove(&id.0).is_some() {
             self.rows.remove_work_package(id);
         }
-        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     pub(super) fn apply_link_work_package_item(
@@ -142,11 +168,18 @@ impl MemoryReducerCaller {
         id: WorkPackageId,
         item: WorkPackageItem,
     ) -> Result<ReducerOutcome> {
+        let scope = self.scope();
         let mut tables = self.lock();
         if !tables.work_packages.contains_key(&id.0) {
             return Ok(ReducerOutcome::Refused(format!("no work package {id}")));
         }
         if let Err(why) = Self::require_item(&tables, item) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        let Some(package) = tables.visible_package(&scope, id.0) else {
+            return Ok(ReducerOutcome::Refused(format!("no work package {id}")));
+        };
+        if let Err(why) = tables.check_link_allowed(&scope, &package, item.kind(), item.raw_id()) {
             return Ok(ReducerOutcome::Refused(why));
         }
         self.insert_link_if_absent(&mut tables, id, item);
@@ -190,7 +223,11 @@ impl MemoryReducerCaller {
         id: WorkPackageId,
         item: WorkPackageItem,
     ) -> Result<ReducerOutcome> {
+        let scope = self.scope();
         let mut tables = self.lock();
+        if tables.visible_package(&scope, id.0).is_none() {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
         let link_id = module::work_package_link_id(id.0, item.kind(), item.raw_id());
         self.delete_work_package_link_rows(&mut tables, vec![link_id]);
         Ok(ReducerOutcome::Applied(vec![]))

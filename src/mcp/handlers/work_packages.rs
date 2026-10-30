@@ -10,8 +10,8 @@ use crate::models::{EpicId, TaskId, WorkPackageId, WorkPackageItem};
 use crate::service::{CreateWorkPackageParams, UpdateWorkPackageParams, WorkPackageView};
 
 use super::types::{
-    deserialize_flexible_id, deserialize_optional_flexible_id, parse_args, reject_alongside,
-    service_err_to_response, FlexibleId, JsonRpcResponse,
+    deserialize_flexible_id, deserialize_optional_flexible_i64, deserialize_optional_flexible_id,
+    parse_args, reject_alongside, service_err_to_response, FlexibleId, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -28,6 +28,10 @@ struct CreateWorkPackageArgs {
     link_task_ids: Vec<FlexibleId<TaskId>>,
     #[serde(default)]
     link_epic_ids: Vec<FlexibleId<EpicId>>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    workspace_id: Option<i64>,
+    #[serde(default)]
+    visibility: Option<crate::models::Visibility>,
 }
 
 #[derive(Deserialize)]
@@ -58,6 +62,8 @@ struct UpdateWorkPackageArgs {
     unlink_epic_ids: Vec<FlexibleId<EpicId>>,
     #[serde(default)]
     delete: bool,
+    #[serde(default)]
+    visibility: Option<crate::models::Visibility>,
 }
 
 fn items(tasks: Vec<FlexibleId<TaskId>>, epics: Vec<FlexibleId<EpicId>>) -> Vec<WorkPackageItem> {
@@ -91,6 +97,19 @@ pub(super) async fn handle_create_work_package(
         Err(resp) => return resp,
     };
     tracing::info!(title = %parsed.title, "MCP create_work_package");
+    let Some(workspace_id) = parsed.workspace_id else {
+        return super::types::tool_error(
+            id,
+            format!(
+                "a work package needs a workspace_id. {}",
+                super::epics::workspace_choices(state).await
+            ),
+        );
+    };
+    if let Some(refusal) = super::epics::unknown_workspace(state, workspace_id).await {
+        return super::types::tool_error(id, refusal);
+    }
+    let visibility = parsed.visibility.unwrap_or_default();
     let link = items(parsed.link_task_ids, parsed.link_epic_ids);
     let linked = link.len();
     match state
@@ -99,6 +118,8 @@ pub(super) async fn handle_create_work_package(
             title: parsed.title,
             description: parsed.description,
             link,
+            workspace_id,
+            visibility,
         })
         .await
     {
@@ -106,7 +127,10 @@ pub(super) async fn handle_create_work_package(
             state.notify();
             text(
                 id,
-                format!("Work package {package_id} created with {linked} linked item(s)"),
+                format!(
+                    "Work package {package_id} created in workspace {} ({}) with {linked} linked item(s)",
+                    workspace_id, visibility
+                ),
             )
         }
         Err(e) => service_err_to_response(id, e),
@@ -158,6 +182,10 @@ fn format_view(view: &WorkPackageView) -> String {
         out.push_str(&format!("\nCreated by: {creator}"));
     }
     out.push_str(&format!(
+        "\nWorkspace: {}\nVisibility: {}",
+        p.workspace_id, p.visibility
+    ));
+    out.push_str(&format!(
         "\nCreated: {}\nUpdated: {}",
         p.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
         p.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
@@ -196,6 +224,7 @@ pub(super) async fn handle_update_work_package(
         ("title", parsed.title.is_some()),
         ("description", parsed.description.is_some()),
         ("sort_order", parsed.sort_order.is_some()),
+        ("visibility", parsed.visibility.is_some()),
         ("link_task_ids", !parsed.link_task_ids.is_empty()),
         ("unlink_task_ids", !parsed.unlink_task_ids.is_empty()),
         ("link_epic_ids", !parsed.link_epic_ids.is_empty()),
@@ -218,6 +247,7 @@ pub(super) async fn handle_update_work_package(
         sort_order: parsed.sort_order,
         link: items(parsed.link_task_ids, parsed.link_epic_ids),
         unlink: items(parsed.unlink_task_ids, parsed.unlink_epic_ids),
+        visibility: parsed.visibility,
     };
     match state.work_package_svc.update_work_package(params).await {
         Ok(not_linked) => {

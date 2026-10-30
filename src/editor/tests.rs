@@ -1026,6 +1026,7 @@ fn apply_epic_feed_command_set() {
         description: "D".into(),
         feed_command: "my-script.sh".into(),
         feed_interval_secs: None,
+        visibility: None,
         errors: Vec::new(),
     };
     let applied = apply_epic_editor_fields(&epic, fields);
@@ -1045,6 +1046,7 @@ fn apply_epic_feed_command_clear() {
         description: "D".into(),
         feed_command: String::new(),
         feed_interval_secs: None,
+        visibility: None,
         errors: Vec::new(),
     };
     let applied = apply_epic_editor_fields(&epic, fields);
@@ -1059,6 +1061,7 @@ fn apply_epic_feed_interval_valid() {
         description: "D".into(),
         feed_command: String::new(),
         feed_interval_secs: Some(FEED_INTERVAL_SLOW_SECS),
+        visibility: None,
         errors: Vec::new(),
     };
     let applied = apply_epic_editor_fields(&epic, fields);
@@ -1185,4 +1188,48 @@ fn epic_single_line_fields_are_trimmed() {
     assert_eq!(f.title, "E");
     assert_eq!(f.description, "  keep");
     assert_eq!(f.feed_command, "echo hi");
+}
+
+#[test]
+fn epic_editor_shows_visibility_and_the_read_only_workspace() {
+    let epic = EpicBuilder::new(1)
+        .workspace(7)
+        .visibility(crate::models::Visibility::Private)
+        .build();
+    let content = format_epic_for_editor(&epic);
+    assert!(content.contains("--- VISIBILITY ---\nprivate\n"));
+    assert!(content.contains("--- WORKSPACE ---\n7\n"));
+}
+
+#[test]
+fn epic_edit_applies_a_changed_visibility_only() {
+    let epic = make_epic("T", "D");
+    let unchanged = apply_epic_editor_fields(
+        &epic,
+        parse_epic_editor_output(&format_epic_for_editor(&epic)),
+    );
+    assert_eq!(unchanged.visibility, None);
+
+    let edited = format_epic_for_editor(&epic).replace("public", "private");
+    let applied = apply_epic_editor_fields(&epic, parse_epic_editor_output(&edited));
+    assert_eq!(applied.visibility, Some(crate::models::Visibility::Private));
+}
+
+#[test]
+fn epic_edit_ignores_an_edited_workspace() {
+    let epic = EpicBuilder::new(1).workspace(7).build();
+    let edited =
+        format_epic_for_editor(&epic).replace("--- WORKSPACE ---\n7", "--- WORKSPACE ---\n9");
+    let fields = parse_epic_editor_output(&edited);
+    assert!(fields.errors.is_empty());
+}
+
+#[test]
+fn epic_edit_reports_an_unknown_visibility() {
+    let epic = make_epic("T", "D");
+    let edited = format_epic_for_editor(&epic).replace("public", "secret");
+    let fields = parse_epic_editor_output(&edited);
+    assert_eq!(fields.errors.len(), 1);
+    assert_eq!(fields.errors[0].field, "VISIBILITY");
+    assert_eq!(apply_epic_editor_fields(&epic, fields).visibility, None);
 }

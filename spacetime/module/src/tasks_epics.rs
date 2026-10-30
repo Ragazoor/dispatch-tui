@@ -296,6 +296,7 @@ pub fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
 /// `sync.allium: EveryMutationIsAtomicAndAnswered`.
 #[spacetimedb::reducer]
 pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
+    check_task_may_enter_epic(ctx, "task", row.epic_id)?;
     // Into the per-repo sub-epic when the epic named is a grouped root
     // (`epics.allium`'s routing note). Every client gets the same placement.
     let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
@@ -324,6 +325,7 @@ pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
 /// binding. A task with no epic is created plain: nobody follows it.
 #[spacetimedb::reducer]
 pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), String> {
+    check_task_may_enter_epic(ctx, "task", row.epic_id)?;
     let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
     let stored = store_task(
         ctx,
@@ -362,7 +364,7 @@ fn patch_task_row(
     patch: TaskPatch,
     store_owns_completion: bool,
 ) -> Result<(), String> {
-    let Some(mut row) = ctx.db.tasks().id().find(id) else {
+    let Some(mut row) = visible_task(ctx, id) else {
         return Ok(());
     };
     // Before anything is applied: a refused patch leaves the row untouched.
@@ -466,7 +468,7 @@ fn patch_task_row(
 /// (and everything it would have retired or torn down) untouched.
 #[spacetimedb::reducer]
 pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
-    let Some(row) = ctx.db.tasks().id().find(id) else {
+    let Some(row) = visible_task(ctx, id) else {
         return Ok(());
     };
     if row.status != DONE {
@@ -526,7 +528,7 @@ pub fn set_task_epic(
 
 /// [`set_task_epic`]'s body, shared with [`update_task`].
 fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> Result<(), String> {
-    let Some(task) = ctx.db.tasks().id().find(id) else {
+    let Some(task) = visible_task(ctx, id) else {
         return Ok(());
     };
     // The epic-exists check `patch_task` leaves to this reducer (see
@@ -534,6 +536,8 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
     if epic_id != 0 && ctx.db.epics().id().find(epic_id).is_none() {
         return Err(format!("task {id}: epic {epic_id} does not exist"));
     }
+    // An epic the caller cannot see is answered as one that does not exist.
+    check_task_may_enter_epic(ctx, &format!("task {id}"), epic_id)?;
     // Routed first, then compared: a task already in the per-repo sub-epic of
     // the grouped root it is "moved" onto is where it belongs.
     let epic_id = route_to_repo_group(ctx, epic_id, &task.repo_path);
@@ -580,7 +584,7 @@ pub fn update_task(
     owner: String,
     patch: TaskPatch,
 ) -> Result<(), String> {
-    if ctx.db.tasks().id().find(id).is_none() {
+    if visible_task(ctx, id).is_none() {
         return Err(format!("task {id} not found"));
     }
     // Every refusal that can be read off the row and the patch is raised
@@ -591,6 +595,7 @@ pub fn update_task(
         if epic_id != 0 && ctx.db.epics().id().find(epic_id).is_none() {
             return Err(format!("task {id}: epic {epic_id} does not exist"));
         }
+        check_task_may_enter_epic(ctx, &format!("task {id}"), epic_id)?;
     }
     let relink_first = patch.repo_path.is_some();
     match epic_id {
@@ -621,9 +626,10 @@ pub fn respawn_phoenix_successor(
     predecessor: i64,
     successor: Task,
 ) -> Result<(), String> {
-    let Some(predecessor_row) = ctx.db.tasks().id().find(predecessor) else {
+    let Some(predecessor_row) = visible_task(ctx, predecessor) else {
         return Err(format!("predecessor task {predecessor} not found"));
     };
+    check_task_may_enter_epic(ctx, "successor task", successor.epic_id)?;
     if !predecessor_row.phoenix {
         return Err(format!(
             "predecessor task {predecessor} is not a phoenix task, or already respawned"
@@ -674,7 +680,7 @@ pub fn batch_patch_sub_status(
 ) -> Result<(), String> {
     let stamp = now(ctx);
     for update in updates {
-        let Some(row) = ctx.db.tasks().id().find(update.task_id) else {
+        let Some(row) = visible_task(ctx, update.task_id) else {
             continue;
         };
         // An entry the status does not allow is skipped, not fatal: the batch
@@ -705,8 +711,9 @@ pub struct SubStatusUpdate {
 /// Create an epic. Backlog, by `epics.allium: CreateEpic`.
 #[spacetimedb::reducer]
 pub fn create_epic(ctx: &ReducerContext, row: Epic) -> Result<(), String> {
-    let parent = row.parent_epic_id;
     validate_status("epic", row.id, &row.status)?;
+    let row = settle_new_epic(ctx, row)?;
+    let parent = row.parent_epic_id;
     ctx.db.epics().insert(Epic { id: 0, ..row });
     // The new epic is a child of its parent and a parent has no children rule
     // it can break by gaining a backlog one — but the parent may have been
@@ -722,9 +729,12 @@ pub fn create_epic(ctx: &ReducerContext, row: Epic) -> Result<(), String> {
 /// placements are preserved" rule and its two auto-transitions coexist.
 #[spacetimedb::reducer]
 pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(), String> {
-    let Some(mut row) = ctx.db.epics().id().find(id) else {
+    let Some(mut row) = visible_epic(ctx, id) else {
         return Ok(());
     };
+    if let Some(parent) = patch.parent_epic_id {
+        check_epic_move(ctx, &row, parent)?;
+    }
     check_epic_patch(&row, &patch, |id| {
         ctx.db.epics().id().find(id).map(|e| e.parent_epic_id)
     })?;
@@ -772,10 +782,13 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
 /// the actual safety net.
 #[spacetimedb::reducer]
 pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
-    let Some(row) = ctx.db.epics().id().find(id) else {
+    let Some(row) = visible_epic(ctx, id) else {
         return Ok(());
     };
     let parent = row.parent_epic_id;
+    // Sight first: validate_epic_deletable's refusals name tasks, which must
+    // not reveal what a private sub-epic holds.
+    check_subtree_all_seen(ctx, id, &collect_epic_subtree_ids(ctx, id))?;
     let doomed = validate_epic_deletable(ctx, id)?;
     delete_epic_subtree_with_feed_cleanup(ctx, id, &doomed);
     recalculate_epic_chain(ctx, parent);
@@ -835,9 +848,10 @@ pub fn batch_delete(
     // subtree must be captured before anything downstream can change it.
     let mut epic_doomed: Vec<(i64, std::collections::HashSet<i64>)> = Vec::new();
     for &id in &epic_ids {
-        if ctx.db.epics().id().find(id).is_none() {
+        if visible_epic(ctx, id).is_none() {
             continue;
         }
+        check_subtree_all_seen(ctx, id, &collect_epic_subtree_ids(ctx, id))?;
         let doomed = validate_epic_deletable(ctx, id)?;
         epic_doomed.push((id, doomed));
     }
@@ -845,7 +859,7 @@ pub fn batch_delete(
     // doomed epic subtrees above is validated again here if the caller passed
     // it too — harmless, since epics.allium's guard already required it done.
     for &id in &task_ids {
-        if let Some(row) = ctx.db.tasks().id().find(id) {
+        if let Some(row) = visible_task(ctx, id) {
             if row.status != DONE {
                 return Err(format!("task {id}: cannot delete because it is not done"));
             }
@@ -866,8 +880,8 @@ pub fn batch_delete(
         delete_epic_subtree_with_feed_cleanup(ctx, *id, doomed);
     }
     for &id in &task_ids {
-        let Some(row) = ctx.db.tasks().id().find(id) else {
-            // Already gone: one of the doomed epics above owned it too.
+        let Some(row) = visible_task(ctx, id) else {
+            // Already gone, or never the caller's to see: one of the doomed epics above owned it too.
             continue;
         };
         let epic_id = row.epic_id;

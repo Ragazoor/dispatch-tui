@@ -277,10 +277,7 @@ async fn dispatch_epic(
 ) {
     use crate::tui::commands::EpicCommand::*;
     match cmd {
-        Insert(draft) => {
-            rt.exec_insert_epic(app, draft.title, draft.description, draft.parent_epic_id)
-                .await
-        }
+        Insert(draft) => rt.exec_insert_epic(app, draft).await,
         Delete(id) => rt.exec_delete_epic(id).await,
         Persist {
             id,

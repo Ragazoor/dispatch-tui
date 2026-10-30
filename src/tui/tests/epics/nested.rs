@@ -202,9 +202,10 @@ fn create_epic_in_epic_view_inherits_parent() {
     app.update(Message::Epic(
         crate::tui::messages::EpicMessage::SubmitTitle("Sub Epic".to_string()),
     ));
-    let cmds = app.update(Message::Epic(
+    app.update(Message::Epic(
         crate::tui::messages::EpicMessage::SubmitDescription("desc".to_string()),
     ));
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
 
     let draft = cmds
         .iter()

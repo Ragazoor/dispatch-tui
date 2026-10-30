@@ -85,6 +85,7 @@ pub enum KeyNamespace {
     BoardPickerMoveToEpic,
     BoardPickerReparentEpic,
     BoardPickerWorkPackage,
+    BoardPickerPlacement,
     BoardConfirmQuit,
     BoardConfirmDeleteTask,
     BoardConfirmBatchDelete,
@@ -109,7 +110,7 @@ pub enum KeyNamespace {
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
     /// order `list_keybindings` and the help overlay group by.
-    pub const ALL: [KeyNamespace; 36] = [
+    pub const ALL: [KeyNamespace; 37] = [
         Self::BoardNormal,
         Self::BoardDetail,
         Self::BoardSearch,
@@ -127,6 +128,7 @@ impl KeyNamespace {
         Self::BoardPickerMoveToEpic,
         Self::BoardPickerReparentEpic,
         Self::BoardPickerWorkPackage,
+        Self::BoardPickerPlacement,
         Self::BoardConfirmQuit,
         Self::BoardConfirmDeleteTask,
         Self::BoardConfirmBatchDelete,
@@ -168,6 +170,7 @@ impl KeyNamespace {
             Self::BoardPickerMoveToEpic => "board.picker.move_to_epic",
             Self::BoardPickerReparentEpic => "board.picker.reparent_epic",
             Self::BoardPickerWorkPackage => "board.picker.work_package",
+            Self::BoardPickerPlacement => "board.picker.placement",
             Self::BoardConfirmQuit => "board.confirm.quit",
             Self::BoardConfirmDeleteTask => "board.confirm.delete_task",
             Self::BoardConfirmBatchDelete => "board.confirm.batch_delete",

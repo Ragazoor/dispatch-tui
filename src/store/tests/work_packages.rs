@@ -15,7 +15,13 @@ async fn a_created_package_is_listed_with_its_trimmed_title_and_creator() {
     let db = in_memory_db().await;
 
     let id = db
-        .create_work_package(" Window 1 ", "the plan", &[])
+        .create_work_package(
+            " Window 1 ",
+            "the plan",
+            &[],
+            1,
+            crate::models::Visibility::Public,
+        )
         .await
         .unwrap();
 
@@ -30,10 +36,16 @@ async fn a_created_package_is_listed_with_its_trimmed_title_and_creator() {
 #[tokio::test]
 async fn a_blank_title_is_refused_on_create_and_on_patch() {
     let db = in_memory_db().await;
-    assert!(db.create_work_package("  ", "", &[]).await.is_err());
+    assert!(db
+        .create_work_package("  ", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .is_err());
     assert!(db.list_work_packages().await.is_empty());
 
-    let id = db.create_work_package("W", "", &[]).await.unwrap();
+    let id = db
+        .create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
     assert!(db
         .patch_work_package(id, Some(" "), None, None)
         .await
@@ -53,7 +65,10 @@ async fn patching_a_missing_package_is_refused() {
 #[tokio::test]
 async fn a_description_patch_leaves_the_title_alone() {
     let db = in_memory_db().await;
-    let id = db.create_work_package("W", "", &[]).await.unwrap();
+    let id = db
+        .create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
 
     db.patch_work_package(id, None, Some("new plan"), None)
         .await
@@ -67,7 +82,10 @@ async fn a_description_patch_leaves_the_title_alone() {
 #[tokio::test]
 async fn linking_is_idempotent_and_unlinking_an_absent_link_is_not_an_error() {
     let db = in_memory_db().await;
-    let id = db.create_work_package("W", "", &[]).await.unwrap();
+    let id = db
+        .create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
     let t = task(&db, "t").await;
     let e = db.create_epic("E", "", None).await.unwrap().id;
 
@@ -105,7 +123,10 @@ async fn linking_is_idempotent_and_unlinking_an_absent_link_is_not_an_error() {
 #[tokio::test]
 async fn a_link_to_an_unknown_item_or_package_is_refused() {
     let db = in_memory_db().await;
-    let id = db.create_work_package("W", "", &[]).await.unwrap();
+    let id = db
+        .create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
     let t = task(&db, "t").await;
 
     assert!(db
@@ -126,7 +147,10 @@ async fn a_link_to_an_unknown_item_or_package_is_refused() {
 #[tokio::test]
 async fn deleting_a_package_removes_its_links_and_keeps_the_items() {
     let db = in_memory_db().await;
-    let id = db.create_work_package("W", "", &[]).await.unwrap();
+    let id = db
+        .create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
     let t = task(&db, "t").await;
     db.link_work_package_item(id, WorkPackageItem::Task(t))
         .await
@@ -142,8 +166,14 @@ async fn deleting_a_package_removes_its_links_and_keeps_the_items() {
 #[tokio::test]
 async fn deleting_an_item_removes_its_links_in_every_package() {
     let db = in_memory_db().await;
-    let a = db.create_work_package("A", "", &[]).await.unwrap();
-    let b = db.create_work_package("B", "", &[]).await.unwrap();
+    let a = db
+        .create_work_package("A", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
+    let b = db
+        .create_work_package("B", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
     let doomed = task(&db, "doomed").await;
     let kept = task(&db, "kept").await;
     for package in [a, b] {
@@ -174,7 +204,10 @@ async fn deleting_an_item_removes_its_links_in_every_package() {
 #[tokio::test]
 async fn deleting_an_epic_removes_the_links_of_everything_in_its_subtree() {
     let db = in_memory_db().await;
-    let id = db.create_work_package("W", "", &[]).await.unwrap();
+    let id = db
+        .create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
+        .await
+        .unwrap();
     let epic = db.create_epic("E", "", None).await.unwrap().id;
     let sub = db.create_epic("S", "", Some(epic)).await.unwrap().id;
     let inner = task(&db, "inner").await;

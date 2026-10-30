@@ -63,6 +63,7 @@ mod session_requests;
 mod tasks_epics;
 mod unseen;
 mod user_profiles;
+mod visibility;
 mod work_packages;
 mod workspaces;
 
@@ -208,6 +209,9 @@ pub struct MemoryReducerCaller {
     /// The identity a real reducer reads off `ctx.sender`. Stamped as
     /// `created_by` on the sub-epics a routed write creates. Empty unless set.
     sender: String,
+    /// Whether the workspace rules are enforced; see
+    /// [`MemoryReducerCaller::with_workspace_rules`].
+    workspace_rules: bool,
     /// Faults queued by [`Self::fail_next`], each consumed by the next call
     /// to the reducer it names.
     faults: Mutex<Vec<(&'static str, InjectedFault)>>,
@@ -224,6 +228,7 @@ impl MemoryReducerCaller {
             rows,
             clock,
             sender: String::new(),
+            workspace_rules: false,
             faults: Mutex::new(Vec::new()),
         }
     }
@@ -358,6 +363,26 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn revoke_super_admin(&self, user: String) -> Result<ReducerOutcome> {
         self.apply_set_super_admin(user, false)
+    }
+
+    async fn set_epic_visibility(&self, id: EpicId, visibility: String) -> Result<ReducerOutcome> {
+        self.apply_set_epic_visibility(id, visibility)
+    }
+
+    async fn set_work_package_visibility(
+        &self,
+        id: WorkPackageId,
+        visibility: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_set_work_package_visibility(id, visibility)
+    }
+
+    async fn super_admin_delete_unseen_item(
+        &self,
+        kind: String,
+        item_id: i64,
+    ) -> Result<ReducerOutcome> {
+        self.apply_super_admin_delete_unseen_item(kind, item_id)
     }
 
     async fn create_workspace(&self, name: String) -> Result<ReducerOutcome> {

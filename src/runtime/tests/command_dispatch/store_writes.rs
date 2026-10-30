@@ -246,6 +246,7 @@ async fn dispatch_epic_insert_then_persist_writes_to_db() {
             title: "Epic via dispatch".into(),
             description: "desc".into(),
             parent_epic_id: None,
+            ..Default::default()
         })),
     )
     .await;
@@ -270,6 +271,8 @@ async fn dispatch_work_package_commands_write_and_refresh_the_board() {
         Command::WorkPackage(W::Create {
             title: "Window 1".into(),
             item,
+            workspace_id: 0,
+            visibility: models::Visibility::Public,
         }),
     )
     .await;
@@ -326,6 +329,7 @@ async fn an_insert_drafted_in_a_package_view_links_the_new_task() {
             title: "Window 1".into(),
             description: String::new(),
             link: vec![],
+            ..Default::default()
         })
         .await
         .expect("package created");

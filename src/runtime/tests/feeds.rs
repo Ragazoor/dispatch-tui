@@ -7,8 +7,15 @@ mod epic_tests {
     #[tokio::test]
     async fn exec_insert_epic_creates_in_db_and_app() {
         let (rt, mut app) = test_runtime().await;
-        rt.exec_insert_epic(&mut app, "My Epic".into(), "description".into(), None)
-            .await;
+        rt.exec_insert_epic(
+            &mut app,
+            crate::tui::types::EpicDraft {
+                title: "My Epic".into(),
+                description: "description".into(),
+                ..Default::default()
+            },
+        )
+        .await;
         assert_eq!(app.epics().len(), 1);
         assert_eq!(app.epics()[0].title, "My Epic");
         assert_eq!(rt.database.list_epics().await.len(), 1);

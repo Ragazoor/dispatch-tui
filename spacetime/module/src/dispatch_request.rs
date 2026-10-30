@@ -600,7 +600,7 @@ pub fn request_dispatch(
     }
     require_acting_for(ctx, &requester)?;
     validate_dispatch_origin(&origin)?;
-    let Some(task) = ctx.db.tasks().id().find(task_id) else {
+    let Some(task) = visible_task(ctx, task_id) else {
         return Err(format!("task {task_id} no longer exists"));
     };
     let has_open = ctx

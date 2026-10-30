@@ -401,6 +401,11 @@ pub enum InputMode {
     InputDisplayName,
     /// `x` on a package card: delete the package (its links only).
     ConfirmDeleteWorkPackage(crate::models::WorkPackageId),
+    /// The last step of the new-epic and new-package forms: workspace (when
+    /// the person has several) and visibility
+    /// (`workspaces.allium: NameWorkspaceAndVisibilityFromBoard`). The state
+    /// is `InputState::placement`.
+    InputPlacement,
 }
 
 impl InputMode {
@@ -487,6 +492,36 @@ pub struct EpicDraft {
     pub title: String,
     pub description: String,
     pub parent_epic_id: Option<EpicId>,
+    /// The workspace a root epic is created in; `0` until chosen (the runtime
+    /// then uses the person's only workspace). A sub-epic takes its parent's.
+    pub workspace_id: i64,
+    pub visibility: crate::models::Visibility,
+}
+
+// ---------------------------------------------------------------------------
+// Placement — the workspace and visibility step ending a create form
+// ---------------------------------------------------------------------------
+
+/// What the placement step creates once answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlacementFor {
+    /// The epic in `InputState::epic_draft`.
+    Epic,
+    /// A package, linked to `item`, from the link picker.
+    Package {
+        title: String,
+        item: crate::models::WorkPackageItem,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placement {
+    pub target: PlacementFor,
+    pub visibility: crate::models::Visibility,
+    /// Index into `InputState::workspaces`.
+    pub workspace: usize,
+    /// False for a sub-epic, which takes its parent's workspace.
+    pub names_workspace: bool,
 }
 
 // ---------------------------------------------------------------------------

@@ -153,6 +153,7 @@ async fn exec_quick_dispatch_links_the_task_to_the_drafts_package() {
             title: "Window 1".into(),
             description: String::new(),
             link: vec![],
+            ..Default::default()
         })
         .await
         .expect("package created");

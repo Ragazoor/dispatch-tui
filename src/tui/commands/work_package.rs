@@ -20,12 +20,20 @@ pub enum WorkPackageCommand {
     Create {
         title: String,
         item: WorkPackageItem,
+        /// `0` when the person has one workspace and the form did not ask.
+        workspace_id: i64,
+        visibility: crate::models::Visibility,
     },
     Rename {
         id: WorkPackageId,
         title: String,
     },
     Delete(WorkPackageId),
+    /// `V` on a package card (`SetWorkPackageVisibility`).
+    SetVisibility {
+        id: WorkPackageId,
+        visibility: crate::models::Visibility,
+    },
     /// Persist a package's manual card order (`work-packages.allium:
     /// ReorderPackage`).
     SetSortOrder {

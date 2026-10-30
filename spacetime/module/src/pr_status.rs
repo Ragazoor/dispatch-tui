@@ -86,7 +86,7 @@ pub fn report_pr_status(
 ) -> Result<(), String> {
     require_acting_for(ctx, &host)?;
     validate_pr_status_report(&state, &review_decision)?;
-    let Some(task) = ctx.db.tasks().id().find(task_id) else {
+    let Some(task) = visible_task(ctx, task_id) else {
         return Ok(());
     };
     let prior_status = task.status.clone();
@@ -123,7 +123,7 @@ pub fn report_pr_unreadable(
     _reason: String,
 ) -> Result<(), String> {
     require_acting_for(ctx, &host)?;
-    let Some(task) = ctx.db.tasks().id().find(task_id) else {
+    let Some(task) = visible_task(ctx, task_id) else {
         return Ok(());
     };
     if let Some(next) = apply_pr_unreadable(task, &now(ctx)) {

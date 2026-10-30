@@ -485,11 +485,12 @@ impl MemoryReducerCaller {
         updates: Vec<(TaskId, SubStatus)>,
     ) -> Result<ReducerOutcome> {
         let updates = encode::sub_status_updates(&updates);
+        let scope = self.scope();
         let mut tables = self.lock();
         let stamp = self.now();
         for update in updates {
             let update = module::SubStatusUpdate::from(update);
-            let Some(row) = tables.tasks.get(&update.task_id).cloned() else {
+            let Some(row) = tables.visible_task(&scope, update.task_id) else {
                 continue;
             };
             // As the module: an entry the status does not allow is skipped.
@@ -514,10 +515,14 @@ impl MemoryReducerCaller {
         successor: bindings::Task,
     ) -> Result<TaskId> {
         let predecessor = predecessor.0;
+        let scope = self.scope();
         let mut tables = self.lock();
-        if !tables.tasks.contains_key(&predecessor) {
+        if tables.visible_task(&scope, predecessor).is_none() {
             return Err(anyhow::anyhow!("predecessor task {predecessor} not found"));
         }
+        tables
+            .check_task_may_enter_epic(&scope, "successor task", successor.epic_id)
+            .map_err(anyhow::Error::msg)?;
         if tables.tasks.get(&predecessor).is_some_and(|t| !t.phoenix) {
             return Err(anyhow::anyhow!(
                 "predecessor task {predecessor} is not a phoenix task, or already respawned"

@@ -60,7 +60,8 @@ fn memory_caller_serves_agents_like_the_real_module() {
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
-            .with_sender(accepted.identity.clone());
+            .with_sender(accepted.identity.clone())
+            .with_workspace_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -70,6 +71,7 @@ fn memory_caller_serves_agents_like_the_real_module() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        join_default_workspace(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
 
         let mut woken = rows_real.changed();

@@ -306,7 +306,9 @@ impl MemoryReducerCaller {
                 module::ROLE_TEAM_REVIEWS,
                 module::ROLE_BOTS,
             ] {
-                self.ensure_role_epic(&mut tables, role, parent, None);
+                if parent != 0 {
+                    self.ensure_role_epic(&mut tables, role, parent, None);
+                }
             }
         }
         if !cve_command.is_empty() {
@@ -356,6 +358,22 @@ impl MemoryReducerCaller {
         let (feed_command, feed_interval_secs) =
             command.map(|(c, i)| (c.to_string(), i)).unwrap_or_default();
         let now = self.now();
+        // A managed root epic lives in the caller's first workspace, and is
+        // not created for a caller in none (the module's `ensure_role_epic`).
+        let workspace_id = if parent_epic_id == 0 && self.workspace_rules {
+            let first = tables
+                .memberships
+                .values()
+                .filter(|m| m.user == self.sender)
+                .map(|m| m.workspace_id)
+                .min();
+            match first {
+                Some(workspace_id) => workspace_id,
+                None => return 0,
+            }
+        } else {
+            0
+        };
         self.write_epic(
             tables,
             module::Epic {
@@ -367,6 +385,7 @@ impl MemoryReducerCaller {
                 created_by: self.sender.clone(),
                 created_at: now.clone(),
                 updated_at: now,
+                workspace_id,
                 ..module::blank_epic()
             },
         )

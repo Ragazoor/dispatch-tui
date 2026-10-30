@@ -4,19 +4,31 @@ impl TuiRuntime {
     pub(super) async fn exec_insert_epic(
         &self,
         app: &mut App,
-        title: String,
-        description: String,
-        parent_epic_id: Option<crate::models::EpicId>,
+        draft: crate::tui::types::EpicDraft,
     ) {
+        let workspace_id = match self
+            .workspace_for_new_item(draft.workspace_id, draft.parent_epic_id.is_some())
+            .await
+        {
+            Ok(workspace_id) => workspace_id,
+            Err(message) => {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    message,
+                )));
+                return;
+            }
+        };
         match self
             .epic_svc
             .create_epic(crate::service::CreateEpicParams {
-                title,
-                description,
+                title: draft.title,
+                description: draft.description,
                 sort_order: None,
-                parent_epic_id,
+                parent_epic_id: draft.parent_epic_id,
                 feed_command: None,
                 feed_interval_secs: None,
+                workspace_id,
+                visibility: draft.visibility,
             })
             .await
         {
@@ -30,6 +42,26 @@ impl TuiRuntime {
                     Self::db_error("creating epic", e),
                 )));
             }
+        }
+    }
+
+    /// The workspace a new root epic or package goes in when the form named
+    /// none (`workspaces.allium: NameWorkspaceAndVisibilityFromBoard`): the
+    /// person's only workspace. A sub-epic needs none (its parent's is used).
+    /// With none, or several and none chosen, the refusal says what to do.
+    pub(super) async fn workspace_for_new_item(
+        &self,
+        chosen: i64,
+        is_sub_epic: bool,
+    ) -> Result<i64, String> {
+        if chosen != 0 || is_sub_epic {
+            return Ok(chosen);
+        }
+        let mut mine = self.people_svc.my_workspaces().await;
+        match mine.len() {
+            0 => Err(models::NO_WORKSPACE.into()),
+            1 => Ok(mine.remove(0).id),
+            _ => Err("You belong to several workspaces; choose one for the new item".into()),
         }
     }
 

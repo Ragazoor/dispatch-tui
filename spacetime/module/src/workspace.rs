@@ -57,26 +57,17 @@ fn profile_of(ctx: &ReducerContext, identity: &str) -> Option<UserProfile> {
 }
 
 fn require_super_admin(ctx: &ReducerContext) -> Result<(), String> {
-    match profile_of(ctx, &caller_identity(ctx)) {
-        Some(p) if p.is_super_admin => Ok(()),
-        _ => Err("only a super-admin may do this".into()),
+    if is_super_admin(ctx, &caller_identity(ctx)) {
+        Ok(())
+    } else {
+        Err("only a super-admin may do this".into())
     }
-}
-
-fn is_workspace_admin(ctx: &ReducerContext, workspace_id: i64, identity: &str) -> bool {
-    ctx.db
-        .memberships()
-        .workspace_id()
-        .filter(&workspace_id)
-        .any(|m| m.user == identity && m.role == ROLE_ADMIN)
 }
 
 /// `is_super_admin(caller()) or workspace.is_admin(caller())`.
 fn require_admin_of(ctx: &ReducerContext, workspace_id: i64) -> Result<(), String> {
     let caller = caller_identity(ctx);
-    if profile_of(ctx, &caller).is_some_and(|p| p.is_super_admin)
-        || is_workspace_admin(ctx, workspace_id, &caller)
-    {
+    if is_super_admin(ctx, &caller) || workspace_has_admin(ctx, workspace_id, &caller) {
         Ok(())
     } else {
         Err("only a super-admin or an admin of this workspace may do this".into())
@@ -225,7 +216,7 @@ pub fn delete_workspace(ctx: &ReducerContext, workspace_id: i64) -> Result<(), S
         .map(|l| l.id)
         .collect();
     for id in learnings {
-        delete_learning(ctx, id)?;
+        delete_learning_rows(ctx, id);
     }
     let memberships: Vec<i64> = ctx
         .db

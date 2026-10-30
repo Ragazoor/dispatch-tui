@@ -34,6 +34,8 @@ pub enum WorkPackageMessage {
     SubmitRename(String),
     /// `x` on a package card (`DeletePackageFromBoard`).
     ConfirmDelete(WorkPackageId),
+    /// `V` on a package card (`SetWorkPackageVisibility`).
+    ToggleVisibility(WorkPackageId),
 }
 
 impl WorkPackageMessage {
@@ -52,6 +54,9 @@ impl WorkPackageMessage {
             WorkPackageMessage::StartRename(id) => app.handle_start_rename_work_package(id),
             WorkPackageMessage::SubmitRename(title) => app.handle_submit_rename_work_package(title),
             WorkPackageMessage::ConfirmDelete(id) => app.handle_confirm_delete_work_package(id),
+            WorkPackageMessage::ToggleVisibility(id) => {
+                app.handle_toggle_work_package_visibility(id)
+            }
         }
     }
 }

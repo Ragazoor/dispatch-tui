@@ -3,14 +3,14 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{Epic, EpicId, TaskStatus};
+use crate::models::{Epic, EpicId, TaskStatus, Visibility};
 use crate::service::{CreateEpicParams, UpdateEpicParams};
 
 use super::types::{
     deserialize_flexible_id, deserialize_nullable_flexible_i64, deserialize_nullable_flexible_id,
     deserialize_nullable_string, deserialize_optional_flexible_i64,
     deserialize_optional_flexible_id, deserialize_optional_limit, parse_args, reject_alongside,
-    service_err_to_response, JsonRpcResponse,
+    service_err_to_response, tool_error, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -27,6 +27,10 @@ pub(super) struct CreateEpicArgs {
     pub(super) sort_order: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_id")]
     pub(super) parent_epic_id: Option<EpicId>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) workspace_id: Option<i64>,
+    #[serde(default)]
+    pub(super) visibility: Option<Visibility>,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +73,8 @@ pub(super) struct UpdateEpicArgs {
     pub(super) feed_append_only: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_id")]
     pub(super) parent_epic_id: Option<Option<EpicId>>,
+    #[serde(default)]
+    pub(super) visibility: Option<Visibility>,
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +93,32 @@ pub(super) async fn handle_create_epic(
     };
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
+    // `workspaces.allium: NameWorkspaceAndVisibilityViaMcp`. A sub-epic takes
+    // its parent's workspace, so naming one is refused rather than ignored.
+    let workspace_id = match (parsed.parent_epic_id, parsed.workspace_id) {
+        (Some(_), Some(_)) => {
+            return tool_error(
+                id,
+                "workspace_id is for a root epic; a sub-epic takes its parent's workspace",
+            )
+        }
+        (Some(_), None) => 0,
+        (None, Some(workspace_id)) => workspace_id,
+        (None, None) => {
+            return tool_error(
+                id,
+                format!(
+                    "a root epic needs a workspace_id. {}",
+                    workspace_choices(state).await
+                ),
+            )
+        }
+    };
+    if workspace_id != 0 {
+        if let Some(refusal) = unknown_workspace(state, workspace_id).await {
+            return tool_error(id, refusal);
+        }
+    }
     let created = state
         .epic_svc
         .create_epic(CreateEpicParams {
@@ -96,6 +128,8 @@ pub(super) async fn handle_create_epic(
             parent_epic_id: parsed.parent_epic_id,
             feed_command: None,
             feed_interval_secs: None,
+            workspace_id,
+            visibility: parsed.visibility.unwrap_or_default(),
         })
         .await;
     let epic = match created {
@@ -103,8 +137,42 @@ pub(super) async fn handle_create_epic(
         Err(e) => return service_err_to_response(id, e),
     };
     state.notify_epic_changed(epic.id);
-    let text = format!("Epic {} created: {}", epic.id, epic.title);
+    let text = format!(
+        "Epic {} created: {} (workspace {}, {})",
+        epic.id, epic.title, epic.workspace_id, epic.visibility
+    );
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+}
+
+/// The refusal for a `workspace_id` the caller does not belong to. A workspace
+/// that does not exist and one the caller is not in read the same, so the
+/// answer does not tell which ids are taken.
+pub(super) async fn unknown_workspace(state: &McpState, workspace_id: i64) -> Option<String> {
+    let mine = state.people_svc.my_workspaces().await;
+    if mine.iter().any(|w| w.id == workspace_id) {
+        return None;
+    }
+    Some(format!(
+        "unknown workspace_id {workspace_id}. {}",
+        format_workspace_choices(&mine)
+    ))
+}
+
+/// The workspaces the caller belongs to, for a refusal that asks for a
+/// `workspace_id` (`workspaces.allium: NameWorkspaceAndVisibilityViaMcp`).
+pub(super) async fn workspace_choices(state: &McpState) -> String {
+    format_workspace_choices(&state.people_svc.my_workspaces().await)
+}
+
+fn format_workspace_choices(mine: &[crate::models::WorkspaceRef]) -> String {
+    if mine.is_empty() {
+        return format!("{}.", crate::models::NO_WORKSPACE);
+    }
+    let list: Vec<String> = mine
+        .iter()
+        .map(|w| format!("{} ({})", w.id, w.name))
+        .collect();
+    format!("Your workspaces: {}.", list.join(", "))
 }
 
 /// epics.allium: GetEpicViaMcp, the `epic_id` form of list_epics.
@@ -147,6 +215,10 @@ async fn get_epic(state: &McpState, id: Option<Value>, epic_id: EpicId) -> JsonR
     text.push_str(&format!(
         "\nUpdated: {}",
         epic.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+    ));
+    text.push_str(&format!(
+        "\nWorkspace: {}\nVisibility: {}",
+        epic.workspace_id, epic.visibility
     ));
     text.push_str(&format!("\nSubtasks: {done_count}/{total} done"));
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
@@ -225,11 +297,13 @@ fn format_epic_list_line(e: &Epic, done: usize, total: usize) -> String {
         None => String::new(),
     };
     format!(
-        "- [{}] {} ({}/{} done){}{}{}: {}",
+        "- [{}] {} ({}/{} done) [workspace {}, {}]{}{}{}: {}",
         e.id,
         e.title,
         done,
         total,
+        e.workspace_id,
+        e.visibility,
         plan_indicator,
         status_indicator,
         parent_indicator,
@@ -266,6 +340,7 @@ pub(super) async fn handle_update_epic(
         group_by_repo: parsed.group_by_repo,
         feed_append_only: parsed.feed_append_only,
         parent_epic_id: parsed.parent_epic_id,
+        visibility: parsed.visibility,
     };
     let field_names: Vec<String> = params
         .updated_field_names()

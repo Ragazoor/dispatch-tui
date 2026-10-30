@@ -33,10 +33,22 @@ impl EpicBuilder {
                 feed_append_only: false,
                 feed_role: FeedRole::None,
                 origin: EpicOrigin::Manual,
+                workspace_id: 0,
+                visibility: crate::models::Visibility::Public,
                 created_at: now,
                 updated_at: now,
             },
         }
+    }
+
+    pub fn workspace(mut self, workspace_id: i64) -> Self {
+        self.epic.workspace_id = workspace_id;
+        self
+    }
+
+    pub fn visibility(mut self, visibility: crate::models::Visibility) -> Self {
+        self.epic.visibility = visibility;
+        self
     }
 
     pub fn title(mut self, title: impl Into<String>) -> Self {

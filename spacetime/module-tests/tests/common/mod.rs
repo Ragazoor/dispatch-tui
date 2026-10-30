@@ -13,19 +13,61 @@ use spacetimedb::{ConnectionId, Identity, ReducerContext, TimeDuration, Timestam
 /// 2026-10-10 12:00:00 UTC, the instant every test's clock starts at.
 const START_MICROS: i64 = 1_791_633_600_000_000;
 
+pub const TEST_WORKSPACE: i64 = 1;
+
 pub const HOST_A: &str = "host-a";
 pub const HOST_B: &str = "host-b";
 
 pub struct Store {
     ctx: TestContext,
+    /// Whether `call` enrols its caller in the test workspace first.
+    enrol_callers: bool,
 }
 
 impl Store {
     pub fn new() -> Self {
+        let mut store = Store::bare();
+        store.enrol_callers = true;
+        // One workspace every caller belongs to, so a test that is not about
+        // workspaces runs in a store where everyone sees everything. It is
+        // workspace 1; `TEST_WORKSPACE` names it for rows built by hand.
+        store.ctx.db.workspaces().insert(Workspace {
+            name: "Test".into(),
+            created_by: "store".into(),
+            ..blank_workspace()
+        });
+        store
+    }
+
+    /// A store with no workspace and no enrolment: for tests about who may
+    /// see what, which set up workspaces and memberships themselves.
+    pub fn bare() -> Self {
         let ctx = TestContext::new().expect("the in-memory store initialises");
         ctx.clock
             .set(Timestamp::from_micros_since_unix_epoch(START_MICROS));
-        Store { ctx }
+        Store {
+            ctx,
+            enrol_callers: false,
+        }
+    }
+
+    /// Make `who` a member of the test workspace, once.
+    fn enrol(&self, who: &str) {
+        let user = identity_of(who);
+        let db = &self.ctx.db;
+        if !db
+            .memberships()
+            .workspace_id()
+            .filter(&TEST_WORKSPACE)
+            .any(|m| m.user == user)
+        {
+            db.memberships().insert(Membership {
+                workspace_id: TEST_WORKSPACE,
+                user,
+                role: "member".into(),
+                ..blank_membership()
+            });
+        }
     }
 
     /// The table handles, for reading back what a reducer wrote.
@@ -45,6 +87,9 @@ impl Store {
         who: &str,
         reducer: impl FnOnce(&ReducerContext) -> Result<T, String>,
     ) -> Result<T, String> {
+        if self.enrol_callers {
+            self.enrol(who);
+        }
         let payload = format!(r#"{{"iss":"test-issuer","sub":"{who}"}}"#);
         let auth = TestAuth::from_jwt_payload(payload, ConnectionId::from_u128(1))
             .expect("a valid test JWT payload");
@@ -82,10 +127,17 @@ impl Store {
         let row = Epic {
             title: title.into(),
             auto_dispatch,
+            workspace_id: TEST_WORKSPACE,
             ..blank_epic()
         };
-        self.call(who, |ctx| create_epic(ctx, row))
-            .expect("create_epic");
+        if self.enrol_callers {
+            self.call(who, |ctx| create_epic(ctx, row))
+                .expect("create_epic");
+        } else {
+            // A bare store has no workspace to create into: this is a row
+            // written before workspaces existed.
+            self.db().epics().insert(row);
+        }
         self.db()
             .epics()
             .iter()

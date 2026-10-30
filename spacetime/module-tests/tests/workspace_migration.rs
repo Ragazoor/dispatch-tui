@@ -77,32 +77,23 @@ fn default_workspace(store: &Store) -> Workspace {
 /// one learning per scope, and rows naming people from every source the
 /// migration reads. Nobody has connected yet.
 fn old_store() -> Store {
-    let store = Store::new();
+    let store = Store::bare();
     store.register_host_for("laptop", "alice");
     let root = store.create_epic("bob", "Root", false);
-    store
-        .call("bob", |ctx| {
-            create_epic(
-                ctx,
-                Epic {
-                    title: "Child".into(),
-                    parent_epic_id: root,
-                    created_by: identity_of("carol"),
-                    ..blank_epic()
-                },
-            )
-        })
-        .expect("sub-epic");
+    store.db().epics().insert(Epic {
+        title: "Child".into(),
+        parent_epic_id: root,
+        created_by: identity_of("carol"),
+        ..blank_epic()
+    });
     store.create("dave", user_task("a user-board task", "dave"));
     store
-        .call("erin", |ctx| {
-            create_work_package(ctx, package("Pack", &identity_of("erin")))
-        })
-        .expect("package");
+        .db()
+        .work_packages()
+        .insert(package("Pack", &identity_of("erin")));
+    // Written by the store itself: before workspaces nobody was refused.
     store
-        .call("frank", |ctx| {
-            subscribe_to_epic(ctx, identity_of("frank"), root)
-        })
+        .call_as_scheduler(|ctx| subscribe_to_epic(ctx, identity_of("frank"), root))
         .expect("subscribe");
     for scope in ["repo", "epic", "task", "user"] {
         store
@@ -248,7 +239,7 @@ fn the_migration_runs_once() {
 // -- DeleteWorkspace and RemoveMember ----------------------------------------
 
 fn store_with_root_and_default() -> (Store, i64) {
-    let store = Store::new();
+    let store = Store::bare();
     for who in ["root", "alice"] {
         connect(&store, who);
     }
@@ -256,6 +247,11 @@ fn store_with_root_and_default() -> (Store, i64) {
         .call("root", |ctx| claim_super_admin(ctx))
         .expect("claim");
     let workspace = default_workspace(&store).id;
+    store
+        .call("root", |ctx| {
+            add_member(ctx, workspace, identity_of("alice"), "member".into())
+        })
+        .expect("alice joins");
     (store, workspace)
 }
 
@@ -350,11 +346,17 @@ fn removing_a_member_ends_their_subscriptions_and_unseen_marks_in_that_workspace
     let alice = identity_of("alice");
     for epic in [here, there] {
         store
-            .call("alice", |ctx| subscribe_to_epic(ctx, alice.clone(), epic))
+            .call_as_scheduler(|ctx| subscribe_to_epic(ctx, alice.clone(), epic))
             .expect("subscribe");
     }
-    let task_here = store.create("root", epic_task("here", here, "backlog"));
-    let task_there = store.create("root", epic_task("there", there, "backlog"));
+    store
+        .call_as_scheduler(|ctx| create_task(ctx, epic_task("here", here, "backlog")))
+        .expect("task");
+    let task_here = store.db().tasks().iter().map(|t| t.id).max().expect("task");
+    store
+        .call_as_scheduler(|ctx| create_task(ctx, epic_task("there", there, "backlog")))
+        .expect("task");
+    let task_there = store.db().tasks().iter().map(|t| t.id).max().expect("task");
     for task in [task_here, task_there] {
         store
             .call("operator", |ctx| {
@@ -367,11 +369,6 @@ fn removing_a_member_ends_their_subscriptions_and_unseen_marks_in_that_workspace
             })
             .expect("mark");
     }
-    store
-        .call("root", |ctx| {
-            add_member(ctx, workspace, alice.clone(), "member".into())
-        })
-        .expect("add");
     let membership = store
         .db()
         .memberships()

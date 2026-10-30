@@ -151,6 +151,15 @@ impl App {
                 ),
                 None => vec![],
             },
+            "toggle_work_package_visibility" => match self.selected_work_package_id() {
+                Some(id) => keyed(
+                    self,
+                    Message::WorkPackage(
+                        crate::tui::messages::WorkPackageMessage::ToggleVisibility(id),
+                    ),
+                ),
+                None => vec![],
+            },
             "link_work_package" => {
                 let item = match self.selected_column_item() {
                     Some(ColumnItem::Task(t)) => crate::models::WorkPackageItem::Task(t.id),

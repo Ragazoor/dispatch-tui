@@ -309,15 +309,19 @@ usually the right answer.",
     async write "create_epic" => epics::handle_create_epic,
         "Create a new epic on the kanban board. An epic groups related tasks and derives its \
 status from theirs, so you do not set an epic's status directly. Pass parent_epic_id to create it \
-as a sub-epic of an existing one. Epics carry no repo_path — that lives on each subtask, and \
-passing it here is rejected.",
+as a sub-epic of an existing one. A root epic needs a workspace_id (a refusal lists yours); a \
+sub-epic takes its parent's workspace and refuses one. visibility is public (every member of the \
+workspace sees it, the default) or private (only you do). Epics carry no repo_path — that lives \
+on each subtask, and passing it here is rejected.",
         {
             "type": "object",
             "properties": {
                 "title": { "type": "string", "description": "Epic title" },
                 "description": { "type": "string", "description": "Epic description" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
-                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent." }
+                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent." },
+                "workspace_id": { "type": "integer", "description": "The workspace a root epic lives in. Required without parent_epic_id; refused with it. A refusal lists the workspaces you belong to." },
+                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only you do. Default public." }
             },
             "required": ["title"]
         };
@@ -350,7 +354,7 @@ epic_id for those.",
     async idempotent "update_epic" => epics::handle_update_epic,
         "Update an epic in place. Accepts title, description, status, plan_path, sort_order, \
 parent_epic_id, and the feed settings feed_command, feed_interval_secs, group_by_repo and \
-feed_append_only. Every field left out is untouched; the nullable ones take an explicit null to \
+feed_append_only, and visibility (public or private; a workspace never changes). Every field left out is untouched; the nullable ones take an explicit null to \
 clear. Setting status by hand is rarely right — an epic's status is recalculated from its \
 subtasks whenever they change. Re-parenting is cycle-checked and rejected if it would create a \
 loop.",
@@ -367,7 +371,8 @@ loop.",
                 "feed_interval_secs": { "type": ["integer", "null"], "description": "Polling interval in seconds (overrides the default). Minimum 60; a lower value is rejected. Pass null to clear (falls back to the 60s default)." },
                 "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI. Pass false to disable grouping." },
                 "feed_append_only": { "type": "boolean", "description": "When true, this epic's feed only ever adds tasks: one whose item is missing from a later emission is kept, not removed. For a feed whose source emits events that are never retracted (a log scan), where absence means nothing. Close such a task from the TUI once it is done: deleting it retires its external id under this epic forever, so an append-only feed never recreates it. Pass false to restore the default, where the feed mirrors its source and removes what the emission omits." },
-                "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." }
+                "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." },
+                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only its creator does. Changeable by the creator or a workspace admin." }
             },
             "required": ["epic_id"]
         };
@@ -377,17 +382,21 @@ loop.",
 wherever they sit in the epic tree, so work spread across several epics can be followed as one \
 board. A package only links; it never owns its items, and one item can belong to many packages. Pass \
 link_task_ids and link_epic_ids to link items at once; every id is checked first, and an unknown \
-one creates nothing. Returns the new package's id. To group new work under a parent, use \
-create_epic instead.",
+one creates nothing. Needs a workspace_id (a refusal lists yours) and links only items in that \
+workspace, or tasks on your main board. visibility is public (the default) or private (only you \
+see it). Returns the new package's id. To group new work under a parent, use create_epic \
+instead.",
         {
             "type": "object",
             "properties": {
                 "title": { "type": "string", "description": "Package title, for example the maintenance window it covers. Must not be blank." },
                 "description": { "type": "string", "description": "Free-text notes, for example the plan for the window." },
                 "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
-                "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link. A linked epic shows as one card; its subtasks are not linked one by one." }
+                "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link. A linked epic shows as one card; its subtasks are not linked one by one." },
+                "workspace_id": { "type": "integer", "description": "The workspace the package lives in. Required; a refusal lists the workspaces you belong to." },
+                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only you do. Default public." }
             },
-            "required": ["title"]
+            "required": ["title", "workspace_id"]
         };
 
     async read_only "list_work_packages" => work_packages::handle_list_work_packages,
@@ -403,7 +412,7 @@ the items. A package's sort order is shown when it has been set.",
         };
 
     async destructive "update_work_package" => work_packages::handle_update_work_package,
-        "Update a work package in place: rename it with title, rewrite description, set sort_order (lower values show first among the package cards), and change \
+        "Update a work package in place: rename it with title, rewrite description, set sort_order (lower values show first among the package cards), set visibility (public or private), and change \
 its links with link_task_ids, unlink_task_ids, link_epic_ids and unlink_epic_ids. Unlinks apply \
 before links, linking an item already linked and unlinking one not linked are both silent, and \
 the tasks and epics themselves are never changed. Every id is checked before anything is written, \
@@ -417,6 +426,7 @@ has served its purpose: its linked tasks and epics stay where they are, with the
                 "title": { "type": "string", "description": "New title. Must not be blank." },
                 "description": { "type": "string", "description": "New description." },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
+                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only its creator does." },
                 "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
                 "unlink_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of tasks to unlink." },
                 "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link." },

@@ -69,7 +69,8 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
-            .with_sender(accepted.identity.clone());
+            .with_sender(accepted.identity.clone())
+            .with_workspace_rules();
         // "host-a" is this board's host: the subscription delivers its
         // dispatch requests (sync.allium: SubscribeToThisHostsDispatchRequests).
         connector
@@ -81,6 +82,7 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        join_default_workspace(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
 
         let mut woken = rows_real.changed();

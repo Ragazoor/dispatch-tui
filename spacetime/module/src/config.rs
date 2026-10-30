@@ -158,7 +158,7 @@ pub fn subscribe_to_epic(
     if subscriber.trim().is_empty() {
         return Err("cannot subscribe without an identity".into());
     }
-    if ctx.db.epics().id().find(epic_id).is_none() {
+    if visible_epic(ctx, epic_id).is_none() {
         return Err(format!("no epic {epic_id}"));
     }
     let id = subscription_id(&subscriber, epic_id);

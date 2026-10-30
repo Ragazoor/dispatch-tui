@@ -43,6 +43,7 @@ impl App {
             | InputMode::RenameWorkPackage(_)
             | InputMode::InputDisplayName => N::BoardText,
             InputMode::LinkWorkPackage { .. } => N::BoardPickerWorkPackage,
+            InputMode::InputPlacement => N::BoardPickerPlacement,
             InputMode::ConfirmDeleteWorkPackage(_) => N::BoardConfirmDeleteWorkPackage,
             InputMode::InputRepoPath => N::BoardPickerRepoPath,
             InputMode::InputBaseBranch => N::BoardPickerBaseBranch,
@@ -358,6 +359,7 @@ impl App {
             N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, key, label),
             N::BoardPickerReparentEpic => self.run_reparent_picker(action, key, label),
             N::BoardPickerWorkPackage => self.run_work_package_picker(action, key, label),
+            N::BoardPickerPlacement => self.run_placement_picker(action, key, label),
             N::BoardConfirmMoveToEpic => {
                 use crate::tui::messages::TaskMessage::*;
                 let msg = match action {
@@ -567,6 +569,28 @@ impl App {
             _ => return vec![],
         };
         self.dispatch_keyed(Message::WorkPackage(msg), action, label)
+    }
+
+    /// The workspace and visibility step ending the new-epic and
+    /// new-package forms.
+    fn run_placement_picker(
+        &mut self,
+        action: &'static str,
+        key: KeyEvent,
+        label: &str,
+    ) -> Vec<Command> {
+        use crate::tui::messages::InputMessage::*;
+        let msg = match action {
+            "placement_picker_workspace" => {
+                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+                PlacementMoveWorkspace(if down { 1 } else { -1 })
+            }
+            "placement_picker_visibility" => PlacementToggleVisibility,
+            "placement_picker_create" => SubmitPlacement,
+            "placement_picker_cancel" => CancelInput,
+            _ => return vec![],
+        };
+        self.dispatch_keyed(Message::Input(msg), action, label)
     }
 
     /// The "reparent epic" tree picker.

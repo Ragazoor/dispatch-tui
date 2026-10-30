@@ -24,6 +24,7 @@ mod keybindings;
 mod layout_cache;
 mod move_task;
 mod navigation;
+mod new_item_placement;
 mod render_dirty;
 mod rendering;
 mod repo_filter;

@@ -58,15 +58,18 @@ pub(crate) fn find_or_create_repo_group(
     }
     ctx.db
         .epics()
-        .insert(Epic {
-            title: title.to_string(),
-            parent_epic_id: root,
-            origin: REPO_GROUP_ORIGIN.to_string(),
-            created_by,
-            created_at: now(ctx),
-            updated_at: now(ctx),
-            ..blank_epic()
-        })
+        .insert(inherit_workspace(
+            ctx,
+            Epic {
+                title: title.to_string(),
+                parent_epic_id: root,
+                origin: REPO_GROUP_ORIGIN.to_string(),
+                created_by,
+                created_at: now(ctx),
+                updated_at: now(ctx),
+                ..blank_epic()
+            },
+        ))
         .id
 }
 
@@ -171,6 +174,9 @@ pub(crate) fn reroute_on_repo_change(ctx: &ReducerContext, task_id: i64) -> Resu
 /// then the root's chain once, rather than per moved task.
 #[spacetimedb::reducer]
 pub fn regroup_epic(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
+    if visible_epic(ctx, root_id).is_none() {
+        return Ok(());
+    }
     let tasks: Vec<Task> = ctx.db.tasks().epic_id().filter(&root_id).collect();
     let mut joined = std::collections::BTreeSet::new();
     for task in tasks {
@@ -197,6 +203,9 @@ pub fn regroup_epic(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
 /// load-bearing.
 #[spacetimedb::reducer]
 pub fn flatten_epic(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
+    if visible_epic(ctx, root_id).is_none() {
+        return Ok(());
+    }
     let subs: Vec<Epic> = ctx
         .db
         .epics()

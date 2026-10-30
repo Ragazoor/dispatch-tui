@@ -27,6 +27,8 @@ impl super::super::WorkPackageCrud for Store {
         title: &str,
         description: &str,
         links: &[WorkPackageItem],
+        workspace_id: i64,
+        visibility: crate::models::Visibility,
     ) -> Result<WorkPackageId> {
         // `sync.allium: CreatesRequireASettledIdentity`: the board subscribes
         // to packages by `created_by`, so a package with no name stamped on it
@@ -35,7 +37,13 @@ impl super::super::WorkPackageCrud for Store {
             .require_identity("there is no name to stamp on a new work package; it was not created")
             .await?;
         let now = self.now();
-        let row = encode::create_work_package_row(title, description, &identity, &now);
+        let row = encode::create_work_package_row(
+            title,
+            description,
+            (workspace_id, visibility),
+            &identity,
+            &now,
+        );
         self.caller
             .create_work_package_with_links(row, links.to_vec())
             .await
@@ -57,6 +65,17 @@ impl super::super::WorkPackageCrud for Store {
         };
         self.caller
             .update_work_package_with_links(id, patch, unlink.to_vec(), link.to_vec())
+            .await?
+            .applied()
+    }
+
+    async fn set_work_package_visibility(
+        &self,
+        id: WorkPackageId,
+        visibility: crate::models::Visibility,
+    ) -> Result<()> {
+        self.caller
+            .set_work_package_visibility(id, visibility.as_str().to_string())
             .await?
             .applied()
     }

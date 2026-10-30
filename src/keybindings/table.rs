@@ -195,6 +195,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "Open the work package's view: its linked tasks and epics as cards",
     ),
     normal(
+        &["V"],
+        Some(C::OnWorkPackageCard),
+        "toggle_work_package_visibility",
+        "Switch the work package between public and private",
+    ),
+    normal(
         &["w"],
         Some(C::OnTaskCard),
         "link_work_package",
@@ -945,6 +951,31 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["Esc", "q"],
         "work_package_picker_close",
         "Close the picker",
+    ),
+    // ---- board.picker.placement ----
+    r(
+        N::BoardPickerPlacement,
+        &["j", "Down", "k", "Up"],
+        "placement_picker_workspace",
+        "Move between your workspaces (shown when you belong to more than one): down (j, Down), up (k, Up)",
+    ),
+    r(
+        N::BoardPickerPlacement,
+        &["Space", "h", "l"],
+        "placement_picker_visibility",
+        "Switch the new item between public and private",
+    ),
+    r(
+        N::BoardPickerPlacement,
+        &["Enter"],
+        "placement_picker_create",
+        "Create the item in the chosen workspace with the chosen visibility",
+    ),
+    r(
+        N::BoardPickerPlacement,
+        &["Esc"],
+        "placement_picker_cancel",
+        "Cancel; nothing is created",
     ),
     // ---- BoardConfirmQuit ----
     r(

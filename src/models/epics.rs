@@ -42,6 +42,10 @@ pub struct Epic {
     pub feed_append_only: bool,
     pub feed_role: FeedRole,
     pub origin: EpicOrigin,
+    /// The workspace this epic lives in, as the store's workspace id. `0`
+    /// for a row from before workspaces existed.
+    pub workspace_id: i64,
+    pub visibility: crate::models::Visibility,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -87,7 +87,13 @@ fn shift_h_on_done_epic_moves_to_review() {
 fn shift_e_key_starts_new_epic() {
     let mut app = make_app();
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('E'))));
-    assert!(cmds.is_empty());
+    // Opening a root epic form reads the person's workspaces.
+    assert!(matches!(
+        cmds.as_slice(),
+        [Command::People(
+            crate::tui::commands::PeopleCommand::LoadWorkspaces
+        )]
+    ));
     assert_eq!(app.input.mode, InputMode::InputEpicTitle);
 }
 
@@ -221,11 +227,14 @@ fn epic_description_submit_completes_creation() {
         title: "My Epic".to_string(),
         description: String::new(),
         parent_epic_id: None,
+        ..Default::default()
     });
-    let cmds = app.update(Message::Epic(
+    app.update(Message::Epic(
         crate::tui::messages::EpicMessage::SubmitDescription("Some description".to_string()),
     ));
-    // Should immediately emit Insert command
+    assert_eq!(app.input.mode, InputMode::InputPlacement);
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    // Enter at the placement step emits the Insert command
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::Epic(crate::tui::commands::EpicCommand::Insert(_))

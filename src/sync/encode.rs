@@ -298,6 +298,7 @@ pub fn create_epic_row(
         None,
         None,
         None,
+        (0, crate::models::Visibility::Public),
         created_by,
         now,
     )
@@ -314,9 +315,11 @@ pub fn create_epic_row_with(
     sort_order: Option<i64>,
     feed_command: Option<&str>,
     feed_interval_secs: Option<i64>,
+    placement: (i64, crate::models::Visibility),
     created_by: &str,
     now: &str,
 ) -> bindings::Epic {
+    let (workspace_id, visibility) = placement;
     bindings::Epic {
         id: 0,
         title: title.to_string(),
@@ -339,10 +342,10 @@ pub fn create_epic_row_with(
         // `sync.allium`'s `own_creations` subscription can find it before
         // anyone follows it. `core.allium: Epic.created_by`.
         created_by: created_by.to_string(),
-        // Placed by the workspace-aware create path (`workspaces.allium:
-        // CreateEpicInWorkspace`); until then the store's own defaults.
-        workspace_id: 0,
-        visibility: "public".to_string(),
+        // `workspaces.allium: CreateEpicInWorkspace`. A sub-epic names its
+        // parent's workspace, which the store would use whatever this said.
+        workspace_id,
+        visibility: visibility.as_str().to_string(),
     }
 }
 
@@ -374,9 +377,11 @@ pub fn epic_patch(patch: &crate::models::EpicPatch<'_>) -> bindings::EpicPatch {
 pub fn create_work_package_row(
     title: &str,
     description: &str,
+    placement: (i64, crate::models::Visibility),
     created_by: &str,
     now: &str,
 ) -> bindings::WorkPackage {
+    let (workspace_id, visibility) = placement;
     bindings::WorkPackage {
         id: 0,
         title: title.trim().to_string(),
@@ -385,8 +390,8 @@ pub fn create_work_package_row(
         created_by: created_by.to_string(),
         created_at: now.to_string(),
         updated_at: now.to_string(),
-        workspace_id: 0,
-        visibility: "public".to_string(),
+        workspace_id,
+        visibility: visibility.as_str().to_string(),
     }
 }
 

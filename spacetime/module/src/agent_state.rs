@@ -323,6 +323,10 @@ pub fn subagent_start(
     session_id: String,
     started_at: String,
 ) -> Result<(), String> {
+    // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
+    if visible_task(ctx, task_id).is_none() {
+        return Ok(());
+    }
     // A hook for a task with no current agent writes no agent fact (A15).
     let Some(owner) = current_agent(&AgentTables(ctx), task_id) else {
         return Ok(());
@@ -351,6 +355,10 @@ pub fn subagent_stop(
     agent_id: String,
     session_id: String,
 ) -> Result<(), String> {
+    // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
+    if visible_task(ctx, task_id).is_none() {
+        return Ok(());
+    }
     fence_subagent_session(ctx, task_id, &session_id);
     delete_subagent_entry(ctx, task_id, &agent_id);
     sync_subagent_count(ctx, task_id)?;
@@ -363,6 +371,10 @@ pub fn subagent_stop(
 /// one draining clear point that owns no status of its own.
 #[spacetimedb::reducer]
 pub fn subagent_clear(ctx: &ReducerContext, task_id: i64) -> Result<(), String> {
+    // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
+    if visible_task(ctx, task_id).is_none() {
+        return Ok(());
+    }
     delete_all_subagents(ctx, task_id);
     sync_subagent_count(ctx, task_id)?;
     apply_pending_stop_if_drained(ctx, task_id)?;
@@ -379,6 +391,10 @@ pub fn subagent_clear_and_void_pending_stop(
     ctx: &ReducerContext,
     task_id: i64,
 ) -> Result<(), String> {
+    // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
+    if visible_task(ctx, task_id).is_none() {
+        return Ok(());
+    }
     delete_all_subagents(ctx, task_id);
     sync_subagent_count(ctx, task_id)?;
     update_current_agent(&mut AgentTables(ctx), task_id, |agent| Agent {
@@ -402,7 +418,7 @@ pub fn try_record_stop(
     id: i64,
     stop_pending_at: String,
 ) -> Result<(), String> {
-    let Some(row) = ctx.db.tasks().id().find(id) else {
+    let Some(row) = visible_task(ctx, id) else {
         return Err(format!("task {id} not found"));
     };
     if row.status != RUNNING {
@@ -436,7 +452,7 @@ pub fn record_pre_tool_use(
     sub_status: String,
     at: String,
 ) -> Result<(), String> {
-    let Some(row) = ctx.db.tasks().id().find(id) else {
+    let Some(row) = visible_task(ctx, id) else {
         return Ok(());
     };
     if row.status != RUNNING {
@@ -468,7 +484,7 @@ pub fn record_notification(
     if mode == "ignore" {
         return Ok(());
     }
-    let Some(row) = ctx.db.tasks().id().find(id) else {
+    let Some(row) = visible_task(ctx, id) else {
         return Ok(());
     };
     if row.status != RUNNING {
@@ -541,7 +557,7 @@ pub fn record_user_prompt_submit(
     activity_at: String,
     prompt_at: String,
 ) -> Result<(), String> {
-    let Some(row) = ctx.db.tasks().id().find(id) else {
+    let Some(row) = visible_task(ctx, id) else {
         return Err(format!("task {id} not found"));
     };
     if row.status != RUNNING && row.status != REVIEW {
@@ -584,7 +600,7 @@ pub fn mark_pr_learnings_gate_shown(
     id: i64,
     at: String,
 ) -> Result<(), String> {
-    let Some(row) = ctx.db.tasks().id().find(id) else {
+    let Some(row) = visible_task(ctx, id) else {
         return Err(format!("task {id} not found"));
     };
     if !row.pr_learnings_gate_shown_at.is_empty() {

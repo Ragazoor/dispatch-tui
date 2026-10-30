@@ -31,7 +31,7 @@ fn is_admin(store: &Store, who: &str) -> bool {
 /// A store where `root` has claimed super-admin and `alice`, `bob` and `carol`
 /// are connected.
 fn store_with_root() -> Store {
-    let store = Store::new();
+    let store = Store::bare();
     for who in ["root", "alice", "bob", "carol"] {
         connect(&store, who);
     }
@@ -65,7 +65,7 @@ fn membership_of(store: &Store, workspace: i64, who: &str) -> Option<Membership>
 
 #[test]
 fn the_first_claim_makes_a_super_admin_and_a_second_is_refused() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     connect(&store, "bob");
     store
@@ -78,13 +78,13 @@ fn the_first_claim_makes_a_super_admin_and_a_second_is_refused() {
 
 #[test]
 fn claiming_without_a_profile_is_refused() {
-    let store = Store::new();
+    let store = Store::bare();
     assert!(store.call("alice", |ctx| claim_super_admin(ctx)).is_err());
 }
 
 #[test]
 fn claiming_adopts_epic_less_tasks_with_no_owner_and_only_those() {
-    let store = Store::new();
+    let store = Store::bare();
     connect(&store, "alice");
     connect(&store, "bob");
     let epic = store.create_epic("bob", "E", false);
@@ -102,7 +102,11 @@ fn claiming_adopts_epic_less_tasks_with_no_owner_and_only_those() {
         })
         .expect("strip owner");
     let owned = store.create("bob", user_task("bobs", "bob"));
-    let in_epic = store.create("bob", epic_task("inside", epic, "backlog"));
+    // The epic predates workspaces, so only the store itself may place a task in it.
+    store
+        .call_as_scheduler(|ctx| create_task(ctx, epic_task("inside", epic, "backlog")))
+        .expect("create in a legacy epic");
+    let in_epic = store.db().tasks().iter().map(|t| t.id).max().expect("task");
     store
         .call("alice", |ctx| claim_super_admin(ctx))
         .expect("claim");

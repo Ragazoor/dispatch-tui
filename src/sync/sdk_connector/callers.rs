@@ -38,13 +38,14 @@ use crate::spacetime::bindings::{
     report_session_request_failed as _, request_dispatch as _, request_exit_session as _,
     request_wrap_up as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
     revoke_super_admin as _, save_repo_path as _, save_setting as _, set_display_name as _,
-    set_member_role as _, set_task_epic as _, set_verify_command as _, subagent_clear as _,
+    set_epic_visibility as _, set_member_role as _, set_task_epic as _, set_verify_command as _,
+    set_work_package_visibility as _, subagent_clear as _,
     subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, try_record_stop as _, unlink_work_package_item as _,
-    unsubscribe_from_epic as _, update_task as _, update_work_package_with_links as _,
-    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
-    LearningsTableAccess as _, SessionRequestsTableAccess as _, TasksTableAccess as _,
-    WorkPackagesTableAccess as _,
+    subscribe_to_epic as _, super_admin_delete_unseen_item as _, try_record_stop as _,
+    unlink_work_package_item as _, unsubscribe_from_epic as _, update_task as _,
+    update_work_package_with_links as _, DbConnection, DispatchRequestsTableAccess as _,
+    EpicsTableAccess as _, LearningsTableAccess as _, SessionRequestsTableAccess as _,
+    TasksTableAccess as _, WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -227,6 +228,42 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the super-admin revoke",
             revoke_super_admin_then(user)
+        )
+    }
+
+    async fn set_epic_visibility(
+        &self,
+        id: EpicId,
+        visibility: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the epic visibility change",
+            set_epic_visibility_then(id.0, visibility)
+        )
+    }
+
+    async fn set_work_package_visibility(
+        &self,
+        id: WorkPackageId,
+        visibility: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the work package visibility change",
+            set_work_package_visibility_then(id.0, visibility)
+        )
+    }
+
+    async fn super_admin_delete_unseen_item(
+        &self,
+        kind: String,
+        item_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the unseen item deletion",
+            super_admin_delete_unseen_item_then(kind, item_id)
         )
     }
 

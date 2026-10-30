@@ -106,6 +106,13 @@ pub fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) {
 #[spacetimedb::reducer]
 pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String> {
     validate_learning_scope(&row.scope, &row.scope_ref)?;
+    if !is_operator(ctx) && !learning_scope_seen(ctx, &row) {
+        return Err(format!(
+            "{} {} does not exist",
+            row.scope,
+            row.scope_ref.as_deref().unwrap_or("")
+        ));
+    }
     ctx.db.learnings().insert(Learning {
         // Never trust an incoming id on a create — see `create_task`.
         id: 0,
@@ -130,7 +137,7 @@ pub fn validate_learning_scope(scope: &str, scope_ref: &Option<String>) -> Resul
 /// the same bargain [`patch_task`] makes.
 #[spacetimedb::reducer]
 pub fn patch_learning(ctx: &ReducerContext, id: i64, patch: LearningPatch) -> Result<(), String> {
-    let Some(mut row) = ctx.db.learnings().id().find(id) else {
+    let Some(mut row) = visible_learning(ctx, id) else {
         return Ok(());
     };
     apply_learning_patch(&mut row, patch);
@@ -150,9 +157,17 @@ pub fn patch_learning(ctx: &ReducerContext, id: i64, patch: LearningPatch) -> Re
 /// `ON DELETE CASCADE` clause.
 #[spacetimedb::reducer]
 pub fn delete_learning(ctx: &ReducerContext, id: i64) -> Result<(), String> {
-    if ctx.db.learnings().id().find(id).is_none() {
+    if visible_learning(ctx, id).is_none() {
         return Err(format!("learning {id} not found"));
     }
+    delete_learning_rows(ctx, id);
+    Ok(())
+}
+
+/// The learning row and what only referred to it, with no sight check:
+/// [`delete_learning`] decides who may, and `delete_workspace` empties a
+/// workspace it was already allowed to delete.
+pub(crate) fn delete_learning_rows(ctx: &ReducerContext, id: i64) {
     ctx.db.learnings().id().delete(id);
     let retrievals: Vec<i64> = ctx
         .db
@@ -170,7 +185,6 @@ pub fn delete_learning(ctx: &ReducerContext, id: i64) -> Result<(), String> {
         .map(|v| v.id)
         .collect();
     delete_learning_verdicts(ctx, verdicts);
-    Ok(())
 }
 
 /// Re-scope every epic-scoped learning pointing at `from` to `to` instead.
@@ -182,6 +196,9 @@ pub fn delete_learning(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// not an embedding input, so no row's `embedding` is touched.
 #[spacetimedb::reducer]
 pub fn rescope_epic_learnings(ctx: &ReducerContext, from: i64, to: i64) -> Result<(), String> {
+    if !is_operator(ctx) && (visible_epic(ctx, from).is_none() || visible_epic(ctx, to).is_none()) {
+        return Ok(());
+    }
     rescope_learnings(ctx, from, to);
     Ok(())
 }
@@ -209,6 +226,11 @@ pub fn record_learning_retrieval(
     learning_id: i64,
     source: String,
 ) -> Result<(), String> {
+    if visible_task(ctx, task_id).is_none() || visible_learning(ctx, learning_id).is_none() {
+        return Err(format!(
+            "task {task_id} or learning {learning_id} does not exist"
+        ));
+    }
     ctx.db.learning_retrievals().insert(LearningRetrieval {
         task_id,
         learning_id,
@@ -278,6 +300,9 @@ pub fn apply_learning_verdicts(
     task_id: i64,
     verdicts: Vec<LearningVerdictInput>,
 ) -> Result<(), String> {
+    if visible_task(ctx, task_id).is_none() {
+        return Err(format!("task {task_id} not found"));
+    }
     for v in &verdicts {
         let retrieved = ctx
             .db
@@ -290,7 +315,7 @@ pub fn apply_learning_verdicts(
         }
     }
     for v in verdicts {
-        let Some(row) = ctx.db.learnings().id().find(v.learning_id) else {
+        let Some(row) = visible_learning(ctx, v.learning_id) else {
             continue;
         };
         let standing = ctx

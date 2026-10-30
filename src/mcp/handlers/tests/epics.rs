@@ -12,7 +12,7 @@ async fn create_epic_minimal() {
         "tools/call",
         Some(json!({
             "name": "create_epic",
-            "arguments": { "title": "My Epic" }
+            "arguments": { "workspace_id": 1, "title": "My Epic" }
         })),
     )
     .await;
@@ -33,7 +33,7 @@ async fn create_epic_with_all_fields() {
         "tools/call",
         Some(json!({
             "name": "create_epic",
-            "arguments": {
+            "arguments": { "workspace_id": 1,
                 "title": "Full Epic",
                 "description": "Epic desc"
             }
@@ -54,7 +54,7 @@ async fn create_epic_missing_title() {
         "tools/call",
         Some(json!({
             "name": "create_epic",
-            "arguments": {}
+            "arguments": { "workspace_id": 1,}
         })),
     )
     .await;
@@ -269,6 +269,26 @@ async fn list_epics_with_items() {
     let text = extract_response_text(&resp);
     assert!(text.contains("Epic A"));
     assert!(text.contains("Epic B"));
+}
+
+#[tokio::test]
+async fn list_epics_names_each_epics_workspace_and_visibility() {
+    let state = test_state().await;
+    let epic = state
+        .db_write()
+        .create_epic("Hidden", "d", None)
+        .await
+        .unwrap();
+    state
+        .db_write()
+        .set_epic_visibility(epic.id, crate::models::Visibility::Private)
+        .await
+        .unwrap();
+    let text = list_epics_text(&state, json!({})).await;
+    assert!(
+        text.contains("[workspace 0, private]"),
+        "workspace and visibility on the row: {text}"
+    );
 }
 
 #[tokio::test]
@@ -1224,4 +1244,97 @@ fn there_is_no_get_epic_tool() {
         .unwrap()
         .iter()
         .any(|t| t["name"] == "get_epic"));
+}
+
+// =======================================================================
+// Workspace and visibility (workspaces.allium: NameWorkspaceAndVisibilityViaMcp)
+// =======================================================================
+
+fn is_error(resp: &JsonRpcResponse) -> bool {
+    resp.result
+        .as_ref()
+        .and_then(|r| r.get("isError"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+async fn create_epic_call(state: &Arc<McpState>, arguments: Value) -> JsonRpcResponse {
+    call(
+        state,
+        "tools/call",
+        Some(json!({"name": "create_epic", "arguments": arguments})),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_root_epic_without_a_workspace_is_refused_and_lists_yours() {
+    let state = test_state().await;
+    let resp = create_epic_call(&state, json!({"title": "E"})).await;
+    assert!(is_error(&resp));
+    let text = extract_response_text(&resp);
+    assert!(text.contains("needs a workspace_id"), "{text}");
+    assert!(text.contains("1 (Default)"), "{text}");
+    assert!(state.db.list_epics().await.is_empty());
+}
+
+#[tokio::test]
+async fn a_root_epic_takes_its_workspace_and_visibility() {
+    let state = test_state().await;
+    let resp = create_epic_call(
+        &state,
+        json!({"title": "E", "workspace_id": 1, "visibility": "private"}),
+    )
+    .await;
+    assert!(!is_error(&resp), "{}", extract_response_text(&resp));
+    assert!(extract_response_text(&resp).contains("workspace 1, private"));
+    let epic = state.db.list_epics().await.remove(0);
+    assert_eq!(epic.workspace_id, 1);
+    assert_eq!(epic.visibility, crate::models::Visibility::Private);
+}
+
+#[tokio::test]
+async fn a_sub_epic_refuses_a_workspace_and_takes_its_parents() {
+    let state = test_state().await;
+    create_epic_call(&state, json!({"title": "Parent", "workspace_id": 1})).await;
+    let parent = state.db.list_epics().await.remove(0).id;
+
+    let refused = create_epic_call(
+        &state,
+        json!({"title": "Sub", "parent_epic_id": parent.0, "workspace_id": 1}),
+    )
+    .await;
+    assert!(is_error(&refused));
+    assert_eq!(state.db.list_epics().await.len(), 1);
+
+    let ok = create_epic_call(&state, json!({"title": "Sub", "parent_epic_id": parent.0})).await;
+    assert!(!is_error(&ok), "{}", extract_response_text(&ok));
+    let sub = state
+        .db
+        .list_epics()
+        .await
+        .into_iter()
+        .find(|e| e.title == "Sub")
+        .unwrap();
+    assert_eq!(sub.workspace_id, 1);
+}
+
+#[tokio::test]
+async fn update_epic_sets_visibility() {
+    let state = test_state().await;
+    create_epic_call(&state, json!({"title": "E", "workspace_id": 1})).await;
+    let id = state.db.list_epics().await.remove(0).id;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(
+            json!({"name": "update_epic", "arguments": {"epic_id": id.0, "visibility": "private"}}),
+        ),
+    )
+    .await;
+    assert!(!is_error(&resp), "{}", extract_response_text(&resp));
+    assert_eq!(
+        state.db.list_epics().await[0].visibility,
+        crate::models::Visibility::Private
+    );
 }

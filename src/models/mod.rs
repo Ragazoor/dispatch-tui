@@ -76,7 +76,9 @@ pub mod epics;
 pub use epics::*;
 
 pub mod people;
-pub use people::shown_name;
+pub mod visibility;
+pub use people::{shown_name, WorkspaceRef, NO_WORKSPACE};
+pub use visibility::Visibility;
 pub mod work_packages;
 pub use work_packages::*;
 

@@ -85,7 +85,8 @@ pub(crate) struct ReducerStore<'a>(pub(crate) &'a ReducerContext);
 
 impl IngestStore for ReducerStore<'_> {
     fn epic(&self, id: i64) -> Option<Epic> {
-        self.0.db.epics().id().find(id)
+        // Sight first: an unseen epic is answered as a missing one.
+        crate::visibility::visible_epic(self.0, id)
     }
     fn child_epics(&self, parent: i64) -> Vec<Epic> {
         self.0.db.epics().parent_epic_id().filter(&parent).collect()
@@ -106,7 +107,7 @@ impl IngestStore for ReducerStore<'_> {
         now(self.0)
     }
     fn insert_epic(&mut self, row: Epic) -> i64 {
-        self.0.db.epics().insert(row).id
+        self.0.db.epics().insert(inherit_workspace(self.0, row)).id
     }
     fn update_task(&mut self, row: Task) {
         let left_its_epic = self

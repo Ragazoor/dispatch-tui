@@ -5,7 +5,11 @@ use crate::models::{TaskId, WorkPackageId, WorkPackageItem};
 // Work package tool tests (work-packages.allium, "MCP tools")
 // =======================================================================
 
-async fn tool(state: &Arc<McpState>, name: &str, arguments: Value) -> JsonRpcResponse {
+async fn tool(state: &Arc<McpState>, name: &str, mut arguments: Value) -> JsonRpcResponse {
+    // The test store's default workspace, which a package is always created in.
+    if name == "create_work_package" && arguments.get("workspace_id").is_none() {
+        arguments["workspace_id"] = json!(1);
+    }
     call(
         state,
         "tools/call",
@@ -413,4 +417,100 @@ async fn list_work_packages_names_the_creator_by_display_name_or_prefix() {
     assert!(!is_error(&resp), "{resp:?}");
     let listed = format!("{:?}", tool(&state, "list_work_packages", json!({})).await);
     assert!(listed.contains("Created by: Alice"), "{listed}");
+}
+
+// =======================================================================
+// Workspace and visibility (workspaces.allium: NameWorkspaceAndVisibilityViaMcp)
+// =======================================================================
+
+fn is_error(resp: &JsonRpcResponse) -> bool {
+    resp.result
+        .as_ref()
+        .and_then(|r| r.get("isError"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+#[tokio::test]
+async fn create_work_package_without_a_workspace_is_refused_and_lists_yours() {
+    let state = test_state().await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "create_work_package", "arguments": {"title": "W"}})),
+    )
+    .await;
+    assert!(is_error(&resp));
+    let text = extract_response_text(&resp);
+    assert!(text.contains("needs a workspace_id"), "{text}");
+    assert!(text.contains("1 (Default)"), "{text}");
+    assert!(state.db.list_work_packages().await.is_empty());
+}
+
+#[tokio::test]
+async fn create_work_package_takes_a_visibility_and_list_shows_it() {
+    let state = test_state().await;
+    let resp = tool(
+        &state,
+        "create_work_package",
+        json!({"title": "Mine", "visibility": "private"}),
+    )
+    .await;
+    assert!(!is_error(&resp), "{}", extract_response_text(&resp));
+    let list = tool(&state, "list_work_packages", json!({})).await;
+    let text = extract_response_text(&list);
+    assert!(text.contains("Workspace: 1"), "{text}");
+    assert!(text.contains("Visibility: private"), "{text}");
+}
+
+#[tokio::test]
+async fn update_work_package_sets_visibility_alone() {
+    let state = test_state().await;
+    tool(&state, "create_work_package", json!({"title": "P"})).await;
+    let id = only_package(&state).await;
+    let resp = tool(
+        &state,
+        "update_work_package",
+        json!({"work_package_id": id.0, "visibility": "private"}),
+    )
+    .await;
+    assert!(!is_error(&resp), "{}", extract_response_text(&resp));
+    assert_eq!(
+        state.db.list_work_packages().await[0].visibility,
+        crate::models::Visibility::Private
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_visibility_is_refused_and_names_the_choices() {
+    let state = test_state().await;
+    let resp = tool(
+        &state,
+        "create_work_package",
+        json!({"title": "P", "visibility": "secret"}),
+    )
+    .await;
+    assert!(is_error(&resp));
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("public") && text.contains("private"),
+        "{text}"
+    );
+    assert!(state.db.list_work_packages().await.is_empty());
+}
+
+#[tokio::test]
+async fn create_work_package_in_an_unknown_workspace_lists_the_callers_workspaces() {
+    let state = test_state().await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_work_package",
+            "arguments": { "title": "P", "workspace_id": 9999 }
+        })),
+    )
+    .await;
+    assert_error(&resp, "unknown workspace_id 9999");
+    assert_error(&resp, "workspace");
 }

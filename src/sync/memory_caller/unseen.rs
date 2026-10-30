@@ -82,7 +82,11 @@ impl MemoryReducerCaller {
             ));
         }
         let epic_id = encode::epic_ref(Some(epic_id));
+        let scope = self.scope();
         let mut tables = self.lock();
+        if tables.visible_epic(&scope, epic_id).is_none() {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
         let in_epic: Vec<i64> = tables
             .tasks
             .values()

@@ -72,6 +72,7 @@ use "./observability.allium" as observability
 --   board_picker_move_to_epic    board.picker.move_to_epic    epic tree picker for moving a task (`m`)
 --   board_picker_reparent_epic   board.picker.reparent_epic   epic tree picker for reparenting an epic (`m`)
 --   board_picker_work_package    board.picker.work_package    work-package link picker (`w`; work-packages.allium)
+--   board_picker_placement       board.picker.placement       workspace and visibility step of epic and package creation (workspaces.allium)
 --   board_confirm_quit                    board.confirm.quit
 --   board_confirm_delete_task             board.confirm.delete_task
 --   board_confirm_batch_delete            board.confirm.batch_delete
@@ -191,7 +192,7 @@ enum KeyNamespace {
     board_picker_repo_path | board_picker_base_branch | board_picker_tag |
     board_picker_wrap_up_mode | board_picker_model | board_picker_quick_dispatch |
     board_picker_move_to_epic | board_picker_reparent_epic |
-    board_picker_work_package |
+    board_picker_work_package | board_picker_placement |
     board_confirm_quit | board_confirm_delete_task | board_confirm_batch_delete |
     board_confirm_delete_epic | board_confirm_done | board_confirm_retry |
     board_confirm_detach_tmux | board_confirm_override_feed_owner |

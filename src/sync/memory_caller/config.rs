@@ -158,8 +158,9 @@ impl MemoryReducerCaller {
                 "cannot subscribe without an identity".into(),
             ));
         }
+        let scope = self.scope();
         let mut tables = self.lock();
-        if !tables.epics.contains_key(&epic_id) {
+        if tables.visible_epic(&scope, epic_id).is_none() {
             return Ok(ReducerOutcome::Refused(format!("no epic {epic_id}")));
         }
         let id = module::subscription_id(&subscriber, epic_id);

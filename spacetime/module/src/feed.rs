@@ -371,7 +371,9 @@ pub fn ensure_managed_epics(
             &identity,
         );
         for role in [ROLE_MY_REVIEWS, ROLE_TEAM_REVIEWS, ROLE_BOTS] {
-            ensure_role_epic(ctx, role, parent, None, &identity);
+            if parent != 0 {
+                ensure_role_epic(ctx, role, parent, None, &identity);
+            }
         }
     }
     if !cve_command.is_empty() {
@@ -413,7 +415,9 @@ fn ensure_role_epic(
         .epics()
         .parent_epic_id()
         .filter(&parent_epic_id)
-        .find(|e| e.feed_role == role);
+        // Only an epic the caller can see counts: a managed root in a
+        // workspace they are not in must not be reused or rewritten.
+        .find(|e| e.feed_role == role && visible_epic(ctx, e.id).is_some());
     if let Some(epic) = existing {
         if let Some((cmd, interval)) = command {
             if epic.feed_command != cmd || epic.feed_interval_secs != interval {
@@ -431,9 +435,9 @@ fn ensure_role_epic(
     }
     let (feed_command, feed_interval_secs) =
         command.map(|(c, i)| (c.to_string(), i)).unwrap_or_default();
-    ctx.db
-        .epics()
-        .insert(Epic {
+    let row = inherit_workspace(
+        ctx,
+        Epic {
             title: managed_role_title(role).to_string(),
             parent_epic_id,
             feed_role: role.to_string(),
@@ -443,6 +447,20 @@ fn ensure_role_epic(
             created_at: now(ctx),
             updated_at: now(ctx),
             ..blank_epic()
-        })
-        .id
+        },
+    );
+    // A managed root epic lives in the caller's first workspace; a caller in
+    // none gets no root epic rather than one in a workspace that is not there.
+    let row = if row.workspace_id == 0 {
+        match first_workspace_of(ctx, created_by) {
+            Some(workspace_id) => Epic {
+                workspace_id,
+                ..row
+            },
+            None => return 0,
+        }
+    } else {
+        row
+    };
+    ctx.db.epics().insert(row).id
 }

@@ -67,6 +67,15 @@ pub(in crate::tui) fn cancel_input(
         input.reopen_link_picker(item, package_count);
         return vec![];
     }
+    if input.mode == InputMode::InputPlacement {
+        // Esc leaves nothing created; a package's form returns to the picker.
+        let placement = input.placement.take();
+        if let Some(PlacementFor::Package { item, .. }) = placement.map(|p| p.target) {
+            input.reopen_link_picker(item, package_count);
+            return vec![];
+        }
+        input.epic_draft = None;
+    }
     input.mode = InputMode::Normal;
     input.clear_buffer();
     input.task_draft = None;
