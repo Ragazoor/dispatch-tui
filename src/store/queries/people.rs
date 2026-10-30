@@ -102,8 +102,7 @@ impl super::super::PeopleStore for Store {
                 }
             })
             .collect();
-        workspaces
-            .sort_by(|a, b| (a.name.to_lowercase(), a.id).cmp(&(b.name.to_lowercase(), b.id)));
+        workspaces.sort_by_key(|w| (w.name.to_lowercase(), w.id));
         let workspace_name = |id: i64| {
             workspaces_rows
                 .iter()

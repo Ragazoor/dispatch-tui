@@ -1,5 +1,6 @@
 //! Confirmation overlays and popup helpers (error, help, repo filter, task detail).
 
+mod admin;
 mod board_filter;
 mod error;
 mod help;
@@ -7,6 +8,7 @@ mod reparent_epic;
 mod task_detail;
 mod work_package;
 
+pub(super) use admin::render_admin_overlay;
 pub(super) use board_filter::render_board_filter_overlay;
 pub(super) use error::render_error_popup;
 pub(super) use help::render_help_overlay;

@@ -140,6 +140,12 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
             "New work package: type a title  [Enter] create  [Esc] back",
             CYAN,
         ),
+        InputMode::Admin => hint(
+            "Admin: [Tab] pane  [j/k] move  [Esc] close  (keys for the pane are shown on the screen)",
+            CYAN,
+        ),
+        InputMode::InputAdminText => hint("Admin: type a name  [Enter] send  [Esc] cancel", CYAN),
+        InputMode::ConfirmAdmin => hint("Admin: confirm with [y], any other key cancels", YELLOW),
         InputMode::InputDisplayName => hint(
             "Display name: type a name  [Enter] save  [Esc] cancel",
             CYAN,

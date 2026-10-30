@@ -232,6 +232,9 @@ pub struct InputState {
     /// The person's workspaces, read when a create form opens
     /// (`PeopleCommand::LoadWorkspaces`).
     pub workspaces: Vec<crate::models::WorkspaceRef>,
+    /// The admin screen; set while `mode` is `Admin`, `InputAdminText` or
+    /// `ConfirmAdmin`.
+    pub admin: Option<super::AdminScreen>,
     pub repo_cursor: usize,
     /// Tracks epic_id during quick-dispatch repo selection in epic view.
     pub pending_epic_id: Option<EpicId>,
@@ -259,6 +262,7 @@ impl Default for InputState {
             epic_draft: None,
             placement: None,
             workspaces: Vec::new(),
+            admin: None,
             repo_cursor: 0,
             pending_epic_id: None,
             copy_flow: false,

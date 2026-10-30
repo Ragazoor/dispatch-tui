@@ -155,7 +155,7 @@ rule UnseenItemListingContents {
         -- private epic with no creator as a private epic nobody holds).
         -- Rows carry no title. The module serves this as the `unseen_items`
         -- view, which returns the empty set to anyone but a super-admin.
-        -- Ordered by workspace name, then kind, then id.
+        -- Ordered by workspace id, then kind, then id.
 }
 
 ------------------------------------------------------------
@@ -168,7 +168,7 @@ rule OpenAdminScreen {
     ensures: AdminScreenOpened(pane: Workspaces)
 
     @guidance
-        -- `W` in the board's normal mode (listed in the keybinding table).
+        -- `A` ("admin") in the board's normal mode (listed in the keybinding table).
         -- The screen reads the directory, the workspaces and the memberships
         -- when it opens and again after every write it makes; it holds a
         -- snapshot, so what it shows is what the last read saw. It lists the

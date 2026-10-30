@@ -41,9 +41,12 @@ impl App {
             | InputMode::InputEpicDescription
             | InputMode::InputWorkPackageTitle(_)
             | InputMode::RenameWorkPackage(_)
-            | InputMode::InputDisplayName => N::BoardText,
+            | InputMode::InputDisplayName
+            | InputMode::InputAdminText => N::BoardText,
             InputMode::LinkWorkPackage { .. } => N::BoardPickerWorkPackage,
             InputMode::InputPlacement => N::BoardPickerPlacement,
+            InputMode::Admin => N::BoardAdmin,
+            InputMode::ConfirmAdmin => N::BoardConfirmAdmin,
             InputMode::ConfirmDeleteWorkPackage(_) => N::BoardConfirmDeleteWorkPackage,
             InputMode::InputRepoPath => N::BoardPickerRepoPath,
             InputMode::InputBaseBranch => N::BoardPickerBaseBranch,
@@ -360,6 +363,14 @@ impl App {
             N::BoardPickerReparentEpic => self.run_reparent_picker(action, key, label),
             N::BoardPickerWorkPackage => self.run_work_package_picker(action, key, label),
             N::BoardPickerPlacement => self.run_placement_picker(action, key, label),
+            N::BoardAdmin => self.run_admin(action, key, label),
+            N::BoardConfirmAdmin => self.dispatch_keyed(
+                Message::Admin(crate::tui::messages::AdminMessage::Confirm(
+                    action.ends_with("_yes"),
+                )),
+                action,
+                label,
+            ),
             N::BoardConfirmMoveToEpic => {
                 use crate::tui::messages::TaskMessage::*;
                 let msg = match action {
@@ -591,6 +602,31 @@ impl App {
             _ => return vec![],
         };
         self.dispatch_keyed(Message::Input(msg), action, label)
+    }
+
+    /// The admin screen (`admin-surfaces.allium`).
+    fn run_admin(&mut self, action: &'static str, key: KeyEvent, label: &str) -> Vec<Command> {
+        use crate::tui::messages::AdminMessage::*;
+        let msg = match action {
+            "admin_navigate" => {
+                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+                Move(if down { 1 } else { -1 })
+            }
+            "admin_pane" => Pane(if key.code == KeyCode::BackTab { -1 } else { 1 }),
+            "admin_new_workspace" => NewWorkspace,
+            "admin_rename_workspace" => RenameWorkspace,
+            "admin_delete_workspace" => DeleteWorkspace,
+            "admin_add_member" => AddMember,
+            "admin_toggle_role" => ToggleRole,
+            "admin_remove_member" => RemoveMember,
+            "admin_grant_super_admin" => Grant,
+            "admin_revoke_super_admin" => Revoke,
+            "admin_claim_super_admin" => Claim,
+            "admin_delete_unseen_item" => DeleteUnseen,
+            "admin_close" => Close,
+            _ => return vec![],
+        };
+        self.dispatch_keyed(Message::Admin(msg), action, label)
     }
 
     /// The "reparent epic" tree picker.

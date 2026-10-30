@@ -59,7 +59,7 @@ async fn a_family_name_returns_every_group_of_the_family() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.confirm"})).await;
     let gs = groups(&resp);
-    assert_eq!(gs.len(), 14);
+    assert_eq!(gs.len(), 15);
     assert!(gs.iter().all(|g| g["namespace"]
         .as_str()
         .unwrap()
@@ -114,13 +114,13 @@ async fn an_unknown_namespace_is_rejected_listing_the_valid_names() {
 }
 
 /// Non-vacuity of the family filter: every board.confirm.* dialog has rows,
-/// so the family returns fourteen groups none of which is empty.
+/// so the family returns fifteen groups none of which is empty.
 #[tokio::test]
-async fn the_confirm_family_returns_fourteen_non_empty_groups() {
+async fn the_confirm_family_returns_fifteen_non_empty_groups() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.confirm"})).await;
     let gs = groups(&resp);
-    assert_eq!(gs.len(), 14);
+    assert_eq!(gs.len(), 15);
     for g in &gs {
         assert!(
             !g["bindings"].as_array().unwrap().is_empty(),

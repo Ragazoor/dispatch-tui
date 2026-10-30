@@ -5,6 +5,7 @@
 //! domain (PR flow, epics, repo filters, etc.) so each file stays small
 //! enough to navigate quickly.
 
+mod admin;
 mod agent;
 mod board_filter;
 mod budget;

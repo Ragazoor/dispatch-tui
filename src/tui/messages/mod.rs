@@ -4,6 +4,7 @@
 //! migrated into per-domain inner enums to keep the dispatcher manageable as
 //! the TUI grows. Each module here owns one domain's messages.
 
+pub mod admin;
 pub mod board_filter;
 pub mod budget;
 pub mod editor;
@@ -16,6 +17,7 @@ pub mod system;
 pub mod task;
 pub mod work_package;
 
+pub use admin::AdminMessage;
 pub use board_filter::BoardFilterMessage;
 pub use budget::BudgetMessage;
 pub use editor::EditorMessage;

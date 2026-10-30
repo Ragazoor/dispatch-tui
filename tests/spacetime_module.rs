@@ -353,3 +353,5 @@ mod publish;
 mod sequence;
 #[path = "spacetime_module/subscription.rs"]
 mod subscription;
+#[path = "spacetime_module/unseen_items.rs"]
+mod unseen_items;

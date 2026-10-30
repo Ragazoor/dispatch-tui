@@ -310,6 +310,15 @@ fn draft_app(mode: InputMode) -> App {
     app
 }
 
+/// A board with the admin screen open on a super-admin's snapshot, so every
+/// key of the screen has something to act on.
+fn admin_app(mode: InputMode) -> App {
+    let mut app = make_app();
+    app.input.admin = Some(crate::tui::tests::admin::super_admin_screen());
+    app.input.mode = mode;
+    app
+}
+
 fn with_move_task_picker() -> App {
     let mut app = make_app();
     app.board.epics = vec![make_epic(10), make_epic(11)];
@@ -518,6 +527,18 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardConfirmDeleteWorkPackage => one(draft_app(InputMode::ConfirmDeleteWorkPackage(
             crate::models::WorkPackageId(1),
         ))),
+        N::BoardAdmin => one(admin_app(InputMode::Admin)),
+        N::BoardConfirmAdmin => {
+            let mut app = admin_app(InputMode::ConfirmAdmin);
+            if let Some(screen) = app.input.admin.as_mut() {
+                screen.confirm = Some(crate::tui::types::AdminConfirm::RemoveMember {
+                    membership_id: 7,
+                    person: "Ann".to_string(),
+                    workspace: "Default".to_string(),
+                });
+            }
+            one(app)
+        }
         N::AgentTreeTree
         | N::AgentTreeCommits
         | N::AgentTreeAgents

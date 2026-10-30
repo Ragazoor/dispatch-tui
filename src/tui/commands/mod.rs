@@ -26,7 +26,7 @@ pub use editor::EditorCommand;
 pub use epic::EpicCommand;
 pub use feed::FeedCommand;
 pub use learnings::LearningCommand;
-pub use people::PeopleCommand;
+pub use people::{AdminWrite, PeopleCommand};
 pub use pr::PrCommand;
 pub use repo_filter::RepoFilterCommand;
 pub use settings::SettingsCommand;

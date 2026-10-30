@@ -58,14 +58,16 @@ fn bindings_index() -> String {
     repo_file(&["src", "spacetime", "bindings", "mod.rs"])
 }
 
-/// Every `accessor = <name>` in the module source.
+/// Every `accessor = <name>` in the module source: tables, and views, which
+/// the generator gives a `<name>_table` binding of their own.
 fn module_tables() -> BTreeSet<String> {
     module_source()
         .lines()
         .filter_map(|line| {
+            let line = line.trim();
             let rest = line
-                .trim()
-                .strip_prefix("#[spacetimedb::table(accessor = ")?;
+                .strip_prefix("#[spacetimedb::table(accessor = ")
+                .or_else(|| line.strip_prefix("#[spacetimedb::view(accessor = "))?;
             let end = rest.find([',', ')'])?;
             Some(rest[..end].to_string())
         })

@@ -76,6 +76,10 @@ impl App {
                 keyed(self, Message::System(SystemMessage::ToggleNotifications))
             }
             "set_display_name" => keyed(self, Message::Input(InputMessage::StartSetDisplayName)),
+            "open_admin_screen" => keyed(
+                self,
+                Message::Admin(crate::tui::messages::AdminMessage::Open),
+            ),
             "open_board_filter" => keyed(self, Message::BoardFilter(BoardFilterMessage::Start)),
             "search_tasks" => {
                 self.search.saved = Some(self.search.query.clone());

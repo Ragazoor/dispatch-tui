@@ -282,6 +282,9 @@ impl App {
             InputMode::InputDisplayName => self.update(Message::Input(
                 crate::tui::messages::InputMessage::SubmitDisplayName(value),
             )),
+            InputMode::InputAdminText => self.update(Message::Admin(
+                crate::tui::messages::AdminMessage::SubmitText(value),
+            )),
             InputMode::RenameWorkPackage(_) => self.update(Message::WorkPackage(
                 crate::tui::messages::WorkPackageMessage::SubmitRename(value),
             )),

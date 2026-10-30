@@ -1,6 +1,7 @@
 pub mod scenarios;
 pub mod snapshots;
 
+mod admin;
 mod board_hides;
 mod board_lens;
 mod budget;

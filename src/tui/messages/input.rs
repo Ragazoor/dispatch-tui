@@ -75,6 +75,12 @@ impl InputMessage {
                 Some(task) => forms::copy_task(&mut app.input, &mut app.status, &task),
                 None => vec![],
             },
+            InputMessage::CancelInput
+                if app.input.mode == crate::tui::types::InputMode::InputAdminText =>
+            {
+                app.cancel_admin_prompt();
+                vec![]
+            }
             InputMessage::CancelInput => forms::cancel_input(
                 &mut app.input,
                 &mut app.interaction,
