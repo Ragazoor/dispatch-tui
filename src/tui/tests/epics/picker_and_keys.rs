@@ -395,7 +395,7 @@ fn reparent_target_epics_excludes_only_active_filtered_epic() {
     inactive.epic_id = Some(EpicId(30));
     inactive.tmux_window = None; // no live session — what only_active filters on
     app.board.tasks = vec![active, inactive];
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
 
     let ids = target_ids(&app, EpicId(10));
     assert_eq!(

@@ -125,35 +125,6 @@ fn a_column_the_repo_filter_emptied_loses_the_epic_card() {
 }
 
 #[test]
-fn a_column_the_only_active_filter_emptied_loses_the_epic_card() {
-    // The Review task is unprovisioned, so only-active drops it; the Running
-    // one is provisioned and keeps both the epic and its own column alive.
-    let mut app = App::new(vec![]);
-    app.board.tasks = vec![
-        epic_task(1, 1, TaskStatus::Running),
-        crate::models::Task {
-            epic_id: Some(EpicId(1)),
-            ..make_unprovisioned_task(2, TaskStatus::Review)
-        },
-    ];
-    app.board.epics.push(make_epic(1));
-
-    assert_eq!(
-        epic_columns(&app, 1),
-        vec![TaskStatus::Running, TaskStatus::Review],
-        "unfiltered"
-    );
-
-    app.filter.lens = app.filter.lens.with_only_active(true);
-
-    assert_eq!(
-        epic_columns(&app, 1),
-        vec![TaskStatus::Running],
-        "the dropped review task no longer places a card"
-    );
-}
-
-#[test]
 fn an_epic_matched_by_title_alone_falls_back_to_backlog() {
     // The query matches the epic's own title but none of its tasks, so the
     // epic card is visible with no task placing it.
@@ -384,7 +355,7 @@ fn an_only_active_change_invalidates_the_placement_cache() {
     let _ = app.cached_epic_stats();
     assert!(app.view().cached_placements().is_some(), "cache is warm");
 
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
 
     assert!(
         app.view().cached_placements().is_none(),

@@ -939,18 +939,24 @@ entity FoldedEpics {
 -- it back, so every lens is at most two presses away — the same reach `A`
 -- gave the most used one.
 --
--- The four lenses, in cycle order:
+-- The three lenses, in cycle order:
 --   everything   → every card the board filter admits (the default)
---   active       → only tasks with a live session (tmux_window set)
 --   flat         → the flattened rendering (see FlattenedView)
---   flat_active  → both at once
+--   flat_active  → flattened, and only tasks with a live session
+--                  (tmux_window set)
 -- Forward wraps from flat_active to everything; backward wraps the other way.
+--
+-- Dropped lens, recorded so it is not re-added (2026-10-30, task #98705):
+-- there used to be a fourth lens, `active`, between everything and flat:
+-- only-active with the columns still grouped under epics. The operator
+-- never used only-active without flattening, so it cost a Tab press on
+-- every cycle for nothing. Only-active now always comes with flattening.
 --
 -- The lens reaches inside a package view as it does everywhere else: both
 -- halves apply there (work-packages.allium: PackageViewCards).
 --
--- What `active` narrows: only tasks where tmux_window is set are included in
--- tasks_for_current_view. This is applied in addition to the board filter.
+-- What `flat_active` narrows: only tasks where tmux_window is set are
+-- included in tasks_for_current_view. This is applied in addition to the board filter.
 -- It is still called the only-active filter everywhere else in this file:
 -- BoardLens.only_active is that predicate's switch.
 --
@@ -958,32 +964,30 @@ entity FoldedEpics {
 --   - One lens per board, preserved as the user navigates into sub-epics and
 --     back out.
 --   - Session-scoped: every app start begins at `everything`.
---   - The lens shows as the status bar's existing badges: `[active]` while
---     only_active holds and `[flat]` while flattened holds, both for
---     flat_active. `everything` shows neither.
+--   - The lens shows as the status bar's existing badges: `[flat]` for
+--     flat, both `[active]` and `[flat]` for flat_active. `everything` shows
+--     neither.
 --
 -- No MCP tool reads or sets the lens. It is the operator's reading of their
 -- own board for one session, needs nothing from the shared store (store-split
 -- S1 keeps it in the TUI), and no agent sees that board.
 
-enum Lens { everything | active | flat | flat_active }
+enum Lens { everything | flat | flat_active }
 
 entity BoardLens {
     lens: Lens
 
     -- The two switches the rest of this file reads. Derived, never set on
     -- their own: the lens is the only state.
-    only_active: lens = active or lens = flat_active
+    only_active: lens = flat_active
     flattened: lens = flat or lens = flat_active
 
-    next: if lens = everything: active
-          else if lens = active: flat
+    next: if lens = everything: flat
           else if lens = flat: flat_active
           else: everything
 
     previous: if lens = everything: flat_active
-              else if lens = active: everything
-              else if lens = flat: active
+              else if lens = flat: everything
               else: flat
 }
 

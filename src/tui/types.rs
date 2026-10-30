@@ -59,13 +59,13 @@ impl std::str::FromStr for RepoFilterMode {
 // ---------------------------------------------------------------------------
 
 /// The board's reading mode. The only state behind the only-active filter and
-/// flattening: both are derived from it, never set on their own. Tab steps it
-/// forward, BackTab back. Session-scoped.
+/// flattening: both are derived from it, never set on their own. Only-active
+/// always comes with flattening; there is no grouped only-active lens. Tab
+/// steps it forward, BackTab back. Session-scoped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Lens {
     #[default]
     Everything,
-    Active,
     Flat,
     FlatActive,
 }
@@ -73,7 +73,7 @@ pub enum Lens {
 impl Lens {
     /// Whether only tasks with a live session are shown.
     pub fn only_active(self) -> bool {
-        matches!(self, Lens::Active | Lens::FlatActive)
+        matches!(self, Lens::FlatActive)
     }
 
     /// Whether the Running, Review and Done columns are flattened.
@@ -83,8 +83,7 @@ impl Lens {
 
     pub fn next(self) -> Self {
         match self {
-            Lens::Everything => Lens::Active,
-            Lens::Active => Lens::Flat,
+            Lens::Everything => Lens::Flat,
             Lens::Flat => Lens::FlatActive,
             Lens::FlatActive => Lens::Everything,
         }
@@ -93,21 +92,21 @@ impl Lens {
     pub fn previous(self) -> Self {
         match self {
             Lens::Everything => Lens::FlatActive,
-            Lens::Active => Lens::Everything,
-            Lens::Flat => Lens::Active,
+            Lens::Flat => Lens::Everything,
             Lens::FlatActive => Lens::Flat,
         }
     }
 
     /// The lens with the given switches. Lets a test say "flattened" without
-    /// naming which of the two flattened lenses it means.
+    /// naming which of the two flattened lenses it means. Only-active without
+    /// flattening is not a lens, so asking for it panics.
     #[cfg(test)]
     pub fn from_switches(only_active: bool, flattened: bool) -> Self {
         match (only_active, flattened) {
             (false, false) => Lens::Everything,
-            (true, false) => Lens::Active,
             (false, true) => Lens::Flat,
             (true, true) => Lens::FlatActive,
+            (true, false) => panic!("only-active without flattening is not a lens"),
         }
     }
 
@@ -115,12 +114,6 @@ impl Lens {
     #[cfg(test)]
     pub fn with_flattened(self, on: bool) -> Self {
         Self::from_switches(self.only_active(), on)
-    }
-
-    /// This lens with only-active set to `on`, flattening unchanged.
-    #[cfg(test)]
-    pub fn with_only_active(self, on: bool) -> Self {
-        Self::from_switches(on, self.flattened())
     }
 }
 

@@ -387,13 +387,13 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["Tab"],
         None,
         "cycle_lens_forward",
-        "Step the board lens forward: everything, active (only tasks with a live session), flat (Running, Review and Done list every task as a plain card instead of grouping subtasks under their epic; Backlog is never flattened), flat + active, and back to everything",
+        "Step the board lens forward: everything, flat (Running, Review and Done list every task as a plain card instead of grouping subtasks under their epic; Backlog is never flattened), flat + active (only tasks with a live session), and back to everything",
     ),
     normal(
         &["BackTab"],
         None,
         "cycle_lens_backward",
-        "Step the board lens back: everything, flat + active, flat, active, and back to everything",
+        "Step the board lens back: everything, flat + active, flat, and back to everything",
     ),
     normal(
         &["N"],

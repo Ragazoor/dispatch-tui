@@ -167,7 +167,7 @@ fn a_finished_package_stays_in_done_under_the_only_active_filter() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Done)]);
     app.board.work_packages = vec![make_package(7, "W")];
     app.board.work_package_links = vec![link(7, task_item(3))];
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
 
     assert_eq!(package_columns(&app, 7), vec![TaskStatus::Done]);
 }

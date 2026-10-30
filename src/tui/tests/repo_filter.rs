@@ -704,7 +704,7 @@ fn filter_state_task_matches_only_active_false_always_passes() {
 fn filter_state_task_matches_only_active_true_requires_tmux_window() {
     use crate::tui::FilterState;
     let state = FilterState {
-        lens: crate::tui::types::Lens::Active,
+        lens: crate::tui::types::Lens::FlatActive,
         ..Default::default()
     };
 
@@ -728,14 +728,14 @@ fn handle_key_confirm_delete_repo_path_routes_correctly() {
 }
 
 #[test]
-fn toggle_only_active_flips_flag() {
+fn tab_reaches_only_active_and_wraps_back_out() {
     let mut app = make_app();
     assert!(!app.filter.lens.only_active());
 
-    flip_only_active(&mut app);
+    cycle_lens_to(&mut app, crate::tui::types::Lens::FlatActive);
     assert!(app.filter.lens.only_active());
 
-    flip_only_active(&mut app);
+    cycle_lens_to(&mut app, crate::tui::types::Lens::Everything);
     assert!(!app.filter.lens.only_active());
 }
 
@@ -912,7 +912,7 @@ fn only_active_filter_hides_tasks_without_tmux_window() {
     let mut t3 = make_task(3, TaskStatus::Backlog);
     t3.tmux_window = None;
     app.board.tasks = vec![t1, t2, t3];
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
 
     let visible = app.view().tasks_for_current_view();
     let ids: Vec<_> = visible.iter().map(|t| t.id.0).collect();
@@ -935,7 +935,7 @@ fn only_active_filter_off_shows_all_tasks() {
 #[test]
 fn status_bar_shows_active_badge_when_only_active_enabled() {
     let mut app = make_app();
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
     app.input.mode = InputMode::Normal;
 
     let buf = render_to_buffer(&mut app, 120, 40);
@@ -948,7 +948,7 @@ fn status_bar_shows_active_badge_when_only_active_enabled() {
 #[test]
 fn status_bar_no_active_badge_when_only_active_disabled() {
     let mut app = make_app();
-    app.filter.lens = app.filter.lens.with_only_active(false);
+    app.filter.lens = crate::tui::types::Lens::Everything;
     app.input.mode = InputMode::Normal;
 
     let buf = render_to_buffer(&mut app, 120, 40);
@@ -971,7 +971,7 @@ fn only_active_filter_hides_epic_with_no_active_tasks() {
     t.tmux_window = None;
     app.board.epics = vec![epic];
     app.board.tasks = vec![t];
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -990,7 +990,7 @@ fn only_active_filter_shows_epic_with_active_task() {
     t.tmux_window = Some(test_tmux_window("dispatch:1"));
     app.board.epics = vec![epic];
     app.board.tasks = vec![t];
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -1007,7 +1007,7 @@ fn only_active_filter_off_shows_epics_without_active_tasks() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Backlog;
     app.board.epics = vec![epic];
-    app.filter.lens = app.filter.lens.with_only_active(false);
+    app.filter.lens = crate::tui::types::Lens::Everything;
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -1032,7 +1032,7 @@ fn only_active_filter_column_item_count_excludes_inactive_epics() {
 
     app.board.epics = vec![epic_active, epic_inactive];
     app.board.tasks = vec![t];
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
 
     let count = app.view().column_item_count(TaskStatus::Backlog);
     assert_eq!(
@@ -1060,7 +1060,7 @@ fn only_active_filter_shows_root_epic_when_grandchild_task_is_active() {
 
     app.board.epics = vec![root_epic, sub_epic];
     app.board.tasks = vec![t];
-    app.filter.lens = app.filter.lens.with_only_active(true);
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -1094,8 +1094,8 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
             crate::tui::messages::BoardFilterMessage::Toggle("/repo".to_string()),
         ));
     });
-    check("CycleLens to active", |app| {
-        flip_only_active(app);
+    check("CycleLens to flat_active", |app| {
+        cycle_lens_to(app, crate::tui::types::Lens::FlatActive);
     });
     check("CloseRepoFilter", |app| {
         app.input.mode = InputMode::BoardFilter;

@@ -1,5 +1,5 @@
-//! The board lens: Tab / BackTab cycle everything → active → flat →
-//! flat_active (`board-layout.allium`, "Board Lens").
+//! The board lens: Tab / BackTab cycle everything → flat → flat_active
+//! (`board-layout.allium`, "Board Lens").
 
 use super::*;
 use crate::tui::types::Lens;
@@ -25,35 +25,28 @@ fn the_board_starts_on_the_everything_lens() {
 fn tab_cycles_the_lens_forward_and_wraps() {
     let mut app = App::new(vec![]);
     let mut seen = vec![];
-    for _ in 0..4 {
+    for _ in 0..3 {
         app.handle_key(tab());
         seen.push(app.filter.lens);
     }
-    assert_eq!(
-        seen,
-        vec![Lens::Active, Lens::Flat, Lens::FlatActive, Lens::Everything]
-    );
+    assert_eq!(seen, vec![Lens::Flat, Lens::FlatActive, Lens::Everything]);
 }
 
 #[test]
 fn back_tab_cycles_the_lens_backward_and_wraps() {
     let mut app = App::new(vec![]);
     let mut seen = vec![];
-    for _ in 0..4 {
+    for _ in 0..3 {
         app.handle_key(back_tab());
         seen.push(app.filter.lens);
     }
-    assert_eq!(
-        seen,
-        vec![Lens::FlatActive, Lens::Flat, Lens::Active, Lens::Everything]
-    );
+    assert_eq!(seen, vec![Lens::FlatActive, Lens::Flat, Lens::Everything]);
 }
 
 #[test]
 fn each_lens_derives_both_switches() {
     let cases = [
         (Lens::Everything, false, false),
-        (Lens::Active, true, false),
         (Lens::Flat, false, true),
         (Lens::FlatActive, true, true),
     ];
@@ -80,18 +73,19 @@ fn tab_cycles_the_lens_inside_an_epic_view_and_the_lens_survives_leaving_it() {
     )));
     app.handle_key(tab());
     app.handle_key(tab());
-    assert_eq!(app.filter.lens, Lens::Flat);
+    assert_eq!(app.filter.lens, Lens::FlatActive);
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));
-    assert_eq!(app.filter.lens, Lens::Flat);
+    assert_eq!(app.filter.lens, Lens::FlatActive);
 }
 
 #[test]
-fn the_active_lens_hides_tasks_without_a_session() {
+fn the_flat_active_lens_hides_tasks_without_a_session() {
     let mut idle = make_task(1, TaskStatus::Running);
     idle.tmux_window = None;
     let mut live = make_task(2, TaskStatus::Running);
     live.tmux_window = Some(crate::models::test_tmux_window("task-2"));
     let mut app = App::new(vec![idle, live]);
+    app.handle_key(tab());
     app.handle_key(tab());
     let ids: Vec<_> = app
         .view()
@@ -100,4 +94,14 @@ fn the_active_lens_hides_tasks_without_a_session() {
         .map(|t| t.id)
         .collect();
     assert_eq!(ids, vec![TaskId(2)]);
+}
+
+#[test]
+fn only_active_never_holds_without_flattening() {
+    let mut app = App::new(vec![]);
+    for _ in 0..3 {
+        app.handle_key(tab());
+        let lens = app.filter.lens;
+        assert!(!lens.only_active() || lens.flattened(), "{lens:?}");
+    }
 }

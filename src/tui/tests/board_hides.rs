@@ -274,11 +274,12 @@ fn closing_the_overlay_leaves_an_epic_view_the_user_just_hid() {
 
 #[test]
 fn a_live_task_under_a_hidden_child_does_not_keep_the_parent_under_the_active_lens() {
-    let mut live = epic_task(20, 2, TaskStatus::Running);
+    // Backlog: the one column the flat_active lens leaves grouped.
+    let mut live = epic_task(20, 2, TaskStatus::Backlog);
     live.tmux_window = Some(crate::models::test_tmux_window("task-20"));
     let mut app = App::new(vec![live]);
     app.board.epics = vec![make_epic(1), sub_epic(2, 1)];
-    app.filter.lens = crate::tui::types::Lens::Active;
+    app.filter.lens = crate::tui::types::Lens::FlatActive;
     assert!(cards(&app).0.contains(&EpicId(1)));
 
     app.filter.hidden_epics.insert(EpicId(2));
