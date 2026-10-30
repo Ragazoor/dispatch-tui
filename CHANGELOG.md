@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.5.0](https://github.com/Ragazoor/dispatch-tui/compare/v0.4.0...v0.5.0) (2026-10-30)
+
+
+### Features
+
+* **admin:** workspace and super-admin MCP tools and the unseen_items view ([f23b5fb](https://github.com/Ragazoor/dispatch-tui/commit/f23b5fb1262fb8b1225cde3ff702ad6d20f02d72))
+* **agent-tree:** group the agents list by epic ([61a0563](https://github.com/Ragazoor/dispatch-tui/commit/61a056371d33a6b005e6cf4373f2e97b2ad9206e))
+* **agent-tree:** one open file at a time, replaced in place and focused ([f9ce543](https://github.com/Ragazoor/dispatch-tui/commit/f9ce543fca1766e3ba49d1c41588bf8b59340bb7))
+* **agent-tree:** start the pane on the agents view ([fb6f7d3](https://github.com/Ragazoor/dispatch-tui/commit/fb6f7d3983178b3d8327ac6b34e8b9eab42ed33c))
+* **feeds:** signal a new PR landing in My Reviews ([748a17d](https://github.com/Ragazoor/dispatch-tui/commit/748a17d7290fd192345ddfb68febe11beff208c2))
+* **guide:** simplify the tour to the keys and views a first visit needs ([b936a2c](https://github.com/Ragazoor/dispatch-tui/commit/b936a2c91be7d39336c533eb67b1d688eb91fcee))
+* **learnings:** add a not_applicable verdict to rate_learning ([a76abc1](https://github.com/Ragazoor/dispatch-tui/commit/a76abc16b0cc604a6670000ae470e1d726018887))
+* **learnings:** workspace-scoped learnings with a stamped author ([cb92230](https://github.com/Ragazoor/dispatch-tui/commit/cb92230d95f0cde0ccd50419689cb08ba9f6693e))
+* **mcp:** add resume_task to wake a detached agent with its context ([6bbc1b4](https://github.com/Ragazoor/dispatch-tui/commit/6bbc1b49aecbbed6fc21144478a7913b5b106922))
+* **module:** one update_task reducer for relink, patch and Done stamp ([5a5209b](https://github.com/Ragazoor/dispatch-tui/commit/5a5209b790e8e635f2a7dee5d36f21aa9abae71d))
+* **module:** per-caller views and the indexes they read ([3524493](https://github.com/Ragazoor/dispatch-tui/commit/352449348b4057db56a28375c17a3d8f00b0fa6d))
+* pick the model a task's agent runs on ([85a70a8](https://github.com/Ragazoor/dispatch-tui/commit/85a70a87685749d77183246cbc4d5de8ee5d08cb))
+* **repo-sync:** refuse a second sync of a repo while one is in flight ([2c58989](https://github.com/Ragazoor/dispatch-tui/commit/2c589890e5d03c29db00709b638ae8d61c09634f))
+* **scripts:** rotate and gate the previous-store fixture ([bda23d3](https://github.com/Ragazoor/dispatch-tui/commit/bda23d371e4ee1d6150180f78ffb5649cd26db76))
+* **startup:** abort before publishing when the CLI login does not own the managed database ([66aba38](https://github.com/Ragazoor/dispatch-tui/commit/66aba381674622dff7a5b57b7057e5d889297734))
+* **sync:** retire rows from a view without erasing an update ([6fdf839](https://github.com/Ragazoor/dispatch-tui/commit/6fdf839d34b74f10af2ebc06a74daa2f8ca723e5))
+* **sync:** wire view tables with insert and retire only ([a10c919](https://github.com/Ragazoor/dispatch-tui/commit/a10c91906b1ea37c1e1a4756fa51a4221a075baa))
+* **tui:** admin screen for workspaces, members and super-admins ([5221e88](https://github.com/Ragazoor/dispatch-tui/commit/5221e88a3fb8a444a9c1ec6c0b11d78bcc6be5c0))
+* **tui:** drop the grouped only-active lens ([ffbfec9](https://github.com/Ragazoor/dispatch-tui/commit/ffbfec99c5f41c8a70043dfe65cf7d0e08bef566))
+* **tui:** start every epic folded in the board filter's Epics tab ([00ef860](https://github.com/Ragazoor/dispatch-tui/commit/00ef860601f121073ca969f2237c78778f14a4e0))
+* workspace and visibility on create and change, sight checks on writes ([c092476](https://github.com/Ragazoor/dispatch-tui/commit/c092476e6dbdd8d6dbe2db4fa40670fbe21885a7))
+* **workspaces:** move a root epic and its tree to another workspace ([95d4b63](https://github.com/Ragazoor/dispatch-tui/commit/95d4b630da36eafb42e2268bfc58c004ea9917ce))
+* **workspaces:** super-admins, workspaces and membership ([c335be3](https://github.com/Ragazoor/dispatch-tui/commit/c335be3eb17cad53863f693eb2c60fad552aeaae))
+* **workspaces:** user profiles and display names ([8da1de5](https://github.com/Ragazoor/dispatch-tui/commit/8da1de5ed9fb5d4195c3dcbac5e2ac2b45b875e7))
+* **workspaces:** workspace and visibility columns, store migration ([bd236f0](https://github.com/Ragazoor/dispatch-tui/commit/bd236f035a5ad262a3ac0b5d57755df28f5d80a5))
+
+
+### Bug Fixes
+
+* **agent-tree:** keep the cursor in view in a one-line agents pane ([52c064e](https://github.com/Ragazoor/dispatch-tui/commit/52c064e9450b5bae4bfc9e92422e88108cc7ceb9))
+* **agent-tree:** never kill or replace an editor pane with unsaved edits ([01eeb24](https://github.com/Ragazoor/dispatch-tui/commit/01eeb241fe142fe70c3a18f8bf37b5f3a1e24d67))
+* **agent-tree:** start a newly opened diff at the top ([ff40aa4](https://github.com/Ragazoor/dispatch-tui/commit/ff40aa419e90051174162e2858cac60bce057dd0))
+* **agent-tree:** v skips the close path; pane lifecycle, refresh timing, docs ([a29c0c5](https://github.com/Ragazoor/dispatch-tui/commit/a29c0c51114802d0d4aefc2afcaf950d451c9ed7))
+* **editor:** escape header-shaped lines so a description cannot end its own section ([42f060d](https://github.com/Ragazoor/dispatch-tui/commit/42f060d9213fd56469f36c0a7f9d7889569927c3))
+* **guide:** restore the cursor on leaving a view, correct finished-task and install text ([7502f05](https://github.com/Ragazoor/dispatch-tui/commit/7502f05e0a94bbf2be484b216a04007b855cbaae))
+* **learnings:** ask for not_applicable on entries the agent did not use ([5c7a5d2](https://github.com/Ragazoor/dispatch-tui/commit/5c7a5d2e922ed687838068a0c0ec7fcde3f87511))
+* **mcp:** resume_task refuses a task whose worktree is gone from disk ([54faffe](https://github.com/Ragazoor/dispatch-tui/commit/54faffefaf307b0610e0f0c25fb31e77127bf244))
+* **mcp:** resume_task refuses another machine's task; board never drops a resume silently ([3159904](https://github.com/Ragazoor/dispatch-tui/commit/315990442b00f1d9409335e8145916feafffaf4b))
+* **module:** feed moves end unseen marks; refuse all format characters in names ([2e523c8](https://github.com/Ragazoor/dispatch-tui/commit/2e523c8d3dcff9a029afd724eb8bf283593ec322))
+* non-interactive git in run_bounded, trimmed editor fields, CLI store-pin wording ([8aae4b8](https://github.com/Ragazoor/dispatch-tui/commit/8aae4b80b2f93ebfc22ab136ef6ad5a5e4d6da51))
+* **process:** kill a timed-out child's process group, keep stderr after exit ([22de00e](https://github.com/Ragazoor/dispatch-tui/commit/22de00e0e95cca017bb75933797dfebe21e3b5a6))
+* **repo-sync:** abort a killed merge, expand ~ in measure_repo ([1f17ac3](https://github.com/Ragazoor/dispatch-tui/commit/1f17ac33ebdc3cc63e076a4886abda66dca52634))
+* review cleanups (verdicts in snapshots, editor sections, scope_ref, embed thread, CLI store pin) ([a2c0402](https://github.com/Ragazoor/dispatch-tui/commit/a2c04027f4509a8ce4bc129b2bac5ce54aa014c1))
+* **runtime:** abort background tasks on drop; safer live-store port pick; CI runs previous-store gate ([1c0bf2f](https://github.com/Ragazoor/dispatch-tui/commit/1c0bf2f44b31e80a033eecc2c945e3dfffe0e77f))
+* **schedule:** a hand move into done spends a claimed one-off ([90d682b](https://github.com/Ragazoor/dispatch-tui/commit/90d682b3afdee4d46bdc8368d71494d24a7dc0fa))
+* **schedule:** keep every accepted cron recurring, settle schedule state on backlog moves and closes ([c486383](https://github.com/Ragazoor/dispatch-tui/commit/c48638333ffb96140cb369cfe8fbc298b4497c62))
+* **schedule:** mark a failed scheduled launch whose task was moved back to backlog ([dfcda06](https://github.com/Ragazoor/dispatch-tui/commit/dfcda060e1bafe4147fe03da709139f134d2fac7))
+* **schedules:** a hand write leaving running cancels the pending run ([06dbb67](https://github.com/Ragazoor/dispatch-tui/commit/06dbb6765eb6e7f95ca628718e8125dec9690b2a))
+* **scripts:** rebuild the previous store fresh instead of publishing over it ([d69a67b](https://github.com/Ragazoor/dispatch-tui/commit/d69a67b6b49e8afdc050b1013c81459515ddc82b))
+* **scripts:** skip the previous-store check in a shallow checkout ([04c9adb](https://github.com/Ragazoor/dispatch-tui/commit/04c9adb76a540aa717d998df97be56fe4abb0800))
+* **spacetime:** burn learning_verdicts' id sequence on restore and import ([d3d5a98](https://github.com/Ragazoor/dispatch-tui/commit/d3d5a98f44ccc69a0ce3d8153e79cb9bb10c0bc8))
+* **startup:** connect to the managed store's own address ([17cbaa8](https://github.com/Ragazoor/dispatch-tui/commit/17cbaa89f9d9bdc2bd996e52b4db111f8e6c131e))
+* **test:** align twin id counters with the real store in conformance test ([4495671](https://github.com/Ragazoor/dispatch-tui/commit/4495671e822e0f2c30df0deab60fb3018a875358))
+* **tests:** wait for the usage row, not just the first wake ([1f916aa](https://github.com/Ragazoor/dispatch-tui/commit/1f916aa73f4c60ac181eb9650756d676bd52654f))
+* **tests:** wait until the subscribed row is present, not just for a wake-up ([f6c722a](https://github.com/Ragazoor/dispatch-tui/commit/f6c722a9c4cdc574488fb2b3e8d0023254492ba4))
+* **tui:** no board filter moves a work package card ([c7d47a9](https://github.com/Ragazoor/dispatch-tui/commit/c7d47a91958853573215bb88da2116d791c8e49e))
+* **workspaces:** refuse a move that would carry off another person's private sub-epic ([0687420](https://github.com/Ragazoor/dispatch-tui/commit/06874206939ec99633505b1467e2483f93bb62b7))
+* **workspaces:** refuse control and invisible characters in display names ([8e1a465](https://github.com/Ragazoor/dispatch-tui/commit/8e1a465438155ef5158684e1e081b3eea3c8bb54))
+
 ## [0.4.0](https://github.com/Ragazoor/dispatch-tui/compare/v0.3.0...v0.4.0) (2026-10-23)
 
 
