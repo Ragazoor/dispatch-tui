@@ -251,11 +251,17 @@ rule UnlinkItem {
     let existing = WorkPackageLink{work_package: package, item: item}
 
     ensures:
-        if exists existing: not exists existing
+        if exists existing and item.visible_to(caller()): not exists existing
 
     @guidance
         -- Idempotent: unlinking an item that is not linked is a silent
         -- success. The task or epic itself is never touched.
+        -- An item the caller cannot see is treated as not linked, so the
+        -- unlink does nothing (task #98744; workspaces.allium:
+        -- WritesRequireSight, UnseenIsAsMissing): a caller can neither
+        -- remove a link they are not shown nor learn from the answer that
+        -- one exists. This holds for unlink_work_package_item and for the
+        -- unlink lists of update_work_package_with_links alike.
 }
 
 rule DeleteWorkPackage {
@@ -564,7 +570,8 @@ rule DeletePackageFromBoard {
 --       that names no field. A link-only call leaves updated_at alone. UnlinkItem
 --       stays idempotent, but the reply names each requested unlink that
 --       was not linked ("not linked: task 4"), so the caller can tell that
---       nothing changed for it.
+--       nothing changed for it. The store leaves a link to an item the
+--       caller cannot see in place, as if it were not linked (UnlinkItem).
 --       delete: true is DeleteWorkPackage (DeleteWorkPackageViaMcp below).
 --
 -- There is no delete_work_package tool. A delete is the last update of a

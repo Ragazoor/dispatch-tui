@@ -114,13 +114,16 @@ impl MemoryReducerCaller {
         task: module::Task,
         target: i64,
     ) -> std::result::Result<(), String> {
+        let id = task.id;
         let row = module::Task {
             epic_id: target,
             owner: String::new(),
             updated_at: self.now(),
             ..task
         };
-        self.write_task(tables, row)
+        self.write_task(tables, row)?;
+        self.clear_unseen_for_task(tables, id);
+        Ok(())
     }
 
     /// Mirrors `reroute_on_repo_change`.

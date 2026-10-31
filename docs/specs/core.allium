@@ -123,7 +123,8 @@ enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
 -- `repo_group` is set by the system when a per-repo sub-epic is created
 -- automatically by repo grouping (see epics.allium: RegroupEpic /
 -- the store's grouping reducers). This field is system-assigned and is never exposed
--- to MCP callers.
+-- to MCP callers. A repo_group epic is always public, and no patch changes
+-- an origin to or from repo_group (workspaces.allium: RepoGroupsStayPublic).
 enum EpicOrigin { manual | repo_group }
 
 -- Legacy alias: "ready" maps to backlog
@@ -1033,10 +1034,13 @@ entity Epic {
     is_feed: feed_command != null
 
     -- The one person who may see this epic when it is private, or null when
-    -- it is public all the way up. A private epic hides its whole subtree: a
-    -- sub-epic of a private epic is private to that epic's creator whatever
-    -- its own visibility says, and the nearest private ancestor decides
-    -- (workspaces.allium: "Decisions", D5). A private epic with no creator
+    -- it is public all the way up. The NEAREST private epic at or above this
+    -- one decides (workspaces.allium: "Decisions", D5, task #98744): a public
+    -- sub-epic of a private epic is hidden by that ancestor and private to
+    -- the ancestor's creator, and a private sub-epic is its own creator's whatever sits
+    -- above it, a public epic included. A move that changes this value needs
+    -- the authority a visibility change does (workspaces.allium:
+    -- ReParentingKeepsTheHolder). A private epic with no creator
     -- (created_by null) has nobody to be private to and is seen by no
     -- member; workspaces.allium: EpicIsPrivateOnlyWithACreator refuses to
     -- make one.

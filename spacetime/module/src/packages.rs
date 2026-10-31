@@ -144,6 +144,9 @@ pub fn update_work_package_with_links(
         ctx.db.work_packages().id().update(row);
     }
     for item in unlink {
+        if !item_seen(ctx, &item.kind, item.item_id) {
+            continue;
+        }
         ctx.db
             .work_package_links()
             .id()
@@ -271,7 +274,7 @@ pub fn unlink_work_package_item(
     kind: String,
     item_id: i64,
 ) -> Result<(), String> {
-    if visible_package(ctx, work_package_id).is_none() {
+    if visible_package(ctx, work_package_id).is_none() || !item_seen(ctx, &kind, item_id) {
         return Ok(());
     }
     let id = work_package_link_id(work_package_id, &kind, item_id);

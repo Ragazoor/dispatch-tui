@@ -526,6 +526,11 @@ pub fn set_task_epic(
     move_task_row(ctx, id, epic_id, owner)
 }
 
+/// The workspace of epic `epic_id`, `None` for no epic or a missing one.
+fn epic_workspace(ctx: &ReducerContext, epic_id: i64) -> Option<i64> {
+    ctx.db.epics().id().find(epic_id).map(|e| e.workspace_id)
+}
+
 /// [`set_task_epic`]'s body, shared with [`update_task`].
 fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> Result<(), String> {
     let Some(task) = visible_task(ctx, id) else {
@@ -545,6 +550,9 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
     if was_in == epic_id {
         return Ok(());
     }
+    check_task_move(ctx, &task, epic_id)?;
+    let left_workspace = epic_workspace(ctx, was_in);
+    let joined_workspace = epic_workspace(ctx, epic_id);
     write_task(
         ctx,
         Task {
@@ -555,6 +563,20 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
         },
     )?;
     clear_unseen_for_task(ctx, id);
+    if matches!((left_workspace, joined_workspace), (Some(a), Some(b)) if a != b) {
+        // `LinkedItemsShareThePackagesWorkspace`: the task's package links and
+        // task-scoped learnings were the old workspace's.
+        delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, id);
+        let task_ref = id.to_string();
+        update_matching_learnings(
+            ctx,
+            |l| l.scope == "task" && l.scope_ref.as_deref() == Some(task_ref.as_str()),
+            |row| Learning {
+                workspace_id: joined_workspace.unwrap_or(0),
+                ..row
+            },
+        );
+    }
     // Both, and in that order. The one it left may now be complete; the one it
     // joined may no longer be.
     recalculate_epic_chain(ctx, was_in);
@@ -734,6 +756,9 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     };
     if let Some(parent) = patch.parent_epic_id {
         check_epic_move(ctx, &row, parent)?;
+    }
+    if let Some(origin) = &patch.origin {
+        check_origin_patch(&row.origin, origin)?;
     }
     check_epic_patch(&row, &patch, |id| {
         ctx.db.epics().id().find(id).map(|e| e.parent_epic_id)

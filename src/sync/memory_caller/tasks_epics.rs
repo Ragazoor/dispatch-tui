@@ -401,6 +401,14 @@ impl MemoryReducerCaller {
                 {
                     return Ok(ReducerOutcome::Refused(why));
                 }
+                // The module's move half refuses this inside one transaction;
+                // this double has no rollback, so it refuses before either half.
+                // A repo-group sub-epic is public, so routing keeps the holder.
+                if epic_id != row.epic_id {
+                    if let Err(why) = tables.check_task_move(&scope, &row, epic_id) {
+                        return Ok(ReducerOutcome::Refused(why));
+                    }
+                }
             }
             let patch = module::TaskPatch::from(patch.clone());
             if let Err(why) = self.check_patch_would_apply(&mut tables, id, row, patch) {
@@ -502,6 +510,11 @@ impl MemoryReducerCaller {
         if was_in == epic_id {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
+        if let Err(why) = tables.check_task_move(&scope, &task, epic_id) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        let left_workspace = tables.epics.get(&was_in).map(|e| e.workspace_id);
+        let joined_workspace = tables.epics.get(&epic_id).map(|e| e.workspace_id);
         let updated_at = self.now();
         let row = module::Task {
             epic_id,
@@ -513,6 +526,20 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused(why));
         }
         self.clear_unseen_for_task(&mut tables, id.0);
+        if matches!((left_workspace, joined_workspace), (Some(a), Some(b)) if a != b) {
+            // Mirrors the module: the task's links and task-scoped learnings
+            // were the old workspace's.
+            self.delete_work_package_links_to(&mut tables, module::WORK_PACKAGE_ITEM_TASK, id.0);
+            let task_ref = id.0.to_string();
+            self.update_matching_learnings(
+                &mut tables,
+                |l| l.scope == "task" && l.scope_ref.as_deref() == Some(task_ref.as_str()),
+                |row| module::Learning {
+                    workspace_id: joined_workspace.unwrap_or(0),
+                    ..row
+                },
+            );
+        }
         self.recalculate_epic_chain(&mut tables, was_in);
         self.recalculate_epic_chain(&mut tables, epic_id);
         Ok(ReducerOutcome::Applied(vec![]))
@@ -547,6 +574,11 @@ impl MemoryReducerCaller {
         let patch = module::EpicPatch::from(patch);
         if let Some(parent) = patch.parent_epic_id {
             if let Err(why) = tables.check_epic_move(&scope, &row, parent) {
+                return Ok(ReducerOutcome::Refused(why));
+            }
+        }
+        if let Some(origin) = &patch.origin {
+            if let Err(why) = module::check_origin_patch(&row.origin, origin) {
                 return Ok(ReducerOutcome::Refused(why));
             }
         }

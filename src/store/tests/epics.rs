@@ -10,15 +10,16 @@ async fn create_epic_defaults_feed_role_none() {
 }
 
 #[tokio::test]
-async fn create_epic_defaults_origin_manual_and_patch_sets_repo_group() {
+async fn create_epic_defaults_origin_manual_and_patch_cannot_claim_repo_group() {
     let db = crate::store::Store::open_in_memory().unwrap();
     let root = db.create_epic("root", "", None).await.unwrap();
     assert_eq!(root.origin, crate::models::EpicOrigin::Manual);
 
     let patch = crate::store::EpicPatch::new().origin(crate::models::EpicOrigin::RepoGroup);
-    db.patch_epic(root.id, &patch).await.unwrap();
+    // `RepoGroupsStayPublic`: routing sets the origin, a patch never does.
+    assert!(db.patch_epic(root.id, &patch).await.is_err());
     let reloaded = db.get_epic(root.id).await.unwrap();
-    assert_eq!(reloaded.origin, crate::models::EpicOrigin::RepoGroup);
+    assert_eq!(reloaded.origin, crate::models::EpicOrigin::Manual);
 }
 
 #[tokio::test]

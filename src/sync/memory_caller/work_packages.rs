@@ -109,6 +109,7 @@ impl MemoryReducerCaller {
         }
         let unlink_ids = unlink
             .iter()
+            .filter(|i| tables.item_seen(&scope, i.kind(), i.raw_id()))
             .map(|i| module::work_package_link_id(id.0, i.kind(), i.raw_id()))
             .collect();
         self.delete_work_package_link_rows(&mut tables, unlink_ids);
@@ -224,7 +225,9 @@ impl MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         let scope = self.scope();
         let mut tables = self.lock();
-        if tables.visible_package(&scope, id.0).is_none() {
+        if tables.visible_package(&scope, id.0).is_none()
+            || !tables.item_seen(&scope, item.kind(), item.raw_id())
+        {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
         let link_id = module::work_package_link_id(id.0, item.kind(), item.raw_id());

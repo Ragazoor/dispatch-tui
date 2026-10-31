@@ -58,6 +58,14 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 25: one rule for moving work under or out of a private epic — a re-parent
+///    or task move that changes who the item is private to needs the authority
+///    `set_epic_visibility` needs; a repo-group epic cannot be private and its
+///    origin cannot change; a repo-group relink ends the unseen mark; a task
+///    moved across workspaces drops its package links and carries its
+///    learnings; unlinking an unseen item does nothing; the super-admin hatch
+///    deletes only items whose creator has left (`visibility.rs`,
+///    `grouping.rs`, `tasks_epics.rs`, `learning.rs`, `packages.rs`).
 /// 24: the module stops trusting a client-named identity — the `seed_*`
 ///    reducers need the store itself or its publisher (`StoreOwner`, stamped by
 ///    `init`); `subscribe_to_epic` and `mark_epic_seen` refuse a subscriber
@@ -115,7 +123,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 24;
+pub const RULES_VERSION: i64 = 25;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

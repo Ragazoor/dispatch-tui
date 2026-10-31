@@ -523,6 +523,8 @@ mod learning_placement;
 mod move_epic;
 #[path = "memory_caller_conformance/pr_state.rs"]
 mod pr_state;
+#[path = "memory_caller_conformance/private_moves.rs"]
+mod private_moves;
 #[path = "memory_caller_conformance/scenario.rs"]
 mod scenario;
 #[path = "memory_caller_conformance/schedules.rs"]

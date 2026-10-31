@@ -277,6 +277,7 @@ impl Tables {
         row: module::Epic,
     ) -> Result<module::Epic, String> {
         module::validate_visibility_value(&row.visibility)?;
+        module::check_repo_group_stays_public(&row.origin, &row.visibility)?;
         if !scope.on {
             return Ok(row);
         }
@@ -339,26 +340,69 @@ impl Tables {
         }
     }
 
-    /// `EpicStaysInItsWorkspace`.
+    /// `EpicStaysInItsWorkspace` and `ReParentingKeepsTheHolder`.
     pub(super) fn check_epic_move(
         &self,
         scope: &Scope,
         epic: &module::Epic,
         new_parent: i64,
     ) -> Result<(), String> {
-        if !scope.on || new_parent == 0 {
+        if !scope.on {
             return Ok(());
         }
-        let Some(destination) = self.visible_epic(scope, new_parent) else {
-            return Err(format!("epic {new_parent} does not exist"));
+        let destination = if new_parent == 0 {
+            None
+        } else {
+            let Some(destination) = self.visible_epic(scope, new_parent) else {
+                return Err(format!("epic {new_parent} does not exist"));
+            };
+            if destination.workspace_id != epic.workspace_id {
+                return Err(
+                    "an epic changes workspace only through move_epic_to_workspace, as a root epic"
+                        .into(),
+                );
+            }
+            Some(destination)
         };
-        if destination.workspace_id != epic.workspace_id {
+        let may_set = epic.created_by == scope.who
+            || self.is_workspace_admin(epic.workspace_id, &scope.who)
+            || self.is_super_admin(&scope.who);
+        if module::epic_move_changes_holder(self, epic, destination.as_ref()) && !may_set {
             return Err(
-                "an epic changes workspace only through move_epic_to_workspace, as a root epic"
+                "only the creator or an admin may move an epic into or out of a private epic"
                     .into(),
             );
         }
         Ok(())
+    }
+
+    /// `ReParentingKeepsTheHolder`, for a task.
+    pub(super) fn check_task_move(
+        &self,
+        scope: &Scope,
+        task: &module::Task,
+        epic_id: i64,
+    ) -> Result<(), String> {
+        if !scope.on || module::task_move_permitted(self, task, epic_id, &scope.who) {
+            return Ok(());
+        }
+        Err(format!(
+            "task {}: only the person it is private to, or an admin, may move it into or out of a private epic",
+            task.id
+        ))
+    }
+
+    /// The module's `item_seen`: the item is missing, or the caller sees it.
+    pub(super) fn item_seen(&self, scope: &Scope, kind: &str, item_id: i64) -> bool {
+        match kind {
+            module::WORK_PACKAGE_ITEM_TASK => {
+                !self.tasks.contains_key(&item_id) || self.visible_task(scope, item_id).is_some()
+            }
+            module::WORK_PACKAGE_ITEM_EPIC => {
+                !self.epics.contains_key(&item_id) || self.visible_epic(scope, item_id).is_some()
+            }
+            _ => true,
+        }
     }
 
     fn item_workspace(&self, kind: &str, item_id: i64) -> Option<i64> {
@@ -454,6 +498,9 @@ impl MemoryReducerCaller {
         }
         if visibility == module::VISIBILITY_PRIVATE && epic.created_by.is_empty() {
             return refused("a private epic needs a creator");
+        }
+        if let Err(why) = module::check_repo_group_stays_public(&epic.origin, &visibility) {
+            return refused(why);
         }
         epic.visibility = visibility;
         epic.updated_at = self.now();
@@ -624,6 +671,7 @@ impl MemoryReducerCaller {
         kind: String,
         item_id: i64,
     ) -> Result<ReducerOutcome> {
+        let scope_on = self.scope().on();
         let mut tables = self.lock();
         if !tables.is_super_admin(&self.sender) {
             return refused("only a super-admin may do this");
@@ -633,7 +681,10 @@ impl MemoryReducerCaller {
                 let Some(epic) = tables.epics.get(&item_id).cloned() else {
                     return refused(format!("no epic {item_id}"));
                 };
-                if !tables.is_private(&epic) {
+                if scope_on && !module::epic_is_unseen(&*tables, &epic) {
+                    return refused("only an item nobody can see is deleted this way");
+                }
+                if !scope_on && !tables.is_private(&epic) {
                     return refused("only a private item is deleted this way");
                 }
                 let doomed = Self::collect_epic_subtree_ids(&tables, item_id);
@@ -653,8 +704,10 @@ impl MemoryReducerCaller {
                 let Some(package) = tables.work_packages.get(&item_id).cloned() else {
                     return refused(format!("no work package {item_id}"));
                 };
-                if package.visibility != module::VISIBILITY_PRIVATE {
-                    return refused("only a private item is deleted this way");
+                if package.visibility != module::VISIBILITY_PRIVATE
+                    || (scope_on && !module::package_is_unseen(&*tables, &package))
+                {
+                    return refused("only an item nobody can see is deleted this way");
                 }
                 self.delete_package_rows(&mut tables, WorkPackageId(item_id));
                 Ok(ReducerOutcome::Applied(vec![]))

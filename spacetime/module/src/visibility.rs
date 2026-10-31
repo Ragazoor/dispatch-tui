@@ -173,12 +173,32 @@ fn check_private_has_creator(visibility: &str, created_by: &str) -> Result<(), S
     Ok(())
 }
 
+/// `RepoGroupsStayPublic`: a repo-group sub-epic is found by title and origin
+/// by whoever routes a task, so it must be one everybody who sees its parent
+/// sees.
+pub fn check_repo_group_stays_public(origin: &str, visibility: &str) -> Result<(), String> {
+    if origin == REPO_GROUP_ORIGIN && visibility == VISIBILITY_PRIVATE {
+        return Err("a repo-group epic cannot be private".into());
+    }
+    Ok(())
+}
+
+/// `RepoGroupsStayPublic`: the origin marking a repo group is set by the
+/// module's routing and never changed by a patch, in either direction.
+pub fn check_origin_patch(current: &str, new: &str) -> Result<(), String> {
+    if current != new && (current == REPO_GROUP_ORIGIN || new == REPO_GROUP_ORIGIN) {
+        return Err("a repo-group origin is set by routing and cannot be changed".into());
+    }
+    Ok(())
+}
+
 /// `CreateEpicInWorkspace`: settle the row a new epic is stored as. A sub-epic
 /// takes its parent's workspace whatever the row names (D5); a root epic names
 /// one the caller belongs to. `created_by` is stamped with the caller when the
 /// row carries none, so a private epic always has a creator to be private to.
 pub fn settle_new_epic(ctx: &ReducerContext, row: Epic) -> Result<Epic, String> {
     validate_visibility_value(&row.visibility)?;
+    check_repo_group_stays_public(&row.origin, &row.visibility)?;
     let operator = is_operator(ctx);
     let caller = caller_identity(ctx);
     let (workspace_id, parent_id) = if row.parent_epic_id != 0 {
@@ -242,19 +262,81 @@ pub fn require_own_identity(ctx: &ReducerContext, subscriber: &str) -> Result<()
 
 /// `EpicStaysInItsWorkspace`: a re-parent stays inside the workspace, under an
 /// epic the caller can see. `new_parent` `0` makes it a root epic.
+///
+/// `ReParentingKeepsTheHolder`: a move that changes who the epic is private to
+/// (under a private epic, out of one, or between two) is a visibility change,
+/// so it needs the authority `SetEpicVisibility` needs.
 pub fn check_epic_move(ctx: &ReducerContext, epic: &Epic, new_parent: i64) -> Result<(), String> {
-    if new_parent == 0 {
-        return Ok(());
-    }
-    let Some(destination) = visible_epic(ctx, new_parent) else {
-        return Err(format!("epic {new_parent} does not exist"));
+    let destination = if new_parent == 0 {
+        None
+    } else {
+        let Some(destination) = visible_epic(ctx, new_parent) else {
+            return Err(format!("epic {new_parent} does not exist"));
+        };
+        if destination.workspace_id != epic.workspace_id {
+            return Err(
+                "an epic changes workspace only through move_epic_to_workspace, as a root epic"
+                    .into(),
+            );
+        }
+        Some(destination)
     };
-    if destination.workspace_id != epic.workspace_id {
+    if epic_move_changes_holder(ctx, epic, destination.as_ref())
+        && !may_set_visibility(ctx, &epic.created_by, epic.workspace_id)
+    {
         return Err(
-            "an epic changes workspace only through move_epic_to_workspace, as a root epic".into(),
+            "only the creator or an admin may move an epic into or out of a private epic".into(),
         );
     }
     Ok(())
+}
+
+/// Whether re-parenting `epic` under `destination` (`None`: to the root)
+/// changes who the epic is private to. Shared with `MemoryReducerCaller`.
+pub fn epic_move_changes_holder(
+    r: &impl StoreReads,
+    epic: &Epic,
+    destination: Option<&Epic>,
+) -> bool {
+    let after = if epic.visibility == VISIBILITY_PRIVATE {
+        Some(epic.created_by.clone())
+    } else {
+        destination.and_then(|d| private_holder(r, d))
+    };
+    after != private_holder(r, epic)
+}
+
+/// `ReParentingKeepsTheHolder`, for a task: a move into `epic_id` that changes
+/// who the task is private to needs more than sight. A task has no creator, so
+/// the authority is: the person it is private to now (their own work is theirs
+/// to expose or keep), or an admin of its workspace, or a super-admin. An
+/// epic-less task is private to its owner. Shared with `MemoryReducerCaller`.
+pub fn task_move_permitted(r: &impl StoreReads, task: &Task, epic_id: i64, caller: &str) -> bool {
+    let holder_of = |id: i64| -> Option<String> {
+        if id == 0 {
+            return Some(task.owner.clone());
+        }
+        r.epic(id).and_then(|e| private_holder(r, &e))
+    };
+    let before = holder_of(task.epic_id);
+    if before == holder_of(epic_id) || before.as_deref() == Some(caller) {
+        return true;
+    }
+    let workspace = r
+        .epic(epic_id)
+        .or_else(|| r.epic(task.epic_id))
+        .map(|e| e.workspace_id);
+    workspace.is_some_and(|w| workspace_has_admin(r, w, caller)) || is_super_admin(r, caller)
+}
+
+pub fn check_task_move(ctx: &ReducerContext, task: &Task, epic_id: i64) -> Result<(), String> {
+    if is_operator(ctx) || task_move_permitted(ctx, task, epic_id, &caller_identity(ctx)) {
+        return Ok(());
+    }
+    Err(format!(
+        "task {}: only the person it is private to, or an admin, may move it into or out of a private epic",
+        task.id
+    ))
 }
 
 /// The workspace an item lives in, or `None` for a main-board task
@@ -299,6 +381,21 @@ pub fn check_link_allowed(
     }
 }
 
+/// Whether the caller may act on a linked item: it does not exist (nothing to
+/// hide), or it does and the caller sees it. An unseen item is answered as one
+/// that is not linked (`LinkOnlyInsideTheWorkspace`, unlinking).
+pub fn item_seen(ctx: &ReducerContext, kind: &str, item_id: i64) -> bool {
+    match kind {
+        WORK_PACKAGE_ITEM_TASK => {
+            ctx.db.tasks().id().find(item_id).is_none() || visible_task(ctx, item_id).is_some()
+        }
+        WORK_PACKAGE_ITEM_EPIC => {
+            ctx.db.epics().id().find(item_id).is_none() || visible_epic(ctx, item_id).is_some()
+        }
+        _ => true,
+    }
+}
+
 /// May the caller change an item's visibility: its creator, an admin of its
 /// workspace, or a super-admin. Sight is checked by the caller first.
 fn may_set_visibility(ctx: &ReducerContext, created_by: &str, workspace_id: i64) -> bool {
@@ -324,6 +421,7 @@ pub fn set_epic_visibility(
         return Err("only the creator or an admin may change an epic's visibility".into());
     }
     check_private_has_creator(&visibility, &epic.created_by)?;
+    check_repo_group_stays_public(&epic.origin, &visibility)?;
     epic.visibility = visibility;
     epic.updated_at = now(ctx);
     ctx.db.epics().id().update(epic);
@@ -476,6 +574,20 @@ pub fn set_work_package_visibility(
     Ok(())
 }
 
+/// `SuperAdminDeletesUnseenItem`: a private epic whose holder is no longer a
+/// member of its workspace. Shared with `MemoryReducerCaller`.
+pub fn epic_is_unseen(r: &impl StoreReads, epic: &Epic) -> bool {
+    private_holder(r, epic)
+        .is_some_and(|h| h.is_empty() || !workspace_has_member(r, epic.workspace_id, &h))
+}
+
+/// `SuperAdminDeletesUnseenItem`: a private package whose creator is no longer
+/// a member of its workspace.
+pub fn package_is_unseen(r: &impl StoreReads, package: &WorkPackage) -> bool {
+    package.visibility == VISIBILITY_PRIVATE
+        && !workspace_has_member(r, package.workspace_id, &package.created_by)
+}
+
 /// `workspaces.allium: SuperAdminDeletesUnseenItem`: delete a private epic
 /// (with its subtree) or a private package without reading it. Refused for an
 /// item that is public, so the escape hatch is no way around `DeleteEpic`'s
@@ -494,8 +606,11 @@ pub fn super_admin_delete_unseen_item(
             let Some(epic) = ctx.db.epics().id().find(item_id) else {
                 return Err(format!("no epic {item_id}"));
             };
-            if private_holder(ctx, &epic).is_none() {
-                return Err("only a private item is deleted this way".into());
+            // `SuperAdminDeletesUnseenItem`: an item nobody can see, not one
+            // its creator still holds. The listing (`unseen_items_of`) shows
+            // the same set.
+            if !epic_is_unseen(ctx, &epic) {
+                return Err("only an item nobody can see is deleted this way".into());
             }
             let parent = epic.parent_epic_id;
             // The escape hatch widens who may delete, not what may be torn
@@ -509,8 +624,8 @@ pub fn super_admin_delete_unseen_item(
             let Some(package) = ctx.db.work_packages().id().find(item_id) else {
                 return Err(format!("no work package {item_id}"));
             };
-            if package.visibility != VISIBILITY_PRIVATE {
-                return Err("only a private item is deleted this way".into());
+            if !package_is_unseen(ctx, &package) {
+                return Err("only an item nobody can see is deleted this way".into());
             }
             delete_package_rows(ctx, item_id);
             Ok(())

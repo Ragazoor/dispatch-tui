@@ -158,11 +158,13 @@ impl MemoryReducerCaller {
     pub(super) fn rescope_learnings(&self, tables: &mut Tables, from: i64, to: i64) {
         let from_ref = from.to_string();
         let to_ref = to.to_string();
+        let to_workspace = tables.epics.get(&to).map(|e| e.workspace_id);
         self.update_matching_learnings(
             tables,
             |l| l.scope == "epic" && l.scope_ref.as_deref() == Some(from_ref.as_str()),
             |row| module::Learning {
                 scope_ref: Some(to_ref.clone()),
+                workspace_id: to_workspace.unwrap_or(row.workspace_id),
                 ..row
             },
         );

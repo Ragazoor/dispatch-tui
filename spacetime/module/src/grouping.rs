@@ -129,6 +129,7 @@ fn delete_if_empty_repo_group(ctx: &ReducerContext, epic_id: i64) {
 ///
 /// Ownership follows `set_task_epic`: a task joining an epic loses its owner.
 fn relink_task(ctx: &ReducerContext, task: Task, target: i64) -> Result<(), String> {
+    let id = task.id;
     write_task(
         ctx,
         Task {
@@ -137,7 +138,11 @@ fn relink_task(ctx: &ReducerContext, task: Task, target: i64) -> Result<(), Stri
             updated_at: now(ctx),
             ..task
         },
-    )
+    )?;
+    // The task left its epic, so its unseen mark ends
+    // (`UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`).
+    clear_unseen_for_task(ctx, id);
+    Ok(())
 }
 
 /// After a task's repo changed: move it to the sub-epic for the new repo and

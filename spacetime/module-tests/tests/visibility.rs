@@ -477,6 +477,20 @@ fn a_package_never_links_an_item_the_caller_cannot_see() {
         .is_err());
 }
 
+/// The creator leaves the workspace, so the item is one nobody can see.
+fn creator_leaves(store: &Store, ws: i64, who: &str) {
+    let id = store
+        .db()
+        .memberships()
+        .iter()
+        .find(|m| m.workspace_id == ws && m.user == identity_of(who))
+        .expect("membership")
+        .id;
+    store
+        .call("root", |ctx| remove_member(ctx, id))
+        .expect("remove member");
+}
+
 // -- SuperAdminDeletesUnseenItem ----------------------------------------------
 
 #[test]
@@ -484,6 +498,7 @@ fn the_escape_hatch_keeps_the_every_task_done_guard() {
     let (store, a, _) = world();
     let epic = make_epic(&store, "alice", a, 0, "private").expect("epic");
     store.create("alice", epic_task("running", epic, "running"));
+    creator_leaves(&store, a, "alice");
     assert!(store
         .call("root", |ctx| {
             super_admin_delete_unseen_item(ctx, "epic".into(), epic)
@@ -497,6 +512,7 @@ fn a_super_admin_deletes_a_private_epic_and_package_without_seeing_them() {
     let (store, a, _) = world();
     let epic = make_epic(&store, "alice", a, 0, "private").expect("epic");
     let package = make_package(&store, "alice", a, "private").expect("package");
+    creator_leaves(&store, a, "alice");
     // The super-admin is no member, so a normal delete is a silent no-op.
     store
         .call("root", |ctx| delete_epic(ctx, epic))
@@ -522,6 +538,7 @@ fn the_escape_hatch_is_for_super_admins_and_private_items_only() {
     let (store, a, _) = world();
     let private = make_epic(&store, "alice", a, 0, "private").expect("private");
     let public = make_epic(&store, "alice", a, 0, "public").expect("public");
+    creator_leaves(&store, a, "alice");
     assert!(store
         .call("bob", |ctx| super_admin_delete_unseen_item(
             ctx,

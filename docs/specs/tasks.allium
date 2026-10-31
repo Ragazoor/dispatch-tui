@@ -1133,7 +1133,11 @@ rule MoveTaskToEpic {
         -- epic ReparentEpic flow instead — see epics.allium). Operates on
         -- the single selected task. The epic-existence precondition is
         -- enforced by the handler, so the MCP relink path (update_tasks with
-        -- an epic_id, mcp-task-tools.allium) is held to it too.
+        -- an epic_id, mcp-task-tools.allium) is held to it too. So are the
+        -- store's checks on who may move what (workspaces.allium:
+        -- TaskEntersAnEpicTheCallerCanSee, ReParentingKeepsTheHolder) and the
+        -- clean-up of a move to another workspace
+        -- (TaskMovedToAnotherWorkspace).
         --
         -- A collapsible tree overlay lists only epics that are relevant
         -- targets: it excludes epics in Done status and epics hidden by
@@ -1242,6 +1246,13 @@ rule UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing {
         -- A mark does not follow a task to its new epic. The signal means
         -- "something new landed here"; a move is a different event, and the
         -- people who see the new epic were never told about this task.
+        --
+        -- "Any change of task.epic" means every path that moves a task, not
+        -- only MoveTaskToEpic and update_tasks: a feed routing move
+        -- (feeds.allium), and the store's repo-group relinks (task #98744):
+        -- RegroupEpic into a per-repo sub-epic, FlattenEpic back to the
+        -- parent, and the reroute after a repo_path change. Those go through
+        -- the store's relink_task, which clears the marks with the move.
 }
 
 -- == Delete ==

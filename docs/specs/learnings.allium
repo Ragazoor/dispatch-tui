@@ -738,6 +738,7 @@ rule ReScopeLearningsOnRepoGroupDelete {
     ensures:
         for l in core/Learnings where l.scope = epic and l.scope_ref = str(sub.id):
             l.scope_ref = str(sub.parent.id)
+            l.workspace = sub.parent.workspace
 
     @guidance
         -- Fires when a repo-group sub-epic is deleted, either by
@@ -749,7 +750,13 @@ rule ReScopeLearningsOnRepoGroupDelete {
         -- orphaned.
         -- scope_ref is not an embedding input: no re-embed obligation.
         -- The learning's summary, detail, kind, and tags are unchanged;
-        -- only scope_ref is updated.
+        -- only scope_ref and workspace are updated. The workspace is the
+        -- target epic's (task #98744), so a re-scoped learning is seen by
+        -- the members of the epic it now points at (workspaces.allium:
+        -- LearningVisibility, D8). A repo-group sub-epic shares its parent's
+        -- workspace, so on this path the value does not change; it does on
+        -- the bare rescope_epic_learnings reducer, which re-scopes between
+        -- any two epics the caller can see.
         --
         -- Implemented in the store's delete_if_empty_repo_group
         -- (spacetime/module, grouping.rs), in the same transaction as the
