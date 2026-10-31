@@ -238,6 +238,27 @@ fn learnings_description_covers_the_whole_lifecycle() {
     }
 }
 
+/// repo-health-review replaced a whole-repo checklist that stopped yielding new
+/// findings: every run started from zero and re-reported the same debt. What
+/// makes it productive is that each run starts from the previous report and
+/// records its own commit range for the next one. Pin both.
+#[test]
+fn repo_health_review_builds_on_the_previous_report() {
+    let path = repo_path(".claude/skills/repo-health-review/SKILL.md");
+    let body = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    for needle in [
+        "previous report",
+        "commit range",
+        "Regression audit",
+        "Standing items",
+    ] {
+        assert!(
+            body.contains(needle),
+            "repo-health-review must keep its '{needle}' step"
+        );
+    }
+}
+
 /// Every markdown file under `dir`, recursively.
 fn markdown_under(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
