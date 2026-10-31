@@ -700,6 +700,29 @@ fn the_board_exit_stops_a_store_it_adopted() {
 }
 
 #[test]
+fn an_import_exit_leaves_an_adopted_store_running() {
+    let ports = Arc::new(FakePorts::new(ManagedAddressState::StoreAnswering));
+    let hashes = Arc::new(FakeHashes::new(Some(EMBEDDED)));
+    let managed = store(&ports, &hashes);
+    managed.bring_up().unwrap();
+
+    assert!(managed.stop_spawned_on_exit());
+    assert_eq!(stops(&ports), 0);
+}
+
+#[test]
+fn an_import_exit_stops_only_a_store_it_started() {
+    let ports = Arc::new(FakePorts::new(ManagedAddressState::NothingListening));
+    let hashes = Arc::new(FakeHashes::new(Some(EMBEDDED)));
+    let managed = store(&ports, &hashes);
+    managed.bring_up().unwrap();
+
+    assert!(managed.stop_spawned_on_exit());
+    assert_eq!(ports.count(Call::StopSpawned), 1);
+    assert_eq!(ports.count(Call::Stop), 0);
+}
+
+#[test]
 fn the_board_exit_stops_nothing_it_does_not_hold() {
     let ports = Arc::new(FakePorts::new(ManagedAddressState::StoreAnswering));
     let hashes = Arc::new(FakeHashes::new(Some(EMBEDDED)));

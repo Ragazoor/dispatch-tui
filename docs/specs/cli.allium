@@ -284,9 +284,12 @@ rule SetVerifyCommandViaCli {
 
     @guidance
         -- `dispatch repo set-verify <path> <command>`. Creates the saved path
-        -- when it does not exist yet. A command containing a newline or
-        -- carriage return is refused (core/SavedRepoPath's
-        -- VerifyCommandSingleLine) and the command ends with failure.
+        -- when it does not exist yet; a path that is already saved is not
+        -- touched, so a row another host saved keeps that host. A command
+        -- containing a newline or carriage return (core/SavedRepoPath's
+        -- VerifyCommandSingleLine), or an empty or whitespace-only one, is
+        -- refused BEFORE any write and the command ends with failure: a
+        -- refused set-verify leaves no repo-path row behind.
 }
 
 rule ClearVerifyCommandViaCli {
@@ -294,6 +297,11 @@ rule ClearVerifyCommandViaCli {
 
     ensures: VerifyCommandStored(path: expand_tilde(path), command: null)
     ensures: CliPrinted(line: "verify_command cleared for " + expand_tilde(path))
+
+    @guidance
+        -- `dispatch repo clear-verify <path>`. A path that is not saved has
+        -- nothing to clear: it is ignored, creates no row and is not an
+        -- error.
 }
 
 rule ListReposViaCli {
@@ -336,6 +344,9 @@ rule PruneRepoPathsViaCli {
         -- row. The summary line reads `<removed> path(s) removed, <kept>
         -- kept.`; kept counts every row left in the store, not only this
         -- host's. A row this host removes takes its verify command with it.
+        -- A path is judged missing only when the filesystem says it is not
+        -- there (NotFound): a permission error or a detached disk leaves the
+        -- row alone.
         -- this_host is the host file's identity (CliCommandsNeedAHostFile).
         --
         -- == Black boxes ==

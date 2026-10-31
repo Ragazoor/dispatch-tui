@@ -32,7 +32,7 @@ impl Drop for ProcessGroup {
 }
 
 impl StoreSpawner for FakeSpawner {
-    fn spawn(&self, address: &str, data_dir: &Path, _log: &Path) -> std::io::Result<Child> {
+    fn spawn(&self, address: &str, data_dir: &Path, log: &Path) -> std::io::Result<Child> {
         use std::os::unix::process::CommandExt;
         if self.fail {
             return Err(std::io::Error::new(
@@ -40,6 +40,7 @@ impl StoreSpawner for FakeSpawner {
                 "no spacetime",
             ));
         }
+        std::fs::write(log, "store output")?;
         *self.seen.lock().unwrap() = Some((address.to_string(), data_dir.to_path_buf()));
         if self.answer_on_start {
             let listener = TcpListener::bind(address)?;
@@ -80,9 +81,11 @@ fn memory_store(_: &str) -> Arc<dyn SnapshotTarget> {
 
 #[tokio::test]
 async fn a_missing_folder_is_refused_before_anything_starts() {
+    let scratch = tempfile::tempdir().unwrap();
     let spawner = FakeSpawner::default();
     let err = read_data_dir_with(
         Path::new("/nonexistent/dispatch-store"),
+        scratch.path(),
         &spawner,
         Duration::from_secs(1),
         &memory_store,
@@ -96,24 +99,38 @@ async fn a_missing_folder_is_refused_before_anything_starts() {
 #[tokio::test]
 async fn a_failed_start_names_the_command() {
     let dir = data_folder();
+    let scratch = tempfile::tempdir().unwrap();
     let spawner = FakeSpawner {
         fail: true,
         ..Default::default()
     };
-    let err = read_data_dir_with(dir.path(), &spawner, Duration::from_secs(1), &memory_store)
-        .await
-        .unwrap_err();
+    let err = read_data_dir_with(
+        dir.path(),
+        scratch.path(),
+        &spawner,
+        Duration::from_secs(1),
+        &memory_store,
+    )
+    .await
+    .unwrap_err();
     assert!(err.to_string().contains("could not run `spacetime start`"));
 }
 
 #[tokio::test]
 async fn a_copy_that_never_answers_times_out_and_is_stopped() {
     let dir = data_folder();
+    let scratch = tempfile::tempdir().unwrap();
     let spawner = FakeSpawner::default();
-    let err = read_data_dir_with(dir.path(), &spawner, Duration::ZERO, &memory_store)
-        .await
-        .unwrap_err();
-    assert!(err.to_string().contains("did not start within"));
+    let err = read_data_dir_with(
+        dir.path(),
+        scratch.path(),
+        &spawner,
+        Duration::ZERO,
+        &memory_store,
+    )
+    .await
+    .unwrap_err();
+    assert!(format!("{err:#}").contains("did not start within"));
     // End-of-file arrives when the whole group has exited: at once if the
     // code under test stopped it, and with "survived" only if it did not.
     let mut output = spawner.output.lock().unwrap().take().unwrap();
@@ -130,13 +147,20 @@ async fn a_copy_that_never_answers_times_out_and_is_stopped() {
 #[tokio::test]
 async fn an_answering_copy_is_dumped_from_a_copy_not_the_original() {
     let dir = data_folder();
+    let scratch = tempfile::tempdir().unwrap();
     let spawner = FakeSpawner {
         answer_on_start: true,
         ..Default::default()
     };
-    let snapshot = read_data_dir_with(dir.path(), &spawner, Duration::from_secs(10), &memory_store)
-        .await
-        .unwrap();
+    let snapshot = read_data_dir_with(
+        dir.path(),
+        scratch.path(),
+        &spawner,
+        Duration::from_secs(10),
+        &memory_store,
+    )
+    .await
+    .unwrap();
     assert!(!snapshot.extracts().is_empty());
     let (_, served) = spawner.seen.lock().unwrap().clone().unwrap();
     assert_ne!(served, dir.path());
@@ -180,9 +204,114 @@ fn a_running_store_over_the_folder_is_detected_in_either_flag_spelling() {
             .to_string(),
         "spacetime start --data-dir=/srv/other".to_string(),
     ];
-    assert!(data_dir_in_use(Path::new("/home/a/data"), &lines));
-    assert!(data_dir_in_use(Path::new("/home/a/data/"), &lines));
-    assert!(data_dir_in_use(Path::new("/srv/other"), &lines));
-    assert!(!data_dir_in_use(Path::new("/home/a/data2"), &lines));
-    assert!(!data_dir_in_use(Path::new("/home/a"), &lines));
+    assert!(data_dir_in_use(
+        Path::new("/home/a/data"),
+        &lines,
+        default_store()
+    ));
+    assert!(data_dir_in_use(
+        Path::new("/home/a/data/"),
+        &lines,
+        default_store()
+    ));
+    assert!(data_dir_in_use(
+        Path::new("/srv/other"),
+        &lines,
+        default_store()
+    ));
+    assert!(!data_dir_in_use(
+        Path::new("/home/a/data2"),
+        &lines,
+        default_store()
+    ));
+    assert!(!data_dir_in_use(
+        Path::new("/home/a"),
+        &lines,
+        default_store()
+    ));
+}
+
+const DEFAULT_STORE_STR: &str = "/home/a/.local/share/spacetime/data";
+
+fn default_store() -> &'static Path {
+    Path::new(DEFAULT_STORE_STR)
+}
+
+#[test]
+fn a_store_started_with_no_data_dir_serves_the_default_folder() {
+    let lines = vec!["spacetime start --listen-addr 127.0.0.1:3001".to_string()];
+    assert!(data_dir_in_use(default_store(), &lines, default_store()));
+    assert!(!data_dir_in_use(
+        Path::new("/srv/other"),
+        &lines,
+        default_store()
+    ));
+    // Not a store at all.
+    let lines = vec!["cargo test start".to_string()];
+    assert!(!data_dir_in_use(default_store(), &lines, default_store()));
+}
+
+#[test]
+fn a_store_over_a_symlink_or_unnormalised_spelling_is_detected() {
+    let real = tempfile::tempdir().unwrap();
+    let link = real.path().with_extension("link");
+    std::os::unix::fs::symlink(real.path(), &link).unwrap();
+    let canonical = std::fs::canonicalize(real.path()).unwrap();
+    let lines = vec![format!("spacetime start --data-dir {}/./", link.display())];
+    let found = data_dir_in_use(&canonical, &lines, default_store());
+    std::fs::remove_file(&link).unwrap();
+    assert!(found);
+}
+
+#[test]
+fn a_store_that_ignores_term_is_killed_after_the_grace_period() {
+    use std::os::unix::process::CommandExt;
+    let mut child = Command::new("sh")
+        .args(["-c", "trap '' TERM; echo ready; sleep 600"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let _backstop = ProcessGroup(pid);
+    // The shell prints once its trap is installed.
+    let mut ready = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(child.stdout.take().unwrap()),
+        &mut ready,
+    )
+    .unwrap();
+    assert_eq!(ready.trim(), "ready");
+    stop_store(child, Duration::from_millis(300));
+    let alive = Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(Stdio::null())
+        .status()
+        .unwrap()
+        .success();
+    assert!(!alive, "the store was left running and unreaped");
+}
+
+#[tokio::test]
+async fn a_scratch_copy_goes_under_the_given_root_and_a_failure_keeps_the_log() {
+    let dir = data_folder();
+    let scratch = tempfile::tempdir().unwrap();
+    let spawner = FakeSpawner::default();
+    let err = read_data_dir_with(
+        dir.path(),
+        scratch.path(),
+        &spawner,
+        Duration::ZERO,
+        &memory_store,
+    )
+    .await
+    .unwrap_err();
+    let (_, served) = spawner.seen.lock().unwrap().clone().unwrap();
+    assert!(served.starts_with(scratch.path()), "{served:?}");
+    assert!(
+        err.to_string().contains("store.log"),
+        "the error should name the log: {err}"
+    );
 }

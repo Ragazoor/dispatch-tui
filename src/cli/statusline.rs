@@ -93,7 +93,8 @@ fn run_chain(chain: &str, stdin: &str, timeout: Duration) -> String {
 /// Decorator core: record, then chain. Always returns exit code 0.
 pub fn run(stdin: &str, snapshot_path: &Path, chain: Option<&str>, now: i64) -> i32 {
     let out = run_capturing(stdin, snapshot_path, chain, now);
-    print!("{out}");
+    // `print!` panics on a closed pipe, and this promises exit 0.
+    let _ = std::io::Write::write_all(&mut std::io::stdout(), out.as_bytes());
     0
 }
 

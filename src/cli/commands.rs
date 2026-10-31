@@ -24,19 +24,33 @@ pub async fn set_verify(
     out: &mut dyn Write,
 ) -> Result<()> {
     let path = expand_tilde(path);
+    // Checked before any write: the module refuses these too, but by then the
+    // path row below would already exist.
+    if command.contains('\n') || command.contains('\r') {
+        anyhow::bail!("verify command must be a single line; chain steps with && or ;");
+    }
+    if command.trim().is_empty() {
+        anyhow::bail!("verify command is empty; use `repo clear-verify` to remove it");
+    }
     // Creates the saved path when it does not exist yet (`cli.allium`): the
-    // store's own `set_verify_command` only updates a path that is saved.
-    // Saving a path that is already saved only touches it.
-    database.save_repo_path(&path).await?;
+    // store's own `set_verify_command` only updates a path that is saved. A
+    // path that is already saved is left alone, so a row another host saved
+    // keeps that host (saving would re-stamp it as this one's).
+    if !database.list_repo_paths().await.contains(&path) {
+        database.save_repo_path(&path).await?;
+    }
     database.set_verify_command(&path, Some(command)).await?;
     writeln!(out, "verify_command set for {path}")?;
     Ok(())
 }
 
-/// `dispatch repo clear-verify <path>`.
+/// `dispatch repo clear-verify <path>`. A path that is not saved has nothing
+/// to clear and is ignored.
 pub async fn clear_verify(database: &Store, path: &str, out: &mut dyn Write) -> Result<()> {
     let path = expand_tilde(path);
-    database.set_verify_command(&path, None).await?;
+    if database.list_repo_paths().await.contains(&path) {
+        database.set_verify_command(&path, None).await?;
+    }
     writeln!(out, "verify_command cleared for {path}")?;
     Ok(())
 }
@@ -69,7 +83,9 @@ pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<(
     let mut removed = 0;
     for p in &database.list_repo_paths_saved_by_this_host().await {
         let expanded = expand_tilde(p);
-        if !Path::new(&expanded).exists() {
+        // Only a path that is certainly gone: a permission error or a detached
+        // disk is not "missing", and the row goes for good.
+        if matches!(Path::new(&expanded).try_exists(), Ok(false)) {
             database.delete_repo_path(p).await?;
             writeln!(out, "removed: {p}")?;
             removed += 1;

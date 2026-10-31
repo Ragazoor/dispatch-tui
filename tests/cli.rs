@@ -953,6 +953,94 @@ async fn dispatch_repo_set_verify_rejects_newline() {
     );
 }
 
+// C2: a refused command must not leave a repo-path row behind.
+#[tokio::test]
+async fn dispatch_repo_set_verify_refused_command_writes_nothing() {
+    let (_tmp, db) = sqlite().await;
+    commands::set_verify(&db, "/typo", "a\nb", &mut Vec::new())
+        .await
+        .expect_err("newline command must be refused");
+    commands::set_verify(&db, "/typo", "   ", &mut Vec::new())
+        .await
+        .expect_err("blank command must be refused");
+
+    assert!(
+        dispatch_tui::store::RepoConfigRead::list_repo_paths(&db)
+            .await
+            .is_empty(),
+        "a refused set-verify must not create the path"
+    );
+}
+
+// C3: set-verify on another host's row must not take the row over.
+#[tokio::test]
+async fn dispatch_repo_set_verify_keeps_the_host_of_an_existing_row() {
+    let (_dir, db, memory) = shared_store_with_caller();
+    let theirs = "/home/a/code/only-on-host-a";
+    seed_repo_path_saved_by(&db, &memory, "host-a", theirs).await;
+
+    commands::set_verify(&db, theirs, "make check", &mut Vec::new())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, theirs)
+            .await
+            .as_deref(),
+        Some("make check")
+    );
+    assert!(
+        !dispatch_tui::store::RepoConfigRead::list_repo_paths_saved_by_this_host(&db)
+            .await
+            .contains(&theirs.to_string()),
+        "the row must stay host-a's"
+    );
+}
+
+// C5: clearing an unknown path is ignored, as the docs say.
+#[tokio::test]
+async fn dispatch_repo_clear_verify_ignores_an_unknown_path() {
+    let (_tmp, db) = sqlite().await;
+    commands::clear_verify(&db, "/unknown", &mut Vec::new())
+        .await
+        .expect("clearing an unknown path is not an error");
+    assert!(dispatch_tui::store::RepoConfigRead::list_repo_paths(&db)
+        .await
+        .is_empty());
+}
+
+// C4: prune deletes on NotFound only; an unreadable path stays.
+#[tokio::test]
+async fn prune_repo_paths_keeps_a_path_it_cannot_inspect() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, db, memory) = shared_store_with_caller();
+    let outer = tempfile::tempdir().unwrap();
+    let locked = outer.path().join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    let inside = locked.join("repo");
+    std::fs::create_dir(&inside).unwrap();
+    let inside = inside.to_string_lossy().into_owned();
+    seed_repo_path_saved_by(&db, &memory, dispatch_tui::store::MEMORY_HOST_ID, &inside).await;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::metadata(&inside).is_ok() {
+        // Running as root: the lock does not bite, so there is nothing to test.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+
+    let mut out = Vec::new();
+    let result = commands::prune_repo_paths(&db, &mut out).await;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    result.unwrap();
+
+    assert!(
+        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, &inside)
+            .await
+            .is_some(),
+        "an unreadable path is not a missing one"
+    );
+}
+
 #[tokio::test]
 async fn dispatch_repo_set_verify_expands_tilde_in_path() {
     let (_tmp, db) = sqlite().await;

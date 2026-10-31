@@ -38,19 +38,58 @@ pub fn parse_source(from: &str) -> ImportSource {
 
 /// Whether any of these process command lines is a store serving `data_dir`.
 /// Copying a folder a store is writing can capture a half-written commit log.
-pub fn data_dir_in_use(data_dir: &Path, command_lines: &[String]) -> bool {
-    let wanted = data_dir.to_string_lossy();
-    let wanted = wanted.trim_end_matches('/');
+///
+/// Both sides are compared canonically, so a symlink or a `./` does not hide
+/// a store. A `spacetime start` with no `--data-dir` serves the CLI's default
+/// folder, `default_store_dir`.
+pub fn data_dir_in_use(
+    data_dir: &Path,
+    command_lines: &[String],
+    default_store_dir: &Path,
+) -> bool {
+    let wanted = canonical_or_raw(&data_dir.to_string_lossy());
     command_lines.iter().any(|line| {
-        line.contains("start")
-            && line.split_whitespace().enumerate().any(|(i, word)| {
-                let mut words = line.split_whitespace().skip(i + 1);
-                let value = word
-                    .strip_prefix("--data-dir=")
-                    .or_else(|| (word == "--data-dir").then(|| words.next()).flatten());
-                value.is_some_and(|v| v.trim_end_matches('/') == wanted)
-            })
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let is_store = words.contains(&"start")
+            && words
+                .first()
+                .and_then(|w| w.rsplit('/').next())
+                .is_some_and(|program| program.contains("spacetime"));
+        if !is_store {
+            return false;
+        }
+        let mut named = false;
+        for (i, word) in words.iter().enumerate() {
+            let value = word.strip_prefix("--data-dir=").or_else(|| {
+                (*word == "--data-dir")
+                    .then(|| words.get(i + 1).copied())
+                    .flatten()
+            });
+            if let Some(value) = value {
+                named = true;
+                if canonical_or_raw(value) == wanted {
+                    return true;
+                }
+            }
+        }
+        !named && canonical_or_raw(&default_store_dir.to_string_lossy()) == wanted
     })
+}
+
+/// The canonical spelling of `path` when it exists, else the path without a
+/// trailing slash.
+fn canonical_or_raw(path: &str) -> String {
+    std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.trim_end_matches('/').to_string())
+}
+
+/// Where a bare `spacetime start` keeps its data.
+fn default_spacetime_data_dir() -> PathBuf {
+    crate::default_data_dir()
+        .parent()
+        .map(|base| base.join("spacetime").join("data"))
+        .unwrap_or_else(|| PathBuf::from("spacetime/data"))
 }
 
 fn running_command_lines() -> Vec<String> {
@@ -93,9 +132,10 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
 
 /// A store over a COPY of `data_dir`, read and stopped. The folder named is
 /// only ever read by `cp`.
-async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
+async fn read_data_dir(data_dir: &Path, scratch_root: &Path) -> Result<Snapshot> {
     read_data_dir_with(
         data_dir,
+        scratch_root,
         &SpacetimeStartSpawner::new(),
         START_TIMEOUT,
         &|server| Arc::new(store_for(server)),
@@ -106,10 +146,31 @@ async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
 /// How long the copy gets to answer before the import gives up.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long a stopping store gets to exit on SIGTERM before it is killed.
+const STOP_GRACE: Duration = Duration::from_secs(5);
+
+/// Stop the store `child` started, and every process in its group: SIGTERM,
+/// then SIGKILL once `grace` has passed, and reap it either way. Blocks.
+fn stop_store(mut child: std::process::Child, grace: Duration) {
+    let group = child.id();
+    // The CLI starts the real server as its child, so stop the whole group.
+    crate::process::kill_process_group(group, "TERM");
+    let deadline = Instant::now() + grace;
+    while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // The leader may be gone while the server behind it is not.
+    crate::process::kill_process_group(group, "KILL");
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// `read_data_dir` with the process start, the wait and the store reached
-/// through seams, so the path runs without a `spacetime` binary.
+/// through seams, so the path runs without a `spacetime` binary. The copy goes
+/// under `scratch_root`, which should be on disk: a full store copy is large.
 async fn read_data_dir_with(
     data_dir: &Path,
+    scratch_root: &Path,
     spawner: &dyn StoreSpawner,
     start_timeout: Duration,
     store_at: &dyn Fn(&str) -> Arc<dyn SnapshotTarget>,
@@ -119,14 +180,19 @@ async fn read_data_dir_with(
     }
     let absolute = std::fs::canonicalize(data_dir)?;
     let lines = tokio::task::spawn_blocking(running_command_lines).await?;
-    if data_dir_in_use(&absolute, &lines) {
+    if data_dir_in_use(&absolute, &lines, &default_spacetime_data_dir()) {
         bail!(
             "a store is running over {}. Copying a folder a store is writing can capture it \
              half-written; name that store's address instead, e.g. `--from http://127.0.0.1:3001`.",
             absolute.display()
         );
     }
-    let scratch = tempfile::tempdir().context("could not make a scratch directory")?;
+    std::fs::create_dir_all(scratch_root)
+        .with_context(|| format!("could not make {}", scratch_root.display()))?;
+    let scratch = tempfile::Builder::new()
+        .prefix("import-scratch-")
+        .tempdir_in(scratch_root)
+        .context("could not make a scratch directory")?;
     let copy = scratch.path().join("data");
     let (from, to) = (absolute.clone(), copy.clone());
     tokio::task::spawn_blocking(move || copy_dir(&from, &to))
@@ -135,7 +201,6 @@ async fn read_data_dir_with(
 
     let log = scratch.path().join("store.log");
     let (address, child) = spawn_on_free_port(spawner, &copy, &log)?;
-    let group = child.id();
 
     let result = async {
         wait_until_answering(&address, start_timeout).await?;
@@ -143,8 +208,18 @@ async fn read_data_dir_with(
     }
     .await;
 
-    // The CLI starts the real server as its child, so stop the whole group.
-    crate::process::kill_process_group(group, "TERM");
+    // Stopped and reaped before the scratch folder goes, so nothing writes to
+    // it while it is deleted.
+    let _ = tokio::task::spawn_blocking(move || stop_store(child, STOP_GRACE)).await;
+    if let Err(e) = result {
+        // The store's log is the only account of why it failed; keep it
+        // alone, not the whole copy.
+        let kept = scratch_root.join("store.log");
+        return Err(match std::fs::copy(&log, &kept) {
+            Ok(_) => e.context(format!("the store's log is {}", kept.display())),
+            Err(_) => e,
+        });
+    }
     result
 }
 
@@ -190,18 +265,19 @@ async fn wait_until_answering(address: &str, start_timeout: Duration) -> Result<
 }
 
 /// Read the old store into a snapshot. Read-only on the source.
-pub async fn read_source(source: &ImportSource) -> Result<Snapshot> {
+pub async fn read_source(source: &ImportSource, scratch_root: &Path) -> Result<Snapshot> {
     match source {
         ImportSource::Server(server) => store_for(server)
             .dump()
             .await
             .with_context(|| format!("could not read the store at {server}")),
-        ImportSource::DataDir(dir) => read_data_dir(dir).await,
+        ImportSource::DataDir(dir) => read_data_dir(dir, scratch_root).await,
     }
 }
 
 /// `dispatch store import`. `named_target` is `--spacetime-server`; without one
-/// the managed store is brought up for the import and stopped after it.
+/// the managed store is brought up for the import and stopped after it,
+/// unless it was already running: that one is left alone.
 pub async fn import_store(
     data_dir: &Path,
     named_target: Option<String>,
@@ -233,7 +309,7 @@ pub async fn import_store(
     let outcome = run(data_dir, &server, &source, out).await;
 
     if let Some(managed) = managed {
-        let _ = tokio::task::spawn_blocking(move || managed.stop_on_exit()).await;
+        let _ = tokio::task::spawn_blocking(move || managed.stop_spawned_on_exit()).await;
     }
     outcome
 }
@@ -249,7 +325,8 @@ async fn run(
             bail!("the source and the target are the same store ({server})");
         }
     }
-    let snapshot = read_source(source).await?;
+    // On disk, beside the data directory, not in `/tmp`, which is RAM on some hosts.
+    let snapshot = read_source(source, &data_dir.join("import-scratch")).await?;
 
     // It names its own target, which may be a store this install never used.
     let connected = crate::store_connection::open_cli_store_with_pin(

@@ -927,6 +927,8 @@ pub struct ManagedStore {
     hashes: Arc<dyn ModuleHashRecord>,
     embedded_hash: String,
     held: AtomicBool,
+    /// Set when `bring_up` started the store itself, not when it adopted one.
+    spawned: AtomicBool,
     /// The first stop's result, so an abort inside `bring_up` followed by the
     /// exit path (or a signal racing a quit) stops the store once and every
     /// later call reports that same result.
@@ -944,6 +946,7 @@ impl ManagedStore {
             hashes,
             embedded_hash: embedded_hash.into(),
             held: AtomicBool::new(false),
+            spawned: AtomicBool::new(false),
             stopped: OnceLock::new(),
         }
     }
@@ -985,6 +988,7 @@ impl ManagedStore {
                 // launched and then missed the deadline must not come up
                 // unowned a moment after the abort.
                 self.held.store(true, Ordering::SeqCst);
+                self.spawned.store(true, Ordering::SeqCst);
                 if let Err(reason) = self.ports.start_managed_store() {
                     // Only the child this board just spawned: the port may be
                     // held by another board's healthy store.
@@ -1061,6 +1065,17 @@ impl ManagedStore {
             return true;
         }
         self.stop_once(|| self.ports.stop_managed_store())
+    }
+
+    /// The import's exit (`ImportBringsUpTheManagedStore`): stops a store
+    /// `bring_up` started and leaves an adopted one running, since a board may
+    /// be using it. Returns whether a stop completed in time (`true` when
+    /// nothing was started).
+    pub fn stop_spawned_on_exit(&self) -> bool {
+        if !self.spawned.load(Ordering::SeqCst) {
+            return true;
+        }
+        self.stop_once(|| self.ports.stop_spawned_store())
     }
 
     /// `StopTheManagedStoreWhenStartupAborts`, for an abort discovered after

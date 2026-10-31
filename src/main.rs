@@ -576,10 +576,12 @@ fn cmd_statusline(snapshot: &str, chain: Option<&str>) -> ! {
 
 fn cmd_caller_headers() -> Result<()> {
     let (stdout, code) = dispatch_tui::cli::caller_headers::resolve_headers();
+    // Not `println!`: a closed pipe must not turn into a panic's exit code.
+    let line = format!("{stdout}\n");
     if code == 0 {
-        println!("{stdout}");
+        let _ = std::io::Write::write_all(&mut std::io::stdout(), line.as_bytes());
     } else {
-        eprintln!("{stdout}");
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), line.as_bytes());
     }
     std::process::exit(code);
 }

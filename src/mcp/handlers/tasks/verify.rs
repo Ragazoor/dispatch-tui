@@ -18,8 +18,8 @@ pub(crate) async fn handle_set_verify_command(
     tracing::info!(repo_path = %parsed.repo_path, "MCP set_verify_command");
     // Newline guard returns -32602 (invalid params) for a user-input error; the DB layer
     // would surface the same constraint as -32603 (internal error), so we validate here.
-    // Blank/whitespace commands are intentionally not rejected — the DB normalises them to
-    // None (clear), which matches the trait contract.
+    // Blank/whitespace commands are intentionally not rejected — the store layer turns
+    // them into a clear (`RepoConfigStore::set_verify_command`).
     if parsed
         .command
         .as_deref()

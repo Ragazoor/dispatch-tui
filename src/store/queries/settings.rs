@@ -103,6 +103,14 @@ impl super::super::RepoConfigRead for Store {
     }
 }
 
+/// The module's `""` means "no command", so a blank one is that.
+fn normalised_verify_command(command: Option<&str>) -> String {
+    match command {
+        Some(c) if !c.trim().is_empty() => c.to_string(),
+        _ => String::new(),
+    }
+}
+
 #[async_trait::async_trait]
 impl super::super::RepoConfigStore for Store {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
@@ -123,7 +131,7 @@ impl super::super::RepoConfigStore for Store {
         // `""` clears it. The module's absent sentinel, not a command that
         // happens to be empty — see its header.
         self.caller
-            .set_verify_command(path.to_string(), command.unwrap_or_default().to_string())
+            .set_verify_command(path.to_string(), normalised_verify_command(command))
             .await?
             .applied()
     }

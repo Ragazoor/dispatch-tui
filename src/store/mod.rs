@@ -740,15 +740,14 @@ pub trait RepoConfigStore: RepoConfigRead {
     /// Remove the `repo_paths` row.
     async fn delete_repo_path(&self, path: &str) -> Result<()>;
 
-    /// Set the verify command for a known repo path.
+    /// Set the verify command for a saved repo path.
     ///
-    /// If `command` is `Some(cmd)` and the path does not exist in `repo_paths`, a new
-    /// row is inserted (with `last_used = now()`), equivalent to calling `save_repo_path`
-    /// first. If `command` is `None`, the column is cleared to NULL; unknown paths are
-    /// silently ignored (no row created).
+    /// `None`, `""` and a whitespace-only command all clear it. A path that is
+    /// not saved is refused (`no repo path ...`): this does not create the row,
+    /// so call `save_repo_path` first (`repo set-verify` does).
     ///
-    /// `command` must not contain a newline (`\n`) or carriage return (`\r`); returns
-    /// an error if it does. Empty or whitespace-only commands are treated as `None`.
+    /// `command` must not contain a newline (`\n`) or carriage return (`\r`);
+    /// returns an error if it does.
     async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()>;
 
     // -- Base branch history (task #3422) --
