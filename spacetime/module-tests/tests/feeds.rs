@@ -93,7 +93,7 @@ fn retire_seed(store: &Store, rows: &[(i64, i64, &str)]) {
         })
         .collect();
     store
-        .call("alice", |ctx| seed_retired_feed_items(ctx, rows))
+        .call_as_scheduler(|ctx| seed_retired_feed_items(ctx, rows))
         .expect("seed_retired_feed_items");
 }
 
@@ -582,7 +582,7 @@ fn deleting_an_epic_detaches_its_subtasks_learnings_and_cascades_their_retrieval
     // `done`: this test is about learning detachment, not the delete guard.
     let task = store.create("alice", epic_task("source", epic, "done"));
     store
-        .call("alice", |ctx| {
+        .call_as_scheduler(|ctx| {
             seed_learnings(
                 ctx,
                 vec![Learning {
@@ -607,7 +607,7 @@ fn deleting_an_epic_detaches_its_subtasks_learnings_and_cascades_their_retrieval
         })
         .expect("seed_learnings");
     store
-        .call("alice", |ctx| {
+        .call_as_scheduler(|ctx| {
             seed_learning_retrievals(
                 ctx,
                 vec![LearningRetrieval {

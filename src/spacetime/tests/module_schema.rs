@@ -116,6 +116,9 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// the store rather than the domain, and `SharedTable` deliberately omits them
 /// (see `snapshot.rs`).
 ///
+/// `store_owner` (the publisher, stamped by `init`) is excluded too: it is the
+/// store's own, private, and a restore must never be able to rewrite it.
+///
 /// `unseen_tasks` (the new-task signal, `core.allium: UnseenTask`) is excluded
 /// too: a mark says "you have not looked yet", which a restore into another
 /// store would invent for people who may have looked since.
@@ -139,6 +142,7 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
                 *name,
                 "schema_version"
                     | "rules_version"
+                    | "store_owner"
                     | "dispatch_requests"
                     | "dispatch_request_timeouts"
                     | "session_requests"

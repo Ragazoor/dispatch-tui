@@ -158,6 +158,7 @@ pub fn subscribe_to_epic(
     if subscriber.trim().is_empty() {
         return Err("cannot subscribe without an identity".into());
     }
+    require_own_identity(ctx, &subscriber)?;
     if visible_epic(ctx, epic_id).is_none() {
         return Err(format!("no epic {epic_id}"));
     }

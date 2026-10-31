@@ -20,14 +20,14 @@ impl MemoryReducerCaller {
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         let scope = self.scope();
         let mut tables = self.lock();
-        tables
-            .check_new_package(&scope, &module::WorkPackage::from(row.clone()))
+        let row = tables
+            .settle_new_package(&scope, module::WorkPackage::from(row))
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         let id = Self::assign_id(0, &mut tables.next_work_package_id);
         let row = module::WorkPackage {
             id,
             title: row.title.trim().to_string(),
-            ..module::WorkPackage::from(row)
+            ..row
         };
         tables.work_packages.insert(id, row.clone());
         self.rows.upsert_work_package(&row.into());
@@ -45,9 +45,8 @@ impl MemoryReducerCaller {
         module::validate_work_package_title(&row.title).map_err(StoreRefusal)?;
         let scope = self.scope();
         let mut tables = self.lock();
-        let candidate = module::WorkPackage::from(row.clone());
-        tables
-            .check_new_package(&scope, &candidate)
+        let candidate = tables
+            .settle_new_package(&scope, module::WorkPackage::from(row))
             .map_err(StoreRefusal)?;
         for item in &links {
             Self::require_item(&tables, *item).map_err(StoreRefusal)?;
@@ -58,8 +57,8 @@ impl MemoryReducerCaller {
         let id = Self::assign_id(0, &mut tables.next_work_package_id);
         let row = module::WorkPackage {
             id,
-            title: row.title.trim().to_string(),
-            ..module::WorkPackage::from(row)
+            title: candidate.title.trim().to_string(),
+            ..candidate
         };
         tables.work_packages.insert(id, row.clone());
         self.rows.upsert_work_package(&row.into());

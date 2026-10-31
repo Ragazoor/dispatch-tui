@@ -51,10 +51,10 @@ fn verdict(learning_id: i64, verdict: &str) -> LearningVerdictInput {
 fn store_with_a_retrieved_learning() -> Store {
     let store = Store::new();
     store
-        .call("alice", |ctx| seed_learnings(ctx, vec![learning(1)]))
+        .call_as_scheduler(|ctx| seed_learnings(ctx, vec![learning(1)]))
         .expect("seed_learnings");
     store
-        .call("alice", |ctx| {
+        .call_as_scheduler(|ctx| {
             seed_learning_retrievals(ctx, vec![retrieval(1, 7, 1), retrieval(2, 8, 1)])
         })
         .expect("seed_learning_retrievals");
@@ -62,7 +62,7 @@ fn store_with_a_retrieved_learning() -> Store {
     // one that does not exist.
     for id in [7, 8, 9] {
         store
-            .call("alice", |ctx| {
+            .call_as_scheduler(|ctx| {
                 seed_tasks(
                     ctx,
                     vec![Task {

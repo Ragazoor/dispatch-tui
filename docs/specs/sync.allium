@@ -1648,6 +1648,11 @@ rule SubscribeToEpic {
         -- than a local preference, and why subscribing on the laptop is already
         -- true on the desktop.
         --
+        -- THE SUBSCRIBER IS THE CALLER. The store refuses a subscriber that is
+        -- not the identity making the call, so a board cannot make someone
+        -- else follow an epic (workspaces.allium, "Identities are the
+        -- caller's"); the rule above already names the local host's owner.
+        --
         -- REQUIRES AN IDENTITY, because a subscription is one person's standing
         -- interest and an install that has never connected does not know whose.
         -- This is the one place the null owner from core/Host bites, and it

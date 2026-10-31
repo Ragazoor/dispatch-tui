@@ -829,8 +829,20 @@ invariant OneSequencePerTable {
 -- deliberately no MCP tool for either: a dispatched agent has no business
 -- rebuilding the shared store, and an operation whose failure mode is "the
 -- team's board is now half a board" should require a human to have typed it.
+--
+-- WHO MAY CALL THE seed_* REDUCERS (task #98743). The seed reducers write rows
+-- with the ids, owners and visibilities they already have, so they skip every
+-- permission rule on purpose. The module therefore lets only two callers use
+-- them: the store itself (the database identity, as a scheduled call), and the
+-- store's PUBLISHER, the identity that published the database. The module
+-- learns the publisher once, as the sender of `init`, and keeps it in a private
+-- `store_owner` row that no board can read and no restore can rewrite. Any
+-- other identity, a board included, is refused by every seed_* reducer before
+-- it writes anything. A store published before that row existed has no
+-- recorded publisher and refuses every board: failing closed is the point, as
+-- a board could otherwise claim the role by being first to ask.
 actor Operator {
-    identified_by: core/Host where id != ""
+    identified_by: core/Host where id != "" and owner = store_publisher()
 }
 
 -- == Importing the old store ==

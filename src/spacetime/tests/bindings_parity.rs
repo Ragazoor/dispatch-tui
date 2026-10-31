@@ -71,6 +71,9 @@ fn module_tables() -> BTreeSet<String> {
             let end = rest.find([',', ')'])?;
             Some(rest[..end].to_string())
         })
+        // A private table has a row type in the bindings but no `_table`
+        // module: no client can read it. `store_owner` is the one.
+        .filter(|name| name != "store_owner")
         .collect()
 }
 

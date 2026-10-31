@@ -145,7 +145,9 @@ fn mark_epic_seen_refuses_a_blank_identity_and_tolerates_nothing_to_clear() {
         .call("alice", |ctx| mark_epic_seen(ctx, "  ".into(), epic))
         .is_err());
     store
-        .call("alice", |ctx| mark_epic_seen(ctx, "bob".into(), epic))
+        .call("alice", |ctx| {
+            mark_epic_seen(ctx, identity_of("alice"), epic)
+        })
         .expect("nothing to clear is not an error");
 }
 

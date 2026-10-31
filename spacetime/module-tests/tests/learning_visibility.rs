@@ -106,7 +106,10 @@ fn a_user_scoped_learning_has_no_workspace_and_is_private_to_its_author() {
     assert_eq!(l.workspace_id, 0);
     assert_eq!(l.author, identity_of("alice"));
     assert!(can_see(&store, "alice", l.id));
-    assert!(!can_see(&store, "bob", l.id), "a workspace mate is not the author");
+    assert!(
+        !can_see(&store, "bob", l.id),
+        "a workspace mate is not the author"
+    );
     assert!(store.call("bob", |ctx| delete_learning(ctx, l.id)).is_err());
 }
 
@@ -165,7 +168,12 @@ fn a_repo_learning_takes_the_workspace_of_the_recording_tasks_epic() {
     let (store, a, _b) = world();
     let epic = epic_in(&store, "alice", a);
     let task = store.create("alice", epic_task("t", epic, "backlog"));
-    let l = record(&store, "alice", row("repo", Some("/repo".into()), Some(task))).expect("record");
+    let l = record(
+        &store,
+        "alice",
+        row("repo", Some("/repo".into()), Some(task)),
+    )
+    .expect("record");
     assert_eq!(l.workspace_id, a);
     assert!(can_see(&store, "bob", l.id));
     assert!(!can_see(&store, "carol", l.id));
@@ -175,7 +183,12 @@ fn a_repo_learning_takes_the_workspace_of_the_recording_tasks_epic() {
 fn a_repo_learning_from_a_main_board_task_is_private_to_its_author() {
     let (store, _a, _b) = world();
     let task = store.create("alice", user_task("mine", "alice"));
-    let l = record(&store, "alice", row("repo", Some("/repo".into()), Some(task))).expect("record");
+    let l = record(
+        &store,
+        "alice",
+        row("repo", Some("/repo".into()), Some(task)),
+    )
+    .expect("record");
     assert_eq!(l.workspace_id, 0);
     assert_eq!(l.author, identity_of("alice"));
     assert!(!can_see(&store, "bob", l.id));
@@ -195,7 +208,12 @@ fn a_recording_task_the_caller_cannot_see_gives_no_workspace() {
     let epic = epic_in(&store, "alice", a);
     let task = store.create("alice", epic_task("t", epic, "backlog"));
     // carol is not in A: naming alice's task must not put her learning there.
-    let l = record(&store, "carol", row("repo", Some("/repo".into()), Some(task))).expect("record");
+    let l = record(
+        &store,
+        "carol",
+        row("repo", Some("/repo".into()), Some(task)),
+    )
+    .expect("record");
     assert_eq!(l.workspace_id, 0);
     assert!(!can_see(&store, "alice", l.id));
 }
@@ -206,7 +224,7 @@ fn a_learning_from_before_workspaces_stays_visible_to_everyone() {
     let mut old = row("user", None, None);
     old.id = 900;
     store
-        .call("root", |ctx| seed_learnings(ctx, vec![old]))
+        .call_as_scheduler(|ctx| seed_learnings(ctx, vec![old]))
         .expect("seed");
     assert!(can_see(&store, "alice", 900));
     assert!(can_see(&store, "carol", 900));

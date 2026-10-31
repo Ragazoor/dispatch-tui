@@ -183,14 +183,41 @@ pub struct SchemaVersion {
     pub module_version: i64,
 }
 
+/// The publisher of this database: the one client, besides the store itself,
+/// that may use the `seed_*` restore reducers (`spacetime-seed.allium:
+/// SeedRequiresTheOperator`).
+///
+/// One row, `id` 1, written only by `init`, in `caller_identity`'s spelling.
+/// **Private**: not in the snapshot and not readable by a board. A store
+/// published before this table existed has no row; it fails closed, so a board
+/// can never claim the role by being first to ask.
+#[spacetimedb::table(accessor = store_owner)]
+#[derive(Clone, Debug)]
+pub struct StoreOwner {
+    #[primary_key]
+    pub id: i64,
+    pub identity: String,
+}
+
 /// Stamp the schema version on a brand-new database.
 #[spacetimedb::reducer(init)]
 pub fn init(ctx: &ReducerContext) {
-    ctx.db.schema_version().insert(SchemaVersion {
-        id: 1,
-        version: SCHEMA_VERSION,
-        module_version: MODULE_SCHEMA_VERSION,
-    });
+    // `init` runs once, as the identity that publishes the database, so its
+    // sender is the publisher. Recorded once and never overwritten: a stray
+    // second call must not hand the role to whoever makes it.
+    if ctx.db.store_owner().id().find(1).is_none() {
+        ctx.db.store_owner().insert(StoreOwner {
+            id: 1,
+            identity: caller_identity(ctx),
+        });
+    }
+    if ctx.db.schema_version().id().find(1).is_none() {
+        ctx.db.schema_version().insert(SchemaVersion {
+            id: 1,
+            version: SCHEMA_VERSION,
+            module_version: MODULE_SCHEMA_VERSION,
+        });
+    }
 }
 
 /// Re-stamp the schema version after an automigration.

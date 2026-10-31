@@ -18,10 +18,31 @@ use std::collections::BTreeSet;
 /// never ends would stall a transaction, so it is bounded.
 const PRIVATE_WALK_LIMIT: usize = 64;
 
-/// Whether the caller is the store itself: a scheduled reducer firing, or the
-/// publisher. Sees everything.
+/// Whether the caller is the store itself: a scheduled reducer firing. Sees
+/// everything. The publisher is NOT an operator here; it is recognised only by
+/// [`require_restore_authority`], for the `seed_*` reducers.
 pub fn is_operator(ctx: &ReducerContext) -> bool {
     ctx.sender() == ctx.database_identity()
+}
+
+/// Whether the caller is the identity that published this database, as
+/// recorded by `init`. False for a store that recorded none.
+pub fn is_publisher(ctx: &ReducerContext) -> bool {
+    ctx.db
+        .store_owner()
+        .id()
+        .find(1)
+        .is_some_and(|owner| owner.identity == caller_identity(ctx))
+}
+
+/// Refuse a `seed_*` call from anyone but the store itself or its publisher
+/// (`spacetime-seed.allium: SeedRequiresTheOperator`).
+pub fn require_restore_authority(ctx: &ReducerContext) -> Result<(), String> {
+    if is_operator(ctx) || is_publisher(ctx) {
+        Ok(())
+    } else {
+        Err("only the store's publisher may restore (seed) data".into())
+    }
 }
 
 /// `is_super_admin(who)`.
@@ -174,10 +195,13 @@ pub fn settle_new_epic(ctx: &ReducerContext, row: Epic) -> Result<Epic, String> 
     if !operator && !workspace_has_member(ctx, workspace_id, &caller) {
         return Err(format!("workspace {workspace_id} does not exist"));
     }
-    let created_by = if row.created_by.is_empty() && !operator {
-        caller
-    } else {
+    // A caller's epic is always theirs: the row's own `created_by` is a
+    // client's claim, and a private epic attributed to someone else would
+    // block that person's moves. Only the store itself may name a creator.
+    let created_by = if operator {
         row.created_by.clone()
+    } else {
+        caller
     };
     check_private_has_creator(&row.visibility, &created_by)?;
     Ok(Epic {
@@ -188,8 +212,9 @@ pub fn settle_new_epic(ctx: &ReducerContext, row: Epic) -> Result<Epic, String> 
     })
 }
 
-/// `CreateWorkPackageInWorkspace`.
-pub fn check_new_package(ctx: &ReducerContext, row: &WorkPackage) -> Result<(), String> {
+/// `CreateWorkPackageInWorkspace`: check the workspace and return the row to
+/// store, `created_by` stamped with the caller (the store itself may name one).
+pub fn settle_new_package(ctx: &ReducerContext, row: WorkPackage) -> Result<WorkPackage, String> {
     validate_visibility_value(&row.visibility)?;
     if ctx.db.workspaces().id().find(row.workspace_id).is_none()
         || (!is_operator(ctx)
@@ -197,7 +222,22 @@ pub fn check_new_package(ctx: &ReducerContext, row: &WorkPackage) -> Result<(), 
     {
         return Err(format!("workspace {} does not exist", row.workspace_id));
     }
-    Ok(())
+    let created_by = if is_operator(ctx) {
+        row.created_by.clone()
+    } else {
+        caller_identity(ctx)
+    };
+    Ok(WorkPackage { created_by, ..row })
+}
+
+/// Refuse a `subscriber` the caller is not: a board follows epics and clears
+/// unseen marks as itself. The store itself may act for anyone.
+pub fn require_own_identity(ctx: &ReducerContext, subscriber: &str) -> Result<(), String> {
+    if is_operator(ctx) || subscriber == caller_identity(ctx) {
+        Ok(())
+    } else {
+        Err("a subscriber must be the caller's own identity".into())
+    }
 }
 
 /// `EpicStaysInItsWorkspace`: a re-parent stays inside the workspace, under an
@@ -333,15 +373,15 @@ pub fn move_epic_to_workspace(
         return Err(format!("workspace {workspace_id} does not exist"));
     }
     if workspace_id == epic.workspace_id {
-        return Err(format!("epic {epic_id} is already in workspace {workspace_id}"));
+        return Err(format!(
+            "epic {epic_id} is already in workspace {workspace_id}"
+        ));
     }
     let admin_of_both = ctx.db.workspaces().id().find(epic.workspace_id).is_some()
         && workspace_has_admin(ctx, epic.workspace_id, &caller)
         && workspace_has_admin(ctx, workspace_id, &caller);
     if !privileged && !admin_of_both {
-        return Err(
-            "only a super-admin, or an admin of both workspaces, may move an epic".into(),
-        );
+        return Err("only a super-admin, or an admin of both workspaces, may move an epic".into());
     }
 
     let tree = crate::tasks_epics::collect_epic_subtree_ids(ctx, epic_id);
@@ -393,7 +433,9 @@ pub fn move_epic_to_workspace(
         .db
         .subscriptions()
         .iter()
-        .filter(|s| tree.contains(&s.epic_id) && !workspace_has_member(ctx, workspace_id, &s.subscriber))
+        .filter(|s| {
+            tree.contains(&s.epic_id) && !workspace_has_member(ctx, workspace_id, &s.subscriber)
+        })
         .map(|s| s.id)
         .collect();
     for id in stale {
@@ -403,7 +445,9 @@ pub fn move_epic_to_workspace(
         .db
         .unseen_tasks()
         .iter()
-        .filter(|u| task_ids.contains(&u.task_id) && !workspace_has_member(ctx, workspace_id, &u.subscriber))
+        .filter(|u| {
+            task_ids.contains(&u.task_id) && !workspace_has_member(ctx, workspace_id, &u.subscriber)
+        })
         .map(|u| u.id)
         .collect();
     for id in marks {

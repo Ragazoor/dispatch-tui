@@ -259,14 +259,12 @@ fn deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals() {
         .call("alice", |ctx| patch_task(ctx, id, status_patch("done")))
         .expect("patch_task");
     store
-        .call("alice", |ctx| {
+        .call_as_scheduler(|ctx| {
             seed_learnings(ctx, vec![blank_learning(1, "A learning", Some(id))])
         })
         .expect("seed_learnings");
     store
-        .call("alice", |ctx| {
-            seed_learning_retrievals(ctx, vec![retrieval(1, id, 1)])
-        })
+        .call_as_scheduler(|ctx| seed_learning_retrievals(ctx, vec![retrieval(1, id, 1)]))
         .expect("seed_learning_retrievals");
 
     store
@@ -282,14 +280,10 @@ fn deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals() {
 fn deleting_a_learning_cascades_its_retrievals_and_refuses_when_missing() {
     let store = Store::new();
     store
-        .call("alice", |ctx| {
-            seed_learnings(ctx, vec![blank_learning(1, "A learning", None)])
-        })
+        .call_as_scheduler(|ctx| seed_learnings(ctx, vec![blank_learning(1, "A learning", None)]))
         .expect("seed_learnings");
     store
-        .call("alice", |ctx| {
-            seed_learning_retrievals(ctx, vec![retrieval(1, 7, 1)])
-        })
+        .call_as_scheduler(|ctx| seed_learning_retrievals(ctx, vec![retrieval(1, 7, 1)]))
         .expect("seed_learning_retrievals");
 
     store

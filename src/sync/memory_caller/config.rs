@@ -159,6 +159,9 @@ impl MemoryReducerCaller {
             ));
         }
         let scope = self.scope();
+        if let Err(why) = Tables::require_own_identity(&scope, &subscriber) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let mut tables = self.lock();
         if tables.visible_epic(&scope, epic_id).is_none() {
             return Ok(ReducerOutcome::Refused(format!("no epic {epic_id}")));

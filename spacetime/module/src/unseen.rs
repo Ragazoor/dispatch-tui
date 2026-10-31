@@ -45,6 +45,7 @@ pub fn mark_epic_seen(
     if subscriber.trim().is_empty() {
         return Err("cannot mark seen without an identity".into());
     }
+    require_own_identity(ctx, &subscriber)?;
     if visible_epic(ctx, epic_id).is_none() {
         return Ok(());
     }

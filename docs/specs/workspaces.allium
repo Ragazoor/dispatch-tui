@@ -77,8 +77,11 @@
 -- enforces reads by making every table that holds task, epic, package,
 -- learning, membership or setting data private and serving clients through
 -- per-caller views that apply the visible_to predicates below. The store's
--- publisher identity can still read private tables with one-off SQL; that
--- identity is the operator, and is the trust boundary.
+-- publisher identity can still read private tables with one-off SQL. The
+-- operator, the trust boundary every sight check exempts, is the store's own
+-- identity (the database identity: scheduled calls). The publisher is
+-- recognised separately, and only for the seed_* restore reducers
+-- (spacetime-seed.allium: actor Operator); it is not exempt from sight checks.
 --
 -- Proven on a throwaway module (docs/plans/2026-10-28-per-caller-views-spike.md).
 -- A client can subscribe to a view with a WHERE; a non-owner's one-off SQL
@@ -134,7 +137,7 @@
 --
 -- Every column a view filters on has a btree index, and every read in a view
 -- is a point read, so a write to an unrelated row never re-runs it.
--- The operator (the publisher identity) is not served by views: it reads the
+-- The operator (the store's own identity) is not served by views: it reads the
 -- tables directly, which is what makes it the trust boundary.
 --
 -- DISPOSITIONS, agreed with the user (task #98690). todos, task_shells,
@@ -729,9 +732,15 @@ rule WritesRequireSight {
         -- subtree holds an epic the caller cannot see, rather than taking
         -- someone's private sub-epic with it.
         --
-        -- The operator (the store's own scheduled calls and its publisher
-        -- identity) is exempt from every sight check: it is the trust
-        -- boundary (see READ ENFORCEMENT), not a person with a membership.
+        -- The operator (the store's own scheduled calls) is exempt from every
+        -- sight check: it is the trust boundary (see READ ENFORCEMENT), not a
+        -- person with a membership. The publisher is not exempt; it only may
+        -- call the seed_* reducers.
+        --
+        -- Identities are the caller's, never a client's claim. A created epic
+        -- or work package is stamped created_by = the caller whatever the row
+        -- says; subscribe_to_epic and mark_epic_seen refuse a subscriber that
+        -- is not the caller. Only the operator may name another identity.
         --
         -- Module-made epics. A feed's grouped and role-routed sub-epics
         -- inherit the parent's workspace. A managed feed's root epics

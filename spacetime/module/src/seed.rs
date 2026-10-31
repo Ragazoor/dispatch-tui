@@ -12,6 +12,7 @@ use super::*;
 /// and the module has no way to know.
 #[spacetimedb::reducer]
 pub fn seed_tasks(ctx: &ReducerContext, rows: Vec<Task>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_tasks needs each task's real id, not a generated one".into());
@@ -24,6 +25,7 @@ pub fn seed_tasks(ctx: &ReducerContext, rows: Vec<Task>) -> Result<(), String> {
 
 #[spacetimedb::reducer]
 pub fn seed_epics(ctx: &ReducerContext, rows: Vec<Epic>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_epics needs each epic's real id".into());
@@ -41,6 +43,7 @@ pub fn seed_epics(ctx: &ReducerContext, rows: Vec<Epic>) -> Result<(), String> {
 
 #[spacetimedb::reducer]
 pub fn seed_todos(ctx: &ReducerContext, rows: Vec<Todo>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_todos needs each todo's real id".into());
@@ -56,6 +59,7 @@ pub fn seed_todos(ctx: &ReducerContext, rows: Vec<Todo>) -> Result<(), String> {
 
 #[spacetimedb::reducer]
 pub fn seed_task_watchers(ctx: &ReducerContext, rows: Vec<TaskWatcher>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_task_watchers needs each watcher's real id".into());
@@ -71,6 +75,7 @@ pub fn seed_task_watchers(ctx: &ReducerContext, rows: Vec<TaskWatcher>) -> Resul
 
 #[spacetimedb::reducer]
 pub fn seed_work_packages(ctx: &ReducerContext, rows: Vec<WorkPackage>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_work_packages needs each package's real id".into());
@@ -90,6 +95,7 @@ pub fn seed_work_package_links(
     ctx: &ReducerContext,
     rows: Vec<WorkPackageLink>,
 ) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id.is_empty() {
             return Err("a work package link needs its derived id".into());
@@ -115,6 +121,7 @@ pub fn seed_work_package_links(
 /// hand it out again (`AgentNameIsNeverReused`).
 #[spacetimedb::reducer]
 pub fn seed_agents(ctx: &ReducerContext, rows: Vec<Agent>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_agents needs each agent's real id".into());
@@ -167,6 +174,7 @@ pub fn seed_handed_out_agent_names(
     ctx: &ReducerContext,
     rows: Vec<HandedOutAgentName>,
 ) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.name.is_empty() {
             return Err("a handed-out agent name cannot be empty".into());
@@ -188,6 +196,7 @@ pub fn seed_handed_out_agent_names(
 
 #[spacetimedb::reducer]
 pub fn seed_repo_paths(ctx: &ReducerContext, rows: Vec<RepoPath>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_repo_paths needs each row's real id".into());
@@ -206,6 +215,7 @@ pub fn seed_repo_base_branches(
     ctx: &ReducerContext,
     rows: Vec<RepoBaseBranch>,
 ) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_repo_base_branches needs each row's real id".into());
@@ -225,6 +235,7 @@ pub fn seed_repo_base_branches(
 /// live-shared-store path is not blocked on this reducer being rewritten.
 #[spacetimedb::reducer]
 pub fn seed_poll_owners(ctx: &ReducerContext, rows: Vec<PollOwner>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_poll_owners needs each row's real id".into());
@@ -245,6 +256,7 @@ pub fn seed_poll_owners(ctx: &ReducerContext, rows: Vec<PollOwner>) -> Result<()
 
 #[spacetimedb::reducer]
 pub fn seed_task_shells(ctx: &ReducerContext, rows: Vec<TaskShell>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if let Some(existing) = ctx
             .db
@@ -261,6 +273,7 @@ pub fn seed_task_shells(ctx: &ReducerContext, rows: Vec<TaskShell>) -> Result<()
 
 #[spacetimedb::reducer]
 pub fn seed_task_subagents(ctx: &ReducerContext, rows: Vec<TaskSubagent>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if let Some(existing) = ctx
             .db
@@ -277,6 +290,7 @@ pub fn seed_task_subagents(ctx: &ReducerContext, rows: Vec<TaskSubagent>) -> Res
 
 #[spacetimedb::reducer]
 pub fn seed_hosts(ctx: &ReducerContext, rows: Vec<Host>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id.is_empty() {
             return Err("a host needs its minted id".into());
@@ -292,6 +306,7 @@ pub fn seed_hosts(ctx: &ReducerContext, rows: Vec<Host>) -> Result<(), String> {
 
 #[spacetimedb::reducer]
 pub fn seed_subscriptions(ctx: &ReducerContext, rows: Vec<Subscription>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id.is_empty() {
             return Err("a subscription needs an id".into());
@@ -310,6 +325,7 @@ pub fn seed_subscriptions(ctx: &ReducerContext, rows: Vec<Subscription>) -> Resu
 
 #[spacetimedb::reducer]
 pub fn seed_settings(ctx: &ReducerContext, rows: Vec<Setting>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id.is_empty() {
             return Err("a setting needs its derived id".into());
@@ -325,6 +341,7 @@ pub fn seed_settings(ctx: &ReducerContext, rows: Vec<Setting>) -> Result<(), Str
 
 #[spacetimedb::reducer]
 pub fn seed_filter_presets(ctx: &ReducerContext, rows: Vec<FilterPreset>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id.is_empty() {
             return Err("a filter preset needs its derived id".into());
@@ -340,6 +357,7 @@ pub fn seed_filter_presets(ctx: &ReducerContext, rows: Vec<FilterPreset>) -> Res
 
 #[spacetimedb::reducer]
 pub fn seed_learnings(ctx: &ReducerContext, rows: Vec<Learning>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_learnings needs each learning's real id".into());
@@ -358,6 +376,7 @@ pub fn seed_learning_verdicts(
     ctx: &ReducerContext,
     rows: Vec<LearningVerdict>,
 ) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_learning_verdicts needs each row's real id".into());
@@ -376,6 +395,7 @@ pub fn seed_learning_retrievals(
     ctx: &ReducerContext,
     rows: Vec<LearningRetrieval>,
 ) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_learning_retrievals needs each row's real id".into());
@@ -391,6 +411,7 @@ pub fn seed_learning_retrievals(
 
 #[spacetimedb::reducer]
 pub fn seed_usage_events(ctx: &ReducerContext, rows: Vec<UsageEvent>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_usage_events needs each row's real id".into());
@@ -409,6 +430,7 @@ pub fn seed_retired_feed_items(
     ctx: &ReducerContext,
     rows: Vec<RetiredFeedItem>,
 ) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_retired_feed_items needs each row's real id".into());
@@ -436,6 +458,7 @@ fn validate_visibility(kind: &str, id: i64, visibility: &str) -> Result<(), Stri
 
 #[spacetimedb::reducer]
 pub fn seed_user_profiles(ctx: &ReducerContext, rows: Vec<UserProfile>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.identity.trim().is_empty() {
             return Err("a profile needs an identity".into());
@@ -457,6 +480,7 @@ pub fn seed_user_profiles(ctx: &ReducerContext, rows: Vec<UserProfile>) -> Resul
 
 #[spacetimedb::reducer]
 pub fn seed_workspaces(ctx: &ReducerContext, rows: Vec<Workspace>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_workspaces needs each workspace's real id".into());
@@ -472,6 +496,7 @@ pub fn seed_workspaces(ctx: &ReducerContext, rows: Vec<Workspace>) -> Result<(),
 
 #[spacetimedb::reducer]
 pub fn seed_memberships(ctx: &ReducerContext, rows: Vec<Membership>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     for row in rows {
         if row.id == 0 {
             return Err("seed_memberships needs each membership's real id".into());

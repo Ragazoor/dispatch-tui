@@ -294,11 +294,8 @@ impl Tables {
         if !self.has_member(workspace_id, &scope.who) {
             return Err(format!("workspace {workspace_id} does not exist"));
         }
-        let created_by = if row.created_by.is_empty() {
-            scope.who.clone()
-        } else {
-            row.created_by.clone()
-        };
+        // Always the caller: the row's own `created_by` is a client's claim.
+        let created_by = scope.who.clone();
         if row.visibility == module::VISIBILITY_PRIVATE && created_by.is_empty() {
             return Err("a private epic needs a creator".into());
         }
@@ -311,11 +308,11 @@ impl Tables {
     }
 
     /// `CreateWorkPackageInWorkspace`.
-    pub(super) fn check_new_package(
+    pub(super) fn settle_new_package(
         &self,
         scope: &Scope,
-        row: &module::WorkPackage,
-    ) -> Result<(), String> {
+        row: module::WorkPackage,
+    ) -> Result<module::WorkPackage, String> {
         module::validate_visibility_value(&row.visibility)?;
         if scope.on
             && (!self.workspaces.contains_key(&row.workspace_id)
@@ -323,7 +320,23 @@ impl Tables {
         {
             return Err(format!("workspace {} does not exist", row.workspace_id));
         }
-        Ok(())
+        if scope.on {
+            return Ok(module::WorkPackage {
+                created_by: scope.who.clone(),
+                ..row
+            });
+        }
+        Ok(row)
+    }
+
+    /// `require_own_identity`: a subscriber is the caller's own identity. Off
+    /// without the workspace rules, as every other identity check here is.
+    pub(super) fn require_own_identity(scope: &Scope, subscriber: &str) -> Result<(), String> {
+        if !scope.on || subscriber == scope.who {
+            Ok(())
+        } else {
+            Err("a subscriber must be the caller's own identity".into())
+        }
     }
 
     /// `EpicStaysInItsWorkspace`.

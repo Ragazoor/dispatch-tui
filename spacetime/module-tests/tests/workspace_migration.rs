@@ -299,7 +299,7 @@ fn deleting_a_workspace_that_holds_a_package_is_refused() {
 fn deleting_an_empty_workspace_removes_its_learnings() {
     let (store, workspace) = store_with_root_and_default();
     store
-        .call("alice", |ctx| {
+        .call_as_scheduler(|ctx| {
             seed_learnings(
                 ctx,
                 vec![Learning {

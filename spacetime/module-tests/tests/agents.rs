@@ -304,7 +304,7 @@ fn legacy_task(id: i64, status: &str, worktree: &str) -> Task {
 
 fn seed_tasks_call(store: &Store, rows: Vec<Task>) {
     store
-        .call("alice", |ctx| seed_tasks(ctx, rows))
+        .call_as_scheduler(|ctx| seed_tasks(ctx, rows))
         .expect("seed_tasks");
 }
 
@@ -361,7 +361,7 @@ fn a_seeded_agent_takes_its_name_out_of_the_pool() {
         stop_pending_at: String::new(),
     };
     store
-        .call("alice", |ctx| seed_agents(ctx, vec![agent]))
+        .call_as_scheduler(|ctx| seed_agents(ctx, vec![agent]))
         .expect("seed_agents");
     assert_eq!(
         store

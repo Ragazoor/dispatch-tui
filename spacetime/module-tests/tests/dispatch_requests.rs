@@ -112,7 +112,7 @@ fn make_epic_stale(store: &Store, epic: i64) {
     let mut row = store.epic(epic);
     row.status = "done".into();
     store
-        .call("alice", |ctx| seed_epics(ctx, vec![row]))
+        .call_as_scheduler(|ctx| seed_epics(ctx, vec![row]))
         .expect("seed_epics");
     assert_eq!(store.epic(epic).status, "done");
 }

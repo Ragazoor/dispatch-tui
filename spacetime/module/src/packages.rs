@@ -74,7 +74,7 @@ pub fn apply_work_package_patch(
 #[spacetimedb::reducer]
 pub fn create_work_package(ctx: &ReducerContext, row: WorkPackage) -> Result<(), String> {
     validate_work_package_title(&row.title)?;
-    check_new_package(ctx, &row)?;
+    let row = settle_new_package(ctx, row)?;
     let title = row.title.trim().to_string();
     ctx.db.work_packages().insert(WorkPackage {
         id: 0,
@@ -95,7 +95,7 @@ pub fn create_work_package_with_links(
     links: Vec<WorkPackageItemRef>,
 ) -> Result<(), String> {
     validate_work_package_title(&row.title)?;
-    check_new_package(ctx, &row)?;
+    let row = settle_new_package(ctx, row)?;
     for item in &links {
         validate_item_exists(ctx, item)?;
         check_link_allowed(ctx, &row, &item.kind, item.item_id)?;

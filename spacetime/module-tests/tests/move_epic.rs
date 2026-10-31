@@ -124,7 +124,10 @@ fn a_sub_epic_the_same_workspace_and_a_missing_destination_are_refused() {
     let sub = make_epic(&store, "alice", a, root, "public");
     assert!(mv(&store, "root", sub, a).is_err(), "sub-epic");
     assert!(mv(&store, "root", root, a).is_err(), "same workspace");
-    assert!(mv(&store, "root", root, 9999).is_err(), "missing destination");
+    assert!(
+        mv(&store, "root", root, 9999).is_err(),
+        "missing destination"
+    );
     assert!(mv(&store, "root", root, 0).is_err(), "workspace 0");
 }
 
@@ -240,7 +243,16 @@ fn package_links_into_the_tree_are_dropped_and_other_links_stay() {
         .map(|l| l.item_id)
         .collect();
     assert_eq!(left, vec![other]);
-    assert_eq!(store.db().work_packages().id().find(package).expect("p").workspace_id, a);
+    assert_eq!(
+        store
+            .db()
+            .work_packages()
+            .id()
+            .find(package)
+            .expect("p")
+            .workspace_id,
+        a
+    );
 }
 
 #[test]
@@ -249,9 +261,7 @@ fn follows_of_people_who_are_not_in_the_destination_are_dropped() {
     let root = make_epic(&store, "alice", a, 0, "public");
     for who in ["alice", "carol"] {
         store
-            .call(who, |ctx| {
-                subscribe_to_epic(ctx, identity_of(who), root)
-            })
+            .call(who, |ctx| subscribe_to_epic(ctx, identity_of(who), root))
             .expect("follow");
     }
     mv(&store, "alice", root, b).expect("move");
