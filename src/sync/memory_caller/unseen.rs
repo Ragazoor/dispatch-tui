@@ -29,13 +29,7 @@ impl MemoryReducerCaller {
         if epic_id == 0 {
             return;
         }
-        let mut viewers = module::viewers_of_epic(&*tables, epic_id);
-        // With the workspace rules off everyone sees everything, but the only
-        // person this double knows by name is its sender.
-        let scope = self.scope();
-        if !scope.on() && !self.sender.is_empty() {
-            viewers.insert(self.sender.clone());
-        }
+        let viewers = tables.epic_viewers(&self.scope(), epic_id);
         for subscriber in viewers {
             let id = module::unseen_id(&subscriber, task_id);
             if let std::collections::btree_map::Entry::Vacant(entry) =

@@ -31,16 +31,6 @@ fn create_signalled(store: &Store, row: Task) -> i64 {
     id
 }
 
-/// Make `who` a member of the test workspace, so they see its public epics.
-fn join(store: &Store, who: &str) {
-    store.db().memberships().insert(Membership {
-        workspace_id: TEST_WORKSPACE,
-        user: identity_of(who),
-        role: "member".into(),
-        ..blank_membership()
-    });
-}
-
 /// Everyone who can see the epic is marked, with no subscription anywhere
 /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`), and
 /// nobody outside the workspace is.
@@ -61,7 +51,7 @@ fn a_signalled_task_is_unseen_for_everyone_who_sees_its_epic() {
             )
         })
         .expect("reparent");
-    join(&store, "bob");
+    store.enrol("bob");
 
     let task = create_signalled(&store, epic_task("new", child, "backlog"));
 
@@ -81,7 +71,7 @@ fn a_signalled_task_in_a_private_epic_marks_only_its_holder() {
             set_epic_visibility(ctx, epic, VISIBILITY_PRIVATE.into())
         })
         .expect("set_epic_visibility");
-    join(&store, "bob");
+    store.enrol("bob");
 
     let task = create_signalled(&store, epic_task("new", epic, "backlog"));
 
@@ -94,7 +84,7 @@ fn a_signalled_task_in_a_private_epic_marks_only_its_holder() {
 fn an_ordinary_create_marks_nothing() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
-    join(&store, "bob");
+    store.enrol("bob");
 
     store.create("alice", epic_task("plain", epic, "backlog"));
 
@@ -108,7 +98,7 @@ fn a_later_member_is_not_marked() {
     let epic = store.create_epic("alice", "E", false);
     create_signalled(&store, epic_task("new", epic, "backlog"));
 
-    join(&store, "late");
+    store.enrol("late");
 
     assert!(unseen_for(&store, "late").is_empty());
 }
@@ -132,8 +122,8 @@ fn entering_an_epic_clears_only_its_own_tasks_for_that_person() {
             )
         })
         .expect("reparent");
-    join(&store, "bob");
-    join(&store, "carol");
+    store.enrol("bob");
+    store.enrol("carol");
     let shallow = create_signalled(&store, epic_task("shallow", root, "backlog"));
     let deep = create_signalled(&store, epic_task("deep", child, "backlog"));
 
@@ -165,7 +155,7 @@ fn moving_a_task_out_of_its_epic_clears_the_mark() {
     let store = Store::new();
     let from = store.create_epic("alice", "from", false);
     let to = store.create_epic("alice", "to", false);
-    join(&store, "bob");
+    store.enrol("bob");
     let task = create_signalled(&store, epic_task("new", from, "backlog"));
 
     store
@@ -180,7 +170,7 @@ fn moving_a_task_out_of_its_epic_clears_the_mark() {
 fn finishing_a_task_clears_the_mark() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
-    join(&store, "bob");
+    store.enrol("bob");
     let task = create_signalled(&store, epic_task("new", epic, "running"));
 
     store
@@ -195,7 +185,7 @@ fn finishing_a_task_clears_the_mark() {
 fn deleting_a_task_removes_its_marks() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
-    join(&store, "bob");
+    store.enrol("bob");
     let task = create_signalled(&store, epic_task("new", epic, "running"));
     // Done clears the mark first, so re-mark by hand to prove the delete path
     // removes rows on its own.

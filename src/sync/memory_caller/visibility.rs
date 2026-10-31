@@ -116,6 +116,21 @@ impl Tables {
         self.private_holder(epic).is_some()
     }
 
+    /// Everyone `epic_id` is shown to: the module's `viewers_of_epic`. With
+    /// the rules off everyone sees everything, but the only person this double
+    /// knows by name is its sender, so the sender is added.
+    pub(super) fn epic_viewers(
+        &self,
+        scope: &Scope,
+        epic_id: i64,
+    ) -> std::collections::BTreeSet<String> {
+        let mut viewers = module::viewers_of_epic(self, epic_id);
+        if !scope.on && !scope.who.is_empty() {
+            viewers.insert(scope.who.clone());
+        }
+        viewers
+    }
+
     pub(super) fn epic_visible(&self, scope: &Scope, epic: &module::Epic) -> bool {
         if !scope.on {
             return true;

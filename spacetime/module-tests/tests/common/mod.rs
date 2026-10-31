@@ -52,7 +52,7 @@ impl Store {
     }
 
     /// Make `who` a member of the test workspace, once.
-    fn enrol(&self, who: &str) {
+    pub fn enrol(&self, who: &str) {
         let user = identity_of(who);
         let db = &self.ctx.db;
         if !db
