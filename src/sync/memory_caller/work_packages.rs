@@ -75,6 +75,7 @@ impl MemoryReducerCaller {
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItem>,
         link: Vec<WorkPackageItem>,
     ) -> Result<ReducerOutcome> {
@@ -84,6 +85,11 @@ impl MemoryReducerCaller {
         let Some(mut row) = tables.visible_package(&scope, id.0) else {
             return Ok(ReducerOutcome::Refused(format!("no work package {id}")));
         };
+        if let Some(visibility) = &visibility {
+            if let Err(why) = self.check_package_visibility_change(&tables, id, visibility) {
+                return Ok(ReducerOutcome::Refused(why));
+            }
+        }
         if let Some(both) = link.iter().find(|i| unlink.contains(i)) {
             return Ok(ReducerOutcome::Refused(format!(
                 "{} {} is in both a link and an unlink list; name it in one",
@@ -99,9 +105,14 @@ impl MemoryReducerCaller {
                 return Ok(ReducerOutcome::Refused(why));
             }
         }
-        if !patch.is_empty() {
-            if let Err(why) = module::apply_work_package_patch(&mut row, patch) {
-                return Ok(ReducerOutcome::Refused(why));
+        if !patch.is_empty() || visibility.is_some() {
+            if !patch.is_empty() {
+                if let Err(why) = module::apply_work_package_patch(&mut row, patch) {
+                    return Ok(ReducerOutcome::Refused(why));
+                }
+            }
+            if let Some(visibility) = visibility {
+                row.visibility = visibility;
             }
             row.updated_at = self.now();
             tables.work_packages.insert(id.0, row.clone());

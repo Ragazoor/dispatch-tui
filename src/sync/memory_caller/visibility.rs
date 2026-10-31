@@ -485,6 +485,18 @@ impl MemoryReducerCaller {
         id: EpicId,
         visibility: String,
     ) -> Result<ReducerOutcome> {
+        self.set_epic_visibility_row(id, visibility, false)
+    }
+
+    /// [`Self::apply_set_epic_visibility`]'s body. `check_only` returns the
+    /// answer the write would get, before the write: `apply_update_epic` asks
+    /// every part first, because this double has no rollback.
+    pub(super) fn set_epic_visibility_row(
+        &self,
+        id: EpicId,
+        visibility: String,
+        check_only: bool,
+    ) -> Result<ReducerOutcome> {
         if let Err(why) = module::validate_visibility_value(&visibility) {
             return refused(why);
         }
@@ -502,6 +514,9 @@ impl MemoryReducerCaller {
         if let Err(why) = module::check_repo_group_stays_public(&epic.origin, &visibility) {
             return refused(why);
         }
+        if check_only {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
         epic.visibility = visibility;
         epic.updated_at = self.now();
         self.write_epic(&mut tables, epic);
@@ -513,6 +528,17 @@ impl MemoryReducerCaller {
         &self,
         id: EpicId,
         workspace_id: i64,
+    ) -> Result<ReducerOutcome> {
+        self.move_epic_row(id, workspace_id, false)
+    }
+
+    /// [`Self::apply_move_epic_to_workspace`]'s body; `check_only` as for
+    /// [`Self::set_epic_visibility_row`].
+    pub(super) fn move_epic_row(
+        &self,
+        id: EpicId,
+        workspace_id: i64,
+        check_only: bool,
     ) -> Result<ReducerOutcome> {
         let scope = self.scope();
         let mut tables = self.lock();
@@ -568,6 +594,9 @@ impl MemoryReducerCaller {
         });
         if someone_elses && scope.on() {
             return refused(missing());
+        }
+        if check_only {
+            return Ok(ReducerOutcome::Applied(vec![]));
         }
         let task_ids: std::collections::HashSet<i64> = tables
             .tasks
@@ -652,6 +681,26 @@ impl MemoryReducerCaller {
     }
 
     /// Mirrors the module's `set_work_package_visibility`.
+    /// Every refusal `apply_set_work_package_visibility` can make, with no
+    /// write. Shared with `apply_update_work_package_with_links`.
+    pub(super) fn check_package_visibility_change(
+        &self,
+        tables: &Tables,
+        id: WorkPackageId,
+        visibility: &str,
+    ) -> Result<(), String> {
+        module::validate_visibility_value(visibility)?;
+        let scope = self.scope();
+        let Some(package) = tables.visible_package(&scope, id.0) else {
+            return Err(format!("no work package {id}"));
+        };
+        if scope.on() && !self.may_set_visibility(tables, &package.created_by, package.workspace_id)
+        {
+            return Err("only the creator or an admin may change a package's visibility".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn apply_set_work_package_visibility(
         &self,
         id: WorkPackageId,

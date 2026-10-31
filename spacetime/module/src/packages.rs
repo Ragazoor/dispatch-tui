@@ -112,8 +112,9 @@ pub fn create_work_package_with_links(
     Ok(())
 }
 
-/// `work-packages.allium: UpdateWorkPackage`, then every unlink, then every
-/// link, in one transaction. Validated before the first write: the package,
+/// `work-packages.allium: UpdateWorkPackage`, then the visibility change
+/// (`workspaces.allium: SetWorkPackageVisibility`, checked before the first
+/// write), then every unlink, then every link, in one transaction. Validated before the first write: the package,
 /// the patch, no item in both lists, and every item to link. A patch that
 /// writes nothing leaves `updated_at` alone. An unlink of an item that is not
 /// linked is a silent success (`UnlinkItem`).
@@ -122,12 +123,16 @@ pub fn update_work_package_with_links(
     ctx: &ReducerContext,
     id: i64,
     patch: WorkPackagePatch,
+    visibility: Option<String>,
     unlink: Vec<WorkPackageItemRef>,
     link: Vec<WorkPackageItemRef>,
 ) -> Result<(), String> {
     let Some(mut row) = visible_package(ctx, id) else {
         return Err(format!("no work package {id}"));
     };
+    if let Some(visibility) = &visibility {
+        crate::visibility::check_package_visibility_change(ctx, id, visibility)?;
+    }
     if let Some(both) = link.iter().find(|i| unlink.contains(i)) {
         return Err(format!(
             "{} {} is in both a link and an unlink list; name it in one",
@@ -138,8 +143,13 @@ pub fn update_work_package_with_links(
         validate_item_exists(ctx, item)?;
         check_link_allowed(ctx, &row, &item.kind, item.item_id)?;
     }
-    if !patch.is_empty() {
-        apply_work_package_patch(&mut row, patch)?;
+    if !patch.is_empty() || visibility.is_some() {
+        if !patch.is_empty() {
+            apply_work_package_patch(&mut row, patch)?;
+        }
+        if let Some(visibility) = visibility {
+            row.visibility = visibility;
+        }
         row.updated_at = now(ctx);
         ctx.db.work_packages().id().update(row);
     }

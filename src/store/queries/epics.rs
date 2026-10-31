@@ -103,6 +103,24 @@ impl super::super::EpicCrud for Store {
             .applied()
     }
 
+    async fn update_epic(
+        &self,
+        id: EpicId,
+        patch: &EpicPatch<'_>,
+        workspace_id: Option<i64>,
+        visibility: Option<crate::models::Visibility>,
+    ) -> Result<()> {
+        self.caller
+            .update_epic(
+                id,
+                encode::epic_patch(patch),
+                workspace_id,
+                visibility.map(|v| v.as_str().to_string()),
+            )
+            .await?
+            .applied()
+    }
+
     async fn set_epic_visibility(
         &self,
         id: EpicId,

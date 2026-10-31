@@ -59,6 +59,7 @@ enum Sent {
     SetTaskEpic(TaskId, i64, String),
     CreateEpic(Box<bindings::Epic>),
     PatchEpic(i64),
+    UpdateEpic(i64, Option<i64>, Option<String>),
     DeleteEpic(i64),
     BatchDelete(Vec<i64>, Vec<i64>),
     Regroup(i64),
@@ -115,6 +116,7 @@ enum Sent {
     UpdateWorkPackageWithLinks {
         id: i64,
         patch: Box<bindings::WorkPackagePatch>,
+        visibility: Option<String>,
         unlink: Vec<(String, i64)>,
         link: Vec<(String, i64)>,
     },
@@ -404,6 +406,16 @@ impl ReducerCaller for RecordingCaller {
     ) -> anyhow::Result<ReducerOutcome> {
         let id = id.0;
         self.answer(Sent::PatchEpic(id))
+    }
+
+    async fn update_epic(
+        &self,
+        id: EpicId,
+        _patch: bindings::EpicPatch,
+        workspace_id: Option<i64>,
+        visibility: Option<String>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::UpdateEpic(id.0, workspace_id, visibility))
     }
 
     async fn delete_epic(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
@@ -734,12 +746,14 @@ impl ReducerCaller for RecordingCaller {
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItem>,
         link: Vec<WorkPackageItem>,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::UpdateWorkPackageWithLinks {
             id: id.0,
             patch: Box::new(patch),
+            visibility,
             unlink: kind_ids(&unlink),
             link: kind_ids(&link),
         })

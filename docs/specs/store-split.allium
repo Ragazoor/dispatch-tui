@@ -1022,6 +1022,50 @@ rule UpdateTaskIsOneTransaction {
         -- older module does not have.
 }
 
+rule UpdateEpicIsOneTransaction {
+    when: EpicUpdateRequested(epic, patch, workspace?, visibility?)
+
+    -- The board's update of an epic (field patch, workspace move and
+    -- visibility change) is ONE reducer, update_epic, so a refused part leaves
+    -- nothing applied. A member who is not the creator sends a title and a
+    -- visibility: the visibility is refused and the title is not saved, and the
+    -- caller learns the whole update failed.
+    requires: epic.exists
+
+    ensures: EpicPatchAccepted(epic: epic, patch: patch)
+    ensures:
+        if workspace != null: epic.workspace = workspace
+    ensures:
+        if visibility != null: epic.visibility = visibility
+
+    @guidance
+        -- workspace and visibility are absent to leave that part alone. The
+        -- parts are patch_epic's, move_epic_to_workspace's and
+        -- set_epic_visibility's, run in that order inside one transaction;
+        -- their refusals are unchanged. A missing epic is an error here ("epic
+        -- <id> does not exist"), unlike patch_epic's silent no-op, and the
+        -- service maps it to NotFound without pre-reading the board's cache.
+        --
+        -- RULES_VERSION moves to 27: the board calls update_epic and
+        -- update_work_package_with_links with a visibility argument, which an
+        -- older module does not have.
+}
+
+rule UpdateWorkPackageIsOneTransaction {
+    when: WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
+
+    -- update_work_package_with_links takes the visibility change too: the
+    -- patch, the visibility, every unlink and every link are one transaction.
+    -- The visibility's refusals (an unknown value, a caller who is neither the
+    -- creator nor an admin) are raised before the first write, so a refused
+    -- visibility leaves the title, the links and the package as they were.
+    requires: package.exists
+
+    ensures: WorkPackagePatchAccepted(package: package, patch: patch)
+    ensures:
+        if visibility != null: package.visibility = visibility
+}
+
 rule RespawnPhoenixSuccessorNeedsTheFlag {
     when: PhoenixSuccessorRequested(predecessor, successor)
 

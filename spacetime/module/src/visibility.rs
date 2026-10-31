@@ -413,6 +413,15 @@ pub fn set_epic_visibility(
     epic_id: i64,
     visibility: String,
 ) -> Result<(), String> {
+    set_epic_visibility_row(ctx, epic_id, visibility)
+}
+
+/// [`set_epic_visibility`]'s body, shared with `update_epic`.
+pub(crate) fn set_epic_visibility_row(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    visibility: String,
+) -> Result<(), String> {
     validate_visibility_value(&visibility)?;
     let Some(mut epic) = visible_epic(ctx, epic_id) else {
         return Err(format!("epic {epic_id} does not exist"));
@@ -437,6 +446,15 @@ pub fn set_epic_visibility(
 /// hand, and anyone else is answered as for a missing epic.
 #[spacetimedb::reducer]
 pub fn move_epic_to_workspace(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    workspace_id: i64,
+) -> Result<(), String> {
+    move_epic_row(ctx, epic_id, workspace_id)
+}
+
+/// [`move_epic_to_workspace`]'s body, shared with `update_epic`.
+pub(crate) fn move_epic_row(
     ctx: &ReducerContext,
     epic_id: i64,
     workspace_id: i64,
@@ -560,6 +578,23 @@ pub fn move_epic_to_workspace(
     Ok(())
 }
 
+/// Every refusal `set_work_package_visibility` can make, raised without a
+/// write so `update_work_package_with_links` can ask before its first one.
+pub(crate) fn check_package_visibility_change(
+    ctx: &ReducerContext,
+    work_package_id: i64,
+    visibility: &str,
+) -> Result<(), String> {
+    validate_visibility_value(visibility)?;
+    let Some(package) = visible_package(ctx, work_package_id) else {
+        return Err(format!("no work package {work_package_id}"));
+    };
+    if !may_set_visibility(ctx, &package.created_by, package.workspace_id) {
+        return Err("only the creator or an admin may change a package's visibility".into());
+    }
+    Ok(())
+}
+
 /// `workspaces.allium: SetWorkPackageVisibility`.
 #[spacetimedb::reducer]
 pub fn set_work_package_visibility(
@@ -567,13 +602,10 @@ pub fn set_work_package_visibility(
     work_package_id: i64,
     visibility: String,
 ) -> Result<(), String> {
-    validate_visibility_value(&visibility)?;
+    check_package_visibility_change(ctx, work_package_id, &visibility)?;
     let Some(mut package) = visible_package(ctx, work_package_id) else {
         return Err(format!("no work package {work_package_id}"));
     };
-    if !may_set_visibility(ctx, &package.created_by, package.workspace_id) {
-        return Err("only the creator or an admin may change a package's visibility".into());
-    }
     package.visibility = visibility;
     package.updated_at = now(ctx);
     ctx.db.work_packages().id().update(package);

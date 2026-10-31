@@ -1340,11 +1340,23 @@ fn memory_caller_matches_the_real_reducers() {
             sort_order: None,
         };
         let r = real
-            .update_work_package_with_links(with_links_real, retitle(), vec![task_item], vec![])
+            .update_work_package_with_links(
+                with_links_real,
+                retitle(),
+                None,
+                vec![task_item],
+                vec![],
+            )
             .await
             .unwrap();
         let m = mem
-            .update_work_package_with_links(with_links_mem, retitle(), vec![task_item], vec![])
+            .update_work_package_with_links(
+                with_links_mem,
+                retitle(),
+                None,
+                vec![task_item],
+                vec![],
+            )
             .await
             .unwrap();
         assert!(r.won() && m.won(), "a valid update is applied");
@@ -1374,11 +1386,11 @@ fn memory_caller_matches_the_real_reducers() {
             .zip(refusals(with_links_mem))
         {
             let r = real
-                .update_work_package_with_links(pr, retitle(), ur, lr)
+                .update_work_package_with_links(pr, retitle(), None, ur, lr)
                 .await
                 .unwrap();
             let m = mem
-                .update_work_package_with_links(pm, retitle(), um, lm)
+                .update_work_package_with_links(pm, retitle(), None, um, lm)
                 .await
                 .unwrap();
             assert!(!r.won() && !m.won(), "refused update");
@@ -1388,6 +1400,37 @@ fn memory_caller_matches_the_real_reducers() {
             rows_real.work_package_links(),
             rows_mem.work_package_links(),
             "a refused update writes no link"
+        );
+
+        // -- UpdateWorkPackageIsOneTransaction: a refused visibility leaves the
+        // title unchanged, on both sides.
+        for (side, caller, id) in [
+            ("real", &real as &dyn ReducerCaller, with_links_real),
+            ("memory", &mem as &dyn ReducerCaller, with_links_mem),
+        ] {
+            let outcome = caller
+                .update_work_package_with_links(
+                    id,
+                    bindings::WorkPackagePatch {
+                        title: Some("never written".into()),
+                        description: None,
+                        sort_order: None,
+                    },
+                    Some("secret".into()),
+                    vec![],
+                    vec![],
+                )
+                .await
+                .unwrap();
+            assert!(!outcome.won(), "{side}: a bad visibility is refused");
+        }
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+        assert!(
+            rows_real
+                .work_packages()
+                .iter()
+                .all(|p| p.title != "never written"),
+            "a refused visibility leaves the title unchanged"
         );
 
         // Later steps count on the first package being the only one.

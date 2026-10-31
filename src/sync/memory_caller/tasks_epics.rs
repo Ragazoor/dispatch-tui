@@ -491,7 +491,7 @@ impl MemoryReducerCaller {
         let scope = self.scope();
         let mut tables = self.lock();
         let Some(task) = tables.visible_task(&scope, id.0) else {
-            return Ok(ReducerOutcome::Applied(vec![]));
+            return Ok(ReducerOutcome::Refused(format!("task {} not found", id.0)));
         };
         if epic_id != 0 && !tables.epics.contains_key(&epic_id) {
             return Ok(ReducerOutcome::Refused(format!(
@@ -565,6 +565,66 @@ impl MemoryReducerCaller {
         id: EpicId,
         patch: bindings::EpicPatch,
     ) -> Result<ReducerOutcome> {
+        self.patch_epic_row(id, patch, false)
+    }
+
+    /// Mirrors the module's `update_epic`: the patch, the workspace move and
+    /// the visibility change, whole or not at all.
+    ///
+    /// The module leans on its rolled-back transaction; this double has none,
+    /// so each part is first asked whether it would be refused (`check_only`,
+    /// no write), and only when all three would apply are they written, in the
+    /// module's order. The checks read the epic as it is before the patch; a
+    /// patch changes neither the creator, the workspace nor the visibility, so
+    /// the answers match what the writes would see.
+    pub(super) fn apply_update_epic(
+        &self,
+        id: EpicId,
+        patch: bindings::EpicPatch,
+        workspace_id: Option<i64>,
+        visibility: Option<String>,
+    ) -> Result<ReducerOutcome> {
+        {
+            let scope = self.scope();
+            let tables = self.lock();
+            if tables.visible_epic(&scope, id.0).is_none() {
+                return Ok(ReducerOutcome::Refused(format!(
+                    "epic {} does not exist",
+                    id.0
+                )));
+            }
+        }
+        let mut parts = vec![self.patch_epic_row(id, patch.clone(), true)?];
+        if let Some(workspace_id) = workspace_id {
+            parts.push(self.move_epic_row(id, workspace_id, true)?);
+        }
+        if let Some(visibility) = &visibility {
+            parts.push(self.set_epic_visibility_row(id, visibility.clone(), true)?);
+        }
+        if let Some(refusal) = parts
+            .into_iter()
+            .find(|p| matches!(p, ReducerOutcome::Refused(_)))
+        {
+            return Ok(refusal);
+        }
+        self.patch_epic_row(id, patch, false)?;
+        if let Some(workspace_id) = workspace_id {
+            self.move_epic_row(id, workspace_id, false)?;
+        }
+        if let Some(visibility) = visibility {
+            self.set_epic_visibility_row(id, visibility, false)?;
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// [`Self::apply_patch_epic`]'s body; `check_only` returns the answer
+    /// before the write.
+    pub(super) fn patch_epic_row(
+        &self,
+        id: EpicId,
+        patch: bindings::EpicPatch,
+        check_only: bool,
+    ) -> Result<ReducerOutcome> {
         let id = id.0;
         let scope = self.scope();
         let mut tables = self.lock();
@@ -608,6 +668,9 @@ impl MemoryReducerCaller {
         row.updated_at = self.now();
         if let Err(why) = module::validate_status("epic", row.id, &row.status) {
             return Ok(ReducerOutcome::Refused(why));
+        }
+        if check_only {
+            return Ok(ReducerOutcome::Applied(vec![]));
         }
         self.write_epic(&mut tables, row);
 

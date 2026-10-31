@@ -175,28 +175,22 @@ impl WorkPackageService {
                 .filter(|i| !linked.contains(i))
                 .collect()
         };
-        let has_other_change = params.title.is_some()
-            || params.description.is_some()
-            || params.sort_order.is_some()
-            || !params.link.is_empty()
-            || !params.unlink.is_empty();
-        if has_other_change {
-            self.db
-                .update_work_package(
-                    params.id,
-                    params.title.as_deref(),
-                    params.description.as_deref(),
-                    params.sort_order,
-                    &params.unlink,
-                    &params.link,
-                )
-                .await?;
-        }
-        if let Some(visibility) = params.visibility {
-            self.db
-                .set_work_package_visibility(params.id, visibility)
-                .await?;
-        }
+        // One store call for the patch, the visibility change and the links,
+        // so a refused part leaves nothing applied
+        // (store-split.allium: UpdateWorkPackageIsOneTransaction).
+        self.db
+            .update_work_package(
+                params.id,
+                crate::store::WorkPackageFields {
+                    title: params.title.as_deref(),
+                    description: params.description.as_deref(),
+                    sort_order: params.sort_order,
+                    visibility: params.visibility,
+                },
+                &params.unlink,
+                &params.link,
+            )
+            .await?;
         Ok(not_linked)
     }
 

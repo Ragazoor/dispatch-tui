@@ -52,19 +52,24 @@ impl super::super::WorkPackageCrud for Store {
     async fn update_work_package(
         &self,
         id: WorkPackageId,
-        title: Option<&str>,
-        description: Option<&str>,
-        sort_order: Option<i64>,
+        fields: super::super::WorkPackageFields<'_>,
         unlink: &[WorkPackageItem],
         link: &[WorkPackageItem],
     ) -> Result<()> {
         let patch = bindings::WorkPackagePatch {
-            title: title.map(str::to_string),
-            description: description.map(str::to_string),
-            sort_order,
+            title: fields.title.map(str::to_string),
+            description: fields.description.map(str::to_string),
+            sort_order: fields.sort_order,
         };
+        let visibility = fields.visibility;
         self.caller
-            .update_work_package_with_links(id, patch, unlink.to_vec(), link.to_vec())
+            .update_work_package_with_links(
+                id,
+                patch,
+                visibility.map(|v| v.as_str().to_string()),
+                unlink.to_vec(),
+                link.to_vec(),
+            )
             .await?
             .applied()
     }

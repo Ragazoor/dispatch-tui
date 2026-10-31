@@ -502,6 +502,18 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_patch_epic(id, patch)
     }
 
+    async fn update_epic(
+        &self,
+        id: EpicId,
+        patch: bindings::EpicPatch,
+        workspace_id: Option<i64>,
+        visibility: Option<String>,
+    ) -> Result<ReducerOutcome> {
+        let outcome = self.apply_update_epic(id, patch, workspace_id, visibility);
+        self.refresh_unseen_items(&self.lock());
+        outcome
+    }
+
     async fn delete_epic(&self, id: EpicId) -> Result<ReducerOutcome> {
         self.apply_delete_epic(id)
     }
@@ -748,10 +760,14 @@ impl ReducerCaller for MemoryReducerCaller {
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItem>,
         link: Vec<WorkPackageItem>,
     ) -> Result<ReducerOutcome> {
-        self.apply_update_work_package_with_links(id, patch, unlink, link)
+        let outcome =
+            self.apply_update_work_package_with_links(id, patch, visibility, unlink, link);
+        self.refresh_unseen_items(&self.lock());
+        outcome
     }
 
     async fn delete_work_package(&self, id: WorkPackageId) -> Result<ReducerOutcome> {

@@ -12,6 +12,7 @@ use super::work_package_patch_type::WorkPackagePatch;
 pub(super) struct UpdateWorkPackageWithLinksArgs {
     pub id: i64,
     pub patch: WorkPackagePatch,
+    pub visibility: Option<String>,
     pub unlink: Vec<WorkPackageItemRef>,
     pub link: Vec<WorkPackageItemRef>,
 }
@@ -21,6 +22,7 @@ impl From<UpdateWorkPackageWithLinksArgs> for super::Reducer {
         Self::UpdateWorkPackageWithLinks {
             id: args.id,
             patch: args.patch,
+            visibility: args.visibility,
             unlink: args.unlink,
             link: args.link,
         }
@@ -46,10 +48,11 @@ pub trait update_work_package_with_links {
         &self,
         id: i64,
         patch: WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItemRef>,
         link: Vec<WorkPackageItemRef>,
     ) -> __sdk::Result<()> {
-        self.update_work_package_with_links_then(id, patch, unlink, link, |_, _| {})
+        self.update_work_package_with_links_then(id, patch, visibility, unlink, link, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `update_work_package_with_links` to run as soon as possible,
@@ -62,6 +65,7 @@ pub trait update_work_package_with_links {
         &self,
         id: i64,
         patch: WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItemRef>,
         link: Vec<WorkPackageItemRef>,
 
@@ -76,6 +80,7 @@ impl update_work_package_with_links for super::RemoteReducers {
         &self,
         id: i64,
         patch: WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItemRef>,
         link: Vec<WorkPackageItemRef>,
 
@@ -87,6 +92,7 @@ impl update_work_package_with_links for super::RemoteReducers {
             UpdateWorkPackageWithLinksArgs {
                 id,
                 patch,
+                visibility,
                 unlink,
                 link,
             },

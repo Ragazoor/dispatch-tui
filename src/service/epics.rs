@@ -412,17 +412,14 @@ impl EpicService {
             None => {}
         }
 
-        // `patch_epic` recalculates the epic and its ancestors, and the parent
-        // it left, in the same transaction (store-split.allium X3).
-        self.db.patch_epic(epic_id, &patch).await?;
-        if let Some(workspace_id) = params.workspace_id {
-            self.db
-                .move_epic_to_workspace(epic_id, workspace_id)
-                .await?;
-        }
-        if let Some(visibility) = params.visibility {
-            self.db.set_epic_visibility(epic_id, visibility).await?;
-        }
+        // One store call for the patch, the workspace move and the visibility
+        // change, so a refused part leaves nothing applied
+        // (store-split.allium: UpdateEpicIsOneTransaction). It recalculates the
+        // epic and its ancestors, and the parent it left, in the same
+        // transaction (store-split.allium X3).
+        self.db
+            .update_epic(epic_id, &patch, params.workspace_id, params.visibility)
+            .await?;
 
         // What this call wrote to completed_at. A call that sets Done may have
         // been stamped by the module, so the stamp is read back rather than

@@ -42,7 +42,7 @@ use crate::spacetime::bindings::{
     set_work_package_visibility as _, subagent_clear as _,
     subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
     subscribe_to_epic as _, super_admin_delete_unseen_item as _, try_record_stop as _,
-    unlink_work_package_item as _, unsubscribe_from_epic as _, update_task as _,
+    unlink_work_package_item as _, unsubscribe_from_epic as _, update_epic as _, update_task as _,
     update_work_package_with_links as _, DbConnection, DispatchRequestsTableAccess as _,
     EpicsTableAccess as _, LearningsTableAccess as _, SessionRequestsTableAccess as _,
     TasksTableAccess as _, WorkPackagesTableAccess as _,
@@ -407,6 +407,20 @@ impl ReducerCaller for SdkReducerCaller {
         patch: bindings::EpicPatch,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(self, "the epic change", patch_epic_then(id.0, patch))
+    }
+
+    async fn update_epic(
+        &self,
+        id: EpicId,
+        patch: bindings::EpicPatch,
+        workspace_id: Option<i64>,
+        visibility: Option<String>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the epic update",
+            update_epic_then(id.0, patch, workspace_id, visibility)
+        )
     }
 
     async fn delete_epic(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
@@ -889,13 +903,20 @@ impl ReducerCaller for SdkReducerCaller {
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItem>,
         link: Vec<WorkPackageItem>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the work package change",
-            update_work_package_with_links_then(id.0, patch, item_refs(&unlink), item_refs(&link))
+            update_work_package_with_links_then(
+                id.0,
+                patch,
+                visibility,
+                item_refs(&unlink),
+                item_refs(&link)
+            )
         )
     }
 

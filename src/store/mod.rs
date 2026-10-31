@@ -593,6 +593,18 @@ pub trait EpicCrud: EpicRead {
         cve_interval_secs: Option<i64>,
     ) -> Result<()>;
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
+    /// The patch, the workspace move and the visibility change as ONE store
+    /// transaction (`store-split.allium: UpdateEpicIsOneTransaction`): a
+    /// refused part leaves nothing applied. `None` leaves the workspace or
+    /// visibility alone. A missing epic is an error here, unlike
+    /// [`patch_epic`](Self::patch_epic)'s no-op.
+    async fn update_epic(
+        &self,
+        id: EpicId,
+        patch: &EpicPatch<'_>,
+        workspace_id: Option<i64>,
+        visibility: Option<crate::models::Visibility>,
+    ) -> Result<()>;
     /// `workspaces.allium: SetEpicVisibility`.
     async fn set_epic_visibility(
         &self,
@@ -628,6 +640,16 @@ pub trait WorkPackageRead: Send + Sync {
 
 /// Work-package mutations. Off [`TaskReadStore`], like [`EpicCrud`]: writes go
 /// through the service layer.
+/// What one `update_work_package` call changes on the package itself; `None`
+/// leaves a field alone.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WorkPackageFields<'a> {
+    pub title: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub sort_order: Option<i64>,
+    pub visibility: Option<crate::models::Visibility>,
+}
+
 #[async_trait::async_trait]
 pub trait WorkPackageCrud: WorkPackageRead {
     /// Create a package stamped with this board's identity and link `links`
@@ -647,15 +669,14 @@ pub trait WorkPackageCrud: WorkPackageRead {
         id: WorkPackageId,
         visibility: crate::models::Visibility,
     ) -> Result<()>;
-    /// The patch, then every unlink, then every link, in one store
-    /// transaction. `None` leaves a field alone; an unlink of an item that is
-    /// not linked is a silent success.
+    /// The patch, the visibility change, then every unlink, then every link,
+    /// in one store transaction (`store-split.allium:
+    /// UpdateWorkPackageIsOneTransaction`). `None` leaves a field alone; an
+    /// unlink of an item that is not linked is a silent success.
     async fn update_work_package(
         &self,
         id: WorkPackageId,
-        title: Option<&str>,
-        description: Option<&str>,
-        sort_order: Option<i64>,
+        fields: WorkPackageFields<'_>,
         unlink: &[WorkPackageItem],
         link: &[WorkPackageItem],
     ) -> Result<()>;

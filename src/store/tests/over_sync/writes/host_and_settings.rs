@@ -551,9 +551,17 @@ async fn every_store_mutation_reaches_the_transport() {
     db.unlink_work_package_item(WorkPackageId(1), WorkPackageItem::Epic(EpicId(1)))
         .await
         .unwrap();
-    db.update_work_package(WorkPackageId(1), Some("W3"), None, None, &[], &[])
-        .await
-        .unwrap();
+    db.update_work_package(
+        WorkPackageId(1),
+        crate::store::WorkPackageFields {
+            title: Some("W3"),
+            ..Default::default()
+        },
+        &[],
+        &[],
+    )
+    .await
+    .unwrap();
     db.delete_work_package(WorkPackageId(1)).await.unwrap();
 
     let names: Vec<String> = caller

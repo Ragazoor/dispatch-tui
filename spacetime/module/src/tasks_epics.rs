@@ -533,8 +533,10 @@ fn epic_workspace(ctx: &ReducerContext, epic_id: i64) -> Option<i64> {
 
 /// [`set_task_epic`]'s body, shared with [`update_task`].
 fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> Result<(), String> {
+    // A missing (or unseen) task is a refusal, not a no-op: the caller owes
+    // the operator a not-found answer a pre-read of a stale view cannot give.
     let Some(task) = visible_task(ctx, id) else {
-        return Ok(());
+        return Err(format!("task {id} not found"));
     };
     // The epic-exists check `patch_task` leaves to this reducer (see
     // `check_task_patch`): a missing epic would be written as a dangling id.
@@ -751,6 +753,46 @@ pub fn create_epic(ctx: &ReducerContext, row: Epic) -> Result<(), String> {
 /// placements are preserved" rule and its two auto-transitions coexist.
 #[spacetimedb::reducer]
 pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(), String> {
+    if visible_epic(ctx, id).is_none() {
+        return Ok(());
+    }
+    patch_epic_row(ctx, id, patch)
+}
+
+/// Change an epic's fields, its workspace and its visibility in one
+/// transaction: a refusal of any part leaves the epic as it was
+/// (`store-split.allium: UpdateEpicIsOneTransaction`).
+///
+/// `workspace_id` is `None` to leave the workspace alone; `visibility` likewise.
+/// Unlike [`patch_epic`], a missing epic is an error: this is the board's
+/// user-facing update. The parts run in the order the board used to issue
+/// them as separate calls (patch, move, visibility), and the reducer's
+/// rolled-back transaction undoes the parts already done when a later one
+/// refuses.
+#[spacetimedb::reducer]
+pub fn update_epic(
+    ctx: &ReducerContext,
+    id: i64,
+    patch: EpicPatch,
+    workspace_id: Option<i64>,
+    visibility: Option<String>,
+) -> Result<(), String> {
+    if visible_epic(ctx, id).is_none() {
+        return Err(format!("epic {id} does not exist"));
+    }
+    patch_epic_row(ctx, id, patch)?;
+    if let Some(workspace_id) = workspace_id {
+        crate::visibility::move_epic_row(ctx, id, workspace_id)?;
+    }
+    if let Some(visibility) = visibility {
+        crate::visibility::set_epic_visibility_row(ctx, id, visibility)?;
+    }
+    Ok(())
+}
+
+/// [`patch_epic`]'s body, shared with [`update_epic`]; the caller has checked
+/// the epic is visible.
+fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(), String> {
     let Some(mut row) = visible_epic(ctx, id) else {
         return Ok(());
     };

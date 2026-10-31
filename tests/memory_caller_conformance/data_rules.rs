@@ -297,6 +297,18 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         assert!(why.contains("does not exist"), "{why}");
         same_task(task.0);
 
+        // -- set_task_epic names a task that does not exist -----------------------
+        let gone_task = TaskId(9_999_998);
+        let why = refused(
+            real.set_task_epic(gone_task, None, "someone".into())
+                .await
+                .unwrap(),
+            mem.set_task_epic(gone_task, None, "someone".into())
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("not found"), "{why}");
+
         // -- update_task: the relink and the patch are one transaction -----------
         let plain = bindings::Epic {
             created_by: identity.clone(),
@@ -362,6 +374,55 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
                 .unwrap(),
         );
         assert!(why.contains("not found"), "{why}");
+
+        let missing_epic = EpicId(9_999_999);
+        // -- update_epic: a refused part leaves the title unchanged -------------
+        let before = rows_real.epic(EpicId(other)).unwrap().title;
+        let rename_and_hide = || bindings::EpicPatch {
+            title: Some("never written".into()),
+            ..blank_epic_patch()
+        };
+        let why = refused(
+            real.update_epic(
+                EpicId(other),
+                rename_and_hide(),
+                None,
+                Some("secret".into()),
+            )
+            .await
+            .unwrap(),
+            mem.update_epic(
+                EpicId(other),
+                rename_and_hide(),
+                None,
+                Some("secret".into()),
+            )
+            .await
+            .unwrap(),
+        );
+        assert!(why.contains("visibility"), "{why}");
+        same_epic(other);
+        assert_eq!(rows_real.epic(EpicId(other)).unwrap().title, before);
+        let why = refused(
+            real.update_epic(EpicId(other), rename_and_hide(), Some(9_999_999), None)
+                .await
+                .unwrap(),
+            mem.update_epic(EpicId(other), rename_and_hide(), Some(9_999_999), None)
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("does not exist"), "{why}");
+        same_epic(other);
+        assert_eq!(rows_real.epic(EpicId(other)).unwrap().title, before);
+        let why = refused(
+            real.update_epic(missing_epic, blank_epic_patch(), None, None)
+                .await
+                .unwrap(),
+            mem.update_epic(missing_epic, blank_epic_patch(), None, None)
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("does not exist"), "{why}");
 
         // -- Done is stamped by the store, whatever the patch names ---------------
         let finishing = |title: &str| bindings::Task {

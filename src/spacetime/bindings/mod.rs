@@ -184,6 +184,7 @@ pub mod unseen_items_table;
 pub mod unseen_task_type;
 pub mod unseen_tasks_table;
 pub mod unsubscribe_from_epic_reducer;
+pub mod update_epic_reducer;
 pub mod update_task_reducer;
 pub mod update_work_package_with_links_reducer;
 pub mod usage_event_type;
@@ -392,6 +393,7 @@ pub use unseen_items_table::*;
 pub use unseen_task_type::UnseenTask;
 pub use unseen_tasks_table::*;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
+pub use update_epic_reducer::update_epic;
 pub use update_task_reducer::update_task;
 pub use update_work_package_with_links_reducer::update_work_package_with_links;
 pub use usage_event_type::UsageEvent;
@@ -834,6 +836,12 @@ pub enum Reducer {
         subscriber: String,
         epic_id: i64,
     },
+    UpdateEpic {
+        id: i64,
+        patch: EpicPatch,
+        workspace_id: Option<i64>,
+        visibility: Option<String>,
+    },
     UpdateTask {
         id: i64,
         epic_id: Option<i64>,
@@ -843,6 +851,7 @@ pub enum Reducer {
     UpdateWorkPackageWithLinks {
         id: i64,
         patch: WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItemRef>,
         link: Vec<WorkPackageItemRef>,
     },
@@ -964,6 +973,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::TryRecordStop { .. } => "try_record_stop",
             Reducer::UnlinkWorkPackageItem { .. } => "unlink_work_package_item",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
+            Reducer::UpdateEpic { .. } => "update_epic",
             Reducer::UpdateTask { .. } => "update_task",
             Reducer::UpdateWorkPackageWithLinks { .. } => "update_work_package_with_links",
             _ => unreachable!(),
@@ -1676,6 +1686,17 @@ Reducer::RecordBaseBranch{
                 subscriber: subscriber.clone(),
                 epic_id: epic_id.clone(),
 }),
+            Reducer::UpdateEpic{
+                id,
+                patch,
+                workspace_id,
+                visibility,
+}             => __sats::bsatn::to_vec(&update_epic_reducer::UpdateEpicArgs {
+                id: id.clone(),
+                patch: patch.clone(),
+                workspace_id: workspace_id.clone(),
+                visibility: visibility.clone(),
+}),
             Reducer::UpdateTask{
                 id,
                 epic_id,
@@ -1690,11 +1711,13 @@ Reducer::RecordBaseBranch{
             Reducer::UpdateWorkPackageWithLinks{
                 id,
                 patch,
+                visibility,
                 unlink,
                 link,
 }             => __sats::bsatn::to_vec(&update_work_package_with_links_reducer::UpdateWorkPackageWithLinksArgs {
                 id: id.clone(),
                 patch: patch.clone(),
+                visibility: visibility.clone(),
                 unlink: unlink.clone(),
                 link: link.clone(),
 }),

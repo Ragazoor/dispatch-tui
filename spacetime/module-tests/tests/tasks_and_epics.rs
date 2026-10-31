@@ -132,6 +132,16 @@ fn moving_a_task_into_an_epic_that_does_not_exist_is_refused() {
 }
 
 #[test]
+fn moving_a_task_that_does_not_exist_is_refused() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "Shared", false);
+    let why = store
+        .call("alice", |ctx| set_task_epic(ctx, 404, epic, String::new()))
+        .expect_err("the caller learns the task is gone");
+    assert!(why.contains("not found"), "{why}");
+}
+
+#[test]
 fn respawning_from_a_task_that_is_not_a_phoenix_is_refused() {
     let store = Store::new();
     let id = store.create("alice", user_task("plain", "alice"));

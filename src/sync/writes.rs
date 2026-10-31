@@ -199,6 +199,17 @@ pub trait ReducerCaller: Send + Sync {
     /// Insert an epic and answer with the id the store generated.
     async fn create_epic(&self, row: bindings::Epic) -> Result<EpicId>;
     async fn patch_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
+    /// `store-split.allium: UpdateEpicIsOneTransaction`: the patch, the
+    /// workspace move and the visibility change in one reducer call. `None`
+    /// leaves the workspace or visibility alone. A missing epic is refused,
+    /// unlike [`patch_epic`](Self::patch_epic)'s no-op.
+    async fn update_epic(
+        &self,
+        id: EpicId,
+        patch: bindings::EpicPatch,
+        workspace_id: Option<i64>,
+        visibility: Option<String>,
+    ) -> Result<ReducerOutcome>;
     async fn delete_epic(&self, id: EpicId) -> Result<ReducerOutcome>;
     /// `epics.allium: RegroupEpic`, in one transaction: every direct task of
     /// `root` moves into its per-repo sub-epic. Idempotent.
@@ -397,12 +408,14 @@ pub trait ReducerCaller: Send + Sync {
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
     ) -> Result<ReducerOutcome>;
-    /// The patch, then every unlink, then every link, in one transaction
-    /// (`update_work_package_with_links`).
+    /// The patch, the visibility change, then every unlink, then every link,
+    /// in one transaction (`update_work_package_with_links`;
+    /// `store-split.allium: UpdateWorkPackageIsOneTransaction`).
     async fn update_work_package_with_links(
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
+        visibility: Option<String>,
         unlink: Vec<WorkPackageItem>,
         link: Vec<WorkPackageItem>,
     ) -> Result<ReducerOutcome>;

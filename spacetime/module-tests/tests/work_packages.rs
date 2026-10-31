@@ -297,7 +297,7 @@ fn update_with(
     link: Vec<WorkPackageItemRef>,
 ) -> Result<(), String> {
     store.call("alice", |ctx| {
-        update_work_package_with_links(ctx, id, patch, unlink, link)
+        update_work_package_with_links(ctx, id, patch, None, unlink, link)
     })
 }
 

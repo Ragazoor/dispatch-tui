@@ -352,21 +352,20 @@ impl TaskService {
         task_id: TaskId,
         new_epic: Option<EpicId>,
     ) -> Result<(), ServiceError> {
-        // A chosen target must exist; a null target detaches the task.
-        // Validate against the ORIGINAL requested epic (the store may route
-        // into a sub-epic, but the caller's intent is this epic).
-        // Detach (`None`) is never checked: there is no target to exist.
-        if let Some(epic_id) = new_epic {
-            crate::service::require_epic_accepting_work(&*self.db, epic_id).await?;
-        }
-
-        if !self.db.task_exists(task_id).await {
-            return Err(Self::task_not_found(task_id));
-        }
-
+        // No pre-check against the board's cache: the module refuses a missing
+        // task ("task N not found") or target epic ("epic M does not exist"),
+        // against the true rows, and a delete that lands between the caller's
+        // look and the write reads the same as one that landed before it.
+        // The target is the ORIGINAL requested epic (the store may route into
+        // a sub-epic, but the caller's intent is this epic); a detach (`None`)
+        // has no target to exist.
+        //
         // The store routes a task dropped onto a group_by_repo (non-feed) root
         // into its per-repo sub-epic, and recalculates both epics it touched.
-        self.db.set_task_epic_id(task_id, new_epic).await?;
+        self.db
+            .set_task_epic_id(task_id, new_epic)
+            .await
+            .map_err(|e| Self::refusal_as_not_found(e, task_id, new_epic))?;
         Ok(())
     }
 
@@ -454,21 +453,13 @@ impl TaskService {
             }
         };
 
-        // The named epic must exist, checked before the insert so a refused
-        // target leaves no task behind rather than a loose one the caller
-        // never asked for. Checked on the epic the caller NAMED, not on
-        // whatever sub-epic the store's `create_task` routes it into — routing
-        // only ever substitutes a `RepoGroup` sub-epic, which cannot outlive
-        // its parent, so there is no existence gap to close there.
-        //
-        // Same `requires` as CreateTaskViaMcp: `if epic_id != null:
-        // core/Epic.exists(epic_id)`. Left to the store's own insert it
-        // would surface as ServiceError::Internal with a bare "Failed to insert
-        // task", which reads as a dispatch fault rather than the bad argument
-        // it is.
-        if let Some(epic_id) = params.epic_id {
-            crate::service::require_epic_accepting_work(&*self.db, epic_id).await?;
-        }
+        // The named epic must exist (`CreateTaskViaMcp`'s `requires`:
+        // `if epic_id != null: core/Epic.exists(epic_id)`). The module's
+        // `create_task` refuses one that does not, before the insert, so a
+        // refused target leaves no task behind; the refusal is mapped to the
+        // `NotFound` the caller's bad argument deserves rather than the
+        // `Internal` a bare store failure would be. No pre-read of the
+        // board's cache decides it.
 
         // Repo-grouping: the store places a task assigned to a group_by_repo
         // (non-feed) epic into its per-repo sub-epic, in the same transaction.
@@ -488,11 +479,12 @@ impl TaskService {
             phoenix: params.phoenix,
             schedule: params.schedule.as_deref(),
         };
-        let task_id = if signal {
-            self.db.create_task_signalled(request).await?
+        let created = if signal {
+            self.db.create_task_signalled(request).await
         } else {
-            self.db.create_task(request).await?
+            self.db.create_task(request).await
         };
+        let task_id = created.map_err(|e| Self::refusal_as_epic_not_found(e, params.epic_id))?;
 
         self.get_task(task_id).await
     }
@@ -843,6 +835,24 @@ impl TaskService {
                 {
                     return ServiceError::NotFound(format!("Epic {} not found", epic_id.0));
                 }
+            }
+        }
+        ServiceError::from(e)
+    }
+
+    /// Map the module's "epic M does not exist" refusal of a create to the
+    /// `NotFound` the caller's bad argument deserves. Any other refusal stays
+    /// what [`ServiceError::from`] makes of it.
+    fn refusal_as_epic_not_found(e: anyhow::Error, epic_id: Option<EpicId>) -> ServiceError {
+        if let (Some(refusal), Some(epic_id)) = (
+            e.downcast_ref::<crate::sync::writes::StoreRefusal>(),
+            epic_id,
+        ) {
+            if refusal
+                .0
+                .contains(&format!("epic {} does not exist", epic_id.0))
+            {
+                return ServiceError::NotFound(format!("Epic {} not found", epic_id.0));
             }
         }
         ServiceError::from(e)

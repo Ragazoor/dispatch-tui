@@ -565,3 +565,140 @@ fn the_operator_is_not_held_to_membership() {
         .call_as_scheduler(|ctx| patch_epic(ctx, private, EpicPatch::default()))
         .expect("the store itself sees everything");
 }
+
+// -- update_epic / update_work_package: one transaction ------------------------
+
+#[test]
+fn update_epic_with_a_refused_visibility_leaves_the_title_unchanged() {
+    let (store, a, _) = world();
+    let id = make_epic(&store, "alice", a, 0, "public").expect("create");
+    let patch = EpicPatch {
+        title: Some("renamed".into()),
+        ..EpicPatch::default()
+    };
+    // bob is a member, not the creator: the visibility half is refused.
+    let why = store
+        .call("bob", |ctx| {
+            update_epic(ctx, id, patch, None, Some("private".into()))
+        })
+        .expect_err("bob may not change the visibility");
+    assert!(why.contains("creator or an admin"), "{why}");
+    let epic = store.epic(id);
+    assert_eq!(epic.title, "e", "the title is not saved");
+    assert_eq!(epic.visibility, "public");
+}
+
+#[test]
+fn update_epic_with_a_refused_move_leaves_the_title_unchanged() {
+    let (store, a, b) = world();
+    let id = make_epic(&store, "alice", a, 0, "public").expect("create");
+    let patch = EpicPatch {
+        title: Some("renamed".into()),
+        ..EpicPatch::default()
+    };
+    // alice is no admin of either workspace: the move is refused.
+    let why = store
+        .call("alice", |ctx| update_epic(ctx, id, patch, Some(b), None))
+        .expect_err("the move is refused");
+    assert!(why.contains("may move an epic"), "{why}");
+    let epic = store.epic(id);
+    assert_eq!(epic.title, "e");
+    assert_eq!(epic.workspace_id, a);
+}
+
+#[test]
+fn update_epic_applies_patch_move_and_visibility_together() {
+    let (store, a, b) = world();
+    let id = make_epic(&store, "alice", a, 0, "public").expect("create");
+    let patch = EpicPatch {
+        title: Some("renamed".into()),
+        ..EpicPatch::default()
+    };
+    // alice must administer both workspaces to move the epic.
+    let membership = store
+        .db()
+        .memberships()
+        .iter()
+        .find(|m| m.workspace_id == a && m.user == identity_of("alice"))
+        .expect("alice's membership")
+        .id;
+    store
+        .call("root", |ctx| set_member_role(ctx, membership, "admin".into()))
+        .expect("admin of A");
+    store
+        .call("root", |ctx| {
+            add_member(ctx, b, identity_of("alice"), "admin".into())
+        })
+        .expect("admin of B");
+    store
+        .call("alice", |ctx| {
+            update_epic(ctx, id, patch, Some(b), Some("private".into()))
+        })
+        .expect("update_epic");
+    let epic = store.epic(id);
+    assert_eq!(epic.title, "renamed");
+    assert_eq!(epic.workspace_id, b);
+    assert_eq!(epic.visibility, "private");
+}
+
+#[test]
+fn update_epic_on_a_missing_epic_is_refused() {
+    let (store, _, _) = world();
+    let why = store
+        .call("alice", |ctx| {
+            update_epic(ctx, 9_999, EpicPatch::default(), None, None)
+        })
+        .expect_err("the caller learns the epic is gone");
+    assert!(why.contains("does not exist"), "{why}");
+}
+
+#[test]
+fn update_work_package_with_a_refused_visibility_leaves_the_title_unchanged() {
+    let (store, a, _) = world();
+    let id = make_package(&store, "alice", a, "public").expect("package");
+    let patch = WorkPackagePatch {
+        title: Some("renamed".into()),
+        ..WorkPackagePatch::default()
+    };
+    let why = store
+        .call("bob", |ctx| {
+            update_work_package_with_links(
+                ctx,
+                id,
+                patch,
+                Some("private".into()),
+                Vec::new(),
+                Vec::new(),
+            )
+        })
+        .expect_err("bob may not change the visibility");
+    assert!(why.contains("creator or an admin"), "{why}");
+    let row = store.db().work_packages().id().find(id).expect("package");
+    assert_ne!(row.title, "renamed", "the title is not saved");
+    assert_eq!(row.visibility, "public");
+}
+
+#[test]
+fn update_work_package_applies_patch_and_visibility_together() {
+    let (store, a, _) = world();
+    let id = make_package(&store, "alice", a, "public").expect("package");
+    let patch = WorkPackagePatch {
+        title: Some("renamed".into()),
+        ..WorkPackagePatch::default()
+    };
+    store
+        .call("alice", |ctx| {
+            update_work_package_with_links(
+                ctx,
+                id,
+                patch,
+                Some("private".into()),
+                Vec::new(),
+                Vec::new(),
+            )
+        })
+        .expect("update");
+    let row = store.db().work_packages().id().find(id).expect("package");
+    assert_eq!(row.title, "renamed");
+    assert_eq!(row.visibility, "private");
+}
