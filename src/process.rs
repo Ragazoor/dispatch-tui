@@ -189,14 +189,54 @@ pub(crate) fn kill_process_group(pgid: u32, signal: &str) {
         .status();
 }
 
-/// The `GIT_SSH_COMMAND` for a bounded child: the caller's own command (or
-/// plain `ssh`) with `BatchMode=yes`, so ssh never asks for a passphrase.
-fn git_ssh_command(existing: Option<&str>) -> String {
-    match existing.map(str::trim).filter(|c| !c.is_empty()) {
-        Some(command) => format!("{command} -o BatchMode=yes"),
-        None => "ssh -o BatchMode=yes".to_string(),
+/// The environment every non-interactive child gets, shared by [`run_bounded`]
+/// and the feed runner. `GIT_TERMINAL_PROMPT=0` always. `GIT_SSH_COMMAND` is set
+/// only when the caller already set one, with `BatchMode=yes` appended: git
+/// ranks it above `core.sshCommand`, so inventing one would override the user's
+/// ssh config. The no-override case for git is [`ssh_config_args`].
+pub(crate) fn non_interactive_env(existing_ssh: Option<&str>) -> Vec<(&'static str, String)> {
+    let mut env = vec![("GIT_TERMINAL_PROMPT", "0".to_string())];
+    if let Some(command) = existing_ssh.map(str::trim).filter(|c| !c.is_empty()) {
+        env.push(("GIT_SSH_COMMAND", format!("{command} -o BatchMode=yes")));
+    }
+    env
+}
+
+/// `git -c` arguments that add `BatchMode=yes` to the user's configured
+/// `core.sshCommand`, or nothing when none is configured. Nothing is a chosen
+/// trade-off (task #98748): plain ssh is left alone rather than overridden, so
+/// a passphrase prompt from `~/.ssh/config` can still stop at the deadline.
+fn ssh_config_args(configured: Option<&str>) -> Vec<String> {
+    match configured.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(command) => vec![
+            "-c".to_string(),
+            format!("core.sshCommand={command} -o BatchMode=yes"),
+        ],
+        None => Vec::new(),
     }
 }
+
+/// The repo's `core.sshCommand`, read the way git will: from the `-C` directory
+/// of `args` when given, else the current directory. `None` when unset or
+/// unreadable; the child then runs without the extra argument.
+fn configured_ssh_command(args: &[&str]) -> Option<String> {
+    // Only a leading `-C <dir>` names the repo; a later `-C` (`commit -C <rev>`)
+    // is a subcommand option.
+    let mut lookup = Vec::new();
+    if args.first() == Some(&"-C") {
+        lookup.extend_from_slice(args.get(..2)?);
+    }
+    lookup.extend(["config", "--get", "core.sshCommand"]);
+    // Bounded like every other child: it must not hang the caller.
+    let output = spawn_bounded("git", &lookup, None, CONFIG_LOOKUP_TIMEOUT, None).ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Deadline for the `git config` lookup in [`configured_ssh_command`].
+const CONFIG_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Give up on `child`: kill it and its process group, reap it so it cannot
 /// linger as an orphan or zombie, and describe the overrun. Output it had
@@ -261,13 +301,39 @@ fn abandon(child: &mut std::process::Child, program: &str, timeout: Duration) ->
 /// output pipes and the drain threads with them. The cost: the child no longer
 /// shares the terminal's foreground group, so Ctrl-C at the terminal does not
 /// reach it; it runs to its own exit or deadline. For the same reason git must
-/// never prompt: the child gets `GIT_TERMINAL_PROMPT=0` and an ssh command with
-/// `BatchMode=yes`, so a remote that wants a credential fails at once.
+/// never prompt: the child gets `GIT_TERMINAL_PROMPT=0` and ssh `BatchMode=yes`
+/// (see [`non_interactive_env`], [`ssh_config_args`]), so a remote that wants a
+/// credential fails at once. The user's own ssh config is extended, not replaced.
 pub(crate) fn run_bounded(
     program: &str,
     args: &[&str],
     stdin: Option<&str>,
     timeout: Duration,
+) -> Result<Output> {
+    let ambient_ssh = std::env::var("GIT_SSH_COMMAND").ok();
+    // For git with no `GIT_SSH_COMMAND` of the caller's, add BatchMode to the
+    // user's `core.sshCommand` instead of overriding it with an env var.
+    let ssh_args = if program == "git" && ambient_ssh.is_none() {
+        ssh_config_args(configured_ssh_command(args).as_deref())
+    } else {
+        Vec::new()
+    };
+    let full_args: Vec<&str> = ssh_args
+        .iter()
+        .map(String::as_str)
+        .chain(args.iter().copied())
+        .collect();
+    spawn_bounded(program, &full_args, stdin, timeout, ambient_ssh.as_deref())
+}
+
+/// The spawn-and-bound half of [`run_bounded`], with the ssh decision already
+/// made: `ambient_ssh` is the caller's own `GIT_SSH_COMMAND`, if any.
+fn spawn_bounded(
+    program: &str,
+    args: &[&str],
+    stdin: Option<&str>,
+    timeout: Duration,
+    ambient_ssh: Option<&str>,
 ) -> Result<Output> {
     use std::io::Write;
 
@@ -281,10 +347,7 @@ pub(crate) fn run_bounded(
     // A background-group child that reads `/dev/tty` (ssh passphrase, https
     // credential prompt) is stopped by SIGTTIN and would sit until the
     // deadline. Make git fail with its real error instead.
-    command.env("GIT_TERMINAL_PROMPT", "0").env(
-        "GIT_SSH_COMMAND",
-        git_ssh_command(std::env::var("GIT_SSH_COMMAND").ok().as_deref()),
-    );
+    command.envs(non_interactive_env(ambient_ssh));
     // Never the caller's stdin: the board's is the operator's terminal, and a
     // child that reads it (a test reaching an interactive prompt) blocks and
     // takes keystrokes from the board.

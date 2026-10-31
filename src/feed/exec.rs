@@ -105,6 +105,11 @@ pub async fn run_feed_command_bounded(
     let mut child = match tokio::process::Command::new("sh")
         .args(["-c", cmd])
         .process_group(0)
+        // Same non-interactive environment as `run_bounded`: a prompt would
+        // stop the background-group command with SIGTTIN and read as a timeout.
+        .envs(crate::process::non_interactive_env(
+            std::env::var("GIT_SSH_COMMAND").ok().as_deref(),
+        ))
         .kill_on_drop(true)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

@@ -577,37 +577,79 @@ fn mock_timeouts_stay_aligned_across_an_out_of_band_window_lookup() {
 // --- non-interactive git ---
 
 #[test]
-fn git_ssh_command_adds_batch_mode_to_nothing() {
-    assert_eq!(git_ssh_command(None), "ssh -o BatchMode=yes");
+fn non_interactive_env_sets_no_ssh_command_when_the_caller_has_none() {
+    let env = non_interactive_env(None);
+    assert_eq!(env, vec![("GIT_TERMINAL_PROMPT", "0".to_string())]);
 }
 
 #[test]
-fn git_ssh_command_appends_batch_mode_to_an_existing_command() {
+fn non_interactive_env_appends_batch_mode_to_the_callers_ssh_command() {
+    let env = non_interactive_env(Some("ssh -i /k"));
+    assert!(env.contains(&("GIT_SSH_COMMAND", "ssh -i /k -o BatchMode=yes".to_string())));
+    assert!(env.contains(&("GIT_TERMINAL_PROMPT", "0".to_string())));
+}
+
+#[test]
+fn non_interactive_env_ignores_an_empty_ssh_command() {
+    assert_eq!(non_interactive_env(Some("  ")).len(), 1);
+}
+
+#[test]
+fn ssh_config_args_are_empty_without_a_configured_command() {
+    assert!(ssh_config_args(None).is_empty());
+    assert!(ssh_config_args(Some("  \n")).is_empty());
+}
+
+#[test]
+fn ssh_config_args_append_batch_mode_to_the_configured_command() {
     assert_eq!(
-        git_ssh_command(Some("ssh -i /k")),
-        "ssh -i /k -o BatchMode=yes"
+        ssh_config_args(Some("ssh -i /k\n")),
+        vec!["-c", "core.sshCommand=ssh -i /k -o BatchMode=yes"]
     );
-}
-
-#[test]
-fn git_ssh_command_ignores_an_empty_existing_command() {
-    assert_eq!(git_ssh_command(Some("  ")), "ssh -o BatchMode=yes");
 }
 
 #[test]
 fn run_bounded_children_never_prompt_for_git_credentials() {
     let out = run_bounded(
         "sh",
-        &[
-            "-c",
-            "printf '%s|%s' \"$GIT_TERMINAL_PROMPT\" \"$GIT_SSH_COMMAND\"",
-        ],
+        &["-c", "printf '%s' \"$GIT_TERMINAL_PROMPT\""],
         None,
         Duration::from_secs(10),
     )
     .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let (prompt, ssh) = stdout.split_once('|').unwrap();
-    assert_eq!(prompt, "0");
-    assert!(ssh.ends_with("-o BatchMode=yes"), "got {ssh:?}");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "0");
+}
+
+/// R1: a user's `core.sshCommand` must still be the command git runs, with
+/// `BatchMode=yes` added, and not be replaced by a `GIT_SSH_COMMAND` override.
+#[test]
+fn run_bounded_git_keeps_the_users_core_ssh_command() {
+    if std::env::var_os("GIT_SSH_COMMAND").is_some() {
+        return; // the caller's own command legitimately wins
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    crate::test_git::git(repo, &["init", "-q"]);
+    let log = repo.join("ssh-args");
+    let script = repo.join("fake-ssh");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\necho \"$@\" > '{}'\nexit 1\n", log.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::test_git::git(
+        repo,
+        &["config", "core.sshCommand", &script.display().to_string()],
+    );
+    let repo_str = repo.display().to_string();
+    let _ = run_bounded(
+        "git",
+        &["-C", &repo_str, "ls-remote", "ssh://example.invalid/x"],
+        None,
+        Duration::from_secs(20),
+    )
+    .unwrap();
+    let args = std::fs::read_to_string(&log).expect("core.sshCommand was not used");
+    assert!(args.contains("BatchMode=yes"), "got {args:?}");
 }
