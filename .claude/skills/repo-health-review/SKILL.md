@@ -35,6 +35,12 @@ If no previous report names a range, or its end is not on `main`
 on a branch that was later rebased), use the commits of the last 14 days and
 say so.
 
+If the newest report is dated today (another review task already ran), stop and
+ask the user before writing: a short follow-up over the new commits, or a full
+pass that replaces it. Both reports would claim the same filename and the same
+`docs/plans/review-<date>/` folder. On 2026-10-31 the user removed the first
+report's tasks and chose a full replacing pass.
+
 If the previous report has no "Standing items" section, seed one: list every
 finding that appears in two or more of the last three reports and is still open.
 
