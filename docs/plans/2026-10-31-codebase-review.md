@@ -166,9 +166,9 @@ Five `docs/invariants.md` claims checked against code: `McpState::db` is `Arc<dy
 
 ## 5. Standing items
 
-- **W2** — adopt unowned repo paths (`host == ""`) on prune. Open since 2026-10-22, optional. Ask: file or drop.
-- **S2/S3 residue** — the service still reads the subscription cache for `close_pr_on_done` and pre-checks epics before `move_task_to_epic`/`create_task_inner`. Raised 10-22, 10-28 and now. Ask: file or drop.
-- **T2 residue** — `startup_smoke.rs::free_address` binds and drops a port. Raised 10-28 and now.
+- **W2** — adopt unowned repo paths (`host == ""`) on prune. Open since 2026-10-22. Filed: task #98752 (Cleanups).
+- **S2/S3 residue** — the service still reads the subscription cache for `close_pr_on_done` and pre-checks epics before `move_task_to_epic`/`create_task_inner`. Raised 10-22, 10-28 and now. Filed: task #98747.
+- **T2 residue** — `startup_smoke.rs::free_address` binds and drops a port. Raised 10-28 and now. Filed: task #98751.
 - **Read enforcement** — every table is still `public` until #98691 lands, so all read-side visibility is advisory. Not a finding; context for V1–V12.
 
 **Graduate to a check.** "A move path forgets a rule its sibling has" appeared in N1 (10-28) and R2 now, and "one logical change, several store writes" in S1 (10-22, 10-28) and R3 now. Deliverables: a conformance test that runs every task-move reducer (set_task_epic, update_task, relink via reroute/regroup/flatten, feed move) against the same unseen-mark and sight assertions; and a `scripts/check-*.sh` (or test) that flags a `src/service/` method making more than one `self.db.<write>` call outside an allow-list.
