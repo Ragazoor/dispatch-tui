@@ -1,12 +1,11 @@
 //! The new-task signal through the store handle
-//! (`mcp-task-tools.allium: SignalMarksTheTaskForEveryFollower`,
+//! (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`,
 //! `tasks.allium: SeeTasksByEnteringTheirEpic`).
 use super::*;
 
-async fn epic_followed(db: &Store) -> crate::models::EpicId {
-    let epic = db.create_epic("E", "", None).await.unwrap().id;
-    db.subscribe_to_epic(MEMORY_USER_ID, epic).await.unwrap();
-    epic
+/// An epic the test user sees but does not follow: sight alone earns a mark.
+async fn epic_seen(db: &Store) -> crate::models::EpicId {
+    db.create_epic("E", "", None).await.unwrap().id
 }
 
 fn task_in(epic: crate::models::EpicId, title: &str) -> CreateTaskRequest<'_> {
@@ -19,7 +18,7 @@ fn task_in(epic: crate::models::EpicId, title: &str) -> CreateTaskRequest<'_> {
 #[tokio::test]
 async fn a_signalled_task_reads_as_unseen_and_a_plain_one_does_not() {
     let db = Store::open_in_memory().unwrap();
-    let epic = epic_followed(&db).await;
+    let epic = epic_seen(&db).await;
 
     let plain = db.create_task(task_in(epic, "plain")).await.unwrap();
     assert!(!BoardReads::unseen_task_ids(&db).await.contains(&plain));
@@ -47,7 +46,7 @@ async fn an_epicless_signalled_task_is_created_without_a_mark() {
 #[tokio::test]
 async fn entering_the_epic_clears_the_mark() {
     let db = Store::open_in_memory().unwrap();
-    let epic = epic_followed(&db).await;
+    let epic = epic_seen(&db).await;
     db.create_task_signalled(task_in(epic, "signalled"))
         .await
         .unwrap();

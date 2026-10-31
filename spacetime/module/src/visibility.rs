@@ -68,6 +68,20 @@ pub fn epic_visible_to(r: &impl StoreReads, epic: &Epic, who: &str) -> bool {
     }
 }
 
+/// Everyone `epic_id` is shown to: the members of its workspace for whom
+/// [`epic_visible_to`] holds. Empty for a missing epic. `pub` so
+/// `MemoryReducerCaller` marks the same people the module does.
+pub fn viewers_of_epic(r: &impl StoreReads, epic_id: i64) -> std::collections::BTreeSet<String> {
+    let Some(epic) = r.epic(epic_id) else {
+        return std::collections::BTreeSet::new();
+    };
+    r.members_of(epic.workspace_id)
+        .into_iter()
+        .map(|m| m.user)
+        .filter(|user| epic_visible_to(r, &epic, user))
+        .collect()
+}
+
 /// `Task.visible_to(who)`: an epic task follows its epic, an epic-less task is
 /// its owner's alone.
 pub fn task_visible_to(r: &impl StoreReads, task: &Task, who: &str) -> bool {
@@ -318,15 +332,15 @@ pub fn move_epic_to_workspace(
         return Err(format!("workspace {workspace_id} does not exist"));
     }
     if workspace_id == epic.workspace_id {
-        return Err(format!("epic {epic_id} is already in workspace {workspace_id}"));
+        return Err(format!(
+            "epic {epic_id} is already in workspace {workspace_id}"
+        ));
     }
     let admin_of_both = ctx.db.workspaces().id().find(epic.workspace_id).is_some()
         && workspace_has_admin(ctx, epic.workspace_id, &caller)
         && workspace_has_admin(ctx, workspace_id, &caller);
     if !privileged && !admin_of_both {
-        return Err(
-            "only a super-admin, or an admin of both workspaces, may move an epic".into(),
-        );
+        return Err("only a super-admin, or an admin of both workspaces, may move an epic".into());
     }
 
     let tree = crate::tasks_epics::collect_epic_subtree_ids(ctx, epic_id);
@@ -378,7 +392,9 @@ pub fn move_epic_to_workspace(
         .db
         .subscriptions()
         .iter()
-        .filter(|s| tree.contains(&s.epic_id) && !workspace_has_member(ctx, workspace_id, &s.subscriber))
+        .filter(|s| {
+            tree.contains(&s.epic_id) && !workspace_has_member(ctx, workspace_id, &s.subscriber)
+        })
         .map(|s| s.id)
         .collect();
     for id in stale {
@@ -388,7 +404,9 @@ pub fn move_epic_to_workspace(
         .db
         .unseen_tasks()
         .iter()
-        .filter(|u| task_ids.contains(&u.task_id) && !workspace_has_member(ctx, workspace_id, &u.subscriber))
+        .filter(|u| {
+            task_ids.contains(&u.task_id) && !workspace_has_member(ctx, workspace_id, &u.subscriber)
+        })
         .map(|u| u.id)
         .collect();
     for id in marks {

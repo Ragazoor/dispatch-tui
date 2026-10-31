@@ -734,7 +734,7 @@ fn create_task_schema_advertises_a_boolean_signal() {
 }
 
 /// A state over a concrete in-memory store the test can also subscribe and read
-/// unseen marks through, with its one epic already followed.
+/// unseen marks through, with one epic its user sees but does not follow.
 async fn signal_fixture() -> (Arc<McpState>, Arc<Store>, crate::models::EpicId) {
     let store = Arc::new(Store::open_in_memory().unwrap());
     let (state, _) = state_over(
@@ -748,9 +748,6 @@ async fn signal_fixture() -> (Arc<McpState>, Arc<Store>, crate::models::EpicId) 
         .await
         .unwrap()
         .id;
-    crate::store::SubscriptionStore::subscribe_to_epic(&*store, crate::store::MEMORY_USER_ID, epic)
-        .await
-        .unwrap();
     (state, store, epic)
 }
 
@@ -770,7 +767,7 @@ async fn create_in_epic(state: &Arc<McpState>, epic: crate::models::EpicId, extr
 }
 
 #[tokio::test]
-async fn create_task_with_signal_marks_it_unseen_for_the_follower() {
+async fn create_task_with_signal_marks_it_unseen_for_whoever_sees_the_epic() {
     let (state, store, epic) = signal_fixture().await;
 
     create_in_epic(&state, epic, json!({ "signal": true })).await;

@@ -2209,25 +2209,25 @@ rule RoleRoutedFeedSync {
         -- settle; this is documented, not a bug.
 }
 
--- == New PRs in My Reviews are signalled ==
+-- == New PRs in My Reviews and Team Reviews are signalled ==
 
-rule NewMyReviewsTaskIsSignalled {
+rule NewReviewRequestIsSignalled {
     when: FeedCommandCompleted(epic, items)
 
     requires: epic.feed_role = reviews_parent
 
     -- A PR that RoleRoutedFeedSync INSERTS (the "Absent from the subtree"
-    -- branch) and whose route(item.signals) is my_reviews is created with the
-    -- new-task signal on. It marks exactly the people
-    -- mcp-task-tools.allium: SignalMarksTheTaskForEveryFollower marks: every
-    -- follower of the epic the task lands in or of any ancestor, in the same
-    -- store transaction as the insert. "The epic it lands in" is the repo
-    -- group under My Reviews when that sub-epic groups by repo, else My
-    -- Reviews itself; either way My Reviews and PR Reviews are ancestors.
+    -- branch) and whose route(item.signals) is my_reviews or team_reviews is
+    -- created with the new-task signal on. It marks exactly the people
+    -- mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt marks:
+    -- every member of the workspace who can see the epic the task lands in,
+    -- in the same store transaction as the insert. "The epic it lands in" is
+    -- the repo group under the role sub-epic when that sub-epic groups by
+    -- repo, else the role sub-epic itself.
     ensures:
-        for task in inserted_tasks(epic, items).where(t => route(t.signals) = my_reviews):
-            for s in core/Subscription.where(s => Epic.ancestor_chain(task.epic.id).contains(s.epic.id)):
-                core/UnseenTask.created(subscriber: s.subscriber, task: task)
+        for task in inserted_tasks(epic, items).where(t => route(t.signals) in {my_reviews, team_reviews}):
+            for m in task.epic.workspace.memberships.where(m => task.epic.visible_to(m.user)):
+                core/UnseenTask.created(subscriber: m.user, task: task)
 
     @guidance
         -- The signal is the create-time flag create_task already has; the feed
@@ -2238,26 +2238,29 @@ rule NewMyReviewsTaskIsSignalled {
         --
         -- ONLY AN INSERT IS SIGNALLED. A refresh of a PR already on the board
         -- (new commits, a new title, a changed CI label) writes no mark, and
-        -- neither does a MOVE into My Reviews from Team Reviews or Bots: the
-        -- task is not new, and the signal says "something new landed here".
-        -- A retired PR is never re-inserted (IngestSkipsRetiredFeedItems), so
-        -- it is never re-signalled either.
+        -- neither does a MOVE between role sub-epics (Team Reviews into My
+        -- Reviews, Bots into Team Reviews): the task is not new, and the
+        -- signal says "something new landed here". A retired PR is never
+        -- re-inserted (IngestSkipsRetiredFeedItems), so it is never
+        -- re-signalled either.
         --
-        -- ONLY MY REVIEWS. Team Reviews, Bots, CVE and every flat or grouped
-        -- feed insert without the signal: My Reviews is the queue of PRs
-        -- waiting on this person. The other buckets hold PRs that are not,
-        -- and Bots inserts arrive in bulk, so marking them would bury the one
-        -- signal that matters.
+        -- MY REVIEWS AND TEAM REVIEWS, NOT BOTS. Both hold PRs a person is
+        -- asked to review, directly or through a team, and the operator wants
+        -- to hear about each new one (task #98730; My Reviews alone was the
+        -- first cut). Bots, CVE and every flat or grouped feed insert without
+        -- the signal: Bots inserts arrive in bulk, so marking them would bury
+        -- the marks that matter.
         --
         -- The additive path (DegradedNonEmptyEmission, AppendOnlyFeed) inserts
         -- the same way and signals the same way.
         --
         -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_into
         -- (role-routed branch), through IngestStore's
-        -- mark_task_unseen_for_followers, which the module and the board's
+        -- mark_task_unseen_for_viewers, which the module and the board's
         -- in-memory double both implement.
         -- Tests: src/feed/ingest/tests/role_routing.rs::new_my_reviews_pr_is_signalled_and_a_refresh_is_not,
-        -- src/feed/ingest/tests/role_routing.rs::new_team_reviews_pr_is_not_signalled,
+        -- src/feed/ingest/tests/role_routing.rs::new_team_reviews_pr_is_signalled,
+        -- src/feed/ingest/tests/role_routing.rs::new_bots_pr_is_not_signalled,
         -- src/feed/ingest/tests/role_routing.rs::pr_moved_into_my_reviews_is_not_signalled,
         -- src/feed/ingest/tests/role_routing.rs::new_pr_in_a_my_reviews_repo_group_is_signalled,
         -- tests/memory_caller_conformance/feeds.rs::memory_caller_ingests_a_feed_like_the_real_module.

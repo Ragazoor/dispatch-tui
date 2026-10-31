@@ -403,9 +403,8 @@ impl TaskService {
         Ok(self.create_task_returning(params).await?.id)
     }
 
-    /// [`Self::create_task`], and mark the task unseen for every follower of its
-    /// epic and ancestors (`mcp-task-tools.allium: CreateTaskViaMcp`'s
-    /// `signal`).
+    /// [`Self::create_task`], and mark the task unseen for everyone who can see
+    /// its epic (`mcp-task-tools.allium: CreateTaskViaMcp`'s `signal`).
     pub async fn create_task_signalled(
         &self,
         params: CreateTaskParams,

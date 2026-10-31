@@ -315,9 +315,9 @@ pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     Ok(())
 }
 
-/// [`create_task`], and mark the new task unseen for every follower of the epic
-/// it lands in or of any ancestor (`mcp-task-tools.allium:
-/// CreateTaskViaMcp`, SignalMarksTheTaskForEveryFollower).
+/// [`create_task`], and mark the new task unseen for everyone who can see the
+/// epic it lands in (`mcp-task-tools.allium: CreateTaskViaMcp`,
+/// SignalMarksTheTaskForEveryoneWhoSeesIt).
 ///
 /// A separate reducer rather than a flag on `create_task`: the caller learns
 /// the generated id only after the row arrives, so the marks cannot be a second
@@ -335,7 +335,7 @@ pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), Stri
             ..row
         }),
     )?;
-    mark_task_unseen_for_followers(ctx, stored.id, epic_id);
+    mark_task_unseen_for_viewers(ctx, stored.id, epic_id);
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
 }

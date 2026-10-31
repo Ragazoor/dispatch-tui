@@ -666,8 +666,8 @@ use "./core.allium" as core
 --
 -- == New-task signal ==
 --
--- A task created with the signal on is unseen by each follower of its epic
--- until that follower enters the epic (core/UnseenTask; tasks.allium:
+-- A task created with the signal on is unseen by each person who can see its
+-- epic until that person enters the epic (core/UnseenTask; tasks.allium:
 -- SeeTasksByEnteringTheirEpic). While a card is marked for the viewing
 -- person it carries a diamond glyph (◆ U+25C6) in SIGNAL, a hue added to
 -- the palette for this one meaning (ORANGE, Rgb 255 158 100). The glyph sits

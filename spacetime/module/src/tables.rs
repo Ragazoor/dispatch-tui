@@ -686,8 +686,8 @@ pub const WORK_PACKAGE_ITEM_EPIC: &str = "epic";
 
 /// One person's unseen mark on one task (`core.allium: UnseenTask`).
 ///
-/// Written when a task is created with the signal on, one row per follower of
-/// its epic or of an ancestor; cleared when the person enters the epic, when the
+/// Written when a task is created with the signal on, one row per person who
+/// can see its epic; cleared when the person enters the epic, when the
 /// task leaves its epic or finishes, and with the task. An epic's mark is never
 /// a row: it is derived from these.
 #[spacetimedb::table(accessor = unseen_tasks, public)]

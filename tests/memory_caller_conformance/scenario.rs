@@ -489,15 +489,9 @@ fn memory_caller_matches_the_real_reducers() {
         assert_eq!(membership_view(&rows_real), membership_view(&rows_mem));
 
         // -- new-task signal --------------------------------------------------------
-        // A task created with the signal on is marked for each follower of its
-        // epic; entering the epic clears it; moving it out clears it too.
-        real.subscribe_to_epic(subscriber.into(), EpicId(epic2_id_real))
-            .await
-            .unwrap();
-        wait_for!(rows_real.subscribed_epics(subscriber) == vec![EpicId(epic2_id_real)]);
-        mem.subscribe_to_epic(subscriber.into(), EpicId(epic2_id_mem))
-            .await
-            .unwrap();
+        // A task created with the signal on is marked for everyone who sees its
+        // epic, with no subscription; entering the epic clears it; moving it
+        // out clears it too.
         let signalled_real = real
             .create_task_signalled(blank_task_in_epic(epic2_id_real))
             .await

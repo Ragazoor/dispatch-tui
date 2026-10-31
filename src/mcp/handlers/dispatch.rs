@@ -260,7 +260,7 @@ usually the right answer.",
                 },
                 "signal": {
                     "type": "boolean",
-                    "description": "When true, signal the user that a new task arrived: the new task and every epic on the path to it are marked on the board until the user enters the epic. Only the people following the epic when the task is created are marked. Ignored when epic_id is null. Defaults to false."
+                    "description": "When true, signal the user that a new task arrived: the new task and every epic on the path to it are marked on the board until the user enters the epic. Everyone who can see the epic when the task is created is marked. Ignored when epic_id is null. Defaults to false."
                 }
             },
             "required": ["title", "repo_path", "epic_id"]

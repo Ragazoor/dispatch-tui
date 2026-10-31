@@ -116,15 +116,8 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         wait_for!(rows_real.epic(EpicId(root)).is_some());
         assert_eq!(mem.create_epic(parent).await.unwrap().0, root);
 
-        // Follow the reviews parent so a new My Reviews PR has someone to mark
-        // (`feeds.allium: NewMyReviewsTaskIsSignalled`).
-        real.subscribe_to_epic(identity.clone(), EpicId(root))
-            .await
-            .unwrap();
-        wait_for!(rows_real.subscribed_epics(&identity) == vec![EpicId(root)]);
-        mem.subscribe_to_epic(identity.clone(), EpicId(root))
-            .await
-            .unwrap();
+        // Nobody follows the reviews parent: a new review request is marked
+        // for everyone who sees it (`feeds.allium: NewReviewRequestIsSignalled`).
         // Task ids are not compared across the two stores: each numbers the
         // role groups' inserts in its own order. The PR names a task in both.
         let unseen_prs = |rows: &SharedRows| {
@@ -185,8 +178,11 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
                 ("pr-3".into(), "Reviews".into(), "Bots".into()),
             ]
         );
-        // Only the new My Reviews PR is signalled.
-        assert_eq!(unseen_prs(&rows_mem), vec!["pr-1".to_string()]);
+        // The new My Reviews and Team Reviews PRs are signalled; Bots is not.
+        assert_eq!(
+            unseen_prs(&rows_mem),
+            vec!["pr-1".to_string(), "pr-2".to_string()]
+        );
         wait_for!(unseen_prs(&rows_real) == unseen_prs(&rows_mem));
 
         // -- cycle 2: pr-2 is reviewed (a move), pr-3 is gone (a delete) ----------
@@ -202,7 +198,8 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         m.applied().unwrap();
         let want = same_layout(2);
         wait_for!(feed_layout(&rows_real, EpicId(root)) == want);
-        // A move into My Reviews is not a new task, so pr-2 stays unmarked.
+        // A move into My Reviews is not a new task: pr-2's Team Reviews mark
+        // ends with the move, and the move writes none.
         assert_eq!(unseen_prs(&rows_mem), vec!["pr-1".to_string()]);
         assert_eq!(unseen_prs(&rows_real), unseen_prs(&rows_mem));
 
@@ -229,6 +226,9 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         m.applied().unwrap();
         let want = same_layout(3);
         wait_for!(feed_layout(&rows_real, EpicId(root)) == want);
+        // The additive path signals its inserts the same way.
+        assert_eq!(unseen_prs(&rows_mem), vec!["pr-5".to_string()]);
+        wait_for!(unseen_prs(&rows_real) == unseen_prs(&rows_mem));
 
         // -- refusals --------------------------------------------------------------
         let (r, m) = ingest(vec![], false).await;

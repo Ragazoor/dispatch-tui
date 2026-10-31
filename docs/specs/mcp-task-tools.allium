@@ -837,34 +837,46 @@ rule CreateTaskViaMcp {
       if schedule != null and schedule != "":
             schedules/ScheduleSet(task: task, cron: schedule)
 
-    -- SignalMarksTheTaskForEveryFollower. When signal is true and the task
-    -- lands in an epic, one core/UnseenTask row is written for every person
-    -- holding a core/Subscription to that epic or to any of its ancestors
-    -- (Epic.ancestor_chain), in the same store transaction as the task. The
+    -- SignalMarksTheTaskForEveryoneWhoSeesIt. When signal is true and the
+    -- task lands in an epic, one core/UnseenTask row is written for every
+    -- member of that epic's workspace who can see the epic
+    -- (core/Epic.visible_to), in the same store transaction as the task. The
     -- epic is the one the task LANDS in (route_target's), not the argument.
       if signal = true and task.epic != null:
-            for s in core/Subscription.where(s => Epic.ancestor_chain(task.epic.id).contains(s.epic.id)):
-                core/UnseenTask.created(subscriber: s.subscriber, task: task)
+            for m in task.epic.workspace.memberships.where(m => task.epic.visible_to(m.user)):
+                core/UnseenTask.created(subscriber: m.user, task: task)
 
     -- signal is optional and defaults to false. Absent or false writes no
-    -- row. With no epic there is no one following it, so signal is silently
+    -- row. With no epic there is no epic to light up, so signal is silently
     -- ignored and the task is created normally; the call is not refused.
     @guidance
-        -- WHO IS SIGNALLED IS DECIDED AT CREATION. A person who subscribes to
-        -- the epic afterwards is not marked for a task that already exists:
-        -- the signal says "something new arrived while you were following",
-        -- and a late follower was not following. Recorded because the
-        -- alternative (derive "unseen" at read time from a follow date) was
-        -- considered and rejected as a second clock to keep honest.
+        -- SIGHT, NOT FOLLOWING. Everyone the epic is shown to is marked: every
+        -- member of its workspace when it is public all the way up, only the
+        -- private holder when it is private. A core/Subscription plays no part.
+        -- It used to (only subscribers were marked), and an operator who had
+        -- created PR Reviews but never followed it got no mark at all, since
+        -- their own epics reach their board without a subscription (task
+        -- #98730). Whoever can see the epic is who the colour is for.
         --
-        -- The caller's own subscription counts like anyone's. An agent that
+        -- WHO IS SIGNALLED IS DECIDED AT CREATION. A person who joins the
+        -- workspace, or is shown the epic, afterwards is not marked for a task
+        -- that already exists: the signal says "something new arrived", and
+        -- it arrived before they could see it. Recorded because the
+        -- alternative (derive "unseen" at read time from a join date) was
+        -- considered and rejected as a second clock to keep honest. Leaving
+        -- the workspace ends the marks (workspaces.allium: RemoveMember,
+        -- MoveEpicToWorkspace). An epic turned private keeps other members'
+        -- rows, but they draw nothing: a person is shown a mark only on cards
+        -- they can see.
+        --
+        -- The caller counts like anyone who sees the epic. An agent that
         -- wants no mark for its operator omits signal.
         --
         -- Only create_task takes it as an argument. update_tasks does not.
         -- The one other creation path that turns it on is the reviews feed:
-        -- a PR newly inserted into My Reviews is created with the signal on,
-        -- marking the same followers this rule names (feeds.allium:
-        -- NewMyReviewsTaskIsSignalled). The TUI form, quick dispatch and
+        -- a PR newly inserted into My Reviews or Team Reviews is created with
+        -- the signal on, marking the same people this rule names (feeds.allium:
+        -- NewReviewRequestIsSignalled). The TUI form, quick dispatch and
         -- every other feed insert write no UnseenTask rows.
 
     -- BaseBranchIsResolvedNotAssumed. An omitted base_branch is resolved

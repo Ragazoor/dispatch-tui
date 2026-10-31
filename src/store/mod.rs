@@ -108,9 +108,9 @@ pub trait AgentRead: Send + Sync {
 #[async_trait::async_trait]
 pub trait TaskCrud: TaskRead {
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
-    /// [`Self::create_task`], marking the task unseen for every follower of
-    /// its epic and ancestors in the same transaction
-    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryFollower`).
+    /// [`Self::create_task`], marking the task unseen for everyone who can see
+    /// its epic in the same transaction
+    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`).
     async fn create_task_signalled(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
     /// `PhoenixRespawn`, made atomic: inserts the successor (with `labels` set
     /// directly, not a follow-up patch) and clears `predecessor`'s `phoenix`

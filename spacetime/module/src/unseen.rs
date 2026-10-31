@@ -8,40 +8,14 @@ pub fn unseen_id(subscriber: &str, task_id: i64) -> String {
     format!("{subscriber}/{task_id}")
 }
 
-/// Every epic from `epic_id` up to its root, `epic_id` first. Bounded by
-/// `core.allium: config.max_ancestor_walk` so a corrupt cycle cannot hang a
-/// reducer.
-fn epic_and_ancestors(ctx: &ReducerContext, epic_id: i64) -> Vec<i64> {
-    let mut chain = Vec::new();
-    let mut next = epic_id;
-    while next != 0 && chain.len() < 1024 && !chain.contains(&next) {
-        chain.push(next);
-        next = ctx
-            .db
-            .epics()
-            .id()
-            .find(next)
-            .map_or(0, |epic| epic.parent_epic_id);
-    }
-    chain
-}
-
-/// `mcp-task-tools.allium: SignalMarksTheTaskForEveryFollower`: one row for
-/// every person subscribed to `epic_id` or to any ancestor. Later followers are
-/// not marked.
-pub(crate) fn mark_task_unseen_for_followers(ctx: &ReducerContext, task_id: i64, epic_id: i64) {
+/// `mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`: one row
+/// for every person who can see `epic_id`. A subscription plays no part, and
+/// people who gain sight later are not marked.
+pub(crate) fn mark_task_unseen_for_viewers(ctx: &ReducerContext, task_id: i64, epic_id: i64) {
     if epic_id == 0 {
         return;
     }
-    let chain = epic_and_ancestors(ctx, epic_id);
-    let followers: std::collections::BTreeSet<String> = ctx
-        .db
-        .subscriptions()
-        .iter()
-        .filter(|s| chain.contains(&s.epic_id))
-        .map(|s| s.subscriber)
-        .collect();
-    for subscriber in followers {
+    for subscriber in viewers_of_epic(ctx, epic_id) {
         let id = unseen_id(&subscriber, task_id);
         if ctx.db.unseen_tasks().id().find(&id).is_none() {
             ctx.db.unseen_tasks().insert(UnseenTask {

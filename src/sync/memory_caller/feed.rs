@@ -518,8 +518,8 @@ impl module::IngestStore for TablesIngest<'_> {
         self.caller.recalculate_epic_chain(self.tables, epic_id);
     }
 
-    fn mark_task_unseen_for_followers(&mut self, task_id: i64, epic_id: i64) {
+    fn mark_task_unseen_for_viewers(&mut self, task_id: i64, epic_id: i64) {
         self.caller
-            .mark_task_unseen_for_followers(self.tables, task_id, epic_id);
+            .mark_task_unseen_for_viewers(self.tables, task_id, epic_id);
     }
 }

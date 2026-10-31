@@ -16,11 +16,11 @@ impl MemoryReducerCaller {
         let id = self.apply_create_task(row)?;
         let mut tables = self.lock();
         let epic_id = tables.tasks.get(&id.0).map_or(0, |t| t.epic_id);
-        self.mark_task_unseen_for_followers(&mut tables, id.0, epic_id);
+        self.mark_task_unseen_for_viewers(&mut tables, id.0, epic_id);
         Ok(id)
     }
 
-    pub(super) fn mark_task_unseen_for_followers(
+    pub(super) fn mark_task_unseen_for_viewers(
         &self,
         tables: &mut Tables,
         task_id: i64,
@@ -29,19 +29,14 @@ impl MemoryReducerCaller {
         if epic_id == 0 {
             return;
         }
-        let mut chain = Vec::new();
-        let mut next = epic_id;
-        while next != 0 && chain.len() < 1024 && !chain.contains(&next) {
-            chain.push(next);
-            next = tables.epics.get(&next).map_or(0, |e| e.parent_epic_id);
+        let mut viewers = module::viewers_of_epic(&*tables, epic_id);
+        // With the workspace rules off everyone sees everything, but the only
+        // person this double knows by name is its sender.
+        let scope = self.scope();
+        if !scope.on() && !self.sender.is_empty() {
+            viewers.insert(self.sender.clone());
         }
-        let followers: std::collections::BTreeSet<String> = tables
-            .subscriptions
-            .values()
-            .filter(|s| chain.contains(&s.epic_id))
-            .map(|s| s.subscriber.clone())
-            .collect();
-        for subscriber in followers {
+        for subscriber in viewers {
             let id = module::unseen_id(&subscriber, task_id);
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 tables.unseen_tasks.entry(id.clone())

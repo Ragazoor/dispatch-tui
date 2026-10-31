@@ -606,8 +606,10 @@ entity Subscription {
 
 -- UnseenTask records that one person has not yet looked at one task that was
 -- created with the signal on (mcp-task-tools.allium: CreateTaskViaMcp's
--- `signal`, or feeds.allium: NewMyReviewsTaskIsSignalled). It is the whole of
--- the "new task" signal's stored state.
+-- `signal`, or feeds.allium: NewReviewRequestIsSignalled). It is the whole of
+-- the "new task" signal's stored state. It is written for everyone who can
+-- see the task's epic when it is created (Epic.visible_to); a Subscription
+-- plays no part.
 --
 -- An EPIC's mark is never stored. An epic is marked for a person exactly when
 -- some UnseenTask row for that person names a task in the epic's subtree (the
