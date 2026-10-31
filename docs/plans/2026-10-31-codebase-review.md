@@ -12,7 +12,7 @@ Task #98742. Follows `docs/plans/2026-10-28-codebase-review.md` (task #98508). T
 
 ## 1. Executive summary
 
-- **The 2026-10-28 work packages landed well: 17 of 23 findings Fixed**, 4 partly fixed, 1 moot, W2 still open. `PaneId` and the one-transaction `update_task` are done and mirrored in the twin.
+- **The 2026-10-28 work packages landed well: 16 of 22 findings Fixed**, 4 partly fixed (S2, S3, G1, T2), P2 moot, W2 still open. `PaneId` and the one-transaction `update_task` are done and mirrored in the twin.
 - **One High that undoes the workspace model:** no `seed_*` reducer checks its caller, so any connected board can make itself super-admin or rewrite any epic (V1).
 - **Moves are the weak point of the sight rules.** Re-parenting under your own private epic, repo-group routing and flatten, and client-chosen `owner`/`created_by`/`subscriber` all let one member hide or take another's work (V2–V5).
 - **Two regressions in last round's fixes:** the P1 fix overrides the user's `core.sshCommand` (R1), and `update_epic` repeats the S1 mistake as three store writes (R3).
@@ -39,7 +39,7 @@ Task #98742. Follows `docs/plans/2026-10-28-codebase-review.md` (task #98508). T
 | W2 | Unowned repo paths never pruned | **Open** | `src/sync/rows.rs::repo_paths_saved_by`; standing item |
 | — | `PaneId` newtype | **Fixed** | 0aed824c, 7de7c5db |
 
-Yield: 17 of 23 fixed (S2, S3, T2 and the G1 residue partly; P2 moot; W2 open).
+Yield: 16 of 22 fixed; 4 partly (S2, S3, G1, T2); 1 moot (P2); 1 open (W2).
 
 ## 3. Findings
 
