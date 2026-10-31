@@ -222,27 +222,40 @@ pub fn unsubscribe_from_epic(
         .iter()
         .map(|e| (e.id, e.parent_epic_id))
         .collect();
-    for released in epics_losing_coverage(epic_id, &remaining, &parents) {
-        let stale: Vec<i64> = ctx
-            .db
-            .poll_owners()
-            .scope_id()
-            .filter(&released)
-            .filter(|p| p.scope == POLL_SCOPE_EPIC)
-            .filter(|p| {
-                ctx.db
-                    .hosts()
-                    .id()
-                    .find(&p.host)
-                    .is_some_and(|h| h.owner == subscriber)
-            })
-            .map(|p| p.id)
+    let released: std::collections::HashSet<i64> =
+        epics_losing_coverage(epic_id, &remaining, &parents)
+            .into_iter()
             .collect();
-        for row_id in stale {
-            ctx.db.poll_owners().id().delete(row_id);
-        }
-    }
+    release_poll_claims(ctx, &released, |owner| owner == subscriber);
     Ok(())
+}
+
+/// `workspaces.allium: RemoveMember`, `MoveEpicToWorkspace` (task #98746, V6):
+/// release every epic-scoped poll claim on an epic in `epics` held by a host
+/// whose owner `loses_sight` of it, so another host can claim the feed
+/// instead of the epic stalling on a host that can no longer read it. The
+/// twin of the release in [`unsubscribe_from_epic`].
+pub(crate) fn release_poll_claims(
+    ctx: &ReducerContext,
+    epics: &std::collections::HashSet<i64>,
+    loses_sight: impl Fn(&str) -> bool,
+) {
+    let stale: Vec<i64> = epics
+        .iter()
+        .flat_map(|epic_id| ctx.db.poll_owners().scope_id().filter(epic_id))
+        .filter(|p| p.scope == POLL_SCOPE_EPIC)
+        .filter(|p| {
+            ctx.db
+                .hosts()
+                .id()
+                .find(&p.host)
+                .is_some_and(|h| loses_sight(&h.owner))
+        })
+        .map(|p| p.id)
+        .collect();
+    for row_id in stale {
+        ctx.db.poll_owners().id().delete(row_id);
+    }
 }
 
 /// The epics in `unfollowed`'s subtree (itself included) that a person whose

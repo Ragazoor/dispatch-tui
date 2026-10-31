@@ -1070,10 +1070,17 @@ entity Epic {
     -- managed epics before v93 ran keeps them and runs without this index
     -- (see ProvisionManagedEpics' race-safety note in epics.allium) — v93
     -- warns rather than deleting or merging data it did not create.
+    --
+    -- Task #98746 (V9). A managed ROOT (parent = null) is one per CREATOR:
+    -- each person's board provisions its own private "PR Reviews" and "CVE"
+    -- roots (epics.allium: ProvisionManagedEpics), so two roots may share a
+    -- feed_role when their creators differ. The module enforces no index for
+    -- this; provisioning finds a root by (feed_role, creator).
     invariant UniqueFeedRolePerParent {
         for a in Epics:
             for b in Epics:
                 a != b and a.feed_role != none and a.parent = b.parent
+                    and (a.parent != null or a.created_by = b.created_by)
                     implies (a.feed_role != b.feed_role or b.feed_role = none)
     }
 

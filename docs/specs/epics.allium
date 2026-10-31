@@ -1496,6 +1496,14 @@ rule ProvisionManagedEpics {
     -- differs. Otherwise create the epic and stamp its feed_role — including
     -- when the user deleted a previously-provisioned one.
     --
+    -- Task #98746 (V9). A managed ROOT is the caller's own: epic_for_role of a
+    -- root role finds only an epic CREATED BY the caller, and a root created
+    -- here is private (visibility = private, created_by = the caller), so each
+    -- board provisions a root of its own and never reuses or rewrites another
+    -- person's. A found root the caller created that is still public is made
+    -- private (the migration of a store whose members shared one root). The
+    -- review sub-epics inherit privacy from their root.
+    --
     -- epic_for_role is a black-box lookup
     -- SCOPED TO THE EXPECTED PARENT for that role (null for the two root
     -- roles, the reviews_parent root for the three review sub-roles): each

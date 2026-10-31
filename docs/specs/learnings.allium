@@ -778,6 +778,11 @@ rule ArchiveStaleLearning {
     when: learning: core/Learning.updated_at + core/config.stale_learning_threshold <= now
 
     requires: core/config.stale_learning_cleanup_enabled = true
+    -- Task #98746 (V7). The sweep archives only what its caller sees
+    -- (workspaces.allium: LearningVisibility, WritesRequireSight). The store
+    -- operator sees every learning; any other caller archives its own
+    -- workspaces' entries and never another workspace's.
+    requires: learning.visible_to(caller()) or is_operator(caller())
     requires: learning.status = approved
     requires: learning.upvote_count <= 0
 

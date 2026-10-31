@@ -374,15 +374,25 @@ pub fn apply_learning_verdicts(
 }
 
 /// Archive every approved learning with a non-positive score that has gone
-/// untouched since before `cutoff`. Mirrors the SQLite bulk `UPDATE`
+/// untouched since before `cutoff`, among the learnings the caller sees (the
+/// operator sees all). Mirrors the SQLite bulk `UPDATE`
 /// `ArchiveStaleLearning` (`docs/specs/learnings.allium`) ran directly;
 /// returns the number of rows archived.
 #[spacetimedb::reducer]
 pub fn archive_stale_learnings(ctx: &ReducerContext, cutoff: String) -> Result<(), String> {
     let now = now(ctx);
+    let operator = is_operator(ctx);
     update_matching_learnings(
         ctx,
-        |l| l.status == "approved" && l.upvote_count <= 0 && l.updated_at <= cutoff,
+        |l| {
+            l.status == "approved"
+                && l.upvote_count <= 0
+                && l.updated_at <= cutoff
+                // `ArchiveStaleLearning` (V7): the sweep archives what its
+                // caller sees, so one board never archives another
+                // workspace's learnings.
+                && (operator || learning_scope_seen(ctx, l))
+        },
         |row| Learning {
             status: "archived".to_string(),
             updated_at: now.clone(),

@@ -58,6 +58,13 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 26: feed authority and poll claims — `remove_member` and
+///    `move_epic_to_workspace` release the poll claims of hosts whose owner
+///    loses sight; a `feed_command` change needs the creator, the poll
+///    owner's owner or a workspace admin; `archive_stale_learnings` archives
+///    only what the caller sees; a managed PR Reviews or CVE root is private
+///    to its creator (`config.rs`, `workspace.rs`, `visibility.rs`,
+///    `tasks_epics.rs`, `learning.rs`, `feed.rs`).
 /// 25: one rule for moving work under or out of a private epic — a re-parent
 ///    or task move that changes who the item is private to needs the authority
 ///    `set_epic_visibility` needs; a repo-group epic cannot be private and its
@@ -123,7 +130,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 25;
+pub const RULES_VERSION: i64 = 26;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

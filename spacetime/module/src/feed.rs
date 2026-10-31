@@ -416,22 +416,38 @@ fn ensure_role_epic(
         .parent_epic_id()
         .filter(&parent_epic_id)
         // Only an epic the caller can see counts: a managed root in a
-        // workspace they are not in must not be reused or rewritten.
-        .find(|e| e.feed_role == role && visible_epic(ctx, e.id).is_some());
+        // workspace they are not in must not be reused or rewritten. A ROOT
+        // is also the caller's own (`epics.allium: ProvisionManagedEpics`,
+        // V9): another person's root is never reused or rewritten, though the
+        // caller sees it.
+        .find(|e| {
+            e.feed_role == role
+                && (parent_epic_id != 0 || e.created_by == created_by)
+                && visible_epic(ctx, e.id).is_some()
+        });
     if let Some(epic) = existing {
-        if let Some((cmd, interval)) = command {
-            if epic.feed_command != cmd || epic.feed_interval_secs != interval {
-                let id = epic.id;
-                ctx.db.epics().id().update(Epic {
-                    feed_command: cmd.to_string(),
-                    feed_interval_secs: interval,
-                    updated_at: now(ctx),
-                    ..epic
-                });
-                return id;
-            }
+        // A root its creator finds still public is the one members used to
+        // share: it becomes private, so only they see and signal on it.
+        let make_private = parent_epic_id == 0 && epic.visibility != VISIBILITY_PRIVATE;
+        let retarget = command
+            .is_some_and(|(cmd, interval)| epic.feed_command != cmd || epic.feed_interval_secs != interval);
+        if !make_private && !retarget {
+            return epic.id;
         }
-        return epic.id;
+        let id = epic.id;
+        let mut row = Epic {
+            updated_at: now(ctx),
+            ..epic
+        };
+        if make_private {
+            row.visibility = VISIBILITY_PRIVATE.to_string();
+        }
+        if let Some((cmd, interval)) = command {
+            row.feed_command = cmd.to_string();
+            row.feed_interval_secs = interval;
+        }
+        ctx.db.epics().id().update(row);
+        return id;
     }
     let (feed_command, feed_interval_secs) =
         command.map(|(c, i)| (c.to_string(), i)).unwrap_or_default();
@@ -444,6 +460,13 @@ fn ensure_role_epic(
             feed_command,
             feed_interval_secs,
             created_by: created_by.to_string(),
+            // A managed root is private to its creator (V9); its sub-epics
+            // inherit that from it.
+            visibility: if parent_epic_id == 0 {
+                VISIBILITY_PRIVATE.to_string()
+            } else {
+                blank_epic().visibility
+            },
             created_at: now(ctx),
             updated_at: now(ctx),
             ..blank_epic()

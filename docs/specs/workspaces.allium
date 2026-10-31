@@ -441,6 +441,14 @@ rule RemoveMember {
             not exists s
         for u in UnseenTasks where u.subscriber = user and u.task.epic != null and u.task.epic.workspace = workspace:
             not exists u
+        -- Task #98746 (V6). A claim must not outlive the sight that made it
+        -- workable: every epic-scoped core/PollOwner row on an epic of this
+        -- workspace held by a host `user` owns is released, as
+        -- UnsubscribeFromEpic does, so another host can claim the feed.
+        for owner_row in core/PollOwners.where(p =>
+                p.scope = epic and p.scope_id.workspace = workspace
+                    and p.host.owner = user):
+            not exists owner_row
 
     @guidance
         -- The person's epics, tasks and packages stay where they are: their
@@ -663,6 +671,14 @@ rule MoveEpicToWorkspace {
         for follow in Subscriptions where follow.epic in epic.subtree:
             if not destination.has_member(follow.subscriber):
                 not exists follow
+        -- Task #98746 (V6). A host whose owner is not a member of the
+        -- destination loses sight of the tree, so its epic-scoped
+        -- core/PollOwner claims on the tree are released: the feed pauses
+        -- until a host that can see the epic claims it, never stalls.
+        for owner_row in core/PollOwners.where(p =>
+                p.scope = epic and p.scope_id in epic.subtree
+                    and not destination.has_member(p.host.owner)):
+            not exists owner_row
 
     @guidance
         -- A refusal for a missing, unseen or private-to-someone-else epic

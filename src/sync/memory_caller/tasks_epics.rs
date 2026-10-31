@@ -587,6 +587,16 @@ impl MemoryReducerCaller {
         }) {
             return Ok(ReducerOutcome::Refused(why));
         }
+        // `FeedCommandAuthority` (V8).
+        if let Some(command) = &patch.feed_command {
+            if scope.on() && !module::may_change_feed_command(&*tables, &row, command, &self.sender)
+            {
+                return Ok(ReducerOutcome::Refused(format!(
+                    "only the creator of epic {}, the owner of the host that polls it, or an admin of its workspace may change its feed command",
+                    row.id
+                )));
+            }
+        }
         let prior_status = row.status.clone();
         let was_child_of = row.parent_epic_id;
         let caller_named_a_completion = patch.completed_at.is_some();

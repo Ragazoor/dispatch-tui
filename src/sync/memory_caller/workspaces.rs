@@ -300,6 +300,15 @@ impl MemoryReducerCaller {
             tables.subscriptions.remove(&id);
             self.rows.remove_subscription(id);
         }
+        // `RemoveMember` (V6): release the claims the person's hosts hold on
+        // this workspace's epics.
+        let epics: std::collections::HashSet<i64> = tables
+            .epics
+            .values()
+            .filter(|e| e.workspace_id == workspace_id)
+            .map(|e| e.id)
+            .collect();
+        self.release_poll_claims(tables, &epics, |owner| owner == user);
         let marks: Vec<String> = tables
             .unseen_tasks
             .values()

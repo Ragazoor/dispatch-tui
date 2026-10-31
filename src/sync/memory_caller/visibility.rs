@@ -624,6 +624,18 @@ impl MemoryReducerCaller {
             tables.subscriptions.remove(&sub);
             self.rows.remove_subscription(sub);
         }
+        // `MoveEpicToWorkspace` (V6): a host whose owner is not in the
+        // destination loses its claim on the tree.
+        let tree_set: std::collections::HashSet<i64> = tree.iter().copied().collect();
+        let members: Vec<String> = tables
+            .memberships
+            .values()
+            .filter(|m| m.workspace_id == workspace_id)
+            .map(|m| m.user.clone())
+            .collect();
+        self.release_poll_claims(&mut tables, &tree_set, |owner| {
+            !members.iter().any(|m| m == owner)
+        });
         let marks: Vec<String> = tables
             .unseen_tasks
             .values()

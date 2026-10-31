@@ -386,5 +386,15 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
             assert_eq!(managed(&rows_real), managed(&rows_mem));
         }
         assert_eq!(managed(&rows_real).len(), 5);
+        // A managed root is private to its creator (task #98746, V9), on both
+        // sides; its sub-epics inherit that.
+        for rows in [&rows_real, &rows_mem] {
+            assert!(rows
+                .epics()
+                .iter()
+                .filter(|e| e.parent_epic_id.is_none()
+                    && e.feed_role != dispatch_tui::models::FeedRole::None)
+                .all(|e| e.visibility == dispatch_tui::models::Visibility::Private));
+        }
     });
 }

@@ -763,6 +763,7 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     check_epic_patch(&row, &patch, |id| {
         ctx.db.epics().id().find(id).map(|e| e.parent_epic_id)
     })?;
+    check_feed_command_authority(ctx, &row, &patch)?;
     let prior_status = row.status.clone();
     let was_child_of = row.parent_epic_id;
     let caller_named_a_completion = patch.completed_at.is_some();
@@ -780,6 +781,53 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
         recalculate_epic_chain(ctx, was_child_of);
     }
     Ok(())
+}
+
+/// `feeds.allium: FeedCommandAuthority` (task #98746, V8). The poll-owner
+/// host runs `feed_command` as a shell command, so a patch that changes it
+/// needs the epic's creator, the owner of a host holding the epic's poll
+/// claim, or an admin of the epic's workspace. The operator and a super-admin
+/// always may. Setting the value the epic already has changes nothing.
+fn check_feed_command_authority(
+    ctx: &ReducerContext,
+    epic: &Epic,
+    patch: &EpicPatch,
+) -> Result<(), String> {
+    let Some(command) = &patch.feed_command else {
+        return Ok(());
+    };
+    if is_operator(ctx) {
+        return Ok(());
+    }
+    let caller = caller_identity(ctx);
+    if may_change_feed_command(ctx, epic, command, &caller) {
+        Ok(())
+    } else {
+        Err(format!(
+            "only the creator of epic {}, the owner of the host that polls it, or an admin of its workspace may change its feed command",
+            epic.id
+        ))
+    }
+}
+
+/// The pure half of [`check_feed_command_authority`], shared with
+/// `MemoryReducerCaller`.
+pub fn may_change_feed_command(
+    r: &impl StoreReads,
+    epic: &Epic,
+    command: &str,
+    caller: &str,
+) -> bool {
+    command == epic.feed_command
+        || (!epic.created_by.is_empty() && epic.created_by == caller)
+        || {
+            let hosts = r.hosts_owned_by(caller);
+            r.poll_owners_of(epic.id)
+                .iter()
+                .any(|p| p.scope == POLL_SCOPE_EPIC && hosts.iter().any(|h| h.id == p.host))
+        }
+        || workspace_has_admin(r, epic.workspace_id, caller)
+        || is_super_admin(r, caller)
 }
 
 /// Delete an epic, its sub-epics and their tasks.

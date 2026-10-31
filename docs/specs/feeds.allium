@@ -1130,6 +1130,35 @@ rule OverrideFeedOwner {
 
 -- == Serialisation ==
 
+rule FeedCommandAuthority {
+    when: EpicFeedCommandSet(epic, command)
+
+    -- Task #98746 (V8). The epic's poll-owner host runs feed_command as a
+    -- shell command, so changing it is changing what another person's
+    -- machine runs. Only three roles may do it: the epic's creator, the owner
+    -- of the host that holds the epic's core/PollOwner claim, and an admin of
+    -- the epic's workspace (a super-admin and the store operator always may).
+    -- Anyone else who merely sees the epic is refused. A patch that leaves
+    -- feed_command as it is, or sets it to the value it already has, is not a
+    -- change and needs no authority.
+    requires:
+        command = epic.feed_command
+        or caller() = epic.created_by
+        or exists core/PollOwner{scope: epic, scope_id: epic.id}
+            where host.owner = caller()
+        or epic.workspace.is_admin(caller())
+        or is_super_admin(caller())
+
+    ensures: epic.feed_command = command
+
+    @guidance
+        -- Module: spacetime/module/src/tasks_epics.rs::patch_epic via
+        -- spacetime/module/src/tasks_epics.rs::may_change_feed_command; mirrored in
+        -- MemoryReducerCaller's apply_patch_epic. The managed root's own
+        -- reconcile (epics.allium: ProvisionManagedEpics) writes only a root
+        -- its caller created, so it needs no check of its own.
+}
+
 rule SerialisedFeedCycle {
     when: FeedCycleRequested(epic)
 

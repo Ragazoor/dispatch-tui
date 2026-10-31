@@ -13,6 +13,32 @@ use super::super::writes::ReducerOutcome;
 use super::{MemoryReducerCaller, Tables, POLL_SCOPE_EPIC};
 
 impl MemoryReducerCaller {
+    /// Mirrors the module's `release_poll_claims`: drop every epic-scoped
+    /// claim on an epic in `epics` held by a host whose owner `loses_sight`.
+    pub(super) fn release_poll_claims(
+        &self,
+        tables: &mut Tables,
+        epics: &std::collections::HashSet<i64>,
+        loses_sight: impl Fn(&str) -> bool,
+    ) {
+        let stale: Vec<i64> = tables
+            .poll_owners
+            .values()
+            .filter(|p| p.scope == POLL_SCOPE_EPIC && epics.contains(&p.scope_id))
+            .filter(|p| {
+                tables
+                    .hosts
+                    .get(&p.host)
+                    .is_some_and(|h| loses_sight(&h.owner))
+            })
+            .map(|p| p.id)
+            .collect();
+        for row_id in stale {
+            tables.poll_owners.remove(&row_id);
+            self.rows.remove_poll_owner(row_id);
+        }
+    }
+
     pub(super) fn write_repo_path(&self, tables: &mut Tables, mut row: module::RepoPath) -> i64 {
         let id = Self::assign_id(row.id, &mut tables.next_repo_path_id);
         row.id = id;
@@ -209,24 +235,11 @@ impl MemoryReducerCaller {
             .values()
             .map(|e| (e.id, e.parent_epic_id))
             .collect();
-        for released in module::epics_losing_coverage(epic_id, &remaining, &parents) {
-            let stale: Vec<i64> = tables
-                .poll_owners
-                .values()
-                .filter(|p| p.scope == POLL_SCOPE_EPIC && p.scope_id == released)
-                .filter(|p| {
-                    tables
-                        .hosts
-                        .get(&p.host)
-                        .is_some_and(|h| h.owner == subscriber)
-                })
-                .map(|p| p.id)
+        let released: std::collections::HashSet<i64> =
+            module::epics_losing_coverage(epic_id, &remaining, &parents)
+                .into_iter()
                 .collect();
-            for row_id in stale {
-                tables.poll_owners.remove(&row_id);
-                self.rows.remove_poll_owner(row_id);
-            }
-        }
+        self.release_poll_claims(&mut tables, &released, |owner| owner == subscriber);
         Ok(ReducerOutcome::Applied(vec![]))
     }
 

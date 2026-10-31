@@ -334,9 +334,22 @@ impl MemoryReducerCaller {
         let cutoff = encode::stamp(cutoff);
         let mut tables = self.lock();
         let now = self.now();
+        let scope = self.scope();
+        let seen: std::collections::HashSet<i64> = tables
+            .learnings
+            .values()
+            .filter(|l| tables.learning_visible(&scope, l))
+            .map(|l| l.id)
+            .collect();
         self.update_matching_learnings(
             &mut tables,
-            |l| l.status == "approved" && l.upvote_count <= 0 && l.updated_at <= cutoff,
+            // `ArchiveStaleLearning` (V7): only what the caller sees.
+            |l| {
+                l.status == "approved"
+                    && l.upvote_count <= 0
+                    && l.updated_at <= cutoff
+                    && seen.contains(&l.id)
+            },
             |row| module::Learning {
                 status: "archived".to_string(),
                 updated_at: now.clone(),

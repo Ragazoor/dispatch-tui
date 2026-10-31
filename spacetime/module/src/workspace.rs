@@ -318,6 +318,16 @@ fn drop_follows_in_workspace(ctx: &ReducerContext, user: &str, workspace_id: i64
     for id in subscriptions {
         ctx.db.subscriptions().id().delete(&id);
     }
+    // `RemoveMember` (V6): a claim held by the person's host would stall the
+    // feed once they cannot see its epic.
+    let epics: std::collections::HashSet<i64> = ctx
+        .db
+        .epics()
+        .iter()
+        .filter(|e| e.workspace_id == workspace_id)
+        .map(|e| e.id)
+        .collect();
+    crate::config::release_poll_claims(ctx, &epics, |owner| owner == user);
     let marks: Vec<String> = ctx
         .db
         .unseen_tasks()

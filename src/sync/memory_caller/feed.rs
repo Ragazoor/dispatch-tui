@@ -332,28 +332,40 @@ impl MemoryReducerCaller {
         parent_epic_id: i64,
         command: Option<(&str, i64)>,
     ) -> i64 {
+        let scope = self.scope();
         let existing = tables
             .epics
             .values()
-            .find(|e| e.parent_epic_id == parent_epic_id && e.feed_role == role)
+            // A root is its creator's own (V9); see the module's twin.
+            .find(|e| {
+                e.parent_epic_id == parent_epic_id
+                    && e.feed_role == role
+                    && (parent_epic_id != 0 || e.created_by == self.sender)
+                    && tables.visible_epic(&scope, e.id).is_some()
+            })
             .cloned();
         if let Some(epic) = existing {
-            if let Some((cmd, interval)) = command {
-                if epic.feed_command != cmd || epic.feed_interval_secs != interval {
-                    let id = epic.id;
-                    self.write_epic(
-                        tables,
-                        module::Epic {
-                            feed_command: cmd.to_string(),
-                            feed_interval_secs: interval,
-                            updated_at: self.now(),
-                            ..epic
-                        },
-                    );
-                    return id;
-                }
+            let make_private = parent_epic_id == 0 && epic.visibility != module::VISIBILITY_PRIVATE;
+            let retarget = command.is_some_and(|(cmd, interval)| {
+                epic.feed_command != cmd || epic.feed_interval_secs != interval
+            });
+            if !make_private && !retarget {
+                return epic.id;
             }
-            return epic.id;
+            let id = epic.id;
+            let mut row = module::Epic {
+                updated_at: self.now(),
+                ..epic
+            };
+            if make_private {
+                row.visibility = module::VISIBILITY_PRIVATE.to_string();
+            }
+            if let Some((cmd, interval)) = command {
+                row.feed_command = cmd.to_string();
+                row.feed_interval_secs = interval;
+            }
+            self.write_epic(tables, row);
+            return id;
         }
         let (feed_command, feed_interval_secs) =
             command.map(|(c, i)| (c.to_string(), i)).unwrap_or_default();
@@ -383,6 +395,12 @@ impl MemoryReducerCaller {
                 feed_command,
                 feed_interval_secs,
                 created_by: self.sender.clone(),
+                // A managed root is private to its creator (V9).
+                visibility: if parent_epic_id == 0 {
+                    module::VISIBILITY_PRIVATE.to_string()
+                } else {
+                    module::blank_epic().visibility
+                },
                 created_at: now.clone(),
                 updated_at: now,
                 workspace_id,

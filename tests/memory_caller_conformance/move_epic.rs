@@ -109,6 +109,29 @@ fn memory_caller_moves_an_epic_like_the_real_reducer() {
             );
         }
 
+        // A poll claim held for a person who is not in the destination is
+        // released by the move (task #98746, V6), on both sides.
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .register_host("host-a".into(), String::new(), identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+            caller
+                .claim_poll_owner(PollScopeId::Epic(EpicId(root_id)), "host-a".into())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        wait_for!(rows_real
+            .poll_owner(PollScopeId::Epic(EpicId(root_id)))
+            .is_some());
+        assert!(rows_mem
+            .poll_owner(PollScopeId::Epic(EpicId(root_id)))
+            .is_some());
+
         real.move_epic_to_workspace(EpicId(root_id), other)
             .await
             .unwrap()
@@ -127,5 +150,14 @@ fn memory_caller_moves_an_epic_like_the_real_reducer() {
             assert_eq!(workspace_of(&rows_real), Some(other), "real epic {id}");
             assert_eq!(workspace_of(&rows_mem), Some(other), "twin epic {id}");
         }
+        wait_for!(rows_real
+            .poll_owner(PollScopeId::Epic(EpicId(root_id)))
+            .is_none());
+        assert!(
+            rows_mem
+                .poll_owner(PollScopeId::Epic(EpicId(root_id)))
+                .is_none(),
+            "twin released the claim"
+        );
     });
 }

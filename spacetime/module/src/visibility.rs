@@ -539,6 +539,12 @@ pub fn move_epic_to_workspace(
     for id in stale {
         ctx.db.subscriptions().id().delete(&id);
     }
+    // `MoveEpicToWorkspace` (V6): a host whose owner is not in the destination
+    // can no longer read the tree, so it must not keep the feed's claim.
+    let tree_set: std::collections::HashSet<i64> = tree.iter().copied().collect();
+    crate::config::release_poll_claims(ctx, &tree_set, |owner| {
+        !workspace_has_member(ctx, workspace_id, owner)
+    });
     let marks: Vec<String> = ctx
         .db
         .unseen_tasks()
