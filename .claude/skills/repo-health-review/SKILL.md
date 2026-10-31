@@ -30,7 +30,13 @@ drift. This skill asks for those directly.
 3. Your range is `<previous range end>..main`. Record it, with the commit count,
    in your report's header. The next run depends on it.
 
-If no previous report names a range, use the commits of the last 14 days and say so.
+If no previous report names a range, or its end is not on `main`
+(`git merge-base --is-ancestor <sha> main` fails, e.g. the report was written
+on a branch that was later rebased), use the commits of the last 14 days and
+say so.
+
+If the previous report has no "Standing items" section, seed one: list every
+finding that appears in two or more of the last three reports and is still open.
 
 ## 1. Last round's findings: status table
 
@@ -124,12 +130,16 @@ Check:
 
 Write `docs/plans/<YYYY-MM-DD>-codebase-review.md` with:
 
-1. Header: task id, previous report, commit range and count, what was run.
+1. Header: task id, previous report, commit range and count, what was run and
+   the gate results (step 3, lens 6).
 2. Executive summary: 3–5 bullets.
 3. Status table of last round's findings (step 1).
 4. Findings, grouped by area, each with an id (e.g. `V1`, `R1`), severity,
    path and symbol, scenario and fix.
-5. Hotspots and agent-context deltas (steps 5 and 6).
+5. Hotspots and agent context (steps 5 and 6): the ranked top-20 list with
+   change counts and line counts, and the `wc -w` figures, then what changed.
+   Record the absolute figures, not only the deltas, so the next run has a
+   baseline.
 6. Standing items.
 7. Areas read: every module this run read in full.
 
