@@ -33,18 +33,14 @@ mod wiring;
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod wiring_tests;
 
 pub use callers::SdkReducerCaller;
-pub(in crate::sync) use queries::{subscription_queries, subtree_queries};
-use wiring::Subtree;
+pub(in crate::sync) use queries::subscription_queries;
 
 use spacetimedb_sdk::{DbContext as _, SubscriptionHandle as _};
 use std::sync::{Arc, Mutex};
 
 use crate::spacetime::bindings::{DbConnection, SubscriptionHandle};
-use crate::sync::subtree::SubtreeCover;
 use crate::sync::SharedRows;
 
 /// Talks to one SpacetimeDB database over a WebSocket.
@@ -68,14 +64,6 @@ pub struct SpacetimeSdkConnector {
     /// that re-subscribed after following a new epic would hold two overlapping
     /// sets and receive every shared row twice.
     subscription: Mutex<Option<SubscriptionHandle>>,
-    /// The sub-epic tree this connection's subscription reaches, and the
-    /// extra subscriptions that widened it there.
-    ///
-    /// Spec: `sync.allium`'s `ASubEpicOfAFollowedEpicIsAskedForToo`. Shared
-    /// with the epic row callbacks, which widen it on the SDK's thread as
-    /// sub-epics arrive; reset by every `subscribe`, and emptied with the
-    /// connection.
-    subtree: Arc<Mutex<Subtree>>,
     /// Where arriving rows land.
     ///
     /// Held rather than passed per call because the row callbacks are
@@ -98,7 +86,6 @@ impl SpacetimeSdkConnector {
             database: database.into(),
             connection: Mutex::new(None),
             subscription: Mutex::new(None),
-            subtree: Arc::new(Mutex::new(Subtree::default())),
             rows,
             dropped: Arc::new(Mutex::new(None)),
         }
@@ -140,25 +127,6 @@ impl SpacetimeSdkConnector {
             .replace(handle);
         if let Some(previous) = previous {
             let _ = previous.unsubscribe();
-        }
-    }
-
-    /// Start a fresh subtree walk from `followed`, unsubscribing whatever the
-    /// previous one had widened to.
-    ///
-    /// Called BEFORE the new subscription is sent: its initial rows fire the
-    /// epic callbacks, and they must widen against the new followed set, not
-    /// the old one.
-    pub(super) fn reset_subtree(&self, followed: &[i64]) {
-        let previous = std::mem::replace(
-            &mut *self.subtree.lock().unwrap_or_else(|e| e.into_inner()),
-            Subtree {
-                cover: SubtreeCover::new(followed.iter().copied()),
-                widenings: Vec::new(),
-            },
-        );
-        for handle in previous.widenings {
-            let _ = handle.unsubscribe();
         }
     }
 

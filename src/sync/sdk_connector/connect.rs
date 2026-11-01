@@ -147,8 +147,6 @@ impl StoreConnector for SpacetimeSdkConnector {
         // board's contents on screen with nothing live behind them, which is
         // the read-through `SharedRows` exists not to have.
         self.rows.clear();
-        // The walk was that connection's too; its widenings died with it.
-        self.reset_subtree(&[]);
         // And the drop slot goes with them: closing deliberately is not an
         // outage to report, and `disconnect` is called on paths the session has
         // already recorded the failure for.
@@ -172,14 +170,12 @@ impl StoreConnector for SpacetimeSdkConnector {
         let (answer, applied) = answer_once::<Result<(), String>>();
         let on_error = answer.clone();
 
-        self.reset_subtree(&request.epics);
         let handle: SubscriptionHandle = connection
             .subscription_builder()
             .on_applied(move |_ctx| answer(Ok(())))
             .on_error(move |_ctx, error| on_error(Err(error.to_string())))
             .subscribe(queries);
         self.replace_subscription(handle);
-        self.reseed_widenings(&connection);
 
         match tokio::time::timeout(CONNECT_TIMEOUT, applied).await {
             Ok(Ok(Ok(()))) => Ok(()),

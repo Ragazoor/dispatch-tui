@@ -2,7 +2,7 @@
 
 // Tables
 
-#[spacetimedb::table(accessor = tasks, public)]
+#[spacetimedb::table(accessor = tasks)]
 #[derive(Clone, Debug)]
 pub struct Task {
     #[primary_key]
@@ -105,7 +105,7 @@ pub struct Task {
     /// Who created this task; stamped once and never rewritten, regardless of
     /// epic membership. NOT `owner` — `owner` tracks board placement and is
     /// blanked when the task joins an epic; this survives that. Exists so
-    /// `sync.allium`'s `own_creations` subscription can find a task its
+    /// the `own_tasks` view can find a task its
     /// creator just made no matter which epic it landed in
     /// (`core.allium: Task.created_by`). Appended last for the same reason
     /// `owner` and `completed_at` are: appending is the only automigratable
@@ -144,7 +144,7 @@ pub struct Task {
     pub model: String,
 }
 
-#[spacetimedb::table(accessor = epics, public)]
+#[spacetimedb::table(accessor = epics)]
 #[derive(Clone, Debug)]
 pub struct Epic {
     #[primary_key]
@@ -179,7 +179,7 @@ pub struct Epic {
     pub completed_at: String,
     /// Who created this epic; stamped once and never rewritten. The epic twin
     /// of [`Task::created_by`] — an epic has no `owner` column at all, so this
-    /// is the only way `sync.allium`'s `own_creations` subscription can find
+    /// is the only way the `own_epics` view can find
     /// an epic its creator just made, before anyone (including them) follows
     /// it. `""` for a row created before this column existed, or created by an
     /// unidentified process (e.g. a feed's grouped sub-epics), and never
@@ -205,7 +205,7 @@ pub struct Epic {
 /// migrations are append-only and there is no supported way to drop a table
 /// short of dump/rebuild/restore. #4970 removed the TODO overlay this backed;
 /// only `seed_todos` still writes it, so a restore of an old snapshot lands.
-#[spacetimedb::table(accessor = todos, public)]
+#[spacetimedb::table(accessor = todos)]
 #[derive(Clone, Debug)]
 pub struct Todo {
     #[primary_key]
@@ -231,7 +231,7 @@ pub struct Todo {
 /// or writes it. The table stays because the store refuses a publish that drops
 /// a table holding rows (`docs/specs/spacetime-seed.allium`); the `seed_task_watchers`
 /// reducer stays so a dump/import still carries the old rows across.
-#[spacetimedb::table(accessor = task_watchers, public)]
+#[spacetimedb::table(accessor = task_watchers)]
 #[derive(Clone, Debug)]
 pub struct TaskWatcher {
     #[primary_key]
@@ -253,7 +253,7 @@ pub struct TaskWatcher {
 /// way every find-or-create here is: reducers run to completion
 /// one at a time, so a check-then-insert here has no race window and needs no
 /// declared unique index.
-#[spacetimedb::table(accessor = retired_feed_items, public)]
+#[spacetimedb::table(accessor = retired_feed_items)]
 #[derive(Clone, Debug)]
 pub struct RetiredFeedItem {
     #[primary_key]
@@ -272,7 +272,7 @@ pub struct RetiredFeedItem {
 /// append-only and there is no supported way to drop a table short of
 /// dump/rebuild/restore. #4965 retired the shell-tracking feature this
 /// backed; no reducer inserts into it anymore.
-#[spacetimedb::table(accessor = task_shells, public)]
+#[spacetimedb::table(accessor = task_shells)]
 #[derive(Clone, Debug)]
 pub struct TaskShell {
     #[index(btree)]
@@ -282,7 +282,7 @@ pub struct TaskShell {
     pub started_at: String,
 }
 
-#[spacetimedb::table(accessor = task_subagents, public)]
+#[spacetimedb::table(accessor = task_subagents)]
 #[derive(Clone, Debug)]
 pub struct TaskSubagent {
     /// Indexed: `delete_agent_state_for` runs once per task, and once per task
@@ -343,7 +343,7 @@ pub struct RepoBaseBranch {
 /// host_id, host_label, the stored UserIdentity and its credential are NOT
 /// rows here despite having been stored the same way before this table
 /// existed — see settings.allium's Excludes.
-#[spacetimedb::table(accessor = settings, public)]
+#[spacetimedb::table(accessor = settings)]
 #[derive(Clone, Debug)]
 pub struct Setting {
     #[primary_key]
@@ -363,7 +363,7 @@ pub struct Setting {
 ///
 /// It was a named repo-filter combination, scoped to one machine, keyed on
 /// `(host, name)`; `repo_paths` a JSON-encoded array the module never parsed.
-#[spacetimedb::table(accessor = filter_presets, public)]
+#[spacetimedb::table(accessor = filter_presets)]
 #[derive(Clone, Debug)]
 pub struct FilterPreset {
     #[primary_key]
@@ -389,7 +389,7 @@ pub struct FilterPreset {
 /// subscription ever filters on any column of this table. `detail`,
 /// `scope_ref`, `source_task_id` and `last_upvoted_at` stay genuine
 /// `Option<_>`, matching SQLite's nullability exactly.
-#[spacetimedb::table(accessor = learnings, public)]
+#[spacetimedb::table(accessor = learnings)]
 #[derive(Clone, Debug)]
 pub struct Learning {
     #[primary_key]
@@ -441,7 +441,7 @@ pub struct Learning {
 /// own, so this is unconditionally subscribed to as well.
 ///
 /// The verdict a task gave a learning lives in [`LearningVerdict`].
-#[spacetimedb::table(accessor = learning_retrievals, public)]
+#[spacetimedb::table(accessor = learning_retrievals)]
 #[derive(Clone, Debug)]
 pub struct LearningRetrieval {
     #[primary_key]
@@ -461,7 +461,7 @@ pub struct LearningRetrieval {
 /// repeat can move `Learning.upvote_count` by the difference instead of again.
 /// A snapshot table (`SharedTable::LearningVerdicts`): a restore that dropped
 /// it would keep the learnings' scores and let a task rate once more.
-#[spacetimedb::table(accessor = learning_verdicts, public)]
+#[spacetimedb::table(accessor = learning_verdicts)]
 #[derive(Clone, Debug)]
 pub struct LearningVerdict {
     #[primary_key]
@@ -484,7 +484,7 @@ pub struct LearningVerdict {
 /// `task_usage` has no table here: it was removed outright — table, model and
 /// MCP tool — in an unrelated change well before this migration reached it,
 /// so there was nothing left to move.
-#[spacetimedb::table(accessor = usage_events, public)]
+#[spacetimedb::table(accessor = usage_events)]
 #[derive(Clone, Debug)]
 pub struct UsageEvent {
     #[primary_key]
@@ -495,6 +495,14 @@ pub struct UsageEvent {
     pub action: String,
     pub detail: Option<String>,
     pub actor: String,
+    /// The `UserIdentity` of the caller who recorded it, stamped by
+    /// `record_usage_event` (never sent by the client). `own_usage_events`
+    /// serves a caller the rows they recorded. Appended last, with a default,
+    /// so the table migrates in place; a row recorded before it has `""` and
+    /// is nobody's.
+    #[default("")]
+    #[index(btree)]
+    pub recorded_by: String,
 }
 
 /// The host registry: one row per machine, not one row in total.
@@ -554,7 +562,7 @@ pub struct Host {
 /// once a shared store exists for two hosts to contend a claim over, so a
 /// fresh local dump legitimately has nothing to contribute
 /// (`src/spacetime/dump.rs::Source::Empty`).
-#[spacetimedb::table(accessor = poll_owners, public)]
+#[spacetimedb::table(accessor = poll_owners)]
 #[derive(Clone, Debug)]
 pub struct PollOwner {
     #[primary_key]
@@ -618,7 +626,7 @@ pub struct Subscription {
 ///
 /// Holds no status of its own — the spec's decision is that a package is a
 /// view on the board, so an item's done-ness is read from the item itself.
-#[spacetimedb::table(accessor = work_packages, public)]
+#[spacetimedb::table(accessor = work_packages)]
 #[derive(Clone, Debug)]
 pub struct WorkPackage {
     #[primary_key]
@@ -626,9 +634,9 @@ pub struct WorkPackage {
     pub id: i64,
     pub title: String,
     pub description: String,
-    /// Who created this package; stamped once and never rewritten. The board
-    /// subscribes to its own creator's packages by this column, the way
-    /// `own_creations` finds epics by [`Epic::created_by`].
+    /// Who created this package; stamped once and never rewritten. The
+    /// `own_packages` view serves a creator their packages by this column, the
+    /// way `own_epics` serves epics by [`Epic::created_by`].
     #[index(btree)]
     pub created_by: String,
     pub created_at: String,
@@ -653,7 +661,7 @@ pub struct WorkPackage {
 
 /// One link from a work package to one task or one epic
 /// (`work-packages.allium: WorkPackageLink`).
-#[spacetimedb::table(accessor = work_package_links, public)]
+#[spacetimedb::table(accessor = work_package_links)]
 #[derive(Clone, Debug)]
 pub struct WorkPackageLink {
     /// `"<work_package_id>/<kind>/<item_id>"` — see [`work_package_link_id`].
@@ -690,7 +698,7 @@ pub const WORK_PACKAGE_ITEM_EPIC: &str = "epic";
 /// can see its epic; cleared when the person enters the epic, when the
 /// task leaves its epic or finishes, and with the task. An epic's mark is never
 /// a row: it is derived from these.
-#[spacetimedb::table(accessor = unseen_tasks, public)]
+#[spacetimedb::table(accessor = unseen_tasks)]
 #[derive(Clone, Debug)]
 pub struct UnseenTask {
     /// `<subscriber>/<task_id>`, so re-marking overwrites rather than
@@ -730,7 +738,7 @@ pub struct UserProfile {
 /// Public for now, like `user_profiles`. The read-enforcement task makes it
 /// private and serves it through a per-caller view
 /// (`workspaces.allium`, "READ ENFORCEMENT, BY DECISION").
-#[spacetimedb::table(accessor = workspaces, public)]
+#[spacetimedb::table(accessor = workspaces)]
 #[derive(Clone, Debug)]
 pub struct Workspace {
     #[primary_key]
@@ -741,13 +749,20 @@ pub struct Workspace {
     /// The `UserIdentity` of the super-admin who created it.
     pub created_by: String,
     pub created_at: String,
+    /// Always `true`. A view cannot scan a table, so a super-admin's
+    /// `visible_workspaces` reads every row through this index
+    /// (`workspaces.allium`, "READ ENFORCEMENT, BY DECISION"). Appended last,
+    /// with a default, so the table migrates in place.
+    #[default(true)]
+    #[index(btree)]
+    pub listed: bool,
 }
 
 /// One person's membership of one workspace (`core.allium: Membership`).
 ///
 /// At most one row per (workspace, user): `add_member` refuses a second.
 /// Public for now, for the reason [`Workspace`] is.
-#[spacetimedb::table(accessor = memberships, public)]
+#[spacetimedb::table(accessor = memberships)]
 #[derive(Clone, Debug)]
 pub struct Membership {
     #[primary_key]

@@ -53,7 +53,6 @@ fn a_cold_start_reaches_a_live_subscription_promptly() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-cold-start",
             ))
             .await
@@ -92,7 +91,8 @@ const COLD_START_CEILING: Duration = Duration::from_secs(10);
 /// and the wake-up but not that the SDK ever calls it. This one closes that
 /// gap: the row is written through the CLI — a different process, standing in
 /// for a teammate's board — and the only thing connecting the two is the
-/// subscription.
+/// subscription. The board belongs to the epic's workspace and follows it, so
+/// `covered_epics` serves it (workspaces.allium, "THE PER-CALLER VIEWS").
 #[test]
 fn a_row_written_elsewhere_arrives_through_the_subscription() {
     if !spacetime_available_or_skip() {
@@ -114,60 +114,28 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![1],
                 "host-a",
             ))
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        admit(&instance, &[&accepted.identity]);
+        follow(&instance, &accepted.identity, 1);
 
         assert!(
             rows.epics().is_empty(),
             "nothing has been written yet, so nothing may have arrived"
         );
 
-        let mut woken = rows.changed();
-        woken.mark_unchanged();
-
         // A different process writes the row. Nothing below asks for it.
-        let seeded = instance.call(
+        call_ok(
+            &instance,
             "seed_epics",
-            &[&serde_json::json!([{
-                "id": 1,
-                "title": "Written by somebody else",
-                "description": "",
-                "status": "backlog",
-                "plan_path": "",
-                "sort_order": {"none": []},
-                "created_at": "2026-09-19 10:00:00",
-                "updated_at": "2026-09-19 10:00:00",
-                "auto_dispatch": false,
-                "parent_epic_id": 0,
-                "feed_command": "",
-                "feed_interval_secs": 0,
-                "group_by_repo": false,
-                "feed_role": "none",
-                "origin": "manual",
-                "feed_append_only": false,
-                "completed_at": "",
-                "created_by": "",
-                "workspace_id": 0,
-                "visibility": "public",
-            }])
-            .to_string()],
+            serde_json::json!([shared_epic(1, "Written by somebody else", 0)]),
         );
-        assert!(seeded.status.success(), "{}", describe(&seeded));
 
-        // No sleep and no poll: wake-ups drive the loop. A wake-up can come from
-        // a change that is not our row (such as a late subscription apply), so
-        // re-check the rows after each one. If the row never arrives this
-        // hangs and the harness kills it, which is louder than a slept-through
-        // comparison.
-        while rows.epics().is_empty() {
-            woken
-                .changed()
-                .await
-                .expect("the subscription must deliver");
-        }
+        wait_for(&rows, |rows| !rows.epics().is_empty())
+            .await
+            .unwrap_or_else(|_| panic!("the row never arrived"));
 
         let epics = rows.epics();
         assert_eq!(epics.len(), 1);
@@ -178,11 +146,11 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
 /// **Task #4927**: following an epic brings its whole sub-epic tree, at any
 /// depth, and keeps bringing it as the tree grows.
 ///
-/// `sync.allium: ASubEpicOfAFollowedEpicIsAskedForToo`. Two sub-epic levels
-/// exist before the board subscribes, which proves the walk on a cold start;
-/// a third level and a task inside it are written by another process once the
-/// board is up, which proves it live. Nothing in the ask names epics 2, 3 or 4
-/// — the board only follows 1.
+/// The store walks the tree (`covered_epics`, workspaces.allium "THE
+/// PER-CALLER VIEWS"); the board only follows 1. Two sub-epic levels exist
+/// before the board subscribes, which proves the walk on a cold start; a third
+/// level and a task inside it are written by another process once the board is
+/// up, which proves it live.
 #[test]
 fn a_followed_epics_whole_sub_epic_tree_arrives_live() {
     if !spacetime_available_or_skip() {
@@ -192,18 +160,6 @@ fn a_followed_epics_whole_sub_epic_tree_arrives_live() {
     let published = instance.publish(&module_path(), None);
     assert!(published.status.success(), "{}", describe(&published));
 
-    let seeded = instance.call(
-        "seed_epics",
-        &[&serde_json::json!([
-            epic_json(1, "Followed", "backlog", 0),
-            epic_json(2, "Child", "backlog", 1),
-            epic_json(3, "Grandchild", "backlog", 2),
-            epic_json(9, "Unfollowed", "backlog", 0),
-        ])
-        .to_string()],
-    );
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-
     let rows = Arc::new(SharedRows::new());
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
 
@@ -213,184 +169,164 @@ fn a_followed_epics_whole_sub_epic_tree_arrives_live() {
             .connect(&instance.host(), None)
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
+        admit(&instance, &[&accepted.identity]);
+        follow(&instance, &accepted.identity, 1);
+        call_ok(
+            &instance,
+            "seed_epics",
+            serde_json::json!([
+                shared_epic(1, "Followed", 0),
+                shared_epic(2, "Child", 1),
+                shared_epic(3, "Grandchild", 2),
+                shared_epic(9, "Unfollowed", 0),
+            ]),
+        );
+
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![1],
                 "host-a",
             ))
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
 
-        // The loop checks before it waits, so a change that landed before a
-        // wait began is never missed and nothing needs marking as seen.
-        let woken = rows.changed();
-        let epic_ids = |rows: &SharedRows| {
-            let mut ids: Vec<i64> = rows.epics().iter().map(|e| e.id.0).collect();
-            ids.sort_unstable();
-            ids
-        };
-        // Bounded by a timeout rather than a sleep: each widening is a round
-        // trip, and the wait ends the moment the rows are there.
-        let wait_for = |want: fn(&SharedRows) -> bool| {
-            let rows = rows.clone();
-            let mut woken = woken.clone();
-            async move {
-                tokio::time::timeout(Duration::from_secs(10), async {
-                    while !want(&rows) {
-                        woken
-                            .changed()
-                            .await
-                            .expect("the subscription must deliver");
-                    }
-                })
-                .await
-            }
-        };
-
-        wait_for(|rows| rows.epics().len() == 3)
+        wait_for(&rows, |rows| rows.epics().len() == 3)
             .await
             .unwrap_or_else(|_| {
                 panic!("cold start: the tree never arrived: {:?}", epic_ids(&rows))
             });
         assert_eq!(epic_ids(&rows), vec![1, 2, 3], "epic 9 is not followed");
 
-        let seeded = instance.call(
+        call_ok(
+            &instance,
             "seed_epics",
-            &[&serde_json::json!([epic_json(4, "Great-grandchild", "backlog", 3)]).to_string()],
+            serde_json::json!([shared_epic(4, "Great-grandchild", 3)]),
         );
-        assert!(seeded.status.success(), "{}", describe(&seeded));
-        let seeded = instance.call(
+        call_ok(
+            &instance,
             "seed_tasks",
-            &[
-                &serde_json::json!([task_json(1, "deep inside", "backlog", 4, "host-b")])
-                    .to_string(),
-            ],
+            serde_json::json!([task_json(1, "deep inside", "backlog", 4, "host-b")]),
         );
-        assert!(seeded.status.success(), "{}", describe(&seeded));
 
-        wait_for(|rows| rows.epics().len() == 4 && rows.tasks().len() == 1)
-            .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "live: the new level never arrived: epics {:?}, tasks {}",
-                    epic_ids(&rows),
-                    rows.tasks().len()
-                )
-            });
+        wait_for(&rows, |rows| {
+            rows.epics().len() == 4 && rows.tasks().len() == 1
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "live: the new level never arrived: epics {:?}, tasks {}",
+                epic_ids(&rows),
+                rows.tasks().len()
+            )
+        });
         assert_eq!(epic_ids(&rows), vec![1, 2, 3, 4]);
         assert_eq!(rows.tasks()[0].title, "deep inside");
     });
 }
 
-/// Unfollowing one epic must not take another followed epic's deeper rows with
-/// it.
+/// Unfollowing one epic takes its tree off the board and leaves another
+/// followed epic's deeper rows where they are, with no resubscribe: the
+/// `subscriptions` row the unfollow deletes is what `covered_epics` reads.
+/// Epic 1 holds a grandchild (3) with a task; epic 9 and its task leave.
 ///
-/// `sync.allium: AnUnfollowReassertsTheWholeAsk`. The replacing subscribe
-/// resets every widening handle, and the deeper levels come back only from
-/// insert callbacks; rows already in the SDK cache fire none. Epic 1 holds a
-/// grandchild (3) with a task, epic 9 is unfollowed, and the task in 3 must
-/// survive.
+/// Task 3 in epic 9 is this board's own, so it is in `own_tasks` and
+/// `covered_tasks` both: leaving one view must not take it off the board
+/// (`sync.allium: AViewUpdateNeverErasesTheRow`).
 #[test]
 fn unfollowing_one_epic_keeps_the_deep_rows_of_another() {
     if !spacetime_available_or_skip() {
         return;
     }
+    use dispatch_tui::models::EpicId;
+    use dispatch_tui::sync::{ReducerCaller, SdkReducerCaller, SettledIdentity};
+
     let instance = Instance::start("module-test");
     let published = instance.publish(&module_path(), None);
     assert!(published.status.success(), "{}", describe(&published));
-
-    let seeded = instance.call(
-        "seed_epics",
-        &[&serde_json::json!([
-            epic_json(1, "Followed", "backlog", 0),
-            epic_json(2, "Child", "backlog", 1),
-            epic_json(3, "Grandchild", "backlog", 2),
-            epic_json(9, "Unfollowed", "backlog", 0),
-        ])
-        .to_string()],
-    );
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-    let seeded = instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([
-            task_json(1, "deep inside", "backlog", 3, "host-b"),
-            task_json(2, "in the unfollowed", "backlog", 9, "host-b"),
-        ])
-        .to_string()],
-    );
-    assert!(seeded.status.success(), "{}", describe(&seeded));
 
     let rows = Arc::new(SharedRows::new());
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
 
     runtime.block_on(async {
-        let connector = SpacetimeSdkConnector::new(instance.database(), rows.clone());
+        let connector = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows.clone(),
+        ));
         let accepted = connector
             .connect(&instance.host(), None)
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
-        let ask =
-            |epics: Vec<i64>| SubscriptionRequest::new(accepted.identity.clone(), epics, "host-a");
+        let me = accepted.identity.clone();
+        admit(&instance, &[&me]);
+        follow(&instance, &me, 1);
+        follow(&instance, &me, 9);
+        call_ok(
+            &instance,
+            "seed_epics",
+            serde_json::json!([
+                shared_epic(1, "Followed", 0),
+                shared_epic(2, "Child", 1),
+                shared_epic(3, "Grandchild", 2),
+                shared_epic(9, "Unfollowed", 0),
+            ]),
+        );
+        let mut mine = task_json(3, "mine in the unfollowed", "backlog", 9, "host-a");
+        mine["created_by"] = serde_json::json!(me);
+        call_ok(
+            &instance,
+            "seed_tasks",
+            serde_json::json!([
+                task_json(1, "deep inside", "backlog", 3, "host-b"),
+                task_json(2, "in the unfollowed", "backlog", 9, "host-b"),
+                mine,
+            ]),
+        );
+
         connector
-            .subscribe(&ask(vec![1, 9]))
+            .subscribe(&SubscriptionRequest::new(me.clone(), "host-a"))
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        wait_for(&rows, |rows| {
+            rows.epics().len() == 4 && rows.tasks().len() == 3
+        })
+        .await
+        .expect("cold start: both trees should arrive");
 
-        let woken = rows.changed();
-        let wait_for = |want: fn(&SharedRows) -> bool| {
-            let rows = rows.clone();
-            let mut woken = woken.clone();
-            async move {
-                tokio::time::timeout(Duration::from_secs(10), async {
-                    while !want(&rows) {
-                        woken
-                            .changed()
-                            .await
-                            .expect("the subscription must deliver");
-                    }
-                })
-                .await
-            }
-        };
-
-        wait_for(|rows| rows.epics().len() == 4 && rows.tasks().len() == 2)
+        let caller = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        caller
+            .unsubscribe_from_epic(me.clone(), EpicId(9))
             .await
-            .expect("cold start: both trees should arrive");
+            .unwrap_or_else(|e| panic!("unsubscribe: {e}"))
+            .applied()
+            .unwrap_or_else(|why| panic!("unsubscribe refused: {why}"));
 
-        connector
-            .subscribe(&ask(vec![1]))
-            .await
-            .unwrap_or_else(|e| panic!("resubscribe: {e}"));
-
-        // Epic 9 and its task leave the view; the grandchild's task must be
-        // (or come back to be) the only one left. A widening is a round trip,
-        // so this waits on the rows rather than asserting at once.
-        wait_for(|rows| {
+        wait_for(&rows, |rows| {
             rows.epics().iter().all(|e| e.id.0 != 9)
                 && rows.epics().len() == 3
-                && rows.tasks().len() == 1
+                && rows.tasks().len() == 2
         })
         .await
         .unwrap_or_else(|_| {
             panic!(
                 "after the unfollow: epics {:?}, tasks {:?}",
-                rows.epics().iter().map(|e| e.id.0).collect::<Vec<_>>(),
+                epic_ids(&rows),
                 rows.tasks()
                     .iter()
                     .map(|t| t.title.clone())
                     .collect::<Vec<_>>()
             )
         });
-        let titles: Vec<String> = rows.tasks().iter().map(|t| t.title.clone()).collect();
+        let mut titles: Vec<String> = rows.tasks().iter().map(|t| t.title.clone()).collect();
+        titles.sort();
         assert_eq!(
             titles,
-            vec!["deep inside".to_string()],
-            "a still-followed epic's depth-2 task must survive an unfollow"
+            vec![
+                "deep inside".to_string(),
+                "mine in the unfollowed".to_string()
+            ],
+            "a still-followed epic's depth-2 task, and my own task, must survive an unfollow"
         );
-        let mut ids: Vec<i64> = rows.epics().iter().map(|e| e.id.0).collect();
-        ids.sort_unstable();
-        assert_eq!(ids, vec![1, 2, 3]);
+        assert_eq!(epic_ids(&rows), vec![1, 2, 3]);
     });
 }
 
@@ -403,9 +339,10 @@ fn unfollowing_one_epic_keeps_the_deep_rows_of_another() {
 /// Host A is the `create_learning` reducer call — a different process,
 /// standing in for a teammate's board, the same convention
 /// `a_row_written_elsewhere_arrives_through_the_subscription` uses. Host B is
-/// this test's own `SharedRows`, subscribed with nothing followed: learnings
-/// need no `epic_id` to see one, because they are unconditionally subscribed
-/// (`docs/specs/learnings.allium`'s Storage Backend section).
+/// this test's own `SharedRows`, subscribed with nothing followed. Both are
+/// members of workspace 1, and each learning comes from a task in it, so it
+/// lands in that workspace and `visible_learnings` serves it to every member
+/// (`workspaces.allium: LearningVisibility`).
 #[test]
 fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
     if !spacetime_available_or_skip() {
@@ -435,10 +372,20 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
             .connect(&instance.host(), None)
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
+        admit(&instance, &[&instance.identity(), &accepted.identity]);
+        call_ok(
+            &instance,
+            "seed_epics",
+            serde_json::json!([shared_epic(1, "Shared", 0)]),
+        );
+        call_ok(
+            &instance,
+            "seed_tasks",
+            serde_json::json!([task_json(1, "source", "backlog", 1, "host-a")]),
+        );
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-b",
             ))
             .await
@@ -450,51 +397,33 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
             "nothing has been written yet, so nothing may have arrived"
         );
 
-        let mut woken = rows.changed();
-        woken.mark_unchanged();
-
         // Host A records both learnings directly through the reducer.
-        let created = instance.call(
-            "create_learning",
-            &[&learning_json(
-                "High similarity",
-                "user",
-                &serde_json::json!({"none": []}),
-                &high_sim_bytes,
+        for (summary, embedding) in [
+            ("High similarity", &high_sim_bytes),
+            ("Low similarity", &low_sim_bytes),
+        ] {
+            call_ok(
+                &instance,
+                "create_learning",
+                learning_json(summary, embedding),
+            );
+        }
+
+        wait_for(&rows, |rows| {
+            rows.approved_non_task_learnings_with_embedding().len() == 2
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "both learnings must arrive, got {}",
+                rows.approved_non_task_learnings_with_embedding().len()
             )
-            .to_string()],
-        );
-        assert!(created.status.success(), "{}", describe(&created));
-
-        woken
-            .changed()
-            .await
-            .expect("the subscription must deliver the first learning");
-
-        let mut woken = rows.changed();
-        woken.mark_unchanged();
-        let created = instance.call(
-            "create_learning",
-            &[&learning_json(
-                "Low similarity",
-                "repo",
-                &serde_json::json!({"some": "/repo/a"}),
-                &low_sim_bytes,
-            )
-            .to_string()],
-        );
-        assert!(created.status.success(), "{}", describe(&created));
-
-        woken
-            .changed()
-            .await
-            .expect("the subscription must deliver the second learning");
+        });
 
         // Host B's read: the RAG candidate pool, sourced entirely from the
         // subscription — this is `LearningStore::list_all_approved_non_task_learnings`'s
         // backing, `SharedRows::approved_non_task_learnings_with_embedding`.
         let candidates = rows.approved_non_task_learnings_with_embedding();
-        assert_eq!(candidates.len(), 2, "both learnings must have arrived");
 
         let decoded: Vec<(dispatch_tui::models::Learning, Vec<f32>)> = candidates
             .into_iter()
@@ -522,26 +451,75 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
     });
 }
 
-/// A `learnings` row, JSON-encoded for `create_learning`'s CLI call.
+/// Workspace 1, with `members` in it. A board sees an epic only in a workspace
+/// it belongs to (`workspaces.allium: Epic.visible_to`).
+fn admit(instance: &Instance, members: &[&str]) {
+    call_ok(
+        instance,
+        "seed_workspaces",
+        serde_json::json!([{
+            "id": 1, "name": "Shared", "created_by": "", "created_at": "2026-10-30 10:00:00",
+            "listed": true,
+        }]),
+    );
+    let memberships: Vec<serde_json::Value> = members
+        .iter()
+        .enumerate()
+        .map(|(i, user)| {
+            serde_json::json!({
+                "id": i as i64 + 1, "workspace_id": 1, "user": user, "role": "member",
+                "created_at": "2026-10-30 10:00:00",
+            })
+        })
+        .collect();
+    call_ok(
+        instance,
+        "seed_memberships",
+        serde_json::Value::from(memberships),
+    );
+}
+
+/// `who` follows `epic`. Seeded, because `subscribe_to_epic` refuses a
+/// subscriber that is not the caller and the CLI is not this board.
+fn follow(instance: &Instance, who: &str, epic: i64) {
+    call_ok(
+        instance,
+        "seed_subscriptions",
+        serde_json::json!([{
+            "id": format!("{who}/{epic}"), "epic_id": epic, "subscriber": who,
+        }]),
+    );
+}
+
+/// A public epic in workspace 1.
+fn shared_epic(id: i64, title: &str, parent: i64) -> serde_json::Value {
+    let mut epic = epic_json(id, title, "backlog", parent);
+    epic["workspace_id"] = serde_json::json!(1);
+    epic
+}
+
+fn epic_ids(rows: &SharedRows) -> Vec<i64> {
+    let mut ids: Vec<i64> = rows.epics().iter().map(|e| e.id.0).collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// A repo-scoped `learnings` row from task 1, JSON-encoded for
+/// `create_learning`'s CLI call.
 ///
 /// `embedding` is passed pre-serialized bytes rather than a float vector: the
 /// module treats it as opaque, exactly as `serialize_embedding` produces it.
-fn learning_json(
-    summary: &str,
-    scope: &str,
-    scope_ref: &serde_json::Value,
-    embedding: &[u8],
-) -> serde_json::Value {
+fn learning_json(summary: &str, embedding: &[u8]) -> serde_json::Value {
     serde_json::json!({
         "id": 0,
         "kind": "convention",
         "summary": summary,
         "detail": {"none": []},
-        "scope": scope,
-        "scope_ref": scope_ref,
+        "scope": "repo",
+        "scope_ref": {"some": "/repo/a"},
         "tags": "[]",
         "status": "approved",
-        "source_task_id": {"none": []},
+        "source_task_id": {"some": 1},
         "upvote_count": 0,
         "last_upvoted_at": {"none": []},
         "created_at": "2026-09-26 10:00:00",

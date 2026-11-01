@@ -24,7 +24,7 @@ use super::*;
 /// Every optional column is `""` for absent, never an `Option`, so a board can
 /// subscribe by it (see "Absence is a sentinel, not a null" in `lib.rs`). Every
 /// timestamp is the module clock, in the store's spelling.
-#[spacetimedb::table(accessor = dispatch_requests, public)]
+#[spacetimedb::table(accessor = dispatch_requests)]
 #[derive(Clone, Debug)]
 pub struct DispatchRequest {
     #[primary_key]
@@ -79,7 +79,7 @@ pub struct DispatchRequest {
 ///
 /// Public so a board (and the live-store tests) can read it over SQL; only the
 /// module writes it.
-#[spacetimedb::table(accessor = dispatch_request_timeouts, public, scheduled(expire_dispatch_request))]
+#[spacetimedb::table(accessor = dispatch_request_timeouts, scheduled(expire_dispatch_request))]
 #[derive(Clone, Debug)]
 pub struct DispatchRequestTimeout {
     #[primary_key]

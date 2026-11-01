@@ -304,6 +304,7 @@ impl MemoryReducerCaller {
         let id = Self::assign_id(0, &mut tables.next_usage_event_id);
         let row = module::UsageEvent {
             id,
+            recorded_by: self.sender.clone(),
             ..module::UsageEvent::from(row)
         };
         tables.usage_events.insert(id, row.clone());

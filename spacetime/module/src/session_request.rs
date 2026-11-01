@@ -31,7 +31,7 @@ use super::*;
 /// an `Option`, so a board can subscribe by it (see "Absence is a sentinel, not
 /// a null" in `lib.rs`). Every timestamp is the module clock, in the store's
 /// spelling.
-#[spacetimedb::table(accessor = session_requests, public)]
+#[spacetimedb::table(accessor = session_requests)]
 #[derive(Clone, Debug)]
 pub struct SessionRequest {
     #[primary_key]
@@ -85,7 +85,7 @@ pub struct SessionRequest {
 ///
 /// Public so a board (and the live-store tests) can read it over SQL; only the
 /// module writes it.
-#[spacetimedb::table(accessor = session_request_timeouts, public, scheduled(expire_session_request))]
+#[spacetimedb::table(accessor = session_request_timeouts, scheduled(expire_session_request))]
 #[derive(Clone, Debug)]
 pub struct SessionRequestTimeout {
     #[primary_key]

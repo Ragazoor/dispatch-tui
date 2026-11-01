@@ -50,7 +50,7 @@ impl TaskCrud for Store {
         // task still needs it for `owner` (`core.allium:
         // OwnerTracksUserBoardTask`); a task landing in an epic needs it for
         // `created_by`, which survives epic membership and is how
-        // `sync.allium`'s `own_creations` subscription finds this task
+        // the `own_tasks` view finds this task
         // regardless of which epic it lands in.
         let identity = self
             .require_identity("there is no name to stamp on a new task; it was not created")
@@ -305,15 +305,6 @@ impl TaskCrud for Store {
             .batch_patch_sub_status(updates.to_vec())
             .await?
             .applied()
-    }
-
-    // Retired feed items.
-    async fn retired_without_task(
-        &self,
-        feed_epic_id: EpicId,
-        external_ids: &[String],
-    ) -> Result<Vec<String>> {
-        Ok(self.rows.retired_without_task(feed_epic_id, external_ids))
     }
 }
 

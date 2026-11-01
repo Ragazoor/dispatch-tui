@@ -95,8 +95,6 @@ pub struct SubscriptionRequest {
     /// own — the type carries one identity, so asking for somebody else's is
     /// not expressible.
     pub owner_board: String,
-    /// The epics to follow. Ascending, and may be empty.
-    pub epics: Vec<i64>,
     /// This host's own id, scoping the settings query
     /// (`docs/specs/settings.allium`). Unlike `owner_board`, known before any
     /// identity settles — see `host.allium: MintHostIdentity` — so it never
@@ -105,10 +103,9 @@ pub struct SubscriptionRequest {
 }
 
 impl SubscriptionRequest {
-    pub fn new(owner_board: impl Into<String>, epics: Vec<i64>, host: impl Into<String>) -> Self {
+    pub fn new(owner_board: impl Into<String>, host: impl Into<String>) -> Self {
         Self {
             owner_board: owner_board.into(),
-            epics,
             host: host.into(),
         }
     }

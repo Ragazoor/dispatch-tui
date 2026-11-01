@@ -58,8 +58,11 @@ fn bindings_index() -> String {
     repo_file(&["src", "spacetime", "bindings", "mod.rs"])
 }
 
-/// Every `accessor = <name>` in the module source: tables, and views, which
-/// the generator gives a `<name>_table` binding of their own.
+/// Every public `accessor = <name>` in the module source: tables, and views,
+/// which the generator gives a `<name>_table` binding of their own.
+///
+/// A private table has a row type in the bindings but no `_table` module: no
+/// client can read it, so it is left out.
 fn module_tables() -> BTreeSet<String> {
     module_source()
         .lines()
@@ -68,12 +71,13 @@ fn module_tables() -> BTreeSet<String> {
             let rest = line
                 .strip_prefix("#[spacetimedb::table(accessor = ")
                 .or_else(|| line.strip_prefix("#[spacetimedb::view(accessor = "))?;
+            let attribute = &rest[..rest.find(")]")?];
+            if !attribute.split(',').any(|arg| arg.trim() == "public") {
+                return None;
+            }
             let end = rest.find([',', ')'])?;
             Some(rest[..end].to_string())
         })
-        // A private table has a row type in the bindings but no `_table`
-        // module: no client can read it. `store_owner` is the one.
-        .filter(|name| name != "store_owner")
         .collect()
 }
 

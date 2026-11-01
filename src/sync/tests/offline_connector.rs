@@ -60,7 +60,7 @@ async fn subscribing_before_connecting_is_an_error_not_a_panic() {
     let (connector, _) = unconnected();
 
     let err = connector
-        .subscribe(&SubscriptionRequest::new("c0ffee", vec![], "host-a"))
+        .subscribe(&SubscriptionRequest::new("c0ffee", "host-a"))
         .await
         .unwrap_err();
 

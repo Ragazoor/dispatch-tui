@@ -153,8 +153,8 @@ async fn a_subscription_request_can_only_ever_name_its_own_board() {
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0],
-        SubscriptionRequest::new("user-a", vec![7], host),
-        "asked for: this person's own board, the epics they follow, and this host's own id"
+        SubscriptionRequest::new("user-a", host),
+        "asked for: this person's identity and this host's own id"
     );
 }
 
@@ -256,12 +256,12 @@ async fn shared_ownership_does_not_make_another_machines_worktree_dispatchable()
     );
 }
 
-/// `sync.allium: AnUnfollowReassertsTheWholeAsk`. Unfollowing an epic while
-/// already connected must reach the board without a reconnect: the next
-/// `step` re-asserts the whole subscription with the epic gone, exactly like
-/// `SubscribeOnceIdentityIsSettled` does on a fresh connection.
+/// `sync.allium: SubscribeOnceIdentityIsSettled`. A follow or an unfollow
+/// while connected changes what the store's `covered_epics` view delivers, so
+/// the board neither widens nor reasserts its own ask: it asks once per
+/// connection.
 #[tokio::test]
-async fn an_unfollow_while_connected_reasserts_the_whole_subscription() {
+async fn a_follow_or_an_unfollow_while_connected_does_not_resubscribe() {
     let db = store().await;
     db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
     db.subscribe_to_epic("user-a", EpicId(9)).await.unwrap();
@@ -269,77 +269,16 @@ async fn an_unfollow_while_connected_reasserts_the_whole_subscription() {
     assert_eq!(connector.subscriptions().len(), 1);
 
     db.unsubscribe_from_epic("user-a", EpicId(7)).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(11)).await.unwrap();
     session.step(&db, now).await.unwrap();
-
-    let requests = connector.subscriptions();
-    assert_eq!(
-        requests.len(),
-        2,
-        "the unfollow must reassert without waiting for a reconnect"
-    );
-    assert_eq!(
-        requests[1].epics,
-        vec![9],
-        "7 must be gone from the reassert"
-    );
-    assert_eq!(
-        connector.disconnects(),
-        0,
-        "reasserting the ask is not a reconnect"
-    );
-}
-
-/// The boundary of the above: unfollowing the only followed epic reasserts
-/// with an empty list, not a refusal to reassert at all.
-#[tokio::test]
-async fn unfollowing_the_last_epic_reasserts_with_an_empty_list() {
-    let db = store().await;
-    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
-    let (connector, mut session, now) = connected_session(&db).await;
-
-    db.unsubscribe_from_epic("user-a", EpicId(7)).await.unwrap();
-    session.step(&db, now).await.unwrap();
-
-    let requests = connector.subscriptions();
-    assert_eq!(requests.len(), 2);
-    assert!(requests[1].epics.is_empty());
-}
-
-/// `sync.allium: AnUnfollowReassertsTheWholeAsk`'s "DOES NOT FIRE ON A FOLLOW"
-/// clause. Growing the followed set is already live via the connector's own
-/// widen path (`ASubscriptionRowWidensTheAsk`, `follow_epic` in
-/// `sdk_connector/`) — a `StoreConnector` under this trait never sees that
-/// widening, so if the session ALSO reasserted on growth it would be a second,
-/// redundant full resubscribe on every follow. It must not.
-#[tokio::test]
-async fn following_an_additional_epic_while_connected_does_not_reassert() {
-    let db = store().await;
-    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
-    let (connector, mut session, now) = connected_session(&db).await;
-    assert_eq!(connector.subscriptions().len(), 1);
-
-    db.subscribe_to_epic("user-a", EpicId(9)).await.unwrap();
     session.step(&db, now).await.unwrap();
 
     assert_eq!(
         connector.subscriptions().len(),
         1,
-        "a pure growth must be left to the connector's own live widen path"
+        "the store re-evaluates the view; the board has nothing to resend"
     );
-}
-
-/// Steps where nothing about the followed set changed must not reassert
-/// either — otherwise every idle tick would be a full resubscribe.
-#[tokio::test]
-async fn steps_with_no_subscription_change_do_not_reassert() {
-    let db = store().await;
-    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
-    let (connector, mut session, now) = connected_session(&db).await;
-
-    session.step(&db, now).await.unwrap();
-    session.step(&db, now).await.unwrap();
-
-    assert_eq!(connector.subscriptions().len(), 1);
+    assert_eq!(connector.disconnects(), 0, "a follow is not a reconnect");
 }
 
 async fn new_backlog_task(

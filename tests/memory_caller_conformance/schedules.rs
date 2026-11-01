@@ -48,7 +48,6 @@ fn memory_caller_keeps_schedules_like_the_real_module() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await

@@ -41,7 +41,6 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await

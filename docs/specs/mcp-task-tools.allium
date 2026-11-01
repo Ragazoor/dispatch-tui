@@ -1194,7 +1194,9 @@ rule QueryUsageViaMcp {
     @guidance
         -- query_usage returns aggregated feature-usage counts grouped by
         -- category + action (with detail, actor, total count and the most
-        -- recent use timestamp per group). Filters are optional:
+        -- recent use timestamp per group), over the events this board's
+        -- identity recorded (own_usage_events, workspaces.allium "THE
+        -- PRIVATE FLIP"). Filters are optional:
         --   category: "keybinding" | "mcp_tool" (enum-validated)
         --   actor:    enum-validated string
         --   since:    ISO-8601 datetime; rows older than this are excluded

@@ -38,7 +38,6 @@ fn memory_caller_matches_the_real_reducers() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![1, 2],
                 "host-a",
             ))
             .await
@@ -65,6 +64,14 @@ fn memory_caller_matches_the_real_reducers() {
                     .unwrap();
             }
         }
+
+        // The board stamps its identity on every task it creates
+        // (`src/sync/encode.rs`), and `own_tasks` serves the caller what they
+        // created: a blank `created_by` would never come back.
+        let own_task_in_epic = |epic_id: i64| bindings::Task {
+            created_by: accepted.identity.clone(),
+            ..blank_task_in_epic(epic_id)
+        };
 
         let mut woken = rows_real.changed();
         macro_rules! wait_for {
@@ -164,12 +171,12 @@ fn memory_caller_matches_the_real_reducers() {
 
         // -- create_task (in the epic, backlog) ----------------------------------
         let task_id_real = real
-            .create_task(blank_task_in_epic(epic_id_real))
+            .create_task(own_task_in_epic(epic_id_real))
             .await
             .unwrap();
         wait_for!(rows_real.task(task_id_real).is_some());
         let task_id_mem = mem
-            .create_task(blank_task_in_epic(epic_id_mem))
+            .create_task(own_task_in_epic(epic_id_mem))
             .await
             .unwrap();
         assert_eq!(task_id_real, task_id_mem, "generated task id");
@@ -493,12 +500,12 @@ fn memory_caller_matches_the_real_reducers() {
         // epic, with no subscription; entering the epic clears it; moving it
         // out clears it too.
         let signalled_real = real
-            .create_task_signalled(blank_task_in_epic(epic2_id_real))
+            .create_task_signalled(own_task_in_epic(epic2_id_real))
             .await
             .unwrap();
         wait_for!(rows_real.unseen_task_ids() == vec![signalled_real]);
         let signalled_mem = mem
-            .create_task_signalled(blank_task_in_epic(epic2_id_mem))
+            .create_task_signalled(own_task_in_epic(epic2_id_mem))
             .await
             .unwrap();
         assert_eq!(signalled_real, signalled_mem, "signalled task id");
@@ -522,12 +529,12 @@ fn memory_caller_matches_the_real_reducers() {
         );
 
         let moved_real = real
-            .create_task_signalled(blank_task_in_epic(epic2_id_real))
+            .create_task_signalled(own_task_in_epic(epic2_id_real))
             .await
             .unwrap();
         wait_for!(rows_real.unseen_task_ids() == vec![moved_real]);
         let moved_mem = mem
-            .create_task_signalled(blank_task_in_epic(epic2_id_mem))
+            .create_task_signalled(own_task_in_epic(epic2_id_mem))
             .await
             .unwrap();
         real.set_task_epic(moved_real, Some(EpicId(epic_id_real)), String::new())
@@ -550,12 +557,12 @@ fn memory_caller_matches_the_real_reducers() {
             ..blank_task_patch()
         };
         let finished_real = real
-            .create_task_signalled(blank_task_in_epic(epic2_id_real))
+            .create_task_signalled(own_task_in_epic(epic2_id_real))
             .await
             .unwrap();
         wait_for!(rows_real.unseen_task_ids() == vec![finished_real]);
         let finished_mem = mem
-            .create_task_signalled(blank_task_in_epic(epic2_id_mem))
+            .create_task_signalled(own_task_in_epic(epic2_id_mem))
             .await
             .unwrap();
         real.patch_task(finished_real, done_patch()).await.unwrap();
@@ -712,6 +719,7 @@ fn memory_caller_matches_the_real_reducers() {
             action: "used".into(),
             detail: None,
             actor: actor.into(),
+            recorded_by: String::new(),
         };
         for _ in 0..5 {
             real.record_usage_event(usage_event("conformance"), cap)
@@ -1519,16 +1527,9 @@ fn memory_caller_matches_the_real_reducers() {
         // wrong id.
         //
         // `created_by` must be this connection's OWN identity, not the
-        // literal `"tester"` `blank_epic()` defaults to: unlike
-        // `epic_id_real`/`epic2_id_real` (visible only because the test
-        // pre-declares them as followed epics, `SubscriptionRequest::new`'s
-        // `vec![1, 2]` above), a brand-new top-level epic has no such
-        // pre-declared coverage — `own_creations`
-        // (`SELECT * FROM epics WHERE created_by = '{owner}'`) is what makes
-        // it visible for the id read-back at all.
-        // A child of `epic_id_real`, not top-level: nesting it here means its
-        // own child tasks fall under the followed-epic subtree subscription,
-        // not just `own_creations`.
+        // literal `"tester"` `blank_epic()` defaults to: nothing here follows
+        // the new epic, so the `own_epics` view is what makes it visible for
+        // the id read-back at all.
         let feed_epic = |parent_epic_id: i64| bindings::Epic {
             title: "feed epic".into(),
             feed_command: "some-command".into(),
@@ -1561,9 +1562,8 @@ fn memory_caller_matches_the_real_reducers() {
         };
         // `created_by` is this connection's own identity here too: a feed
         // task's home epic (`feed_epic_id_real`) is not a followed epic, so
-        // only `own_creations` (`SELECT * FROM tasks WHERE created_by =
-        // '{owner}'`) makes the inserted rows arrive on this subscription at
-        // all.
+        // only the `own_tasks` view makes the inserted rows arrive on this
+        // subscription at all.
         real.ingest_feed(
             EpicId(feed_epic_id_real),
             vec![feed_item("feed-a"), feed_item("feed-b")],
@@ -1668,10 +1668,29 @@ fn memory_caller_matches_the_real_reducers() {
         real.delete_task(retire_task_real).await.unwrap();
         wait_for!(rows_real.task(retire_task_real).is_none());
         mem.delete_task(retire_task_mem).await.unwrap();
+        // The retired record is private to the module (no view serves it), so
+        // the pair is compared by what it does: ingesting the retired item
+        // again inserts nothing.
+        real.ingest_feed(
+            EpicId(feed_epic_id_real),
+            vec![feed_item("retire-me")],
+            false,
+            accepted.identity.clone(),
+        )
+        .await
+        .unwrap();
+        mem.ingest_feed(
+            EpicId(feed_epic_id_mem),
+            vec![feed_item("retire-me")],
+            false,
+            "conformance".into(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
-            rows_real.retired_without_task(EpicId(feed_epic_id_real), &["retire-me".to_string()]),
-            rows_mem.retired_without_task(EpicId(feed_epic_id_mem), &["retire-me".to_string()]),
-            "retired_without_task after delete_task"
+            rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len(),
+            rows_mem.tasks_for_epic(EpicId(feed_epic_id_mem)).len(),
+            "a retired feed item is not ingested again"
         );
 
         // -- respawn_phoenix_successor (agent_state) -----------------------------
@@ -1686,7 +1705,7 @@ fn memory_caller_matches_the_real_reducers() {
                 title: "phoenix predecessor".into(),
                 status: "done".into(),
                 phoenix: true,
-                ..blank_task_in_epic(epic_id_real)
+                ..own_task_in_epic(epic_id_real)
             })
             .await
             .unwrap();
@@ -1696,7 +1715,7 @@ fn memory_caller_matches_the_real_reducers() {
                 title: "phoenix predecessor".into(),
                 status: "done".into(),
                 phoenix: true,
-                ..blank_task_in_epic(epic_id_mem)
+                ..own_task_in_epic(epic_id_mem)
             })
             .await
             .unwrap();
@@ -1704,7 +1723,7 @@ fn memory_caller_matches_the_real_reducers() {
 
         let phoenix_successor = |epic_id: i64| bindings::Task {
             title: "phoenix successor".into(),
-            ..blank_task_in_epic(epic_id)
+            ..own_task_in_epic(epic_id)
         };
         let real_successor = real
             .respawn_phoenix_successor(real_predecessor, phoenix_successor(epic_id_real))

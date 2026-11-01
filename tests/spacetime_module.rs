@@ -230,6 +230,31 @@ fn epic_json(id: i64, title: &str, status: &str, parent: i64) -> serde_json::Val
     })
 }
 
+/// Call `reducer` with `rows` as its one argument, and require it to succeed.
+fn call_ok(instance: &Instance, reducer: &str, rows: serde_json::Value) {
+    let out = instance.call(reducer, &[&rows.to_string()]);
+    assert!(out.status.success(), "{reducer}: {}", describe(&out));
+}
+
+/// Until `want` holds, woken by each change. Bounded by a timeout rather than a
+/// sleep, and checked before each wait, so a change that landed first is never
+/// missed.
+async fn wait_for(
+    rows: &SharedRows,
+    want: impl Fn(&SharedRows) -> bool,
+) -> Result<(), tokio::time::error::Elapsed> {
+    let mut woken = rows.changed();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !want(rows) {
+            woken
+                .changed()
+                .await
+                .expect("the subscription must deliver");
+        }
+    })
+    .await
+}
+
 fn published_instance() -> Instance {
     let instance = Instance::start("module-test");
     let published = instance.publish(&module_path(), None);

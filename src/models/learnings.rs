@@ -154,7 +154,7 @@ impl std::str::FromStr for LearningStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Learning {
     pub id: LearningId,
     pub kind: LearningKind,
@@ -266,7 +266,7 @@ impl std::str::FromStr for RetrievalSource {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LearningRetrieval {
     pub id: i64,
     pub task_id: TaskId,

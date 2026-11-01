@@ -5,7 +5,9 @@ use anyhow::anyhow;
 
 use crate::models::TaskStatus;
 use crate::spacetime::bindings;
-use crate::spacetime::bindings::{AgentsTableAccess as _, TasksTableAccess as _};
+use crate::spacetime::bindings::{
+    CoveredTasksTableAccess as _, OwnTasksTableAccess as _, VisibleAgentsTableAccess as _,
+};
 use crate::sync::writes::{DrainReadBack, ReducerOutcome, StoreRefusal};
 use spacetimedb_sdk::Table as _;
 
@@ -13,10 +15,20 @@ use spacetimedb_sdk::Table as _;
 /// A4: the count is the agent's, not the task row's).
 pub(super) fn current_live_subagents(ctx: &bindings::ReducerEventContext, task_id: i64) -> i64 {
     ctx.db
-        .agents()
+        .visible_agents()
         .iter()
         .find(|a| a.task_id == task_id && a.state == "current")
         .map_or(0, |a| a.live_subagents)
+}
+
+/// The task `id`, if the board holds it: one of the caller's own or one it
+/// covers. The views have no primary key in the bindings, so this is a scan of
+/// the two caches.
+pub(super) fn held_task(db: &bindings::RemoteTables, id: i64) -> Option<bindings::Task> {
+    db.own_tasks()
+        .iter()
+        .chain(db.covered_tasks().iter())
+        .find(|t| t.id == id)
 }
 
 /// `[live, task_is_now_in_review]` off the task the drain acted on, shared by
@@ -28,7 +40,7 @@ pub(super) fn subagent_drain_read_back(
     ctx: &bindings::ReducerEventContext,
     task_id: i64,
 ) -> DrainReadBack {
-    match ctx.db.tasks().id().find(&task_id) {
+    match held_task(&ctx.db, task_id) {
         Some(t) => DrainReadBack {
             live: current_live_subagents(ctx, task_id),
             is_review: is_review(&t.status),
@@ -124,20 +136,20 @@ pub(super) fn outcome_of(
 ///
 /// The view the callback reads is the client's subscription cache, so a
 /// created row is findable only where a subscription already covers it
-/// (`subscription_queries` above is the list). Task #4911 is the reason
-/// `own_creations` is on that list unconditionally, for exactly this: an
-/// epic-less task the operator owns arrives on `WHERE owner = …`, a task in a
-/// followed epic on `WHERE epic_id = …`, and EVERYTHING ELSE — a brand-new
-/// epic nobody follows yet, a task landing in an epic this board does not
-/// follow — arrives on `WHERE created_by = …` instead, because
-/// `SubscribeOnceIdentityIsSettled` asserts it the moment identity settles,
-/// before any create this board makes could exist.
+/// (`subscription_queries` above is the list). Task #4911 is the reason the
+/// `own_tasks` and `own_epics` views are on that list unconditionally, for
+/// exactly this: a brand-new epic nobody follows yet, or a task landing in an
+/// epic this board does not follow, is still this identity's own creation, and
+/// the store serves it through those views (`SubscribeOnceIdentityIsSettled`
+/// subscribes to them the moment identity settles, before any create this
+/// board makes could exist). The view's update reaches the client cache before
+/// the reducer's reply does, which the memory caller conformance scenario
+/// checks against a live store.
 ///
-/// An applied create with NO matching row is now a real anomaly rather than
-/// the ordinary case it used to be — own_creations covers every create this
-/// identity can make — and the message still says what it would mean: the
-/// store made the row, and this board's subscriptions do not cover where it
-/// landed.
+/// An applied create with NO matching row is a real anomaly — the own views
+/// cover every create this identity can see — and the message still says what
+/// it would mean: the store made the row, and this board's subscriptions do
+/// not cover where it landed.
 pub(super) fn generated_id(answer: ReducerOutcome, what: &str) -> anyhow::Result<i64> {
     match answer {
         ReducerOutcome::Applied(ids) => ids.into_iter().max().ok_or_else(|| {
@@ -153,7 +165,7 @@ pub(super) fn generated_id(answer: ReducerOutcome, what: &str) -> anyhow::Result
 /// Whether `candidate` is a row this board's epic create could have produced.
 ///
 /// `created_by` narrows to this identity's own epics — the field
-/// `own_creations` subscribes by — which a coincidence with a colleague's epic
+/// `own_epics` serves by — which a coincidence with a colleague's epic
 /// of the same title, parent and millisecond cannot satisfy.
 pub(super) fn matches_created_epic(candidate: &bindings::Epic, sent: &bindings::Epic) -> bool {
     candidate.title == sent.title
@@ -181,7 +193,7 @@ pub(super) fn matches_created_work_package(
 /// narrows nothing there; `created_by` is what actually pins a match to THIS
 /// identity's own task when the candidate set includes an epic's other tasks
 /// (from the `epic_id`-followed subscription) or nothing at all epic-scoped
-/// (from `own_creations`).
+/// (from `own_tasks`).
 ///
 /// **`epic_id` is deliberately NOT compared.** The store routes a task created
 /// in a `group_by_repo` epic into that epic's per-repo sub-epic

@@ -6,7 +6,7 @@
 //! the request sends nothing else, and asking for too much is the failure that
 //! would be ours.
 
-use crate::sync::sdk_connector::{subscription_queries, subtree_queries};
+use crate::sync::sdk_connector::subscription_queries;
 use crate::sync::SubscriptionRequest;
 
 /// A well-formed identity: the store issues hex and nothing else is one.
@@ -17,96 +17,133 @@ const OTHER: &str = "ffee0011223344556677889900aabbcc";
 const HOST: &str = "c200e1f4-bcae-4a1b-9f0e-7d2a3c5b8e60";
 const OTHER_HOST: &str = "ffee0011-2233-4455-6677-889900aabbcc";
 
-fn queries(epics: Vec<i64>) -> Vec<String> {
-    subscription_queries(&SubscriptionRequest::new(ID, epics, HOST)).unwrap()
+fn queries() -> Vec<String> {
+    subscription_queries(&SubscriptionRequest::new(ID, HOST)).unwrap()
 }
 
-#[test]
-fn a_board_with_no_epics_asks_only_for_its_own() {
-    let queries = queries(vec![]);
+/// The private tables a per-caller view serves. A board that asked for one
+/// directly would be refused by the store.
+const PRIVATE_TABLES: [&str; 22] = [
+    "tasks",
+    "epics",
+    "work_packages",
+    "work_package_links",
+    "agents",
+    "dispatch_requests",
+    "session_requests",
+    "unseen_tasks",
+    "poll_owners",
+    "learnings",
+    "learning_retrievals",
+    "learning_verdicts",
+    "settings",
+    "workspaces",
+    "memberships",
+    "usage_events",
+    "task_subagents",
+    "task_watchers",
+    "todos",
+    "task_shells",
+    "retired_feed_items",
+    "filter_presets",
+];
 
-    assert!(queries.iter().any(|q| q.contains("FROM hosts")));
-    assert!(queries
+fn asks_for(queries: &[String], source: &str) -> bool {
+    queries
         .iter()
-        .any(|q| q.contains("FROM tasks") && q.contains(&format!("owner = '{ID}'"))));
-    assert!(
-        !queries.iter().any(|q| q.contains("epic_id")),
-        "nothing is followed, so no epic is asked for"
-    );
+        .any(|q| q.split_whitespace().nth(3) == Some(source))
 }
 
-/// `sync.allium: SubscribeOnceIdentityIsSettled`'s `own_creations` — asked for
-/// unconditionally, unlike `epics` above, because the whole point is finding a
-/// task or epic this identity just made regardless of which epic it landed in
-/// or whether anyone follows it yet. See `src/sync/sdk_connector/outcome.rs::generated_id`
-/// for why the read-back needs this.
+/// **No private table is asked for by name.** `sync.allium:
+/// SubscribeOnceIdentityIsSettled`: the board reads through the views, and a
+/// subscription to a private table is refused by the store, which would fail
+/// the whole ask.
 #[test]
-fn own_creations_are_asked_for_even_with_nothing_followed() {
-    let queries = queries(vec![]);
-
-    assert!(
-        queries
-            .iter()
-            .any(|q| q.contains("FROM tasks") && q.contains(&format!("created_by = '{ID}'"))),
-        "a task this identity created must be findable regardless of its epic: {queries:?}"
-    );
-    assert!(
-        queries
-            .iter()
-            .any(|q| q.contains("FROM epics") && q.contains(&format!("created_by = '{ID}'"))),
-        "a brand-new epic must be findable before anyone follows it: {queries:?}"
-    );
-}
-
-#[test]
-fn each_followed_epic_brings_its_own_tasks_and_the_epic_itself() {
-    let queries = queries(vec![7, 9]);
-
-    for epic in [7, 9] {
+fn no_private_table_is_asked_for_directly() {
+    let queries = queries();
+    for table in PRIVATE_TABLES {
         assert!(
-            queries
-                .iter()
-                .any(|q| q.contains("FROM epics") && q.contains(&format!("id = {epic}"))),
-            "epic {epic} itself must arrive, or its tasks have no card to sit under"
+            !asks_for(&queries, table),
+            "`{table}` is private; the board reads it through a view: {queries:?}"
         );
-        assert!(queries
-            .iter()
-            .any(|q| q.contains("FROM tasks") && q.contains(&format!("epic_id = {epic}"))));
+    }
+    for table in ["dispatch_request_timeouts", "session_request_timeouts"] {
+        assert!(!asks_for(&queries, table), "{table} is the module's own");
+    }
+}
+
+/// **The ask covers every source the board draws from.** The board has no
+/// second copy to fall back on: a source nothing subscribes to renders empty,
+/// in a way that looks exactly like having no rows.
+#[test]
+fn every_source_the_board_reads_is_asked_for() {
+    let queries = queries();
+    for source in [
+        "hosts",
+        "subscriptions",
+        "user_profiles",
+        "repo_paths",
+        "repo_base_branches",
+        "own_tasks",
+        "own_epics",
+        "covered_tasks",
+        "covered_epics",
+        "own_packages",
+        "visible_work_package_links",
+        "visible_poll_owners",
+        "visible_workspaces",
+        "visible_memberships",
+        "unseen_items",
+        "own_unseen_tasks",
+        "own_settings",
+        "visible_learnings",
+        "visible_learning_retrievals",
+        "own_usage_events",
+        "visible_dispatch_requests",
+        "visible_session_requests",
+        "visible_agents",
+    ] {
+        assert!(
+            asks_for(&queries, source),
+            "nothing asks for `{source}`, so the board would draw it empty: {queries:?}"
+        );
+    }
+}
+
+/// **The board no longer walks the epic tree.** `covered_epics` is walked by
+/// the store, at any depth, so no ask names an epic by id or by parent.
+#[test]
+fn no_ask_names_an_epic_by_id() {
+    for query in queries() {
+        assert!(
+            !query.contains("epic_id =")
+                && !query.contains("parent_epic_id")
+                && !query.contains("id = "),
+            "the store walks the tree; an ask by epic would be the old walk: {query}"
+        );
     }
 }
 
 /// The containment claim. Nothing in the ask can bring another person's user
-/// board, whatever epics are followed.
+/// board: the views answer for the connection's own identity, and the only
+/// filter naming a person is the subscription rows' own subscriber.
 #[test]
 fn nothing_asked_for_can_reach_another_persons_user_board() {
-    let queries = queries(vec![7, 9, 4096]);
+    let queries = queries();
 
     for query in &queries {
         assert!(
             !query.contains(OTHER),
             "a query named an identity that is not this board's: {query}"
         );
+        assert!(
+            !query.contains("owner =") && !query.contains("created_by ="),
+            "a view ask needs no identity filter: {query}"
+        );
     }
-    let owner_filters = queries.iter().filter(|q| q.contains("owner =")).count();
-    assert_eq!(
-        owner_filters, 1,
-        "one query selects by owner — the user board — and it selects by this one"
-    );
-    for query in queries.iter().filter(|q| q.contains("owner =")) {
-        assert!(query.contains(&format!("owner = '{ID}'")), "{query}");
-    }
-
-    let creator_filters = queries
-        .iter()
-        .filter(|q| q.contains("created_by ="))
-        .count();
-    assert_eq!(
-        creator_filters, 3,
-        "three queries select by created_by — own_creations for tasks and for epics, and this person's work packages — and all select by this one"
-    );
-    for query in queries.iter().filter(|q| q.contains("created_by =")) {
-        assert!(query.contains(&format!("created_by = '{ID}'")), "{query}");
-    }
+    let by_person: Vec<&String> = queries.iter().filter(|q| q.contains(ID)).collect();
+    assert_eq!(by_person.len(), 1, "{by_person:?}");
+    assert!(by_person[0].contains("FROM subscriptions WHERE subscriber ="));
 }
 
 /// The identity is validated against a closed alphabet rather than escaped.
@@ -124,7 +161,7 @@ fn an_identity_outside_the_hex_alphabet_is_refused() {
         "c200e1f4 OR 1=1",
         "c200e1f4'",
     ] {
-        let result = subscription_queries(&SubscriptionRequest::new(bad, vec![7], HOST));
+        let result = subscription_queries(&SubscriptionRequest::new(bad, HOST));
         assert!(
             result.is_err(),
             "{bad:?} should not have produced a subscription"
@@ -136,7 +173,7 @@ fn an_identity_outside_the_hex_alphabet_is_refused() {
 #[test]
 fn a_host_id_outside_its_alphabet_is_refused() {
     for bad in ["", "not valid", "c200'; DROP TABLE settings; --"] {
-        let result = subscription_queries(&SubscriptionRequest::new(ID, vec![7], bad));
+        let result = subscription_queries(&SubscriptionRequest::new(ID, bad));
         assert!(
             result.is_err(),
             "{bad:?} should not have produced a subscription"
@@ -144,60 +181,26 @@ fn a_host_id_outside_its_alphabet_is_refused() {
     }
 }
 
-/// A board that follows nothing still asks for something. An empty ask would
-/// subscribe to nothing at all, which is indistinguishable from a store with
-/// no rows.
+/// An empty ask would subscribe to nothing at all, which is indistinguishable
+/// from a store with no rows.
 #[test]
 fn the_ask_is_never_empty() {
-    assert!(!queries(vec![]).is_empty());
-}
-
-/// **The ask covers every shared table the board draws from.**
-///
-/// The board has no second copy to fall back on: a table nothing subscribes to
-/// is a table that renders empty, in a way that looks exactly like having no
-/// rows. So this is asserted per table rather than left to whoever notices the
-/// gap on screen.
-///
-/// `task_subagents` is deliberately absent. Nothing on the read surface reaches
-/// it — it is written and consumed by the mutation path, which is Phase 6 — and
-/// asking for rows nothing renders is the "asking for too much" this file's
-/// header warns about. `task_shells`, `todos`, `filter_presets` and
-/// `task_watchers` are dead schema (spacetime-seed.allium's SharedTable), so
-/// nothing reads them — see `no_dead_table_is_asked_for` below.
-#[test]
-fn every_table_the_board_reads_is_asked_for() {
-    let queries = queries(vec![7]);
-
-    for table in [
-        "hosts",
-        "subscriptions",
-        "tasks",
-        "epics",
-        "repo_paths",
-        "repo_base_branches",
-        "settings",
-    ] {
-        assert!(
-            queries.iter().any(|q| q.contains(&format!("FROM {table}"))),
-            "nothing asks for `{table}`, so the board would draw it empty"
-        );
-    }
+    assert!(!queries().is_empty());
 }
 
 /// **Test 1 of task #4913**: a setting written by one host is not visible to
 /// another host's board.
 ///
-/// Asserted at the ask, per this file's own header: the query this board sends
-/// names only its own host id, so a store honouring the request never sends a
-/// colleague's settings here in the first place.
+/// The view serves the settings of every host this person owns, so the ask
+/// narrows to this host's own id: a store honouring the request never sends
+/// another machine's settings here.
 #[test]
 fn settings_are_scoped_to_this_hosts_own_id() {
-    let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
+    let queries = queries();
 
     let asked: Vec<&String> = queries
         .iter()
-        .filter(|q| q.contains("FROM settings"))
+        .filter(|q| q.contains("FROM own_settings"))
         .collect();
     assert_eq!(asked.len(), 1, "expected exactly one ask for settings");
     assert!(
@@ -213,16 +216,11 @@ fn settings_are_scoped_to_this_hosts_own_id() {
 }
 
 /// The repo lists are asked for unfiltered, and that is the decision rather
-/// than an oversight.
-///
-/// Neither table has an owner column to filter on, and neither wants one: a
-/// repo path and its base-branch history describe the WORK, not the person, and
-/// a colleague adding a repo to the shared board is a colleague telling
-/// everybody where the code lives. They carry no private content — a path and a
-/// branch name — so the containment claim is not weakened by them.
+/// than an oversight: a repo path and its base-branch history describe the
+/// WORK, not the person, and carry no private content.
 #[test]
 fn the_repo_lists_are_shared_by_design() {
-    let queries = queries(vec![]);
+    let queries = queries();
 
     for table in ["repo_paths", "repo_base_branches"] {
         let asked: Vec<&String> = queries
@@ -238,132 +236,39 @@ fn the_repo_lists_are_shared_by_design() {
     }
 }
 
-/// The dead tables — kept in the store only because SpacetimeDB refuses to
-/// drop a table holding rows — are read by nothing, so nothing asks for them.
+/// `sync.allium: SubscribeToThisHostsDispatchRequests` and
+/// `SubscribeToThisHostsSessionRequests`. The views serve every request on a
+/// held task, and a request is provisioned only by the machine that made it,
+/// so each ask narrows to THIS machine, in every state: a row leaving a
+/// state-filtered query would arrive as a delete and its outcome would be lost.
 #[test]
-fn no_dead_table_is_asked_for() {
-    let queries = queries(vec![7]);
-    for table in ["task_shells", "todos", "filter_presets", "task_watchers"] {
-        assert!(
-            !queries.iter().any(|q| q.contains(&format!("FROM {table}"))),
-            "`{table}` is dead schema; nothing should ask for it: {queries:?}"
-        );
-    }
-}
+fn requests_are_asked_for_by_this_hosts_own_id_in_every_state() {
+    let queries = queries();
 
-/// `sync.allium: ASubEpicOfAFollowedEpicIsAskedForToo`. A followed epic is
-/// asked for with its direct sub-epics too, which is the first step of walking
-/// its tree — the store's SQL cannot follow a parent chain on its own.
-#[test]
-fn each_followed_epic_brings_its_direct_sub_epics() {
-    let queries = queries(vec![7, 9]);
-
-    for epic in [7, 9] {
-        assert!(
-            queries.iter().any(
-                |q| q.contains("FROM epics") && q.contains(&format!("parent_epic_id = {epic}"))
-            ),
-            "epic {epic}'s sub-epics must arrive, or its tree is invisible: {queries:?}"
-        );
-    }
-}
-
-/// What a newly covered sub-epic widens the subscription by: its tasks and its
-/// own sub-epics. Its row already arrived through its parent's sub-epics ask.
-#[test]
-fn a_covered_sub_epic_is_asked_for_by_its_tasks_and_its_children() {
-    let queries = subtree_queries(42);
-
-    assert_eq!(
-        queries,
-        vec![
-            "SELECT * FROM tasks WHERE epic_id = 42".to_string(),
-            "SELECT * FROM epics WHERE parent_epic_id = 42".to_string(),
-        ]
-    );
-}
-
-/// `sync.allium: SubscribeToThisHostsDispatchRequests`. Every dispatch request
-/// row naming THIS machine, in every state, and no other machine's: the host
-/// provisions what it asked for (`store-split.allium: HostClaimsDispatch`) and
-/// reads the outcome of every request it made (DispatchingFeedback,
-/// dispatch_task). Unfiltered by state on purpose — a row leaving a
-/// state-filtered query would arrive as a delete and its outcome would be
-/// lost.
-#[test]
-fn dispatch_requests_are_asked_for_by_this_hosts_own_id_in_every_state() {
-    let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
-
-    let asked: Vec<&String> = queries
-        .iter()
-        .filter(|q| q.contains("FROM dispatch_requests"))
-        .collect();
-    assert_eq!(
-        asked.len(),
-        1,
-        "expected exactly one ask for dispatch_requests, got: {queries:?}"
-    );
-    assert!(
-        asked[0].contains(&format!("host = '{HOST}'")),
-        "dispatch requests must be filtered to this host's own id: {}",
-        asked[0]
-    );
-    assert!(
-        !asked[0].contains(OTHER_HOST) && !asked[0].contains("state"),
-        "the ask names only this host and filters on no state: {}",
-        asked[0]
-    );
-}
-
-/// `sync.allium: SubscribeToThisHostsSessionRequests`, the sixth ask. Every
-/// session request row naming THIS machine, in every state, and no other
-/// machine's: the host does the rebase and the teardown its rows ask for
-/// (`store-split.allium: HostClaimsSessionRequest`) and reads the outcome the
-/// wrap_up tool waits on. Unfiltered by state on purpose — a row leaving a
-/// state-filtered query would arrive as a delete and its outcome would be
-/// lost.
-#[test]
-fn session_requests_are_asked_for_by_this_hosts_own_id_in_every_state() {
-    let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
-
-    let asked: Vec<&String> = queries
-        .iter()
-        .filter(|q| q.contains("FROM session_requests"))
-        .collect();
-    assert_eq!(
-        asked.len(),
-        1,
-        "expected exactly one ask for session_requests, got: {queries:?}"
-    );
-    assert!(
-        asked[0].contains(&format!("host = '{HOST}'")),
-        "session requests must be filtered to this host's own id: {}",
-        asked[0]
-    );
-    assert!(
-        !asked[0].contains(OTHER_HOST) && !asked[0].contains("state"),
-        "the ask names only this host and filters on no state: {}",
-        asked[0]
-    );
-    assert!(
-        queries
+    for view in ["visible_dispatch_requests", "visible_session_requests"] {
+        let asked: Vec<&String> = queries
             .iter()
-            .all(|q| !q.contains("session_request_timeouts")),
-        "the backstop's schedule table is the module's and is never asked for"
-    );
+            .filter(|q| q.contains(&format!("FROM {view}")))
+            .collect();
+        assert_eq!(asked.len(), 1, "expected one ask for {view}: {queries:?}");
+        assert!(
+            asked[0].contains(&format!("host = '{HOST}'")),
+            "{view} must be filtered to this host's own id: {}",
+            asked[0]
+        );
+        assert!(
+            !asked[0].contains(OTHER_HOST) && !asked[0].contains("state"),
+            "the ask names only this host and filters on no state: {}",
+            asked[0]
+        );
+    }
 }
 
-/// agents A1 (`sync.allium: SubscribeToAgents`): every agent row, unfiltered,
-/// and never the name ledger, which only the module's picker reads.
+/// The name ledger is not asked for: only the module's picker reads it, and it
+/// stays public for that reason alone.
 #[test]
-fn agents_are_asked_for_unfiltered_and_the_ledger_is_not() {
-    let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
-    assert!(
-        queries.iter().any(|q| q == "SELECT * FROM agents"),
-        "{queries:?}"
-    );
-    assert!(
-        !queries.iter().any(|q| q.contains("handed_out_agent_names")),
-        "{queries:?}"
-    );
+fn the_agent_name_ledger_is_not_asked_for() {
+    assert!(!queries()
+        .iter()
+        .any(|q| q.contains("handed_out_agent_names")));
 }

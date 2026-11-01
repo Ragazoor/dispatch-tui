@@ -25,7 +25,7 @@ use super::*;
 /// One agent (`agents.allium: Agent`). Every optional column is `""` for
 /// absent, never an `Option`, so a board can subscribe by it (see "Absence is
 /// a sentinel, not a null" in `lib.rs`).
-#[spacetimedb::table(accessor = agents, public)]
+#[spacetimedb::table(accessor = agents)]
 #[derive(Clone, Debug)]
 pub struct Agent {
     #[primary_key]

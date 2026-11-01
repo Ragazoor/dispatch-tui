@@ -482,6 +482,9 @@ pub fn seed_user_profiles(ctx: &ReducerContext, rows: Vec<UserProfile>) -> Resul
 pub fn seed_workspaces(ctx: &ReducerContext, rows: Vec<Workspace>) -> Result<(), String> {
     require_restore_authority(ctx)?;
     for row in rows {
+        // Never trust the flag a restore names: a row with it unset would drop
+        // out of every super-admin's `visible_workspaces`.
+        let row = Workspace { listed: true, ..row };
         if row.id == 0 {
             return Err("seed_workspaces needs each workspace's real id".into());
         }

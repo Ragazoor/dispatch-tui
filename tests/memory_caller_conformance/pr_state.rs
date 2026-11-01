@@ -36,7 +36,6 @@ fn memory_caller_derives_pr_state_like_the_real_module() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await

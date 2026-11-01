@@ -110,6 +110,25 @@ fn the_other_member_sees_the_private_epic_and_its_subtree() {
 }
 
 #[test]
+fn a_super_admin_sees_every_workspace_without_belonging_to_one() {
+    let caller = scenario().with_sender("carol");
+    assert!(keys(&caller, "visible_workspaces").is_empty());
+    assert!(keys(&caller, "visible_memberships").is_empty());
+
+    caller.lock().user_profiles.insert(
+        "carol".into(),
+        module::UserProfile {
+            identity: "carol".into(),
+            display_name: String::new(),
+            is_super_admin: true,
+            created_at: String::new(),
+        },
+    );
+    assert_eq!(keys(&caller, "visible_workspaces"), ["1"]);
+    assert_eq!(keys(&caller, "visible_memberships"), ["1", "2"]);
+}
+
+#[test]
 fn a_name_that_is_not_a_view_has_no_keys() {
     assert!(scenario().view_keys("epics").is_none());
 }

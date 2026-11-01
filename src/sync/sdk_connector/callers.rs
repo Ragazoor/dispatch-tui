@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::answer::{awaiting_answer, fire};
 use super::outcome::{
-    current_live_subagents, flag_or_refused, generated_id, is_review, matches_create,
+    current_live_subagents, flag_or_refused, generated_id, held_task, is_review, matches_create,
     matches_created_epic, matches_created_learning, matches_created_work_package, outcome_of,
     outcome_with_ids, subagent_drain_read_back, value_or_bail,
 };
@@ -43,9 +43,9 @@ use crate::spacetime::bindings::{
     subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
     subscribe_to_epic as _, super_admin_delete_unseen_item as _, try_record_stop as _,
     unlink_work_package_item as _, unsubscribe_from_epic as _, update_epic as _, update_task as _,
-    update_work_package_with_links as _, DbConnection, DispatchRequestsTableAccess as _,
-    EpicsTableAccess as _, LearningsTableAccess as _, SessionRequestsTableAccess as _,
-    TasksTableAccess as _, WorkPackagesTableAccess as _,
+    update_work_package_with_links as _, DbConnection, OwnEpicsTableAccess as _,
+    OwnPackagesTableAccess as _, OwnTasksTableAccess as _, VisibleDispatchRequestsTableAccess as _,
+    VisibleLearningsTableAccess as _, VisibleSessionRequestsTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -190,7 +190,7 @@ impl ReducerCaller for SdkReducerCaller {
             "the new task",
             "task",
             create_task_then(row),
-            tasks,
+            own_tasks,
             |t| matches_create(t, &wanted)
         )
         .map(TaskId)
@@ -205,7 +205,7 @@ impl ReducerCaller for SdkReducerCaller {
             "the new task",
             "task",
             create_task_signalled_then(row),
-            tasks,
+            own_tasks,
             |t| matches_create(t, &wanted)
         )
         .map(TaskId)
@@ -395,7 +395,7 @@ impl ReducerCaller for SdkReducerCaller {
             "the new epic",
             "epic",
             create_epic_then(row),
-            epics,
+            own_epics,
             |e| matches_created_epic(e, &wanted)
         )
         .map(EpicId)
@@ -541,7 +541,7 @@ impl ReducerCaller for SdkReducerCaller {
             "the new learning",
             "learning",
             create_learning_then(row),
-            learnings,
+            visible_learnings,
             |l| matches_created_learning(l, &wanted)
         )
         .map(LearningId)
@@ -750,11 +750,7 @@ impl ReducerCaller for SdkReducerCaller {
                     fire(
                         tx,
                         flag_or_refused(result, || {
-                            ctx.db
-                                .tasks()
-                                .id()
-                                .find(&id)
-                                .is_some_and(|t| is_review(&t.status))
+                            held_task(&ctx.db, id).is_some_and(|t| is_review(&t.status))
                         }),
                     );
                 })
@@ -876,7 +872,7 @@ impl ReducerCaller for SdkReducerCaller {
             "the new work package",
             "work package",
             create_work_package_then(row),
-            work_packages,
+            own_packages,
             |p| matches_created_work_package(p, &wanted)
         )
         .map(WorkPackageId)
@@ -893,7 +889,7 @@ impl ReducerCaller for SdkReducerCaller {
             "the new work package",
             "work package",
             create_work_package_with_links_then(row, item_refs(&links)),
-            work_packages,
+            own_packages,
             |p| matches_created_work_package(p, &wanted)
         )
         .map(WorkPackageId)
@@ -1020,7 +1016,7 @@ impl ReducerCaller for SdkReducerCaller {
             "the phoenix successor",
             "phoenix successor",
             respawn_phoenix_successor_then(predecessor, successor),
-            tasks,
+            own_tasks,
             |t| matches_create(t, &wanted)
         )
         .map(TaskId)
@@ -1066,7 +1062,7 @@ impl ReducerCaller for SdkReducerCaller {
                         tx,
                         outcome_with_ids(result, || {
                             ctx.db
-                                .dispatch_requests()
+                                .visible_dispatch_requests()
                                 .iter()
                                 .filter(|r| {
                                     r.task_id == task.0 && r.host == host && r.state == "requested"
@@ -1162,7 +1158,7 @@ impl ReducerCaller for SdkReducerCaller {
                         tx,
                         outcome_with_ids(result, || {
                             ctx.db
-                                .session_requests()
+                                .visible_session_requests()
                                 .iter()
                                 .filter(|r| {
                                     r.task_id == task.0 && r.host == for_host && r.kind == "wrap_up"
@@ -1265,7 +1261,7 @@ impl ReducerCaller for SdkReducerCaller {
                         tx,
                         outcome_with_ids(result, || {
                             ctx.db
-                                .session_requests()
+                                .visible_session_requests()
                                 .iter()
                                 .filter(|r| {
                                     r.task_id == task.0

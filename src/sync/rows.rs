@@ -102,17 +102,6 @@ pub struct UsageEventRow {
     pub actor: String,
 }
 
-/// One `retired_feed_items` row (task #4971): `core.allium: RetiredFeedItem`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RetiredFeedItemRow {
-    pub id: i64,
-    pub feed_epic_id: EpicId,
-    pub external_id: String,
-    /// Audit only; no rule reads this to decide anything (`core.allium`'s
-    /// doc comment on `RetiredFeedItem.retired_at`).
-    pub retired_at: String,
-}
-
 #[derive(Default)]
 struct Rows {
     tasks: BTreeMap<i64, Task>,
@@ -167,9 +156,6 @@ struct Rows {
     /// it is keyed by (kind, id), which names one item.
     unseen_items: BTreeMap<(String, i64), bindings::UnseenItem>,
     settings: BTreeMap<String, bindings::Setting>,
-    /// Task #4971. Unconditionally subscribed, like `learnings`/`usage_events`
-    /// above — a retirement record is not scoped by owner or host either.
-    retired_feed_items: BTreeMap<i64, RetiredFeedItemRow>,
     /// `work-packages.allium`. Packages arrive scoped to their creator by the
     /// subscription's `WHERE created_by = …`; links arrive unfiltered.
     work_packages: BTreeMap<i64, WorkPackage>,
@@ -237,7 +223,6 @@ impl Rows {
             && self.memberships.is_empty()
             && self.unseen_items.is_empty()
             && self.settings.is_empty()
-            && self.retired_feed_items.is_empty()
             && self.work_packages.is_empty()
             && self.work_package_links.is_empty()
             && self.dispatch_requests.is_empty()
@@ -374,14 +359,7 @@ impl SharedRows {
             self.write(|rows| rows.undecodable_tasks.remove(&id).is_some());
             return;
         };
-        self.write(|rows| {
-            if rows.tasks.get(&old.id.0) == Some(&old) {
-                rows.tasks.remove(&old.id.0);
-                true
-            } else {
-                false
-            }
-        });
+        self.write(|rows| remove_if_held(&mut rows.tasks, &old.id.0, &old));
     }
 
     /// An epic row left a per-caller view. As [`Self::retire_task`].
@@ -389,14 +367,7 @@ impl SharedRows {
         let Ok(old) = decode::epic(old) else {
             return;
         };
-        self.write(|rows| {
-            if rows.epics.get(&old.id.0) == Some(&old) {
-                rows.epics.remove(&old.id.0);
-                true
-            } else {
-                false
-            }
-        });
+        self.write(|rows| remove_if_held(&mut rows.epics, &old.id.0, &old));
     }
 
     pub fn upsert_epic(&self, row: &bindings::Epic) {
@@ -611,13 +582,11 @@ impl SharedRows {
     /// that replaced it (`sync.allium: AViewUpdateNeverErasesTheRow`).
     pub fn retire_unseen_item(&self, old: &bindings::UnseenItem) {
         self.write(|rows| {
-            let key = (old.kind.clone(), old.item_id);
-            if rows.unseen_items.get(&key) == Some(old) {
-                rows.unseen_items.remove(&key);
-                true
-            } else {
-                false
-            }
+            remove_if_held(
+                &mut rows.unseen_items,
+                &(old.kind.clone(), old.item_id),
+                old,
+            )
         });
     }
 
@@ -699,20 +668,6 @@ impl SharedRows {
 
     pub fn remove_setting(&self, id: String) {
         self.write(|rows| rows.settings.remove(&id).is_some());
-    }
-
-    /// Infallible decode (see [`decode::retired_feed_item`]), so unlike the
-    /// upserts above this one never has a dropped-row branch to log.
-    pub fn upsert_retired_feed_item(&self, row: &bindings::RetiredFeedItem) {
-        let item = decode::retired_feed_item(row);
-        self.write(|rows| {
-            rows.retired_feed_items.insert(item.id, item);
-            true
-        });
-    }
-
-    pub fn remove_retired_feed_item(&self, id: i64) {
-        self.write(|rows| rows.retired_feed_items.remove(&id).is_some());
     }
 
     pub fn upsert_work_package(&self, row: &bindings::WorkPackage) {
@@ -814,6 +769,115 @@ impl SharedRows {
 
     pub fn remove_session_request(&self, id: i64) {
         self.write(|rows| rows.session_requests.remove(&id).is_some());
+    }
+
+    // -- Rows that left a per-caller view ---------------------------------
+    //
+    // A view's rows have no primary key in the bindings, so an update arrives
+    // as INSERT(new) then DELETE(old) with the same id, in an order that is not
+    // ours to rely on. Each `retire_*` below removes the id only while the row
+    // held is the one that left (`sync.allium: AViewUpdateNeverErasesTheRow`);
+    // a row that cannot be decoded was never stored, so nothing of it is held.
+
+    pub fn retire_work_package(&self, old: &bindings::WorkPackage) {
+        let Ok(old) = decode::work_package(old) else {
+            return;
+        };
+        self.write(|rows| remove_if_held(&mut rows.work_packages, &old.id.0, &old));
+    }
+
+    pub fn retire_work_package_link(&self, old: &bindings::WorkPackageLink) {
+        let Ok(old_link) = decode::work_package_link(old) else {
+            return;
+        };
+        self.write(|rows| remove_if_held(&mut rows.work_package_links, &old.id, &old_link));
+    }
+
+    pub fn retire_poll_owner(&self, old: &bindings::PollOwner) {
+        let old = decode::poll_owner(old);
+        self.write(|rows| {
+            let held = remove_if_held(&mut rows.poll_owners, &old.id, &old);
+            if held {
+                rows.poll_owners_by_scope
+                    .remove(&(old.scope.clone(), old.scope_id));
+            }
+            held
+        });
+    }
+
+    pub fn retire_learning(&self, old: &bindings::Learning) {
+        let Ok(decoded) = decode::learning(old) else {
+            return;
+        };
+        self.write(|rows| {
+            let held = rows
+                .learnings
+                .get(&decoded.id.0)
+                .is_some_and(|(l, embedding)| *l == decoded && *embedding == old.embedding);
+            if held {
+                rows.learnings.remove(&decoded.id.0);
+            }
+            held
+        });
+    }
+
+    pub fn retire_learning_retrieval(&self, old: &bindings::LearningRetrieval) {
+        let Ok(old) = decode::learning_retrieval(old) else {
+            return;
+        };
+        self.write(|rows| remove_if_held(&mut rows.learning_retrievals, &old.id, &old));
+    }
+
+    pub fn retire_usage_event(&self, old: &bindings::UsageEvent) {
+        let Ok(old) = decode::usage_event(old) else {
+            return;
+        };
+        self.write(|rows| remove_if_held(&mut rows.usage_events, &old.id, &old));
+    }
+
+    pub fn retire_unseen_task(&self, old: &bindings::UnseenTask) {
+        self.write(|rows| remove_if_held(&mut rows.unseen_tasks, &old.id, old));
+    }
+
+    pub fn retire_workspace(&self, old: &bindings::Workspace) {
+        self.write(|rows| remove_if_held(&mut rows.workspaces, &old.id, old));
+    }
+
+    pub fn retire_membership(&self, old: &bindings::Membership) {
+        self.write(|rows| remove_if_held(&mut rows.memberships, &old.id, old));
+    }
+
+    pub fn retire_setting(&self, old: &bindings::Setting) {
+        self.write(|rows| remove_if_held(&mut rows.settings, &old.id, old));
+    }
+
+    pub fn retire_dispatch_request(&self, old: &bindings::DispatchRequest) {
+        let Ok(old) = decode::dispatch_request(old) else {
+            return;
+        };
+        self.write(|rows| remove_if_held(&mut rows.dispatch_requests, &old.id.0, &old));
+    }
+
+    pub fn retire_session_request(&self, old: &bindings::SessionRequest) {
+        let Ok(old) = decode::session_request(old) else {
+            return;
+        };
+        self.write(|rows| remove_if_held(&mut rows.session_requests, &old.id.0, &old));
+    }
+
+    pub fn retire_agent(&self, old: &bindings::Agent) {
+        let Ok(old) = decode::agent(old) else {
+            return;
+        };
+        self.write(|rows| {
+            if rows.agents.get(&old.id.0) == Some(&old) {
+                rows.index_agent_out(old.id.0);
+                rows.agents.remove(&old.id.0);
+                true
+            } else {
+                false
+            }
+        });
     }
 
     /// Drop everything.
@@ -1254,45 +1318,6 @@ impl SharedRows {
             out
         })
     }
-
-    /// Of `external_ids`, the subset retired under `feed_epic_id` AND absent
-    /// from every task anywhere in `feed_epic_id`'s subtree — what
-    /// `store::TaskCrud::retired_without_task` answers. A subtree join a
-    /// subscription's `WHERE` clause cannot express, so it runs in Rust over the
-    /// rows a standing subscription already holds, the same reasoning
-    /// [`Self::usage_summary`] documents.
-    pub fn retired_without_task(
-        &self,
-        feed_epic_id: EpicId,
-        external_ids: &[String],
-    ) -> Vec<String> {
-        // Built outside the read lock (via the ordinary `epics()` accessor,
-        // which takes its own short-lived lock) so the subtree walk reuses
-        // `crate::models::descendant_epic_ids` instead of a hand-rolled DFS.
-        let epics = self.epics();
-        let subtree = crate::models::descendant_epic_ids(feed_epic_id, &epics);
-        self.read(|rows| {
-            let wanted: std::collections::HashSet<&str> =
-                external_ids.iter().map(String::as_str).collect();
-            // Survivor external_ids for the subtree, computed once so the
-            // filter below is an O(1) membership check per candidate rather
-            // than a full scan of every task on the board per candidate.
-            let survivors: std::collections::HashSet<&str> = rows
-                .tasks
-                .values()
-                .filter(|t| t.epic_id.is_some_and(|e| subtree.contains(&e)))
-                .filter_map(|t| t.external_id.as_deref())
-                .collect();
-            rows.retired_feed_items
-                .values()
-                .filter(|r| {
-                    r.feed_epic_id == feed_epic_id && wanted.contains(r.external_id.as_str())
-                })
-                .filter(|r| !survivors.contains(r.external_id.as_str()))
-                .map(|r| r.external_id.clone())
-                .collect()
-        })
-    }
 }
 
 /// Shared by [`SharedRows::approved_non_task_learnings_with_embedding`] and
@@ -1318,4 +1343,15 @@ fn sorted_by_key<'a, T: Clone + 'a>(
     let mut out: Vec<&T> = values.collect();
     out.sort_by_key(|value| key(value));
     out.into_iter().cloned().collect()
+}
+
+/// Remove `key` from `map` only while the row held there equals `old`: the one
+/// rule behind every `retire_*` (`sync.allium: AViewUpdateNeverErasesTheRow`).
+/// Whether anything was removed, which is what `SharedRows::write` wakes on.
+fn remove_if_held<K: Ord, V: PartialEq>(map: &mut BTreeMap<K, V>, key: &K, old: &V) -> bool {
+    let held = map.get(key) == Some(old);
+    if held {
+        map.remove(key);
+    }
+    held
 }

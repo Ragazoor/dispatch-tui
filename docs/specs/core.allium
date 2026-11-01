@@ -981,6 +981,9 @@ entity Workspace {
     name: String               -- non-empty after trimming; unique across the store
     created_by: UserIdentity
     created_at: Timestamp
+    -- The store also carries an always-true indexed `listed` column on each
+    -- row, so a super-admin's view can read them all (workspaces.allium,
+    -- "READ ENFORCEMENT, BY DECISION"). It is not a property of the workspace.
 
     memberships: Membership with workspace = this
     epics: Epic with workspace = this

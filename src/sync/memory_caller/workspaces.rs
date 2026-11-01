@@ -115,6 +115,7 @@ impl MemoryReducerCaller {
             name,
             created_by: self.sender.clone(),
             created_at: self.now(),
+            listed: true,
         };
         tables.workspaces.insert(id, row.clone());
         self.rows.upsert_workspace(&row.into());
@@ -344,6 +345,7 @@ impl MemoryReducerCaller {
             // `store_publisher()`: a memory store has no database identity.
             created_by: String::new(),
             created_at: stamp.clone(),
+            listed: true,
         };
         tables.workspaces.insert(id, default.clone());
         self.rows.upsert_workspace(&default.into());

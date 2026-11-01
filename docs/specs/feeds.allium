@@ -3039,8 +3039,7 @@ rule AppendOnlyFeed {
 -- SINCE store-split M3, retired_without_task's subtree walk runs inside the
 -- module's ingest_feed, over every row the store holds, not over the poll
 -- owner's subscribed view (IngestFeedEmission). Before M3 it ran on the board,
--- which is the assumption sync.allium: BoardConnection.covered_epics still
--- describes.
+-- which is the assumption sync.allium: BoardConnection.covered_epics describes.
 
 rule DropClosedRetiredFeedItems {
     when: FeedSync(epic, items, additive)

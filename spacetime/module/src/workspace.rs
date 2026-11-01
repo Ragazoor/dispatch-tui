@@ -160,6 +160,7 @@ pub fn create_workspace(ctx: &ReducerContext, name: String) -> Result<(), String
         name,
         created_by: caller_identity(ctx),
         created_at: now(ctx),
+        listed: true,
     });
     Ok(())
 }
@@ -361,6 +362,7 @@ pub fn migrate_store_to_workspaces(ctx: &ReducerContext) {
         name: DEFAULT_WORKSPACE_NAME.into(),
         created_by: ctx.database_identity().to_hex().to_string(),
         created_at: stamp.clone(),
+        listed: true,
     });
     let epics: Vec<Epic> = ctx.db.epics().iter().collect();
     for epic in epics {

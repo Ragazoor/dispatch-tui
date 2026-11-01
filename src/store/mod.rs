@@ -290,25 +290,6 @@ pub trait TaskCrud: TaskRead {
     /// Atomically update `sub_status` for multiple tasks in a single transaction.
     /// Used by the tick to batch all per-task reclassifications into one DB round-trip.
     async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
-
-    // Retired feed items (`docs/specs/core.allium`: `RetiredFeedItem`).
-    //
-    // The closed-retirement drop is part of the module's `ingest_feed`; the
-    // read (`retired_without_task`) is a join a subscription's `WHERE` clause cannot
-    // express, so it runs in Rust over the store's rows, the same as
-    // `query_usage` and the learning reads. There is no
-    // `create_retired_feed_item` here — every real retirement writes the row
-    // inline, in the same reducer transaction as the delete (`delete_task`,
-    // `delete_epic`), rather than through a separate call.
-    /// Of `external_ids`, the subset that are retired under `feed_epic_id`
-    /// AND have no existing task anywhere in `feed_epic_id`'s subtree. Used by
-    /// `GroupedFeedUpsert`/`RoleRoutedFeedSync` (`docs/specs/feeds.allium`) to
-    /// drop such items before a sub-epic is found-or-created for them.
-    async fn retired_without_task(
-        &self,
-        feed_epic_id: EpicId,
-        external_ids: &[String],
-    ) -> Result<Vec<String>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -994,7 +975,6 @@ pub trait UsageStore: Send + Sync {
 /// | `learnings` | [`LearningStore`] |
 /// | `learning_retrievals` | [`LearningRetrievalStore`] |
 /// | `usage_events` | [`UsageStore`] |
-/// | `retired_feed_items` | [`TaskCrud`] (task #4971) |
 /// | `work_packages`, `work_package_links` | [`WorkPackageCrud`] / [`WorkPackageRead`] |
 /// | the user identity's credential | [`IdentityCredentialStore`] |
 ///

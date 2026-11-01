@@ -104,6 +104,152 @@ fn an_unseen_item_update_pair_keeps_the_new_row_in_either_order() {
     assert_eq!(rows.unseen_items()[0].creator, "new");
 }
 
+/// The same three cases for every other view-served table: an update pair in
+/// either order keeps the new row, and a row leaving the view is removed.
+/// `row(tag)` builds a row whose one varying field is `tag`; `probe` reads
+/// that field back, or `None` when the row is gone.
+macro_rules! pins_view_updates {
+    ($name:ident, $upsert:ident, $retire:ident, $row:expr, $probe:expr) => {
+        #[test]
+        fn $name() {
+            let row = $row;
+            let probe = $probe;
+
+            let rows = SharedRows::new();
+            rows.$upsert(&row("old"));
+            rows.$upsert(&row("new"));
+            rows.$retire(&row("old"));
+            assert_eq!(probe(&rows).as_deref(), Some("new"), "insert first");
+
+            let rows = SharedRows::new();
+            rows.$upsert(&row("old"));
+            rows.$retire(&row("old"));
+            rows.$upsert(&row("new"));
+            assert_eq!(probe(&rows).as_deref(), Some("new"), "delete first");
+
+            let rows = SharedRows::new();
+            rows.$upsert(&row("only"));
+            rows.$retire(&row("only"));
+            assert_eq!(probe(&rows), None, "leaving the view");
+        }
+    };
+}
+
+pins_view_updates!(
+    a_workspace_update_pair_keeps_the_new_row,
+    upsert_workspace,
+    retire_workspace,
+    |tag: &str| bindings::Workspace {
+        id: 7,
+        name: tag.into(),
+        ..dispatch_spacetime_module::blank_workspace().into()
+    },
+    |rows: &SharedRows| rows.workspaces().first().map(|w| w.name.clone())
+);
+
+pins_view_updates!(
+    a_membership_update_pair_keeps_the_new_row,
+    upsert_membership,
+    retire_membership,
+    |tag: &str| bindings::Membership {
+        id: 7,
+        role: tag.into(),
+        ..dispatch_spacetime_module::blank_membership().into()
+    },
+    |rows: &SharedRows| rows.memberships().first().map(|m| m.role.clone())
+);
+
+pins_view_updates!(
+    a_setting_update_pair_keeps_the_new_row,
+    upsert_setting,
+    retire_setting,
+    |tag: &str| bindings::Setting {
+        id: "host-a/theme".into(),
+        host: "host-a".into(),
+        key: "theme".into(),
+        value: tag.into(),
+    },
+    |rows: &SharedRows| rows.setting("theme")
+);
+
+pins_view_updates!(
+    a_work_package_update_pair_keeps_the_new_row,
+    upsert_work_package,
+    retire_work_package,
+    |tag: &str| bindings::WorkPackage {
+        id: 7,
+        title: tag.into(),
+        created_at: "2026-09-18 10:00:00".into(),
+        updated_at: "2026-09-18 10:00:00".into(),
+        ..dispatch_spacetime_module::blank_work_package().into()
+    },
+    |rows: &SharedRows| rows.work_packages().first().map(|p| p.title.clone())
+);
+
+pins_view_updates!(
+    a_dispatch_request_update_pair_keeps_the_new_row,
+    upsert_dispatch_request,
+    retire_dispatch_request,
+    |tag: &str| bindings::DispatchRequest {
+        id: 7,
+        task_id: 7,
+        kind: "dispatch".into(),
+        host: "host-a".into(),
+        mode: "research".into(),
+        origin: "epic_chain".into(),
+        state: "requested".into(),
+        requested_at: "2026-10-11 12:00:00.000".into(),
+        deadline: "2026-10-11 12:01:00.000".into(),
+        requested_by: tag.into(),
+        ..dispatch_spacetime_module::blank_dispatch_request().into()
+    },
+    |rows: &SharedRows| rows
+        .dispatch_requests()
+        .first()
+        .map(|r| r.requested_by.clone())
+);
+
+pins_view_updates!(
+    a_session_request_update_pair_keeps_the_new_row,
+    upsert_session_request,
+    retire_session_request,
+    |tag: &str| bindings::SessionRequest {
+        id: 7,
+        task_id: 7,
+        kind: "wrap_up".into(),
+        action: "rebase".into(),
+        host: "host-a".into(),
+        requested_by: tag.into(),
+        state: "requested".into(),
+        requested_at: "2026-10-12 12:00:00.000".into(),
+        deadline: "2026-10-12 12:02:00.000".into(),
+        ..dispatch_spacetime_module::blank_session_request().into()
+    },
+    |rows: &SharedRows| rows
+        .session_requests()
+        .first()
+        .map(|r| r.requested_by.clone())
+);
+
+pins_view_updates!(
+    an_agent_update_pair_keeps_the_new_row,
+    upsert_agent,
+    retire_agent,
+    |tag: &str| bindings::Agent {
+        id: 4,
+        task_id: 9,
+        name: tag.into(),
+        host: "host-a".into(),
+        start_mode: "research".into(),
+        state: "ended".into(),
+        started_at: "2026-10-16 10:00:00.000".into(),
+        ended_at: "2026-10-16 11:00:00.000".into(),
+        end_reason: "worktree_gone".into(),
+        ..dispatch_spacetime_module::blank_agent().into()
+    },
+    |rows: &SharedRows| rows.agents().first().map(|a| a.name.clone())
+);
+
 /// A row that never decoded leaves the view too: the id must stop counting as
 /// an undecodable task of its epic.
 #[test]

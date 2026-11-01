@@ -185,7 +185,22 @@ fn usage_event() -> bindings::UsageEvent {
         action: "used".into(),
         detail: None,
         actor: "tester".into(),
+        // Whatever a client names here, the store stamps the caller.
+        recorded_by: "someone-else".into(),
     }
+}
+
+#[tokio::test]
+async fn a_usage_event_is_stamped_with_its_recorder_and_served_only_to_them() {
+    let (caller, _rows) = caller();
+    let alice = caller.with_sender("alice");
+    alice.record_usage_event(usage_event(), 10).await.unwrap();
+    assert_eq!(alice.view_keys("own_usage_events").unwrap(), ["1"]);
+    assert!(alice
+        .with_sender("bob")
+        .view_keys("own_usage_events")
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]

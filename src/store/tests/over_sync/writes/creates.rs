@@ -73,7 +73,7 @@ async fn a_create_in_an_epic_carries_no_owner() {
 }
 
 /// `created_by` is a DIFFERENT question from `owner` — it survives regardless
-/// of epic membership, because it is how `sync.allium`'s `own_creations`
+/// of epic membership, because it is how the `own_tasks` view (`sync.allium`'s own creations)
 /// subscription finds a task this identity just created no matter which epic
 /// it landed in. `core.allium: Task.created_by`.
 #[tokio::test]
@@ -382,7 +382,7 @@ async fn an_epic_born_with_feed_fields_is_one_write() {
 
 /// An epic create carries the creator's identity, the same as a task's does —
 /// `core.allium: Epic.created_by`. Unlike a task, an epic has no `owner` field
-/// at all, so this is the ONLY way `sync.allium`'s `own_creations`
+/// at all, so this is the ONLY way the `own_tasks` view (`sync.allium`'s own creations)
 /// subscription can find an epic its creator just made.
 #[tokio::test]
 async fn an_epic_create_carries_the_creator() {

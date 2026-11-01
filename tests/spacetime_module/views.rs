@@ -9,11 +9,6 @@
 use super::*;
 use crate::common::spacetime_instance::column_values;
 
-fn call_ok(instance: &Instance, reducer: &str, rows: serde_json::Value) {
-    let out = instance.call(reducer, &[&rows.to_string()]);
-    assert!(out.status.success(), "{reducer}: {}", describe(&out));
-}
-
 fn epic_in(
     id: i64,
     parent: i64,
@@ -40,7 +35,7 @@ fn seed_scenario(instance: &Instance, me: &str, bob: &str) {
         instance,
         "seed_workspaces",
         serde_json::json!([{
-            "id": 1, "name": "Core", "created_by": me, "created_at": "2026-10-30 10:00:00"
+            "id": 1, "name": "Core", "created_by": me, "created_at": "2026-10-30 10:00:00", "listed": true
         }]),
     );
     call_ok(

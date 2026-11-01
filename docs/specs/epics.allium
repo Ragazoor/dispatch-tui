@@ -371,8 +371,8 @@ rule DeleteEpic {
         -- the Store's subscription view, before ever calling the store —
         -- that is what lets a refusal be instant and say why. But permanent
         -- delete removed the safety net an incomplete view used to have: an
-        -- epic visible only through own_creations, or whose subtree ask is
-        -- still mid-widen, can pass that client check while holding
+        -- epic visible only through own_creations can pass that client
+        -- check while holding
         -- non-done tasks the view never delivered. So the same guard is
         -- checked again inside the delete_epic reducer itself
         -- (spacetime/module/src/lib.rs), over the store's true row set, and

@@ -256,7 +256,7 @@ mod unconnected {
     #[tokio::test]
     async fn subscribing_before_connecting_is_refused_by_name() {
         let error = connector()
-            .subscribe(&SubscriptionRequest::new("ab12", vec![], "host-1"))
+            .subscribe(&SubscriptionRequest::new("ab12", "host-1"))
             .await
             .unwrap_err();
         assert!(error.to_string().contains("before connecting"), "{error}");

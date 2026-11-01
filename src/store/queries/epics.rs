@@ -43,8 +43,8 @@ impl super::super::EpicCrud for Store {
         birth: &super::super::EpicBirth<'_>,
     ) -> Result<Epic> {
         // `sync.allium: CreatesRequireASettledIdentity` — an epic has no
-        // `owner` at all, so `created_by` is the only way `own_creations` can
-        // find it before anyone follows it, and there is no name to stamp
+        // `owner` at all, so `created_by` is the only way the `own_epics` view
+        // can find it before anyone follows it, and there is no name to stamp
         // without a settled identity.
         let identity = self
             .require_identity("there is no name to stamp on a new epic; it was not created")

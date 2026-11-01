@@ -26,6 +26,9 @@ impl StoreReads for Tables {
     fn workspace(&self, id: i64) -> Option<module::Workspace> {
         self.workspaces.get(&id).cloned()
     }
+    fn listed_workspaces(&self) -> Vec<module::Workspace> {
+        keep(self.workspaces.values().cloned(), |w| w.listed)
+    }
     fn profile(&self, who: &str) -> Option<module::UserProfile> {
         self.user_profiles.get(who).cloned()
     }
@@ -133,6 +136,11 @@ impl StoreReads for Tables {
     fn settings_of(&self, host: &str) -> Vec<module::Setting> {
         keep(self.settings.values().cloned(), |s| s.host == host)
     }
+    fn usage_events_recorded_by(&self, who: &str) -> Vec<module::UsageEvent> {
+        keep(self.usage_events.values().cloned(), |e| {
+            e.recorded_by == who
+        })
+    }
 }
 
 impl MemoryReducerCaller {
@@ -219,6 +227,10 @@ impl MemoryReducerCaller {
                 .into_iter()
                 .map(|s| s.id)
                 .collect(),
+            "own_usage_events" => ids(module::usage_events_visible_to(t, who)
+                .iter()
+                .map(|e| e.id)
+                .collect()),
             "visible_workspaces" => ids(module::workspaces_visible_to(t, who)
                 .iter()
                 .map(|e| e.id)

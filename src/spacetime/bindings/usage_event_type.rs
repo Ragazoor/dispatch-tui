@@ -13,6 +13,7 @@ pub struct UsageEvent {
     pub action: String,
     pub detail: Option<String>,
     pub actor: String,
+    pub recorded_by: String,
 }
 
 impl __sdk::InModule for UsageEvent {
@@ -29,6 +30,7 @@ pub struct UsageEventCols {
     pub action: __sdk::__query_builder::Col<UsageEvent, String>,
     pub detail: __sdk::__query_builder::Col<UsageEvent, Option<String>>,
     pub actor: __sdk::__query_builder::Col<UsageEvent, String>,
+    pub recorded_by: __sdk::__query_builder::Col<UsageEvent, String>,
 }
 
 impl __sdk::__query_builder::HasCols for UsageEvent {
@@ -41,6 +43,7 @@ impl __sdk::__query_builder::HasCols for UsageEvent {
             action: __sdk::__query_builder::Col::new(table_name, "action"),
             detail: __sdk::__query_builder::Col::new(table_name, "detail"),
             actor: __sdk::__query_builder::Col::new(table_name, "actor"),
+            recorded_by: __sdk::__query_builder::Col::new(table_name, "recorded_by"),
         }
     }
 }
@@ -50,6 +53,7 @@ impl __sdk::__query_builder::HasCols for UsageEvent {
 /// Provides typed access to indexed columns for query building.
 pub struct UsageEventIxCols {
     pub id: __sdk::__query_builder::IxCol<UsageEvent, i64>,
+    pub recorded_by: __sdk::__query_builder::IxCol<UsageEvent, String>,
 }
 
 impl __sdk::__query_builder::HasIxCols for UsageEvent {
@@ -57,6 +61,7 @@ impl __sdk::__query_builder::HasIxCols for UsageEvent {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         UsageEventIxCols {
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            recorded_by: __sdk::__query_builder::IxCol::new(table_name, "recorded_by"),
         }
     }
 }

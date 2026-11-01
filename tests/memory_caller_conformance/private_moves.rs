@@ -32,7 +32,6 @@ fn memory_caller_keeps_repo_groups_public_and_clears_marks_on_relink() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await

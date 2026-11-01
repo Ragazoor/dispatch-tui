@@ -306,7 +306,7 @@ pub fn epics_losing_coverage(
 /// "lowest id", exactly as it was in SQLite.
 ///
 /// No caller needs the new row's id — recording returns nothing — so there is
-/// no read-back and nothing for `own_creations` to cover.
+/// no read-back and nothing for an own-creations read-back to cover.
 #[spacetimedb::reducer]
 pub fn record_usage_event(ctx: &ReducerContext, row: UsageEvent, cap: i64) -> Result<(), String> {
     if cap <= 0 {
@@ -318,6 +318,7 @@ pub fn record_usage_event(ctx: &ReducerContext, row: UsageEvent, cap: i64) -> Re
     let inserted = ctx.db.usage_events().insert(UsageEvent {
         // Never trust an incoming id on a create — see `create_task`.
         id: 0,
+        recorded_by: caller_identity(ctx),
         ..row
     });
     prune_usage_events(ctx, inserted.id, cap);

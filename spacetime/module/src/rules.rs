@@ -58,6 +58,14 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 28: the private flip. Every table a per-caller view serves is private, the
+///    board reads them through the views, and `own_usage_events` serves a
+///    caller the usage events they recorded (`record_usage_event` stamps an
+///    appended, indexed `recorded_by`). A super-admin's
+///    `visible_workspaces` lists every workspace, through an always-true
+///    indexed `listed` column. A board that subscribes to the views needs a
+///    module that has them and refuses a subscription to a table now private
+///    (`views.rs`).
 /// 27: `update_epic` (patch, workspace move and visibility in one transaction)
 ///    and `update_work_package_with_links` taking the visibility change, so a
 ///    refused part leaves nothing applied; `set_task_epic` refuses a missing
@@ -134,7 +142,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 27;
+pub const RULES_VERSION: i64 = 28;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

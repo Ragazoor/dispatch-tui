@@ -180,7 +180,7 @@ pub fn create_task_row(
         },
         completed_at: String::new(),
         // Unlike `owner`, this survives epic membership — it is how
-        // `sync.allium`'s `own_creations` subscription finds this task
+        // the `own_tasks` view finds this task
         // regardless of which epic it lands in. `core.allium: Task.created_by`.
         created_by: created_by.to_string(),
         // Retired (`agents.allium`, step A5): the column stays, blank and
@@ -339,7 +339,7 @@ pub fn create_epic_row_with(
         feed_append_only: false,
         completed_at: String::new(),
         // An epic has no `owner` at all, so this is the only way
-        // `sync.allium`'s `own_creations` subscription can find it before
+        // the `own_epics` view can find it before
         // anyone follows it. `core.allium: Epic.created_by`.
         created_by: created_by.to_string(),
         // `workspaces.allium: CreateEpicInWorkspace`. A sub-epic names its
@@ -519,5 +519,7 @@ pub fn usage_event_row(event: &crate::models::UsageEvent, now: &str) -> bindings
         action: event.action.clone(),
         detail: event.detail.clone(),
         actor: event.actor.as_str().to_string(),
+        // The store stamps the caller; whatever is sent here is ignored.
+        recorded_by: String::new(),
     }
 }

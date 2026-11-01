@@ -11,6 +11,7 @@ pub struct Workspace {
     pub name: String,
     pub created_by: String,
     pub created_at: String,
+    pub listed: bool,
 }
 
 impl __sdk::InModule for Workspace {
@@ -25,6 +26,7 @@ pub struct WorkspaceCols {
     pub name: __sdk::__query_builder::Col<Workspace, String>,
     pub created_by: __sdk::__query_builder::Col<Workspace, String>,
     pub created_at: __sdk::__query_builder::Col<Workspace, String>,
+    pub listed: __sdk::__query_builder::Col<Workspace, bool>,
 }
 
 impl __sdk::__query_builder::HasCols for Workspace {
@@ -35,6 +37,7 @@ impl __sdk::__query_builder::HasCols for Workspace {
             name: __sdk::__query_builder::Col::new(table_name, "name"),
             created_by: __sdk::__query_builder::Col::new(table_name, "created_by"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+            listed: __sdk::__query_builder::Col::new(table_name, "listed"),
         }
     }
 }
@@ -44,6 +47,7 @@ impl __sdk::__query_builder::HasCols for Workspace {
 /// Provides typed access to indexed columns for query building.
 pub struct WorkspaceIxCols {
     pub id: __sdk::__query_builder::IxCol<Workspace, i64>,
+    pub listed: __sdk::__query_builder::IxCol<Workspace, bool>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Workspace {
@@ -51,6 +55,7 @@ impl __sdk::__query_builder::HasIxCols for Workspace {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         WorkspaceIxCols {
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            listed: __sdk::__query_builder::IxCol::new(table_name, "listed"),
         }
     }
 }

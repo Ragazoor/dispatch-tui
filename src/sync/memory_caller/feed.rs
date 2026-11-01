@@ -15,13 +15,10 @@ use super::{MemoryReducerCaller, Tables, MAX_EPIC_DEPTH};
 impl MemoryReducerCaller {
     /// The `retired_feed_items` delete helper — shared by
     /// `drop_retired_feed_items_for_epics` and the closed-retirement drop in
-    /// `ingest_feed`, which otherwise repeated this identical remove-and-notify
-    /// loop.
-    pub(super) fn remove_retired_feed_item_rows(&self, tables: &mut Tables, ids: Vec<i64>) {
+    /// `ingest_feed`. The rows are the store's own: no board reads them.
+    pub(super) fn remove_retired_feed_item_rows(tables: &mut Tables, ids: Vec<i64>) {
         for id in ids {
-            if tables.retired_feed_items.remove(&id).is_some() {
-                self.rows.remove_retired_feed_item(id);
-            }
+            tables.retired_feed_items.remove(&id);
         }
     }
 
@@ -65,8 +62,7 @@ impl MemoryReducerCaller {
                 external_id: external_id.to_string(),
                 retired_at: self.now(),
             };
-            tables.retired_feed_items.insert(id, row.clone());
-            self.rows.upsert_retired_feed_item(&row.into());
+            tables.retired_feed_items.insert(id, row);
         }
     }
 
@@ -139,7 +135,7 @@ impl MemoryReducerCaller {
             .filter(|r| doomed.contains(&r.feed_epic_id))
             .map(|r| r.id)
             .collect();
-        self.remove_retired_feed_item_rows(tables, stale);
+        Self::remove_retired_feed_item_rows(tables, stale);
     }
 
     /// Insert or update one feed item under `epic_id`. Mirrors the module's
@@ -504,8 +500,7 @@ impl module::IngestStore for TablesIngest<'_> {
             .filter(|r| r.feed_epic_id == feed_epic_id && !keep.contains(r.external_id.as_str()))
             .map(|r| r.id)
             .collect();
-        self.caller
-            .remove_retired_feed_item_rows(self.tables, stale);
+        MemoryReducerCaller::remove_retired_feed_item_rows(self.tables, stale);
     }
 
     fn upsert_feed_tasks(

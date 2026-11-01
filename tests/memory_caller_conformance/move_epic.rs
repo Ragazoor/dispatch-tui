@@ -32,7 +32,6 @@ fn memory_caller_moves_an_epic_like_the_real_reducer() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await
@@ -142,6 +141,19 @@ fn memory_caller_moves_an_epic_like_the_real_reducer() {
             .unwrap()
             .applied()
             .unwrap();
+        // A super-admin is a member of no workspace by being one, so the move
+        // released the claim (the holder is not in `Other`) and took the tree
+        // off this board: the views serve epics only in a workspace the caller
+        // belongs to. Joining `Other` now brings the tree back, and with it any
+        // claim the move had kept, in the same transaction.
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .add_member(other, identity.clone(), "member".into())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
         wait_for!(rows_real
             .epic(EpicId(sub_id))
             .is_some_and(|e| e.workspace_id == other));

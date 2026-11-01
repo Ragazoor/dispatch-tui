@@ -76,7 +76,6 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await

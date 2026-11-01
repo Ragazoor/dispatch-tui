@@ -43,7 +43,6 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await

@@ -228,7 +228,8 @@ mirror!(
         id,
         name,
         created_by,
-        created_at
+        created_at,
+        listed
     }
 );
 
@@ -262,6 +263,7 @@ mirror!(
         action,
         detail,
         actor,
+        recorded_by,
     }
 );
 

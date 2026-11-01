@@ -14,7 +14,6 @@ mod identity;
 mod offline_connector;
 mod queries;
 mod session_requests;
-mod subtree;
 mod view_updates;
 
 use super::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};

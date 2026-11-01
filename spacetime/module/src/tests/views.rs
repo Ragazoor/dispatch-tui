@@ -20,6 +20,7 @@ struct Store {
     hosts: Vec<Host>,
     settings: Vec<Setting>,
     workspaces: Vec<Workspace>,
+    usage_events: Vec<UsageEvent>,
 }
 
 fn keep<T: Clone>(rows: &[T], f: impl Fn(&T) -> bool) -> Vec<T> {
@@ -38,6 +39,9 @@ impl StoreReads for Store {
     }
     fn workspace(&self, id: i64) -> Option<Workspace> {
         self.workspaces.iter().find(|w| w.id == id).cloned()
+    }
+    fn listed_workspaces(&self) -> Vec<Workspace> {
+        keep(&self.workspaces, |w| w.listed)
     }
     fn profile(&self, who: &str) -> Option<UserProfile> {
         self.profiles.iter().find(|p| p.identity == who).cloned()
@@ -116,6 +120,9 @@ impl StoreReads for Store {
     }
     fn settings_of(&self, host: &str) -> Vec<Setting> {
         keep(&self.settings, |s| s.host == host)
+    }
+    fn usage_events_recorded_by(&self, who: &str) -> Vec<UsageEvent> {
+        keep(&self.usage_events, |e| e.recorded_by == who)
     }
 }
 
@@ -449,4 +456,45 @@ fn workspaces_and_memberships_are_the_callers_own() {
         [1, 2]
     );
     assert_eq!(ids(&workspaces_visible_to(&store, "bob"), |w| w.id), [7, 8]);
+}
+
+#[test]
+fn a_super_admin_sees_every_workspace_and_its_memberships() {
+    let mut store = tree();
+    store.members.push(member(3, 8, "bob"));
+    store.workspaces = vec![
+        Workspace {
+            id: 7,
+            ..blank_workspace()
+        },
+        Workspace {
+            id: 8,
+            ..blank_workspace()
+        },
+    ];
+    assert!(workspaces_visible_to(&store, "root").is_empty());
+    store.profiles.push(UserProfile {
+        identity: "root".into(),
+        display_name: String::new(),
+        is_super_admin: true,
+        created_at: String::new(),
+    });
+    assert_eq!(ids(&workspaces_visible_to(&store, "root"), |w| w.id), [7, 8]);
+    assert_eq!(
+        ids(&memberships_visible_to(&store, "root"), |m| m.id),
+        [1, 2, 3]
+    );
+}
+
+#[test]
+fn usage_events_are_served_to_whoever_recorded_them() {
+    let mut store = tree();
+    let event = |id, who: &str| UsageEvent {
+        id,
+        recorded_by: who.to_string(),
+        ..blank_usage_event()
+    };
+    store.usage_events = vec![event(1, "ann"), event(2, "bob"), event(3, "")];
+    assert_eq!(ids(&usage_events_visible_to(&store, "ann"), |e| e.id), [1]);
+    assert_eq!(ids(&usage_events_visible_to(&store, "bob"), |e| e.id), [2]);
 }

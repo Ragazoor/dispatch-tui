@@ -91,6 +91,7 @@ pub fn blank_workspace() -> Workspace {
         name: String::new(),
         created_by: String::new(),
         created_at: String::new(),
+        listed: true,
     }
 }
 
@@ -218,6 +219,7 @@ pub(crate) fn blank_usage_event() -> UsageEvent {
         action: String::new(),
         detail: None,
         actor: String::new(),
+        recorded_by: String::new(),
     }
 }
 

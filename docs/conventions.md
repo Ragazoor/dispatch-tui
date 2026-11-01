@@ -226,11 +226,9 @@ temporary data directory holding a host file. The shared Host registry gets a
 mirror via `sync.allium: RegisterHostOnConnect`.
 
 **Some reads are done in Rust because a subscription cannot express them.**
-`query_usage` (task #4915) groups and counts rows, and
-`TaskCrud::retired_without_task` (task #4971) joins `retired_feed_items`
-against every task in an epic's whole subtree — no subscription's `WHERE`
-clause can do either, so both run over the rows a standing subscription
-already holds (`SharedRows::usage_summary`, `SharedRows::retired_without_task`).
+`query_usage` (task #4915) groups and counts rows, which no subscription's
+`WHERE` clause can do, so it runs over the rows a standing subscription
+already holds (`SharedRows::usage_summary`).
 `usage_events` has no spec: it is append-only telemetry with no
 user-observable rule beyond "recorded". `ingest_feed` drops closed retired items
 itself; the per-step reducers it replaced are gone.

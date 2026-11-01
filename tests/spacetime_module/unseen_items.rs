@@ -6,11 +6,6 @@
 use super::*;
 use crate::common::spacetime_instance::no_rows;
 
-fn call_ok(instance: &Instance, reducer: &str, rows: serde_json::Value) {
-    let out = instance.call(reducer, &[&rows.to_string()]);
-    assert!(out.status.success(), "{reducer}: {}", describe(&out));
-}
-
 fn profile(identity: &str, super_admin: bool) -> serde_json::Value {
     serde_json::json!({
         "identity": identity,
@@ -32,7 +27,7 @@ fn the_unseen_items_view_lists_private_epics_nobody_can_see_for_a_super_admin_on
         &instance,
         "seed_workspaces",
         serde_json::json!([{
-            "id": 1, "name": "Core", "created_by": me, "created_at": "2026-10-30 10:00:00"
+            "id": 1, "name": "Core", "created_by": me, "created_at": "2026-10-30 10:00:00", "listed": true
         }]),
     );
     // `gone` created a private epic in workspace 1 and is not a member of it.

@@ -32,7 +32,6 @@ fn memory_caller_places_a_learning_like_the_real_reducer() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await

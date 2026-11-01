@@ -93,6 +93,9 @@ value FeatureUsageEvent {
                               -- distinguishing which binding drove a shared
                               -- action
     actor:    UsageActor
+    -- The store also stamps each stored event with the identity that
+    -- recorded it (recorded_by), which no recorder supplies: a board reads
+    -- back only its own events (workspaces.allium, "THE PRIVATE FLIP").
 }
 
 ------------------------------------------------------------

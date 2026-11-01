@@ -149,8 +149,8 @@ entity BoardConnection {
     --
     -- Derived, like subscribed_epics, and for the same reason: the Subscription
     -- rows say what the person chose, and the tree says what that choice
-    -- reaches. Nobody follows a sub-epic by hand to see it — see
-    -- ASubEpicOfAFollowedEpicIsAskedForToo for how the ask keeps up.
+    -- reaches. Nobody follows a sub-epic by hand to see it. The store
+    -- derives it (the covered_epics view), so it follows a follow live.
     covered_epics: core/Epics.where(e =>
         e in subscribed_epics
             or core/Epic.ancestor_chain(e).any(a => a in subscribed_epics))
@@ -163,9 +163,8 @@ entity BoardConnection {
     -- `TaskCrud::retired_without_task`). That walk is only as complete as
     -- `covered_epics` is: it is correct when the host running that feed's
     -- poll (`core/PollOwner`) has this feed epic in `covered_epics`, so the
-    -- whole subtree arrives live through ASubEpicOfAFollowedEpicIsAskedForToo.
-    -- A poll owner whose board has NOT followed the feed epic — or whose
-    -- subtree ask is still mid-widen, or was refused and never retried — sees
+    -- whole subtree arrives live through the covered_epics view.
+    -- A poll owner whose board has NOT followed the feed epic — — sees
     -- a thinner subtree than the store holds, and a task surviving outside
     -- that thinner view reads as absent.
     --
@@ -189,7 +188,7 @@ entity BoardConnection {
     -- subscribed to UNFILTERED (SubscribeOnceIdentityIsSettled's "repo lists"
     -- clause), so that one read is always complete regardless of
     -- `covered_epics`. And the epic/task reads above answer from
-    -- `covered_epics` UNION `own_creations` — an epic or task this host's
+    -- `covered_epics` UNION the `own_epics`/`own_tasks` views — an epic or task this host's
     -- identity created is visible whether or not anyone follows it — not
     -- from `covered_epics` alone.
     --
@@ -199,10 +198,9 @@ entity BoardConnection {
     -- `FeedRunner::tick` never polls it in the first place. The thinner-view
     -- failure this note is actually about needs one of three narrower
     -- conditions: (a) this host's identity CREATED the feed epic (so
-    -- `own_creations` makes it visible) but never followed it, so its own
+    -- the `own_epics` view makes it visible) but never followed it, so its own
     -- subtree tasks are seen while a teammate's tasks in the same subtree are
-    -- not; (b) the subtree ask is still mid-widen or was refused (this file's
-    -- ASubEpicOfAFollowedEpicIsAskedForToo); or (c) a host followed the feed
+    -- not; (b) no longer possible (the store walks the subtree); or (c) a host followed the feed
     -- epic, was assigned `core/PollOwner` for it, and later unfollowed. (c)
     -- is closed since task #8196: UnsubscribeFromEpic releases the claim
     -- of any host the unfollower owns on every feed epic it stops covering,
@@ -448,7 +446,7 @@ rule FirstConnectionLetsTheBoardDraw {
         -- initial subscription's rows have arrived (SubscribeOnceIdentityIsSettled),
         -- so every startup read of a shared row finds what the store holds.
         -- Epics followed by Subscription rows arrive one round trip later
-        -- (ASubscriptionRowWidensTheAsk) and are not waited for: they come in
+        -- (the covered_epics view) and are not waited for: they come in
         -- live, the way a teammate's edit does.
 }
 
@@ -527,9 +525,7 @@ rule SubscribeOnceIdentityIsSettled {
         SubscriptionsAsserted(
             connection: connection,
             owner_board: identity,
-            own_creations: identity,
-            own_unseen: identity,
-            epics: connection.subscribed_epics
+            views: identity
         )
 
     @guidance
@@ -539,37 +535,45 @@ rule SubscribeOnceIdentityIsSettled {
         -- already have asked for a stranger's rows before discovering it was a
         -- stranger.
         --
-        -- own_unseen is the fourth ask: every core/UnseenTask row whose
-        -- subscriber is this identity. Without it the board could not draw
-        -- the new-task signal (board-visuals.allium, "New-task signal"). It
-        -- is scoped to the caller's own rows, so one person's marks are never
-        -- sent to another. The task a row names is already visible through
-        -- the epic subscription that caused the row to be written.
+        -- THE BOARD ASKS THE VIEWS, NOT THE TABLES. Every table that carries a
+        -- person's work is private (workspaces.allium, "THE PER-CALLER
+        -- VIEWS"), and the board subscribes to the per-caller views over
+        -- them, which answer for the connection's own identity:
+        --   own_tasks, own_epics, own_packages: what this person created,
+        --     and the epic-less tasks they own (own_creations);
+        --   covered_epics, covered_tasks: the epics this person follows and
+        --     every descendant, at any depth, and their tasks;
+        --   rows about a held task (agents, dispatch and session requests,
+        --     learning retrievals, unseen marks) and the links, poll claims,
+        --     learnings, settings, workspaces, memberships and usage events
+        --     the caller may see.
+        -- Public tables (hosts, user_profiles, repo lists, this person's own
+        -- subscription rows) are asked for directly.
         --
-        -- OF THE REST, WHAT IS ASKED FOR IS EXACTLY THREE THINGS: this person's own user
-        -- board, the epics they subscribe to (each with its whole sub-epic
-        -- tree — see ASubEpicOfAFollowedEpicIsAskedForToo), and every task or
-        -- epic they have ever created themselves. The own board is not a Subscription row and
-        -- never will be — see core/Subscription's commentary — it is implied by
-        -- the identity, which is also why there is no way to express an
-        -- interest in somebody else's. That is not a permission check that
-        -- could be got wrong; it is an operation that does not exist. See
-        -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics.
+        -- THE STORE WALKS THE TREE, THE BOARD DOES NOT. covered_epics is
+        -- derived from the Subscription rows on the store's side, so a
+        -- follow, an unfollow, a new sub-epic and a reparent change what the
+        -- board receives live, with no widening and no reassert. A refused
+        -- widening or a mid-walk thin subtree no longer exists.
+        --
+        -- Two asks stay narrowed by host, because a view serves every host
+        -- this person owns and a request or setting is one machine's:
+        -- own_settings, visible_dispatch_requests and
+        -- visible_session_requests carry WHERE host = this host, in every
+        -- state, so a row never leaves a state-filtered query as a delete.
         --
         -- WHY own_creations EXISTS, AND WHY IT IS UNCONDITIONAL. A reducer
         -- cannot return a value (see EveryMutationIsAtomicAndAnswered's
         -- "ANSWERED, not merely performed" clause), so the only way this board
         -- ever learns the id a create was given is by already being subscribed
         -- to a query that covers the new row once the store applies it — see
-        -- CreatesRequireASettledIdentity below. owner_board and epics cover
-        -- that for an epic-less task and for a task landing in a followed
-        -- epic, but neither covers a brand-new epic (nobody is subscribed to
-        -- an epic that doesn't exist yet) or a task created into an epic
-        -- nobody here follows. own_creations closes both gaps the same way:
-        -- unconditionally, by core/Task.created_by and core/Epic.created_by
-        -- rather than by epic_id, so a row this identity just created is
-        -- covered no matter which epic it lands in or whether anyone follows
-        -- it yet.
+        -- CreatesRequireASettledIdentity below. own_tasks, own_epics and
+        -- own_packages cover a brand-new epic and a task created into an epic
+        -- nobody here follows, by who created them.
+        --
+        -- A view's rows arrive with the transaction that wrote them, so a
+        -- create's callback finds its row there. Live-store test:
+        -- tests/spacetime_module (generated id read back through the views).
         --
         -- RE-ASSERTED ON EVERY CONNECTION, unconditionally, including the
         -- reconnects where nothing changed. Subscriptions are per-connection
@@ -732,65 +736,6 @@ rule SubscribeToAgents {
         -- reads as having no session until it does.
 }
 
-rule ASubEpicOfAFollowedEpicIsAskedForToo {
-    when: SubEpicDelivered(connection, epic)
-
-    requires: connection.status = connected
-    requires: epic.parent in connection.covered_epics
-
-    ensures:
-        SubscriptionsWidened(connection: connection, epic: epic)
-    ensures:
-        for held in core/Epics where core/Epic.ancestor_chain(held).contains(epic):
-            SubscriptionsWidened(connection: connection, epic: held)
-
-    @guidance
-        -- HOW covered_epics REACHES THE ASK. Each covered epic is asked for as
-        -- three things: its own row, its direct tasks, and its direct
-        -- sub-epics. The third is what lets the tree be walked at all — the
-        -- store's query language cannot follow a parent chain, so the board
-        -- cannot ask for "everything under 325" in one go. It asks for 325's
-        -- children, and each child that arrives is asked for in turn, one
-        -- level per round trip, until the tree is exhausted.
-        --
-        -- LIVE, NOT ON THE NEXT CONNECTION. A sub-epic a teammate's feed
-        -- creates under a followed epic arrives through its parent's
-        -- sub-epics ask, and this rule widens the subscription to its tasks
-        -- and children then and there. Waiting for a reconnect would draw the
-        -- new sub-epic as an empty card for as long as the connection holds,
-        -- which on a healthy board is all day.
-        --
-        -- A SUB-EPIC ALREADY DELIVERED BY SOMETHING ELSE COUNTS TOO. An epic
-        -- this identity created arrives through own_creations whether or not
-        -- its parent is covered, and may arrive BEFORE its parent becomes
-        -- covered. When the parent does become covered, that already-present
-        -- sub-epic is widened at the same moment — the store will not deliver
-        -- it a second time, so nothing else would.
-        --
-        -- ONLY WIDENS. An unfollowed epic, or a sub-epic deleted mid-session,
-        -- stays in the ask until the next connection re-asserts it. Asking
-        -- for rows that no longer exist sends nothing, and the containment
-        -- claim is untouched: the subtree of an epic this person follows is
-        -- theirs to see by the follow.
-        --
-        -- A WIDENING THE STORE REFUSES IS NOT RETRIED. It is logged, and that
-        -- sub-epic's tasks and children stay missing until the next connection
-        -- walks the tree again from scratch. A retry here would be a second
-        -- reconnect loop living inside the first; RetryAfterBackoff is the
-        -- one this board has.
-        --
-        -- THE PARENT, NOT THE ANCESTRY, IS CHECKED, and that is enough: a
-        -- parent that is covered is one whose own chain already reaches a
-        -- followed epic.
-        --
-        -- A REPARENT IS A DELIVERY TOO. epics.allium: ReparentEpicFromTui can
-        -- move an epic under a covered one. If the board did not hold it, it
-        -- arrives through the new parent's sub-epics ask like any new
-        -- sub-epic; if the board already held it (own_creations), the store
-        -- delivers the changed row, and that counts as SubEpicDelivered just
-        -- the same. A move OUT of the tree is the "only widens" case above.
-}
-
 -- A row served through a per-caller view has no primary key in the generated
 -- bindings (workspaces.allium, READ ENFORCEMENT). The store's update of such a
 -- row reaches the board as an insert of the new row and a delete of the old
@@ -817,123 +762,13 @@ rule AViewUpdateNeverErasesTheRow {
         -- `wire_view!` (sdk_connector/wiring.rs) is that wiring: a view's
         -- delete goes to the table's retire method, never to its remove.
         --
-        -- A REPARENT BEHIND A VIEW STILL WIDENS. There is no on_update to
-        -- compare old and new parent, but the insert of the new row is an
-        -- on_insert like any other, and SubEpicDelivered counts it: an epic
-        -- held under one parent that arrives again under a covered parent
-        -- widens the ask, once (SubtreeCover only grows). The delete of the
-        -- old row widens nothing.
-}
-
-rule ASubscriptionRowWidensTheAsk {
-    when: SubscriptionDelivered(connection, subscription)
-
-    requires: connection.status = connected
-    requires: subscription.subscriber = core/local_host().owner
-
-    ensures:
-        SubscriptionsWidened(connection: connection, epic: subscription.epic)
-    ensures:
-        for held in core/Epics where core/Epic.ancestor_chain(held).contains(subscription.epic):
-            SubscriptionsWidened(connection: connection, epic: held)
-
-    @guidance
-        -- HOW subscribed_epics REACHES THE ASK. SubscribeOnceIdentityIsSettled
-        -- names connection.subscribed_epics, and those are Subscription rows —
-        -- shared rows, which this board reads only from what its connection
-        -- has delivered (BoardReadsFromTheSubscription). When the first
-        -- subscription is built nothing has been delivered yet, so the list it
-        -- can read is empty. The Subscription rows arrive WITH that first
-        -- subscription (it asks for this person's own), and each one widens
-        -- the ask to its epic from there — the epic's row, its tasks and its
-        -- sub-epics, exactly as ASubEpicOfAFollowedEpicIsAskedForToo asks for
-        -- a covered sub-epic. The effect is the three-part ask that rule
-        -- describes, reached one round trip later.
-        --
-        -- LIVE, FOR THE SAME REASON. An epic followed a moment ago — on this
-        -- machine, or on another of this person's — is a Subscription row
-        -- arriving, and its tasks reach the board then, not at the next
-        -- reconnect.
-        --
-        -- AN EPIC ALREADY COVERED WIDENS NOTHING. A Subscription row delivered
-        -- again (an update, a reconnect) must not stack a second copy of the
-        -- same ask.
-        --
-        -- ONLY WIDENS, like ASubEpicOfAFollowedEpicIsAskedForToo, and for the
-        -- same reasons: an unfollow stays asked for until the next connection
-        -- starts afresh, and a refused widening is logged, not retried.
-        --
-        -- UNFOLLOWING IS NOT THE MIRROR OF THIS RULE. A removed Subscription
-        -- row does not narrow the ask back down here — see
-        -- AnUnfollowReassertsTheWholeAsk below, which answers to
-        -- SubscriptionRemoved instead and does something different in kind,
-        -- not just in direction.
-}
-
-rule AnUnfollowReassertsTheWholeAsk {
-    when: SubscriptionRemoved(connection, subscription)
-
-    requires: connection.status = connected
-    requires: subscription.subscriber = core/local_host().owner
-
-    ensures:
-        SubscriptionsAsserted(
-            connection: connection,
-            owner_board: core/local_host().owner,
-            own_creations: core/local_host().owner,
-            own_unseen: core/local_host().owner,
-            epics: connection.subscribed_epics
-        )
-
-    @guidance
-        -- THE COUNTERPART TO ASubscriptionRowWidensTheAsk, and deliberately not
-        -- symmetric with it. That rule widens in place: one more subscription
-        -- added beside what is already held, and what was already covered stays
-        -- covered no matter what. This rule throws the whole ask away and
-        -- rebuilds it — the same SubscriptionsAsserted that
-        -- SubscribeOnceIdentityIsSettled sends on every reconnect, run again
-        -- here with connection.subscribed_epics already reflecting the epic
-        -- just unfollowed being gone.
-        --
-        -- WHY THE WHOLE ASK, NOT JUST THE UNFOLLOWED EPIC'S SUBTREE. Narrowing
-        -- correctly would mean knowing whether that subtree is still covered
-        -- some other way — a still-followed ancestor, a sibling subscription,
-        -- own_creations — before dropping anything, which is bookkeeping the
-        -- widening side never needed: widening can always ask for more without
-        -- first asking "is this already covered less directly". Reasserting the
-        -- whole ask sidesteps the question rather than answering it: it is the
-        -- same derivation SubscribeOnceIdentityIsSettled already gets right,
-        -- run again from the epic list as it now stands.
-        --
-        -- THE COST IS A REDRAW OF EVERYTHING THIS BOARD ASKS FOR, not only the
-        -- unfollowed epic's rows. Reasserting the whole ask replaces the whole
-        -- subscription, so rows the board was already covered for arrive again
-        -- as fresh inserts. That is a bad trade for something that happens
-        -- often and an acceptable one for an operator's deliberate unfollow.
-        --
-        -- DEEPER LEVELS ARE RE-ASKED FROM THE CACHE. Rows the connection
-        -- already holds fire no insert when the replacement applies, so the
-        -- sub-epic walk cannot rediscover them from callbacks. The connector
-        -- re-seeds the walk from the epics it holds, so a still-followed
-        -- epic's sub-epic rows survive another epic being unfollowed.
-        --
-        -- DOES NOT FIRE ON A FOLLOW. SubscriptionRemoved narrows StoreDeliversRow
-        -- to a deletion; an added Subscription row is SubscriptionDelivered,
-        -- which ASubscriptionRowWidensTheAsk already handles live and without a
-        -- redraw. The two rules answer to opposite halves of the same row's
-        -- lifecycle for opposite reasons, and nothing here tries to make
-        -- shrinking as cheap as growing by treating it as the same problem.
-        --
-        -- A REASSERT THE STORE REFUSES DOES NOT TAKE THE CONNECTION DOWN. Unlike
-        -- the assertion made on connecting (ASubscriptionTheStoreRefusesIsAnOutage),
-        -- this one is asked of a connection that is already up and already
-        -- syncing, so the board stays `connected` and keeps the ask it held
-        -- before — the unfollowed epic's rows go on arriving. The refusal is
-        -- logged, and the shrink is noticed again and the reassert re-sent on
-        -- the board's next connection step, until one is applied or the
-        -- connection goes. Unlike a refused widening, this one IS retried:
-        -- leaving it would keep asking for rows the person has said they no
-        -- longer want, for as long as the connection holds.
+        -- A ROW IN TWO VIEWS IS HELD UNTIL IT HAS LEFT BOTH. A task or epic
+        -- the caller created and also covers is served by own_tasks and
+        -- covered_tasks (own_epics and covered_epics), and leaves one of them
+        -- without leaving the other: an unfollow, or a task moved out of a
+        -- followed epic. The board removes the id only when the other view's
+        -- cache no longer holds it (sdk_connector/wiring.rs,
+        -- `wire_board_views`), on top of the equality check above.
 }
 
 rule RegisterHostOnConnect {
@@ -1553,10 +1388,7 @@ rule ASubscriptionTheStoreRefusesIsAnOutage {
         -- The identity stays settled: the store did say who this is, and
         -- nothing about a refused ask changes that.
         --
-        -- ONLY THE ASK MADE ON CONNECTING. A refused widening
-        -- (ASubEpicOfAFollowedEpicIsAskedForToo) and a refused reassert after
-        -- an unfollow (AnUnfollowReassertsTheWholeAsk) leave the connection
-        -- up; see each.
+        -- ONLY THE ASK MADE ON CONNECTING: the board makes no other.
 }
 
 rule RetryAfterBackoff {
@@ -1692,7 +1524,7 @@ rule UnsubscribeFromEpic {
     @guidance
         -- RELEASING THE CLAIM (task #8196). A feed epic this person no longer
         -- follows is invisible to their boards (`list_epics` answers from
-        -- `covered_epics` UNION `own_creations`), so a claim they hold on it
+        -- `covered_epics` UNION the `own_epics`/`own_tasks` views), so a claim they hold on it
         -- would stop the feed for EVERY board with no error: the owner never
         -- polls it and no other host may. Releasing the row lets the next host
         -- that covers the epic claim it on its next FeedTick (feeds.allium:
@@ -1705,7 +1537,7 @@ rule UnsubscribeFromEpic {
         -- the laptop's does. A claim held by another person's host is never
         -- touched. An epic that is still covered (a followed ancestor, or a
         -- second followed route) keeps its claim. An epic this identity
-        -- created stays visible through `own_creations`, so its next tick
+        -- created stays visible through the `own_epics` view, so its next tick
         -- re-claims it: that is the narrower thin-subtree case (a) in the
         -- assumption note on `covered_epics`, not a stopped feed.
         --
@@ -1714,10 +1546,9 @@ rule UnsubscribeFromEpic {
         -- interest, not an assignment, so dropping one changes no task, no
         -- owner and no worktree.
         --
-        -- LIVE, on a connected board — see AnUnfollowReassertsTheWholeAsk.
-        -- "Stop reaching this board" is not a promise that waits for the next
-        -- reconnect; it costs a brief redraw of everything else this board asks
-        -- for too, which SubscribeToEpic's live widening does not.
+        -- LIVE, on a connected board: the covered_epics view loses the epic
+        -- and its rows leave the board as deletes, with no redraw of anything
+        -- else and no reconnect.
         --
         -- IT DOES NOT AND CANNOT UNSUBSCRIBE ANYBODY ELSE. The row is looked up
         -- by this install's own identity, so there is no argument through which
@@ -1823,20 +1654,6 @@ surface StoreBoundary {
         ConnectionDropped(connection, reason)
             when connection.status = connected
         StoreDeliversRow(connection, row)
-            when connection.status = connected
-        -- StoreDeliversRow, narrowed to an epic row that is new to this
-        -- board or whose parent changed. Named separately because
-        -- ASubEpicOfAFollowedEpicIsAskedForToo needs the epic's parent, and a
-        -- generic row carries none.
-        SubEpicDelivered(connection, epic)
-            when connection.status = connected
-        -- StoreDeliversRow, narrowed to a new Subscription row, for
-        -- ASubscriptionRowWidensTheAsk.
-        SubscriptionDelivered(connection, subscription)
-            when connection.status = connected
-        -- StoreDeliversRow, narrowed to a removed Subscription row, for
-        -- AnUnfollowReassertsTheWholeAsk.
-        SubscriptionRemoved(connection, subscription)
             when connection.status = connected
         -- The store's answer to the ask SubscribeOnceIdentityIsSettled sends:
         -- a refusal, or no application within config.connect_timeout. For
@@ -2036,8 +1853,6 @@ open question "What is a board supposed to do with a change whose fate is unknow
 -- row that could later read as belonging to the wrong person.
 
 open question "Does a store that keeps accepting the connection and refusing its initial subscription ever get backed off? ConnectionAccepted resets `attempts` to 0 on acceptance, and ASubscriptionTheStoreRefusesIsAnOutage then adds one, so every cycle of that failure waits config.reconnect_backoff_base and the wait never grows towards config.reconnect_backoff_max — a refusal that lasts an hour is retried roughly every second for an hour, which is the hot loop the ceiling's own comment says the backoff exists to prevent. Should `attempts` reset only once the initial subscription is applied, rather than on acceptance?"
-
-open question "Is retrying a refused unfollow reassert on every connection step the intended cadence? AnUnfollowReassertsTheWholeAsk's refusal is re-sent on each step of the board's connection loop with no backoff, for as long as the store keeps refusing it. ASubEpicOfAFollowedEpicIsAskedForToo refuses to retry a refused widening precisely so that there is no 'second reconnect loop living inside the first'; this is one. Should a refused reassert back off, wait for the next connection like a refused widening, or keep retrying every step?"
 
 open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 

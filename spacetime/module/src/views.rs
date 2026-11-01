@@ -25,6 +25,7 @@ pub trait StoreReads {
     fn task(&self, id: i64) -> Option<Task>;
     fn package(&self, id: i64) -> Option<WorkPackage>;
     fn workspace(&self, id: i64) -> Option<Workspace>;
+    fn listed_workspaces(&self) -> Vec<Workspace>;
     fn profile(&self, who: &str) -> Option<UserProfile>;
     fn members_of(&self, workspace_id: i64) -> Vec<Membership>;
     fn memberships_of(&self, user: &str) -> Vec<Membership>;
@@ -52,6 +53,7 @@ pub trait StoreReads {
     fn learnings_by_author(&self, author: &str) -> Vec<Learning>;
     fn hosts_owned_by(&self, owner: &str) -> Vec<Host>;
     fn settings_of(&self, host: &str) -> Vec<Setting>;
+    fn usage_events_recorded_by(&self, who: &str) -> Vec<UsageEvent>;
 }
 
 /// `StoreReads` over a context whose `db` is a table set: the reducers' and the
@@ -70,6 +72,9 @@ macro_rules! impl_store_reads {
             }
             fn workspace(&self, id: i64) -> Option<Workspace> {
                 self.db.workspaces().id().find(id)
+            }
+            fn listed_workspaces(&self) -> Vec<Workspace> {
+                self.db.workspaces().listed().filter(true).collect()
             }
             fn profile(&self, who: &str) -> Option<UserProfile> {
                 self.db.user_profiles().identity().find(&who.to_string())
@@ -232,6 +237,13 @@ macro_rules! impl_store_reads {
                     .settings()
                     .host()
                     .filter(&host.to_string())
+                    .collect()
+            }
+            fn usage_events_recorded_by(&self, who: &str) -> Vec<UsageEvent> {
+                self.db
+                    .usage_events()
+                    .recorded_by()
+                    .filter(&who.to_string())
                     .collect()
             }
         }
@@ -491,10 +503,19 @@ pub fn settings_visible_to(r: &impl StoreReads, who: &str) -> Vec<Setting> {
     )
 }
 
-/// `visible_workspaces`: the workspaces the caller belongs to. A super-admin's
-/// list of every workspace needs a column a view can range over, which the
-/// table has not (open question in `workspaces.allium`).
+/// `own_usage_events`: the events the caller recorded. An event names no task,
+/// so the held-task rule cannot apply; the caller sees their own.
+pub fn usage_events_visible_to(r: &impl StoreReads, who: &str) -> Vec<UsageEvent> {
+    // One index read: each row once, so nothing to dedup.
+    r.usage_events_recorded_by(who)
+}
+
+/// `visible_workspaces`: the workspaces the caller belongs to, or every one
+/// for a super-admin (read through the always-true `listed` index).
 pub fn workspaces_visible_to(r: &impl StoreReads, who: &str) -> Vec<Workspace> {
+    if r.profile(who).is_some_and(|p| p.is_super_admin) {
+        return r.listed_workspaces();
+    }
     dedup_by(
         workspaces_of(r, who)
             .into_iter()
@@ -617,6 +638,11 @@ fn visible_learnings(ctx: &ViewContext) -> Vec<Learning> {
 #[spacetimedb::view(accessor = own_settings, public)]
 fn own_settings(ctx: &ViewContext) -> Vec<Setting> {
     settings_visible_to(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = own_usage_events, public)]
+fn own_usage_events(ctx: &ViewContext) -> Vec<UsageEvent> {
+    usage_events_visible_to(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = visible_workspaces, public)]

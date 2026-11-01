@@ -191,6 +191,8 @@ fn usage_event(action: &str) -> UsageEvent {
         action: action.into(),
         detail: None,
         actor: "human".into(),
+        // The store stamps the caller over whatever is sent.
+        recorded_by: "someone-else".into(),
     }
 }
 
@@ -320,6 +322,14 @@ fn recording_usage_events_prunes_beyond_the_cap() {
     assert_eq!(actions.len(), 3, "the table never exceeds the cap");
     assert!(!actions.contains(&"action_1".to_string()), "oldest pruned");
     assert!(actions.contains(&"action_5".to_string()), "newest kept");
+    assert!(
+        store
+            .db()
+            .usage_events()
+            .iter()
+            .all(|e| e.recorded_by == identity_of("alice")),
+        "every event is stamped with whoever recorded it"
+    );
 }
 
 // -- update_task: the relink and the patch are one transaction ---------------

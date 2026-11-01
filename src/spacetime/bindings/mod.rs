@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod add_member_reducer;
 pub mod agent_type;
-pub mod agents_table;
 pub mod apply_learning_verdicts_reducer;
 pub mod archive_stale_learnings_reducer;
 pub mod backfill_agents_reducer;
@@ -37,19 +36,15 @@ pub mod delete_task_reducer;
 pub mod delete_work_package_reducer;
 pub mod delete_workspace_reducer;
 pub mod dispatch_request_timeout_type;
-pub mod dispatch_request_timeouts_table;
 pub mod dispatch_request_type;
-pub mod dispatch_requests_table;
 pub mod ensure_managed_epics_reducer;
 pub mod epic_patch_type;
 pub mod epic_type;
-pub mod epics_table;
 pub mod fail_interrupted_dispatch_requests_reducer;
 pub mod fail_interrupted_session_requests_reducer;
 pub mod feed_ingest_item_type;
 pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
-pub mod filter_presets_table;
 pub mod flatten_epic_reducer;
 pub mod grant_super_admin_reducer;
 pub mod handed_out_agent_name_type;
@@ -59,17 +54,13 @@ pub mod hosts_table;
 pub mod ingest_feed_reducer;
 pub mod learning_patch_type;
 pub mod learning_retrieval_type;
-pub mod learning_retrievals_table;
 pub mod learning_type;
 pub mod learning_verdict_input_type;
 pub mod learning_verdict_type;
-pub mod learning_verdicts_table;
-pub mod learnings_table;
 pub mod link_work_package_item_reducer;
 pub mod mark_epic_seen_reducer;
 pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod membership_type;
-pub mod memberships_table;
 pub mod move_epic_to_workspace_reducer;
 pub mod override_poll_owner_reducer;
 pub mod own_epics_table;
@@ -77,12 +68,12 @@ pub mod own_packages_table;
 pub mod own_settings_table;
 pub mod own_tasks_table;
 pub mod own_unseen_tasks_table;
+pub mod own_usage_events_table;
 pub mod patch_epic_reducer;
 pub mod patch_learning_reducer;
 pub mod patch_task_reducer;
 pub mod patch_work_package_reducer;
 pub mod poll_owner_type;
-pub mod poll_owners_table;
 pub mod probe_generated_task_id_reducer;
 pub mod record_base_branch_reducer;
 pub mod record_learning_retrieval_reducer;
@@ -110,7 +101,6 @@ pub mod request_wrap_up_reducer;
 pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
 pub mod retired_feed_item_type;
-pub mod retired_feed_items_table;
 pub mod revoke_super_admin_reducer;
 pub mod rules_version_table;
 pub mod rules_version_type;
@@ -144,9 +134,7 @@ pub mod seed_work_package_links_reducer;
 pub mod seed_work_packages_reducer;
 pub mod seed_workspaces_reducer;
 pub mod session_request_timeout_type;
-pub mod session_request_timeouts_table;
 pub mod session_request_type;
-pub mod session_requests_table;
 pub mod set_display_name_reducer;
 pub mod set_epic_visibility_reducer;
 pub mod set_member_role_reducer;
@@ -155,7 +143,6 @@ pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
 pub mod set_work_package_visibility_reducer;
 pub mod setting_type;
-pub mod settings_table;
 pub mod store_owner_type;
 pub mod sub_status_update_type;
 pub mod subagent_clear_and_void_pending_stop_reducer;
@@ -168,27 +155,20 @@ pub mod subscriptions_table;
 pub mod super_admin_delete_unseen_item_reducer;
 pub mod task_patch_type;
 pub mod task_shell_type;
-pub mod task_shells_table;
 pub mod task_subagent_type;
-pub mod task_subagents_table;
 pub mod task_type;
 pub mod task_watcher_type;
-pub mod task_watchers_table;
-pub mod tasks_table;
 pub mod todo_type;
-pub mod todos_table;
 pub mod try_record_stop_reducer;
 pub mod unlink_work_package_item_reducer;
 pub mod unseen_item_type;
 pub mod unseen_items_table;
 pub mod unseen_task_type;
-pub mod unseen_tasks_table;
 pub mod unsubscribe_from_epic_reducer;
 pub mod update_epic_reducer;
 pub mod update_task_reducer;
 pub mod update_work_package_with_links_reducer;
 pub mod usage_event_type;
-pub mod usage_events_table;
 pub mod user_profile_type;
 pub mod user_profiles_table;
 pub mod visible_agents_table;
@@ -208,16 +188,12 @@ pub mod visible_work_package_links_table;
 pub mod visible_workspaces_table;
 pub mod work_package_item_ref_type;
 pub mod work_package_link_type;
-pub mod work_package_links_table;
 pub mod work_package_patch_type;
 pub mod work_package_type;
-pub mod work_packages_table;
 pub mod workspace_type;
-pub mod workspaces_table;
 
 pub use add_member_reducer::add_member;
 pub use agent_type::Agent;
-pub use agents_table::*;
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
 pub use archive_stale_learnings_reducer::archive_stale_learnings;
 pub use backfill_agents_reducer::backfill_agents;
@@ -246,19 +222,15 @@ pub use delete_task_reducer::delete_task;
 pub use delete_work_package_reducer::delete_work_package;
 pub use delete_workspace_reducer::delete_workspace;
 pub use dispatch_request_timeout_type::DispatchRequestTimeout;
-pub use dispatch_request_timeouts_table::*;
 pub use dispatch_request_type::DispatchRequest;
-pub use dispatch_requests_table::*;
 pub use ensure_managed_epics_reducer::ensure_managed_epics;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
-pub use epics_table::*;
 pub use fail_interrupted_dispatch_requests_reducer::fail_interrupted_dispatch_requests;
 pub use fail_interrupted_session_requests_reducer::fail_interrupted_session_requests;
 pub use feed_ingest_item_type::FeedIngestItem;
 pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
-pub use filter_presets_table::*;
 pub use flatten_epic_reducer::flatten_epic;
 pub use grant_super_admin_reducer::grant_super_admin;
 pub use handed_out_agent_name_type::HandedOutAgentName;
@@ -268,17 +240,13 @@ pub use hosts_table::*;
 pub use ingest_feed_reducer::ingest_feed;
 pub use learning_patch_type::LearningPatch;
 pub use learning_retrieval_type::LearningRetrieval;
-pub use learning_retrievals_table::*;
 pub use learning_type::Learning;
 pub use learning_verdict_input_type::LearningVerdictInput;
 pub use learning_verdict_type::LearningVerdict;
-pub use learning_verdicts_table::*;
-pub use learnings_table::*;
 pub use link_work_package_item_reducer::link_work_package_item;
 pub use mark_epic_seen_reducer::mark_epic_seen;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use membership_type::Membership;
-pub use memberships_table::*;
 pub use move_epic_to_workspace_reducer::move_epic_to_workspace;
 pub use override_poll_owner_reducer::override_poll_owner;
 pub use own_epics_table::*;
@@ -286,12 +254,12 @@ pub use own_packages_table::*;
 pub use own_settings_table::*;
 pub use own_tasks_table::*;
 pub use own_unseen_tasks_table::*;
+pub use own_usage_events_table::*;
 pub use patch_epic_reducer::patch_epic;
 pub use patch_learning_reducer::patch_learning;
 pub use patch_task_reducer::patch_task;
 pub use patch_work_package_reducer::patch_work_package;
 pub use poll_owner_type::PollOwner;
-pub use poll_owners_table::*;
 pub use probe_generated_task_id_reducer::probe_generated_task_id;
 pub use record_base_branch_reducer::record_base_branch;
 pub use record_learning_retrieval_reducer::record_learning_retrieval;
@@ -319,7 +287,6 @@ pub use request_wrap_up_reducer::request_wrap_up;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
 pub use retired_feed_item_type::RetiredFeedItem;
-pub use retired_feed_items_table::*;
 pub use revoke_super_admin_reducer::revoke_super_admin;
 pub use rules_version_table::*;
 pub use rules_version_type::RulesVersion;
@@ -353,9 +320,7 @@ pub use seed_work_package_links_reducer::seed_work_package_links;
 pub use seed_work_packages_reducer::seed_work_packages;
 pub use seed_workspaces_reducer::seed_workspaces;
 pub use session_request_timeout_type::SessionRequestTimeout;
-pub use session_request_timeouts_table::*;
 pub use session_request_type::SessionRequest;
-pub use session_requests_table::*;
 pub use set_display_name_reducer::set_display_name;
 pub use set_epic_visibility_reducer::set_epic_visibility;
 pub use set_member_role_reducer::set_member_role;
@@ -364,7 +329,6 @@ pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
 pub use set_work_package_visibility_reducer::set_work_package_visibility;
 pub use setting_type::Setting;
-pub use settings_table::*;
 pub use store_owner_type::StoreOwner;
 pub use sub_status_update_type::SubStatusUpdate;
 pub use subagent_clear_and_void_pending_stop_reducer::subagent_clear_and_void_pending_stop;
@@ -377,27 +341,20 @@ pub use subscriptions_table::*;
 pub use super_admin_delete_unseen_item_reducer::super_admin_delete_unseen_item;
 pub use task_patch_type::TaskPatch;
 pub use task_shell_type::TaskShell;
-pub use task_shells_table::*;
 pub use task_subagent_type::TaskSubagent;
-pub use task_subagents_table::*;
 pub use task_type::Task;
 pub use task_watcher_type::TaskWatcher;
-pub use task_watchers_table::*;
-pub use tasks_table::*;
 pub use todo_type::Todo;
-pub use todos_table::*;
 pub use try_record_stop_reducer::try_record_stop;
 pub use unlink_work_package_item_reducer::unlink_work_package_item;
 pub use unseen_item_type::UnseenItem;
 pub use unseen_items_table::*;
 pub use unseen_task_type::UnseenTask;
-pub use unseen_tasks_table::*;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
 pub use update_epic_reducer::update_epic;
 pub use update_task_reducer::update_task;
 pub use update_work_package_with_links_reducer::update_work_package_with_links;
 pub use usage_event_type::UsageEvent;
-pub use usage_events_table::*;
 pub use user_profile_type::UserProfile;
 pub use user_profiles_table::*;
 pub use visible_agents_table::*;
@@ -417,12 +374,9 @@ pub use visible_work_package_links_table::*;
 pub use visible_workspaces_table::*;
 pub use work_package_item_ref_type::WorkPackageItemRef;
 pub use work_package_link_type::WorkPackageLink;
-pub use work_package_links_table::*;
 pub use work_package_patch_type::WorkPackagePatch;
 pub use work_package_type::WorkPackage;
-pub use work_packages_table::*;
 pub use workspace_type::Workspace;
-pub use workspaces_table::*;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -1730,42 +1684,22 @@ Reducer::RecordBaseBranch{
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
-    agents: __sdk::TableUpdate<Agent>,
     covered_epics: __sdk::TableUpdate<Epic>,
     covered_tasks: __sdk::TableUpdate<Task>,
-    dispatch_request_timeouts: __sdk::TableUpdate<DispatchRequestTimeout>,
-    dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
-    epics: __sdk::TableUpdate<Epic>,
-    filter_presets: __sdk::TableUpdate<FilterPreset>,
     handed_out_agent_names: __sdk::TableUpdate<HandedOutAgentName>,
     hosts: __sdk::TableUpdate<Host>,
-    learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
-    learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
-    learnings: __sdk::TableUpdate<Learning>,
-    memberships: __sdk::TableUpdate<Membership>,
     own_epics: __sdk::TableUpdate<Epic>,
     own_packages: __sdk::TableUpdate<WorkPackage>,
     own_settings: __sdk::TableUpdate<Setting>,
     own_tasks: __sdk::TableUpdate<Task>,
     own_unseen_tasks: __sdk::TableUpdate<UnseenTask>,
-    poll_owners: __sdk::TableUpdate<PollOwner>,
+    own_usage_events: __sdk::TableUpdate<UsageEvent>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
-    retired_feed_items: __sdk::TableUpdate<RetiredFeedItem>,
     rules_version: __sdk::TableUpdate<RulesVersion>,
     schema_version: __sdk::TableUpdate<SchemaVersion>,
-    session_request_timeouts: __sdk::TableUpdate<SessionRequestTimeout>,
-    session_requests: __sdk::TableUpdate<SessionRequest>,
-    settings: __sdk::TableUpdate<Setting>,
     subscriptions: __sdk::TableUpdate<Subscription>,
-    task_shells: __sdk::TableUpdate<TaskShell>,
-    task_subagents: __sdk::TableUpdate<TaskSubagent>,
-    task_watchers: __sdk::TableUpdate<TaskWatcher>,
-    tasks: __sdk::TableUpdate<Task>,
-    todos: __sdk::TableUpdate<Todo>,
     unseen_items: __sdk::TableUpdate<UnseenItem>,
-    unseen_tasks: __sdk::TableUpdate<UnseenTask>,
-    usage_events: __sdk::TableUpdate<UsageEvent>,
     user_profiles: __sdk::TableUpdate<UserProfile>,
     visible_agents: __sdk::TableUpdate<Agent>,
     visible_dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
@@ -1782,9 +1716,6 @@ pub struct DbUpdate {
     visible_tasks: __sdk::TableUpdate<Task>,
     visible_work_package_links: __sdk::TableUpdate<WorkPackageLink>,
     visible_workspaces: __sdk::TableUpdate<Workspace>,
-    work_package_links: __sdk::TableUpdate<WorkPackageLink>,
-    work_packages: __sdk::TableUpdate<WorkPackage>,
-    workspaces: __sdk::TableUpdate<Workspace>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -1793,45 +1724,18 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
-                "agents" => db_update
-                    .agents
-                    .append(agents_table::parse_table_update(table_update)?),
                 "covered_epics" => db_update
                     .covered_epics
                     .append(covered_epics_table::parse_table_update(table_update)?),
                 "covered_tasks" => db_update
                     .covered_tasks
                     .append(covered_tasks_table::parse_table_update(table_update)?),
-                "dispatch_request_timeouts" => db_update.dispatch_request_timeouts.append(
-                    dispatch_request_timeouts_table::parse_table_update(table_update)?,
-                ),
-                "dispatch_requests" => db_update
-                    .dispatch_requests
-                    .append(dispatch_requests_table::parse_table_update(table_update)?),
-                "epics" => db_update
-                    .epics
-                    .append(epics_table::parse_table_update(table_update)?),
-                "filter_presets" => db_update
-                    .filter_presets
-                    .append(filter_presets_table::parse_table_update(table_update)?),
                 "handed_out_agent_names" => db_update.handed_out_agent_names.append(
                     handed_out_agent_names_table::parse_table_update(table_update)?,
                 ),
                 "hosts" => db_update
                     .hosts
                     .append(hosts_table::parse_table_update(table_update)?),
-                "learning_retrievals" => db_update
-                    .learning_retrievals
-                    .append(learning_retrievals_table::parse_table_update(table_update)?),
-                "learning_verdicts" => db_update
-                    .learning_verdicts
-                    .append(learning_verdicts_table::parse_table_update(table_update)?),
-                "learnings" => db_update
-                    .learnings
-                    .append(learnings_table::parse_table_update(table_update)?),
-                "memberships" => db_update
-                    .memberships
-                    .append(memberships_table::parse_table_update(table_update)?),
                 "own_epics" => db_update
                     .own_epics
                     .append(own_epics_table::parse_table_update(table_update)?),
@@ -1847,60 +1751,27 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "own_unseen_tasks" => db_update
                     .own_unseen_tasks
                     .append(own_unseen_tasks_table::parse_table_update(table_update)?),
-                "poll_owners" => db_update
-                    .poll_owners
-                    .append(poll_owners_table::parse_table_update(table_update)?),
+                "own_usage_events" => db_update
+                    .own_usage_events
+                    .append(own_usage_events_table::parse_table_update(table_update)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
                     .append(repo_base_branches_table::parse_table_update(table_update)?),
                 "repo_paths" => db_update
                     .repo_paths
                     .append(repo_paths_table::parse_table_update(table_update)?),
-                "retired_feed_items" => db_update
-                    .retired_feed_items
-                    .append(retired_feed_items_table::parse_table_update(table_update)?),
                 "rules_version" => db_update
                     .rules_version
                     .append(rules_version_table::parse_table_update(table_update)?),
                 "schema_version" => db_update
                     .schema_version
                     .append(schema_version_table::parse_table_update(table_update)?),
-                "session_request_timeouts" => db_update.session_request_timeouts.append(
-                    session_request_timeouts_table::parse_table_update(table_update)?,
-                ),
-                "session_requests" => db_update
-                    .session_requests
-                    .append(session_requests_table::parse_table_update(table_update)?),
-                "settings" => db_update
-                    .settings
-                    .append(settings_table::parse_table_update(table_update)?),
                 "subscriptions" => db_update
                     .subscriptions
                     .append(subscriptions_table::parse_table_update(table_update)?),
-                "task_shells" => db_update
-                    .task_shells
-                    .append(task_shells_table::parse_table_update(table_update)?),
-                "task_subagents" => db_update
-                    .task_subagents
-                    .append(task_subagents_table::parse_table_update(table_update)?),
-                "task_watchers" => db_update
-                    .task_watchers
-                    .append(task_watchers_table::parse_table_update(table_update)?),
-                "tasks" => db_update
-                    .tasks
-                    .append(tasks_table::parse_table_update(table_update)?),
-                "todos" => db_update
-                    .todos
-                    .append(todos_table::parse_table_update(table_update)?),
                 "unseen_items" => db_update
                     .unseen_items
                     .append(unseen_items_table::parse_table_update(table_update)?),
-                "unseen_tasks" => db_update
-                    .unseen_tasks
-                    .append(unseen_tasks_table::parse_table_update(table_update)?),
-                "usage_events" => db_update
-                    .usage_events
-                    .append(usage_events_table::parse_table_update(table_update)?),
                 "user_profiles" => db_update
                     .user_profiles
                     .append(user_profiles_table::parse_table_update(table_update)?),
@@ -1949,15 +1820,6 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "visible_workspaces" => db_update
                     .visible_workspaces
                     .append(visible_workspaces_table::parse_table_update(table_update)?),
-                "work_package_links" => db_update
-                    .work_package_links
-                    .append(work_package_links_table::parse_table_update(table_update)?),
-                "work_packages" => db_update
-                    .work_packages
-                    .append(work_packages_table::parse_table_update(table_update)?),
-                "workspaces" => db_update
-                    .workspaces
-                    .append(workspaces_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -1984,24 +1846,6 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
-        diff.agents = cache
-            .apply_diff_to_table::<Agent>("agents", &self.agents)
-            .with_updates_by_pk(|row| &row.id);
-        diff.dispatch_request_timeouts = cache
-            .apply_diff_to_table::<DispatchRequestTimeout>(
-                "dispatch_request_timeouts",
-                &self.dispatch_request_timeouts,
-            )
-            .with_updates_by_pk(|row| &row.scheduled_id);
-        diff.dispatch_requests = cache
-            .apply_diff_to_table::<DispatchRequest>("dispatch_requests", &self.dispatch_requests)
-            .with_updates_by_pk(|row| &row.id);
-        diff.epics = cache
-            .apply_diff_to_table::<Epic>("epics", &self.epics)
-            .with_updates_by_pk(|row| &row.id);
-        diff.filter_presets = cache
-            .apply_diff_to_table::<FilterPreset>("filter_presets", &self.filter_presets)
-            .with_updates_by_pk(|row| &row.id);
         diff.handed_out_agent_names = cache
             .apply_diff_to_table::<HandedOutAgentName>(
                 "handed_out_agent_names",
@@ -2011,32 +1855,11 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.hosts = cache
             .apply_diff_to_table::<Host>("hosts", &self.hosts)
             .with_updates_by_pk(|row| &row.id);
-        diff.learning_retrievals = cache
-            .apply_diff_to_table::<LearningRetrieval>(
-                "learning_retrievals",
-                &self.learning_retrievals,
-            )
-            .with_updates_by_pk(|row| &row.id);
-        diff.learning_verdicts = cache
-            .apply_diff_to_table::<LearningVerdict>("learning_verdicts", &self.learning_verdicts)
-            .with_updates_by_pk(|row| &row.id);
-        diff.learnings = cache
-            .apply_diff_to_table::<Learning>("learnings", &self.learnings)
-            .with_updates_by_pk(|row| &row.id);
-        diff.memberships = cache
-            .apply_diff_to_table::<Membership>("memberships", &self.memberships)
-            .with_updates_by_pk(|row| &row.id);
-        diff.poll_owners = cache
-            .apply_diff_to_table::<PollOwner>("poll_owners", &self.poll_owners)
-            .with_updates_by_pk(|row| &row.id);
         diff.repo_base_branches = cache
             .apply_diff_to_table::<RepoBaseBranch>("repo_base_branches", &self.repo_base_branches)
             .with_updates_by_pk(|row| &row.id);
         diff.repo_paths = cache
             .apply_diff_to_table::<RepoPath>("repo_paths", &self.repo_paths)
-            .with_updates_by_pk(|row| &row.id);
-        diff.retired_feed_items = cache
-            .apply_diff_to_table::<RetiredFeedItem>("retired_feed_items", &self.retired_feed_items)
             .with_updates_by_pk(|row| &row.id);
         diff.rules_version = cache
             .apply_diff_to_table::<RulesVersion>("rules_version", &self.rules_version)
@@ -2044,51 +1867,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.schema_version = cache
             .apply_diff_to_table::<SchemaVersion>("schema_version", &self.schema_version)
             .with_updates_by_pk(|row| &row.id);
-        diff.session_request_timeouts = cache
-            .apply_diff_to_table::<SessionRequestTimeout>(
-                "session_request_timeouts",
-                &self.session_request_timeouts,
-            )
-            .with_updates_by_pk(|row| &row.scheduled_id);
-        diff.session_requests = cache
-            .apply_diff_to_table::<SessionRequest>("session_requests", &self.session_requests)
-            .with_updates_by_pk(|row| &row.id);
-        diff.settings = cache
-            .apply_diff_to_table::<Setting>("settings", &self.settings)
-            .with_updates_by_pk(|row| &row.id);
         diff.subscriptions = cache
             .apply_diff_to_table::<Subscription>("subscriptions", &self.subscriptions)
-            .with_updates_by_pk(|row| &row.id);
-        diff.task_shells = cache.apply_diff_to_table::<TaskShell>("task_shells", &self.task_shells);
-        diff.task_subagents =
-            cache.apply_diff_to_table::<TaskSubagent>("task_subagents", &self.task_subagents);
-        diff.task_watchers = cache
-            .apply_diff_to_table::<TaskWatcher>("task_watchers", &self.task_watchers)
-            .with_updates_by_pk(|row| &row.id);
-        diff.tasks = cache
-            .apply_diff_to_table::<Task>("tasks", &self.tasks)
-            .with_updates_by_pk(|row| &row.id);
-        diff.todos = cache
-            .apply_diff_to_table::<Todo>("todos", &self.todos)
-            .with_updates_by_pk(|row| &row.id);
-        diff.unseen_tasks = cache
-            .apply_diff_to_table::<UnseenTask>("unseen_tasks", &self.unseen_tasks)
-            .with_updates_by_pk(|row| &row.id);
-        diff.usage_events = cache
-            .apply_diff_to_table::<UsageEvent>("usage_events", &self.usage_events)
             .with_updates_by_pk(|row| &row.id);
         diff.user_profiles = cache
             .apply_diff_to_table::<UserProfile>("user_profiles", &self.user_profiles)
             .with_updates_by_pk(|row| &row.identity);
-        diff.work_package_links = cache
-            .apply_diff_to_table::<WorkPackageLink>("work_package_links", &self.work_package_links)
-            .with_updates_by_pk(|row| &row.id);
-        diff.work_packages = cache
-            .apply_diff_to_table::<WorkPackage>("work_packages", &self.work_packages)
-            .with_updates_by_pk(|row| &row.id);
-        diff.workspaces = cache
-            .apply_diff_to_table::<Workspace>("workspaces", &self.workspaces)
-            .with_updates_by_pk(|row| &row.id);
         diff.covered_epics =
             cache.apply_diff_to_table::<Epic>("covered_epics", &self.covered_epics);
         diff.covered_tasks =
@@ -2101,6 +1885,8 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.own_tasks = cache.apply_diff_to_table::<Task>("own_tasks", &self.own_tasks);
         diff.own_unseen_tasks =
             cache.apply_diff_to_table::<UnseenTask>("own_unseen_tasks", &self.own_unseen_tasks);
+        diff.own_usage_events =
+            cache.apply_diff_to_table::<UsageEvent>("own_usage_events", &self.own_usage_events);
         diff.unseen_items =
             cache.apply_diff_to_table::<UnseenItem>("unseen_items", &self.unseen_items);
         diff.visible_agents =
@@ -2154,44 +1940,17 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
-                "agents" => db_update
-                    .agents
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "covered_epics" => db_update
                     .covered_epics
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "covered_tasks" => db_update
                     .covered_tasks
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "dispatch_request_timeouts" => db_update
-                    .dispatch_request_timeouts
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "dispatch_requests" => db_update
-                    .dispatch_requests
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "epics" => db_update
-                    .epics
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "filter_presets" => db_update
-                    .filter_presets
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "handed_out_agent_names" => db_update
                     .handed_out_agent_names
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "learning_retrievals" => db_update
-                    .learning_retrievals
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "learning_verdicts" => db_update
-                    .learning_verdicts
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "learnings" => db_update
-                    .learnings
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "memberships" => db_update
-                    .memberships
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "own_epics" => db_update
                     .own_epics
@@ -2208,8 +1967,8 @@ impl __sdk::DbUpdate for DbUpdate {
                 "own_unseen_tasks" => db_update
                     .own_unseen_tasks
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "poll_owners" => db_update
-                    .poll_owners
+                "own_usage_events" => db_update
+                    .own_usage_events
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
@@ -2217,50 +1976,17 @@ impl __sdk::DbUpdate for DbUpdate {
                 "repo_paths" => db_update
                     .repo_paths
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "retired_feed_items" => db_update
-                    .retired_feed_items
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "rules_version" => db_update
                     .rules_version
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "session_request_timeouts" => db_update
-                    .session_request_timeouts
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "session_requests" => db_update
-                    .session_requests
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "settings" => db_update
-                    .settings
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "subscriptions" => db_update
                     .subscriptions
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "task_shells" => db_update
-                    .task_shells
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "task_subagents" => db_update
-                    .task_subagents
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "task_watchers" => db_update
-                    .task_watchers
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "tasks" => db_update
-                    .tasks
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "todos" => db_update
-                    .todos
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "unseen_items" => db_update
                     .unseen_items
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "unseen_tasks" => db_update
-                    .unseen_tasks
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "usage_events" => db_update
-                    .usage_events
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "user_profiles" => db_update
                     .user_profiles
@@ -2309,15 +2035,6 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_workspaces" => db_update
                     .visible_workspaces
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "work_package_links" => db_update
-                    .work_package_links
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "work_packages" => db_update
-                    .work_packages
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "workspaces" => db_update
-                    .workspaces
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -2332,44 +2049,17 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
-                "agents" => db_update
-                    .agents
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "covered_epics" => db_update
                     .covered_epics
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "covered_tasks" => db_update
                     .covered_tasks
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "dispatch_request_timeouts" => db_update
-                    .dispatch_request_timeouts
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "dispatch_requests" => db_update
-                    .dispatch_requests
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "epics" => db_update
-                    .epics
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "filter_presets" => db_update
-                    .filter_presets
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "handed_out_agent_names" => db_update
                     .handed_out_agent_names
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "learning_retrievals" => db_update
-                    .learning_retrievals
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "learning_verdicts" => db_update
-                    .learning_verdicts
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "learnings" => db_update
-                    .learnings
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "memberships" => db_update
-                    .memberships
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "own_epics" => db_update
                     .own_epics
@@ -2386,8 +2076,8 @@ impl __sdk::DbUpdate for DbUpdate {
                 "own_unseen_tasks" => db_update
                     .own_unseen_tasks
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "poll_owners" => db_update
-                    .poll_owners
+                "own_usage_events" => db_update
+                    .own_usage_events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
@@ -2395,50 +2085,17 @@ impl __sdk::DbUpdate for DbUpdate {
                 "repo_paths" => db_update
                     .repo_paths
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "retired_feed_items" => db_update
-                    .retired_feed_items
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "rules_version" => db_update
                     .rules_version
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "session_request_timeouts" => db_update
-                    .session_request_timeouts
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "session_requests" => db_update
-                    .session_requests
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "settings" => db_update
-                    .settings
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "subscriptions" => db_update
                     .subscriptions
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "task_shells" => db_update
-                    .task_shells
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "task_subagents" => db_update
-                    .task_subagents
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "task_watchers" => db_update
-                    .task_watchers
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "tasks" => db_update
-                    .tasks
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "todos" => db_update
-                    .todos
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "unseen_items" => db_update
                     .unseen_items
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "unseen_tasks" => db_update
-                    .unseen_tasks
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "usage_events" => db_update
-                    .usage_events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "user_profiles" => db_update
                     .user_profiles
@@ -2487,15 +2144,6 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_workspaces" => db_update
                     .visible_workspaces
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "work_package_links" => db_update
-                    .work_package_links
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "work_packages" => db_update
-                    .work_packages
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "workspaces" => db_update
-                    .workspaces
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -2512,42 +2160,22 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
-    agents: __sdk::TableAppliedDiff<'r, Agent>,
     covered_epics: __sdk::TableAppliedDiff<'r, Epic>,
     covered_tasks: __sdk::TableAppliedDiff<'r, Task>,
-    dispatch_request_timeouts: __sdk::TableAppliedDiff<'r, DispatchRequestTimeout>,
-    dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
-    epics: __sdk::TableAppliedDiff<'r, Epic>,
-    filter_presets: __sdk::TableAppliedDiff<'r, FilterPreset>,
     handed_out_agent_names: __sdk::TableAppliedDiff<'r, HandedOutAgentName>,
     hosts: __sdk::TableAppliedDiff<'r, Host>,
-    learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
-    learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
-    learnings: __sdk::TableAppliedDiff<'r, Learning>,
-    memberships: __sdk::TableAppliedDiff<'r, Membership>,
     own_epics: __sdk::TableAppliedDiff<'r, Epic>,
     own_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
     own_settings: __sdk::TableAppliedDiff<'r, Setting>,
     own_tasks: __sdk::TableAppliedDiff<'r, Task>,
     own_unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
-    poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
+    own_usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
-    retired_feed_items: __sdk::TableAppliedDiff<'r, RetiredFeedItem>,
     rules_version: __sdk::TableAppliedDiff<'r, RulesVersion>,
     schema_version: __sdk::TableAppliedDiff<'r, SchemaVersion>,
-    session_request_timeouts: __sdk::TableAppliedDiff<'r, SessionRequestTimeout>,
-    session_requests: __sdk::TableAppliedDiff<'r, SessionRequest>,
-    settings: __sdk::TableAppliedDiff<'r, Setting>,
     subscriptions: __sdk::TableAppliedDiff<'r, Subscription>,
-    task_shells: __sdk::TableAppliedDiff<'r, TaskShell>,
-    task_subagents: __sdk::TableAppliedDiff<'r, TaskSubagent>,
-    task_watchers: __sdk::TableAppliedDiff<'r, TaskWatcher>,
-    tasks: __sdk::TableAppliedDiff<'r, Task>,
-    todos: __sdk::TableAppliedDiff<'r, Todo>,
     unseen_items: __sdk::TableAppliedDiff<'r, UnseenItem>,
-    unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
-    usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
     user_profiles: __sdk::TableAppliedDiff<'r, UserProfile>,
     visible_agents: __sdk::TableAppliedDiff<'r, Agent>,
     visible_dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
@@ -2564,9 +2192,6 @@ pub struct AppliedDiff<'r> {
     visible_tasks: __sdk::TableAppliedDiff<'r, Task>,
     visible_work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
     visible_workspaces: __sdk::TableAppliedDiff<'r, Workspace>,
-    work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
-    work_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
-    workspaces: __sdk::TableAppliedDiff<'r, Workspace>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -2580,43 +2205,14 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
-        callbacks.invoke_table_row_callbacks::<Agent>("agents", &self.agents, event);
         callbacks.invoke_table_row_callbacks::<Epic>("covered_epics", &self.covered_epics, event);
         callbacks.invoke_table_row_callbacks::<Task>("covered_tasks", &self.covered_tasks, event);
-        callbacks.invoke_table_row_callbacks::<DispatchRequestTimeout>(
-            "dispatch_request_timeouts",
-            &self.dispatch_request_timeouts,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<DispatchRequest>(
-            "dispatch_requests",
-            &self.dispatch_requests,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<Epic>("epics", &self.epics, event);
-        callbacks.invoke_table_row_callbacks::<FilterPreset>(
-            "filter_presets",
-            &self.filter_presets,
-            event,
-        );
         callbacks.invoke_table_row_callbacks::<HandedOutAgentName>(
             "handed_out_agent_names",
             &self.handed_out_agent_names,
             event,
         );
         callbacks.invoke_table_row_callbacks::<Host>("hosts", &self.hosts, event);
-        callbacks.invoke_table_row_callbacks::<LearningRetrieval>(
-            "learning_retrievals",
-            &self.learning_retrievals,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<LearningVerdict>(
-            "learning_verdicts",
-            &self.learning_verdicts,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<Learning>("learnings", &self.learnings, event);
-        callbacks.invoke_table_row_callbacks::<Membership>("memberships", &self.memberships, event);
         callbacks.invoke_table_row_callbacks::<Epic>("own_epics", &self.own_epics, event);
         callbacks.invoke_table_row_callbacks::<WorkPackage>(
             "own_packages",
@@ -2630,18 +2226,17 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.own_unseen_tasks,
             event,
         );
-        callbacks.invoke_table_row_callbacks::<PollOwner>("poll_owners", &self.poll_owners, event);
+        callbacks.invoke_table_row_callbacks::<UsageEvent>(
+            "own_usage_events",
+            &self.own_usage_events,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<RepoBaseBranch>(
             "repo_base_branches",
             &self.repo_base_branches,
             event,
         );
         callbacks.invoke_table_row_callbacks::<RepoPath>("repo_paths", &self.repo_paths, event);
-        callbacks.invoke_table_row_callbacks::<RetiredFeedItem>(
-            "retired_feed_items",
-            &self.retired_feed_items,
-            event,
-        );
         callbacks.invoke_table_row_callbacks::<RulesVersion>(
             "rules_version",
             &self.rules_version,
@@ -2652,48 +2247,14 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.schema_version,
             event,
         );
-        callbacks.invoke_table_row_callbacks::<SessionRequestTimeout>(
-            "session_request_timeouts",
-            &self.session_request_timeouts,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<SessionRequest>(
-            "session_requests",
-            &self.session_requests,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<Setting>("settings", &self.settings, event);
         callbacks.invoke_table_row_callbacks::<Subscription>(
             "subscriptions",
             &self.subscriptions,
             event,
         );
-        callbacks.invoke_table_row_callbacks::<TaskShell>("task_shells", &self.task_shells, event);
-        callbacks.invoke_table_row_callbacks::<TaskSubagent>(
-            "task_subagents",
-            &self.task_subagents,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<TaskWatcher>(
-            "task_watchers",
-            &self.task_watchers,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<Task>("tasks", &self.tasks, event);
-        callbacks.invoke_table_row_callbacks::<Todo>("todos", &self.todos, event);
         callbacks.invoke_table_row_callbacks::<UnseenItem>(
             "unseen_items",
             &self.unseen_items,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<UnseenTask>(
-            "unseen_tasks",
-            &self.unseen_tasks,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<UsageEvent>(
-            "usage_events",
-            &self.usage_events,
             event,
         );
         callbacks.invoke_table_row_callbacks::<UserProfile>(
@@ -2768,17 +2329,6 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.visible_workspaces,
             event,
         );
-        callbacks.invoke_table_row_callbacks::<WorkPackageLink>(
-            "work_package_links",
-            &self.work_package_links,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<WorkPackage>(
-            "work_packages",
-            &self.work_packages,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<Workspace>("workspaces", &self.workspaces, event);
     }
 }
 
@@ -3439,42 +2989,22 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
-        agents_table::register_table(client_cache);
         covered_epics_table::register_table(client_cache);
         covered_tasks_table::register_table(client_cache);
-        dispatch_request_timeouts_table::register_table(client_cache);
-        dispatch_requests_table::register_table(client_cache);
-        epics_table::register_table(client_cache);
-        filter_presets_table::register_table(client_cache);
         handed_out_agent_names_table::register_table(client_cache);
         hosts_table::register_table(client_cache);
-        learning_retrievals_table::register_table(client_cache);
-        learning_verdicts_table::register_table(client_cache);
-        learnings_table::register_table(client_cache);
-        memberships_table::register_table(client_cache);
         own_epics_table::register_table(client_cache);
         own_packages_table::register_table(client_cache);
         own_settings_table::register_table(client_cache);
         own_tasks_table::register_table(client_cache);
         own_unseen_tasks_table::register_table(client_cache);
-        poll_owners_table::register_table(client_cache);
+        own_usage_events_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
-        retired_feed_items_table::register_table(client_cache);
         rules_version_table::register_table(client_cache);
         schema_version_table::register_table(client_cache);
-        session_request_timeouts_table::register_table(client_cache);
-        session_requests_table::register_table(client_cache);
-        settings_table::register_table(client_cache);
         subscriptions_table::register_table(client_cache);
-        task_shells_table::register_table(client_cache);
-        task_subagents_table::register_table(client_cache);
-        task_watchers_table::register_table(client_cache);
-        tasks_table::register_table(client_cache);
-        todos_table::register_table(client_cache);
         unseen_items_table::register_table(client_cache);
-        unseen_tasks_table::register_table(client_cache);
-        usage_events_table::register_table(client_cache);
         user_profiles_table::register_table(client_cache);
         visible_agents_table::register_table(client_cache);
         visible_dispatch_requests_table::register_table(client_cache);
@@ -3491,47 +3021,24 @@ impl __sdk::SpacetimeModule for RemoteModule {
         visible_tasks_table::register_table(client_cache);
         visible_work_package_links_table::register_table(client_cache);
         visible_workspaces_table::register_table(client_cache);
-        work_package_links_table::register_table(client_cache);
-        work_packages_table::register_table(client_cache);
-        workspaces_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
-        "agents",
         "covered_epics",
         "covered_tasks",
-        "dispatch_request_timeouts",
-        "dispatch_requests",
-        "epics",
-        "filter_presets",
         "handed_out_agent_names",
         "hosts",
-        "learning_retrievals",
-        "learning_verdicts",
-        "learnings",
-        "memberships",
         "own_epics",
         "own_packages",
         "own_settings",
         "own_tasks",
         "own_unseen_tasks",
-        "poll_owners",
+        "own_usage_events",
         "repo_base_branches",
         "repo_paths",
-        "retired_feed_items",
         "rules_version",
         "schema_version",
-        "session_request_timeouts",
-        "session_requests",
-        "settings",
         "subscriptions",
-        "task_shells",
-        "task_subagents",
-        "task_watchers",
-        "tasks",
-        "todos",
         "unseen_items",
-        "unseen_tasks",
-        "usage_events",
         "user_profiles",
         "visible_agents",
         "visible_dispatch_requests",
@@ -3548,8 +3055,5 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "visible_tasks",
         "visible_work_package_links",
         "visible_workspaces",
-        "work_package_links",
-        "work_packages",
-        "workspaces",
     ];
 }

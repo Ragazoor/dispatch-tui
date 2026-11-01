@@ -35,7 +35,7 @@ fn a_created_row_carries_no_id() {
 ///
 /// `created_by` is the counterpart claim: unlike `owner`, it is set the same
 /// way in both arms — `core.allium: Task.created_by` survives epic membership
-/// because it exists for a different reader (`sync.allium`'s `own_creations`).
+/// because it exists for a different reader (the `own_tasks` view (`sync.allium`'s own creations)).
 #[test]
 fn the_owner_is_set_exactly_when_there_is_no_epic() {
     let on_my_board = encode::create_task_row(&a_request(), "me", "me", NOW);

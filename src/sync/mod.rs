@@ -28,7 +28,6 @@
 //! - [`writes`] — [`ReducerCaller`], the transport every store write goes
 //!   through, and the identity a write is stamped with.
 //! - [`encode`] / [`decode`] — model rows to and from the generated bindings.
-//! - [`subtree`] — the epic subtree a board follows.
 //! - [`identity`] — the three-way verdict on an identity the store offers.
 //!   Pure, and the only fatal decision in the subsystem.
 //! - [`connection`] — the connection lifecycle as a state machine. No I/O, no
@@ -62,7 +61,6 @@ pub mod rows;
 pub mod rules_gate;
 pub mod sdk_connector;
 pub mod session;
-pub mod subtree;
 pub mod writes;
 
 #[cfg(test)]
