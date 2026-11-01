@@ -266,7 +266,6 @@ fn every_task_move_path_meets_the_same_rules_on_both_stores() {
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
-                vec![],
                 "host-a",
             ))
             .await
