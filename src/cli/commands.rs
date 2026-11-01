@@ -71,24 +71,47 @@ pub async fn list_repos(database: &Store, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
+/// Whether `path` is on this machine's disk. `Err` when the filesystem cannot
+/// say (a permission error, a detached disk): that is not "missing", and the
+/// row stays.
+fn path_on_disk(path: &str) -> std::io::Result<bool> {
+    Path::new(&expand_tilde(path)).try_exists()
+}
+
 /// `dispatch prune-repo-paths` — forget every repo path THIS host saved that no
 /// longer exists on its disk.
 ///
 /// The table is shared, but a path is a place on one machine: a row another
-/// host saved, or one saved before rows carried a host, says nothing about
-/// this disk and is left alone, verify command and all. `kept` counts the
-/// whole store.
+/// host saved says nothing about this disk and is left alone, verify command
+/// and all. A row saved before rows carried a host belongs to no one: this
+/// host adopts it when the path exists here and removes it when it does not.
+/// `kept` counts the whole store.
 pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<()> {
     let total = database.list_repo_paths().await.len();
     let mut removed = 0;
     for p in &database.list_repo_paths_saved_by_this_host().await {
-        let expanded = expand_tilde(p);
-        // Only a path that is certainly gone: a permission error or a detached
-        // disk is not "missing", and the row goes for good.
-        if matches!(Path::new(&expanded).try_exists(), Ok(false)) {
+        if matches!(path_on_disk(p), Ok(false)) {
             database.delete_repo_path(p).await?;
             writeln!(out, "removed: {p}")?;
             removed += 1;
+        }
+    }
+    // Rows saved before hosts were stamped belong to no one: judge them here
+    // too, or they live forever. Present on this disk, this host adopts the
+    // row (a re-save stamps the host and keeps the verify command); missing,
+    // the row goes.
+    for p in &database.list_unowned_repo_paths().await {
+        match path_on_disk(p) {
+            Ok(false) => {
+                database.delete_repo_path(p).await?;
+                writeln!(out, "removed: {p}")?;
+                removed += 1;
+            }
+            Ok(true) => {
+                database.save_repo_path(p).await?;
+                writeln!(out, "adopted: {p}")?;
+            }
+            Err(_) => {}
         }
     }
     writeln!(out, "{removed} path(s) removed, {} kept.", total - removed)?;

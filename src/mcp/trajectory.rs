@@ -19,11 +19,65 @@ pub struct TrajectoryEntry {
 
 const SCHEMA_VERSION: &str = "1.0.0";
 
+/// Longest `result` kept per entry, in serialised bytes. A longer one is
+/// replaced by its truncated text, so one huge tool result cannot bloat the
+/// file or make a single append large enough to interleave with another.
+pub const MAX_RESULT_BYTES: usize = 64 * 1024;
+const TRUNCATED_MARKER: &str = "…[truncated]";
+
+/// How long a task's trajectory file is kept after its last write.
+pub const RETENTION: std::time::Duration = std::time::Duration::from_secs(90 * 86_400);
+
+fn capped_result(result: &Value) -> Value {
+    let text = result.to_string();
+    if text.len() <= MAX_RESULT_BYTES {
+        return result.clone();
+    }
+    let mut end = MAX_RESULT_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    Value::String(format!("{}{TRUNCATED_MARKER}", &text[..end]))
+}
+
+/// Deletes `*.jsonl` files under the trajectories dir not written for `max_age`.
+/// Best effort: a file it cannot inspect or remove stays.
+pub async fn prune_older_than(data_dir: &Path, max_age: std::time::Duration) {
+    let dir = data_dir.join(TRAJECTORIES_SUBDIR);
+    let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .await
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > max_age);
+        if stale {
+            if let Err(e) = tokio::fs::remove_file(&path).await {
+                tracing::warn!(error = ?e, path = %path.display(), "failed to prune trajectory file");
+            }
+        }
+    }
+}
+
+/// Runs [`prune_older_than`] once per process, on the first append.
+static PRUNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub async fn append_entry(data_dir: &Path, entry: &TrajectoryEntry) {
     let trajectories_dir = data_dir.join(TRAJECTORIES_SUBDIR);
     if let Err(e) = tokio::fs::create_dir_all(&trajectories_dir).await {
         tracing::warn!(error = ?e, path = %trajectories_dir.display(), "failed to create trajectories dir");
         return;
+    }
+    if !PRUNED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        prune_older_than(data_dir, RETENTION).await;
     }
     let path = trajectories_dir.join(format!("{}.jsonl", entry.task_id));
     let file = match tokio::fs::OpenOptions::new()
@@ -41,12 +95,21 @@ pub async fn append_entry(data_dir: &Path, entry: &TrajectoryEntry) {
     #[derive(Serialize)]
     struct WithVersion<'a> {
         schema_version: &'static str,
-        #[serde(flatten)]
-        entry: &'a TrajectoryEntry,
+        timestamp: DateTime<Utc>,
+        task_id: i64,
+        method: &'a str,
+        args: &'a Value,
+        result: Value,
+        duration_ms: u64,
     }
     let payload = WithVersion {
         schema_version: SCHEMA_VERSION,
-        entry,
+        timestamp: entry.timestamp,
+        task_id: entry.task_id,
+        method: &entry.method,
+        args: &entry.args,
+        result: capped_result(&entry.result),
+        duration_ms: entry.duration_ms,
     };
     match serde_json::to_string(&payload) {
         Ok(mut line) => {
@@ -104,6 +167,72 @@ mod tests {
         assert_eq!(parsed["task_id"], 42);
         assert_eq!(parsed["method"], "update_tasks");
         assert_eq!(parsed["duration_ms"], 10);
+    }
+
+    #[tokio::test]
+    async fn an_oversized_result_is_capped_and_marked() {
+        let dir = tempdir().unwrap();
+        let mut entry = make_entry("get_task");
+        let big = "é".repeat(MAX_RESULT_BYTES);
+        entry.result = json!({"content": [{"type": "text", "text": big}]});
+        append_entry(dir.path(), &entry).await;
+        let content =
+            tokio::fs::read_to_string(dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"))
+                .await
+                .unwrap();
+        assert!(
+            content.len() < MAX_RESULT_BYTES * 2 + 1024,
+            "line was not capped"
+        );
+        let parsed: Value = serde_json::from_str(content.trim()).unwrap();
+        let result = parsed["result"].as_str().unwrap();
+        assert!(result.ends_with(TRUNCATED_MARKER));
+        assert_eq!(parsed["method"], "get_task");
+    }
+
+    #[tokio::test]
+    async fn a_small_result_is_kept_as_json() {
+        let dir = tempdir().unwrap();
+        append_entry(dir.path(), &make_entry("get_task")).await;
+        let content =
+            tokio::fs::read_to_string(dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"))
+                .await
+                .unwrap();
+        let parsed: Value = serde_json::from_str(content.trim()).unwrap();
+        assert_eq!(parsed["result"]["content"][0]["text"], "ok");
+    }
+
+    #[tokio::test]
+    async fn prune_older_than_removes_only_stale_jsonl_files() {
+        let dir = tempdir().unwrap();
+        let t = dir.path().join(TRAJECTORIES_SUBDIR);
+        tokio::fs::create_dir_all(&t).await.unwrap();
+        let old = t.join("1.jsonl");
+        let fresh = t.join("2.jsonl");
+        let other = t.join("notes.txt");
+        for f in [&old, &fresh, &other] {
+            tokio::fs::write(f, "x").await.unwrap();
+        }
+        let day = std::time::Duration::from_secs(86_400);
+        let aged = std::time::SystemTime::now() - day * 100;
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(aged)
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&other)
+            .unwrap()
+            .set_modified(aged)
+            .unwrap();
+
+        prune_older_than(dir.path(), day * 90).await;
+
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert!(other.exists(), "only .jsonl files are ours to delete");
     }
 
     #[tokio::test]

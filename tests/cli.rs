@@ -839,25 +839,70 @@ async fn prune_repo_paths_keeps_a_missing_path_another_host_saved() {
     );
 }
 
-// A row saved before rows carried a host has no owner, so no host can call it
-// gone.
+// W2 — a row saved before rows carried a host has no owner, so every host's
+// prune judges it: gone from this disk, it is removed with its verify command.
 #[tokio::test]
-async fn prune_repo_paths_keeps_a_missing_path_with_no_recorded_host() {
+async fn prune_repo_paths_removes_an_unowned_row_whose_path_is_missing_here() {
     let (_dir, db, memory) = shared_store_with_caller();
-    let legacy = "/home/old/dispatch-test-legacy-row";
+    let legacy = "/dispatch-test-nonexistent-legacy-77777";
     seed_repo_path_saved_by(&db, &memory, "", legacy).await;
 
     let mut out = Vec::new();
     commands::prune_repo_paths(&db, &mut out).await.unwrap();
+    let stdout = String::from_utf8(out).unwrap();
 
-    assert!(String::from_utf8(out)
-        .unwrap()
-        .contains("0 path(s) removed"));
+    assert!(
+        stdout.contains(&format!("removed: {legacy}")),
+        "got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 path(s) removed, 0 kept."),
+        "got: {stdout}"
+    );
     assert!(
         dispatch_tui::store::RepoConfigRead::get_verify_command(&db, legacy)
             .await
-            .is_some(),
-        "a row with no host must stay"
+            .is_none()
+    );
+}
+
+// W2 — an unowned row whose path exists here is adopted: kept, stamped with
+// this host, verify command intact.
+#[tokio::test]
+async fn prune_repo_paths_adopts_an_unowned_row_whose_path_exists_here() {
+    let (dir, db, memory) = shared_store_with_caller();
+    let legacy = dir.path().to_string_lossy().into_owned();
+    seed_repo_path_saved_by(&db, &memory, "", &legacy).await;
+    assert!(
+        !dispatch_tui::store::RepoConfigRead::list_repo_paths_saved_by_this_host(&db)
+            .await
+            .contains(&legacy),
+        "starts unowned"
+    );
+
+    let mut out = Vec::new();
+    commands::prune_repo_paths(&db, &mut out).await.unwrap();
+    let stdout = String::from_utf8(out).unwrap();
+
+    assert!(
+        stdout.contains(&format!("adopted: {legacy}")),
+        "got: {stdout}"
+    );
+    assert!(
+        stdout.contains("0 path(s) removed, 1 kept."),
+        "got: {stdout}"
+    );
+    assert!(
+        dispatch_tui::store::RepoConfigRead::list_repo_paths_saved_by_this_host(&db)
+            .await
+            .contains(&legacy),
+        "adopted rows belong to this host"
+    );
+    assert_eq!(
+        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, &legacy)
+            .await
+            .as_deref(),
+        Some("cargo test")
     );
 }
 

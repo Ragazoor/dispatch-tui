@@ -157,7 +157,7 @@ impl TaskService {
     /// Supports the full `UpdateTaskParams` builder (title, description,
     /// repo_path, pr_url, worktree, tmux_window, base_branch, sub_status,
     /// epic_id, sort_order, tag, status). Epic recalculation is the store's:
-    /// `patch_task` and `set_task_epic` recalculate the epics they touch.
+    /// the `update_task` reducer recalculates the epics it touches.
     ///
     /// This is the only status-writing path on the service: it can transition
     /// to any status including `Done`. The restriction against agents

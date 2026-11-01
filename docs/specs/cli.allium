@@ -328,22 +328,32 @@ rule PruneRepoPathsViaCli {
 
     let mine = core/SavedRepoPaths where host = this_host
     let missing = mine where not path_exists_on_disk(path)
+    let unowned = core/SavedRepoPaths where host = null
+    let unowned_missing = unowned where not path_exists_on_disk(path)
+    let unowned_here = unowned where path_exists_on_disk(path)
 
     ensures:
-        for repo in missing:
+        for repo in missing + unowned_missing:
             SavedRepoPathForgotten(repo: repo)
             CliPrinted(line: "removed: " + repo.path)
-    ensures: CliPrinted(line: prune_summary(missing.count, core/SavedRepoPaths.count - missing.count))
+        for repo in unowned_here:
+            SavedRepoPathAdopted(repo: repo, host: this_host)
+            CliPrinted(line: "adopted: " + repo.path)
+    ensures: CliPrinted(line: prune_summary(missing.count + unowned_missing.count, core/SavedRepoPaths.count - missing.count - unowned_missing.count))
 
     @guidance
         -- `dispatch prune-repo-paths`. Existence is judged on THIS machine's
-        -- filesystem, after tilde expansion, and only for rows THIS host
-        -- saved. A row another host saved, or one saved before rows carried
-        -- a host (host = null), is never judged and never removed: its path
-        -- says nothing about this disk, and its verify command goes with the
-        -- row. The summary line reads `<removed> path(s) removed, <kept>
-        -- kept.`; kept counts every row left in the store, not only this
-        -- host's. A row this host removes takes its verify command with it.
+        -- filesystem, after tilde expansion. A row another host saved is
+        -- never judged and never removed: its path says nothing about this
+        -- disk, and its verify command goes with the row. A row saved before
+        -- rows carried a host (host = null) belongs to no one, so every
+        -- host's prune judges it: where the path exists on this disk the
+        -- host adopts it (stamps itself, keeping the verify command), and
+        -- where it is missing the row is removed. Without this rule such a
+        -- row would live forever. The summary line reads `<removed> path(s)
+        -- removed, <kept> kept.`; kept counts every row left in the store,
+        -- adopted ones included, not only this host's. A row this host
+        -- removes takes its verify command with it.
         -- A path is judged missing only when the filesystem says it is not
         -- there (NotFound): a permission error or a detached disk leaves the
         -- row alone.

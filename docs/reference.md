@@ -172,7 +172,13 @@ dispatch verify-feed '<command>'                 # run a feed command and valida
 dispatch repo set-verify <path> <command>        # set the repo's verify command
 dispatch repo clear-verify <path>
 dispatch repo list                               # known repo paths + their verify commands
-dispatch prune-repo-paths                        # forget repo paths that no longer exist
+dispatch prune-repo-paths                        # forget repo paths that no longer exist; judges only rows this host saved
+                                                 # (plus unowned legacy rows: adopts if present here, removes if missing)
+
+# Shared store (see "SpacetimeDB" below)
+dispatch spacetime dump-server [--out <file>]    # snapshot a server's shared tables
+dispatch spacetime restore <file>                # write a snapshot into a server
+dispatch store import --from <store-or-folder>   # bring an old hand-started store's rows into the managed one
 ```
 
 Tasks are created and mutated via the MCP tools (`create_task`,

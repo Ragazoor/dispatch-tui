@@ -205,6 +205,10 @@ enum Commands {
         action: RepoAction,
     },
     /// Remove repo paths that no longer exist on the filesystem.
+    ///
+    /// Only rows this host saved are judged, plus rows saved before hosts were
+    /// recorded: this host adopts one whose path exists here and removes one
+    /// whose path is missing. A row another host saved is left alone.
     PruneRepoPaths,
     /// Back up a SpacetimeDB server's shared domain, or restore it.
     ///

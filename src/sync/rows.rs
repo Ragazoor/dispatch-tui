@@ -1123,13 +1123,28 @@ impl SharedRows {
     }
 
     /// The paths `host` saved, in [`Self::repo_paths`]'s order. A row with no
-    /// recorded host belongs to no one, so it is in nobody's list.
+    /// recorded host belongs to no one, so it is in nobody's list; see
+    /// [`Self::repo_paths_unowned`].
     pub fn repo_paths_saved_by(&self, host: &str) -> Vec<String> {
         self.read(|rows| {
             let mut out: Vec<&RepoPathRow> = rows
                 .repo_paths
                 .values()
                 .filter(|row| !row.host.is_empty() && row.host == host)
+                .collect();
+            out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(a.id.cmp(&b.id)));
+            out.into_iter().map(|row| row.path.clone()).collect()
+        })
+    }
+
+    /// The paths saved before rows carried a host, in [`Self::repo_paths`]'s
+    /// order. No host owns them; every host's prune may judge them.
+    pub fn repo_paths_unowned(&self) -> Vec<String> {
+        self.read(|rows| {
+            let mut out: Vec<&RepoPathRow> = rows
+                .repo_paths
+                .values()
+                .filter(|row| row.host.is_empty())
                 .collect();
             out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(a.id.cmp(&b.id)));
             out.into_iter().map(|row| row.path.clone()).collect()

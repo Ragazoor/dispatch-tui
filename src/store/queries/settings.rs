@@ -94,6 +94,10 @@ impl super::super::RepoConfigRead for Store {
         self.rows.repo_paths_saved_by(&self.host)
     }
 
+    async fn list_unowned_repo_paths(&self) -> Vec<String> {
+        self.rows.repo_paths_unowned()
+    }
+
     async fn get_verify_command(&self, path: &str) -> Option<String> {
         self.rows.verify_command(path)
     }
