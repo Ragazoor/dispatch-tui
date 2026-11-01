@@ -1109,8 +1109,9 @@ rule ToggleHiddenEpic {
         -- it again shows the whole subtree, clearing any sub-epic the user had
         -- hidden on its own (task #98757). Space on a partly hidden row shows
         -- its whole subtree too; a second Space then hides the parent. Space
-        -- on a row hidden by its parent only toggles that epic's own entry,
-        -- which changes nothing visible while the parent stays hidden.
+        -- on a row hidden by its parent adds or removes that epic's own entry
+        -- (removing also clears its sub-epics' entries), which changes nothing
+        -- visible while the parent stays hidden.
 }
 
 rule ToggleHiddenWorkPackage {
