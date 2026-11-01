@@ -521,6 +521,8 @@ mod feeds;
 mod learning_placement;
 #[path = "memory_caller_conformance/move_epic.rs"]
 mod move_epic;
+#[path = "memory_caller_conformance/move_paths.rs"]
+mod move_paths;
 #[path = "memory_caller_conformance/pr_state.rs"]
 mod pr_state;
 #[path = "memory_caller_conformance/private_moves.rs"]

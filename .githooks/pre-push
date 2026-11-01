@@ -45,6 +45,12 @@ echo "no-test-sleep..."
 echo "no-test-sleep self-test..."
 bash ./scripts/test-check-no-test-sleep.sh
 
+echo "single-write-service..."
+./scripts/check-single-write-service.sh
+
+echo "single-write-service self-test..."
+bash ./scripts/test-check-single-write-service.sh
+
 echo "commit-msg self-test..."
 bash ./scripts/test-check-commit-msg.sh
 

@@ -1,0 +1,9 @@
+# Sanctioned multi-write service functions: `path::function  reason`.
+# Each call site must be an exclusive branch or an idempotent retry, never two
+# writes that both land for one logical change.
+src/service/people.rs::set_member  exclusive match arms: remove OR set role
+src/service/tasks/crud.rs::create_task_inner  if/else: signalled OR plain create
+src/service/tasks/crud.rs::record_hook_event  exclusive match arms per hook kind
+src/service/tasks/crud.rs::record_subagent_event  exclusive match arms per event
+src/service/tasks/session.rs::report_rebase_done  one idempotent retry of the same report
+src/service/tasks/session.rs::report_session_done  one idempotent retry of the same report

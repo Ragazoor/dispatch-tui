@@ -393,6 +393,12 @@ jobs:
       - name: Self-test the no-test-sleep checker
         run: bash ./scripts/test-check-no-test-sleep.sh
 
+      - name: Reject multi-write service methods
+        run: ./scripts/check-single-write-service.sh
+
+      - name: Self-test the single-write-service checker
+        run: bash ./scripts/test-check-single-write-service.sh
+
       - name: Self-test the commit-message checker
         run: bash ./scripts/test-check-commit-msg.sh
 

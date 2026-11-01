@@ -54,6 +54,8 @@ fn pre_push_hook_runs_full_check_sequence() {
         "scripts/test-check-doc-headings.sh",
         "scripts/check-no-test-sleep.sh",
         "scripts/test-check-no-test-sleep.sh",
+        "scripts/check-single-write-service.sh",
+        "scripts/test-check-single-write-service.sh",
         "scripts/test-check-commit-msg.sh",
         "scripts/test-fetch-reviews.sh",
         "scripts/test-bots-conf.sh",
