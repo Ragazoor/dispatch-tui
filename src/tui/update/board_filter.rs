@@ -2,7 +2,7 @@
 //! hide-lists, and the overlay's tabs (`board-layout.allium`, "Board Filter
 //! Overlay Layout").
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::super::types::*;
 use super::super::{filtered_repos, fuzzy_matches_lower, has_new_repo_option, App};
@@ -26,12 +26,30 @@ impl App {
         let overlay = &self.filter_overlay;
         let query = overlay.epic_query.to_lowercase();
         let hidden = &self.filter.hidden_epics;
-        let known: std::collections::HashSet<EpicId> = epics.iter().map(|e| e.id).collect();
+        let known: HashSet<EpicId> = epics.iter().map(|e| e.id).collect();
         let mut children: HashMap<Option<EpicId>, Vec<usize>> = HashMap::new();
         for (i, e) in epics.iter().enumerate() {
             // A parent the board does not hold re-roots the child.
             let parent = e.parent_epic_id.filter(|p| known.contains(p));
             children.entry(parent).or_default().push(i);
+        }
+        // Every shown ancestor of a hidden epic is partly hidden, read from
+        // the whole tree so a folded or filtered-out row still counts.
+        let parent_of: HashMap<EpicId, EpicId> = epics
+            .iter()
+            .filter_map(|e| Some((e.id, e.parent_epic_id.filter(|p| known.contains(p))?)))
+            .collect();
+        let mut has_hidden_below: HashSet<EpicId> = HashSet::new();
+        for &h in hidden.iter().filter(|h| known.contains(h)) {
+            let mut at = h;
+            // Bounded by the epic count, so a parent cycle cannot hang this.
+            for _ in 0..epics.len() {
+                let Some(&p) = parent_of.get(&at) else { break };
+                if !has_hidden_below.insert(p) {
+                    break;
+                }
+                at = p;
+            }
         }
         let qualifies = |i: usize| {
             let e = &epics[i];
@@ -44,6 +62,7 @@ impl App {
             children: &children,
             epics,
             hidden,
+            has_hidden_below: &has_hidden_below,
             open: query.is_empty().then_some(&overlay.open_epics),
             qualifies: &qualifies,
             out: vec![],
@@ -90,9 +109,20 @@ impl App {
         vec![]
     }
 
+    /// Space on an epic row (`ToggleHiddenEpic`): a hidden or partly hidden
+    /// epic shows its whole subtree, clearing every sub-epic's own hide; a
+    /// shown one, or one hidden only by its parent, goes on the list.
     pub(in crate::tui) fn handle_toggle_hidden_epic(&mut self, id: EpicId) -> Vec<Command> {
-        if !self.filter.hidden_epics.remove(&id) {
-            self.filter.hidden_epics.insert(id);
+        let epics = &self.board.epics;
+        let hidden = &mut self.filter.hidden_epics;
+        // Inclusive of `id` itself.
+        let subtree = crate::models::descendant_epic_ids(id, epics);
+        let partly_hidden = !super::super::search::hidden_epic_closure(hidden, epics).contains(&id)
+            && subtree.iter().any(|e| *e != id && hidden.contains(e));
+        if hidden.contains(&id) || partly_hidden {
+            hidden.retain(|e| !subtree.contains(e));
+        } else {
+            hidden.insert(id);
         }
         // Showing a hidden done epic again drops its row unless `d` is on.
         self.clamp_epic_cursor();
@@ -326,9 +356,11 @@ fn sorted_ids_json(ids: impl Iterator<Item = i64>) -> String {
 struct SubtreeWalk<'a> {
     children: &'a HashMap<Option<EpicId>, Vec<usize>>,
     epics: &'a [crate::models::Epic],
-    hidden: &'a std::collections::HashSet<EpicId>,
+    hidden: &'a HashSet<EpicId>,
+    /// Epics with some sub-epic on the hide-list, at any depth.
+    has_hidden_below: &'a HashSet<EpicId>,
     /// The unfolded epics; `None` while a query stands and folds are ignored.
-    open: Option<&'a std::collections::HashSet<EpicId>>,
+    open: Option<&'a HashSet<EpicId>>,
     qualifies: &'a dyn Fn(usize) -> bool,
     out: Vec<FilterEpicRow>,
 }
@@ -352,6 +384,8 @@ impl SubtreeWalk<'_> {
                 FilterEpicMark::HiddenByParent
             } else if own_hidden {
                 FilterEpicMark::Hidden
+            } else if self.has_hidden_below.contains(&e.id) {
+                FilterEpicMark::PartlyHidden
             } else {
                 FilterEpicMark::Shown
             };

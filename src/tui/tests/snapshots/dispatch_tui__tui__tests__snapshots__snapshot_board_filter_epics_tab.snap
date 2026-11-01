@@ -18,7 +18,7 @@ expression: rendered
  │    no subtasks           │ ╔ Board Filter ════════════════════════════════════════════╗
  ╰──────────────────────────╯ ║   Repos (include)  │  Epics ·2  │  Work packages         ║
  ╭──────────────────────────╮ ║                                                          ║
- │  ▎ #13 Dependabot        │ ║  ► ▾[ ] #10 DB maintenance                               ║
+ │  ▎ #13 Dependabot        │ ║  ► ▾[~] #10 DB maintenance                               ║
  │    no subtasks           │ ║       [x] #11 Staging                                    ║
  ╰──────────────────────────╯ ║       [ ] #12 Prod                                       ║
                               ║    ▾[x] #14 Dispatch                                     ║

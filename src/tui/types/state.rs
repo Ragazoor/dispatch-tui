@@ -707,6 +707,9 @@ pub enum FilterEpicMark {
     Hidden,
     /// Hidden because an ancestor is: Space on it cannot bring it back.
     HiddenByParent,
+    /// Shown, but some sub-epic is on the hide-list: Space shows the whole
+    /// subtree.
+    PartlyHidden,
 }
 
 /// One row of the Epics tab's tree.

@@ -308,8 +308,9 @@ fn repo_rows<'a>(app: &'a App, styles: &HintStyles) -> Vec<Line<'a>> {
         .collect()
 }
 
-/// The epic tree: `[x]` hidden, `[-]` hidden because an ancestor is, `[ ]`
-/// shown; children indented two spaces per level.
+/// The epic tree: `[x]` hidden, `[-]` hidden because an ancestor is, `[~]`
+/// shown with some sub-epic hidden, `[ ]` shown; children indented two spaces
+/// per level.
 fn epic_list_rows<'a>(rows: &[FilterEpicRow], cursor: usize, styles: &HintStyles) -> Vec<Line<'a>> {
     rows.iter()
         .enumerate()
@@ -318,6 +319,7 @@ fn epic_list_rows<'a>(rows: &[FilterEpicRow], cursor: usize, styles: &HintStyles
                 FilterEpicMark::Shown => "[ ]",
                 FilterEpicMark::Hidden => "[x]",
                 FilterEpicMark::HiddenByParent => "[-]",
+                FilterEpicMark::PartlyHidden => "[~]",
             };
             let indent = "  ".repeat(row.depth);
             let fold = match (row.has_children, row.folded) {

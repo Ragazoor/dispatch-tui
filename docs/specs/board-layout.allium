@@ -1079,6 +1079,12 @@ entity BoardHides {
     task_is_hidden(task):
         task.epic != null and epic_is_hidden(task.epic)
 
+    -- A shown epic with some sub-epic on the list: part of its subtree is
+    -- hidden though its own card is not. The overlay marks it partly hidden.
+    epic_is_partly_hidden(epic):
+        not epic_is_hidden(epic)
+        and hidden_epics.any(h => h in epic.subtree_epics)
+
     package_is_hidden(package): package in hidden_packages
 
     hidden_count: hidden_epics.count + hidden_packages.count
@@ -1087,15 +1093,24 @@ entity BoardHides {
 rule ToggleHiddenEpic {
     when: ToggleHiddenEpic(epic)
     ensures:
-        if epic in board_hides.hidden_epics:
+        if epic in board_hides.hidden_epics
+            or board_hides.epic_is_partly_hidden(epic):
+            -- Show the whole subtree: the epic and every sub-epic leave the
+            -- list, done ones and unlisted ones included.
             board_hides.hidden_epics.remove(epic)
+            for sub_epic in epic.subtree_epics:
+                board_hides.hidden_epics.remove(sub_epic)
         else:
             board_hides.hidden_epics.add(epic)
 
     @guidance
-        -- Space on an epic row in the overlay's Epics tab. Toggling a parent
-        -- does not touch its children's own entries: a child the user hid
-        -- separately stays hidden when the parent is shown again.
+        -- Space on an epic row in the overlay's Epics tab. The tab works like
+        -- a tree of checkboxes: hiding a parent hides its subtree, and showing
+        -- it again shows the whole subtree, clearing any sub-epic the user had
+        -- hidden on its own (task #98757). Space on a partly hidden row shows
+        -- its whole subtree too; a second Space then hides the parent. Space
+        -- on a row hidden by its parent only toggles that epic's own entry,
+        -- which changes nothing visible while the parent stays hidden.
 }
 
 rule ToggleHiddenWorkPackage {
@@ -1152,9 +1167,15 @@ rule ToggleHiddenWorkPackage {
 --   it could not show it anyway.) A listed epic's ancestors are listed too,
 --   so no row appears out of its place in the tree. `d` switches the list to every
 --   epic, done ones included, and back; this lets the user hide a done
---   epic's cards in the Done column. A child of a hidden parent draws as
+--   epic's cards in the Done column. Each row carries one of four marks:
+--   `[ ]` shown, `[x]` hidden on its own, `[-]` hidden by its parent, and
+--   `[~]` partly hidden (BoardHides.epic_is_partly_hidden: shown, but some
+--   sub-epic is on the hide-list). A child of a hidden parent draws as
 --   hidden-by-parent, distinct from hidden on its own, because Space on it
---   cannot bring it back while the parent is hidden.
+--   cannot bring it back while the parent is hidden. The partly hidden mark
+--   is read from the whole subtree, not from the listed rows, so a folded
+--   parent still shows that work under it is hidden (task #98757): without
+--   it a folded `[ ]` read as nothing hidden.
 --
 --   The tree folds. An epic with listed children carries a `▾` (open) or `▸`
 --   (folded) before its checkbox; a leaf carries neither. `z` folds or

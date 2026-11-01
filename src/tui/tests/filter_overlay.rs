@@ -205,13 +205,92 @@ fn a_child_of_a_hidden_parent_is_marked_hidden_by_parent() {
     );
 }
 
-#[test]
-fn showing_a_parent_again_keeps_a_child_hidden_on_its_own() {
+/// Alpha 1 → Beta 2 → Zeta 6 (done), so a grandchild and a done sub-epic are
+/// both in Alpha's subtree.
+fn deep_overlay_app() -> App {
     let mut app = overlay_app();
-    app.filter.hidden_epics.extend([EpicId(1), EpicId(2)]);
+    app.board
+        .epics
+        .push(epic(6, Some(2), "Zeta", TaskStatus::Done));
+    app
+}
+
+#[test]
+fn showing_a_parent_again_shows_its_whole_subtree() {
+    let mut app = deep_overlay_app();
+    app.filter
+        .hidden_epics
+        .extend([EpicId(1), EpicId(2), EpicId(6), EpicId(3)]);
     press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Char(' '));
-    assert_eq!(app.filter.hidden_epics, [EpicId(2)].into_iter().collect());
+    assert_eq!(
+        app.filter.hidden_epics,
+        [EpicId(3)].into_iter().collect(),
+        "the parent, its child and its done grandchild all leave the list; \
+         an unrelated epic stays hidden"
+    );
+}
+
+#[test]
+fn hide_then_show_a_parent_leaves_nothing_in_its_subtree_hidden() {
+    let mut app = deep_overlay_app();
+    app.filter.hidden_epics.insert(EpicId(6));
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char(' '));
+    press(&mut app, KeyCode::Char(' '));
+    press(&mut app, KeyCode::Char(' '));
+    assert!(app.filter.hidden_epics.is_empty());
+}
+
+#[test]
+fn a_folded_parent_with_a_hidden_sub_epic_is_marked_partly_hidden() {
+    let mut app = deep_overlay_app();
+    app.filter.hidden_epics.insert(EpicId(6));
+    press(&mut app, KeyCode::Tab);
+    let rows = app.filter_epic_rows();
+    assert!(rows[0].folded);
+    assert_eq!(rows[0].mark, FilterEpicMark::PartlyHidden);
+}
+
+#[test]
+fn every_shown_ancestor_of_a_hidden_epic_is_partly_hidden() {
+    let mut app = deep_overlay_app();
+    app.filter.hidden_epics.insert(EpicId(6));
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('Z'));
+    let marks: Vec<_> = app
+        .filter_epic_rows()
+        .iter()
+        .filter(|r| r.id != EpicId(3))
+        .map(|r| r.mark)
+        .collect();
+    assert_eq!(
+        marks,
+        vec![
+            FilterEpicMark::PartlyHidden,
+            FilterEpicMark::PartlyHidden,
+            FilterEpicMark::Hidden,
+        ]
+    );
+}
+
+#[test]
+fn a_hidden_parent_is_hidden_not_partly_hidden() {
+    let mut app = deep_overlay_app();
+    app.filter.hidden_epics.extend([EpicId(1), EpicId(2)]);
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.filter_epic_rows()[0].mark, FilterEpicMark::Hidden);
+}
+
+#[test]
+fn space_on_a_partly_hidden_row_shows_the_subtree_then_hides_the_parent() {
+    let mut app = deep_overlay_app();
+    app.filter.hidden_epics.extend([EpicId(2), EpicId(6)]);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char(' '));
+    assert!(app.filter.hidden_epics.is_empty());
+    press(&mut app, KeyCode::Char(' '));
+    assert_eq!(app.filter.hidden_epics, [EpicId(1)].into_iter().collect());
 }
 
 #[test]
