@@ -498,19 +498,3 @@ async fn an_unknown_visibility_is_refused_and_names_the_choices() {
     );
     assert!(state.db.list_work_packages().await.is_empty());
 }
-
-#[tokio::test]
-async fn create_work_package_in_an_unknown_workspace_lists_the_callers_workspaces() {
-    let state = test_state().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_work_package",
-            "arguments": { "title": "P", "workspace_id": 9999 }
-        })),
-    )
-    .await;
-    assert_error(&resp, "unknown workspace_id 9999");
-    assert_error(&resp, "workspace");
-}

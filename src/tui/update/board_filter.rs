@@ -134,6 +134,14 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_toggle_all_filter_epic_folds(&mut self) -> Vec<Command> {
+        // A standing query sets folds aside, so there is nothing to toggle.
+        if !self.filter_overlay.epic_query.is_empty() {
+            return vec![];
+        }
+        let kept = self
+            .filter_epic_rows()
+            .get(self.filter_overlay.epic_cursor)
+            .map(|r| r.id);
         // A folded parent hides any folded descendant, so a visible fold is
         // enough to tell whether anything is folded.
         if self.filter_epic_rows().iter().any(|r| r.folded) {
@@ -142,6 +150,12 @@ impl App {
             self.filter_overlay.open_epics.extend(all);
         } else {
             self.filter_overlay.open_epics.clear();
+        }
+        // Rows appear and vanish under the cursor: follow the epic, not the index.
+        if let Some(index) =
+            kept.and_then(|id| self.filter_epic_rows().iter().position(|r| r.id == id))
+        {
+            self.filter_overlay.epic_cursor = index;
         }
         self.clamp_epic_cursor();
         self.dirty = true;

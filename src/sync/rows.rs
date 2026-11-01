@@ -369,7 +369,9 @@ impl SharedRows {
     /// `AViewUpdateNeverErasesTheRow` in `sync.allium`.
     pub fn retire_task(&self, old: &bindings::Task) {
         let Ok(old) = decode::task(old) else {
-            // Never stored decoded, so there is nothing of it to remove.
+            // Never stored decoded; only its undecodable mark can remain.
+            let id = old.id;
+            self.write(|rows| rows.undecodable_tasks.remove(&id).is_some());
             return;
         };
         self.write(|rows| {

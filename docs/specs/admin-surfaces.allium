@@ -100,15 +100,18 @@ rule PersonResolution {
 
     ensures:
         if by_identity.count = 1: PersonResolved(by_identity.first)
+        else if by_identity.count > 1: PersonAmbiguous(by_identity)
         else if by_name.count = 1: PersonResolved(by_name.first)
-        else if by_name.count > 1 or by_identity.count > 1: PersonAmbiguous(matches)
+        else if by_name.count > 1: PersonAmbiguous(by_name)
         else: PersonUnknown(wanted)
 
     @guidance
         -- Used by the screen's add-member and grant prompts and by the tools'
         -- person argument; one function, so a key and a tool cannot disagree.
         -- An identity match wins over a name match: a person whose display
-        -- name looks like somebody else's identity cannot hijack it.
+        -- name looks like somebody else's identity cannot hijack it. Several
+        -- identity matches are ambiguous even when one name matches exactly:
+        -- the text was meant as an identity, so a name is not consulted.
         -- PersonAmbiguous is the refusal: it lists each match as
         -- "<shown name> (<identity prefix>)" and says to name one by identity.
         -- PersonUnknown says no one has that name and points at

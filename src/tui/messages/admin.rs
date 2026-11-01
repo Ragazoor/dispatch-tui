@@ -10,7 +10,7 @@ use crate::tui::App;
 /// Wrapped by [`crate::tui::types::Message::Admin`] for dispatch.
 #[derive(Debug, Clone)]
 pub enum AdminMessage {
-    /// `W` on the board: open the screen and read the snapshot.
+    /// `A` on the board: open the screen and read the snapshot.
     Open,
     /// The snapshot, read when the screen opened and after every write.
     Loaded(Box<AdminSnapshot>),

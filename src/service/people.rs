@@ -43,7 +43,8 @@ impl PeopleService {
 
     /// `GrantSuperAdmin` or `RevokeSuperAdmin` for the person `person` names
     /// (`admin-surfaces.allium: PersonResolution`). Granting a super-admin or
-    /// revoking a non-super-admin changes nothing and succeeds. Answers the
+    /// revoking a non-super-admin changes nothing and succeeds, once the store
+    /// has said the caller may ask. Answers the
     /// person's shown name.
     pub async fn set_super_admin(
         &self,
@@ -51,8 +52,14 @@ impl PeopleService {
         granted: bool,
     ) -> Result<String, ServiceError> {
         let who = self.resolve(person).await?;
-        if who.is_super_admin != granted {
-            self.db.set_super_admin(&who.identity, granted).await?;
+        // Always ask the store: a cached no-op must not stand in for its
+        // answer on who may ask. Granting is idempotent there; revoking a
+        // person who is no super-admin is the one refusal read as success.
+        if let Err(e) = self.db.set_super_admin(&who.identity, granted).await {
+            let already = !granted && e.to_string().contains("is not a super-admin");
+            if !already {
+                return Err(e.into());
+            }
         }
         Ok(who.shown_name)
     }
@@ -124,9 +131,7 @@ impl PeopleService {
                 who.shown_name
             ))),
             (Some(role), Some(m)) => {
-                if m.role != role {
-                    self.db.set_member_role(m.membership_id, role).await?;
-                }
+                self.db.set_member_role(m.membership_id, role).await?;
                 Ok(format!(
                     "{} is {} of {workspace}",
                     who.shown_name,

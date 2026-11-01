@@ -116,11 +116,6 @@ pub(super) async fn handle_create_epic(
             )
         }
     };
-    if workspace_id != 0 {
-        if let Some(refusal) = unknown_workspace(state, workspace_id).await {
-            return tool_error(id, refusal);
-        }
-    }
     let created = state
         .epic_svc
         .create_epic(CreateEpicParams {
@@ -136,7 +131,7 @@ pub(super) async fn handle_create_epic(
         .await;
     let epic = match created {
         Ok(epic) => epic,
-        Err(e) => return service_err_to_response(id, e),
+        Err(e) => return workspace_refusal(state, id, workspace_id, e).await,
     };
     state.notify_epic_changed(epic.id);
     let text = format!(
@@ -146,25 +141,42 @@ pub(super) async fn handle_create_epic(
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-/// The refusal for a `workspace_id` the caller does not belong to. A workspace
-/// that does not exist and one the caller is not in read the same, so the
-/// answer does not tell which ids are taken.
-pub(super) async fn unknown_workspace(state: &McpState, workspace_id: i64) -> Option<String> {
-    let mine = state.people_svc.my_workspaces().await;
-    if mine.iter().any(|w| w.id == workspace_id) {
-        return None;
+/// The store's refusal of a create, with the caller's workspaces added to a
+/// refusal that is about the workspace. The store decides whether the caller
+/// may create there (`NameWorkspaceAndVisibilityViaMcp`); the local list only
+/// helps the caller pick another. A workspace that does not exist and one the
+/// caller is not in read the same, so the answer does not tell which ids are
+/// taken.
+pub(super) async fn workspace_refusal(
+    state: &McpState,
+    id: Option<Value>,
+    workspace_id: i64,
+    err: crate::service::ServiceError,
+) -> JsonRpcResponse {
+    let about_workspace = workspace_id != 0
+        && matches!(&err, crate::service::ServiceError::Validation(m)
+            if m.contains(&format!("workspace {workspace_id}")));
+    if !about_workspace {
+        return service_err_to_response(id, err);
     }
-    Some(format!(
-        "unknown workspace_id {workspace_id}. {}",
-        format_workspace_choices(&mine)
-    ))
+    let choices = workspace_choices(state).await;
+    let msg = format!("{err}. {choices}");
+    service_err_to_response(id, crate::service::ServiceError::Validation(msg))
 }
 
 /// The workspaces the caller belongs to, for a refusal that asks for a
 /// `workspace_id` (`workspaces.allium: NameWorkspaceAndVisibilityViaMcp`).
 pub(super) async fn workspace_choices(state: &McpState) -> String {
+    if state.people_svc.admin_snapshot().await.me.is_none() {
+        return NOT_SETTLED.to_string();
+    }
     format_workspace_choices(&state.people_svc.my_workspaces().await)
 }
+
+/// Said instead of "you belong to no workspace" while the board does not yet
+/// know who it writes as: the list is empty for want of an identity.
+pub(super) const NOT_SETTLED: &str =
+    "Your identity is not settled yet, so your workspaces are not known; try again in a moment.";
 
 fn format_workspace_choices(mine: &[crate::models::WorkspaceRef]) -> String {
     if mine.is_empty() {

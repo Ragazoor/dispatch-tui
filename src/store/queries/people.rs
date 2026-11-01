@@ -109,9 +109,12 @@ impl super::super::PeopleStore for Store {
                 .find(|w| w.id == id)
                 .map_or_else(|| format!("workspace {id}"), |w| w.name.clone())
         };
-        let unseen = self
-            .rows
-            .unseen_items()
+        let mut unseen_rows = self.rows.unseen_items();
+        // `UnseenItemListing`: by workspace id, then kind, then id.
+        unseen_rows.sort_by(|a, b| {
+            (a.workspace_id, &a.kind, a.item_id).cmp(&(b.workspace_id, &b.kind, b.item_id))
+        });
+        let unseen = unseen_rows
             .into_iter()
             .map(|i| UnseenItemRow {
                 workspace_name: workspace_name(i.workspace_id),

@@ -355,3 +355,97 @@ async fn a_public_item_cannot_be_deleted_through_the_hatch() {
     .await;
     assert_error(&resp, "only a private item");
 }
+
+#[tokio::test]
+async fn a_non_super_admin_is_refused_even_when_the_change_would_be_a_no_op() {
+    let (state, _) = state_with_people().await;
+    // Bob is not a super-admin, so revoking him changes nothing; the store
+    // still answers who may ask.
+    let resp = tool(
+        &state,
+        "set_super_admin",
+        json!({"person": "Bob", "super_admin": false}),
+    )
+    .await;
+    assert_error(&resp, "only a super-admin");
+}
+
+/// The store decides (`NameWorkspaceAndVisibilityViaMcp`); the handler only
+/// adds the caller's workspaces to a refusal that is about the workspace. The
+/// in-memory store runs with the workspace rules off, so the store's refusal
+/// is handed to the decoration directly, in the words the module uses.
+#[tokio::test]
+async fn a_workspace_refusal_from_the_store_carries_the_callers_list() {
+    use crate::service::ServiceError;
+    let (state, _) = state_with_people().await;
+    let refused = super::super::epics::workspace_refusal(
+        &state,
+        None,
+        9999,
+        ServiceError::Validation("the shared store refused: workspace 9999 does not exist".into()),
+    )
+    .await;
+    assert_error(&refused, "workspace 9999 does not exist");
+    assert_error(&refused, "Your workspaces: 1");
+
+    // A refusal about something else passes through undecorated.
+    let other = super::super::epics::workspace_refusal(
+        &state,
+        None,
+        9999,
+        ServiceError::Validation("title is empty".into()),
+    )
+    .await;
+    assert_error(&other, "title is empty");
+}
+
+#[tokio::test]
+async fn a_create_in_a_workspace_the_store_accepts_is_not_stopped_by_the_local_list() {
+    let (state, _) = state_with_people().await;
+    let made = ok_text(
+        &state,
+        "create_work_package",
+        json!({"title": "P", "workspace_id": 1}),
+    )
+    .await;
+    assert!(made.contains("created in workspace 1"), "{made}");
+}
+
+#[tokio::test]
+async fn unseen_items_are_listed_by_workspace_then_kind_then_id() {
+    let (state, store) = state_with_people().await;
+    ok_text(&state, "claim_super_admin", json!({})).await;
+    ok_text(&state, "create_workspace", json!({"name": "Ops"})).await;
+    let snapshot = store.admin_snapshot().await;
+    let ops = snapshot
+        .workspaces
+        .iter()
+        .find(|w| w.name == "Ops")
+        .map(|w| w.id)
+        .expect("Ops exists");
+    // The work package is in the lower-numbered workspace and the epic in the
+    // higher one: kind order alone would list the epic first.
+    ok_text(
+        &state,
+        "create_work_package",
+        json!({"title": "Hidden package", "workspace_id": 1, "visibility": "private"}),
+    )
+    .await;
+    ok_text(
+        &state,
+        "create_epic",
+        json!({"title": "Hidden epic", "workspace_id": ops, "visibility": "private"}),
+    )
+    .await;
+    let me = snapshot.me.unwrap();
+    ok_text(
+        &state,
+        "set_workspace_member",
+        json!({"workspace_id": 1, "person": me, "remove": true}),
+    )
+    .await;
+    let items = ok_text(&state, "list_unseen_items", json!({})).await;
+    let package = items.find("- work_package").expect("package listed");
+    let epic = items.find("- epic").expect("epic listed");
+    assert!(package < epic, "{items}");
+}

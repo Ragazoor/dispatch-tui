@@ -103,3 +103,20 @@ fn an_unseen_item_update_pair_keeps_the_new_row_in_either_order() {
     rows.upsert_unseen_item(&item("new"));
     assert_eq!(rows.unseen_items()[0].creator, "new");
 }
+
+/// A row that never decoded leaves the view too: the id must stop counting as
+/// an undecodable task of its epic.
+#[test]
+fn an_undecodable_task_leaving_the_view_is_forgotten() {
+    let rows = SharedRows::new();
+    let mut bad = task("bad");
+    bad.epic_id = 3;
+    bad.status = "teleported".into();
+    rows.upsert_task(&bad);
+    assert_eq!(
+        rows.undecodable_task_ids_for_epic(EpicId(3)),
+        vec![TaskId(7)]
+    );
+    rows.retire_task(&bad);
+    assert!(rows.undecodable_task_ids_for_epic(EpicId(3)).is_empty());
+}

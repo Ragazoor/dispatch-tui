@@ -85,7 +85,14 @@ impl TuiRuntime {
                 let name = svc
                     .add_member(workspace_id, &person, MemberRole::Member)
                     .await?;
-                Ok(format!("Added {name}"))
+                let workspace = svc
+                    .admin_snapshot()
+                    .await
+                    .workspaces
+                    .into_iter()
+                    .find(|w| w.id == workspace_id)
+                    .map_or_else(|| format!("workspace {workspace_id}"), |w| w.name);
+                Ok(format!("Added {name} to {workspace}"))
             }
             W::SetRole {
                 membership_id,

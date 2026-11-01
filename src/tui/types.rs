@@ -566,6 +566,9 @@ pub struct AdminScreen {
     pub unseen: usize,
     pub prompt: Option<AdminPrompt>,
     pub confirm: Option<AdminConfirm>,
+    /// A workspace name just sent to `create_workspace`: the next snapshot
+    /// highlights it (`CreateWorkspaceFromScreen`).
+    pub select_workspace_named: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

@@ -406,3 +406,97 @@ fn a_reload_clamps_the_highlight_when_its_row_is_gone() {
     let screen = app.input.admin.as_ref().unwrap();
     assert_eq!(screen.current_workspace().map(|w| w.id), Some(1));
 }
+
+#[test]
+fn a_refusal_is_visible_over_the_admin_screen() {
+    let mut app = open(snapshot(true));
+    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+        "Workspace is not empty".to_string(),
+    )));
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(buffer_contains(&buf, "Workspace is not empty"));
+}
+
+#[test]
+fn a_reload_keeps_the_highlighted_member_by_id() {
+    let mut app = open(snapshot(true));
+    app.handle_key(make_key(KeyCode::Tab));
+    press(&mut app, 'j'); // Bob (8)
+    let mut snap = snapshot(true);
+    snap.workspaces[0]
+        .members
+        .insert(0, member(6, "Aaron", MemberRole::Member));
+    app.update(Message::Admin(AdminMessage::Loaded(Box::new(snap))));
+    let screen = app.input.admin.as_ref().unwrap();
+    assert_eq!(screen.current_member().map(|m| m.membership_id), Some(8));
+}
+
+#[test]
+fn a_reload_keeps_the_highlighted_super_admin_by_identity() {
+    let mut app = open(snapshot(true));
+    app.handle_key(make_key(KeyCode::Tab));
+    app.handle_key(make_key(KeyCode::Tab));
+    // Grant Ann so two super-admins are listed, then highlight the second.
+    let mut snap = snapshot(true);
+    snap.directory[1].is_super_admin = true;
+    app.update(Message::Admin(AdminMessage::Loaded(Box::new(snap.clone()))));
+    press(&mut app, 'j');
+    let kept = app
+        .input
+        .admin
+        .as_ref()
+        .unwrap()
+        .current_super_admin()
+        .map(|p| p.identity.clone());
+    snap.directory.insert(
+        0,
+        DirectoryPerson {
+            identity: "aaaa".to_string(),
+            shown_name: "Aaron".to_string(),
+            is_super_admin: true,
+        },
+    );
+    app.update(Message::Admin(AdminMessage::Loaded(Box::new(snap))));
+    let screen = app.input.admin.as_ref().unwrap();
+    assert_eq!(
+        screen.current_super_admin().map(|p| p.identity.clone()),
+        kept
+    );
+}
+
+#[test]
+fn a_reload_keeps_the_highlighted_unseen_item_by_kind_and_id() {
+    let mut app = open(snapshot(true));
+    let unseen = |kind: &str, id: i64| UnseenItemRow {
+        kind: kind.to_string(),
+        id,
+        workspace_id: 1,
+        workspace_name: "Default".to_string(),
+        creator: "Zed".to_string(),
+        created_at: "2026-10-30T07:00:00Z".to_string(),
+    };
+    let mut snap = snapshot(true);
+    snap.unseen = vec![unseen("epic", 12), unseen("epic", 20)];
+    app.update(Message::Admin(AdminMessage::Loaded(Box::new(snap.clone()))));
+    for _ in 0..3 {
+        app.handle_key(make_key(KeyCode::Tab));
+    }
+    press(&mut app, 'j');
+    snap.unseen.insert(0, unseen("epic", 5));
+    app.update(Message::Admin(AdminMessage::Loaded(Box::new(snap))));
+    let screen = app.input.admin.as_ref().unwrap();
+    assert_eq!(screen.current_unseen().map(|u| u.id), Some(20));
+}
+
+#[test]
+fn a_created_workspace_is_highlighted_by_name_on_the_reload() {
+    let mut app = open(snapshot(true));
+    press(&mut app, 'n');
+    type_text(&mut app, "Beta");
+    app.handle_key(make_key(KeyCode::Enter));
+    let mut snap = snapshot(true);
+    snap.workspaces.insert(1, workspace(3, "Beta", vec![]));
+    app.update(Message::Admin(AdminMessage::Loaded(Box::new(snap))));
+    let screen = app.input.admin.as_ref().unwrap();
+    assert_eq!(screen.current_workspace().map(|w| w.id), Some(3));
+}

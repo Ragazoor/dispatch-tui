@@ -107,7 +107,9 @@ fn format_workspaces(snapshot: &AdminSnapshot, only: Option<i64>) -> Result<Stri
             ));
         }
     }
-    if shown.is_empty() {
+    if shown.is_empty() && snapshot.me.is_none() {
+        out.push_str(&format!("{}\n", super::epics::NOT_SETTLED));
+    } else if shown.is_empty() {
         out.push_str("You belong to no workspace; ask a super-admin to add you.\n");
     }
     for w in shown {

@@ -284,7 +284,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_input_form_panel(frame, app, vertical[3]);
     render_status_bar(frame, app, vertical[4]);
 
-    render_error_popup(frame, app, area);
     render_help_overlay(frame, app, area);
     render_board_filter_overlay(frame, app, area);
     render_task_detail_overlay(frame, app, area);
@@ -293,6 +292,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_work_package_picker_overlay(frame, app, area);
     render_work_package_rename_overlay(frame, app, area);
     render_admin_overlay(frame, app, area);
+    // Last, so a refusal is never hidden under an overlay.
+    render_error_popup(frame, app, area);
 }
 
 /// Layout constraints for the kanban board: content columns interleaved with

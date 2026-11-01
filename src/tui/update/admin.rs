@@ -3,7 +3,9 @@
 //! what; it hides a key the person's role cannot use and sends the rest, and
 //! the store's refusal is what the person reads.
 
-use crate::models::{AdminSnapshot, WorkspaceDetail, WorkspaceMember};
+use crate::models::{
+    AdminSnapshot, DirectoryPerson, UnseenItemRow, WorkspaceDetail, WorkspaceMember,
+};
 use crate::tui::commands::{AdminWrite, PeopleCommand};
 
 use super::super::types::*;
@@ -25,6 +27,14 @@ impl AdminScreen {
 
     pub fn current_member(&self) -> Option<&WorkspaceMember> {
         self.current_workspace()?.members.get(self.member)
+    }
+
+    pub fn current_super_admin(&self) -> Option<&DirectoryPerson> {
+        self.snapshot.super_admins().nth(self.super_admin)
+    }
+
+    pub fn current_unseen(&self) -> Option<&UnseenItemRow> {
+        self.snapshot.unseen.get(self.unseen)
     }
 
     /// The panes Tab visits: the last two are a super-admin's.
@@ -72,7 +82,7 @@ impl AdminScreen {
 }
 
 impl App {
-    /// `W` in the board's normal mode: open the screen and read the snapshot.
+    /// `A` in the board's normal mode: open the screen and read the snapshot.
     pub(in crate::tui) fn handle_admin_open(&mut self) -> Vec<Command> {
         self.input.clear_buffer();
         self.input.admin = Some(AdminScreen::default());
@@ -88,12 +98,48 @@ impl App {
         let Some(screen) = self.input.admin.as_mut() else {
             return vec![];
         };
-        let kept = screen.current_workspace().map(|w| w.id);
+        let kept_workspace = screen.current_workspace().map(|w| w.id);
+        let kept_member = screen.current_member().map(|m| m.membership_id);
+        let kept_super_admin = screen.current_super_admin().map(|p| p.identity.clone());
+        let kept_unseen = screen.current_unseen().map(|u| (u.kind.clone(), u.id));
         screen.snapshot = snapshot;
-        if let Some(index) =
-            kept.and_then(|id| screen.administered().iter().position(|w| w.id == id))
-        {
+        let created = screen
+            .select_workspace_named
+            .take()
+            .and_then(|name| screen.administered().iter().position(|w| w.name == name));
+        let by_id =
+            kept_workspace.and_then(|id| screen.administered().iter().position(|w| w.id == id));
+        let moved_to_created = created.is_some();
+        if let Some(index) = created.or(by_id) {
             screen.workspace = index;
+        }
+        if moved_to_created {
+            screen.member = 0;
+        } else if let Some(index) = kept_member.and_then(|id| {
+            screen
+                .current_workspace()?
+                .members
+                .iter()
+                .position(|m| m.membership_id == id)
+        }) {
+            screen.member = index;
+        }
+        if let Some(index) = kept_super_admin.and_then(|identity| {
+            screen
+                .snapshot
+                .super_admins()
+                .position(|p| p.identity == identity)
+        }) {
+            screen.super_admin = index;
+        }
+        if let Some(index) = kept_unseen.and_then(|key| {
+            screen
+                .snapshot
+                .unseen
+                .iter()
+                .position(|u| (u.kind.clone(), u.id) == key)
+        }) {
+            screen.unseen = index;
         }
         screen.clamp_cursors();
         vec![]
@@ -299,6 +345,9 @@ impl App {
         let (Some(prompt), false) = (prompt, text.is_empty()) else {
             return vec![];
         };
+        if let (AdminPrompt::NewWorkspace, Some(screen)) = (&prompt, self.input.admin.as_mut()) {
+            screen.select_workspace_named = Some(text.clone());
+        }
         Self::admin_write(match prompt {
             AdminPrompt::NewWorkspace => AdminWrite::CreateWorkspace(text),
             AdminPrompt::RenameWorkspace(id) => AdminWrite::RenameWorkspace { id, name: text },

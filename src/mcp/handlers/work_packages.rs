@@ -106,9 +106,6 @@ pub(super) async fn handle_create_work_package(
             ),
         );
     };
-    if let Some(refusal) = super::epics::unknown_workspace(state, workspace_id).await {
-        return super::types::tool_error(id, refusal);
-    }
     let visibility = parsed.visibility.unwrap_or_default();
     let link = items(parsed.link_task_ids, parsed.link_epic_ids);
     let linked = link.len();
@@ -133,7 +130,7 @@ pub(super) async fn handle_create_work_package(
                 ),
             )
         }
-        Err(e) => service_err_to_response(id, e),
+        Err(e) => super::epics::workspace_refusal(state, id, workspace_id, e).await,
     }
 }
 

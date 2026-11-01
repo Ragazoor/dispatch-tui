@@ -406,3 +406,35 @@ fn the_repos_footer_names_the_forget_key() {
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(buffer_contains(&buf, "[Del]"));
 }
+
+#[test]
+fn capital_z_keeps_the_cursor_on_the_same_epic() {
+    let mut app = overlay_app();
+    app.board
+        .epics
+        .push(epic(4, None, "Delta", TaskStatus::Running));
+    app.board
+        .epics
+        .push(epic(5, Some(4), "Echo", TaskStatus::Running));
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('j')); // Delta
+    press(&mut app, KeyCode::Char('Z')); // unfold all: Delta moves down
+    let rows = app.filter_epic_rows();
+    assert_eq!(rows[app.filter_overlay.epic_cursor].id, EpicId(4));
+    press(&mut app, KeyCode::Char('Z')); // fold all: Delta moves up
+    let rows = app.filter_epic_rows();
+    assert_eq!(rows[app.filter_overlay.epic_cursor].id, EpicId(4));
+}
+
+#[test]
+fn capital_z_is_a_no_op_during_a_query() {
+    let mut app = epics_tab();
+    press(&mut app, KeyCode::Char('/'));
+    type_str(&mut app, "alp");
+    press(&mut app, KeyCode::Enter);
+    let before = app.filter_overlay.open_epics.clone();
+    press(&mut app, KeyCode::Char('Z'));
+    assert_eq!(app.filter_overlay.open_epics, before);
+    press(&mut app, KeyCode::Esc); // clears the query
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
+}
