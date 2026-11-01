@@ -113,18 +113,19 @@ fn publish_open_set(
 /// `v`: show one file in the user's editor in the lower pane, in place of
 /// whatever it showed (`OpenAgentTreeFileInEditor`). Once the editor is up no
 /// diff is showing, so the open set is emptied and published; the pane is now
-/// marked as the editor, which an empty set leaves running.
+/// marked as the editor, which an empty set leaves running. Returns whether the
+/// editor is up.
 fn open_in_editor(
     context: &DiffPaneContext<'_>,
     relative: &Path,
     state: &mut RenderState,
     runner: &dyn ProcessRunner,
-) {
+) -> bool {
     let my_pane = match crate::agent_tree::diff_pane::current_pane_from_env() {
         Ok(pane) => pane,
         Err(e) => {
             state.notice = Some(Notice::diff(e.to_string()));
-            return;
+            return false;
         }
     };
     if let Err(e) = crate::agent_tree::diff_pane::show_in_editor(
@@ -136,9 +137,10 @@ fn open_in_editor(
     ) {
         tracing::warn!(error = %format!("{e:#}"), "failed to open the editor pane");
         state.notice = Some(Notice::diff(format!("{e:#}")));
-        return;
+        return false;
     }
     record_editor_took_over(context, state);
+    true
 }
 
 /// Once the editor is up no diff is showing, so the open set is emptied and
@@ -170,11 +172,18 @@ pub(crate) fn record_editor_took_over(context: &DiffPaneContext<'_>, state: &mut
 ///
 /// Whatever notice this leaves behind goes unread, which is correct: the
 /// renderer is already leaving and there is nowhere left to show one.
-fn tear_down_diff_pane(
+pub(crate) fn tear_down_diff_pane(
     context: &DiffPaneContext<'_>,
     state: &mut RenderState,
     runner: &dyn ProcessRunner,
+    editor_took_over: bool,
 ) {
+    // The editor took the pane over and the open set is already empty and
+    // written. The close path reads the pane's content mark, and a mark that
+    // failed to stick reads as a diff: it would kill the editor.
+    if editor_took_over {
+        return;
+    }
     state.open_diffs.clear();
     publish_open_set(context, state, runner);
 }
@@ -185,11 +194,18 @@ fn tear_down_diff_pane(
 struct DiffPaneTeardown<'a> {
     context: &'a DiffPaneContext<'a>,
     runner: &'a dyn ProcessRunner,
+    /// Set while the lower pane runs the editor; cleared when a diff opens.
+    editor_took_over: &'a std::cell::Cell<bool>,
 }
 
 impl Drop for DiffPaneTeardown<'_> {
     fn drop(&mut self) {
-        tear_down_diff_pane(self.context, &mut RenderState::new(), self.runner);
+        tear_down_diff_pane(
+            self.context,
+            &mut RenderState::new(),
+            self.runner,
+            self.editor_took_over.get(),
+        );
     }
 }
 
@@ -311,7 +327,12 @@ fn run_loop<B: Backend>(
     let root = context.root;
     // Retires the diff pane on every way out, an error from a draw or a poll
     // included (`KillAgentTreeDiffPaneWithItsTree`).
-    let _teardown = DiffPaneTeardown { context, runner };
+    let editor_took_over = std::cell::Cell::new(false);
+    let _teardown = DiffPaneTeardown {
+        context,
+        runner,
+        editor_took_over: &editor_took_over,
+    };
     let mut state = RenderState::new();
     let mut tree = build_tree(root, &[]);
     // `build_tree` names the root node after the worktree directory, which is
@@ -348,9 +369,14 @@ fn run_loop<B: Backend>(
                         KeyAction::Continue => {}
                         KeyAction::DiffSetChanged => {
                             publish_open_set(context, &mut state, runner);
+                            if !state.open_diffs.is_empty() {
+                                editor_took_over.set(false);
+                            }
                         }
                         KeyAction::OpenInEditor(path) => {
-                            open_in_editor(context, &path, &mut state, runner)
+                            if open_in_editor(context, &path, &mut state, runner) {
+                                editor_took_over.set(true);
+                            }
                         }
                         KeyAction::JumpTo(window) => jump_to_agent(&window, &mut state, runner),
                         KeyAction::SourceChanged => {

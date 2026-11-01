@@ -26,3 +26,9 @@ chrono = { version = "0.4", default-features = false }
 # and compilation fails. Drop these two once upstream moves.
 icu_calendar = "~2.1"
 icu_locale = "~2.1"
+
+[dev-dependencies]
+# An oracle for the module's format-character table that does not share its
+# source: the Unicode general-category data itself. Already in the tree via V8's
+# ICU family; same pin as above.
+icu_properties = "~2.1"

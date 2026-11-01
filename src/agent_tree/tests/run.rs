@@ -156,3 +156,20 @@ fn opening_the_editor_empties_the_open_set_without_touching_tmux() {
     assert!(state.notice.is_none(), "got {:?}", state.notice);
     assert!(crate::agent_tree::open_set::read_open_set(&worktree.to_string_lossy()).is_empty());
 }
+
+/// `EditorPaneOutlivesItsTree`: once the editor took the pane over, leaving
+/// the tree must not reach tmux. A failed content mark makes the pane read as
+/// a diff, and the close path would kill the editor with its unsaved edits.
+#[test]
+fn leaving_the_tree_after_the_editor_took_over_does_not_touch_tmux() {
+    let context = DiffPaneContext {
+        root: Path::new("/work/wt"),
+        data_dir: Path::new("/data"),
+        task_id: TaskId(42),
+    };
+    let runner = crate::process::MockProcessRunner::new(vec![]);
+
+    tear_down_diff_pane(&context, &mut browse_state(), &runner, true);
+
+    assert!(runner.flattened_calls().is_empty());
+}

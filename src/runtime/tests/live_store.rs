@@ -34,6 +34,13 @@ pub(super) fn spacetime(cli_config: &Path, args: &[&str]) -> Output {
         .expect("run the spacetime CLI")
 }
 
+/// Whether a store's stderr says it lost the race for its port: the only early
+/// exit worth another attempt. Any other exit is a real failure to report.
+fn is_address_in_use(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    lower.contains("address already in use") || lower.contains("addrinuse")
+}
+
 /// A standalone store on a free loopback port, killed on drop.
 pub(super) struct LiveStore {
     child: Child,
@@ -55,20 +62,23 @@ impl LiveStore {
         panic!("no store stayed up on a free port in {PORT_ATTEMPTS} attempts");
     }
 
-    /// One attempt on a fresh port. `None` when the store exited during
-    /// startup; panics on the deadline.
+    /// One attempt on a fresh port. `None` when the store exited because the
+    /// port was taken; panics, showing the exit status and stderr, on any other
+    /// early exit, and on the deadline.
     fn try_start(data_dir: &Path, keys_dir: &Path, cli_config: &Path) -> Option<LiveStore> {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .and_then(|l| l.local_addr())
             .expect("pick a free port")
             .port();
         let address = format!("127.0.0.1:{port}");
+        let stderr_path = keys_dir.with_file_name(format!("store-{port}.stderr"));
+        let stderr_file = std::fs::File::create(&stderr_path).expect("create the stderr file");
         let child = SpacetimeStartSpawner::new()
             .with_config_path(cli_config)
             .with_key_dir(keys_dir)
             .command(&address, data_dir)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr_file))
             .spawn()
             .expect("spawn spacetime start");
         let mut store = LiveStore { child, port };
@@ -76,8 +86,12 @@ impl LiveStore {
         loop {
             // Our own child first: a probe that answers while it is dead is
             // another test's store on this port.
-            if store.child.try_wait().expect("poll the store").is_some() {
-                return None;
+            if let Some(status) = store.child.try_wait().expect("poll the store") {
+                let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+                if is_address_in_use(&stderr) {
+                    return None;
+                }
+                panic!("the store exited during startup with {status} on port {port}:\n{stderr}");
             }
             if probe_address(&address, Duration::from_secs(2))
                 == ManagedAddressState::StoreAnswering
@@ -143,4 +157,13 @@ fn a_live_store_serves_and_frees_its_port_on_drop() {
         std::net::TcpListener::bind(&address).is_ok(),
         "the store still holds {address} after drop"
     );
+}
+
+#[test]
+fn only_an_address_in_use_exit_is_retried() {
+    assert!(is_address_in_use(
+        "Error: Address already in use (os error 98)"
+    ));
+    assert!(!is_address_in_use("Error: failed to open the database"));
+    assert!(!is_address_in_use(""));
 }

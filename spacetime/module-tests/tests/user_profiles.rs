@@ -126,3 +126,34 @@ fn a_name_with_control_or_invisible_characters_is_refused() {
     }
     assert_eq!(profile(&store, "alice").unwrap().display_name, "");
 }
+
+/// The module's `FORMAT_RANGES` table is hand-written; this checks it against
+/// Unicode's own data, so a range missing from the table fails here instead of
+/// passing a test that copied the table.
+#[test]
+fn every_unicode_format_and_separator_character_is_refused_in_a_name() {
+    use icu_properties::props::GeneralCategory;
+    use icu_properties::CodePointMapData;
+
+    let categories = CodePointMapData::<GeneralCategory>::new();
+    let store = Store::bare();
+    connect(&store, "alice");
+    let mut checked = 0;
+    for category in [
+        GeneralCategory::Format,
+        GeneralCategory::LineSeparator,
+        GeneralCategory::ParagraphSeparator,
+    ] {
+        for range in categories.iter_ranges_for_value(category) {
+            for code in range {
+                let c = char::from_u32(code).expect("a scalar value");
+                assert!(
+                    set_name(&store, "alice", &format!("Al{c}ice")).is_err(),
+                    "U+{code:04X} ({category:?}) was accepted in a name"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 100, "the oracle yielded only {checked} characters");
+}

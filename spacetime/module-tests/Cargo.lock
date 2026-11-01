@@ -1128,6 +1128,7 @@ dependencies = [
  "chrono",
  "icu_calendar",
  "icu_locale",
+ "icu_properties",
  "spacetimedb",
 ]
 
