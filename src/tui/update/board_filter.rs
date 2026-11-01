@@ -33,24 +33,6 @@ impl App {
             let parent = e.parent_epic_id.filter(|p| known.contains(p));
             children.entry(parent).or_default().push(i);
         }
-        // Every shown ancestor of a hidden epic is partly hidden, read from
-        // the whole tree so a folded or filtered-out row still counts.
-        let parent_of: HashMap<EpicId, EpicId> = epics
-            .iter()
-            .filter_map(|e| Some((e.id, e.parent_epic_id.filter(|p| known.contains(p))?)))
-            .collect();
-        let mut has_hidden_below: HashSet<EpicId> = HashSet::new();
-        for &h in hidden.iter().filter(|h| known.contains(h)) {
-            let mut at = h;
-            // Bounded by the epic count, so a parent cycle cannot hang this.
-            for _ in 0..epics.len() {
-                let Some(&p) = parent_of.get(&at) else { break };
-                if !has_hidden_below.insert(p) {
-                    break;
-                }
-                at = p;
-            }
-        }
         let qualifies = |i: usize| {
             let e = &epics[i];
             (overlay.show_done_epics || e.status != TaskStatus::Done || hidden.contains(&e.id))
@@ -62,7 +44,6 @@ impl App {
             children: &children,
             epics,
             hidden,
-            has_hidden_below: &has_hidden_below,
             open: query.is_empty().then_some(&overlay.open_epics),
             qualifies: &qualifies,
             out: vec![],
@@ -113,13 +94,17 @@ impl App {
     /// epic shows its whole subtree, clearing every sub-epic's own hide; a
     /// shown one, or one hidden only by its parent, goes on the list.
     pub(in crate::tui) fn handle_toggle_hidden_epic(&mut self, id: EpicId) -> Vec<Command> {
-        let epics = &self.board.epics;
+        // The row's own mark, so Space does what the row shows. The id
+        // comes from the cursor row, so it is listed.
+        let mark = self
+            .filter_epic_rows()
+            .into_iter()
+            .find(|r| r.id == id)
+            .map(|r| r.mark);
         let hidden = &mut self.filter.hidden_epics;
-        // Inclusive of `id` itself.
-        let subtree = crate::models::descendant_epic_ids(id, epics);
-        let partly_hidden = !super::super::search::hidden_epic_closure(hidden, epics).contains(&id)
-            && subtree.iter().any(|e| *e != id && hidden.contains(e));
-        if hidden.contains(&id) || partly_hidden {
+        if let Some(FilterEpicMark::Hidden | FilterEpicMark::PartlyHidden) = mark {
+            // Inclusive of `id` itself.
+            let subtree = crate::models::descendant_epic_ids(id, &self.board.epics);
             hidden.retain(|e| !subtree.contains(e));
         } else {
             hidden.insert(id);
@@ -357,8 +342,6 @@ struct SubtreeWalk<'a> {
     children: &'a HashMap<Option<EpicId>, Vec<usize>>,
     epics: &'a [crate::models::Epic],
     hidden: &'a HashSet<EpicId>,
-    /// Epics with some sub-epic on the hide-list, at any depth.
-    has_hidden_below: &'a HashSet<EpicId>,
     /// The unfolded epics; `None` while a query stands and folds are ignored.
     open: Option<&'a HashSet<EpicId>>,
     qualifies: &'a dyn Fn(usize) -> bool,
@@ -370,27 +353,33 @@ impl SubtreeWalk<'_> {
     /// order. A child is listed when it qualifies or some descendant does
     /// (post-order decision, pre-order output). `depth` past the epic count
     /// means a parent cycle; the walk stops rather than hang the overlay.
-    fn walk(&mut self, node: Option<EpicId>, depth: usize, parent_hidden: bool) {
+    ///
+    /// Returns whether any epic under `node` is on the hide-list. Every node
+    /// is visited, folded and unlisted ones too, so a folded parent is still
+    /// marked partly hidden.
+    fn walk(&mut self, node: Option<EpicId>, depth: usize, parent_hidden: bool) -> bool {
         let Some(kids) = self.children.get(&node) else {
-            return;
+            return false;
         };
         if depth > self.epics.len() {
-            return;
+            return false;
         }
+        let mut any_hidden = false;
         for &i in kids {
             let e = &self.epics[i];
             let own_hidden = self.hidden.contains(&e.id);
+            let at = self.out.len();
+            let hidden_below = self.walk(Some(e.id), depth + 1, parent_hidden || own_hidden);
+            any_hidden |= own_hidden || hidden_below;
             let mark = if parent_hidden {
                 FilterEpicMark::HiddenByParent
             } else if own_hidden {
                 FilterEpicMark::Hidden
-            } else if self.has_hidden_below.contains(&e.id) {
+            } else if hidden_below {
                 FilterEpicMark::PartlyHidden
             } else {
                 FilterEpicMark::Shown
             };
-            let at = self.out.len();
-            self.walk(Some(e.id), depth + 1, parent_hidden || own_hidden);
             let has_children = self.out.len() > at;
             let is_folded = has_children && self.open.is_some_and(|o| !o.contains(&e.id));
             if is_folded {
@@ -410,5 +399,6 @@ impl SubtreeWalk<'_> {
                 );
             }
         }
+        any_hidden
     }
 }

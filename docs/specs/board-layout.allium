@@ -1173,7 +1173,8 @@ rule ToggleHiddenWorkPackage {
 --   `[~]` partly hidden (BoardHides.epic_is_partly_hidden: shown, but some
 --   sub-epic is on the hide-list). A child of a hidden parent draws as
 --   hidden-by-parent, distinct from hidden on its own, because Space on it
---   cannot bring it back while the parent is hidden. The partly hidden mark
+--   cannot bring it back while the parent is hidden; `[-]` wins even when
+--   the child is on the hide-list itself. The partly hidden mark
 --   is read from the whole subtree, not from the listed rows, so a folded
 --   parent still shows that work under it is hidden (task #98757): without
 --   it a folded `[ ]` read as nothing hidden.
