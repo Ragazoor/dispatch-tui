@@ -312,32 +312,9 @@ pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
     descendant_epic_ids_with_map(root, &children)
 }
 
-/// Titles of `epic`'s ancestor chain, root first, ending with `epic` itself.
-///
-/// Walks `parent_epic_id` upward through `epics`. A visited-set guards against
-/// malformed cycles (which the service layer prevents, but the renderer must
-/// not hang on). A root epic returns `vec![epic.title]`.
-pub fn ancestor_titles<'a>(epic: &'a Epic, epics: &'a [Epic]) -> Vec<&'a str> {
-    let by_id = epic_id_lookup(epics);
-    let mut seen: HashSet<EpicId> = HashSet::new();
-    let mut chain: Vec<&str> = Vec::new();
-    let mut cursor = epic;
-    loop {
-        if !seen.insert(cursor.id) {
-            break; // cycle guard
-        }
-        chain.push(cursor.title.as_str());
-        match cursor.parent_epic_id.and_then(|pid| by_id.get(&pid)) {
-            Some(parent) => cursor = parent,
-            None => break,
-        }
-    }
-    chain.reverse();
-    chain
-}
-
 /// The chain of epic ids from the root epic down to `target`, both included.
-/// Cycle-safe like [`ancestor_titles`].
+/// Walks `parent_epic_id` upward; a visited set guards against malformed
+/// cycles (which the service layer prevents, but a caller must not hang on).
 pub fn epic_path(target: EpicId, epics: &[Epic]) -> Vec<EpicId> {
     let by_id = epic_id_lookup(epics);
     let mut seen: HashSet<EpicId> = HashSet::new();

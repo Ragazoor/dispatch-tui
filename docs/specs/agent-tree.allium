@@ -2940,8 +2940,9 @@ surface AgentTreeCompanionPane {
         -- is too short to show both, where the cursor's row wins.
         --
         -- The pane reads the epic from the board's answer (the hooks wire's
-        -- PaneAgent.epic, whose breadcrumb ends in the epic's own title; the
-        -- header draws that last segment only). A board that predates it sends
+        -- PaneAgent.epic). Its breadcrumb holds the epic's own title alone;
+        -- the header draws its last segment, which an older board that still
+        -- sends the full path ends with too. A board that predates it sends
         -- none, and every agent then reads as epicless: the list is the plain
         -- id-ordered list with no headers and no rule.
 

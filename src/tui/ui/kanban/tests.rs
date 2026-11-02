@@ -472,7 +472,7 @@ fn epic_header_row_truncates_a_long_title() {
 }
 
 /// The id prefix is muted like every other id badge on the board, not the
-/// row's purple identity hue — that stays on the breadcrumb title.
+/// row's purple identity hue — that stays on the epic's title.
 #[test]
 fn epic_header_id_prefix_is_muted_not_purple() {
     let epic = make_epic_with_title(7, "Alpha");

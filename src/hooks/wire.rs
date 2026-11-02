@@ -206,10 +206,11 @@ pub struct PaneAgent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneEpic {
     pub id: EpicId,
-    /// The epic's ancestor titles, root first and its own title last. The
-    /// pane's header draws only the last (`agent-tree.allium`,
-    /// `AgentListGroupsByEpic`); the whole path stays on the wire so a pane
-    /// and board of different builds still agree.
+    /// The epic's own title, as the one segment. The header names only the
+    /// epic itself (`agent-tree.allium`, `AgentListGroupsByEpic`). The field
+    /// keeps its name and list shape from when it carried the ancestor path,
+    /// and the pane draws its last segment, so a pane and board of different
+    /// builds still agree.
     pub breadcrumb: Vec<String>,
 }
 

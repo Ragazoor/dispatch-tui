@@ -500,41 +500,6 @@ fn descendant_task_ids_is_cycle_safe() {
 }
 
 #[test]
-fn ancestor_titles_root_returns_self_only() {
-    let mut root = epic_with(1, None);
-    root.title = "Root".into();
-    let epics = vec![root.clone()];
-    assert_eq!(ancestor_titles(&root, &epics), vec!["Root"]);
-}
-
-#[test]
-fn ancestor_titles_orders_root_to_self() {
-    // root(1) -> mid(2) -> leaf(3)
-    let mut root = epic_with(1, None);
-    root.title = "Root".into();
-    let mut mid = epic_with(2, Some(1));
-    mid.title = "Mid".into();
-    let mut leaf = epic_with(3, Some(2));
-    leaf.title = "Leaf".into();
-    let epics = vec![root, mid, leaf.clone()];
-    assert_eq!(ancestor_titles(&leaf, &epics), vec!["Root", "Mid", "Leaf"]);
-}
-
-#[test]
-fn ancestor_titles_is_cycle_safe() {
-    // 1 -> 2 -> 1 (malformed cycle); must terminate.
-    let mut a = epic_with(1, Some(2));
-    a.title = "A".into();
-    let mut b = epic_with(2, Some(1));
-    b.title = "B".into();
-    let epics = vec![a.clone(), b];
-    let out = ancestor_titles(&a, &epics);
-    // Terminates and includes A's own title as the last segment.
-    assert_eq!(out.last(), Some(&"A"));
-    assert!(out.len() <= 2);
-}
-
-#[test]
 fn epic_origin_roundtrips_kebab_case() {
     assert_eq!(EpicOrigin::Manual.as_str(), "manual");
     assert_eq!(EpicOrigin::RepoGroup.as_str(), "repo-group");

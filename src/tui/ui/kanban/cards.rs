@@ -413,12 +413,11 @@ pub(super) fn render_folded_epic_header(
     is_cursor: bool,
 ) -> ListItem<'static> {
     let epic = header.epic;
-    let id_digits = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
     let id_prefix = format!("#{} ", epic.id);
-    let id_prefix_len = id_digits + 2;
     let suffix = format!(" ({}) \u{22ef}", header.hidden);
 
-    let reserved = "\u{2500}\u{2500} ".chars().count() + id_prefix_len + suffix.chars().count();
+    let reserved =
+        "\u{2500}\u{2500} ".chars().count() + id_prefix.chars().count() + suffix.chars().count();
     let budget = (col_width as usize).saturating_sub(reserved);
     let title = crate::tui::ui::shared::truncate(&epic.title, budget);
 

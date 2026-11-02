@@ -95,7 +95,7 @@ impl EpicContext {
     /// over it would be worse.
     ///
     /// The visited set is the cycle guard, mirroring
-    /// `models::epics::ancestor_titles` — the service layer prevents a cycle,
+    /// `models::epics::epic_path` — the service layer prevents a cycle,
     /// but a dispatch must not hang on one that got in anyway. A depth cap
     /// would do the same job approximately, and would put an arbitrary number
     /// in the spec that only exists because the guard was the weaker of the

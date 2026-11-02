@@ -115,7 +115,7 @@ pub async fn handle_pane_view(
         state.db.list_agents(),
         state.db.list_epics()
     );
-    // Each epic's breadcrumb once, however many of its agents are live.
+    // Each epic once, however many of its agents are live.
     let by_id = crate::models::epics::epic_id_lookup(&epics);
     let mut pane_epics: std::collections::HashMap<crate::models::EpicId, PaneEpic> =
         std::collections::HashMap::new();
@@ -125,10 +125,7 @@ pub async fn handle_pane_view(
         {
             slot.insert(PaneEpic {
                 id,
-                breadcrumb: crate::models::epics::ancestor_titles(epic, &epics)
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect(),
+                breadcrumb: vec![epic.title.clone()],
             });
         }
     }

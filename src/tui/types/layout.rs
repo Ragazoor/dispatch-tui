@@ -87,8 +87,8 @@ impl EpicFoldRef {
 
 /// A folded epic group's header, which stands in for the cards it hides.
 /// Carries the epic itself (unlike [`FoldedHeader`], whose section already
-/// names its own label) so the renderer can show the same id and breadcrumb
-/// the open header would.
+/// names its own label) so the renderer can show the same id and title the
+/// open header would.
 #[derive(Debug, Clone, Copy)]
 pub struct FoldedEpicHeader<'a> {
     pub at: EpicFoldRef,
