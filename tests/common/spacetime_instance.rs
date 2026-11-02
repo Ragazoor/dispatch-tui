@@ -316,6 +316,50 @@ impl Instance {
             .to_lowercase()
     }
 
+    /// One-off SQL as the second identity `who`, returned as it came, success
+    /// or not: a refusal is what a test of what `who` may read looks for.
+    pub fn sql_as(&self, who: &str, query: &str) -> std::process::Output {
+        run(
+            None,
+            &[
+                &self.other_config_arg(who),
+                "sql",
+                "-s",
+                &self.host(),
+                "--format",
+                "json",
+                self.database(),
+                query,
+            ],
+        )
+    }
+
+    /// Subscribe as `who` (`None` is this instance's own identity) to
+    /// `queries` and return the initial update the store sends, printed.
+    ///
+    /// The CLI keeps listening for LATER updates until its `--timeout`, and
+    /// then exits with a timeout error, so a caller reads the stdout and must
+    /// not require success. It is a bound the CLI enforces, not a test sleep.
+    pub fn subscribe_as(&self, who: Option<&str>, queries: &[String]) -> std::process::Output {
+        let config = match who {
+            Some(who) => self.other_config_arg(who),
+            None => self.config_arg(),
+        };
+        let mut argv = vec![
+            config,
+            "subscribe".into(),
+            "-s".into(),
+            self.host(),
+            "-y".into(),
+            "--print-initial-update".into(),
+            "-t".into(),
+            "5".into(),
+            self.database().to_string(),
+        ];
+        argv.extend(queries.iter().cloned());
+        run(None, &argv.iter().map(String::as_str).collect::<Vec<_>>())
+    }
+
     pub fn call(&self, reducer: &str, args: &[&str]) -> std::process::Output {
         let mut argv = vec![
             self.config_arg(),

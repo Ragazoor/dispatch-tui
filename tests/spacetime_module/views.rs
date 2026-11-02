@@ -9,7 +9,7 @@
 use super::*;
 use crate::common::spacetime_instance::column_values;
 
-fn epic_in(
+pub(super) fn epic_in(
     id: i64,
     parent: i64,
     visibility: &str,
@@ -30,7 +30,7 @@ fn ids(instance: &Instance, view: &str) -> Vec<String> {
 /// Me and `bob` in workspace 1. Epic 1 is public and followed by me; epic 2
 /// under it is bob's private epic; epic 3 under 2 is public by itself; epic 4
 /// is a public child of 1. Task 10 is in epic 1, task 11 in private epic 2.
-fn seed_scenario(instance: &Instance, me: &str, bob: &str) {
+pub(super) fn seed_scenario(instance: &Instance, me: &str, bob: &str) {
     call_ok(
         instance,
         "seed_workspaces",

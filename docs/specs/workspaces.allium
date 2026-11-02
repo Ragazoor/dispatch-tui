@@ -1148,10 +1148,21 @@ surface StoreReads {
         -- A client never receives a row it cannot see: not by subscription,
         -- not by one-off SQL, not by a reducer's error text. This holds for
         -- every row ABOUT a task too: agents, dispatch and session
-        -- requests, unseen marks, watchers, subagent rows, usage events,
-        -- PR poll state and learning retrievals and verdicts are visible
-        -- exactly when the task they name is. Poll-owner rows follow their
-        -- epic. Host rows carry no task content and stay readable by all.
+        -- requests, unseen marks, watchers, subagent rows, PR poll state and
+        -- learning retrievals and verdicts are visible only when the task
+        -- they name is (the views serve them for the tasks the board holds). Poll-owner rows follow their scope (an epic or a
+        -- task). A usage event names no task, so it is its recorder's alone
+        -- (own_usage_events). Host rows carry no task content and stay
+        -- readable by all.
+        --
+        -- KNOWN GAP (task #98806): the subscriptions table is still public,
+        -- so any client's one-off SQL reads every follow, including who
+        -- follows a private epic and that epic's id. Proven by the ignored
+        -- live test a_non_member_cannot_see_who_follows_a_private_epic
+        -- (tests/spacetime_module/read_enforcement.rs). The other public
+        -- tables (hosts, user_profiles, repo_paths, repo_base_branches,
+        -- handed_out_agent_names, schema_version, rules_version) carry no
+        -- item content.
 
     @guarantee CreatorIsShownByName
         -- D4. Wherever a card or a tool result names who created an item,

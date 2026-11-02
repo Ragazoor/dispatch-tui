@@ -374,6 +374,8 @@ mod mutations;
 mod poll_owner;
 #[path = "spacetime_module/publish.rs"]
 mod publish;
+#[path = "spacetime_module/read_enforcement.rs"]
+mod read_enforcement;
 #[path = "spacetime_module/sequence.rs"]
 mod sequence;
 #[path = "spacetime_module/subscription.rs"]
