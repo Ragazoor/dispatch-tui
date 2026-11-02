@@ -635,12 +635,16 @@ rule ReParentingKeepsTheHolder {
         -- admin of the workspace it moves into (or out of, for a move onto
         -- a user board), or a super-admin. The destination is the epic the
         -- task lands in after repo-group routing (route_target), which
-        -- shares its grouped root's holder. Moving a task off a public epic
-        -- onto a user board makes it private to its new owner, so it is a
-        -- holder change and needs an admin. Refusal: "task N: only the
-        -- person it is private to, or an admin, may move it into or out of
-        -- a private epic". Module: check_task_move, task_move_permitted
-        -- (shared with MemoryReducerCaller).
+        -- shares its grouped root's holder. A task detached onto a user
+        -- board lands on the CALLER's board (identity stamping, below), so
+        -- the board is the caller's: moving a task the caller sees off a
+        -- public epic onto it is allowed for any member (task #98783). It
+        -- hides nothing the caller could not already change. Moving a task
+        -- off someone else's private epic onto it still needs the authority
+        -- above. Refusal: "task N: only the person it is private to, or an
+        -- admin, may move it into or out of a private epic". Module:
+        -- check_task_move, task_move_permitted (shared with
+        -- MemoryReducerCaller).
         -- The store itself (the operator) is exempt, as from every sight
         -- check (WritesRequireSight). Separately, the repo-group relinks
         -- (RegroupEpic, FlattenEpic, the reroute after a repo_path change)

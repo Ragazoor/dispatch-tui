@@ -177,6 +177,25 @@ fn a_task_leaves_your_private_epic_for_a_public_one() {
 }
 
 #[test]
+fn a_member_detaches_a_task_from_a_public_epic_onto_their_own_board() {
+    let (store, a, _) = world();
+    let shared = make_epic(&store, "bob", a, 0, "public");
+    let task = store.create("bob", epic_task("t", shared, "backlog"));
+    move_task(&store, "alice", task, 0).expect("the caller's own board holds nothing new");
+    assert_eq!(store.task(task).epic_id, 0);
+    assert_eq!(store.task(task).owner, identity_of("alice"));
+}
+
+#[test]
+fn a_member_may_not_detach_a_task_out_of_anothers_private_epic() {
+    let (store, a, _) = world();
+    let private = make_epic(&store, "bob", a, 0, "private");
+    let task = store.create("bob", epic_task("t", private, "backlog"));
+    assert!(move_task(&store, "alice", task, 0).is_err());
+    assert_eq!(store.task(task).epic_id, private);
+}
+
+#[test]
 fn an_epicless_task_of_yours_moves_into_your_private_epic() {
     let (store, a, _) = world();
     let private = make_epic(&store, "alice", a, 0, "private");
