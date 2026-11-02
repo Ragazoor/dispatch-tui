@@ -243,14 +243,14 @@ impl RenderState {
                     self.notice = None;
                 }
                 let waiting = self.pending_jump?;
-                let row = self.agents.rows().iter().find(|row| row.id == waiting);
-                match row.map(|row| row.window.clone()) {
+                match self.agents.rows().iter().find(|row| row.id == waiting) {
                     // Still detached: keep waiting.
-                    Some(None) => None,
+                    Some(row) if row.window.is_none() => None,
                     // Attached now: jump, once. Gone: stop waiting.
-                    attached_or_gone => {
+                    row => {
+                        let window = row.and_then(|row| row.window.clone());
                         self.pending_jump = None;
-                        attached_or_gone.flatten()
+                        window
                     }
                 }
             }

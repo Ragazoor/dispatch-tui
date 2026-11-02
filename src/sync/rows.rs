@@ -932,38 +932,27 @@ impl SharedRows {
         self.read(|rows| rows.tasks.contains_key(&id.0))
     }
 
-    /// Running or Review tasks with a tmux window, ordered by id — the
-    /// `list_live_agent_tasks` query. Filtered before anything is cloned: the
-    /// agent-tree pane polls this every second.
-    pub fn live_agent_tasks(&self) -> Vec<Task> {
+    /// The agent-tree pane's agents, ordered by id — the `list_agent_tasks`
+    /// query: Running or Review tasks with a tmux window (`Task::is_live_agent`)
+    /// and those with a worktree and none (`Task::is_detached`), split in one
+    /// pass under one read, so a task is never in both lists or neither.
+    /// Filtered before anything is cloned: every shown pane polls this each
+    /// second.
+    pub fn agent_tasks(&self) -> (Vec<Task>, Vec<Task>) {
         use crate::models::TaskStatus;
         self.read(|rows| {
-            rows.tasks
-                .values()
-                .filter(|t| {
-                    matches!(t.status, TaskStatus::Running | TaskStatus::Review)
-                        && rows.current_window_of(t.id)
-                })
-                .map(|t| rows.view(t))
-                .collect()
-        })
-    }
-
-    /// Running or Review tasks with a worktree and no tmux window, ordered by
-    /// id — the `list_detached_agent_tasks` query, `Task::is_detached` read
-    /// before anything is cloned, like [`Self::live_agent_tasks`].
-    pub fn detached_agent_tasks(&self) -> Vec<Task> {
-        use crate::models::TaskStatus;
-        self.read(|rows| {
-            rows.tasks
-                .values()
-                .filter(|t| {
-                    matches!(t.status, TaskStatus::Running | TaskStatus::Review)
-                        && t.worktree.is_some()
-                        && !rows.current_window_of(t.id)
-                })
-                .map(|t| rows.view(t))
-                .collect()
+            let (mut live, mut detached) = (Vec::new(), Vec::new());
+            for t in rows.tasks.values() {
+                if !matches!(t.status, TaskStatus::Running | TaskStatus::Review) {
+                    continue;
+                }
+                if rows.current_window_of(t.id) {
+                    live.push(rows.view(t));
+                } else if t.worktree.is_some() {
+                    detached.push(rows.view(t));
+                }
+            }
+            (live, detached)
         })
     }
 

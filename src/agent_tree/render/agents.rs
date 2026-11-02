@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
+use crate::agent_tree::keys::KeyAction;
 use crate::agent_tree::list_cursor::ListCursor;
 use crate::hooks::wire::PaneEpic;
 use crate::models::{TaskId, TmuxWindow};
@@ -90,23 +91,13 @@ impl AgentsSection {
     /// What Space or Enter does on the selected row: jump to an attached
     /// agent's window, resume a detached one, or nothing on the pane's own
     /// task or an empty list.
-    pub fn space_action(&self) -> Option<AgentAction> {
+    pub fn space_action(&self) -> Option<KeyAction> {
         let row = self.selected().filter(|row| !row.is_own)?;
         Some(match &row.window {
-            Some(window) => AgentAction::JumpTo(window.clone()),
-            None => AgentAction::Resume(row.id),
+            Some(window) => KeyAction::JumpTo(window.clone()),
+            None => KeyAction::Resume(row.id),
         })
     }
-}
-
-/// What Space or Enter on an agent row asks the loop to do.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AgentAction {
-    /// An attached agent: select its window (`JumpToAgentWindow`).
-    JumpTo(TmuxWindow),
-    /// A detached agent: ask the board to resume it
-    /// (`ResumeDetachedAgentFromThePane`).
-    Resume(TaskId),
 }
 
 impl ListCursor for AgentsSection {
@@ -521,7 +512,7 @@ mod tests {
         section.set_rows(vec![row(1, false), row(2, true)]);
         assert_eq!(
             section.space_action(),
-            Some(AgentAction::JumpTo(test_tmux_window("task-1")))
+            Some(KeyAction::JumpTo(test_tmux_window("task-1")))
         );
     }
 
@@ -537,7 +528,7 @@ mod tests {
     fn space_on_a_detached_agent_resumes_it() {
         let mut section = AgentsSection::new();
         section.set_rows(vec![test_detached_row(3)]);
-        assert_eq!(section.space_action(), Some(AgentAction::Resume(TaskId(3))));
+        assert_eq!(section.space_action(), Some(KeyAction::Resume(TaskId(3))));
     }
 
     // ---- TwoViewsShareThePane / AgentRowShowsAgentName ----------

@@ -113,7 +113,7 @@ async fn live_agents_are_exactly_the_boards_live_agents_by_id() {
     assert_eq!(ids, vec![review, running]);
     let first = &view.live_agents[0];
     assert_eq!(first.title, "review, window");
-    assert_eq!(first.tmux_window, format!("task-{}", review.0));
+    assert_eq!(first.tmux_window, Some(format!("task-{}", review.0)));
 }
 
 /// AskingChangesNothing: a pane asks once a second for as long as it is

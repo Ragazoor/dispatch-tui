@@ -438,7 +438,7 @@ impl crate::agent_tree::pane::PaneViewSource for FakeBoard {
 /// A detached agent as the board sends it: no window.
 fn detached_pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
     crate::hooks::wire::PaneAgent {
-        tmux_window: String::new(),
+        tmux_window: None,
         ..pane_agent(id)
     }
 }
@@ -462,7 +462,7 @@ fn pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
     crate::hooks::wire::PaneAgent {
         id: TaskId(id),
         title: format!("task {id}"),
-        tmux_window: format!("task-{id}"),
+        tmux_window: Some(format!("task-{id}")),
         agent_name: String::new(),
         epic: None,
     }

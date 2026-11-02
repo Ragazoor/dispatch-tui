@@ -209,7 +209,7 @@ async fn the_pane_view_lists_detached_agents_apart_from_live_ones() {
     };
     assert_eq!(ids(&view.live_agents), vec![live]);
     assert_eq!(ids(&view.detached_agents), vec![detached]);
-    assert_eq!(view.detached_agents[0].tmux_window, "");
+    assert_eq!(view.detached_agents[0].tmux_window, None);
 }
 
 /// ResumeIsTheBoardsOwnResume: a detached task's resume is handed to the

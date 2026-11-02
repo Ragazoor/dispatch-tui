@@ -491,7 +491,7 @@ impl Task {
     /// Whether this task has an agent window the user can reach: Running or
     /// Review with a tmux window recorded. The board's own answer, as the
     /// agent-tree pane's agents section lists it (`RefreshAgentTreeAgentList`
-    /// in `docs/specs/agent-tree.allium`). `TaskRead::list_live_agent_tasks`
+    /// in `docs/specs/agent-tree.allium`). `TaskRead::list_agent_tasks`
     /// is its SQL mirror.
     pub fn is_live_agent(&self) -> bool {
         self.tmux_window.is_some()

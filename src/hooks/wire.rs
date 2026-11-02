@@ -176,7 +176,7 @@ pub struct PaneViewRequest {
 /// `agent-tree.allium`'s `PaneView`: the pane's task, when the board's rows
 /// hold it, every task with a live agent window, and every task whose agent is
 /// detached.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneView {
     /// Null until the board's rows hold the task -- "not arrived yet", which
     /// is not the same answer as "arrived without a worktree".
@@ -185,7 +185,7 @@ pub struct PaneView {
     /// across every repo and epic (`LiveIsTheBoardsOwnDefinition`).
     pub live_agents: Vec<PaneAgent>,
     /// Exactly the tasks `Task::is_detached` holds for in the board's rows
-    /// (`DetachedIsTheBoardsOwnDefinition`), each with an empty `tmux_window`.
+    /// (`DetachedIsTheBoardsOwnDefinition`), each with no `tmux_window`.
     /// A separate list rather than a flag on [`PaneAgent`] so a pane that
     /// predates it ignores it, and lists the attached agents as before;
     /// absent from a board that predates it.
@@ -207,8 +207,10 @@ pub struct PaneAgent {
     pub id: TaskId,
     pub title: String,
     /// The task's recorded tmux window: always present for a live agent, and
-    /// empty for a detached one, which has none.
-    pub tmux_window: String,
+    /// absent for a detached one, which has none. Only ever absent in
+    /// `detached_agents`, a list a pane that predates it ignores.
+    #[serde(default)]
+    pub tmux_window: Option<String>,
     /// The name of the task's current agent, the word the section shows in
     /// place of its id (`agent-tree.allium: AgentRowShowsAgentName`). Empty
     /// from a board that predates agent names, or for a task with no current

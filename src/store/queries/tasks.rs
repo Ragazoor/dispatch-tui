@@ -18,12 +18,8 @@ impl super::super::TaskRead for Store {
         self.rows.has_task(id)
     }
 
-    async fn list_live_agent_tasks(&self) -> Vec<Task> {
-        self.rows.live_agent_tasks()
-    }
-
-    async fn list_detached_agent_tasks(&self) -> Vec<Task> {
-        self.rows.detached_agent_tasks()
+    async fn list_agent_tasks(&self) -> (Vec<Task>, Vec<Task>) {
+        self.rows.agent_tasks()
     }
 
     async fn list_all(&self) -> Vec<Task> {

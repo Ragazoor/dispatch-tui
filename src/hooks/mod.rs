@@ -286,28 +286,37 @@ pub fn post_tool_use_context(context: &str) -> String {
 /// refused, an answer this version cannot read -- is an `Err` naming the
 /// address tried, never an empty view.
 pub async fn fetch_pane_view(port: u16, task_id: TaskId) -> Result<wire::PaneView> {
-    let request = wire::PaneViewRequest { task_id };
-    tokio::time::timeout(
-        DELIVERY_TIMEOUT,
-        post_json(port, wire::PANE_VIEW_PATH, &request),
+    ask_board(
+        port,
+        wire::PANE_VIEW_PATH,
+        &wire::PaneViewRequest { task_id },
     )
     .await
-    .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {DELIVERY_TIMEOUT:?}")))
-    .with_context(|| format!("could not reach the dispatch board on 127.0.0.1:{port}"))
+}
+
+/// One companion-pane call to the board on `port`, bounded by
+/// [`DELIVERY_TIMEOUT`]. Every failure names the address tried.
+async fn ask_board<Req, Resp>(port: u16, path: &str, request: &Req) -> Result<Resp>
+where
+    Req: serde::Serialize,
+    Resp: serde::de::DeserializeOwned,
+{
+    tokio::time::timeout(DELIVERY_TIMEOUT, post_json(port, path, request))
+        .await
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {DELIVERY_TIMEOUT:?}")))
+        .with_context(|| format!("could not reach the dispatch board on 127.0.0.1:{port}"))
 }
 
 /// Ask the running board on `port` to resume task `task_id`'s detached agent
 /// (agent-tree.allium: BoardPaneView.resume_agent). A refusal is an answer;
 /// only a board that could not be reached or read is an `Err`.
 pub async fn request_pane_resume(port: u16, task_id: TaskId) -> Result<wire::PaneResumeAnswer> {
-    let request = wire::PaneResumeRequest { task_id };
-    tokio::time::timeout(
-        DELIVERY_TIMEOUT,
-        post_json(port, wire::PANE_RESUME_PATH, &request),
+    ask_board(
+        port,
+        wire::PANE_RESUME_PATH,
+        &wire::PaneResumeRequest { task_id },
     )
     .await
-    .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {DELIVERY_TIMEOUT:?}")))
-    .with_context(|| format!("could not reach the dispatch board on 127.0.0.1:{port}"))
 }
 
 /// What the PR gate decided. Returned rather than acted on, so the exit code

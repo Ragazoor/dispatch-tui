@@ -243,13 +243,7 @@ fn run_tree_action(
             state.tree_state.toggle_selected();
             KeyAction::Continue
         }
-        "jump_to_agent" => {
-            use crate::agent_tree::render::agents::AgentAction;
-            return state.agents.space_action().map(|action| match action {
-                AgentAction::JumpTo(window) => KeyAction::JumpTo(window),
-                AgentAction::Resume(task) => KeyAction::Resume(task),
-            });
-        }
+        "jump_to_agent" => return state.agents.space_action(),
         // Space or Enter in the commits section: the row under the cursor
         // becomes the source. The row already selected is a no-op, so it
         // records nothing (SelectAgentTreeSource).

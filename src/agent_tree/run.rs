@@ -582,7 +582,7 @@ pub(crate) async fn read_agent_rows(
         epic: agent.epic,
     };
     let live = view.live_agents.into_iter().filter_map(|agent| {
-        let window = TmuxWindow::parse(&agent.tmux_window)?;
+        let window = TmuxWindow::parse(agent.tmux_window.as_deref()?)?;
         Some(row(agent, Some(window)))
     });
     // A detached agent has no window; Space resumes it instead.
