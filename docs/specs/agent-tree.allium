@@ -20,8 +20,9 @@
 --           beneath the tree, which lists the agent's own commits since the
 --           fork point from the task's base branch and selects which change
 --           the tree and diff pane show; and the AGENTS SECTION beneath that,
---           which lists every task with a live agent window and jumps to the
---           selected one's window.
+--           which lists every task with an agent — attached to a live window
+--           or detached from one — jumps to the selected attached agent's
+--           window, and asks the board to resume a detached one.
 -- Excludes: Task-activity classification and the activity-signal hook (see
 --           agent-health.allium — HookPreToolUse fires for both PreToolUse and
 --           PostToolUse and is NOT modified by anything in this spec);
@@ -60,10 +61,12 @@
 -- holds, so to the board the feature is a reader and nothing more.
 --
 -- The AGENTS SECTION is the one thing the pane reads that git does not
--- supply. It reads the board's live-agent list, read-only, on its own timer,
--- and never writes to it. That does not bend the git rule: the rule is about
--- what the pane says about FILES, and the agents section says nothing about
--- files. See AgentsSectionListsLiveAgents.
+-- supply. It reads the board's agent list, read-only, on its own timer. Its
+-- one write is a request: Space on a detached agent asks the board to resume
+-- it, and the board runs the same resume as Space on a detached card
+-- (ResumeDetachedAgentFromThePane). That does not bend the git rule: the rule
+-- is about what the pane says about FILES, and the agents section says
+-- nothing about files. See RefreshAgentTreeAgentList.
 --
 -- The COMMITS SECTION does not bend it either: its rows come from git, and
 -- the one thing it adds that git does not hold — which row the user selected —
@@ -270,11 +273,23 @@ value AgentCommit {
 }
 
 -- One answer from the board to a pane: its task, when the board's rows hold
--- it, and the tasks with a live agent window (is_live_agent), across every
--- repo and epic, as RefreshAgentTreeAgentList lists them.
+-- it, the tasks with a live agent window (is_live_agent), and the tasks
+-- whose agent is detached (core/Task.is_detached), across every repo and
+-- epic, as RefreshAgentTreeAgentList lists them.
 value PaneView {
     task: PaneTask?
     live_agents: [core/Task]
+    -- Empty from a board that predates detached agents: the pane then lists
+    -- the attached agents alone, as it did before.
+    detached_agents: [core/Task]
+}
+
+-- The board's answer to a pane's resume request (BoardPaneView.resume_agent).
+value PaneResumeAnswer {
+    -- True when the board raised ResumeTask; false when it refused.
+    accepted: Boolean
+    -- Why the board refused, worded for the pane's notice. Null when accepted.
+    refusal: String?
 }
 
 ------------------------------------------------------------
@@ -309,6 +324,29 @@ contract BoardPaneView {
         -- live_agents holds exactly the tasks is_live_agent holds for in the
         -- board's rows — the Running or Review column with a tmux window
         -- recorded — and no others. The pane does not re-derive it.
+
+    @invariant DetachedIsTheBoardsOwnDefinition
+        -- detached_agents holds exactly the tasks core/Task.is_detached holds
+        -- for in the board's rows — the Running or Review column with a
+        -- worktree and no tmux window — and no others. A task never appears
+        -- in both lists. A task with no worktree (is_unprovisioned) is in
+        -- neither: it has no agent to resume. A Done task keeps its worktree
+        -- but is not detached, so it is in neither either.
+
+    -- Ask the board to resume a detached agent. The one call here that writes:
+    -- it is not a read, and AskingChangesNothing does not cover it.
+    resume_agent: (task_id: Integer) -> PaneResumeAnswer
+
+    @invariant ResumeIsTheBoardsOwnResume
+        -- The board answers resume_agent by raising the same ResumeTask
+        -- (dispatch.allium) that Space on a detached card and the MCP tool
+        -- resume_task raise, with no message, after the same refusals
+        -- resume_task makes (the task never ran, has no worktree, is held by
+        -- another machine, is attached, or its worktree is gone from disk).
+        -- A refusal changes nothing. An accepted request only means the
+        -- launch was handed to the board: the launch can still fail, and
+        -- says so in the board's status line, as it does for resume_task.
+        -- The pane never launches an agent itself.
 }
 
 ------------------------------------------------------------
@@ -448,7 +486,8 @@ entity AgentTreePane {
 
     -- The tasks the agents section shows: what the last SUCCESSFUL read of the
     -- board's task list returned, filtered to tasks with a live agent window
-    -- (see is_live_agent) and grouped by epic (AgentListGroupsByEpic). A failed read leaves it
+    -- (see is_live_agent) or a detached agent (core/Task.is_detached), and
+    -- grouped by epic (AgentListGroupsByEpic). A failed read leaves it
     -- alone, exactly as a failed git query leaves rendered_changes alone
     -- (AgentTreeAgentListFailureKeepsLastList). Empty before the first read.
     --
@@ -456,6 +495,20 @@ entity AgentTreePane {
     -- live, which is almost always. It is listed, marked, and not jumpable —
     -- see JumpToAgentWindow.
     listed_agents: [core/Task]
+
+    -- The detached agent the board accepted a resume for, whose window the
+    -- pane jumps to once a list read shows it attached
+    -- (ResumeDetachedAgentFromThePane, RefreshAgentTreeAgentList). Null when no
+    -- resume is waiting. Dropped when the cursor leaves its row or the task
+    -- leaves the list (ForgetPendingResumeJump), so a resume that never
+    -- comes up cannot jump the user away later.
+    pending_jump: core/Task?
+
+    -- The task under the agents section's cursor; null when the list is
+    -- empty. View state, moved by the cursor motions and kept on its task
+    -- across list reads (RefreshAgentTreeAgentList, "The cursor follows its
+    -- task").
+    selected_agent: core/Task?
 
     -- The agents section's own redraw stamp. Separate from last_rendered_at
     -- because a git query that overran its timeout must not also delay the
@@ -2287,11 +2340,14 @@ rule SelectAgentTreeSource {
 
 -- == Agents Section ==
 --
--- Beneath the tree, the pane lists every task that has a live agent window, so
--- the user can see which agents are running without going back to the board,
--- and jump straight to one. Its main use is finding the task id to hand an
--- agent that should message another one; the jump is what makes the list
--- something to act on rather than only read.
+-- Beneath the tree, the pane lists every task that has an agent: the ones
+-- attached to a live window, and the detached ones whose session stopped but
+-- whose worktree is kept, so the user can see which agents are running and
+-- which wait in Running or Review without going back to the board. Space
+-- jumps straight to an attached one and resumes a detached one. Its main use
+-- is finding the task id to hand an agent that should message another one;
+-- the jump is what makes the list something to act on rather than only
+-- read.
 
 rule RefreshAgentTreeAgentList {
     -- A shown pane re-reads the board's task list on its own timer.
@@ -2303,10 +2359,22 @@ rule RefreshAgentTreeAgentList {
     requires: pane.task_resolution = resolved
     requires: board_tasks().ok
 
-    let live = board_tasks().value.filter(t => is_live_agent(t))
+    let listed = board_tasks().value.filter(t => is_live_agent(t) or t.is_detached)
 
     ensures: pane.last_agents_listed_at = now
-    ensures: pane.listed_agents = grouped_by_epic(live)
+    ensures: pane.listed_agents = grouped_by_epic(listed)
+
+    -- A resumed agent that now has a window: jump to it, and stop waiting.
+    -- One that left the list: stop waiting (ForgetPendingResumeJump).
+    let waiting = pane.pending_jump
+    ensures:
+        if waiting != null and listed.contains(waiting) and is_live_agent(waiting):
+            AgentWindowSelected(window: current_agent(waiting).tmux_window)
+    ensures: pane.pending_jump =
+        if waiting = null: null
+        else if not listed.contains(waiting): null
+        else if is_live_agent(waiting): null
+        else: waiting
 
     -- A working read clears its own stale notice and nothing else, exactly
     -- as RefreshAgentTree does for git.
@@ -2315,27 +2383,37 @@ rule RefreshAgentTreeAgentList {
         else: old(pane.error_notice)
 
     @guidance
-        -- == What "live" means ==
+        -- == What "live" and "detached" mean ==
         -- is_live_agent(t) holds when t is in the Running or Review column and
         -- the board has a tmux window recorded for it. That is the board's
         -- own answer to "does this task have an agent window", read as it
         -- stands; the pane does not ask tmux itself. A window the board has
-        -- not yet noticed is gone is listed until it does, and a jump to it
-        -- fails visibly (AgentTreeAgentJumpFailureIsVisible) rather than
-        -- silently.
+        -- not yet noticed is gone is listed as attached until it does, and a
+        -- jump to it fails visibly (AgentTreeAgentJumpFailureIsVisible)
+        -- rather than silently.
+        --
+        -- t.is_detached holds when t is in the Running or Review column with
+        -- a worktree and no tmux window: its session stopped and can be
+        -- resumed. It is the same state the board's card marks "detached".
+        -- An attached and a detached row are told apart by their leading
+        -- dot (AgentRowShowsAgentName). A task with no worktree is not
+        -- listed: there is no agent to reach or resume.
         --
         -- Every repo and every epic is listed, not only this task's. The
         -- question the section answers is "which agents can I reach", and an
-        -- agent in another repo is as reachable as one in this.
+        -- agent in another repo is as reachable as one in this. A detached
+        -- agent on another machine is listed too; resuming it is refused
+        -- (ResumeIsTheBoardsOwnResume), and the refusal says why.
         --
         -- == Read-only ==
         -- board_tasks() is BoardPaneView's pane_view(pane.task.id).live_agents
-        -- — the board's own answer, already filtered by the same definition
-        -- (LiveIsTheBoardsOwnDefinition), so the filter above restates it
-        -- rather than narrowing it. Not ok when the board could not be
-        -- reached or its answer could not be read. The pane never writes to
-        -- the board (AskingChangesNothing) and never opens the store
-        -- (PanesReadThroughTheBoard).
+        -- together with its detached_agents — the board's own answer,
+        -- already filtered by the same definitions
+        -- (LiveIsTheBoardsOwnDefinition, DetachedIsTheBoardsOwnDefinition),
+        -- so the filter above restates it rather than narrowing it. Not ok
+        -- when the board could not be reached or its answer could not be
+        -- read. Reading writes nothing to the board (AskingChangesNothing),
+        -- and the pane never opens the store (PanesReadThroughTheBoard).
         --
         -- == Order ==
         -- grouped_by_epic puts the tasks of one epic next to each other: the
@@ -2431,11 +2509,15 @@ rule SwitchAgentTreeBrowseFocus {
 }
 
 rule JumpToAgentWindow {
-    -- Space or Enter on an agent row switches tmux to that agent's window.
+    -- Space or Enter on an attached agent's row switches tmux to that agent's
+    -- window.
     when: JumpToAgentWindow(user, pane, target)
 
     requires: pane.focus = agents
     requires: pane.listed_agents.contains(target)
+    -- A detached row has no window to jump to; Space there resumes it
+    -- (ResumeDetachedAgentFromThePane).
+    requires: is_live_agent(target)
 
     -- The pane's own task is already on screen: jumping to it is a no-op,
     -- not an error, so it neither switches nor raises a notice.
@@ -2467,6 +2549,82 @@ rule AgentTreeAgentJumpFailureIsVisible {
         -- same reason AgentTreeDiffPaneFailureIsVisible does. The next list
         -- read drops a closed window's row on its own; this notice only has
         -- to cover the second in between.
+}
+
+rule ResumeDetachedAgentFromThePane {
+    -- Space or Enter on a detached agent's row asks the board to resume it.
+    when: ResumeDetachedAgent(user, pane, target)
+
+    requires: pane.focus = agents
+    requires: pane.listed_agents.contains(target)
+    requires: target.is_detached
+    -- The pane's own task always has a window while its pane is shown, so
+    -- it is never detached here; stated for symmetry with JumpToAgentWindow.
+    requires: target != pane.task
+
+    ensures: AgentResumeRequested(pane: pane, target: target)
+
+    @guidance
+        -- The request goes to the board (BoardPaneView.resume_agent), which
+        -- runs the same resume as Space on a detached card
+        -- (ResumeIsTheBoardsOwnResume). The pane does not launch anything,
+        -- does not touch tmux, and does not change the task: the board does
+        -- all of that, and the next list read shows the result.
+        --
+        -- The request runs beside the renderer, not inside its key loop, as
+        -- the list read does, so a slow board never delays a keypress. The
+        -- board's answer arrives as AgentTreeResumeAnswered.
+}
+
+rule AgentTreeResumeAccepted {
+    -- The board accepted the resume. The pane waits for the agent's window.
+    when: AgentTreeResumeAnswered(pane, target, answer)
+
+    requires: answer.accepted
+
+    ensures: pane.pending_jump = target
+
+    @guidance
+        -- Nothing is shown for an accepted request: the notice is for
+        -- failures only (AgentTreeNoticeRedensBorder). The row stays
+        -- detached until the board records the new window, and then the
+        -- pane jumps there (JumpToResumedAgent).
+}
+
+rule AgentTreeResumeRefusedIsVisible {
+    -- The board refused, or could not be reached.
+    when: AgentTreeResumeAnswered(pane, target, answer)
+
+    requires: not answer.accepted
+
+    ensures: pane.error_notice = answer.refusal
+    ensures: pane.notice_source = agent_jump
+    ensures: pane.status = shown
+
+    @guidance
+        -- The direct answer to a keypress, like a failed jump, so it uses
+        -- the jump's notice source and no timer clears it. A board that could
+        -- not be reached is answered the same way, with a refusal naming the
+        -- board's address.
+}
+
+rule ForgetPendingResumeJump {
+    -- The user moved the agents cursor off the row they resumed.
+    when: AgentTreeAgentCursorMoved(pane)
+
+    requires: pane.pending_jump != null
+    requires: pane.selected_agent != pane.pending_jump
+
+    ensures: pane.pending_jump = null
+
+    @guidance
+        -- A launch can fail on the board, and a task can be resumed later
+        -- from somewhere else. Without this the pane would jump the user away
+        -- the next time that agent comes up, long after they stopped waiting
+        -- for it. Moving the agents cursor to another row is the user saying
+        -- they stopped waiting. The task leaving the list drops the wait too
+        -- (RefreshAgentTreeAgentList), and the list read that shows it
+        -- attached ends it with the jump.
 }
 
 ------------------------------------------------------------
@@ -2771,13 +2929,15 @@ surface AgentTreeCompanionPane {
         -- browse view (tree and commits) and the agents view; `s` moves between
         -- tree and commits. With the commits section focused, Space and Enter
         -- select the row under the cursor as the tree's source; with the
-        -- agents section focused, they jump. See AgentKeysFollowFocus for
-        -- what every other key does there.
+        -- agents section focused, they jump to an attached agent and resume
+        -- a detached one. See AgentKeysFollowFocus for what every other key
+        -- does there.
         SwitchAgentTreeView(user, pane)                   -- Tab, Shift+Tab
         SwitchAgentTreeBrowseFocus(user, pane)            -- s (browse view)
         OpenSelectedAgentTreeFileInEditor(user, pane, node) -- v (file, tree focus)
         SelectAgentTreeSource(user, pane, commit)         -- Space, Enter (commits focus)
-        JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus)
+        JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus, attached row)
+        ResumeDetachedAgent(user, pane, target)           -- Space, Enter (agents focus, detached row)
 
     @guarantee PanesReadThroughTheBoard
         -- A pane's renderer reads its task and the live agents from the
@@ -2790,11 +2950,14 @@ surface AgentTreeCompanionPane {
         -- subscription per pane — and each connection re-delivered every row
         -- the board already held, to show one task and one list.
         --
-        -- The pane's one write goes the same way: a keypress that takes
-        -- effect is sent to the board over the same port, and the board
-        -- records its keybinding usage (keybindings.allium:
-        -- PanesRecordUsageLikeTheBoard). That is a usage event, not a task
-        -- change, and the pane never writes the store itself.
+        -- The pane's writes go the same way. A keypress that takes effect is
+        -- sent to the board over the same port, and the board records its
+        -- keybinding usage (keybindings.allium: PanesRecordUsageLikeTheBoard).
+        -- That is a usage event, not a task change. Space on a detached agent
+        -- sends a resume request (BoardPaneView.resume_agent), and the board
+        -- runs its own resume (ResumeIsTheBoardsOwnResume). That one does
+        -- change the task, but the board changes it, not the pane. The pane
+        -- never writes the store itself.
         --
         -- Reading is read-only, in both directions: the pane asks, the board
         -- answers, and neither the board's rows nor the store change because
@@ -2894,8 +3057,12 @@ surface AgentTreeCompanionPane {
         -- focus was elsewhere.
 
     @guarantee AgentRowShowsAgentName
-        -- Each agent row reads `<agent name> <title>`, clipped at the pane edge
-        -- like every other row here. The name comes first because a word is
+        -- Each agent row reads `<dot> <agent name> <title>`, clipped at the
+        -- pane edge like every other row here. The dot says whether the agent
+        -- is attached: `●` for an agent with a live window, `○` for a
+        -- detached one (the glyph the board's card puts before "detached").
+        -- It leads the row on every row, so it lines up in one column and the
+        -- edge never clips it. The name comes first because a word is
         -- what a person scans fastest. It is the name of the task's current
         -- agent (agents.allium), which is also the name of the messaging
         -- session and the word a peer is addressed by. The numeric id is not
@@ -2904,10 +3071,11 @@ surface AgentTreeCompanionPane {
         -- wire (PaneAgent) carries the agent name for the row, not the task's
         -- alias.
         --
-        -- The pane's own task is marked with a trailing dot and drawn dimmed.
-        -- It is listed rather than hidden so the list always reads as the
-        -- whole set of running agents, but Space on it does nothing (see
-        -- JumpToAgentWindow).
+        -- The pane's own task is drawn dimmed and carries no other mark: its
+        -- dot is `●` like any attached agent's. It is listed rather than
+        -- hidden so the list always reads as the whole set of agents, but
+        -- Space on it does nothing (see JumpToAgentWindow). A detached row is
+        -- drawn in the ordinary colour; only its dot sets it apart.
         --
         -- The cursor highlight is drawn only in the focused section. The
         -- unfocused section keeps its cursor position without showing it, so
@@ -2978,8 +3146,10 @@ surface AgentTreeCompanionPane {
         -- its row's action id: the pane sends the press to the running board
         -- over the board's port, and the board records it
         -- (keybindings.allium: PanesRecordUsageLikeTheBoard). Space or Enter
-        -- in the agents section on the pane's own task, or on no row, does
-        -- nothing (JumpToAgentWindow) and records nothing; so does Space or
+        -- on a detached row is the same jump_to_agent row: it resumes
+        -- (ResumeDetachedAgentFromThePane) and records like a jump. Space or
+        -- Enter in the agents section on the pane's own task, or on no row,
+        -- does nothing (JumpToAgentWindow) and records nothing; so does Space or
         -- Enter in the commits section on the row already selected
         -- (SelectAgentTreeSource).
 
@@ -3309,7 +3479,10 @@ surface AgentTreeCompanionPane {
         -- and change nothing in it. It never writes to the worktree, never
         -- mutates the task, and never issues an MCP call. Killing it, or never
         -- opening it, cannot change what the agent does or what the board
-        -- shows.
+        -- shows. Asking the board to resume ANOTHER, detached agent is not an
+        -- exception to this: it is a request the board decides on and acts
+        -- on (ResumeIsTheBoardsOwnResume), and it touches neither this
+        -- worktree nor this task.
         --
         -- The git commands this pane runs are read-only by construction — two
         -- diffs of the worktree against the index and a file listing for

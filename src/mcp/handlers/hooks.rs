@@ -17,7 +17,7 @@ use axum::{
 
 use crate::hooks::wire::{
     Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, PaneAgent, PaneEpic,
-    PaneTask, PaneView, PaneViewRequest, Question,
+    PaneResumeAnswer, PaneResumeRequest, PaneTask, PaneView, PaneViewRequest, Question,
 };
 use crate::mcp::{trajectory, BackgroundWrite, McpState};
 use crate::models::{TaskId, TaskStatus};
@@ -110,16 +110,21 @@ pub async fn handle_pane_view(
             worktree: task.worktree,
             base_branch: task.base_branch,
         });
-    let (live_tasks, agents, epics) = tokio::join!(
+    let (live_tasks, detached_tasks, agents, epics) = tokio::join!(
         state.db.list_live_agent_tasks(),
+        state.db.list_detached_agent_tasks(),
         state.db.list_agents(),
         state.db.list_epics()
     );
-    // Each epic once, however many of its agents are live.
+    // Each epic once, however many of its agents are listed.
     let by_id = crate::models::epics::epic_id_lookup(&epics);
     let mut pane_epics: std::collections::HashMap<crate::models::EpicId, PaneEpic> =
         std::collections::HashMap::new();
-    for id in live_tasks.iter().filter_map(|task| task.epic_id) {
+    for id in live_tasks
+        .iter()
+        .chain(&detached_tasks)
+        .filter_map(|task| task.epic_id)
+    {
         if let (Some(epic), std::collections::hash_map::Entry::Vacant(slot)) =
             (by_id.get(&id), pane_epics.entry(id))
         {
@@ -129,23 +134,56 @@ pub async fn handle_pane_view(
             });
         }
     }
+    let pane_agent = |task: crate::models::Task, tmux_window: String| PaneAgent {
+        id: task.id,
+        agent_name: agents
+            .iter()
+            .find(|a| a.task_id == task.id && a.is_current())
+            .map(|a| a.name.clone())
+            .unwrap_or_default(),
+        epic: task.epic_id.and_then(|id| pane_epics.get(&id).cloned()),
+        title: task.title,
+        tmux_window,
+    };
     let live_agents = live_tasks
         .into_iter()
         .filter_map(|task| {
-            Some(PaneAgent {
-                id: task.id,
-                title: task.title,
-                tmux_window: task.tmux_window?.as_str().to_string(),
-                agent_name: agents
-                    .iter()
-                    .find(|a| a.task_id == task.id && a.is_current())
-                    .map(|a| a.name.clone())
-                    .unwrap_or_default(),
-                epic: task.epic_id.and_then(|id| pane_epics.get(&id).cloned()),
-            })
+            let window = task.tmux_window.as_ref()?.as_str().to_string();
+            Some(pane_agent(task, window))
         })
         .collect();
-    Ok(Json(PaneView { task, live_agents }))
+    // A detached agent has no window (DetachedIsTheBoardsOwnDefinition).
+    let detached_agents = detached_tasks
+        .into_iter()
+        .map(|task| pane_agent(task, String::new()))
+        .collect();
+    Ok(Json(PaneView {
+        task,
+        live_agents,
+        detached_agents,
+    }))
+}
+
+/// `BoardPaneView.resume_agent` (`docs/specs/agent-tree.allium`): a companion
+/// pane asks the board to resume a detached agent. The same checks and the
+/// same event as `resume_task` (`ResumeIsTheBoardsOwnResume`); a refusal is an
+/// answer, worded for the pane's notice, never an HTTP error.
+pub async fn handle_pane_resume(
+    State(state): State<Arc<McpState>>,
+    Json(request): Json<PaneResumeRequest>,
+) -> Json<PaneResumeAnswer> {
+    let n = request.task_id.0;
+    let refused = |reason: String| Json(PaneResumeAnswer::Refused { reason });
+    let Ok(task) = state.task_svc.get_task(request.task_id).await else {
+        return refused(format!("#{n} is not on the board"));
+    };
+    if let Some(why) = super::tasks::unresumable(&task, &state.host_id).await {
+        return refused(super::tasks::pane_refusal_text(n, &why));
+    }
+    match super::tasks::hand_resume_to_board(&state, request.task_id, None) {
+        Ok(()) => Json(PaneResumeAnswer::Accepted),
+        Err(why) => refused(why.to_string()),
+    }
 }
 
 async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {

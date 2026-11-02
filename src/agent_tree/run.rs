@@ -255,11 +255,67 @@ const AGENTS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Take every read that has arrived since the last pass. Only the newest one
 /// matters for the rows, but each is adopted in turn so a failure followed by
-/// a recovery leaves no stale notice behind.
-fn drain_agent_reads(agent_reads: &AgentReads, state: &mut RenderState) {
+/// a recovery leaves no stale notice behind. A read that shows a resumed agent
+/// attached jumps to its window (`RefreshAgentTreeAgentList`).
+fn drain_agent_reads(
+    agent_reads: &AgentReads,
+    state: &mut RenderState,
+    runner: &dyn ProcessRunner,
+) {
     while let Ok(read) = agent_reads.try_recv() {
-        state.adopt_agent_list(read);
+        if let Some(window) = state.adopt_agent_list(read) {
+            jump_to_agent(&window, state, runner);
+        }
     }
+}
+
+/// The agents section's resume requests and the board's answers to them
+/// (`ResumeDetachedAgentFromThePane`). The requests go to a task beside the
+/// render loop, as the list reads do, so a slow board never delays a key.
+pub(crate) struct ResumeRequests {
+    requests: tokio::sync::mpsc::UnboundedSender<TaskId>,
+    answers:
+        std::sync::mpsc::Receiver<(TaskId, Result<crate::hooks::wire::PaneResumeAnswer, String>)>,
+}
+
+impl ResumeRequests {
+    /// Ask for `task` to be resumed. A worker that has gone away is a board
+    /// that cannot be asked, shown as such.
+    fn request(&self, task: TaskId, state: &mut RenderState) {
+        if self.requests.send(task).is_err() {
+            state.adopt_resume_answer(task, Err("the resume worker has stopped".to_string()));
+        }
+    }
+
+    /// Take every answer that has arrived since the last pass.
+    fn drain(&self, state: &mut RenderState) {
+        while let Ok((task, answer)) = self.answers.try_recv() {
+            state.adopt_resume_answer(task, answer);
+        }
+    }
+}
+
+/// Start the worker that sends resume requests to the board.
+fn spawn_resume_worker(
+    source: std::sync::Arc<dyn crate::agent_tree::pane::PaneViewSource>,
+) -> (ResumeRequests, tokio::task::JoinHandle<()>) {
+    let (requests, mut incoming) = tokio::sync::mpsc::unbounded_channel::<TaskId>();
+    let (tx, answers) = std::sync::mpsc::channel();
+    let handle = tokio::spawn(async move {
+        while let Some(task) = incoming.recv().await {
+            let answer = source.resume_agent(task).await.map_err(|e| {
+                format!(
+                    "could not ask the board at {} to resume #{}: {e:#}",
+                    source.board_address(),
+                    task.0
+                )
+            });
+            if tx.send((task, answer)).is_err() {
+                return;
+            }
+        }
+    });
+    (ResumeRequests { requests, answers }, handle)
 }
 
 /// Reads of the agent's commits for the commits section, one per
@@ -320,6 +376,7 @@ fn run_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     context: &DiffPaneContext<'_>,
     agent_reads: &AgentReads,
+    resumes: &ResumeRequests,
     commit_reads: &CommitReads,
     runner: &dyn ProcessRunner,
     usage: &mut crate::agent_tree::pane::PaneUsage,
@@ -349,7 +406,8 @@ fn run_loop<B: Backend>(
     let mut schedule = RefreshSchedule::new(REFRESH_INTERVAL, Instant::now());
 
     loop {
-        drain_agent_reads(agent_reads, &mut state);
+        drain_agent_reads(agent_reads, &mut state, runner);
+        resumes.drain(&mut state);
         if drain_commit_reads(commit_reads, root, &mut tree, &mut state) {
             refresh(root, runner, &mut tree, &mut state);
             schedule.mark(Instant::now());
@@ -379,6 +437,7 @@ fn run_loop<B: Backend>(
                             }
                         }
                         KeyAction::JumpTo(window) => jump_to_agent(&window, &mut state, runner),
+                        KeyAction::Resume(task) => resumes.request(task, &mut state),
                         KeyAction::SourceChanged => {
                             adopt_selected_source(root, &mut tree, &mut state);
                             refresh(root, runner, &mut tree, &mut state);
@@ -459,6 +518,7 @@ pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()
     // already holds them (`PanesReadThroughTheBoard`).
     let source = std::sync::Arc::new(crate::agent_tree::pane::BoardPaneSource { port: board_port });
     let (agent_reads, poller) = spawn_agent_list_poller(source.clone(), task_id);
+    let (resumes, resume_worker) = spawn_resume_worker(source.clone());
     let mut usage = crate::agent_tree::pane::PaneUsage::new(board_port, task_id);
 
     let result = crate::agent_tree::pane::with_pane_task(
@@ -484,6 +544,7 @@ pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()
                     task_id,
                 },
                 &agent_reads,
+                &resumes,
                 &commit_reads,
                 &RealProcessRunner::default(),
                 &mut usage,
@@ -493,12 +554,13 @@ pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()
     // An exit through an error path leaves sends outstanding.
     usage.flush();
     poller.abort();
+    resume_worker.abort();
     result
 }
 
 /// One read of the agents section, from the running board
 /// (agent-tree.allium: RefreshAgentTreeAgentList, `board_tasks()` =
-/// BoardPaneView's `live_agents`). `Err` carries the notice to show -- naming
+/// BoardPaneView's `live_agents` and `detached_agents`). `Err` carries the notice to show -- naming
 /// the board -- and the loop keeps its last list
 /// (AgentTreeAgentListFailureKeepsLastList).
 pub(crate) async fn read_agent_rows(
@@ -511,20 +573,24 @@ pub(crate) async fn read_agent_rows(
             source.board_address()
         )
     })?;
-    let mut rows: Vec<AgentRow> = view
-        .live_agents
+    let row = |agent: crate::hooks::wire::PaneAgent, window: Option<TmuxWindow>| AgentRow {
+        id: agent.id,
+        title: agent.title,
+        agent_name: agent.agent_name,
+        window,
+        is_own: agent.id == own,
+        epic: agent.epic,
+    };
+    let live = view.live_agents.into_iter().filter_map(|agent| {
+        let window = TmuxWindow::parse(&agent.tmux_window)?;
+        Some(row(agent, Some(window)))
+    });
+    // A detached agent has no window; Space resumes it instead.
+    let detached = view
+        .detached_agents
         .into_iter()
-        .filter_map(|agent| {
-            Some(AgentRow {
-                id: agent.id,
-                title: agent.title,
-                agent_name: agent.agent_name,
-                window: TmuxWindow::parse(&agent.tmux_window)?,
-                is_own: agent.id == own,
-                epic: agent.epic,
-            })
-        })
-        .collect();
+        .map(|agent| row(agent, None));
+    let mut rows: Vec<AgentRow> = live.chain(detached).collect();
     // Grouped by epic: epics by id, epicless last, tasks by id inside a group
     // (RefreshAgentTreeAgentList's grouped_by_epic).
     rows.sort_by_key(|row| (row.epic.is_none(), row.epic.as_ref().map(|e| e.id), row.id));
@@ -532,8 +598,8 @@ pub(crate) async fn read_agent_rows(
 }
 
 /// Read the board's task list on its own timer and send each read, reduced to
-/// the agents section's rows, to the render loop. Read-only: the pane never
-/// writes to the board (`RefreshAgentTreeAgentList`).
+/// the agents section's rows, to the render loop. Read-only: reading writes
+/// nothing to the board (`RefreshAgentTreeAgentList`).
 ///
 /// A task rather than an inline read because the render loop is synchronous
 /// and the board read is not; the loop runs on the runtime's calling thread, so

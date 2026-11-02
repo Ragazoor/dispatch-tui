@@ -166,6 +166,10 @@ pub(crate) trait PaneViewSource: Send + Sync {
     /// One read of the board (BoardPaneView's `pane_view`). `Err` is a failed
     /// read, never an empty view.
     async fn pane_view(&self, task_id: TaskId) -> Result<crate::hooks::wire::PaneView>;
+    /// Ask the board to resume a detached agent (BoardPaneView's
+    /// `resume_agent`). `Err` only when the board could not be reached or
+    /// read; a refusal is an `Ok` answer.
+    async fn resume_agent(&self, task_id: TaskId) -> Result<crate::hooks::wire::PaneResumeAnswer>;
     /// The board address this source asks, for the failure text.
     fn board_address(&self) -> String;
 }
@@ -180,6 +184,9 @@ pub(crate) struct BoardPaneSource {
 impl PaneViewSource for BoardPaneSource {
     async fn pane_view(&self, task_id: TaskId) -> Result<crate::hooks::wire::PaneView> {
         crate::hooks::fetch_pane_view(self.port, task_id).await
+    }
+    async fn resume_agent(&self, task_id: TaskId) -> Result<crate::hooks::wire::PaneResumeAnswer> {
+        crate::hooks::request_pane_resume(self.port, task_id).await
     }
     fn board_address(&self) -> String {
         format!("127.0.0.1:{}", self.port)

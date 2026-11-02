@@ -1,8 +1,10 @@
 //! The agents section of the agent-tree pane: the band beneath the file tree
-//! that lists every task with a live agent window and jumps to the selected
-//! one (see `docs/specs/agent-tree.allium`'s `RefreshAgentTreeAgentList` and
-//! `JumpToAgentWindow` rules, and the `TwoViewsShareThePane`,
-//! `AgentRowShowsIdAndTitle` and `AgentKeysFollowFocus` guarantees).
+//! that lists every task with an attached or detached agent, jumps to the
+//! selected attached one and resumes a detached one (see
+//! `docs/specs/agent-tree.allium`'s
+//! `RefreshAgentTreeAgentList`, `JumpToAgentWindow` and
+//! `ResumeDetachedAgentFromThePane` rules, and the `TwoViewsShareThePane`,
+//! `AgentRowShowsAgentName` and `AgentKeysFollowFocus` guarantees).
 //!
 //! Pure view state and rendering only. Reading the board's task list and
 //! selecting a tmux window both belong to the loop in [`crate::agent_tree::run`].
@@ -25,8 +27,10 @@ pub struct AgentRow {
     /// The word the row leads with, the task's current agent name; empty
     /// falls back to `#<id>`.
     pub agent_name: String,
-    pub window: TmuxWindow,
-    /// Whether this is the pane's own task — marked, dimmed, and not jumpable.
+    /// The agent's window; `None` for a detached agent, which has none and
+    /// which Space resumes instead (`ResumeDetachedAgentFromThePane`).
+    pub window: Option<TmuxWindow>,
+    /// Whether this is the pane's own task — dimmed, and not jumpable.
     pub is_own: bool,
     /// The task's own epic, which the row is grouped under; `None` for an
     /// epicless task (`AgentListGroupsByEpic`).
@@ -83,13 +87,26 @@ impl AgentsSection {
         self.rows.get(self.cursor)
     }
 
-    /// The window Space or Enter jumps to: the selected row's, unless it is
-    /// the pane's own task, where the jump is a no-op.
-    pub fn jump_target(&self) -> Option<TmuxWindow> {
-        self.selected()
-            .filter(|row| !row.is_own)
-            .map(|row| row.window.clone())
+    /// What Space or Enter does on the selected row: jump to an attached
+    /// agent's window, resume a detached one, or nothing on the pane's own
+    /// task or an empty list.
+    pub fn space_action(&self) -> Option<AgentAction> {
+        let row = self.selected().filter(|row| !row.is_own)?;
+        Some(match &row.window {
+            Some(window) => AgentAction::JumpTo(window.clone()),
+            None => AgentAction::Resume(row.id),
+        })
     }
+}
+
+/// What Space or Enter on an agent row asks the loop to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentAction {
+    /// An attached agent: select its window (`JumpToAgentWindow`).
+    JumpTo(TmuxWindow),
+    /// A detached agent: ask the board to resume it
+    /// (`ResumeDetachedAgentFromThePane`).
+    Resume(TaskId),
 }
 
 impl ListCursor for AgentsSection {
@@ -158,9 +175,18 @@ pub(crate) fn test_row(id: i64, own: bool) -> AgentRow {
         id: TaskId(id),
         title: format!("task {id}"),
         agent_name: String::new(),
-        window: crate::models::test_tmux_window(&format!("task-{id}")),
+        window: Some(crate::models::test_tmux_window(&format!("task-{id}"))),
         is_own: own,
         epic: None,
+    }
+}
+
+/// A detached agent for tests: `#<id> task <id>`, no window.
+#[cfg(test)]
+pub(crate) fn test_detached_row(id: i64) -> AgentRow {
+    AgentRow {
+        window: None,
+        ..test_row(id, false)
     }
 }
 
@@ -248,10 +274,10 @@ pub fn render_agents(
             if focused && index == section.cursor {
                 style = style.add_modifier(Modifier::REVERSED);
             }
-            let mut text = format!("{} {}", row.label(), row.title);
-            if row.is_own {
-                text.push_str(" ●");
-            }
+            // The dot leads every row so it lines up and the edge never
+            // clips it: attached or detached (AgentRowShowsAgentName).
+            let dot = if row.window.is_some() { '●' } else { '○' };
+            let text = format!("{dot} {} {}", row.label(), row.title);
             Some(Line::from(Span::styled(text, style)))
         })
         .collect();
@@ -487,33 +513,65 @@ mod tests {
         assert!(section.selected().is_none());
     }
 
-    // ---- JumpToAgentWindow -----------------------------------------------
+    // ---- JumpToAgentWindow / ResumeDetachedAgentFromThePane --------------
 
     #[test]
-    fn the_jump_target_is_the_selected_agents_window() {
+    fn space_on_an_attached_agent_jumps_to_its_window() {
         let mut section = AgentsSection::new();
         section.set_rows(vec![row(1, false), row(2, true)]);
-        assert_eq!(section.jump_target(), Some(test_tmux_window("task-1")));
+        assert_eq!(
+            section.space_action(),
+            Some(AgentAction::JumpTo(test_tmux_window("task-1")))
+        );
     }
 
     #[test]
-    fn the_own_task_has_no_jump_target() {
+    fn the_own_task_has_no_space_action() {
         let mut section = AgentsSection::new();
         section.set_rows(vec![row(1, false), row(2, true)]);
         section.down();
-        assert_eq!(section.jump_target(), None);
+        assert_eq!(section.space_action(), None);
     }
 
-    // ---- TwoViewsShareThePane / AgentRowShowsIdAndTitle ----------
+    #[test]
+    fn space_on_a_detached_agent_resumes_it() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![test_detached_row(3)]);
+        assert_eq!(section.space_action(), Some(AgentAction::Resume(TaskId(3))));
+    }
+
+    // ---- TwoViewsShareThePane / AgentRowShowsAgentName ----------
 
     #[test]
-    fn a_row_reads_id_then_title_and_the_own_task_is_marked() {
+    fn every_row_leads_with_its_dot_and_the_own_task_has_no_trailing_mark() {
         let mut section = AgentsSection::new();
-        section.set_rows(vec![row(4941, false), row(4942, true)]);
-        let out = rendered(&mut section, true, 4);
+        section.set_rows(vec![
+            row(4941, false),
+            row(4942, true),
+            test_detached_row(4943),
+        ]);
+        let out = rendered(&mut section, true, 5);
         assert!(out.contains("Agents"), "{out}");
-        assert!(out.contains("#4941 task 4941"), "{out}");
-        assert!(out.contains("#4942 task 4942 ●"), "{out}");
+        assert!(out.contains("● #4941 task 4941"), "{out}");
+        assert!(out.contains("● #4942 task 4942"), "{out}");
+        assert!(!out.contains("task 4942 ●"), "{out}");
+        assert!(out.contains("○ #4943 task 4943"), "{out}");
+    }
+
+    #[test]
+    fn a_detached_row_is_drawn_in_the_ordinary_colour_and_the_own_row_dimmed() {
+        use crate::palette::MUTED;
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![row(1, true), test_detached_row(2)]);
+        let mut terminal = Terminal::new(TestBackend::new(30, 4)).expect("terminal");
+        terminal
+            .draw(|frame| render_agents(frame, frame.area(), &mut section, false, false, None))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        // Row 1 (inside the border) is the own task, row 2 the detached one;
+        // column 3 is past the dot, on the label.
+        assert_eq!(buffer[(3, 1)].fg, MUTED);
+        assert_ne!(buffer[(3, 2)].fg, MUTED);
     }
 
     #[test]
@@ -536,7 +594,7 @@ mod tests {
         section.bottom();
         let out = rendered(&mut section, true, 10);
         assert!(out.contains("#20 task 20"), "{out}");
-        assert!(!out.contains("#1 task 1\n"), "{out}");
+        assert!(!out.contains("#1 task 1 "), "{out}");
     }
 
     #[test]

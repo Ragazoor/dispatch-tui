@@ -128,6 +128,119 @@ fn space_on_another_agent_jumps_to_its_window() {
     );
 }
 
+/// ResumeDetachedAgentFromThePane: Space or Enter on a detached row asks the
+/// loop to resume it, not to jump.
+#[test]
+fn space_on_a_detached_agent_requests_a_resume() {
+    let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![detached(7)]);
+    rig.state.focus = Focus::Agents;
+    assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::Resume(TaskId(7)));
+    assert_eq!(rig.press(KeyCode::Enter), KeyAction::Resume(TaskId(7)));
+}
+
+// ---- The resume's answer and the jump that follows it ----------------
+
+fn pane_with(rows: Vec<AgentRow>) -> RenderState {
+    let mut state = RenderState::new();
+    state.adopt_agent_list(Ok(rows));
+    state
+}
+
+/// AgentTreeResumeAccepted: the pane waits for the agent's window, and says
+/// nothing — the notice is for failures.
+#[test]
+fn an_accepted_resume_waits_for_the_window_without_a_notice() {
+    let mut state = pane_with(vec![detached(7)]);
+    state.adopt_resume_answer(
+        TaskId(7),
+        Ok(crate::hooks::wire::PaneResumeAnswer::Accepted),
+    );
+    assert_eq!(state.pending_jump, Some(TaskId(7)));
+    assert_eq!(state.notice, None);
+}
+
+/// AgentTreeResumeRefusedIsVisible: the board's reason is the notice, and
+/// nothing waits.
+#[test]
+fn a_refused_resume_shows_the_boards_reason() {
+    let mut state = pane_with(vec![detached(7)]);
+    state.adopt_resume_answer(
+        TaskId(7),
+        Ok(crate::hooks::wire::PaneResumeAnswer::Refused {
+            reason: "its worktree is on another machine".into(),
+        }),
+    );
+    assert_eq!(state.pending_jump, None);
+    assert_eq!(
+        state.notice,
+        Some(Notice::agent_jump("its worktree is on another machine"))
+    );
+}
+
+/// A board that could not be reached is a refusal too, naming why.
+#[test]
+fn an_unreachable_board_on_resume_is_a_visible_notice() {
+    let mut state = pane_with(vec![detached(7)]);
+    state.adopt_resume_answer(TaskId(7), Err("could not reach the board".into()));
+    assert_eq!(state.pending_jump, None);
+    assert_eq!(
+        state.notice,
+        Some(Notice::agent_jump("could not reach the board"))
+    );
+}
+
+/// RefreshAgentTreeAgentList: the read that shows the resumed agent attached
+/// hands the loop its window to jump to, once.
+#[test]
+fn the_read_that_shows_the_resumed_agent_attached_jumps_to_it_once() {
+    let mut state = pane_with(vec![detached(7)]);
+    state.adopt_resume_answer(
+        TaskId(7),
+        Ok(crate::hooks::wire::PaneResumeAnswer::Accepted),
+    );
+
+    assert_eq!(state.adopt_agent_list(Ok(vec![detached(7)])), None);
+    assert_eq!(state.pending_jump, Some(TaskId(7)));
+
+    assert_eq!(
+        state.adopt_agent_list(Ok(vec![agent(7, false)])),
+        Some(test_tmux_window("task-7"))
+    );
+    assert_eq!(state.pending_jump, None);
+    assert_eq!(state.adopt_agent_list(Ok(vec![agent(7, false)])), None);
+}
+
+/// RefreshAgentTreeAgentList: a resumed task that left the list stops the wait.
+#[test]
+fn a_resumed_task_that_leaves_the_list_stops_the_wait() {
+    let mut state = pane_with(vec![detached(7), agent(8, false)]);
+    state.adopt_resume_answer(
+        TaskId(7),
+        Ok(crate::hooks::wire::PaneResumeAnswer::Accepted),
+    );
+    assert_eq!(state.adopt_agent_list(Ok(vec![agent(8, false)])), None);
+    assert_eq!(state.pending_jump, None);
+}
+
+/// ForgetPendingResumeJump: moving the cursor off the resumed row stops the
+/// wait, so a later attach does not jump the user away.
+#[test]
+fn moving_the_cursor_off_the_resumed_row_stops_the_wait() {
+    let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![detached(7), agent(8, false)]);
+    rig.state.focus = Focus::Agents;
+    rig.state.adopt_resume_answer(
+        TaskId(7),
+        Ok(crate::hooks::wire::PaneResumeAnswer::Accepted),
+    );
+    rig.press(KeyCode::Char('j'));
+    assert_eq!(rig.state.pending_jump, None);
+    assert_eq!(
+        rig.state
+            .adopt_agent_list(Ok(vec![agent(7, false), agent(8, false)])),
+        None
+    );
+}
+
 #[test]
 fn space_on_the_panes_own_task_does_nothing() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, true)]);
@@ -297,9 +410,38 @@ impl crate::agent_tree::pane::PaneViewSource for FakeBoard {
     async fn pane_view(&self, _task_id: TaskId) -> anyhow::Result<crate::hooks::wire::PaneView> {
         self.0.clone().map_err(|e| anyhow::anyhow!(e))
     }
+    async fn resume_agent(
+        &self,
+        _task_id: TaskId,
+    ) -> anyhow::Result<crate::hooks::wire::PaneResumeAnswer> {
+        anyhow::bail!("not asked in these tests")
+    }
     fn board_address(&self) -> String {
         "127.0.0.1:8899".into()
     }
+}
+
+/// A detached agent as the board sends it: no window.
+fn detached_pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
+    crate::hooks::wire::PaneAgent {
+        tmux_window: String::new(),
+        ..pane_agent(id)
+    }
+}
+
+/// RefreshAgentTreeAgentList: the board's detached agents are listed beside
+/// the attached ones, in the same order, without a window.
+#[tokio::test]
+async fn detached_agents_are_listed_beside_attached_ones_without_a_window() {
+    let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
+        task: None,
+        live_agents: vec![pane_agent(9), pane_agent(4)],
+        detached_agents: vec![detached_pane_agent(6)],
+    }));
+
+    let rows = read_agent_rows(&board, TaskId(4)).await;
+
+    assert_eq!(rows, Ok(vec![agent(4, true), detached(6), agent(9, false)]));
 }
 
 fn pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
@@ -325,6 +467,7 @@ async fn the_agent_list_groups_agents_by_epic_with_epicless_last() {
     let three = pane_epic(3, &["Root", "Three"]);
     let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
         task: None,
+        detached_agents: vec![],
         live_agents: vec![
             crate::hooks::wire::PaneAgent {
                 epic: Some(five.clone()),
@@ -358,6 +501,7 @@ async fn the_agent_list_groups_agents_by_epic_with_epicless_last() {
 async fn the_boards_agent_name_reaches_the_agent_row() {
     let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
         task: None,
+        detached_agents: vec![],
         live_agents: vec![crate::hooks::wire::PaneAgent {
             agent_name: "scar".into(),
             ..pane_agent(9)
@@ -376,6 +520,7 @@ async fn the_boards_agent_name_reaches_the_agent_row() {
 async fn the_agent_list_is_the_boards_live_agents_by_id_with_own_marked() {
     let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
         task: None,
+        detached_agents: vec![],
         live_agents: vec![pane_agent(9), pane_agent(4), pane_agent(7)],
     }));
 

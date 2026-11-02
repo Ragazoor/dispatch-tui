@@ -26,6 +26,10 @@ pub enum KeyAction {
     /// `handle_key` for the same reason as `DiffSetChanged` — tmux belongs to
     /// the loop.
     JumpTo(TmuxWindow),
+    /// Space or Enter on a detached agent's row: ask the board to resume it
+    /// (`ResumeDetachedAgentFromThePane`). The loop sends the request; the
+    /// board's answer comes back to it.
+    Resume(crate::models::TaskId),
     /// Space or Enter in the commits section selected a different source
     /// (`SelectAgentTreeSource`). The loop drops the old source's tree,
     /// publishes the selection and re-queries — see [`crate::agent_tree::run::adopt_selected_source`].
@@ -76,6 +80,7 @@ pub fn handle_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> Ke
     let opened_before = state.tree_state.opened().clone();
     let action = dispatch_key(state, root, key);
     state.absorb_manual_expansion(&opened_before);
+    state.forget_pending_jump_if_moved();
     action
 }
 
@@ -238,7 +243,13 @@ fn run_tree_action(
             state.tree_state.toggle_selected();
             KeyAction::Continue
         }
-        "jump_to_agent" => return state.agents.jump_target().map(KeyAction::JumpTo),
+        "jump_to_agent" => {
+            use crate::agent_tree::render::agents::AgentAction;
+            return state.agents.space_action().map(|action| match action {
+                AgentAction::JumpTo(window) => KeyAction::JumpTo(window),
+                AgentAction::Resume(task) => KeyAction::Resume(task),
+            });
+        }
         // Space or Enter in the commits section: the row under the cursor
         // becomes the source. The row already selected is a no-op, so it
         // records nothing (SelectAgentTreeSource).

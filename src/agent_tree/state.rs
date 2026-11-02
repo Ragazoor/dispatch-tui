@@ -161,6 +161,11 @@ pub struct RenderState {
     /// Keypress usage events for presses that took effect, waiting for the
     /// loop to write them through the pane's store connection.
     pub usage: Vec<crate::models::UsageEvent>,
+    /// The detached agent the board accepted a resume for, waiting for its
+    /// window — the spec's `pane.pending_jump`. The list read that shows it
+    /// attached jumps there; the cursor leaving its row, or the task leaving
+    /// the list, drops it (`ForgetPendingResumeJump`).
+    pub pending_jump: Option<crate::models::TaskId>,
 }
 
 impl RenderState {
@@ -178,6 +183,7 @@ impl RenderState {
             commits: CommitsSection::new(),
             selected_commit: None,
             usage: Vec::new(),
+            pending_jump: None,
         }
     }
 
@@ -223,15 +229,62 @@ impl RenderState {
     /// rows and clears the agents timer's own stale notice, nothing else; a
     /// failed one keeps the last rows and says why — the spec's
     /// `RefreshAgentTreeAgentList` and `AgentTreeAgentListFailureKeepsLastList`.
-    pub fn adopt_agent_list(&mut self, read: Result<Vec<AgentRow>, String>) {
+    ///
+    /// Returns the window to jump to when this read shows the agent a resume
+    /// is waiting on attached (`RefreshAgentTreeAgentList`'s pending jump).
+    pub fn adopt_agent_list(
+        &mut self,
+        read: Result<Vec<AgentRow>, String>,
+    ) -> Option<crate::models::TmuxWindow> {
         match read {
             Ok(rows) => {
                 self.agents.set_rows(rows);
                 if matches!(self.notice, Some(Notice::AgentList(_))) {
                     self.notice = None;
                 }
+                let waiting = self.pending_jump?;
+                let row = self.agents.rows().iter().find(|row| row.id == waiting);
+                match row.map(|row| row.window.clone()) {
+                    // Still detached: keep waiting.
+                    Some(None) => None,
+                    // Attached now: jump, once. Gone: stop waiting.
+                    attached_or_gone => {
+                        self.pending_jump = None;
+                        attached_or_gone.flatten()
+                    }
+                }
             }
-            Err(reason) => self.notice = Some(Notice::AgentList(reason)),
+            Err(reason) => {
+                self.notice = Some(Notice::AgentList(reason));
+                None
+            }
+        }
+    }
+
+    /// Take the board's answer to a resume request for `task`
+    /// (`AgentTreeResumeAccepted`, `AgentTreeResumeRefusedIsVisible`). `Err`
+    /// is a board that could not be reached, shown like a refusal.
+    pub fn adopt_resume_answer(
+        &mut self,
+        task: crate::models::TaskId,
+        answer: Result<crate::hooks::wire::PaneResumeAnswer, String>,
+    ) {
+        use crate::hooks::wire::PaneResumeAnswer;
+        match answer {
+            Ok(PaneResumeAnswer::Accepted) => self.pending_jump = Some(task),
+            Ok(PaneResumeAnswer::Refused { reason }) | Err(reason) => {
+                self.notice = Some(Notice::AgentJump(reason));
+            }
+        }
+    }
+
+    /// `ForgetPendingResumeJump`: the agents cursor left the row a resume is
+    /// waiting on, so the user stopped waiting.
+    pub fn forget_pending_jump_if_moved(&mut self) {
+        if self.pending_jump.is_some()
+            && self.agents.selected().map(|row| row.id) != self.pending_jump
+        {
+            self.pending_jump = None;
         }
     }
 

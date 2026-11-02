@@ -35,23 +35,8 @@ pub(crate) async fn handle_resume_task(
     if let Some(why) = unresumable(&task, &state.host_id).await {
         return JsonRpcResponse::err(id, INVALID_PARAMS, refusal_text(task_id.0, &why));
     }
-    let Some(tx) = &state.notify_tx else {
-        return JsonRpcResponse::err(
-            id,
-            INTERNAL_ERROR,
-            "no board is attached to this server, so nothing can resume the agent".to_string(),
-        );
-    };
-    let event = BoardEvent::ResumeTask {
-        id: task_id,
-        message: parsed.message,
-    };
-    if tx.send(event).is_err() {
-        return JsonRpcResponse::err(
-            id,
-            INTERNAL_ERROR,
-            "the board is shutting down; the agent was not resumed".to_string(),
-        );
+    if let Err(why) = hand_resume_to_board(state, task_id, parsed.message) {
+        return JsonRpcResponse::err(id, INTERNAL_ERROR, why.to_string());
     }
     let text = format!(
         "resume requested for task #{n}: the board is restarting its agent in {window} with the \
@@ -62,6 +47,26 @@ pub(crate) async fn handle_resume_task(
         window = crate::models::TmuxWindow::for_task(task_id),
     );
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+}
+
+/// Hand a checked resume to the board, which runs the launch behind the Space
+/// key (`dispatch.allium: ResumeTask`). The one place a resume is sent from, so
+/// `resume_task` and the agent-tree pane's resume (`agent-tree.allium:
+/// ResumeIsTheBoardsOwnResume`) are the same resume. `Err` says why nothing
+/// was sent.
+pub(crate) fn hand_resume_to_board(
+    state: &McpState,
+    task_id: crate::models::TaskId,
+    message: Option<String>,
+) -> Result<(), &'static str> {
+    let Some(tx) = &state.notify_tx else {
+        return Err("no board is attached to this server, so nothing can resume the agent");
+    };
+    tx.send(BoardEvent::ResumeTask {
+        id: task_id,
+        message,
+    })
+    .map_err(|_| "the board is shutting down; the agent was not resumed")
 }
 
 /// Why a task has no session `resume_task` can wake. Shared with the hook
@@ -106,6 +111,24 @@ pub(crate) async fn unresumable(task: &Task, host_id: &str) -> Option<Unresumabl
     match tokio::fs::metadata(worktree).await {
         Ok(m) if m.is_dir() => None,
         _ => Some(Unresumable::WorktreeGone(worktree.to_string())),
+    }
+}
+
+/// The agent-tree pane's refusal for `why`: one line for the pane's notice,
+/// which has no tools to suggest (`AgentTreeResumeRefusedIsVisible`).
+pub(crate) fn pane_refusal_text(n: i64, why: &Unresumable) -> String {
+    match why {
+        Unresumable::NeverRan(status) => {
+            format!("#{n} cannot be resumed: it is {status} and has not run yet")
+        }
+        Unresumable::NoWorktree => format!("#{n} cannot be resumed: it has no worktree"),
+        Unresumable::OtherMachine => {
+            format!("#{n} cannot be resumed here: its worktree is on another machine")
+        }
+        Unresumable::Attached => format!("#{n} already has an agent attached"),
+        Unresumable::WorktreeGone(worktree) => {
+            format!("#{n} cannot be resumed: its worktree {worktree} is gone")
+        }
     }
 }
 

@@ -157,3 +157,94 @@ async fn resume_task_refuses_a_task_whose_worktree_is_gone_from_disk() {
     assert!(msg.contains("no longer on disk"), "{}", msg);
     assert!(rx.try_recv().is_err(), "a refusal must not reach the board");
 }
+
+// ---- The agent-tree pane's view and resume (agent-tree.allium) ----------
+
+async fn pane_view_for(
+    state: &Arc<McpState>,
+    task_id: crate::models::TaskId,
+) -> crate::hooks::wire::PaneView {
+    let axum::Json(view) = crate::mcp::handlers::handle_pane_view(
+        axum::extract::State(state.clone()),
+        axum::Json(crate::hooks::wire::PaneViewRequest { task_id }),
+    )
+    .await
+    .unwrap();
+    view
+}
+
+async fn pane_resume(
+    state: &Arc<McpState>,
+    task_id: crate::models::TaskId,
+) -> crate::hooks::wire::PaneResumeAnswer {
+    let axum::Json(answer) = crate::mcp::handlers::handle_pane_resume(
+        axum::extract::State(state.clone()),
+        axum::Json(crate::hooks::wire::PaneResumeRequest { task_id }),
+    )
+    .await;
+    answer
+}
+
+/// DetachedIsTheBoardsOwnDefinition: a detached task is in detached_agents,
+/// not live_agents; a Done task that kept its worktree is in neither.
+#[tokio::test]
+async fn the_pane_view_lists_detached_agents_apart_from_live_ones() {
+    let (state, _rx) = test_state_with_notify().await;
+    let (detached, _dir) = create_detached_task(&state).await;
+    let (done, _done_dir) = create_detached_task(&state).await;
+    state
+        .db_write()
+        .patch_task(
+            done,
+            &crate::store::TaskPatch::new().status(TaskStatus::Done),
+        )
+        .await
+        .unwrap();
+    let live = create_running_task_with_window_in(&state, "/repo", None).await;
+
+    let view = pane_view_for(&state, live).await;
+
+    let ids = |agents: &[crate::hooks::wire::PaneAgent]| -> Vec<_> {
+        agents.iter().map(|a| a.id).collect()
+    };
+    assert_eq!(ids(&view.live_agents), vec![live]);
+    assert_eq!(ids(&view.detached_agents), vec![detached]);
+    assert_eq!(view.detached_agents[0].tmux_window, "");
+}
+
+/// ResumeIsTheBoardsOwnResume: a detached task's resume is handed to the
+/// board as the same event resume_task sends, with no message.
+#[tokio::test]
+async fn a_pane_resume_of_a_detached_task_hands_it_to_the_board() {
+    let (state, mut rx) = test_state_with_notify().await;
+    let (id, _dir) = create_detached_task(&state).await;
+
+    let answer = pane_resume(&state, id).await;
+
+    assert_eq!(answer, crate::hooks::wire::PaneResumeAnswer::Accepted);
+    match rx.try_recv().expect("expected a board event") {
+        BoardEvent::ResumeTask { id: got, message } => {
+            assert_eq!(got, id);
+            assert_eq!(message, None);
+        }
+        other => panic!("expected ResumeTask, got {other:?}"),
+    }
+}
+
+/// ResumeIsTheBoardsOwnResume: an attached task is refused with a reason,
+/// and nothing is sent.
+#[tokio::test]
+async fn a_pane_resume_of_an_attached_task_is_refused() {
+    let (state, mut rx) = test_state_with_notify().await;
+    let id = create_running_task_with_window_in(&state, "/repo", None).await;
+
+    let answer = pane_resume(&state, id).await;
+
+    match answer {
+        crate::hooks::wire::PaneResumeAnswer::Refused { reason } => {
+            assert!(reason.contains(&format!("#{}", id.0)), "{reason}");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(rx.try_recv().is_err(), "a refusal sends nothing");
+}

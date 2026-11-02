@@ -376,6 +376,10 @@ fn agent(id: i64, own: bool) -> AgentRow {
     crate::agent_tree::render::agents::test_row(id, own)
 }
 
+fn detached(id: i64) -> AgentRow {
+    crate::agent_tree::render::agents::test_detached_row(id)
+}
+
 /// The unstaged form's three answers, in call order: the diff against the
 /// index, its line counts, and the untracked listing. `diff` alternates
 /// status and path; `numstat` holds whole `added\tremoved\tpath` records;

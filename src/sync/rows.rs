@@ -949,6 +949,24 @@ impl SharedRows {
         })
     }
 
+    /// Running or Review tasks with a worktree and no tmux window, ordered by
+    /// id — the `list_detached_agent_tasks` query, `Task::is_detached` read
+    /// before anything is cloned, like [`Self::live_agent_tasks`].
+    pub fn detached_agent_tasks(&self) -> Vec<Task> {
+        use crate::models::TaskStatus;
+        self.read(|rows| {
+            rows.tasks
+                .values()
+                .filter(|t| {
+                    matches!(t.status, TaskStatus::Running | TaskStatus::Review)
+                        && t.worktree.is_some()
+                        && !rows.current_window_of(t.id)
+                })
+                .map(|t| rows.view(t))
+                .collect()
+        })
+    }
+
     /// The lowest-id task whose plan is `plan`.
     pub fn task_by_plan(&self, plan: &str) -> Option<Task> {
         self.read(|rows| {

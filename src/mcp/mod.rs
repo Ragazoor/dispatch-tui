@@ -260,6 +260,11 @@ fn router_over(state: McpState, bound_port: Option<u16>) -> Router {
             crate::hooks::wire::PANE_VIEW_PATH,
             post(handlers::handle_pane_view),
         )
+        // ...and ask it to resume a detached agent -- `ResumeIsTheBoardsOwnResume`.
+        .route(
+            crate::hooks::wire::PANE_RESUME_PATH,
+            post(handlers::handle_pane_resume),
+        )
         .layer(axum::middleware::from_fn(
             middleware::extract_caller_identity,
         ))
@@ -387,6 +392,7 @@ mod origin_tests {
             "/mcp",
             crate::hooks::wire::HOOK_PATH,
             crate::hooks::wire::PANE_VIEW_PATH,
+            crate::hooks::wire::PANE_RESUME_PATH,
         ] {
             for (name, value) in [("host", "evil.example"), ("origin", "http://evil.example")] {
                 let resp = app()

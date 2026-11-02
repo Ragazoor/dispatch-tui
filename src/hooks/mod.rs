@@ -296,6 +296,20 @@ pub async fn fetch_pane_view(port: u16, task_id: TaskId) -> Result<wire::PaneVie
     .with_context(|| format!("could not reach the dispatch board on 127.0.0.1:{port}"))
 }
 
+/// Ask the running board on `port` to resume task `task_id`'s detached agent
+/// (agent-tree.allium: BoardPaneView.resume_agent). A refusal is an answer;
+/// only a board that could not be reached or read is an `Err`.
+pub async fn request_pane_resume(port: u16, task_id: TaskId) -> Result<wire::PaneResumeAnswer> {
+    let request = wire::PaneResumeRequest { task_id };
+    tokio::time::timeout(
+        DELIVERY_TIMEOUT,
+        post_json(port, wire::PANE_RESUME_PATH, &request),
+    )
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {DELIVERY_TIMEOUT:?}")))
+    .with_context(|| format!("could not reach the dispatch board on 127.0.0.1:{port}"))
+}
+
 /// What the PR gate decided. Returned rather than acted on, so the exit code
 /// stays the caller's to choose — see `run_pr_gate`.
 #[derive(Debug, Clone, PartialEq, Eq)]

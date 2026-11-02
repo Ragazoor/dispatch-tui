@@ -87,6 +87,9 @@ pub trait TaskRead: Send + Sync {
     /// agent-tree pane's agents section, read once a second per pane, so it
     /// filters in SQL rather than decoding every task ever created.
     async fn list_live_agent_tasks(&self) -> Vec<Task>;
+    /// The tasks [`Task::is_detached`] accepts, ordered by id — the agents
+    /// section's detached rows, read as often as the live ones.
+    async fn list_detached_agent_tasks(&self) -> Vec<Task>;
     async fn find_task_by_plan(&self, plan: &str) -> Option<Task>;
 }
 

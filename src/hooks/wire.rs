@@ -174,7 +174,8 @@ pub struct PaneViewRequest {
 }
 
 /// `agent-tree.allium`'s `PaneView`: the pane's task, when the board's rows
-/// hold it, and every task with a live agent window.
+/// hold it, every task with a live agent window, and every task whose agent is
+/// detached.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneView {
     /// Null until the board's rows hold the task -- "not arrived yet", which
@@ -183,6 +184,13 @@ pub struct PaneView {
     /// Exactly the tasks `Task::is_live_agent` holds for in the board's rows,
     /// across every repo and epic (`LiveIsTheBoardsOwnDefinition`).
     pub live_agents: Vec<PaneAgent>,
+    /// Exactly the tasks `Task::is_detached` holds for in the board's rows
+    /// (`DetachedIsTheBoardsOwnDefinition`), each with an empty `tmux_window`.
+    /// A separate list rather than a flag on [`PaneAgent`] so a pane that
+    /// predates it ignores it, and lists the attached agents as before;
+    /// absent from a board that predates it.
+    #[serde(default)]
+    pub detached_agents: Vec<PaneAgent>,
 }
 
 /// `agent-tree.allium`'s `PaneTask`.
@@ -192,13 +200,14 @@ pub struct PaneTask {
     pub base_branch: String,
 }
 
-/// One live agent, as much of the task as the agents section draws and jumps
-/// to.
+/// One listed agent, as much of the task as the agents section draws and
+/// jumps to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneAgent {
     pub id: TaskId,
     pub title: String,
-    /// The task's recorded tmux window (always present: a live agent has one).
+    /// The task's recorded tmux window: always present for a live agent, and
+    /// empty for a detached one, which has none.
     pub tmux_window: String,
     /// The name of the task's current agent, the word the section shows in
     /// place of its id (`agent-tree.allium: AgentRowShowsAgentName`). Empty
@@ -223,6 +232,28 @@ pub struct PaneEpic {
     /// and the pane draws its last segment, so a pane and board of different
     /// builds still agree.
     pub breadcrumb: Vec<String>,
+}
+
+/// The path a companion pane asks the board to resume a detached agent on,
+/// beside [`PANE_VIEW_PATH`]. POST, with a [`PaneResumeRequest`] body; the
+/// answer is a [`PaneResumeAnswer`]. See `BoardPaneView.resume_agent` and
+/// `ResumeIsTheBoardsOwnResume` in `docs/specs/agent-tree.allium`.
+pub const PANE_RESUME_PATH: &str = "/pane-resume";
+
+/// A pane's request: resume this detached agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneResumeRequest {
+    pub task_id: TaskId,
+}
+
+/// `agent-tree.allium`'s `PaneResumeAnswer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "answer", rename_all = "snake_case")]
+pub enum PaneResumeAnswer {
+    /// The board raised `ResumeTask`; the launch is its to finish.
+    Accepted,
+    /// The board refused. `reason` is worded for the pane's notice.
+    Refused { reason: String },
 }
 
 /// The board's answer to a [`Question`].

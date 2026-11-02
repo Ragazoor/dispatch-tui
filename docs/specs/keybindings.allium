@@ -158,7 +158,10 @@ use "./observability.allium" as observability
 --     keys as in agent_tree.tree
 --     jump_to_agent              Space, Enter   takes effect (and records)
 --                                               only with another task's
---                                               agent row under the cursor;
+--                                               agent row under the cursor:
+--                                               it jumps to an attached
+--                                               agent and resumes a detached
+--                                               one;
 --                                               on the pane's own task's row,
 --                                               or with no row, it does
 --                                               nothing and records nothing

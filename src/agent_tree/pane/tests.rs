@@ -137,6 +137,9 @@ impl PaneViewSource for FakeBoard {
     async fn pane_view(&self, _task_id: TaskId) -> Result<PaneView> {
         self.answer.clone().map_err(|e| anyhow::anyhow!(e))
     }
+    async fn resume_agent(&self, _task_id: TaskId) -> Result<crate::hooks::wire::PaneResumeAnswer> {
+        anyhow::bail!("not asked in these tests")
+    }
     fn board_address(&self) -> String {
         BOARD.into()
     }
@@ -147,6 +150,7 @@ fn view(task: Option<PaneTask>) -> FakeBoard {
         answer: Ok(PaneView {
             task,
             live_agents: vec![],
+            detached_agents: vec![],
         }),
     }
 }

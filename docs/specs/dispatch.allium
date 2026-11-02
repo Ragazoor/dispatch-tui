@@ -1140,11 +1140,13 @@ rule ResumeTask {
 
     @guidance
         -- == Who triggers it, and the optional message ==
-        -- Two callers raise ResumeTask: Space on a detached card in the TUI
-        -- (no message) and the MCP tool resume_task
+        -- Three callers raise ResumeTask: Space on a detached card in the TUI
+        -- (no message), the MCP tool resume_task
         -- (mcp-task-tools.allium: ResumeTaskViaMcp), which may carry a
-        -- message. Both reach the same board handler and the same launch, so
-        -- every precondition and ensures here holds for both.
+        -- message, and Space on a detached row in an agent-tree pane's agents
+        -- section (agent-tree.allium: ResumeDetachedAgentFromThePane), which
+        -- carries none. All three reach the same board handler and the same
+        -- launch, so every precondition and ensures here holds for each.
         --
         -- A message is delivered as the FIRST INPUT of the resumed session:
         -- it is the positional prompt of the same `claude ... --continue`
