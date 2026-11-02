@@ -857,8 +857,8 @@ rule NameWorkspaceAndVisibilityFromBoard {
         -- description): j/k move between workspaces, Tab, BackTab or h/l
         -- toggle visibility (default public; private shows a lock marker),
         -- Space or Enter creates, as Space/Enter choose in every other
-        -- picker (task #98822), and Esc leaves nothing created (a package returns to its
-        -- picker). The workspaces are read when the form opens; a person in
+        -- picker (task #98822), and Esc leaves nothing created (a package
+        -- returns to its picker). The workspaces are read when the form opens; a person in
         -- none is refused there, not at the end.
         -- Editing an epic (`e`, the pop-out document) shows a VISIBILITY
         -- section, changeable, and a WORKSPACE section that is read-only and
