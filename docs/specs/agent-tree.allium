@@ -2582,7 +2582,12 @@ rule AgentTreeResumeAccepted {
 
     requires: answer.accepted
 
-    ensures: pane.pending_jump = target
+    -- Only while the cursor is still on the row the user resumed. The answer
+    -- arrives after the keypress, and a user who moved on in between stopped
+    -- waiting, as ForgetPendingResumeJump says.
+    ensures: pane.pending_jump =
+        if pane.selected_agent = target: target
+        else: null
 
     @guidance
         -- Nothing is shown for an accepted request: the notice is for

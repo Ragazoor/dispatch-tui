@@ -241,6 +241,20 @@ fn moving_the_cursor_off_the_resumed_row_stops_the_wait() {
     );
 }
 
+/// AgentTreeResumeAccepted: an answer that arrives after the user moved off
+/// the row does not start a wait — the answer outlives the keypress.
+#[test]
+fn an_accepted_resume_after_the_cursor_moved_on_does_not_wait() {
+    let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![detached(7), agent(8, false)]);
+    rig.state.focus = Focus::Agents;
+    rig.press(KeyCode::Char('j'));
+    rig.state.adopt_resume_answer(
+        TaskId(7),
+        Ok(crate::hooks::wire::PaneResumeAnswer::Accepted),
+    );
+    assert_eq!(rig.state.pending_jump, None);
+}
+
 #[test]
 fn space_on_the_panes_own_task_does_nothing() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, true)]);

@@ -271,7 +271,12 @@ impl RenderState {
     ) {
         use crate::hooks::wire::PaneResumeAnswer;
         match answer {
-            Ok(PaneResumeAnswer::Accepted) => self.pending_jump = Some(task),
+            // Only while the cursor is still on the row: the answer can
+            // arrive after the user moved on.
+            Ok(PaneResumeAnswer::Accepted) => {
+                self.pending_jump = Some(task);
+                self.forget_pending_jump_if_moved();
+            }
             Ok(PaneResumeAnswer::Refused { reason }) | Err(reason) => {
                 self.notice = Some(Notice::AgentJump(reason));
             }

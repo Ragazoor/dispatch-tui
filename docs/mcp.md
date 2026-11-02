@@ -93,7 +93,7 @@ These codes never reach a client through `tools/call`: `handle_tools_call` re-wr
 
 ## Loopback only
 
-The agent port rejects (HTTP 403) any request whose `Host` or `Origin` is not `127.0.0.1`, `localhost` or `[::1]`, on `/mcp`, the hook path and the pane-view path. This stops a DNS-rebinding page from calling tools. See `AgentPortRejectsNonLoopbackOrigins` in `docs/specs/mcp-task-tools.allium`.
+The agent port rejects (HTTP 403) any request whose `Host` or `Origin` is not `127.0.0.1`, `localhost` or `[::1]`, on `/mcp`, the hook path, the pane-view path and the pane-resume path. This stops a DNS-rebinding page from calling tools. See `AgentPortRejectsNonLoopbackOrigins` in `docs/specs/mcp-task-tools.allium`.
 
 ## Server instructions
 

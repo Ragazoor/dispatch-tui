@@ -157,7 +157,7 @@ rule ToolsAdvertiseAnnotations {
 -- A web page can rebind a hostname it controls to 127.0.0.1 and then reach the
 -- agent port same-origin, with no CORS preflight to stop it. Caller identity is
 -- a client-supplied header, so the port itself must refuse such a request.
--- This covers /mcp, the hook path and the pane-view path.
+-- This covers /mcp, the hook path, the pane-view path and the pane-resume path.
 
 rule AgentPortRejectsNonLoopbackOrigins {
     when: AgentPortRequest(host?, origin?)
