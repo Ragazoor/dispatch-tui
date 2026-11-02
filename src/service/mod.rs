@@ -24,6 +24,7 @@ pub use managed_feeds::{
 pub use people::PeopleService;
 pub use services::Services;
 pub use tasks::wrap_up_block_message;
+pub(crate) use tasks::{parse_peer_message_target_name, peer_message_target_name};
 pub use tasks::{
     CreateTaskParams, ListTasksFilter, ServedDispatch, ServedSession, SessionOutcome, TaskService,
     UpdateTaskParams, UpdateTaskResult,

@@ -10,6 +10,7 @@ mod session;
 mod validators;
 mod wrap_up;
 
+pub(crate) use crud::{parse_peer_message_target_name, peer_message_target_name};
 pub use crud::{wrap_up_block_message, TaskService, UpdateTaskResult};
 pub use dispatch::ServedDispatch;
 pub use params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};

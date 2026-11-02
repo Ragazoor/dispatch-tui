@@ -574,6 +574,25 @@ async fn seed_detached(
     (id, dir)
 }
 
+/// [`seed_detached`], with the board still holding the task's window open.
+async fn seed_attached(
+    board: &Board,
+    title: &str,
+) -> (
+    dispatch_tui::models::TaskId,
+    dispatch_tui::models::TmuxWindow,
+    tempfile::TempDir,
+) {
+    let (id, dir) = seed_detached(board, title).await;
+    let window = dispatch_tui::models::TmuxWindow::for_task(id);
+    board
+        .db
+        .patch_task(id, &TaskPatch::new().tmux_window(Some(&window)))
+        .await
+        .unwrap();
+    (id, window, dir)
+}
+
 async fn current_agent_name(board: &Board, id: dispatch_tui::models::TaskId) -> String {
     use dispatch_tui::store::AgentRead;
     board
@@ -695,13 +714,7 @@ async fn undelivered_message_to_a_task_whose_worktree_is_gone_says_so() {
 async fn undelivered_message_to_a_task_with_an_open_window_points_at_the_operator() {
     let board = spawn_board().await;
     let (_sender, sender_arg) = seed(&board, "Sender").await;
-    let (target, _dir) = seed_detached(&board, "Target").await;
-    let window = dispatch_tui::models::TmuxWindow::for_task(target);
-    board
-        .db
-        .patch_task(target, &TaskPatch::new().tmux_window(Some(&window)))
-        .await
-        .unwrap();
+    let (target, _window, _dir) = seed_attached(&board, "Target").await;
 
     let (ok, context, stderr) =
         run_undelivered(board.port, &sender_arg, &format!("task-{}", target.0)).await;
@@ -717,13 +730,7 @@ async fn undelivered_message_to_a_task_with_an_open_window_points_at_the_operato
 async fn undelivered_message_by_agent_name_to_an_open_window_offers_the_window_name() {
     let board = spawn_board().await;
     let (_sender, sender_arg) = seed(&board, "Sender").await;
-    let (target, _dir) = seed_detached(&board, "Target").await;
-    let window = dispatch_tui::models::TmuxWindow::for_task(target);
-    board
-        .db
-        .patch_task(target, &TaskPatch::new().tmux_window(Some(&window)))
-        .await
-        .unwrap();
+    let (target, window, _dir) = seed_attached(&board, "Target").await;
     let name = current_agent_name(&board, target).await;
 
     let (ok, context, stderr) =

@@ -49,7 +49,7 @@ const EXPECTED_GH_CLOSE_FAILURE_MARKERS: &[&str] = &[
 /// The name part of a native `SendMessage` `to` value. Strips a
 /// disambiguating `" [ref]"` suffix — `ListAgents`/`SendMessage` append one
 /// when more than one live agent answers to a name.
-fn peer_message_target_name(to: &str) -> &str {
+pub(crate) fn peer_message_target_name(to: &str) -> &str {
     to.split(' ').next().unwrap_or(to)
 }
 
@@ -60,7 +60,7 @@ fn peer_message_target_name(to: &str) -> &str {
 /// tmux window names go through. Still read for a session started before
 /// agents and not resumed since, which keeps the name it began with. `None`
 /// for any value that doesn't match this shape.
-fn parse_peer_message_target_name(to: &str) -> Option<TaskId> {
+pub(crate) fn parse_peer_message_target_name(to: &str) -> Option<TaskId> {
     crate::models::TmuxWindow::parse(peer_message_target_name(to))?.task_id()
 }
 

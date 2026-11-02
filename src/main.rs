@@ -884,17 +884,12 @@ async fn run_async(
             id,
             target,
             body,
-            undelivered: false,
-            board,
-        } => hooks::run_peer_message(board.port, id, target, body).await?,
-        Commands::HookPeerMessage {
-            id,
-            target,
-            body,
-            undelivered: true,
+            undelivered,
             board,
         } => {
-            if let Some(hint) =
+            if !undelivered {
+                hooks::run_peer_message(board.port, id, target, body).await?
+            } else if let Some(hint) =
                 hooks::run_undelivered_peer_message(board.port, id, target, body).await?
             {
                 println!("{}", hooks::post_tool_use_context(&hint));
