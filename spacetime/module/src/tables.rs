@@ -496,7 +496,7 @@ pub struct UsageEvent {
     pub detail: Option<String>,
     pub actor: String,
     /// The `UserIdentity` of the caller who recorded it, stamped by
-    /// `record_usage_event` (never sent by the client). `own_usage_events`
+    /// `record_usage_event` (never sent by the client). `own_usage_summary`
     /// serves a caller the rows they recorded. Appended last, with a default,
     /// so the table migrates in place; a row recorded before it has `""` and
     /// is nobody's.
