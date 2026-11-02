@@ -240,6 +240,9 @@ pub(crate) fn startup_step(
             root: root.clone(),
             base_branch: base_branch.clone(),
         },
+        // The pane starts as the agent launches; the worktree is recorded on
+        // the row just after. Waited out like a row that has not arrived.
+        TaskLookup::NoWorktree if elapsed < limit => StartupStep::Wait,
         TaskLookup::NoWorktree => StartupStep::Fail(format!("task {task_id} has no worktree")),
         TaskLookup::NotYet if elapsed < limit => StartupStep::Wait,
         TaskLookup::NotYet => StartupStep::Fail(format!("task {task_id} not found")),

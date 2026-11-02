@@ -527,8 +527,8 @@ entity AgentTreePane {
     -- present makes the condition turn true afresh. The diff form also
     -- requires a diff pane, since no diff renderer is waiting until one has
     -- been split; its appearance is what turns the condition true.
-    task_arrived: task_resolution = waiting and board_task(task) != null
-    diff_task_arrived: diff_pane != null and diff_task_resolution = waiting and board_task(task) != null
+    task_arrived: task_resolution = waiting and board_task(task) != null and board_task(task).worktree != null
+    diff_task_arrived: diff_pane != null and diff_task_resolution = waiting and board_task(task) != null and board_task(task).worktree != null
 
     -- A renderer either finds its task or gives up; a new renderer (a show,
     -- a re-split) starts waiting again whatever the last one reached.
@@ -1117,7 +1117,8 @@ rule DiscardAgentTreePaneOnWindowCleared {
 -- with a line saying what it is waiting for. A board that cannot be reached
 -- is waited out the same way — it is most often a board mid-restart, back
 -- within the wait. And a renderer that cannot resolve its task — the wait
--- ran out, or the task has no worktree to root a tree at — stays open and
+-- ran out with no row, or with a row that still has no worktree to root a
+-- tree at — stays open and
 -- says so, rather than exiting. The one thing that closes a pane is still the
 -- user's exit key (ExitAgentTreeRenderer, ExitAgentTreeDiffRenderer).
 --
@@ -1147,16 +1148,26 @@ rule AgentTreePaneResolvesItsTask {
 }
 
 rule AgentTreePaneTaskHasNoWorktree {
-    -- The row arrived, but the task has no worktree. There is no directory to
-    -- root a tree at, and waiting longer will not give it one: give up now,
-    -- without spending the rest of the wait.
-    when: pane: AgentTreePane.task_arrived
+    -- The row arrived, but the task still has no worktree when the wait runs
+    -- out. There is no directory to root a tree at, so the pane says so and
+    -- stays open.
+    when: pane: AgentTreePane.renderer_started_at + config.agent_tree_startup_wait <= now
 
+    requires: pane.task_resolution = waiting
+    requires: board_task(pane.task) != null
     requires: board_task(pane.task).worktree = null
 
     ensures: pane.task_resolution = unresolved
     ensures: pane.startup_failure = task_without_worktree_reason(pane.task)
     ensures: pane.status = shown
+
+    @guidance
+        -- A row without a worktree is waited out like a row that has not
+        -- arrived. The pane is split off when the agent launches, and the
+        -- worktree is recorded on the row just after, so a pane that asked in
+        -- between used to give up on a task that was seconds from having one
+        -- (task 98781). If the worktree arrives within the wait,
+        -- AgentTreePaneResolvesItsTask applies.
 }
 
 rule AgentTreePaneTaskNeverArrives {
@@ -1166,6 +1177,7 @@ rule AgentTreePaneTaskNeverArrives {
     when: pane: AgentTreePane.renderer_started_at + config.agent_tree_startup_wait <= now
 
     requires: pane.task_resolution = waiting
+    requires: board_task(pane.task) = null
 
     ensures: pane.task_resolution = unresolved
     ensures: pane.startup_failure = task_not_found_reason(pane.task)
@@ -1206,9 +1218,13 @@ rule AgentTreeDiffPaneResolvesItsTask {
 }
 
 rule AgentTreeDiffPaneTaskHasNoWorktree {
-    -- The diff pane's counterpart of AgentTreePaneTaskHasNoWorktree.
-    when: pane: AgentTreePane.diff_task_arrived
+    -- The diff pane's counterpart of AgentTreePaneTaskHasNoWorktree: the
+    -- worktree is waited for, and named as missing only when the wait runs out.
+    when: pane: AgentTreePane.diff_renderer_started_at + config.agent_tree_startup_wait <= now
 
+    requires: pane.diff_pane != null
+    requires: pane.diff_task_resolution = waiting
+    requires: board_task(pane.task) != null
     requires: board_task(pane.task).worktree = null
 
     ensures: pane.diff_task_resolution = unresolved
@@ -1222,6 +1238,7 @@ rule AgentTreeDiffPaneTaskNeverArrives {
 
     requires: pane.diff_pane != null
     requires: pane.diff_task_resolution = waiting
+    requires: board_task(pane.task) = null
 
     ensures: pane.diff_task_resolution = unresolved
     ensures: pane.diff_startup_failure = task_not_found_reason(pane.task)
@@ -2800,8 +2817,8 @@ surface AgentTreeCompanionPane {
         -- line is never seen (AgentTreePaneResolvesItsTask).
         --
         -- If the task does not resolve — the wait of
-        -- config.agent_tree_startup_wait ran out, or the task has no worktree
-        -- — the line is replaced by pane.startup_failure, which stays on
+        -- config.agent_tree_startup_wait ran out, with no row or with a row that
+        -- still has no worktree — the line is replaced by pane.startup_failure, which stays on
         -- screen for as long as the renderer runs. It is not a notice: it is
         -- not in the border, and no keypress clears it, because there is
         -- nothing behind it to reveal.

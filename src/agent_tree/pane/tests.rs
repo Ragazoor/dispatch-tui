@@ -45,9 +45,17 @@ fn a_row_that_never_arrives_fails_with_not_found_at_the_limit() {
     assert_eq!(step, StartupStep::Fail("task 7 not found".into()));
 }
 
+/// The pane is split off when the agent launches and the worktree is recorded
+/// just after, so a row without one is waited out like a missing row.
 #[test]
-fn a_task_without_a_worktree_fails_at_once() {
+fn a_task_without_a_worktree_is_waited_for() {
     let step = startup_step(TaskId(7), &TaskLookup::NoWorktree, Duration::ZERO, LIMIT);
+    assert_eq!(step, StartupStep::Wait);
+}
+
+#[test]
+fn a_task_that_never_gets_a_worktree_fails_at_the_limit() {
+    let step = startup_step(TaskId(7), &TaskLookup::NoWorktree, LIMIT, LIMIT);
     assert_eq!(step, StartupStep::Fail("task 7 has no worktree".into()));
 }
 
