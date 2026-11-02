@@ -854,7 +854,7 @@ rule UndeliveredPeerMessage {
            and target.worktree != null
            and target.is_locally_owned
            and current_agent(target).tmux_window = null
-           and target.worktree_on_disk:
+           and path_exists_on_disk(target.worktree):
             SenderToldToResume(sender: sender, target: target, agent: current_agent(target))
         else:
             SenderToldWhyNotResumable(sender: sender, target: target)
@@ -879,6 +879,10 @@ rule UndeliveredPeerMessage {
         -- the board still holds open: the send failed, so the session in it
         -- has exited or does not answer. The sender is told that and told to
         -- raise it with the operator; resume_task would refuse it as attached.
+        -- When `to` was not the `task-<id>` name, the sender is first told
+        -- to try that name: a session started before agents had names still
+        -- answers to it, so a send by agent name can miss a live session.
+        -- A disambiguating " [ref]" suffix on `to` is dropped from the text.
         --
         -- A `to` that resolves to no dispatch task (a typo, a session outside
         -- dispatch's fleet, a deleted task) adds nothing: Claude Code's own
@@ -894,7 +898,13 @@ rule UndeliveredPeerMessage {
         -- == How it is observed ==
         -- The PostToolUse hook already sees every SendMessage call
         -- (HookPeerMessageSent). A failed send carries `success: false` in
-        -- the tool response, and the hook asks the board what to tell the
+        -- the tool response — checked on 2026-11-02: a send to an unknown
+        -- name fired PostToolUse (its trajectory entry was written) and its
+        -- structured result was `{"success": false, "message": "No agent
+        -- named '…' is reachable. …"}`; Claude Code's hook docs say
+        -- PostToolUse passes that structured output as `tool_response`.
+        -- The hook script also accepts it as JSON text. It asks the board
+        -- what to tell the
         -- sender — a question, like the PR gate (pr-workflow.allium:
         -- PrLearningsGate), not an observation. It fails open: no board, an
         -- unreadable answer, or no task behind `to` adds nothing, and the

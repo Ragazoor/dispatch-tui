@@ -279,13 +279,16 @@ async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Opti
             .find(|a| a.task_id == target_id && a.is_current())
             .map(|a| a.name)
     };
+    // The name without a disambiguating " [ref]" suffix.
+    let to = to.split(' ').next().unwrap_or(to);
     let not_running = format!("{to} is not running, so your message was not delivered.");
     let Some(why) = super::tasks::unresumable(&task, &state.host_id).await else {
         let agent =
             agent.unwrap_or_else(|| crate::models::TmuxWindow::for_task(target_id).to_string());
-        let named = to.split(' ').next().unwrap_or(to);
-        let ended = if named != agent && !named.starts_with("task-") {
-            format!(" {named} is no longer that task's agent; a resume wakes its current agent, {agent}.")
+        let ended = if to != agent && !to.starts_with("task-") {
+            format!(
+                " {to} is no longer that task's agent; a resume wakes its current agent, {agent}."
+            )
         } else {
             String::new()
         };
@@ -305,12 +308,23 @@ async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Opti
     };
     let reason = match why {
         Unresumable::Attached => {
+            // A session started before agents had names still answers to
+            // `task-<id>`, so a send by agent name can miss a live session.
+            let window = crate::models::TmuxWindow::for_task(target_id).to_string();
+            let try_window = if to == window {
+                String::new()
+            } else {
+                format!(
+                    " A session started before agents had names answers to {window}; try \
+                     that name first."
+                )
+            };
             return Some(format!(
                 "{to} did not answer, so your message was not delivered, but the board still \
                  shows task #{n}'s window open: the session in it has exited or is not \
-                 responding. resume_task refuses a task whose window is open. Tell your \
-                 operator so they can check the window."
-            ))
+                 responding.{try_window} resume_task refuses a task whose window is open. If \
+                 the send still fails, tell your operator so they can check the window."
+            ));
         }
         Unresumable::NeverRan(status) => {
             format!("it is {status} and no agent has run on it yet")

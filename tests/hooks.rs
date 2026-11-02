@@ -711,6 +711,35 @@ async fn undelivered_message_to_a_task_with_an_open_window_points_at_the_operato
     assert!(!context.contains("resume_task("), "got: {context}");
 }
 
+/// A session started before agents had names answers to `task-<id>`, so a
+/// send by agent name can miss a live session: the hint offers that name.
+#[tokio::test]
+async fn undelivered_message_by_agent_name_to_an_open_window_offers_the_window_name() {
+    let board = spawn_board().await;
+    let (_sender, sender_arg) = seed(&board, "Sender").await;
+    let (target, _dir) = seed_detached(&board, "Target").await;
+    let window = dispatch_tui::models::TmuxWindow::for_task(target);
+    board
+        .db
+        .patch_task(target, &TaskPatch::new().tmux_window(Some(&window)))
+        .await
+        .unwrap();
+    let name = current_agent_name(&board, target).await;
+
+    let (ok, context, stderr) =
+        run_undelivered(board.port, &sender_arg, &format!("{name} [3fa9c1]")).await;
+    assert!(ok, "stderr: {stderr}");
+    let context = context.expect("a known target must produce a reason");
+    assert!(
+        context.contains("try that name first") && context.contains(&window.to_string()),
+        "got: {context}"
+    );
+    assert!(
+        !context.contains("[3fa9c1]"),
+        "the ref suffix is noise, got: {context}"
+    );
+}
+
 #[tokio::test]
 async fn undelivered_message_to_an_unknown_name_adds_nothing() {
     let board = spawn_board().await;
