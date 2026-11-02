@@ -967,13 +967,13 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     r(
         N::BoardPickerPlacement,
-        &["Space", "h", "l"],
+        &["Tab", "BackTab", "h", "l"],
         "placement_picker_visibility",
         "Switch the new item between public and private",
     ),
     r(
         N::BoardPickerPlacement,
-        &["Enter"],
+        &["Space", "Enter"],
         "placement_picker_create",
         "Create the item in the chosen workspace with the chosen visibility",
     ),

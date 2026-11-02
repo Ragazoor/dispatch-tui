@@ -65,21 +65,29 @@ fn one_workspace_is_used_without_asking_and_the_epic_is_public() {
 }
 
 #[test]
-fn space_h_and_l_toggle_the_visibility() {
+fn tab_backtab_h_and_l_toggle_the_visibility() {
     let mut app = at_the_placement_step(&["Core"], None);
-    app.handle_key(make_key(KeyCode::Char(' ')));
-    assert_eq!(
-        app.input.placement.as_ref().unwrap().visibility,
-        Visibility::Private
-    );
-    app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(
-        app.input.placement.as_ref().unwrap().visibility,
-        Visibility::Public
-    );
+    let visibility = |app: &App| app.input.placement.as_ref().unwrap().visibility;
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_eq!(visibility(&app), Visibility::Private);
+    app.handle_key(make_key(KeyCode::BackTab));
+    assert_eq!(visibility(&app), Visibility::Public);
     app.handle_key(make_key(KeyCode::Char('l')));
+    assert_eq!(visibility(&app), Visibility::Private);
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(visibility(&app), Visibility::Public);
+    app.handle_key(make_key(KeyCode::Tab));
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(inserted(cmds).visibility, Visibility::Private);
+}
+
+#[test]
+fn space_creates_like_enter() {
+    let mut app = at_the_placement_step(&["Core"], None);
+    app.handle_key(make_key(KeyCode::Tab));
+    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
+    assert_eq!(inserted(cmds).visibility, Visibility::Private);
+    assert_eq!(app.input.mode, InputMode::Normal);
 }
 
 #[test]

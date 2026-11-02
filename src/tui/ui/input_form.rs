@@ -623,7 +623,7 @@ pub(in crate::tui) fn input_placement_lines(
         ""
     };
     lines.push(Line::from(Span::styled(
-        format!("  {moves}[Space] public/private  [Enter] create  [Esc] cancel"),
+        format!("  {moves}[Tab] public/private  [Space/Enter] create  [Esc] cancel"),
         styles.hint,
     )));
     lines

@@ -949,7 +949,7 @@ fn the_new_package_row_creates_a_package_linked_to_the_item() {
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Enter)));
     assert!(cmds.is_empty(), "{cmds:?}");
     assert_eq!(app.input.mode, InputMode::InputPlacement);
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Tab));
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Enter)));
     assert!(
         matches!(
