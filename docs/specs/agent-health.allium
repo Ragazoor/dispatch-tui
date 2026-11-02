@@ -793,9 +793,11 @@ rule HookPeerMessageSent {
         -- addressee (not `name` — verified against the live tool schema,
         -- since the docs describing this feature don't spell out the
         -- payload shape). It may carry a disambiguating `" [ref]"` suffix
-        -- per `ListAgents`' listing format; `parse_peer_message_target_name`
-        -- (src/service/tasks/crud.rs — the `core/Task.find_by_session_name`
-        -- of the rule body above) strips it before delegating to
+        -- per `ListAgents`' listing format.
+        -- `TaskService::resolve_peer_message_target` (src/service/tasks/crud.rs
+        -- — the `core/Task.find_by_session_name` of the rule body above)
+        -- strips it, matches the agent names first, and falls back to
+        -- `parse_peer_message_target_name`, which delegates to
         -- `TmuxWindow::task_id` (src/models/tmux_window.rs), the same
         -- parser tmux window names go through, so the two conventions
         -- cannot drift apart.
@@ -805,17 +807,18 @@ rule HookPeerMessageSent {
         -- `sender.last_peer_message_sent_at` is stamped in that case.
         --
         -- Implemented by `dispatch hook-peer-message <sender_id> --target
-        -- <to> --body <message>` (src/main.rs, cmd_hook_peer_message),
+        -- <to> --body <message>` (src/main.rs, `hooks::run_peer_message`),
         -- invoked from `plugin/hooks/scripts/task-status-hook`'s
         -- `PostToolUse` case — one of that case's additive observers, gated
         -- on `tool_name == "SendMessage"`
         -- rather than the `mcp__dispatch__*` skip (a native tool call is
-        -- never skipped by that filter). `TaskService::record_peer_message_sent`
-        -- (src/service/tasks/crud.rs) does the two stamps and also appends a
-        -- `SendMessage` trajectory entry for the sender
-        -- (`src/mcp/trajectory.rs::append_entry`, called directly from the
-        -- CLI process) — the only audit record this call gets, since it
-        -- never reaches dispatch's own MCP server.
+        -- never skipped by that filter). The board does the rest:
+        -- `TaskService::record_peer_message_sent` (src/service/tasks/crud.rs)
+        -- does the two stamps, and the hook handler appends a `SendMessage`
+        -- trajectory entry for the sender
+        -- (`src/mcp/handlers/hooks.rs::append_peer_message_trajectory`) —
+        -- the only audit record this call gets, since it never reaches
+        -- dispatch's own MCP tools.
         --
         -- Both timestamps are read by the TUI's tick-driven task diff
         -- (`detect_task_transition_notifications`, src/tui/update/agent.rs)
@@ -846,32 +849,33 @@ rule UndeliveredPeerMessage {
     -- is the one a resume wakes; the hint names it.
     let target = core/Task.find_by_session_name(to)
 
-    requires: target != null
-
     ensures: sender.last_peer_message_sent_at = now
     ensures:
-        if target.status in {running, review, done}
-           and target.worktree != null
-           and target.is_locally_owned
-           and current_agent(target).tmux_window = null
-           and path_exists_on_disk(target.worktree):
-            SenderToldToResume(sender: sender, target: target, agent: current_agent(target))
-        else:
-            SenderToldWhyNotResumable(sender: sender, target: target)
+        if target != null:
+            if target.status in {running, review, done}
+               and target.worktree != null
+               and target.is_locally_owned
+               and current_agent(target).tmux_window = null
+               and path_exists_on_disk(target.worktree):
+                SenderToldToResume(sender: sender, target: target, agent: current_agent(target))
+            else:
+                SenderToldWhyNotResumable(sender: sender, target: target)
 
     @guidance
         -- == What the sender reads ==
         -- The answer is added to the failed tool call's result as context the
         -- sender's Claude reads at once. SenderToldToResume names, in order:
         -- that `to` is not running; the task id and its current agent's name;
-        -- and the exact call to make, `resume_task(task_id: <id>, message:
-        -- <the same message>)`, saying the message becomes the resumed
+        -- and the call to make, `resume_task(task_id: <id>, message: <your
+        -- message>)` with the id written out and the message left for the
+        -- sender to repeat (it has it; echoing a long body adds noise), saying the message becomes the resumed
         -- agent's first input and that a review or done task moves back to
         -- running. When `to` was an ended agent's name, it says the message
         -- goes to the task's current agent instead.
         --
-        -- SenderToldWhyNotResumable gives the one reason, in the same words
-        -- resume_task would refuse with: a task that never ran (backlog), no
+        -- SenderToldWhyNotResumable gives the one reason, from the same
+        -- checks resume_task refuses on but worded for the sender (no
+        -- dispatch_task advice): a task that never ran (backlog), no
         -- worktree, a worktree on another machine, or a worktree gone from
         -- disk. It never suggests a fresh dispatch: a fresh agent has none of
         -- the old conversation, so starting one is the operator's decision.
@@ -879,15 +883,20 @@ rule UndeliveredPeerMessage {
         -- the board still holds open: the send failed, so the session in it
         -- has exited or does not answer. The sender is told that and told to
         -- raise it with the operator; resume_task would refuse it as attached.
-        -- When `to` was not the `task-<id>` name, the sender is first told
-        -- to try that name: a session started before agents had names still
-        -- answers to it, so a send by agent name can miss a live session.
+        -- In this open-window case only, when `to` was not the `task-<id>`
+        -- name, the sender is first told to try that name: a session started
+        -- before agents had names still answers to it, so a send by agent
+        -- name can miss a live session. A closed window hides no session.
         -- A disambiguating " [ref]" suffix on `to` is dropped from the text.
         --
         -- A `to` that resolves to no dispatch task (a typo, a session outside
         -- dispatch's fleet, a deleted task) adds nothing: Claude Code's own
         -- "No agent named … is reachable" error stands alone. The sender's
         -- sent stamp is still taken, as HookPeerMessageSent takes it.
+        --
+        -- Every undelivered send, resolved or not, also gets the sender's
+        -- `SendMessage` trajectory entry, marked `delivered: false`; a
+        -- delivered one is marked `delivered: true`.
         --
         -- == Why the sender resumes, not dispatch ==
         -- The operator chose this over resuming inside the hook. The sender
@@ -908,7 +917,9 @@ rule UndeliveredPeerMessage {
         -- sender — a question, like the PR gate (pr-workflow.allium:
         -- PrLearningsGate), not an observation. It fails open: no board, an
         -- unreadable answer, or no task behind `to` adds nothing, and the
-        -- failed send stands as Claude Code reported it.
+        -- failed send stands as Claude Code reported it. As with every other
+        -- hook, an unreachable board or a board that could not decide exits
+        -- non-zero, which Claude Code shows as a non-blocking hook error.
 }
 
 
