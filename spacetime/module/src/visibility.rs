@@ -340,7 +340,7 @@ pub fn task_move_permitted(r: &impl StoreReads, task: &Task, epic_id: i64, calle
     }
     // A detach lands on the caller's own board (`owner` is stamped as the
     // caller), so a task the caller sees off a public epic hides nothing new.
-    if epic_id == 0 && before.is_none() {
+    if epic_id == 0 && before.is_none() && r.epic(task.epic_id).is_some() {
         return true;
     }
     let workspace = r
