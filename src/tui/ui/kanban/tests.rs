@@ -1,5 +1,5 @@
 use super::super::shared::{render_folded_section_header, render_substatus_header};
-use super::cards::render_epic_header_item;
+use super::cards::{render_epic_header_item, render_folded_epic_header};
 use super::*;
 use crate::models::{ColumnSection, EpicId, TaskTag};
 use crate::palette::{CURSOR_BORDER, MUTED, PURPLE, SELECT_ALL_HIGHLIGHT_BG};
@@ -415,11 +415,7 @@ fn buf_find_char(buf: &Buffer, y: u16, needle: char) -> Option<u16> {
 /// The rendered text of a single epic's header row.
 fn epic_header_row(epic: &Epic, width: u16) -> String {
     buf_row(
-        &render_list_item_to_buf(
-            render_epic_header_item(epic, std::slice::from_ref(epic), width),
-            width,
-            1,
-        ),
+        &render_list_item_to_buf(render_epic_header_item(epic, width), width, 1),
         0,
     )
 }
@@ -431,30 +427,48 @@ fn epic_header_row_shows_its_own_epic_id() {
     assert!(row.contains("#42"), "got: {row:?}");
 }
 
-/// A nested epic's header row carries only its own id — not one per
-/// ancestor named in the breadcrumb.
+/// A nested epic's header row carries only its own id and its own title —
+/// none of its ancestors' (board-layout.allium, "Flattening").
 #[test]
-fn epic_header_row_shows_leaf_id_only_for_nested_epic() {
-    let root = make_epic_with_title(1, "Root");
-    let mut mid = make_epic_with_title(2, "Mid");
-    mid.parent_epic_id = Some(EpicId(1));
+fn epic_header_row_names_only_the_nested_epic_itself() {
     let mut leaf = make_epic_with_title(3, "Leaf");
     leaf.parent_epic_id = Some(EpicId(2));
-    let epics = vec![root, mid, leaf.clone()];
 
-    let item = render_epic_header_item(&leaf, &epics, 60);
-    let buf = render_list_item_to_buf(item, 60, 1);
-    let row = buf_row(&buf, 0);
+    let item = render_epic_header_item(&leaf, 60);
+    let row = buf_row(&render_list_item_to_buf(item, 60, 1), 0);
 
-    assert!(row.contains("#3"), "missing leaf id, got: {row:?}");
+    assert!(row.contains("── #3 Leaf ──"), "got: {row:?}");
     assert!(
-        !row.contains("#1"),
-        "root ancestor id leaked in, got: {row:?}"
+        !row.contains('\u{203a}'),
+        "breadcrumb separator drawn, got: {row:?}"
     );
-    assert!(
-        !row.contains("#2"),
-        "mid ancestor id leaked in, got: {row:?}"
-    );
+}
+
+/// A folded nested epic's header names the same single epic its open header
+/// does, then its hidden count (board-layout.allium, "Epic Folding").
+#[test]
+fn folded_epic_header_names_only_the_nested_epic_itself() {
+    let mut leaf = make_epic_with_title(3, "Leaf");
+    leaf.parent_epic_id = Some(EpicId(1));
+    let header = crate::tui::types::FoldedEpicHeader {
+        at: crate::tui::types::EpicFoldRef::new(TaskStatus::Running, EpicId(3)),
+        epic: &leaf,
+        hidden: 2,
+    };
+
+    let item = render_folded_epic_header(&header, 60, true, false);
+    let row = buf_row(&render_list_item_to_buf(item, 60, 1), 0);
+
+    assert!(row.contains("── #3 Leaf (2) \u{22ef}"), "got: {row:?}");
+}
+
+/// A title too long for the column ends in an ellipsis inside the row.
+#[test]
+fn epic_header_row_truncates_a_long_title() {
+    let epic = make_epic_with_title(3, "A very long epic title that will not fit");
+    let row = epic_header_row(&epic, 24);
+    assert!(row.contains('\u{2026}'), "got: {row:?}");
+    assert_eq!(row.chars().count(), 24, "got: {row:?}");
 }
 
 /// The id prefix is muted like every other id badge on the board, not the
@@ -462,7 +476,7 @@ fn epic_header_row_shows_leaf_id_only_for_nested_epic() {
 #[test]
 fn epic_header_id_prefix_is_muted_not_purple() {
     let epic = make_epic_with_title(7, "Alpha");
-    let item = render_epic_header_item(&epic, std::slice::from_ref(&epic), 40);
+    let item = render_epic_header_item(&epic, 40);
     let buf = render_list_item_to_buf(item, 40, 1);
 
     let hash_x = buf_find_char(&buf, 0, '#').expect("row should contain the id marker '#'");

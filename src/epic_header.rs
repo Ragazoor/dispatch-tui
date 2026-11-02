@@ -8,23 +8,19 @@ use ratatui::text::{Line, Span};
 
 use crate::models::EpicId;
 use crate::palette::{MUTED, PURPLE};
-use crate::text::{fair_truncate_segments, BREADCRUMB_SEPARATOR};
+use crate::text::truncate;
 
-/// `── #<id> <breadcrumb> ───`, filling `width`: the rule and id muted, the
-/// breadcrumb purple. `breadcrumb` is the epic's ancestor titles, root first;
-/// when it does not fit, every segment keeps a visible prefix
-/// ([`fair_truncate_segments`]).
-pub(crate) fn epic_header_line<S: AsRef<str>>(
-    id: EpicId,
-    breadcrumb: &[S],
-    width: u16,
-) -> Line<'static> {
+/// `── #<id> <title> ───`, filling `width`: the rule and id muted, the title
+/// purple. `title` is the epic's own title, never its ancestors'
+/// (`board-layout.allium`, "Flattening"); it ends in an ellipsis when it
+/// does not fit.
+pub(crate) fn epic_header_line(id: EpicId, title: &str, width: u16) -> Line<'static> {
     let id_prefix = format!("#{id} ");
     // "── " + text + " " + rule reserves the text's length plus 5, beside the
     // id prefix's own width.
     let reserved = 5 + id_prefix.chars().count();
     let budget = usize::from(width).saturating_sub(reserved);
-    let title = fair_truncate_segments(breadcrumb, budget, BREADCRUMB_SEPARATOR);
+    let title = truncate(title, budget);
     let rule_count = usize::from(width).saturating_sub(title.chars().count() + reserved);
     Line::from(vec![
         Span::styled("\u{2500}\u{2500} ", Style::default().fg(MUTED)),

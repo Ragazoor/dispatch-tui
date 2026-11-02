@@ -163,16 +163,10 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
                 render_folded_section_header(header, first, is_cursor)
             }
             ColumnItem::EpicHeader(epic) => {
-                render_epic_header_item(epic, &app.board.epics, col_area.width)
+                render_epic_header_item(epic, col_area.width)
             }
             ColumnItem::FoldedEpic(header) => {
-                render_folded_epic_header(
-                    header,
-                    &app.board.epics,
-                    col_area.width,
-                    first,
-                    is_cursor,
-                )
+                render_folded_epic_header(header, col_area.width, first, is_cursor)
             }
             ColumnItem::OrphanSeparator => render_orphan_separator(col_area.width, first),
         });

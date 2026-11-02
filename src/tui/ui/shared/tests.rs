@@ -151,53 +151,6 @@ fn feed_role_label_shows_kebab_role() {
 }
 
 #[test]
-fn empty_is_empty() {
-    assert_eq!(fair_truncate_segments::<&str>(&[], 20, " › "), "");
-}
-
-#[test]
-fn single_segment_uses_plain_truncate() {
-    assert_eq!(fair_truncate_segments(&["Hello"], 20, " › "), "Hello");
-    assert_eq!(fair_truncate_segments(&["Hello World"], 4, " › "), "Hel…");
-}
-
-#[test]
-fn fits_whole_joins_unchanged() {
-    let out = fair_truncate_segments(&["A", "B", "C"], 20, " › ");
-    assert_eq!(out, "A › B › C");
-}
-
-#[test]
-fn equal_segments_split_evenly() {
-    // budget 15, sep " › " x2 = 6, name_budget = 9, 3 segments → 3 chars each.
-    let out = fair_truncate_segments(&["Alpha", "Bravo", "Charl"], 15, " › ");
-    assert_eq!(out, "Al… › Br… › Ch…");
-}
-
-#[test]
-fn short_segment_donates_slack_to_long() {
-    // "PR" is short; its slack goes to the long segment.
-    // budget 21, seps=6, name_budget=15. Segments: "A"(1), "PR Reviews"(10), "Bots PR"(7).
-    let out = fair_truncate_segments(&["A", "PR Reviews", "Bots PR"], 21, " › ");
-    // "A" whole (1); remaining pool 14 across 2 long segments → 7 each.
-    assert_eq!(out, "A › PR Rev… › Bots PR");
-}
-
-#[test]
-fn narrow_budget_falls_back_to_whole_truncate() {
-    // name_budget < 2 * n → whole-string truncate, never a bare ellipsis segment.
-    let out = fair_truncate_segments(&["Alpha", "Bravo", "Charlie"], 8, " › ");
-    assert_eq!(out, "Alpha ›…");
-    assert!(out.chars().count() <= 8);
-}
-
-#[test]
-fn empty_segments_never_exceed_budget() {
-    let out = fair_truncate_segments(&["", ""], 1, " › ");
-    assert!(out.chars().count() <= 1);
-}
-
-#[test]
 fn push_hint_spans_embeds_key_in_non_ascii_label() {
     // 'é' is two bytes; slicing the label at byte 1 would panic.
     let mut spans = Vec::new();

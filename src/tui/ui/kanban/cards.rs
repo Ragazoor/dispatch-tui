@@ -384,23 +384,20 @@ fn label_color(chip: &str) -> Color {
 }
 
 /// Render a decorative epic-header separator row (non-selectable).
-/// Shows the epic's own id, then its ancestor breadcrumb:
-/// `── #NNN root › … › self ──────────`.
-pub(super) fn render_epic_header_item(
-    epic: &Epic,
-    epics: &[Epic],
-    col_width: u16,
-) -> ListItem<'static> {
-    // The id is the epic's own — the one whose task group this header
-    // precedes — never one per breadcrumb ancestor (board-layout.allium,
+/// Shows the epic's own id, then its own title — never its ancestors':
+/// `── #NNN self ──────────`.
+pub(super) fn render_epic_header_item(epic: &Epic, col_width: u16) -> ListItem<'static> {
+    // The id and title are the epic's own — the one whose task group this
+    // header precedes — never an ancestor's (board-layout.allium,
     // "Flattening").
-    let segments = crate::models::epics::ancestor_titles(epic, epics);
     ListItem::new(crate::epic_header::epic_header_line(
-        epic.id, &segments, col_width,
+        epic.id,
+        &epic.title,
+        col_width,
     ))
 }
 
-/// A folded epic group's header: the same id and ancestor breadcrumb
+/// A folded epic group's header: the same id and own title
 /// [`render_epic_header_item`] draws, plus the count of cards it is hiding
 /// and a fold marker — same relationship as `render_folded_section_header`
 /// has to `render_substatus_header` (board-layout.allium: "Epic Folding").
@@ -411,7 +408,6 @@ pub(super) fn render_epic_header_item(
 /// two needs to hold the cursor.
 pub(super) fn render_folded_epic_header(
     header: &crate::tui::types::FoldedEpicHeader<'_>,
-    epics: &[Epic],
     col_width: u16,
     first: bool,
     is_cursor: bool,
@@ -424,12 +420,7 @@ pub(super) fn render_folded_epic_header(
 
     let reserved = "\u{2500}\u{2500} ".chars().count() + id_prefix_len + suffix.chars().count();
     let budget = (col_width as usize).saturating_sub(reserved);
-    let segments = crate::models::epics::ancestor_titles(epic, epics);
-    let title = crate::tui::ui::shared::fair_truncate_segments(
-        &segments,
-        budget,
-        crate::tui::ui::shared::BREADCRUMB_SEPARATOR,
-    );
+    let title = crate::tui::ui::shared::truncate(&epic.title, budget);
 
     crate::tui::ui::shared::section_header_item(
         format!("\u{2500}\u{2500} {}{}{}", id_prefix, title, suffix),

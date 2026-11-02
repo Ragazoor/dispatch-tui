@@ -234,7 +234,7 @@ pub fn render_agents(
                     let epic = section.rows.get(index)?.epic.as_ref()?;
                     return Some(crate::epic_header::epic_header_line(
                         epic.id,
-                        &epic.breadcrumb,
+                        epic.breadcrumb.last().map_or("", String::as_str),
                         width,
                     ));
                 }
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn an_epic_header_reads_id_then_breadcrumb_above_its_agents() {
+    fn an_epic_header_reads_id_then_own_title_above_its_agents() {
         let mut section = AgentsSection::new();
         section.set_rows(vec![
             in_epic(41, 314, &["Dispatch"]),
@@ -348,7 +348,8 @@ mod tests {
         ]);
         let out = rendered(&mut section, true, 10);
         let first = line_of(&out, "── #314 Dispatch ──");
-        let nested = line_of(&out, "── #320 Dispatch › Pane ──");
+        let nested = line_of(&out, "── #320 Pane ──");
+        assert!(!out.contains("Dispatch › Pane"), "ancestor drawn:\n{out}");
         let rule = line_of(&out, "╌╌ · ╌╌");
         assert_eq!(line_of(&out, "#41 task 41"), first + 1, "{out}");
         assert_eq!(line_of(&out, "#42 task 42"), nested + 1, "{out}");

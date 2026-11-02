@@ -206,7 +206,10 @@ pub struct PaneAgent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneEpic {
     pub id: EpicId,
-    /// The epic's ancestor titles, root first and its own title last.
+    /// The epic's ancestor titles, root first and its own title last. The
+    /// pane's header draws only the last (`agent-tree.allium`,
+    /// `AgentListGroupsByEpic`); the whole path stays on the wire so a pane
+    /// and board of different builds still agree.
     pub breadcrumb: Vec<String>,
 }
 
