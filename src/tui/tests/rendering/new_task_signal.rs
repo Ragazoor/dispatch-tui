@@ -1,5 +1,5 @@
 //! `board-visuals.allium`, "New-task signal", and
-//! `tasks.allium: SeeTasksByEnteringTheirEpic`.
+//! `tasks.allium: SeeTaskByLandingOnIt`.
 use super::*;
 use crate::models::{EpicBuilder, EpicId};
 use crate::palette::SIGNAL;
@@ -120,47 +120,133 @@ async fn signal_never_colours_the_card_frame() {
     assert_ne!(buf[(rail, y)].fg, SIGNAL);
 }
 
+fn mark_seen_sent(cmds: &[crate::tui::types::Command], id: TaskId) -> bool {
+    cmds.iter().any(|c| {
+        matches!(
+            c,
+            crate::tui::types::Command::Task(crate::tui::commands::TaskCommand::MarkSeen(t))
+                if *t == id
+        )
+    })
+}
+
+fn any_mark_seen_sent(cmds: &[crate::tui::types::Command]) -> bool {
+    cmds.iter().any(|c| {
+        matches!(
+            c,
+            crate::tui::types::Command::Task(crate::tui::commands::TaskCommand::MarkSeen(_))
+        )
+    })
+}
+
+/// Epic `10` holding two backlog tasks, `2` and `3`, both unseen.
+fn app_with_two_new_tasks_in_one_epic() -> App {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![EpicBuilder::new(10).title("Root epic").build()];
+    for id in [2, 3] {
+        let mut task = make_task(id, TaskStatus::Backlog);
+        task.epic_id = Some(EpicId(10));
+        app.board.tasks.push(task);
+    }
+    app.board.unseen_tasks = [TaskId(2), TaskId(3)].into_iter().collect();
+    app
+}
+
 #[tokio::test]
-async fn entering_an_epic_sees_its_own_tasks_and_keeps_the_child_marked() {
+async fn cursor_landing_on_an_unseen_task_clears_only_it() {
+    let mut app = app_with_two_new_tasks_in_one_epic();
+
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
+
+    let landed = app.selected_task().expect("the cursor is on a task").id;
+    let other = if landed == TaskId(2) {
+        TaskId(3)
+    } else {
+        TaskId(2)
+    };
+    assert!(!app.board.unseen_tasks.contains(&landed));
+    assert!(
+        app.board.unseen_tasks.contains(&other),
+        "entering the epic does not see the card the cursor is not on"
+    );
+    assert!(app.board.epic_has_unseen(EpicId(10)));
+    assert!(mark_seen_sent(&cmds, landed));
+    assert!(!mark_seen_sent(&cmds, other));
+
+    // The sibling still draws its own glyph inside the epic.
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert_eq!(glyph_cells(&buf).len(), 1);
+}
+
+#[tokio::test]
+async fn moving_the_cursor_onto_an_unseen_task_clears_it() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    let first = app.selected_task().expect("a task card").id;
+    let second = if first == TaskId(1) {
+        TaskId(2)
+    } else {
+        TaskId(1)
+    };
+    app.board.unseen_tasks.insert(second);
+
+    let cmds = app.update(Message::NavigateRow(1));
+
+    assert_eq!(app.selected_task().map(|t| t.id), Some(second));
+    assert!(app.board.unseen_tasks.is_empty());
+    assert!(mark_seen_sent(&cmds, second));
+}
+
+#[tokio::test]
+async fn a_refresh_that_slides_an_unseen_task_under_the_cursor_clears_it() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::UnseenRefreshed(vec![TaskId(1)]),
+    ));
+
+    assert!(app.board.unseen_tasks.is_empty());
+    assert!(mark_seen_sent(&cmds, TaskId(1)));
+}
+
+#[tokio::test]
+async fn cursor_on_a_marked_epic_clears_nothing() {
     let mut app = app_with_task_two_epics_deep();
-    let mut shallow = make_task(2, TaskStatus::Backlog);
-    shallow.epic_id = Some(EpicId(10));
-    app.board.tasks.push(shallow);
-    app.board.unseen_tasks = [TaskId(1), TaskId(2)].into_iter().collect();
+    app.board.unseen_tasks.insert(TaskId(1));
+    assert!(
+        app.selected_task().is_none(),
+        "the cursor is on the epic card"
+    );
 
-    let cmds = app.handle_enter_epic(EpicId(10));
+    let cmds = app.update(Message::NavigateRowFirst);
 
-    assert!(!app.board.unseen_tasks.contains(&TaskId(2)));
+    assert!(app.board.unseen_tasks.contains(&TaskId(1)));
+    assert!(!any_mark_seen_sent(&cmds));
+}
+
+#[tokio::test]
+async fn entering_an_epic_whose_new_task_is_deeper_clears_nothing() {
+    let mut app = app_with_task_two_epics_deep();
+    app.board.unseen_tasks.insert(TaskId(1));
+
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
+
     assert!(app.board.unseen_tasks.contains(&TaskId(1)));
     assert!(app.board.epic_has_unseen(EpicId(11)));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        crate::tui::types::Command::Epic(crate::tui::commands::EpicCommand::MarkSeen(EpicId(10)))
-    )));
+    assert!(!any_mark_seen_sent(&cmds));
 }
 
 #[tokio::test]
-async fn entering_an_epic_with_nothing_unseen_sends_nothing() {
-    let mut app = app_with_task_two_epics_deep();
+async fn a_card_already_seen_sends_nothing() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
 
-    let cmds = app.handle_enter_epic(EpicId(10));
+    let cmds = app.update(Message::NavigateRowFirst);
 
-    assert!(cmds.is_empty());
-}
-
-#[tokio::test]
-async fn a_jump_sees_only_the_epic_that_opens() {
-    let mut app = app_with_task_two_epics_deep();
-    let mut shallow = make_task(2, TaskStatus::Backlog);
-    shallow.epic_id = Some(EpicId(10));
-    app.board.tasks.push(shallow);
-    app.board.unseen_tasks = [TaskId(1), TaskId(2)].into_iter().collect();
-
-    app.handle_jump_to_epic(EpicId(11));
-
-    assert!(
-        app.board.unseen_tasks.contains(&TaskId(2)),
-        "the epic passed over was never looked at"
-    );
-    assert!(!app.board.unseen_tasks.contains(&TaskId(1)));
+    assert!(!any_mark_seen_sent(&cmds));
 }

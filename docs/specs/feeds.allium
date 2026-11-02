@@ -2262,7 +2262,7 @@ rule NewReviewRequestIsSignalled {
         -- The signal is the create-time flag create_task already has; the feed
         -- is one caller of it, not a second mechanism. Who is marked, how the
         -- mark is drawn and how it clears are all the signal's own rules
-        -- (tasks.allium: SeeTasksByEnteringTheirEpic,
+        -- (tasks.allium: SeeTaskByLandingOnIt,
         -- UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing).
         --
         -- ONLY AN INSERT IS SIGNALLED. A refresh of a PR already on the board

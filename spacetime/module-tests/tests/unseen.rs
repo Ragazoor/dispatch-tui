@@ -103,10 +103,11 @@ fn a_later_member_is_not_marked() {
     assert!(unseen_for(&store, "late").is_empty());
 }
 
-/// Entering the epic clears the entering person's marks on tasks directly in
-/// it, leaves a deeper task's mark, and leaves other people's marks.
+/// The cursor resting on a task card clears that person's mark on that task
+/// only: its sibling, a deeper task and other people's marks stay
+/// (`tasks.allium: SeeTaskByLandingOnIt`).
 #[test]
-fn entering_an_epic_clears_only_its_own_tasks_for_that_person() {
+fn seeing_a_task_clears_only_that_task_for_that_person() {
     let store = Store::new();
     let root = store.create_epic("alice", "root", false);
     let child = store.create_epic("alice", "child", false);
@@ -125,30 +126,33 @@ fn entering_an_epic_clears_only_its_own_tasks_for_that_person() {
     store.enrol("bob");
     store.enrol("carol");
     let shallow = create_signalled(&store, epic_task("shallow", root, "backlog"));
+    let sibling = create_signalled(&store, epic_task("sibling", root, "backlog"));
     let deep = create_signalled(&store, epic_task("deep", child, "backlog"));
 
     store
-        .call("bob", |ctx| mark_epic_seen(ctx, identity_of("bob"), root))
-        .expect("mark_epic_seen");
+        .call("bob", |ctx| mark_task_seen(ctx, identity_of("bob"), shallow))
+        .expect("mark_task_seen");
 
-    assert_eq!(unseen_for(&store, "bob"), vec![deep]);
-    assert_eq!(unseen_for(&store, "carol"), vec![shallow, deep]);
+    assert_eq!(unseen_for(&store, "bob"), vec![sibling, deep]);
+    assert_eq!(unseen_for(&store, "carol"), vec![shallow, sibling, deep]);
 }
 
-/// Marking seen needs an identity, and an epic with nothing unseen is routine.
+/// Marking seen needs an identity; a task with no mark, or one that does not
+/// exist, is routine.
 #[test]
-fn mark_epic_seen_refuses_a_blank_identity_and_tolerates_nothing_to_clear() {
+fn mark_task_seen_refuses_a_blank_identity_and_tolerates_nothing_to_clear() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
+    let task = create_signalled(&store, epic_task("t", epic, "backlog"));
 
     assert!(store
-        .call("alice", |ctx| mark_epic_seen(ctx, "  ".into(), epic))
+        .call("alice", |ctx| mark_task_seen(ctx, "  ".into(), task))
         .is_err());
-    store
-        .call("alice", |ctx| {
-            mark_epic_seen(ctx, identity_of("alice"), epic)
-        })
-        .expect("nothing to clear is not an error");
+    for id in [task, task, 9_999] {
+        store
+            .call("alice", |ctx| mark_task_seen(ctx, identity_of("alice"), id))
+            .expect("nothing to clear is not an error");
+    }
 }
 
 /// Moving the task to another epic ends the mark, and it does not follow.

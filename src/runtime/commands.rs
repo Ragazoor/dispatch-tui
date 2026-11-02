@@ -146,6 +146,10 @@ async fn dispatch_task(
             rt.exec_persist_task(app, fields).await;
             vec![]
         }
+        MarkSeen(id) => {
+            rt.exec_mark_task_seen(id).await;
+            vec![]
+        }
         ClearSubagents { id, mode } => {
             rt.exec_clear_subagents(id, mode).await;
             vec![]
@@ -299,7 +303,6 @@ async fn dispatch_epic(
         RefreshFromDb => rt.exec_refresh_epics_from_db(app).await,
         Reparent { id, new_parent } => rt.exec_reparent_epic(app, id, new_parent).await,
         OverrideFeedOwner(id) => rt.exec_override_feed_owner(app, id).await,
-        MarkSeen(id) => rt.exec_mark_epic_seen(id).await,
     }
 }
 

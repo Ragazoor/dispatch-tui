@@ -463,8 +463,8 @@ impl ReducerCaller for MemoryReducerCaller {
         outcome
     }
 
-    async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome> {
-        self.apply_mark_epic_seen(subscriber, epic_id)
+    async fn mark_task_seen(&self, subscriber: String, task_id: TaskId) -> Result<ReducerOutcome> {
+        self.apply_mark_task_seen(subscriber, task_id)
     }
 
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome> {

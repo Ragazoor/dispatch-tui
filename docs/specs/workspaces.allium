@@ -939,7 +939,7 @@ rule WritesRequireSight {
         --
         -- Identities are the caller's, never a client's claim. A created epic
         -- or work package is stamped created_by = the caller whatever the row
-        -- says; subscribe_to_epic, unsubscribe_from_epic and mark_epic_seen
+        -- says; subscribe_to_epic, unsubscribe_from_epic and mark_task_seen
         -- refuse a subscriber that is not the caller. Only the operator may
         -- name another identity.
         --

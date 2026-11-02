@@ -1,6 +1,6 @@
 //! The new-task signal through the store handle
 //! (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`,
-//! `tasks.allium: SeeTasksByEnteringTheirEpic`).
+//! `tasks.allium: SeeTaskByLandingOnIt`).
 use super::*;
 
 /// An epic the test user sees but does not follow: sight alone earns a mark.
@@ -44,14 +44,19 @@ async fn an_epicless_signalled_task_is_created_without_a_mark() {
 }
 
 #[tokio::test]
-async fn entering_the_epic_clears_the_mark() {
+async fn seeing_a_task_clears_its_mark_and_only_its_mark() {
     let db = Store::open_in_memory().unwrap();
     let epic = epic_seen(&db).await;
-    db.create_task_signalled(task_in(epic, "signalled"))
+    let seen = db
+        .create_task_signalled(task_in(epic, "seen"))
+        .await
+        .unwrap();
+    let sibling = db
+        .create_task_signalled(task_in(epic, "sibling"))
         .await
         .unwrap();
 
-    db.mark_epic_seen(epic).await.unwrap();
+    db.mark_task_seen(seen).await.unwrap();
 
-    assert!(BoardReads::unseen_task_ids(&db).await.is_empty());
+    assert_eq!(BoardReads::unseen_task_ids(&db).await, vec![sibling]);
 }

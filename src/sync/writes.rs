@@ -176,8 +176,8 @@ pub trait ReducerCaller: Send + Sync {
     async fn set_member_role(&self, membership_id: i64, role: String) -> Result<ReducerOutcome>;
     /// `workspaces.allium: RemoveMember`.
     async fn remove_member(&self, membership_id: i64) -> Result<ReducerOutcome>;
-    /// `tasks.allium: SeeTasksByEnteringTheirEpic`.
-    async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome>;
+    /// `tasks.allium: SeeTaskByLandingOnIt`.
+    async fn mark_task_seen(&self, subscriber: String, task_id: TaskId) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
     /// `store-split.allium: UpdateTaskIsOneTransaction`: the relink and the
     /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.

@@ -667,8 +667,8 @@ use "./core.allium" as core
 -- == New-task signal ==
 --
 -- A task created with the signal on is unseen by each person who can see its
--- epic until that person enters the epic (core/UnseenTask; tasks.allium:
--- SeeTasksByEnteringTheirEpic). While a card is marked for the viewing
+-- epic until that person's board cursor rests on the task's card
+-- (core/UnseenTask; tasks.allium: SeeTaskByLandingOnIt). While a card is marked for the viewing
 -- person it carries a diamond glyph (◆ U+25C6) in SIGNAL, a hue added to
 -- the palette for this one meaning (ORANGE, Rgb 255 158 100). The glyph sits
 -- on the title line in the same slot, and by the same mechanism, as the
@@ -680,7 +680,11 @@ use "./core.allium" as core
 --   - an EPIC card whose subtree (itself or any descendant epic) holds such a
 --     task. The mark is derived, never stored (core/UnseenTask), so the whole
 --     chain from the top-level epic down to the one holding the new task is
---     marked, and each link clears as the operator enters the epic below it.
+--     marked. Each link clears once the cursor has rested on every new task
+--     card below it; selecting or entering an epic clears nothing itself.
+--
+-- The task card's own ◆ is what tells the operator WHICH card is new once
+-- they are inside a marked epic. It stays until the cursor reaches that card.
 --
 -- An epic card ALSO draws its stripe (▎) in SIGNAL instead of PURPLE while
 -- marked. The stripe is one cell on the title line, so there is no "lower
@@ -690,8 +694,8 @@ use "./core.allium" as core
 -- already learnt (see "Message flash") what recolouring a channel that means
 -- something else costs. A task card is marked by the glyph alone.
 --
--- The signal is steady, not a blink. It lasts until the operator enters the
--- epic, which is the same reason the message flash is a notice rather than a
+-- The signal is steady, not a blink. It lasts until the cursor reaches the
+-- card, which is the same reason the message flash is a notice rather than a
 -- blink: a person whose attention is elsewhere must still catch it on their
 -- next glance, and a timer-driven toggle would add a periodic redraw to a
 -- board that otherwise draws on events only.
@@ -914,6 +918,13 @@ use "./core.allium" as core
 --   signal_never_colours_the_card_frame          the frame stays neutral/cursor
 --   signal_is_per_viewer                         another person's row marks
 --                                                nothing for this viewer
+--   cursor_landing_on_an_unseen_task_clears_only_it
+--                                                entering an epic clears only
+--                                                the card the cursor lands
+--                                                on; its siblings keep ◆
+--   cursor_on_a_marked_epic_clears_nothing       the epic mark is derived
+--   moving_the_cursor_onto_an_unseen_task_clears_it
+--   a_refresh_that_slides_an_unseen_task_under_the_cursor_clears_it
 --   message_flash_never_colours_the_card_frame   a live flash leaves the
 --                                                frame alone: no column
 --                                                hue, and the only

@@ -617,7 +617,7 @@ entity Subscription {
 -- epic itself or any descendant). The epics on the path to a new task therefore
 -- light up and go dark by derivation, with no second write to keep in step.
 -- See "New-task signal" in board-visuals.allium for how it is drawn and
--- tasks.allium: SeeTasksByEnteringTheirEpic for how it clears.
+-- tasks.allium: SeeTaskByLandingOnIt for how it clears.
 --
 -- Rows exist for people, not for machines: the key is a UserIdentity, so one
 -- person's two laptops share one mark and clearing it on either clears both.

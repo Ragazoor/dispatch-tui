@@ -33,27 +33,27 @@ pub(crate) fn clear_unseen_for_task(ctx: &ReducerContext, task_id: i64) {
     ctx.db.unseen_tasks().task_id().delete(task_id);
 }
 
-/// `tasks.allium: SeeTasksByEnteringTheirEpic`: `subscriber` entered `epic_id`,
-/// so their marks on the tasks directly in it end. Tasks in child epics stay
-/// marked. Nothing to clear is not an error: entering an epic is routine.
+/// `tasks.allium: SeeTaskByLandingOnIt`: `subscriber`'s board cursor rested on
+/// `task_id`'s card, so their mark on that one task ends. Every other task,
+/// and everyone else's mark, stays. Nothing to clear is not an error: the
+/// cursor lands on cards all the time. A task the caller cannot see is one
+/// that does not exist, so it is the same no-op.
 #[spacetimedb::reducer]
-pub fn mark_epic_seen(
+pub fn mark_task_seen(
     ctx: &ReducerContext,
     subscriber: String,
-    epic_id: i64,
+    task_id: i64,
 ) -> Result<(), String> {
     if subscriber.trim().is_empty() {
         return Err("cannot mark seen without an identity".into());
     }
     require_own_identity(ctx, &subscriber)?;
-    if visible_epic(ctx, epic_id).is_none() {
+    if visible_task(ctx, task_id).is_none() {
         return Ok(());
     }
-    for task in ctx.db.tasks().epic_id().filter(&epic_id) {
-        ctx.db
-            .unseen_tasks()
-            .id()
-            .delete(unseen_id(&subscriber, task.id));
-    }
+    ctx.db
+        .unseen_tasks()
+        .id()
+        .delete(unseen_id(&subscriber, task_id));
     Ok(())
 }

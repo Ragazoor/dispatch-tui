@@ -28,7 +28,7 @@ use crate::spacetime::bindings::{
     delete_work_package as _, delete_workspace as _, ensure_managed_epics as _,
     fail_interrupted_dispatch_requests as _, fail_interrupted_session_requests as _,
     flatten_epic as _, grant_super_admin as _, ingest_feed as _, link_work_package_item as _,
-    mark_epic_seen as _, mark_pr_learnings_gate_shown as _, move_epic_to_workspace as _,
+    mark_pr_learnings_gate_shown as _, mark_task_seen as _, move_epic_to_workspace as _,
     override_poll_owner as _, patch_epic as _, patch_learning as _, patch_task as _,
     patch_work_package as _, record_base_branch as _, record_learning_retrieval as _,
     record_notification as _, record_pre_tool_use as _, record_usage_event as _,
@@ -336,15 +336,15 @@ impl ReducerCaller for SdkReducerCaller {
         )
     }
 
-    async fn mark_epic_seen(
+    async fn mark_task_seen(
         &self,
         subscriber: String,
-        epic_id: EpicId,
+        task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
-            "marking the epic seen",
-            mark_epic_seen_then(subscriber, epic_id.0)
+            "marking the task seen",
+            mark_task_seen_then(subscriber, task_id.0)
         )
     }
 

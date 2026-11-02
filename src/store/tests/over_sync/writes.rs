@@ -49,7 +49,7 @@ impl WriterIdentity for FixedIdentity {
 enum Sent {
     CreateTask(Box<bindings::Task>),
     CreateTaskSignalled(Box<bindings::Task>),
-    MarkEpicSeen(String, EpicId),
+    MarkTaskSeen(String, TaskId),
     SetDisplayName(String),
     /// Any of the workspace and super-admin reducers, by name.
     Workspace(&'static str),
@@ -353,12 +353,12 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::Workspace("remove_member"))
     }
 
-    async fn mark_epic_seen(
+    async fn mark_task_seen(
         &self,
         subscriber: String,
-        epic_id: EpicId,
+        task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::MarkEpicSeen(subscriber, epic_id))
+        self.answer(Sent::MarkTaskSeen(subscriber, task_id))
     }
 
     async fn patch_task(

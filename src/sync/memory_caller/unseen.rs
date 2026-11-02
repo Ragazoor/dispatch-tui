@@ -4,10 +4,9 @@ use anyhow::Result;
 
 use dispatch_spacetime_module as module;
 
-use crate::models::{EpicId, TaskId};
+use crate::models::TaskId;
 use crate::spacetime::bindings;
 
-use super::super::encode;
 use super::super::writes::ReducerOutcome;
 use super::{MemoryReducerCaller, Tables};
 
@@ -60,36 +59,29 @@ impl MemoryReducerCaller {
         }
     }
 
-    pub(super) fn apply_mark_epic_seen(
+    /// `tasks.allium: SeeTaskByLandingOnIt`. Mirrors the module's
+    /// `mark_task_seen`.
+    pub(super) fn apply_mark_task_seen(
         &self,
         subscriber: String,
-        epic_id: EpicId,
+        task_id: TaskId,
     ) -> Result<ReducerOutcome> {
         if subscriber.trim().is_empty() {
             return Ok(ReducerOutcome::Refused(
                 "cannot mark seen without an identity".into(),
             ));
         }
-        let epic_id = encode::epic_ref(Some(epic_id));
         let scope = self.scope();
         if let Err(why) = Tables::require_own_identity(&scope, &subscriber) {
             return Ok(ReducerOutcome::Refused(why));
         }
         let mut tables = self.lock();
-        if tables.visible_epic(&scope, epic_id).is_none() {
+        if tables.visible_task(&scope, task_id.0).is_none() {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
-        let in_epic: Vec<i64> = tables
-            .tasks
-            .values()
-            .filter(|t| t.epic_id == epic_id)
-            .map(|t| t.id)
-            .collect();
-        for task_id in in_epic {
-            let id = module::unseen_id(&subscriber, task_id);
-            if tables.unseen_tasks.remove(&id).is_some() {
-                self.rows.remove_unseen_task(id);
-            }
+        let id = module::unseen_id(&subscriber, task_id.0);
+        if tables.unseen_tasks.remove(&id).is_some() {
+            self.rows.remove_unseen_task(id);
         }
         Ok(ReducerOutcome::Applied(vec![]))
     }

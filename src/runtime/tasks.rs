@@ -219,6 +219,15 @@ impl TuiRuntime {
         self.link_new_task(app, work_package, task.id).await;
     }
 
+    /// `tasks.allium: SeeTaskByLandingOnIt`. The board already dropped the
+    /// mark locally; the store's row change confirms it, so nothing is read
+    /// back here.
+    pub(super) async fn exec_mark_task_seen(&self, id: models::TaskId) {
+        if let Err(e) = self.task_svc.mark_task_seen(id).await {
+            tracing::warn!("marking task {id} seen: {e}");
+        }
+    }
+
     pub(super) async fn exec_persist_task(
         &self,
         app: &mut App,

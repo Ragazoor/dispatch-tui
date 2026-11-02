@@ -742,7 +742,7 @@ async fn new_my_reviews_pr_is_signalled_and_a_refresh_is_not() {
     assert_eq!(unseen(&db).await, vec![task.id], "a new PR is signalled");
 
     // Seen, then refreshed by the next poll: the refresh writes no new mark.
-    db.mark_epic_seen(my).await.unwrap();
+    db.mark_task_seen(task.id).await.unwrap();
     assert!(unseen(&db).await.is_empty());
     run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
         .await

@@ -112,6 +112,13 @@ impl TaskCrud for Store {
         self.caller.delete_task(id).await?.applied()
     }
 
+    async fn mark_task_seen(&self, id: TaskId) -> Result<()> {
+        let Some(identity) = self.identity.user().await? else {
+            return Ok(());
+        };
+        self.caller.mark_task_seen(identity, id).await?.applied()
+    }
+
     /// tasks.allium: `BatchDelete`'s atomic counterpart to `delete_task`/
     /// `delete_epic` looped per item — one reducer call over both domains,
     /// which is where the joint guard runs. See

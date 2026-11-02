@@ -205,6 +205,12 @@ macro_rules! task_service_api {
                 task_id: $crate::models::TaskId
             ) -> Result<(), $crate::service::ServiceError>;
 
+            /// `tasks.allium: SeeTaskByLandingOnIt`.
+            async fn mark_task_seen(
+                &self,
+                task_id: $crate::models::TaskId
+            ) -> Result<(), $crate::service::ServiceError>;
+
             /// `tasks.allium: BatchDelete`'s atomic call — every task and epic
             /// in the selection, deleted together in one operation. See
             /// `TaskService::batch_delete`'s doc comment.
@@ -473,11 +479,6 @@ macro_rules! epic_service_api {
             async fn regroup_epic(
                 &self,
                 root: $crate::models::EpicId
-            ) -> Result<(), $crate::service::ServiceError>;
-
-            async fn mark_epic_seen(
-                &self,
-                epic: $crate::models::EpicId
             ) -> Result<(), $crate::service::ServiceError>;
 
             async fn flatten_epic(

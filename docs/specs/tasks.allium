@@ -1201,31 +1201,49 @@ rule MoveTaskToEpic {
 -- who can see its epic (core/UnseenTask). The mark drives the board's "new" glyph and stripe
 -- (board-visuals.allium, "New-task signal"). These rules end it.
 
-rule SeeTasksByEnteringTheirEpic {
-    when: OperatorEntersEpic(viewer, epic)
+rule SeeTaskByLandingOnIt {
+    when: CursorRestsOnTaskCard(viewer, task)
 
-    -- Only tasks DIRECTLY in the entered epic are seen. A task in a child
-    -- epic stays unseen, so the child epic stays marked and the trail of
-    -- marks leads the operator one level further down.
+    -- Only the task under the cursor is seen. Other tasks in the same epic
+    -- stay unseen, and so does every epic whose subtree still holds one, so
+    -- the trail of marks leads the operator down to each new card in turn.
     ensures:
-        for u in core/UnseenTask.where(u => u.subscriber = viewer and u.task.epic = epic):
+        for u in core/UnseenTask.where(u => u.subscriber = viewer and u.task = task):
             not exists u
 
     @guidance
-        -- "Entering" is the epic view opening: Space on an epic card
-        -- (keybindings.allium: enter_epic), Enter's jump to the deepest epic
-        -- (epics.allium: JumpToDeepestEpic) and entering from a work package
-        -- (work-packages.allium: EnterEpicFromPackage). A jump passes over
-        -- the epics between; only the epic whose view actually opens is
-        -- entered, so only its own tasks are seen. Selecting a card, or
-        -- opening the task detail, does not clear anything: the operator
-        -- chose "going into the epic" as the trigger.
+        -- "Rests on" is any way a task card comes to be under the board's
+        -- cursor, not only a keypress that moves it there: the arrow and
+        -- first/last keys, the first card a newly entered epic or package
+        -- puts the cursor on, the card the cursor returns to when a view is
+        -- left, and a card a refresh, fold or filter change slides under a
+        -- cursor that did not move. The board checks after every update, so
+        -- one check covers all of them.
         --
-        -- The row is removed for the viewing person only. Anyone else's
-        -- mark stays until they enter. The same person on a second machine
-        -- sees it clear, because the row is keyed by person.
+        -- An EPIC card under the cursor clears nothing. An epic's mark is
+        -- derived from the tasks below it (core/UnseenTask); it clears once
+        -- the last of them is seen, never by selecting the epic. Entering an
+        -- epic clears nothing either.
+        --
+        -- Why not "entering the epic", the trigger this rule used to have
+        -- (SeeTasksByEnteringTheirEpic, task #98798). Entering cleared every
+        -- task directly in the epic at once, and entering is the only way to
+        -- see those task cards, so the ◆ on a task card was never on screen
+        -- for an epic the operator walked into. The operator could tell an
+        -- epic had something new but not which card it was. Clearing per
+        -- task keeps the ◆ on the new card until the cursor reaches it.
+        --
+        -- Opening the task detail is not needed: the cursor reaching the card
+        -- already cleared it.
+        --
+        -- The row is removed for the viewing person only. Anyone else's mark
+        -- stays until their own cursor lands on the card. The same person on
+        -- a second machine sees it clear, because the row is keyed by person.
         --
         -- There is no MCP tool for this. It is an operator act.
+        --
+        -- Implementation: src/tui/update/epics.rs::see_selected_task, called
+        -- from App::update; the store write is the module's mark_task_seen.
 }
 
 rule UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing {

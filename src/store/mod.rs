@@ -124,6 +124,10 @@ pub trait TaskCrud: TaskRead {
         labels: &[String],
     ) -> Result<TaskId>;
     async fn delete_task(&self, id: TaskId) -> Result<()>;
+    /// `tasks.allium: SeeTaskByLandingOnIt`: this board's cursor rested on
+    /// `id`'s card, so this board's person's unseen mark on it ends. A board
+    /// with no settled identity has no marks to end and does nothing.
+    async fn mark_task_seen(&self, id: TaskId) -> Result<()>;
     /// `tasks.allium: BatchDelete`'s atomic counterpart to looping
     /// [`Self::delete_task`]/[`EpicCrud::delete_epic`] once per selected item.
     /// Validates every task and epic against the store's TRUE state and
@@ -603,10 +607,6 @@ pub trait EpicCrud: EpicRead {
     /// `epics.allium: FlattenEpic`, likewise: the tasks of every `repo-group`
     /// sub-epic move back onto `root` and the emptied sub-epics are deleted.
     async fn flatten_epic(&self, root: EpicId) -> Result<()>;
-    /// `tasks.allium: SeeTasksByEnteringTheirEpic`: this board's person
-    /// entered `epic`, so their unseen marks on the tasks directly in it end.
-    /// A board with no settled identity has no marks to end and does nothing.
-    async fn mark_epic_seen(&self, epic: EpicId) -> Result<()>;
 }
 
 /// Read-only work-package queries (`work-packages.allium`). Held (via

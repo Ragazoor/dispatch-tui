@@ -129,6 +129,9 @@ pub enum DeleteGuard {
 #[derive(Debug, Clone)]
 pub enum TaskCommand {
     Persist(PersistFields),
+    /// `tasks.allium: SeeTaskByLandingOnIt`, fired when the cursor rests on an
+    /// unseen task's card.
+    MarkSeen(TaskId),
     Insert {
         draft: TaskDraft,
         epic_id: Option<EpicId>,

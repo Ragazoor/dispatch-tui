@@ -837,8 +837,13 @@ impl App {
     ///
     /// The routing match lives in `dispatcher.rs`; this method is a thin
     /// delegate so adding a `Message` variant is a two-file edit.
+    ///
+    /// After the message, the task card left under the cursor is seen
+    /// (`tasks.allium: SeeTaskByLandingOnIt`), whichever message put it there.
     pub fn update(&mut self, msg: Message) -> Vec<Command> {
-        dispatcher::dispatch(self, msg)
+        let mut cmds = dispatcher::dispatch(self, msg);
+        cmds.extend(self.see_selected_task());
+        cmds
     }
 
     // -----------------------------------------------------------------------

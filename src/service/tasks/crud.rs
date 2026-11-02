@@ -503,6 +503,12 @@ impl TaskService {
         Ok(())
     }
 
+    /// `tasks.allium: SeeTaskByLandingOnIt`. No existence pre-check: a mark on
+    /// a task that is gone is gone with it, so there is nothing to refuse.
+    pub async fn mark_task_seen(&self, task_id: TaskId) -> Result<(), ServiceError> {
+        Ok(self.db.mark_task_seen(task_id).await?)
+    }
+
     pub async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
         self.get_task(task_id).await?;
         self.db

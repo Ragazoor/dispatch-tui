@@ -58,6 +58,10 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 30: the new-task signal clears per task — `mark_task_seen` replaces
+///    `mark_epic_seen`, so the cursor resting on a task card ends that one
+///    mark and entering an epic ends none (`unseen.rs`;
+///    `tasks.allium: SeeTaskByLandingOnIt`).
 /// 29: the module stops trusting a client-named owner — a task created with
 ///    no epic or detached onto a user board takes the caller as `owner`, a
 ///    created task is stamped `created_by` with the caller,
@@ -149,7 +153,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 29;
+pub const RULES_VERSION: i64 = 30;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

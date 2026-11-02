@@ -497,8 +497,8 @@ fn memory_caller_matches_the_real_reducers() {
 
         // -- new-task signal --------------------------------------------------------
         // A task created with the signal on is marked for everyone who sees its
-        // epic, with no subscription; entering the epic clears it; moving it
-        // out clears it too.
+        // epic, with no subscription; seeing one task clears that task only;
+        // moving it out clears it too.
         let signalled_real = real
             .create_task_signalled(own_task_in_epic(epic2_id_real))
             .await
@@ -515,17 +515,41 @@ fn memory_caller_matches_the_real_reducers() {
             "unseen after a signalled create"
         );
 
-        real.mark_epic_seen(subscriber.into(), EpicId(epic2_id_real))
+        let sibling_real = real
+            .create_task_signalled(own_task_in_epic(epic2_id_real))
             .await
             .unwrap();
-        wait_for!(rows_real.unseen_task_ids().is_empty());
-        mem.mark_epic_seen(subscriber.into(), EpicId(epic2_id_mem))
+        wait_for!(rows_real.unseen_task_ids().len() == 2);
+        let sibling_mem = mem
+            .create_task_signalled(own_task_in_epic(epic2_id_mem))
+            .await
+            .unwrap();
+        assert_eq!(sibling_real, sibling_mem, "sibling task id");
+
+        real.mark_task_seen(subscriber.into(), signalled_real)
+            .await
+            .unwrap();
+        wait_for!(rows_real.unseen_task_ids() == vec![sibling_real]);
+        mem.mark_task_seen(subscriber.into(), signalled_mem)
             .await
             .unwrap();
         assert_eq!(
             rows_real.unseen_task_ids(),
             rows_mem.unseen_task_ids(),
-            "unseen after entering the epic"
+            "unseen after seeing one task"
+        );
+
+        real.mark_task_seen(subscriber.into(), sibling_real)
+            .await
+            .unwrap();
+        wait_for!(rows_real.unseen_task_ids().is_empty());
+        mem.mark_task_seen(subscriber.into(), sibling_mem)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.unseen_task_ids(),
+            rows_mem.unseen_task_ids(),
+            "unseen after seeing the other"
         );
 
         let moved_real = real
@@ -575,6 +599,7 @@ fn memory_caller_matches_the_real_reducers() {
         );
         for (real_id, mem_id) in [
             (signalled_real, signalled_mem),
+            (sibling_real, sibling_mem),
             (moved_real, moved_mem),
             (finished_real, finished_mem),
         ] {

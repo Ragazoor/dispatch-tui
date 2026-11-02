@@ -59,8 +59,8 @@ pub mod learning_type;
 pub mod learning_verdict_input_type;
 pub mod learning_verdict_type;
 pub mod link_work_package_item_reducer;
-pub mod mark_epic_seen_reducer;
 pub mod mark_pr_learnings_gate_shown_reducer;
+pub mod mark_task_seen_reducer;
 pub mod membership_type;
 pub mod move_epic_to_workspace_reducer;
 pub mod override_poll_owner_reducer;
@@ -246,8 +246,8 @@ pub use learning_type::Learning;
 pub use learning_verdict_input_type::LearningVerdictInput;
 pub use learning_verdict_type::LearningVerdict;
 pub use link_work_package_item_reducer::link_work_package_item;
-pub use mark_epic_seen_reducer::mark_epic_seen;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
+pub use mark_task_seen_reducer::mark_task_seen;
 pub use membership_type::Membership;
 pub use move_epic_to_workspace_reducer::move_epic_to_workspace;
 pub use override_poll_owner_reducer::override_poll_owner;
@@ -504,13 +504,13 @@ pub enum Reducer {
         kind: String,
         item_id: i64,
     },
-    MarkEpicSeen {
-        subscriber: String,
-        epic_id: i64,
-    },
     MarkPrLearningsGateShown {
         id: i64,
         at: String,
+    },
+    MarkTaskSeen {
+        subscriber: String,
+        task_id: i64,
     },
     MoveEpicToWorkspace {
         epic_id: i64,
@@ -855,8 +855,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::GrantSuperAdmin { .. } => "grant_super_admin",
             Reducer::IngestFeed { .. } => "ingest_feed",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
-            Reducer::MarkEpicSeen { .. } => "mark_epic_seen",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
+            Reducer::MarkTaskSeen { .. } => "mark_task_seen",
             Reducer::MoveEpicToWorkspace { .. } => "move_epic_to_workspace",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
@@ -1141,19 +1141,19 @@ Reducer::ClearSetting{
                 kind: kind.clone(),
                 item_id: item_id.clone(),
 }),
-            Reducer::MarkEpicSeen{
-                subscriber,
-                epic_id,
-}             => __sats::bsatn::to_vec(&mark_epic_seen_reducer::MarkEpicSeenArgs {
-                subscriber: subscriber.clone(),
-                epic_id: epic_id.clone(),
-}),
             Reducer::MarkPrLearningsGateShown{
                 id,
                 at,
 }             => __sats::bsatn::to_vec(&mark_pr_learnings_gate_shown_reducer::MarkPrLearningsGateShownArgs {
                 id: id.clone(),
                 at: at.clone(),
+}),
+            Reducer::MarkTaskSeen{
+                subscriber,
+                task_id,
+}             => __sats::bsatn::to_vec(&mark_task_seen_reducer::MarkTaskSeenArgs {
+                subscriber: subscriber.clone(),
+                task_id: task_id.clone(),
 }),
             Reducer::MoveEpicToWorkspace{
                 epic_id,
