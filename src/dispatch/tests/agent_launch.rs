@@ -169,9 +169,195 @@ fn dispatch_agent_omits_rustc_wrapper_when_sccache_unavailable() {
     let calls = mock.recorded_calls();
     let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
     assert!(
-        !new_window_args.iter().any(|a| a == "-e"),
-        "new-window should carry no -e flag when sccache is unavailable, got: {new_window_args:?}"
+        !new_window_args
+            .iter()
+            .any(|a| a.starts_with("RUSTC_WRAPPER=")),
+        "new-window should carry no RUSTC_WRAPPER when sccache is unavailable, got: {new_window_args:?}"
     );
+    assert_eq!(
+        mock.sccache_server_starts(),
+        0,
+        "no sccache server is started when sccache is unavailable"
+    );
+}
+
+/// The `-e` value new-window carries for `key`, if any.
+fn window_env(new_window_args: &[String], key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    new_window_args
+        .windows(2)
+        .find(|w| w[0] == "-e" && w[1].starts_with(&prefix))
+        .map(|w| w[1][prefix.len()..].to_string())
+}
+
+fn dispatch_with(mock: &MockProcessRunner, repo_path: &str) {
+    let task = make_task(repo_path);
+    dispatch_agent(
+        &task,
+        "atlas",
+        mock,
+        mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
+}
+
+fn resume_with(mock: &MockProcessRunner, worktree_path: &str, message: Option<&str>) {
+    resume_agent_with_message(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        worktree_path,
+        message,
+        mock,
+    )
+    .unwrap();
+}
+
+// --- AgentBuildsRunFewerParallelJobs (task #98833) ---
+
+#[test]
+fn dispatch_agent_sets_default_cargo_build_jobs() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = script.runner();
+
+    dispatch_with(&mock, &repo_path);
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert_eq!(
+        window_env(new_window_args, "CARGO_BUILD_JOBS").as_deref(),
+        Some("8"),
+        "got: {new_window_args:?}"
+    );
+}
+
+#[test]
+fn dispatch_agent_passes_the_boards_own_cargo_build_jobs() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = script.runner().with_board_cargo_build_jobs("3");
+
+    dispatch_with(&mock, &repo_path);
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert_eq!(
+        window_env(new_window_args, "CARGO_BUILD_JOBS").as_deref(),
+        Some("3"),
+        "got: {new_window_args:?}"
+    );
+}
+
+#[test]
+fn resume_agent_sets_default_cargo_build_jobs() {
+    let (_dir, worktree_path) = make_test_repo();
+    let script = DispatchScript::resume();
+    let mock = script.runner();
+
+    resume_with(&mock, &worktree_path, None);
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert_eq!(
+        window_env(new_window_args, "CARGO_BUILD_JOBS").as_deref(),
+        Some("8"),
+        "got: {new_window_args:?}"
+    );
+}
+
+// --- SccacheServerStartsOutsideTheCap (task #98833) ---
+
+#[test]
+fn dispatch_agent_starts_the_sccache_server_when_sccache_available() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = script.runner().with_sccache_available(true);
+
+    dispatch_with(&mock, &repo_path);
+
+    assert_eq!(mock.sccache_server_starts(), 1);
+}
+
+#[test]
+fn resume_agent_starts_the_sccache_server_when_sccache_available() {
+    let (_dir, worktree_path) = make_test_repo();
+    let script = DispatchScript::resume();
+    let mock = script.runner().with_sccache_available(true);
+
+    resume_with(&mock, &worktree_path, None);
+
+    assert_eq!(mock.sccache_server_starts(), 1);
+}
+
+// --- AgentsShareOneMemoryCap (task #98833) ---
+
+const SCOPE_PREFIX: &str = "systemd-run --user --scope --quiet --collect \
+     --slice=dispatch-agents.slice -p OOMPolicy=continue -- ";
+
+fn scoped(mock: MockProcessRunner) -> MockProcessRunner {
+    mock.with_agent_scope(crate::process::AgentScope::new("dispatch-agents.slice"))
+}
+
+#[test]
+fn dispatch_agent_runs_claude_inside_the_agent_scope() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = scoped(script.runner());
+
+    dispatch_with(&mock, &repo_path);
+
+    let calls = mock.recorded_calls();
+    let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
+    assert!(
+        launch.starts_with(&format!("{SCOPE_PREFIX}bash -c ")),
+        "got: {launch}"
+    );
+}
+
+#[test]
+fn resume_agent_runs_claude_inside_the_agent_scope() {
+    let (_dir, worktree_path) = make_test_repo();
+    let script = DispatchScript::resume();
+    let mock = scoped(script.runner());
+
+    resume_with(&mock, &worktree_path, None);
+
+    let calls = mock.recorded_calls();
+    let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
+    assert!(launch.starts_with(SCOPE_PREFIX), "got: {launch}");
+    assert!(launch.ends_with(" --continue"), "got: {launch}");
+}
+
+#[test]
+fn resume_agent_with_message_runs_claude_inside_the_agent_scope() {
+    let (_dir, worktree_path) = make_test_repo();
+    let script = DispatchScript::resume();
+    let mock = scoped(script.runner());
+
+    resume_with(&mock, &worktree_path, Some("rebase on main"));
+
+    let calls = mock.recorded_calls();
+    let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
+    assert!(
+        launch.starts_with(&format!("{SCOPE_PREFIX}bash -c ")),
+        "got: {launch}"
+    );
+}
+
+#[test]
+fn dispatch_agent_without_an_agent_scope_launches_unwrapped() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = script.runner();
+
+    dispatch_with(&mock, &repo_path);
+
+    let calls = mock.recorded_calls();
+    let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
+    assert!(launch.starts_with("bash -c "), "got: {launch}");
 }
 
 #[test]

@@ -141,6 +141,18 @@ impl ProcessRunner for DeadlineRunner {
     fn sccache_available(&self) -> bool {
         self.inner.sccache_available()
     }
+
+    fn board_cargo_build_jobs(&self) -> Option<String> {
+        self.inner.board_cargo_build_jobs()
+    }
+
+    fn agent_scope(&self) -> Option<crate::process::AgentScope> {
+        self.inner.agent_scope()
+    }
+
+    fn start_sccache_server(&self) {
+        self.inner.start_sccache_server();
+    }
 }
 
 /// `store-split.allium: config.wrap_up_rebase_timeout`: how long a wrap_up

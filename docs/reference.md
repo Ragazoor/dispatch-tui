@@ -226,6 +226,19 @@ and `DISPATCH_SPACETIME_SERVER` is the operator's: subcommands read both,
 `dispatch tui` reads only the operator's, so a restarted board never
 inherits its predecessor's store (task #28729).
 
+**Agent builds share one memory cap.** Every agent window gets
+`CARGO_BUILD_JOBS=8`, or the board's own `CARGO_BUILD_JOBS` when it has one. On
+a machine with a systemd user manager, each agent's `claude` also runs in its own
+scope inside `dispatch-agents.slice`. That slice gets `MemoryHigh=80%`,
+`MemoryMax=85%` and `MemorySwapMax=2G` when it has no `MemoryMax` yet. At the cap
+the kernel kills the largest process in the slice (usually a linker), and the
+agent sees one failed build. To pick another cap, set it yourself; dispatch keeps
+any cap that is already set:
+`systemctl --user set-property dispatch-agents.slice MemoryMax=40G`. Check usage
+with `systemctl --user status dispatch-agents.slice`. Why, and what happens
+without systemd: `docs/specs/dispatch.allium` (`AgentBuildsRunFewerParallelJobs`,
+`AgentsShareOneMemoryCap`, `SccacheServerStartsOutsideTheCap`).
+
 It is a flag or environment variable rather than a setting because which store
 a board uses is a property of how it was launched: the address has to be known
 before anything can be read from the store. It is read at the entry point and

@@ -3,22 +3,49 @@ use anyhow::Context;
 use crate::models::extract_github_repo;
 use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
-/// The tmux window environment every agent launch sets, so any `cargo build`/
-/// `cargo test` the agent runs — task or resumed alike, including
-/// `spacetime/module`'s separate wasm32 workspace, which picks up a plain
-/// environment variable with no config of its own — goes through sccache's
-/// shared compiler-object cache instead of paying full per-worktree compile
-/// cost. See `DispatchedAgentsShareASccacheNotATargetDir` in
-/// docs/specs/dispatch.allium.
+/// `dispatch.allium: config.agent_cargo_build_jobs`.
+const AGENT_CARGO_BUILD_JOBS: &str = "8";
+
+/// The tmux window environment every agent launch sets — task or resumed
+/// alike, including `spacetime/module`'s separate wasm32 workspace, which picks
+/// up a plain environment variable with no config of its own.
 ///
-/// Empty when `sccache` is not on this machine's `PATH`: it is a build-time
-/// speedup, not a correctness requirement, so its absence degrades the launch
-/// silently rather than blocking it.
-fn sccache_launch_env(runner: &dyn ProcessRunner) -> Vec<(&'static str, &'static str)> {
+/// - `RUSTC_WRAPPER=sccache`, so every `cargo build`/`cargo test` goes through
+///   sccache's shared compiler-object cache instead of paying full
+///   per-worktree compile cost (`DispatchedAgentsShareASccacheNotATargetDir`
+///   in docs/specs/dispatch.allium). Left out when `sccache` is not on this
+///   machine's `PATH`: it is a build-time speedup, not a correctness
+///   requirement, so its absence degrades the launch silently rather than
+///   blocking it. When it is set, the sccache server is started here first,
+///   from the board's own process, so it does not land inside the first
+///   agent's memory-capped scope (`SccacheServerStartsOutsideTheCap`).
+/// - `CARGO_BUILD_JOBS`, always: the board's own value when it has one, the
+///   default otherwise (`AgentBuildsRunFewerParallelJobs`).
+fn agent_launch_env(runner: &dyn ProcessRunner) -> Vec<(&'static str, String)> {
+    let mut env = Vec::new();
     if runner.sccache_available() {
-        vec![("RUSTC_WRAPPER", "sccache")]
-    } else {
-        vec![]
+        runner.start_sccache_server();
+        env.push(("RUSTC_WRAPPER", "sccache".to_string()));
+    }
+    let jobs = runner
+        .board_cargo_build_jobs()
+        .unwrap_or_else(|| AGENT_CARGO_BUILD_JOBS.to_string());
+    env.push(("CARGO_BUILD_JOBS", jobs));
+    env
+}
+
+/// [`agent_launch_env`] in the borrowed form [`crate::tmux::new_window`] takes.
+fn borrowed_env<'a>(env: &'a [(&'static str, String)]) -> Vec<(&'static str, &'a str)> {
+    env.iter().map(|(k, v)| (*k, v.as_str())).collect()
+}
+
+/// `command` wrapped in the agents' shared memory-capped scope when this
+/// machine offers one, unchanged otherwise (`AgentsShareOneMemoryCap` in
+/// docs/specs/dispatch.allium).
+fn in_agent_scope(command: String, runner: &dyn ProcessRunner) -> String {
+    match runner.agent_scope() {
+        Some(scope) => scope.wrap(&command),
+        None => command,
     }
 }
 

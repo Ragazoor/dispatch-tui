@@ -5,6 +5,9 @@ use std::process::Output;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+mod agent_scope;
+pub use agent_scope::{prepare_agent_scope, AgentScope, AGENT_SLICE};
+
 /// Canonical timeout for long-running subprocesses (git fetch, worktree add).
 /// A dispatch's provisioning is bounded tighter still, by its request row's
 /// deadline (`crate::dispatch::DeadlineRunner`; `dispatch.allium:
@@ -484,6 +487,34 @@ pub trait ProcessRunner: Send + Sync {
     fn sccache_available(&self) -> bool {
         sccache_on_path()
     }
+
+    /// The board's own `CARGO_BUILD_JOBS`, passed on to every agent window in
+    /// place of the default — see `AgentBuildsRunFewerParallelJobs` in
+    /// docs/specs/dispatch.allium.
+    ///
+    /// Inert by default, like [`Self::claude_json_path`]: only
+    /// [`RealProcessRunner`] reads the board's environment, so no test runner
+    /// picks up whatever the developer's shell exports.
+    fn board_cargo_build_jobs(&self) -> Option<String> {
+        None
+    }
+
+    /// The shared-memory-cap scope this launch's `claude` command runs in, or
+    /// `None` to launch it unwrapped — see `AgentsShareOneMemoryCap` in
+    /// docs/specs/dispatch.allium. Consulted once per agent launch.
+    ///
+    /// Inert by default: only [`RealProcessRunner`] talks to the operator's
+    /// systemd user manager, so no test runner can cap or wrap anything on the
+    /// developer's machine by omission.
+    fn agent_scope(&self) -> Option<AgentScope> {
+        None
+    }
+
+    /// Start the sccache server from the board's own process, before an agent
+    /// launch that sets `RUSTC_WRAPPER` — see `SccacheServerStartsOutsideTheCap`
+    /// in docs/specs/dispatch.allium. Best-effort and inert by default, for the
+    /// same reason as [`Self::agent_scope`].
+    fn start_sccache_server(&self) {}
 }
 
 /// Whether an executable named `sccache` exists in some `PATH` entry — the
@@ -572,6 +603,39 @@ impl ProcessRunner for RealProcessRunner {
         // terminal. See [`run_bounded`] for the hazards handled.
         run_bounded(program, args, None, timeout)
     }
+
+    fn board_cargo_build_jobs(&self) -> Option<String> {
+        std::env::var("CARGO_BUILD_JOBS")
+            .ok()
+            .filter(|jobs| !jobs.trim().is_empty())
+    }
+
+    fn agent_scope(&self) -> Option<AgentScope> {
+        prepare_agent_scope(self)
+    }
+
+    fn start_sccache_server(&self) {
+        // Spawned directly rather than through `run_bounded`: the server it
+        // starts outlives this call, and `run_bounded` drains the child's pipes
+        // to EOF, which an inheriting daemon would hold open until the timeout.
+        // Every stream is null, so nothing is drained at all.
+        let status = std::process::Command::new("sccache")
+            .arg("--start-server")
+            .env("SCCACHE_IDLE_TIMEOUT", "0")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        match status {
+            Ok(s) if s.success() => tracing::info!("started the sccache server"),
+            // sccache exits non-zero with "Address in use" when a server is
+            // already running, which is the common case and leaves it as it is.
+            Ok(s) => {
+                tracing::debug!(%s, "sccache --start-server exited non-zero; a server is probably running")
+            }
+            Err(e) => tracing::warn!(error = %e, "could not run sccache --start-server"),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -632,6 +696,13 @@ pub struct MockProcessRunner {
     /// default. See that method's doc comment for why a fixed answer replaces
     /// the real scan here.
     sccache_available: bool,
+    /// What [`ProcessRunner::board_cargo_build_jobs`] answers — `None` by
+    /// default, like the trait's own default.
+    board_cargo_build_jobs: Option<String>,
+    /// What [`ProcessRunner::agent_scope`] answers — `None` by default.
+    agent_scope: Option<AgentScope>,
+    /// How many times [`ProcessRunner::start_sccache_server`] was called.
+    sccache_server_starts: std::sync::atomic::AtomicUsize,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -654,7 +725,28 @@ impl MockProcessRunner {
             binaries: AgentBinaries::default(),
             claude_json: None,
             sccache_available: false,
+            board_cargo_build_jobs: None,
+            agent_scope: None,
+            sccache_server_starts: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Make this runner report `jobs` as the board's own `CARGO_BUILD_JOBS`.
+    pub fn with_board_cargo_build_jobs(mut self, jobs: &str) -> Self {
+        self.board_cargo_build_jobs = Some(jobs.to_string());
+        self
+    }
+
+    /// Make this runner hand every agent launch `scope`.
+    pub fn with_agent_scope(mut self, scope: AgentScope) -> Self {
+        self.agent_scope = Some(scope);
+        self
+    }
+
+    /// How many times a launch asked this runner to start the sccache server.
+    pub fn sccache_server_starts(&self) -> usize {
+        self.sccache_server_starts
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Point this runner's caller-identity config derivation at `path`, so a
@@ -919,6 +1011,19 @@ impl ProcessRunner for MockProcessRunner {
 
     fn sccache_available(&self) -> bool {
         self.sccache_available
+    }
+
+    fn board_cargo_build_jobs(&self) -> Option<String> {
+        self.board_cargo_build_jobs.clone()
+    }
+
+    fn agent_scope(&self) -> Option<AgentScope> {
+        self.agent_scope.clone()
+    }
+
+    fn start_sccache_server(&self) {
+        self.sccache_server_starts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

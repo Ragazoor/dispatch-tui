@@ -44,6 +44,18 @@ config {
     -- decorator on a sub-second debounce, and the chained command in practice
     -- shells out to git, which can block on a lock, NFS or a network remote.
     statusline_chain_timeout: Duration = 2.seconds
+
+    -- Parallel build jobs an agent's cargo runs when the board's own
+    -- environment names none (see AgentBuildsRunFewerParallelJobs).
+    agent_cargo_build_jobs: Integer = 8
+
+    -- The systemd user slice every agent runs in, and the cap dispatch gives
+    -- it when the operator has set none (see AgentsShareOneMemoryCap). The
+    -- percentages are of the machine's physical memory, as systemd reads them.
+    agent_slice: String = "dispatch-agents.slice"
+    agent_slice_memory_high: String = "80%"
+    agent_slice_memory_max: String = "85%"
+    agent_slice_swap_max: String = "2G"
 }
 
 ------------------------------------------------------------
@@ -429,6 +441,66 @@ rule ProvisionDispatch {
         -- convention as this repo's other optional external tools
         -- (bubblewrap, socat) rather than its required ones (tmux, git, gh,
         -- claude), which have no such fallback.
+
+    @guarantee AgentBuildsRunFewerParallelJobs
+        -- Every agent launch sets CARGO_BUILD_JOBS in the tmux window's
+        -- environment, through the same seam as RUSTC_WRAPPER above, so no
+        -- launcher can set one without the other. The value is the board's
+        -- own CARGO_BUILD_JOBS when its environment carries one — that is
+        -- how an operator chooses another number — and
+        -- config.agent_cargo_build_jobs otherwise. Unlike RUSTC_WRAPPER it
+        -- is set unconditionally: it names no tool that could be missing.
+        --
+        -- Why (task #98833): cargo's default is one job per core. One
+        -- `cargo test` in this repo links 34+ test binaries, each link
+        -- peaking at ~1.1 GB, so on a 22-core machine two agents testing at
+        -- once held ~45 linkers and ~50 GB, filled RAM and swap, and froze
+        -- the machine. At 8 jobs four concurrent agents peak near 38 GB.
+        -- This is prevention; AgentsShareOneMemoryCap is the backstop.
+
+    @guarantee AgentsShareOneMemoryCap
+        -- Every agent launch runs the agent's `claude` command in its own
+        -- transient systemd user scope inside config.agent_slice, with
+        -- OOMPolicy=continue, so the agent and everything it starts (cargo,
+        -- rustc, linkers, test binaries) count against one memory cap
+        -- shared by all agents on this machine. The cap bounds the total,
+        -- not each agent: a lone agent may use all of it, and no number of
+        -- agents can take the memory the desktop and the board need.
+        --
+        -- Before each launch dispatch reads the slice's MemoryMax from the
+        -- user service manager. When none is set, it sets, for the runtime
+        -- of the manager only, MemoryHigh = config.agent_slice_memory_high,
+        -- MemoryMax = config.agent_slice_memory_max and MemorySwapMax =
+        -- config.agent_slice_swap_max. When one is set — by an earlier
+        -- launch or by the operator — it is kept unchanged: that is how an
+        -- operator chooses another cap.
+        --
+        -- At the cap the kernel kills the largest process in the slice,
+        -- which in practice is a linker or rustc. OOMPolicy=continue is
+        -- load-bearing: without it systemd stops the whole scope after the
+        -- kill, ending the agent's session along with its build (measured
+        -- in task #98833). With it the agent sees one failed build command
+        -- and every other agent is untouched. The swap bound exists because
+        -- a full swap is what froze the machine, not the full RAM alone.
+        --
+        -- BEST-EFFORT in the same direction as RUSTC_WRAPPER: when the
+        -- user service manager cannot be reached, or the read or the write
+        -- of the slice fails, the launch proceeds unwrapped — today's
+        -- behaviour — and dispatch logs why. A wrapper that cannot start
+        -- would leave a window with no agent in it and nothing on the board
+        -- saying so, which is worse than an uncapped agent.
+
+    @guarantee SccacheServerStartsOutsideTheCap
+        -- When RUSTC_WRAPPER=sccache is set, dispatch starts the sccache
+        -- server itself before the launch, from the board's own process,
+        -- with its idle timeout off; a server that is already running is
+        -- left as it is. sccache's server is spawned by its first client
+        -- and stays in that client's cgroup, so without this it would live
+        -- inside the first agent's scope, count against the shared cap, and
+        -- at ~750 MB be a likely kill — breaking every agent's build at
+        -- once. The idle timeout is off so the server does not exit and get
+        -- respawned by some agent inside the cap. Failure to start it is
+        -- logged and never blocks the launch.
 
     @guarantee DevBuildsKeepLineTablesNotFullDebugInfo
         -- The dev profile in Cargo.toml sets `debug = "line-tables-only"`.

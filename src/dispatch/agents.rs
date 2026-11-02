@@ -469,7 +469,7 @@ fn launch_agent(
         &provision.worktree_path,
         runner,
     );
-    let claude_cmd = prompt_launch_command(&claude, &launch_flags);
+    let claude_cmd = super::in_agent_scope(prompt_launch_command(&claude, &launch_flags), runner);
 
     // Anything failing here happens after the worktree and tmux window both
     // exist — a fresh worktree (this attempt's own `git worktree add`) and the
@@ -857,10 +857,11 @@ pub fn resume_agent_with_message(
         return Ok(ResumeResult { tmux_window });
     }
 
+    let launch_env = super::agent_launch_env(runner);
     tmux::new_window(
         &tmux_window,
         worktree_path,
-        &super::sccache_launch_env(runner),
+        &super::borrowed_env(&launch_env),
         runner,
     )
     .context("failed to create tmux window for resume")?;
@@ -882,6 +883,7 @@ pub fn resume_agent_with_message(
         }
         None => format!("{claude} {} --continue", launch_flags.inline()),
     };
+    let launch = super::in_agent_scope(launch, runner);
     tmux::send_keys(&tmux_window, &launch, runner)
         .context("failed to send resume keys to tmux window")?;
 
