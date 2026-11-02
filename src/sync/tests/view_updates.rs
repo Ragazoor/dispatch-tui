@@ -266,3 +266,43 @@ fn an_undecodable_task_leaving_the_view_is_forgotten() {
     rows.retire_task(&bad);
     assert!(rows.undecodable_task_ids_for_epic(EpicId(3)).is_empty());
 }
+
+/// Task 98793: the PR-learnings hook sets `pr_learnings_gate_shown_at`, a
+/// column the decoder ignores. Old and new then decode equal, so the delete
+/// half of the update pair erased the row until something else touched it.
+#[test]
+fn a_task_update_in_an_ignored_column_keeps_the_new_row_insert_first() {
+    let rows = SharedRows::new();
+    let old = task("same");
+    let mut new = task("same");
+    new.pr_learnings_gate_shown_at = "2026-11-02 08:40:00".into();
+    rows.upsert_task(&old);
+    rows.upsert_task(&new);
+    rows.retire_task(&old);
+    assert!(rows.task(TaskId(7)).is_some());
+}
+
+#[test]
+fn a_task_update_in_an_ignored_column_keeps_the_new_row_delete_first() {
+    let rows = SharedRows::new();
+    let old = task("same");
+    let mut new = task("same");
+    new.pr_learnings_gate_shown_at = "2026-11-02 08:40:00".into();
+    rows.upsert_task(&old);
+    rows.retire_task(&old);
+    rows.upsert_task(&new);
+    assert!(rows.task(TaskId(7)).is_some());
+}
+
+#[test]
+fn an_epic_update_in_an_ignored_column_keeps_the_new_row() {
+    let rows = SharedRows::new();
+    let old = epic("same");
+    let mut new = epic("same");
+    // `created_by` is a column the epic decoder ignores.
+    new.created_by = "someone-else".into();
+    rows.upsert_epic(&old);
+    rows.upsert_epic(&new);
+    rows.retire_epic(&old);
+    assert!(rows.epic(EpicId(7)).is_some());
+}

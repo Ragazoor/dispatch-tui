@@ -752,8 +752,11 @@ rule AViewUpdateNeverErasesTheRow {
         -- on a retraction only while the row it holds equals the retracted
         -- one (SharedRows::retire_task, retire_epic). A retraction of a row
         -- the board no longer holds is the tail of an update and changes
-        -- nothing. Known edge: rows that differ only in a column the decoder
-        -- ignores compare equal, so that update's delete would erase it.
+        -- nothing. "Equals" is judged on the raw store row, not the decoded
+        -- one: rows that differ only in a column the decoder ignores (such
+        -- as pr_learnings_gate_shown_at) must still count as different, or
+        -- the delete half of that update erases the row and every read of
+        -- the task answers "not found" until it is next written (task 98793).
         --
         -- EVERY TABLE THAT MOVES BEHIND A VIEW takes this path, not just
         -- tasks and epics. This rule is built for those two first; each

@@ -105,6 +105,12 @@ pub struct UsageEventRow {
 #[derive(Default)]
 struct Rows {
     tasks: BTreeMap<i64, Task>,
+    /// The raw row behind each entry of `tasks`. `retire_task` compares against
+    /// it, not against the decoded task: two rows that differ only in a column
+    /// the decoder ignores decode equal, and the delete half of such an update
+    /// would erase the row (`sync.allium: AViewUpdateNeverErasesTheRow`).
+    raw_tasks: BTreeMap<i64, bindings::Task>,
+    raw_epics: BTreeMap<i64, bindings::Epic>,
     /// Tasks the store delivered that did not decode, as `id -> raw epic_id`
     /// (`0` for none). They are absent from `tasks` but still exist in the
     /// store, so a subtree check has to be able to count them
@@ -317,6 +323,7 @@ impl SharedRows {
         match decode::task(row) {
             Ok(task) => self.write(|rows| {
                 rows.undecodable_tasks.remove(&task.id.0);
+                rows.raw_tasks.insert(task.id.0, row.clone());
                 rows.tasks.insert(task.id.0, task);
                 true
             }),
@@ -326,6 +333,7 @@ impl SharedRows {
                 // delete pre-check can still count it.
                 self.write(|rows| {
                     rows.tasks.remove(&row.id);
+                    rows.raw_tasks.remove(&row.id);
                     rows.undecodable_tasks.insert(row.id, row.epic_id);
                     false
                 });
@@ -336,6 +344,7 @@ impl SharedRows {
     pub fn remove_task(&self, id: TaskId) {
         self.write(|rows| {
             let undecodable = rows.undecodable_tasks.remove(&id.0).is_some();
+            rows.raw_tasks.remove(&id.0);
             rows.tasks.remove(&id.0).is_some() || undecodable
         });
     }
@@ -347,27 +356,38 @@ impl SharedRows {
     /// as INSERT(new) then DELETE(old) with the same id, and the SDK's callback
     /// order for the pair is not ours to rely on. [`Self::remove_task`] on the
     /// delete would erase the row the insert just stored. This removes only
-    /// when the stored row equals the one that left.
-    ///
-    /// Known edge: two rows that differ only in a column the decoder ignores
-    /// decode equal, so the delete after the insert would erase the update.
+    /// when the stored RAW row equals the one that left. The raw row, not the
+    /// decoded task: rows that differ only in a column the decoder ignores
+    /// decode equal, and would erase the update (task 98793).
     /// `AViewUpdateNeverErasesTheRow` in `sync.allium`.
     pub fn retire_task(&self, old: &bindings::Task) {
-        let Ok(old) = decode::task(old) else {
+        if decode::task(old).is_err() {
             // Never stored decoded; only its undecodable mark can remain.
             let id = old.id;
             self.write(|rows| rows.undecodable_tasks.remove(&id).is_some());
             return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.tasks, &old.id.0, &old));
+        }
+        self.write(|rows| {
+            let removed = remove_if_held(&mut rows.raw_tasks, &old.id, old);
+            if removed {
+                rows.tasks.remove(&old.id);
+            }
+            removed
+        });
     }
 
     /// An epic row left a per-caller view. As [`Self::retire_task`].
     pub fn retire_epic(&self, old: &bindings::Epic) {
-        let Ok(old) = decode::epic(old) else {
+        if decode::epic(old).is_err() {
             return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.epics, &old.id.0, &old));
+        }
+        self.write(|rows| {
+            let removed = remove_if_held(&mut rows.raw_epics, &old.id, old);
+            if removed {
+                rows.epics.remove(&old.id);
+            }
+            removed
+        });
     }
 
     pub fn upsert_epic(&self, row: &bindings::Epic) {
@@ -378,6 +398,7 @@ impl SharedRows {
         }
         match decode::epic(row) {
             Ok(epic) => self.write(|rows| {
+                rows.raw_epics.insert(epic.id.0, row.clone());
                 rows.epics.insert(epic.id.0, epic);
                 true
             }),
@@ -388,7 +409,10 @@ impl SharedRows {
     }
 
     pub fn remove_epic(&self, id: EpicId) {
-        self.write(|rows| rows.epics.remove(&id.0).is_some());
+        self.write(|rows| {
+            rows.raw_epics.remove(&id.0);
+            rows.epics.remove(&id.0).is_some()
+        });
     }
 
     pub fn upsert_repo_path(&self, row: &bindings::RepoPath) {
