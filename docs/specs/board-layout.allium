@@ -479,9 +479,9 @@ value EpicCardPlacement {
 --     a nested epic's header carries one id, its own.
 --   - After the id, the row shows that epic's own title and nothing else —
 --     not its ancestors. A nested epic's header names only the epic its
---     tasks sit in directly, root or not: the full ancestor path is long,
---     and repeats what the user already knows from where they are, so it
---     buries the one title that tells the groups apart. The title is
+--     tasks sit in directly, root or not: the full ancestor path is long
+--     and buries the one title that tells the groups apart. The id still
+--     names the epic uniquely when two share a title. The title is
 --     bounded by the column width, less the space the id prefix takes —
 --     the same reservation task cards and epic cards already make for their
 --     own id badge before computing their truncation budget — and truncated
