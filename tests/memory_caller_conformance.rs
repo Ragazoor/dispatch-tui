@@ -517,6 +517,8 @@ mod data_rules;
 mod dispatch_requests;
 #[path = "memory_caller_conformance/feeds.rs"]
 mod feeds;
+#[path = "memory_caller_conformance/identity_stamping.rs"]
+mod identity_stamping;
 #[path = "memory_caller_conformance/learning_placement.rs"]
 mod learning_placement;
 #[path = "memory_caller_conformance/move_epic.rs"]

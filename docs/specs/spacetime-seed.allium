@@ -841,6 +841,16 @@ invariant OneSequencePerTable {
 -- it writes anything. A store published before that row existed has no
 -- recorded publisher and refuses every board: failing closed is the point, as
 -- a board could otherwise claim the role by being first to ask.
+--
+-- A STORE PUBLISHED BEFORE THAT ROW EXISTED (task #98755). Its publisher is
+-- recorded by `claim_store_owner`, a reducer with no arguments: the caller
+-- becomes the publisher, but ONLY while no row exists, and the call is refused
+-- once one does. The module cannot verify who published, so the rule is the
+-- operator's: run it as the CLI login that owns the database (the identity
+-- startup.allium already checks before publishing), straight after the
+-- publish and before any other board connects, with
+-- `spacetime call <db> claim_store_owner`. A store that already has a row is
+-- not changed by it, so a board cannot take the role later.
 actor Operator {
     identified_by: core/Host where id != "" and owner = store_publisher()
 }

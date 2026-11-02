@@ -58,6 +58,13 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 29: the module stops trusting a client-named owner — a task created with
+///    no epic or detached onto a user board takes the caller as `owner`, a
+///    created task is stamped `created_by` with the caller,
+///    `unsubscribe_from_epic` refuses a subscriber that is not the caller and
+///    hides epics the caller cannot see, and `claim_store_owner` records the
+///    publisher of a store that has none (`tasks_epics.rs`, `config.rs`,
+///    `visibility.rs`, `lib.rs`).
 /// 28: the private flip. Every table a per-caller view serves is private, the
 ///    board reads them through the views, and `own_usage_events` serves a
 ///    caller the usage events they recorded (`record_usage_event` stamps an
@@ -142,7 +149,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 28;
+pub const RULES_VERSION: i64 = 29;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

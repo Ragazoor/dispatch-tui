@@ -155,5 +155,8 @@ fn every_unicode_format_and_separator_character_is_refused_in_a_name() {
             }
         }
     }
-    assert!(checked > 100, "the oracle yielded only {checked} characters");
+    assert!(
+        checked > 100,
+        "the oracle yielded only {checked} characters"
+    );
 }

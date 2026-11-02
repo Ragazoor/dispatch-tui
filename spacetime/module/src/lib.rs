@@ -199,6 +199,25 @@ pub struct StoreOwner {
     pub identity: String,
 }
 
+/// Record the caller as the store's publisher, for a store published before
+/// `store_owner` existed (`spacetime-seed.allium: Operator`).
+///
+/// Only while no publisher is recorded; refused once one is, so a board cannot
+/// take the role later. The module cannot tell who published, so the operator
+/// runs this as the CLI login that owns the database, straight after the
+/// publish: `spacetime call <db> claim_store_owner`.
+#[spacetimedb::reducer]
+pub fn claim_store_owner(ctx: &ReducerContext) -> Result<(), String> {
+    if ctx.db.store_owner().id().find(1).is_some() {
+        return Err("this store already has a recorded publisher".into());
+    }
+    ctx.db.store_owner().insert(StoreOwner {
+        id: 1,
+        identity: caller_identity(ctx),
+    });
+    Ok(())
+}
+
 /// Stamp the schema version on a brand-new database.
 #[spacetimedb::reducer(init)]
 pub fn init(ctx: &ReducerContext) {

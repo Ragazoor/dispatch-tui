@@ -214,9 +214,17 @@ impl MemoryReducerCaller {
         epic_id: EpicId,
     ) -> Result<ReducerOutcome> {
         let epic_id = epic_id.0;
+        let scope = self.scope();
+        if let Err(why) = Tables::require_own_identity(&scope, &subscriber) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let mut tables = self.lock();
         let id = module::subscription_id(&subscriber, epic_id);
         if !tables.subscriptions.contains_key(&id) {
+            // The module's sight check: no row and no sight reads as missing.
+            if tables.visible_epic(&scope, epic_id).is_none() {
+                return Ok(ReducerOutcome::Refused(format!("no epic {epic_id}")));
+            }
             return Ok(ReducerOutcome::Refused(format!(
                 "not subscribed to epic {epic_id}"
             )));

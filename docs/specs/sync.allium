@@ -1522,6 +1522,17 @@ rule UnsubscribeFromEpic {
                     not exists owner_row
 
     @guidance
+        -- THE SUBSCRIBER IS THE CALLER (task #98755, V5). As for
+        -- SubscribeToEpic, the store refuses a subscriber that is not the
+        -- identity making the call, so a board cannot unfollow someone else
+        -- (releasing their hosts' poll claims). The refusal is the same for a
+        -- row that exists and one that does not. The sight check: a caller who
+        -- holds no row and cannot see the epic is told "no epic N", not "not
+        -- subscribed", so the answer never confirms that a private epic
+        -- exists. A caller who still holds a row may always remove it, even
+        -- after losing sight of the epic, so a stale follow cannot become
+        -- permanent.
+        --
         -- RELEASING THE CLAIM (task #8196). A feed epic this person no longer
         -- follows is invisible to their boards (`list_epics` answers from
         -- `covered_epics` UNION the `own_epics`/`own_tasks` views), so a claim they hold on it

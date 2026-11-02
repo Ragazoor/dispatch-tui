@@ -17,6 +17,7 @@ pub mod burn_id_sequence_reducer;
 pub mod claim_dispatch_request_reducer;
 pub mod claim_poll_owner_reducer;
 pub mod claim_session_request_reducer;
+pub mod claim_store_owner_reducer;
 pub mod claim_super_admin_reducer;
 pub mod clear_setting_reducer;
 pub mod close_task_reducer;
@@ -203,6 +204,7 @@ pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_dispatch_request_reducer::claim_dispatch_request;
 pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use claim_session_request_reducer::claim_session_request;
+pub use claim_store_owner_reducer::claim_store_owner;
 pub use claim_super_admin_reducer::claim_super_admin;
 pub use clear_setting_reducer::clear_setting;
 pub use close_task_reducer::close_task;
@@ -423,6 +425,7 @@ pub enum Reducer {
         request_id: i64,
         host: String,
     },
+    ClaimStoreOwner,
     ClaimSuperAdmin,
     ClearSetting {
         host: String,
@@ -828,6 +831,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::ClaimDispatchRequest { .. } => "claim_dispatch_request",
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::ClaimSessionRequest { .. } => "claim_session_request",
+            Reducer::ClaimStoreOwner => "claim_store_owner",
             Reducer::ClaimSuperAdmin => "claim_super_admin",
             Reducer::ClearSetting { .. } => "clear_setting",
             Reducer::CloseTask { .. } => "close_task",
@@ -1001,7 +1005,9 @@ Reducer::BatchDelete{
                 request_id: request_id.clone(),
                 host: host.clone(),
 }),
-            Reducer::ClaimSuperAdmin => __sats::bsatn::to_vec(&claim_super_admin_reducer::ClaimSuperAdminArgs {
+            Reducer::ClaimStoreOwner => __sats::bsatn::to_vec(&claim_store_owner_reducer::ClaimStoreOwnerArgs {
+                }),
+Reducer::ClaimSuperAdmin => __sats::bsatn::to_vec(&claim_super_admin_reducer::ClaimSuperAdminArgs {
                 }),
 Reducer::ClearSetting{
                 host,

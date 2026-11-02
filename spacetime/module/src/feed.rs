@@ -429,8 +429,9 @@ fn ensure_role_epic(
         // A root its creator finds still public is the one members used to
         // share: it becomes private, so only they see and signal on it.
         let make_private = parent_epic_id == 0 && epic.visibility != VISIBILITY_PRIVATE;
-        let retarget = command
-            .is_some_and(|(cmd, interval)| epic.feed_command != cmd || epic.feed_interval_secs != interval);
+        let retarget = command.is_some_and(|(cmd, interval)| {
+            epic.feed_command != cmd || epic.feed_interval_secs != interval
+        });
         if !make_private && !retarget {
             return epic.id;
         }

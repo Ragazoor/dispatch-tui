@@ -300,6 +300,7 @@ pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     // Into the per-repo sub-epic when the epic named is a grouped root
     // (`epics.allium`'s routing note). Every client gets the same placement.
     let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
+    let (owner, created_by) = stamp_new_task(ctx, &row);
     write_task(
         ctx,
         Task {
@@ -308,11 +309,25 @@ pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
             // next generated id would collide with it.
             id: 0,
             epic_id,
+            owner,
+            created_by,
             ..row
         },
     )?;
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
+}
+
+/// The `owner` and `created_by` a created task is stored with: the caller's,
+/// whatever the row says (`workspaces.allium`: "Identities are the caller's").
+/// A task in an epic has no owner, so only an epic-less one is stamped.
+fn stamp_new_task(ctx: &ReducerContext, row: &Task) -> (String, String) {
+    let owner = if row.epic_id == 0 {
+        caller_stamp(ctx, row.owner.clone())
+    } else {
+        row.owner.clone()
+    };
+    (owner, caller_stamp(ctx, row.created_by.clone()))
 }
 
 /// [`create_task`], and mark the new task unseen for everyone who can see the
@@ -327,11 +342,14 @@ pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
 pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     check_task_may_enter_epic(ctx, "task", row.epic_id)?;
     let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
+    let (owner, created_by) = stamp_new_task(ctx, &row);
     let stored = store_task(
         ctx,
         without_session_facts(Task {
             id: 0,
             epic_id,
+            owner,
+            created_by,
             ..row
         }),
     )?;
@@ -559,7 +577,13 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
         ctx,
         Task {
             epic_id,
-            owner: if epic_id == 0 { owner } else { String::new() },
+            // A task landing on a user board lands on the CALLER's
+            // (`workspaces.allium`: "Identities are the caller's").
+            owner: if epic_id == 0 {
+                caller_stamp(ctx, owner)
+            } else {
+                String::new()
+            },
             updated_at: now(ctx),
             ..task
         },

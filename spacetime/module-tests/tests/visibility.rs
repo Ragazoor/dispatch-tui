@@ -623,7 +623,9 @@ fn update_epic_applies_patch_move_and_visibility_together() {
         .expect("alice's membership")
         .id;
     store
-        .call("root", |ctx| set_member_role(ctx, membership, "admin".into()))
+        .call("root", |ctx| {
+            set_member_role(ctx, membership, "admin".into())
+        })
         .expect("admin of A");
     store
         .call("root", |ctx| {

@@ -28,7 +28,9 @@ fn the_store_refuses_a_user_board_task_with_no_owner() {
         owner: String::new(),
         ..user_task("orphan", "alice")
     };
-    let refused = store.call("alice", |ctx| create_task(ctx, row));
+    // A person's epic-less task is stamped with them (`identity_stamping.rs`),
+    // so only the store itself, which names an owner, can leave one blank.
+    let refused = store.call_as_scheduler(|ctx| create_task(ctx, row));
     assert!(refused.is_err(), "an epic-less task needs an owner");
     assert_eq!(store.db().tasks().iter().count(), 0, "nothing was written");
 }

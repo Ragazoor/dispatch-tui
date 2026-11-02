@@ -242,9 +242,20 @@ impl MemoryReducerCaller {
     pub(super) fn apply_create_task(&self, row: bindings::Task) -> Result<TaskId> {
         let scope = self.scope();
         let mut tables = self.lock();
+        let row = module::Task::from(row);
+        // The module's `stamp_new_task`: the caller's identity, whatever the
+        // row says. A task in an epic has no owner to stamp.
+        let owner = if row.epic_id == 0 {
+            scope.stamp(row.owner.clone())
+        } else {
+            row.owner.clone()
+        };
+        let created_by = scope.stamp(row.created_by.clone());
         let row = module::Task {
             id: 0,
-            ..module::Task::from(row)
+            owner,
+            created_by,
+            ..row
         };
         tables
             .check_task_may_enter_epic(&scope, "task", row.epic_id)
@@ -518,7 +529,11 @@ impl MemoryReducerCaller {
         let updated_at = self.now();
         let row = module::Task {
             epic_id,
-            owner: if epic_id == 0 { owner } else { String::new() },
+            owner: if epic_id == 0 {
+                scope.stamp(owner)
+            } else {
+                String::new()
+            },
             updated_at,
             ..task
         };

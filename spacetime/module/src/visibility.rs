@@ -35,6 +35,22 @@ pub fn is_publisher(ctx: &ReducerContext) -> bool {
         .is_some_and(|owner| owner.identity == caller_identity(ctx))
 }
 
+/// The identity a write records for a person: the caller's own, unless the
+/// caller is the operator, who may name anyone (`workspaces.allium`:
+/// "Identities are the caller's"). Pure, so the board's twin calls it too.
+pub fn stamped_identity(operator: bool, caller: &str, claimed: String) -> String {
+    if operator {
+        claimed
+    } else {
+        caller.to_string()
+    }
+}
+
+/// [`stamped_identity`] for the current call.
+pub fn caller_stamp(ctx: &ReducerContext, claimed: String) -> String {
+    stamped_identity(is_operator(ctx), &caller_identity(ctx), claimed)
+}
+
 /// Refuse a `seed_*` call from anyone but the store itself or its publisher
 /// (`spacetime-seed.allium: SeedRequiresTheOperator`).
 pub fn require_restore_authority(ctx: &ReducerContext) -> Result<(), String> {

@@ -49,6 +49,17 @@ impl Scope {
     pub(super) fn on(&self) -> bool {
         self.on
     }
+
+    /// The module's `caller_stamp`: the identity a write records for the
+    /// caller, whatever the row claims. A memory store has no operator, and
+    /// with the rules off it runs as the board did before identities existed.
+    pub(super) fn stamp(&self, claimed: String) -> String {
+        if self.on {
+            module::stamped_identity(false, &self.who, claimed)
+        } else {
+            claimed
+        }
+    }
 }
 
 impl Tables {

@@ -479,7 +479,10 @@ fn a_super_admin_sees_every_workspace_and_its_memberships() {
         is_super_admin: true,
         created_at: String::new(),
     });
-    assert_eq!(ids(&workspaces_visible_to(&store, "root"), |w| w.id), [7, 8]);
+    assert_eq!(
+        ids(&workspaces_visible_to(&store, "root"), |w| w.id),
+        [7, 8]
+    );
     assert_eq!(
         ids(&memberships_visible_to(&store, "root"), |m| m.id),
         [1, 2, 3]

@@ -199,8 +199,16 @@ pub fn unsubscribe_from_epic(
     subscriber: String,
     epic_id: i64,
 ) -> Result<(), String> {
+    require_own_identity(ctx, &subscriber)?;
     let id = subscription_id(&subscriber, epic_id);
     if ctx.db.subscriptions().id().find(&id).is_none() {
+        // The sight check (`sync.allium: UnsubscribeFromEpic`): a caller with
+        // no row who cannot see the epic is told it is missing, so the answer
+        // never confirms that a private epic exists. A caller who still holds
+        // a row may always remove it.
+        if visible_epic(ctx, epic_id).is_none() {
+            return Err(format!("no epic {epic_id}"));
+        }
         return Err(format!("not subscribed to epic {epic_id}"));
     }
     ctx.db.subscriptions().id().delete(&id);

@@ -935,8 +935,20 @@ rule WritesRequireSight {
         --
         -- Identities are the caller's, never a client's claim. A created epic
         -- or work package is stamped created_by = the caller whatever the row
-        -- says; subscribe_to_epic and mark_epic_seen refuse a subscriber that
-        -- is not the caller. Only the operator may name another identity.
+        -- says; subscribe_to_epic, unsubscribe_from_epic and mark_epic_seen
+        -- refuse a subscriber that is not the caller. Only the operator may
+        -- name another identity.
+        --
+        -- The same holds for the owner of a user-board task (task #98755, V4).
+        -- A task created with no epic, or detached from its epic (set_task_epic,
+        -- update_task), lands on the CALLER's own board: owner = the caller
+        -- whatever the argument says. Without that, Bob could detach a
+        -- teammate's task with owner = Bob and take it, or with an owner no one
+        -- is and hide it. A created task (create_task, create_task_signalled)
+        -- is also stamped created_by = the caller. The `owner` argument stays
+        -- in the signatures for the operator, the one caller who may name
+        -- another person. A task that joins an epic carries no owner, as
+        -- before.
         --
         -- Module-made epics. A feed's grouped and role-routed sub-epics
         -- inherit the parent's workspace. A managed feed's root epics
