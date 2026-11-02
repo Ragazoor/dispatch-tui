@@ -15,8 +15,8 @@ use anyhow::anyhow;
 /// changes it live.
 ///
 /// Beside the views sit the tables that stay public because they carry
-/// nothing a card draws from: the host registry, the directory of people,
-/// this person's own subscription rows and the shared repo lists.
+/// nothing a card draws from: the host registry, the directory of people
+/// and the shared repo lists.
 ///
 /// **A table absent from this list renders empty.** The board keeps no second
 /// copy, so an unasked-for table does not degrade to stale data; it degrades to
@@ -55,10 +55,6 @@ pub(in crate::sync) fn subscription_queries(
         // needs that host to resolve to something, and which machines those
         // are is not knowable in advance.
         "SELECT * FROM hosts".to_string(),
-        // This person's own subscription rows, so a change made on another of
-        // their machines arrives here. `covered_epics` reads the same rows on
-        // the store's side, so a follow widens what the views deliver.
-        format!("SELECT * FROM subscriptions WHERE subscriber = '{owner}'"),
         // The directory of people (`workspaces.allium: UserProfile`, D7).
         // Unfiltered: admins find people by name, and a card names its creator.
         "SELECT * FROM user_profiles".to_string(),
@@ -67,6 +63,12 @@ pub(in crate::sync) fn subscription_queries(
         "SELECT * FROM repo_paths".to_string(),
         "SELECT * FROM repo_base_branches".to_string(),
         // The per-caller views.
+        //
+        // This person's own follows of epics they can still see, so a change
+        // made on another of their machines arrives here. `covered_epics`
+        // reads the same rows on the store's side, so a follow widens what the
+        // views deliver.
+        "SELECT * FROM own_subscriptions".to_string(),
         //
         // What the caller created, and the epic-less tasks they own
         // (own_creations), and the epics they follow with every descendant

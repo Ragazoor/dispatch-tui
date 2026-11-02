@@ -7,8 +7,8 @@ use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     CoveredEpicsTableAccess as _, CoveredTasksTableAccess as _, DbConnection,
     HostsTableAccess as _, OwnEpicsTableAccess as _, OwnPackagesTableAccess as _,
-    OwnSettingsTableAccess as _, OwnTasksTableAccess as _, OwnUnseenTasksTableAccess as _,
-    RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _, SubscriptionsTableAccess as _,
+    OwnSettingsTableAccess as _, OwnSubscriptionsTableAccess as _, OwnTasksTableAccess as _,
+    OwnUnseenTasksTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
     UnseenItemsTableAccess as _, UserProfilesTableAccess as _, VisibleAgentsTableAccess as _,
     VisibleDispatchRequestsTableAccess as _, VisibleLearningRetrievalsTableAccess as _,
     VisibleLearningsTableAccess as _, VisibleMembershipsTableAccess as _,
@@ -114,14 +114,6 @@ impl SpacetimeSdkConnector {
         wire!(
             self,
             db,
-            subscriptions,
-            upsert_subscription,
-            remove_subscription,
-            |row: &bindings::Subscription| row.id.clone()
-        );
-        wire!(
-            self,
-            db,
             user_profiles,
             upsert_user_profile,
             remove_user_profile,
@@ -215,6 +207,13 @@ impl SpacetimeSdkConnector {
             unseen_items,
             upsert_unseen_item,
             retire_unseen_item
+        );
+        wire_view!(
+            self,
+            db,
+            own_subscriptions,
+            upsert_subscription,
+            retire_subscription
         );
         wire_view!(self, db, own_settings, upsert_setting, retire_setting);
         wire_view!(

@@ -297,6 +297,19 @@ pub fn own_packages_of(r: &impl StoreReads, who: &str) -> Vec<WorkPackage> {
     )
 }
 
+/// `own_subscriptions`: the caller's own follows, while the followed epic is
+/// still visible to them. Never another person's follow, so a private epic's id
+/// and its followers reach nobody who cannot see it.
+pub fn own_subscriptions_of(r: &impl StoreReads, who: &str) -> Vec<Subscription> {
+    r.subscriptions_of(who)
+        .into_iter()
+        .filter(|s| {
+            r.epic(s.epic_id)
+                .is_some_and(|e| epic_visible_to(r, &e, who))
+        })
+        .collect()
+}
+
 /// `covered_epics`: the epics the caller follows and every descendant, at any
 /// depth. The walk stops at an epic the caller cannot see: a private epic hides
 /// its whole subtree, so nothing below it is theirs either.
@@ -666,6 +679,11 @@ fn visible_dispatch_requests(ctx: &ViewContext) -> Vec<DispatchRequest> {
 #[spacetimedb::view(accessor = visible_session_requests, public)]
 fn visible_session_requests(ctx: &ViewContext) -> Vec<SessionRequest> {
     session_requests_of_held(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = own_subscriptions, public)]
+fn own_subscriptions(ctx: &ViewContext) -> Vec<Subscription> {
+    own_subscriptions_of(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = own_unseen_tasks, public)]

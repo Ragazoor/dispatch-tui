@@ -595,7 +595,7 @@ pub(crate) const POLL_SCOPE_EPIC: &str = "epic";
 /// Subscribing to your own user board is deliberately not a row here. You can
 /// only ever subscribe to your own, so the row would exist for everyone always
 /// and carry nothing; `Task.owner` resolves it instead.
-#[spacetimedb::table(accessor = subscriptions, public)]
+#[spacetimedb::table(accessor = subscriptions)]
 #[derive(Clone, Debug)]
 pub struct Subscription {
     /// `<subscriber>/<epic_id>`, so re-subscribing overwrites rather than

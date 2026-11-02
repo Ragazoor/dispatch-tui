@@ -1164,10 +1164,11 @@ surface StoreReads {
         -- (own_usage_summary). Host rows carry no task content and stay
         -- readable by all.
         --
-        -- KNOWN GAP (task #98806): the subscriptions table is still public,
-        -- so any client's one-off SQL reads every follow, including who
-        -- follows a private epic and that epic's id. Proven by the ignored
-        -- live test a_non_member_cannot_see_who_follows_a_private_epic
+        -- Follows are private too: the subscriptions table is served only
+        -- through own_subscriptions (the caller's own follows of epics they
+        -- can still see), so one-off SQL never reads another person's
+        -- follow or a private epic's id. Proven by the live test
+        -- a_non_member_cannot_see_who_follows_a_private_epic
         -- (tests/spacetime_module/read_enforcement.rs). The other public
         -- tables (hosts, user_profiles, repo_paths, repo_base_branches,
         -- handed_out_agent_names, schema_version, rules_version) carry no

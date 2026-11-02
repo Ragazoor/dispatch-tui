@@ -502,6 +502,10 @@ impl SharedRows {
         self.write(|rows| rows.subscriptions.remove(&id).is_some());
     }
 
+    pub fn retire_subscription(&self, old: &bindings::Subscription) {
+        self.write(|rows| remove_if_held(&mut rows.subscriptions, &old.id, old));
+    }
+
     pub fn upsert_unseen_task(&self, row: &bindings::UnseenTask) {
         self.write(|rows| {
             rows.unseen_tasks.insert(row.id.clone(), row.clone());

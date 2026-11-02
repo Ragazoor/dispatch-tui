@@ -80,7 +80,6 @@ fn every_source_the_board_reads_is_asked_for() {
     let queries = queries();
     for source in [
         "hosts",
-        "subscriptions",
         "user_profiles",
         "repo_paths",
         "repo_base_branches",
@@ -95,6 +94,7 @@ fn every_source_the_board_reads_is_asked_for() {
         "visible_memberships",
         "unseen_items",
         "own_unseen_tasks",
+        "own_subscriptions",
         "own_settings",
         "visible_learnings",
         "visible_learning_retrievals",
@@ -124,8 +124,8 @@ fn no_ask_names_an_epic_by_id() {
 }
 
 /// The containment claim. Nothing in the ask can bring another person's user
-/// board: the views answer for the connection's own identity, and the only
-/// filter naming a person is the subscription rows' own subscriber.
+/// board: the views answer for the connection's own identity, and no
+/// ask names a person at all.
 #[test]
 fn nothing_asked_for_can_reach_another_persons_user_board() {
     let queries = queries();
@@ -141,8 +141,7 @@ fn nothing_asked_for_can_reach_another_persons_user_board() {
         );
     }
     let by_person: Vec<&String> = queries.iter().filter(|q| q.contains(ID)).collect();
-    assert_eq!(by_person.len(), 1, "{by_person:?}");
-    assert!(by_person[0].contains("FROM subscriptions WHERE subscriber ="));
+    assert!(by_person.is_empty(), "{by_person:?}");
 }
 
 /// The identity is validated against a closed alphabet rather than escaped.

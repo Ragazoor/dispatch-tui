@@ -67,6 +67,7 @@ pub mod override_poll_owner_reducer;
 pub mod own_epics_table;
 pub mod own_packages_table;
 pub mod own_settings_table;
+pub mod own_subscriptions_table;
 pub mod own_tasks_table;
 pub mod own_unseen_tasks_table;
 pub mod own_usage_summary_procedure;
@@ -152,7 +153,6 @@ pub mod subagent_start_reducer;
 pub mod subagent_stop_reducer;
 pub mod subscribe_to_epic_reducer;
 pub mod subscription_type;
-pub mod subscriptions_table;
 pub mod super_admin_delete_unseen_item_reducer;
 pub mod task_patch_type;
 pub mod task_shell_type;
@@ -255,6 +255,7 @@ pub use override_poll_owner_reducer::override_poll_owner;
 pub use own_epics_table::*;
 pub use own_packages_table::*;
 pub use own_settings_table::*;
+pub use own_subscriptions_table::*;
 pub use own_tasks_table::*;
 pub use own_unseen_tasks_table::*;
 pub use own_usage_summary_procedure::own_usage_summary;
@@ -340,7 +341,6 @@ pub use subagent_start_reducer::subagent_start;
 pub use subagent_stop_reducer::subagent_stop;
 pub use subscribe_to_epic_reducer::subscribe_to_epic;
 pub use subscription_type::Subscription;
-pub use subscriptions_table::*;
 pub use super_admin_delete_unseen_item_reducer::super_admin_delete_unseen_item;
 pub use task_patch_type::TaskPatch;
 pub use task_shell_type::TaskShell;
@@ -1699,13 +1699,13 @@ pub struct DbUpdate {
     own_epics: __sdk::TableUpdate<Epic>,
     own_packages: __sdk::TableUpdate<WorkPackage>,
     own_settings: __sdk::TableUpdate<Setting>,
+    own_subscriptions: __sdk::TableUpdate<Subscription>,
     own_tasks: __sdk::TableUpdate<Task>,
     own_unseen_tasks: __sdk::TableUpdate<UnseenTask>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
     rules_version: __sdk::TableUpdate<RulesVersion>,
     schema_version: __sdk::TableUpdate<SchemaVersion>,
-    subscriptions: __sdk::TableUpdate<Subscription>,
     unseen_items: __sdk::TableUpdate<UnseenItem>,
     user_profiles: __sdk::TableUpdate<UserProfile>,
     visible_agents: __sdk::TableUpdate<Agent>,
@@ -1752,6 +1752,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "own_settings" => db_update
                     .own_settings
                     .append(own_settings_table::parse_table_update(table_update)?),
+                "own_subscriptions" => db_update
+                    .own_subscriptions
+                    .append(own_subscriptions_table::parse_table_update(table_update)?),
                 "own_tasks" => db_update
                     .own_tasks
                     .append(own_tasks_table::parse_table_update(table_update)?),
@@ -1770,9 +1773,6 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "schema_version" => db_update
                     .schema_version
                     .append(schema_version_table::parse_table_update(table_update)?),
-                "subscriptions" => db_update
-                    .subscriptions
-                    .append(subscriptions_table::parse_table_update(table_update)?),
                 "unseen_items" => db_update
                     .unseen_items
                     .append(unseen_items_table::parse_table_update(table_update)?),
@@ -1871,9 +1871,6 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.schema_version = cache
             .apply_diff_to_table::<SchemaVersion>("schema_version", &self.schema_version)
             .with_updates_by_pk(|row| &row.id);
-        diff.subscriptions = cache
-            .apply_diff_to_table::<Subscription>("subscriptions", &self.subscriptions)
-            .with_updates_by_pk(|row| &row.id);
         diff.user_profiles = cache
             .apply_diff_to_table::<UserProfile>("user_profiles", &self.user_profiles)
             .with_updates_by_pk(|row| &row.identity);
@@ -1886,6 +1883,8 @@ impl __sdk::DbUpdate for DbUpdate {
             cache.apply_diff_to_table::<WorkPackage>("own_packages", &self.own_packages);
         diff.own_settings =
             cache.apply_diff_to_table::<Setting>("own_settings", &self.own_settings);
+        diff.own_subscriptions =
+            cache.apply_diff_to_table::<Subscription>("own_subscriptions", &self.own_subscriptions);
         diff.own_tasks = cache.apply_diff_to_table::<Task>("own_tasks", &self.own_tasks);
         diff.own_unseen_tasks =
             cache.apply_diff_to_table::<UnseenTask>("own_unseen_tasks", &self.own_unseen_tasks);
@@ -1963,6 +1962,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "own_settings" => db_update
                     .own_settings
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "own_subscriptions" => db_update
+                    .own_subscriptions
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "own_tasks" => db_update
                     .own_tasks
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1980,9 +1982,6 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "subscriptions" => db_update
-                    .subscriptions
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "unseen_items" => db_update
                     .unseen_items
@@ -2069,6 +2068,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "own_settings" => db_update
                     .own_settings
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "own_subscriptions" => db_update
+                    .own_subscriptions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "own_tasks" => db_update
                     .own_tasks
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2086,9 +2088,6 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "subscriptions" => db_update
-                    .subscriptions
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "unseen_items" => db_update
                     .unseen_items
@@ -2163,13 +2162,13 @@ pub struct AppliedDiff<'r> {
     own_epics: __sdk::TableAppliedDiff<'r, Epic>,
     own_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
     own_settings: __sdk::TableAppliedDiff<'r, Setting>,
+    own_subscriptions: __sdk::TableAppliedDiff<'r, Subscription>,
     own_tasks: __sdk::TableAppliedDiff<'r, Task>,
     own_unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
     rules_version: __sdk::TableAppliedDiff<'r, RulesVersion>,
     schema_version: __sdk::TableAppliedDiff<'r, SchemaVersion>,
-    subscriptions: __sdk::TableAppliedDiff<'r, Subscription>,
     unseen_items: __sdk::TableAppliedDiff<'r, UnseenItem>,
     user_profiles: __sdk::TableAppliedDiff<'r, UserProfile>,
     visible_agents: __sdk::TableAppliedDiff<'r, Agent>,
@@ -2215,6 +2214,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<Setting>("own_settings", &self.own_settings, event);
+        callbacks.invoke_table_row_callbacks::<Subscription>(
+            "own_subscriptions",
+            &self.own_subscriptions,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Task>("own_tasks", &self.own_tasks, event);
         callbacks.invoke_table_row_callbacks::<UnseenTask>(
             "own_unseen_tasks",
@@ -2235,11 +2239,6 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<SchemaVersion>(
             "schema_version",
             &self.schema_version,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<Subscription>(
-            "subscriptions",
-            &self.subscriptions,
             event,
         );
         callbacks.invoke_table_row_callbacks::<UnseenItem>(
@@ -2986,13 +2985,13 @@ impl __sdk::SpacetimeModule for RemoteModule {
         own_epics_table::register_table(client_cache);
         own_packages_table::register_table(client_cache);
         own_settings_table::register_table(client_cache);
+        own_subscriptions_table::register_table(client_cache);
         own_tasks_table::register_table(client_cache);
         own_unseen_tasks_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
         rules_version_table::register_table(client_cache);
         schema_version_table::register_table(client_cache);
-        subscriptions_table::register_table(client_cache);
         unseen_items_table::register_table(client_cache);
         user_profiles_table::register_table(client_cache);
         visible_agents_table::register_table(client_cache);
@@ -3019,13 +3018,13 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "own_epics",
         "own_packages",
         "own_settings",
+        "own_subscriptions",
         "own_tasks",
         "own_unseen_tasks",
         "repo_base_branches",
         "repo_paths",
         "rules_version",
         "schema_version",
-        "subscriptions",
         "unseen_items",
         "user_profiles",
         "visible_agents",

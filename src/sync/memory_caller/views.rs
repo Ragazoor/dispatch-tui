@@ -223,6 +223,10 @@ impl MemoryReducerCaller {
                 .iter()
                 .map(|e| e.id)
                 .collect()),
+            "own_subscriptions" => module::own_subscriptions_of(t, who)
+                .into_iter()
+                .map(|s| s.id)
+                .collect(),
             "own_settings" => module::settings_visible_to(t, who)
                 .into_iter()
                 .map(|s| s.id)

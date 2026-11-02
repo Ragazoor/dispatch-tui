@@ -40,7 +40,8 @@ const VIEWS: [&str; 20] = [
 
 /// Tables that hold work and are not public: only the module's owner may read
 /// them, and a caller's own SQL must not reach them.
-const PRIVATE_TABLES: [&str; 8] = [
+const PRIVATE_TABLES: [&str; 9] = [
+    "subscriptions",
     "tasks",
     "epics",
     "agents",
@@ -51,13 +52,11 @@ const PRIVATE_TABLES: [&str; 8] = [
     "memberships",
 ];
 
-fn board_queries(owner: &str) -> Vec<String> {
+fn board_queries() -> Vec<String> {
     let mut queries: Vec<String> = VIEWS.iter().map(|v| format!("SELECT * FROM {v}")).collect();
     queries.push("SELECT * FROM unseen_items".into());
     queries.push("SELECT * FROM visible_learnings".into());
-    queries.push(format!(
-        "SELECT * FROM subscriptions WHERE subscriber = '{owner}'"
-    ));
+    queries.push("SELECT * FROM own_subscriptions".into());
     queries
 }
 
@@ -81,21 +80,20 @@ fn a_non_member_receives_nothing_about_a_private_epic() {
         assert!(named.status.success(), "{}", describe(&named));
     }
     let bob = instance.identity_as("bob");
-    let carol = instance.identity_as("carol");
     seed_scenario(&instance, &me, &bob);
 
     // Controls: bob, who made the private epic, receives it; I, a member who
     // follows epic 1, receive the public task but not the private one.
-    let as_bob = instance.subscribe_as(Some("bob"), &board_queries(&bob));
+    let as_bob = instance.subscribe_as(Some("bob"), &board_queries());
     assert!(text(&as_bob).contains("visible_tasks"), "{}", text(&as_bob));
     assert!(text(&as_bob).contains("\"hidden\""), "{}", text(&as_bob));
-    let as_me = instance.subscribe_as(None, &board_queries(&me));
+    let as_me = instance.subscribe_as(None, &board_queries());
     assert!(text(&as_me).contains("visible_tasks"), "{}", text(&as_me));
     assert!(text(&as_me).contains("\"visible\""), "{}", text(&as_me));
     assert!(!text(&as_me).contains("\"hidden\""), "{}", text(&as_me));
 
     // Subscription: carol's whole board ask comes back without a trace.
-    let as_carol = instance.subscribe_as(Some("carol"), &board_queries(&carol));
+    let as_carol = instance.subscribe_as(Some("carol"), &board_queries());
     assert!(
         text(&as_carol).contains("visible_tasks"),
         "{}",
@@ -151,7 +149,6 @@ fn a_non_member_receives_nothing_about_a_private_epic() {
 /// reach a stranger: bob follows his own private epic, and carol's one-off SQL
 /// reads every row of that table.
 #[test]
-#[ignore = "real leak: public `subscriptions` shows private epic ids; fix is task #98806"]
 fn a_non_member_cannot_see_who_follows_a_private_epic() {
     if !spacetime_available_or_skip() {
         return;
@@ -170,11 +167,26 @@ fn a_non_member_cannot_see_who_follows_a_private_epic() {
         serde_json::json!([{"id": format!("{bob}/2"), "epic_id": 2, "subscriber": bob}]),
     );
 
+    // The table is private, so carol's SQL is refused outright.
     let out = instance.sql_as("carol", "SELECT * FROM subscriptions");
-    assert!(out.status.success(), "{}", describe(&out));
     assert!(
-        !text(&out).contains(&bob),
-        "carol read bob's follow of a private epic: {}",
+        !out.status.success() && !text(&out).contains(&bob),
+        "carol read the subscriptions table: {}",
         text(&out)
+    );
+    // The view serves each caller only their own follows: bob sees his,
+    // carol sees none of them.
+    let as_carol = instance.sql_as("carol", "SELECT * FROM own_subscriptions");
+    assert!(as_carol.status.success(), "{}", describe(&as_carol));
+    assert!(
+        !text(&as_carol).contains(&bob),
+        "carol read bob's follow of a private epic: {}",
+        text(&as_carol)
+    );
+    let as_bob = instance.sql_as("bob", "SELECT * FROM own_subscriptions");
+    assert!(
+        text(&as_bob).contains(&bob),
+        "bob cannot see his own follow: {}",
+        text(&as_bob)
     );
 }
