@@ -55,8 +55,9 @@
 --
 -- The pane remains a standalone process inside the agent's own tmux window. It
 -- does not touch the board TUI's state, its refresh cycle, or the kanban App.
--- What it needs from the shared rows — its task, and the live agents — it ASKS
--- the running board for, read-only (BoardPaneView); it never opens the store
+-- What it needs from the shared rows — its task, and the attached and
+-- detached agents — it ASKS the running board for, read-only (BoardPaneView);
+-- a resume it asks the board to run, never runs itself; it never opens the store
 -- itself (PanesReadThroughTheBoard). The board answers from rows it already
 -- holds, so to the board the feature is a reader and nothing more.
 --
@@ -120,8 +121,9 @@ enum DiffRefusal { binary | too_large }
 -- The agents section added two more writers of the same shape. agent_list is
 -- the timer's writer, like git_query: a failed read of the task list, cleared
 -- by the next successful read. agent_jump is a keypress's writer, like
--- diff_open: a failed jump to another agent's window, which survives every
--- refresh until the next key.
+-- diff_open: a failed jump to another agent's window, or a resume the board
+-- refused or could not be asked for (AgentTreeResumeRefusedIsVisible), which
+-- survives every refresh until the next key.
 --
 -- The commits section added one more, of the timer's shape: commit_list, a
 -- failed read of the agent's commits, cleared by the next successful read.
@@ -297,7 +299,8 @@ value PaneResumeAnswer {
 ------------------------------------------------------------
 
 -- The read a companion pane's renderer makes of the running board, in place of
--- a store connection of its own. The board is found the way a hook finds it
+-- a store connection of its own, and the one request it makes of it: resume a
+-- detached agent. The board is found the way a hook finds it
 -- (agent-health.allium: HookDelivery). Stated as a contract because the board
 -- is another process: it can be down, mid-restart, or a different version.
 contract BoardPaneView {
@@ -343,6 +346,8 @@ contract BoardPaneView {
         -- resume_task raise, with no message, after the same refusals
         -- resume_task makes (the task never ran, has no worktree, is held by
         -- another machine, is attached, or its worktree is gone from disk).
+        -- It also refuses a task it does not hold, and refuses when it has no
+        -- way to hand the resume on (no board attached, or shutting down).
         -- A refusal changes nothing. An accepted request only means the
         -- launch was handed to the board: the launch can still fail, and
         -- says so in the board's status line, as it does for resume_task.
@@ -2593,7 +2598,7 @@ rule AgentTreeResumeAccepted {
         -- Nothing is shown for an accepted request: the notice is for
         -- failures only (AgentTreeNoticeRedensBorder). The row stays
         -- detached until the board records the new window, and then the
-        -- pane jumps there (JumpToResumedAgent).
+        -- pane jumps there (RefreshAgentTreeAgentList).
 }
 
 rule AgentTreeResumeRefusedIsVisible {
@@ -2945,8 +2950,8 @@ surface AgentTreeCompanionPane {
         ResumeDetachedAgent(user, pane, target)           -- Space, Enter (agents focus, detached row)
 
     @guarantee PanesReadThroughTheBoard
-        -- A pane's renderer reads its task and the live agents from the
-        -- running board (BoardPaneView) and from nowhere else. It never opens
+        -- A pane's renderer reads its task and the attached and detached
+        -- agents from the running board (BoardPaneView) and from nowhere else. It never opens
         -- a connection to the shared store, and never opens the store's
         -- local database for shared rows: the board is the single reader of
         -- shared rows on a machine, as it is the single writer of hook events
