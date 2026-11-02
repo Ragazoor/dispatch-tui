@@ -122,6 +122,17 @@ impl Store {
         id
     }
 
+    /// [`Self::create`] with the new-task signal on
+    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`).
+    pub fn create_signalled(&self, who: &str, row: Task) -> i64 {
+        let before = self.max_task_id();
+        self.call(who, |ctx| create_task_signalled(ctx, row))
+            .expect("create_task_signalled");
+        let id = self.max_task_id();
+        assert!(id > before, "create_task_signalled wrote no row");
+        id
+    }
+
     /// Create a top-level epic and return the id the store gave it.
     pub fn create_epic(&self, who: &str, title: &str, auto_dispatch: bool) -> i64 {
         let row = Epic {

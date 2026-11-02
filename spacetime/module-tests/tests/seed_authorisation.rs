@@ -167,12 +167,7 @@ fn a_board_cannot_clear_someone_elses_unseen_marks() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
     store.enrol("bob");
-    let task = store
-        .call("alice", |ctx| {
-            create_task_signalled(ctx, epic_task("t", epic, "backlog"))
-        })
-        .map(|_| store.db().tasks().iter().map(|t| t.id).max().unwrap())
-        .expect("create_task_signalled");
+    let task = store.create_signalled("alice", epic_task("t", epic, "backlog"));
     let err = store
         .call("alice", |ctx| mark_task_seen(ctx, identity_of("bob"), task))
         .expect_err("alice may not name bob");

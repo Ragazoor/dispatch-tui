@@ -74,20 +74,31 @@ impl App {
         if col == 0 || col > TaskStatus::COLUMN_COUNT {
             return;
         }
-        let row = self.selection().row(col);
-        let Some(status) = TaskStatus::from_column_index(col - 1) else {
-            return;
-        };
+        let new_anchor = self.anchor_under_cursor();
+        self.selection_mut().anchor = new_anchor;
+    }
 
+    /// The item under the cursor, as its [`ColumnAnchor`], read from
+    /// `column_anchor_cache` in O(1) after warming the layout cache if it is
+    /// cold. The cheap counterpart of [`Self::selected_column_item`], which
+    /// rebuilds the whole column: use this on a path that runs per message.
+    pub(in crate::tui) fn anchor_under_cursor(&mut self) -> Option<ColumnAnchor> {
+        if self.selection().on_select_all {
+            return None;
+        }
+        let col = self.selection().column();
+        if col == 0 || col > TaskStatus::COLUMN_COUNT {
+            return None;
+        }
+        let row = self.selection().row(col);
+        let status = TaskStatus::from_column_index(col - 1)?;
         let _ = self.cached_epic_stats(); // warms column_anchor_cache if cold
-        let new_anchor = self
-            .layout
+        self.layout
             .column_anchor_cache
             .as_ref()
             .and_then(|m| m.get(&status))
             .and_then(|v| v.get(row))
-            .copied();
-        self.selection_mut().anchor = new_anchor;
+            .copied()
     }
 
     /// Restore cursor position from the anchor after a data change.

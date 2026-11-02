@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use crate::models::{descendant_epic_ids, Epic, EpicId, TaskId, TaskStatus};
 
+use super::super::commands::TaskCommand;
 use super::super::types::*;
 use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
 
@@ -13,10 +14,6 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub(in crate::tui) fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
-        self.push_epic_view(epic_id)
-    }
-
-    fn push_epic_view(&mut self, epic_id: EpicId) -> Vec<Command> {
         self.push_view(|selection, parent| ViewMode::Epic {
             epic_id,
             selection,
@@ -34,16 +31,14 @@ impl App {
         if self.board.unseen_tasks.is_empty() {
             return vec![];
         }
-        let Some(id) = self.selected_task().map(|t| t.id) else {
+        let Some(ColumnAnchor::Task(id)) = self.anchor_under_cursor() else {
             return vec![];
         };
         if !self.board.unseen_tasks.remove(&id) {
             return vec![];
         }
         self.dirty = true;
-        vec![Command::Task(crate::tui::commands::TaskCommand::MarkSeen(
-            id,
-        ))]
+        vec![Command::Task(TaskCommand::MarkSeen(id))]
     }
 
     pub(in crate::tui) fn handle_unseen_refreshed(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
@@ -94,7 +89,8 @@ impl App {
     /// Open `target`'s epic view, entering each epic between the current view
     /// and `target` so that `q` climbs back one level at a time.
     pub(in crate::tui) fn handle_jump_to_epic(&mut self, target: EpicId) -> Vec<Command> {
-        self.jump_to_epic_from(target, None)
+        self.jump_to_epic_from(target, None);
+        vec![]
     }
 
     /// [`Self::handle_jump_to_epic`], with the linked epic that was pressed
@@ -104,7 +100,7 @@ impl App {
     /// (`work-packages.allium: EnterEpicFromPackage`), or for a task card at
     /// the outermost linked epic on `target`'s path, else at `target` itself
     /// (`PackageViewCards`).
-    fn jump_to_epic_from(&mut self, target: EpicId, pressed: Option<EpicId>) -> Vec<Command> {
+    fn jump_to_epic_from(&mut self, target: EpicId, pressed: Option<EpicId>) {
         let path = crate::models::epic_path(target, &self.board.epics);
         let position = |e: EpicId| path.iter().position(|&p| p == e);
         let start = match (self.current_epic_id(), &self.board.view_mode) {
@@ -118,12 +114,10 @@ impl App {
             }
             (None, _) => 0,
         };
-        let below = &path[start..];
         // Every level is entered so `q` climbs back one at a time.
-        for &id in below {
-            self.push_epic_view(id);
+        for &id in &path[start..] {
+            self.handle_enter_epic(id);
         }
-        vec![]
     }
 
     pub(in crate::tui) fn handle_jump_to_deepest_epic(
@@ -133,7 +127,8 @@ impl App {
     ) -> Vec<Command> {
         let target =
             crate::models::deepest_epic_with(epic, status, &self.board.epics, &self.board.tasks);
-        self.jump_to_epic_from(target, Some(epic))
+        self.jump_to_epic_from(target, Some(epic));
+        vec![]
     }
 
     pub(in crate::tui) fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {
