@@ -295,6 +295,35 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
+    /// Mirrors the module's `own_usage_summary` procedure: this caller's
+    /// events, grouped.
+    pub(super) fn apply_own_usage_summary(
+        &self,
+        category: Option<String>,
+        actor: Option<String>,
+        since: Option<String>,
+        limit: i64,
+    ) -> Vec<bindings::UsageSummaryRow> {
+        let tables = self.lock();
+        let filter = module::UsageFilter {
+            category,
+            actor,
+            since,
+            limit,
+        };
+        module::usage_summary_for(&*tables, &self.sender, &filter)
+            .into_iter()
+            .map(|r| bindings::UsageSummaryRow {
+                category: r.category,
+                action: r.action,
+                detail: r.detail,
+                actor: r.actor,
+                count: r.count,
+                last_used: r.last_used,
+            })
+            .collect()
+    }
+
     /// Mirrors the module's `record_usage_event` + `prune_usage_events`: the
     /// prune runs in the same call as the insert, so no reader ever sees the
     /// table over `cap`.
@@ -315,8 +344,7 @@ impl MemoryReducerCaller {
             recorded_by: self.sender.clone(),
             ..module::UsageEvent::from(row)
         };
-        tables.usage_events.insert(id, row.clone());
-        self.rows.upsert_usage_event(&row.into());
+        tables.usage_events.insert(id, row);
         let threshold = id - cap;
         if threshold > 0 {
             let stale: Vec<i64> = tables
@@ -326,7 +354,6 @@ impl MemoryReducerCaller {
                 .collect();
             for stale_id in stale {
                 tables.usage_events.remove(&stale_id);
-                self.rows.remove_usage_event(stale_id);
             }
         }
         Ok(ReducerOutcome::Applied(vec![]))

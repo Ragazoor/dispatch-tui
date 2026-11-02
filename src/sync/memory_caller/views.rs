@@ -227,10 +227,6 @@ impl MemoryReducerCaller {
                 .into_iter()
                 .map(|s| s.id)
                 .collect(),
-            "own_usage_events" => ids(module::usage_events_visible_to(t, who)
-                .iter()
-                .map(|e| e.id)
-                .collect()),
             "visible_workspaces" => ids(module::workspaces_visible_to(t, who)
                 .iter()
                 .map(|e| e.id)

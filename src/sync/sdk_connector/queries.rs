@@ -102,9 +102,9 @@ pub(in crate::sync) fn subscription_queries(
         // the caller may see, and the retrievals of the tasks they hold.
         "SELECT * FROM visible_learnings".to_string(),
         "SELECT * FROM visible_learning_retrievals".to_string(),
-        // Usage telemetry: the events the caller recorded. An event names no
-        // task, so the view serves it by `recorded_by`.
-        "SELECT * FROM own_usage_events".to_string(),
+        // Usage telemetry is NOT subscribed: a view over it would re-run on
+        // every recorded event. `query_usage` asks the store on demand
+        // (`own_usage_summary`).
         // Dispatch and session requests (store-split M4, M5). Scoped by HOST
         // as well: the view serves every request on a held task, and a request
         // is provisioned only by the machine that made it. Unfiltered by state

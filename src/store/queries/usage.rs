@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::models::{UsageEvent, UsageSummary};
-use crate::sync::encode;
+use crate::sync::{decode, encode};
 
 use super::super::{Store, UsageCap, UsageQuery};
 
@@ -20,9 +20,23 @@ impl crate::store::UsageStore for Store {
     }
 
     /// `query_usage` groups and counts rows — a shape a subscription's `WHERE`
-    /// clause cannot express — so the aggregation runs in Rust over the rows a
-    /// standing subscription already holds.
+    /// clause cannot express — so the store aggregates on demand
+    /// (`own_usage_summary`) and the board holds no usage rows. A view over
+    /// usage would re-run on every recorded event (`workspaces.allium`, "THE
+    /// PRIVATE FLIP").
     async fn query_usage(&self, q: &UsageQuery) -> Result<Vec<UsageSummary>> {
-        Ok(self.rows.usage_summary(q))
+        let limit = q.limit.unwrap_or(50).clamp(1, 500) as i64;
+        let rows = self
+            .caller
+            .own_usage_summary(
+                q.category.clone(),
+                q.actor.clone(),
+                q.since.map(encode::stamp),
+                limit,
+            )
+            .await?;
+        rows.iter()
+            .map(|row| decode::usage_summary_row(row).map_err(anyhow::Error::from))
+            .collect()
     }
 }

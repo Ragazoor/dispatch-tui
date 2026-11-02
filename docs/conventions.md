@@ -227,8 +227,9 @@ mirror via `sync.allium: RegisterHostOnConnect`.
 
 **Some reads are done in Rust because a subscription cannot express them.**
 `query_usage` (task #4915) groups and counts rows, which no subscription's
-`WHERE` clause can do, so it runs over the rows a standing subscription
-already holds (`SharedRows::usage_summary`).
+`WHERE` clause can do. It is served on demand by the module's
+`own_usage_summary` procedure (task #98756), not by a view or a standing
+subscription: a view over usage re-runs on every recorded event.
 `usage_events` has no spec: it is append-only telemetry with no
 user-observable rule beyond "recorded". `ingest_feed` drops closed retired items
 itself; the per-step reducers it replaced are gone.

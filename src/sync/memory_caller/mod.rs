@@ -638,6 +638,16 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_record_usage_event(row, cap)
     }
 
+    async fn own_usage_summary(
+        &self,
+        category: Option<String>,
+        actor: Option<String>,
+        since: Option<String>,
+        limit: i64,
+    ) -> Result<Vec<bindings::UsageSummaryRow>> {
+        Ok(self.apply_own_usage_summary(category, actor, since, limit))
+    }
+
     async fn subagent_start(
         &self,
         task_id: TaskId,

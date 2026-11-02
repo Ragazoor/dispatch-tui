@@ -252,6 +252,7 @@ macro_rules! impl_store_reads {
 
 impl_store_reads!(ReducerContext);
 impl_store_reads!(ViewContext);
+impl_store_reads!(spacetimedb::TxContext);
 
 // -- The view bodies ----------------------------------------------------------
 
@@ -503,11 +504,83 @@ pub fn settings_visible_to(r: &impl StoreReads, who: &str) -> Vec<Setting> {
     )
 }
 
-/// `own_usage_events`: the events the caller recorded. An event names no task,
+/// What `own_usage_summary` asks of the caller's events.
+#[derive(Clone, Debug, Default)]
+pub struct UsageFilter {
+    pub category: Option<String>,
+    pub actor: Option<String>,
+    /// Inclusive lower bound, in the store's fixed-width `recorded_at` text,
+    /// which sorts the same as the instants it spells.
+    pub since: Option<String>,
+    pub limit: i64,
+}
+
+/// One group of the caller's usage events: what `own_usage_summary` returns.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug, PartialEq)]
+pub struct UsageSummaryRow {
+    pub category: String,
+    pub action: String,
+    pub detail: Option<String>,
+    pub actor: String,
+    pub count: i64,
+    pub last_used: String,
+}
+
+/// `own_usage_summary`: the events the caller recorded, grouped by
+/// category, action, detail and actor, rarest first. An event names no task,
 /// so the held-task rule cannot apply; the caller sees their own.
-pub fn usage_events_visible_to(r: &impl StoreReads, who: &str) -> Vec<UsageEvent> {
-    // One index read: each row once, so nothing to dedup.
-    r.usage_events_recorded_by(who)
+///
+/// Served on demand, never as a view: a view over usage is recomputed whole on
+/// every recorded event (`workspaces.allium`, "THE PRIVATE FLIP").
+pub fn usage_summary_for(
+    r: &impl StoreReads,
+    who: &str,
+    filter: &UsageFilter,
+) -> Vec<UsageSummaryRow> {
+    type Key = (String, String, Option<String>, String);
+    let mut groups: std::collections::HashMap<Key, (i64, String)> =
+        std::collections::HashMap::new();
+    // One index read: each row once.
+    for e in r.usage_events_recorded_by(who) {
+        if filter.category.as_ref().is_some_and(|c| *c != e.category)
+            || filter.actor.as_ref().is_some_and(|a| *a != e.actor)
+            || filter.since.as_ref().is_some_and(|s| e.recorded_at < *s)
+        {
+            continue;
+        }
+        let entry = groups
+            .entry((e.category, e.action, e.detail, e.actor))
+            .or_insert((0, String::new()));
+        entry.0 += 1;
+        if e.recorded_at > entry.1 {
+            entry.1 = e.recorded_at;
+        }
+    }
+    let mut out: Vec<UsageSummaryRow> = groups
+        .into_iter()
+        .map(
+            |((category, action, detail, actor), (count, last_used))| UsageSummaryRow {
+                category,
+                action,
+                detail,
+                actor,
+                count,
+                last_used,
+            },
+        )
+        .collect();
+    // Rarest first; the key breaks ties so the order is the same every call.
+    out.sort_by(|a, b| {
+        (a.count, &a.category, &a.action, &a.detail, &a.actor).cmp(&(
+            b.count,
+            &b.category,
+            &b.action,
+            &b.detail,
+            &b.actor,
+        ))
+    });
+    out.truncate(filter.limit.clamp(1, 500) as usize);
+    out
 }
 
 /// `visible_workspaces`: the workspaces the caller belongs to, or every one
@@ -638,11 +711,6 @@ fn visible_learnings(ctx: &ViewContext) -> Vec<Learning> {
 #[spacetimedb::view(accessor = own_settings, public)]
 fn own_settings(ctx: &ViewContext) -> Vec<Setting> {
     settings_visible_to(ctx, &sender(ctx))
-}
-
-#[spacetimedb::view(accessor = own_usage_events, public)]
-fn own_usage_events(ctx: &ViewContext) -> Vec<UsageEvent> {
-    usage_events_visible_to(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = visible_workspaces, public)]

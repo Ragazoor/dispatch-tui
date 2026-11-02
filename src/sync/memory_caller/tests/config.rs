@@ -190,31 +190,32 @@ fn usage_event() -> bindings::UsageEvent {
     }
 }
 
+async fn usage_counts(caller: &MemoryReducerCaller) -> Vec<i64> {
+    caller
+        .own_usage_summary(None, None, None, 50)
+        .await
+        .unwrap()
+        .iter()
+        .map(|s| s.count)
+        .collect()
+}
+
 #[tokio::test]
 async fn a_usage_event_is_stamped_with_its_recorder_and_served_only_to_them() {
     let (caller, _rows) = caller();
     let alice = caller.with_sender("alice");
     alice.record_usage_event(usage_event(), 10).await.unwrap();
-    assert_eq!(alice.view_keys("own_usage_events").unwrap(), ["1"]);
-    assert!(alice
-        .with_sender("bob")
-        .view_keys("own_usage_events")
-        .unwrap()
-        .is_empty());
+    assert_eq!(usage_counts(&alice).await, [1]);
+    assert!(usage_counts(&alice.with_sender("bob")).await.is_empty());
 }
 
 #[tokio::test]
 async fn record_usage_event_prunes_beyond_the_cap() {
-    let (caller, rows) = caller();
+    let (caller, _rows) = caller();
     for _ in 0..5 {
         caller.record_usage_event(usage_event(), 2).await.unwrap();
     }
-    let total: i64 = rows
-        .usage_summary(&crate::models::UsageQuery::default())
-        .iter()
-        .map(|s| s.count)
-        .sum();
-    assert_eq!(total, 2);
+    assert_eq!(usage_counts(&caller).await.iter().sum::<i64>(), 2);
 }
 
 #[tokio::test]

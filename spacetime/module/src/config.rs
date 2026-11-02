@@ -349,3 +349,24 @@ pub(crate) fn prune_usage_events(ctx: &ReducerContext, highest: i64, cap: i64) {
         ctx.db.usage_events().id().delete(id);
     }
 }
+
+/// The caller's usage, grouped, on demand (task #98756). `query_usage` calls
+/// it; no view or subscription serves usage rows, because a view over them
+/// would re-run over a person's whole history on every recorded event.
+#[spacetimedb::procedure]
+pub fn own_usage_summary(
+    ctx: &mut spacetimedb::ProcedureContext,
+    category: Option<String>,
+    actor: Option<String>,
+    since: Option<String>,
+    limit: i64,
+) -> Vec<UsageSummaryRow> {
+    let who = ctx.sender().to_hex().to_string();
+    let filter = UsageFilter {
+        category,
+        actor,
+        since,
+        limit,
+    };
+    ctx.with_tx(|tx| usage_summary_for(tx, &who, &filter))
+}

@@ -309,6 +309,20 @@ pub trait ReducerCaller: Send + Sync {
         row: bindings::UsageEvent,
         cap: i64,
     ) -> Result<ReducerOutcome>;
+    /// The caller's usage events, grouped by the store (`own_usage_summary`).
+    ///
+    /// A read, not a write, and not a reducer: usage is served on demand
+    /// because a view over it would re-run on every recorded event
+    /// (`workspaces.allium`, "THE PRIVATE FLIP"). It sits here because this is
+    /// the one seam both the live connection and the in-memory store stand
+    /// behind. `since` is in the store's `recorded_at` text.
+    async fn own_usage_summary(
+        &self,
+        category: Option<String>,
+        actor: Option<String>,
+        since: Option<String>,
+        limit: i64,
+    ) -> Result<Vec<bindings::UsageSummaryRow>>;
 
     // Agent session state (Phase 6b). Every one of these acts on a row whose
     // id the caller already has, so what needs reading back is a FACT off

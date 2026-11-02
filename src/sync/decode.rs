@@ -34,12 +34,12 @@ use crate::models::{
     DispatchRequestId, DispatchRequestState, Epic, EpicId, EpicOrigin, FeedRole, Learning,
     LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus, RetrievalSource,
     SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus, Task,
-    TaskId, TaskModel, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, WorkPackage,
-    WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
+    TaskId, TaskModel, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, UsageSummary,
+    WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 use crate::spacetime::bindings;
 
-use super::rows::{HostRow, PollOwnerRow, RepoBaseBranchRow, RepoPathRow, UsageEventRow};
+use super::rows::{HostRow, PollOwnerRow, RepoBaseBranchRow, RepoPathRow};
 
 /// Why one row could not become a domain value.
 ///
@@ -443,25 +443,24 @@ pub fn learning_retrieval(row: &bindings::LearningRetrieval) -> Decoded<Learning
 }
 
 // ---------------------------------------------------------------------------
-// Usage events (Phase 11, task #4915)
+// Usage summary (task #98756)
 // ---------------------------------------------------------------------------
 
-/// The store's `usage_events` row.
+/// One group `own_usage_summary` returned, as the board's [`UsageSummary`].
 ///
 /// No enum validation on `category`/`actor`: `UsageStore::query_usage`
-/// returns them as bare strings (`models::UsageSummary`), the same shape the
-/// SQL path already answers with — parsing into `UsageCategory`/`UsageActor`
-/// is a concern of callers of `query_usage`, not of this decode step.
-pub fn usage_event(row: &bindings::UsageEvent) -> Decoded<UsageEventRow> {
-    const T: &str = "usage_events";
+/// returns them as bare strings, and parsing them into
+/// `UsageCategory`/`UsageActor` is a concern of its callers.
+pub fn usage_summary_row(row: &bindings::UsageSummaryRow) -> Decoded<UsageSummary> {
+    const T: &str = "own_usage_summary";
 
-    Ok(UsageEventRow {
-        id: row.id,
-        recorded_at: required_timestamp(T, row.id, "recorded_at", &row.recorded_at)?,
+    Ok(UsageSummary {
         category: row.category.clone(),
         action: row.action.clone(),
         detail: row.detail.clone(),
         actor: row.actor.clone(),
+        count: row.count,
+        last_used: required_timestamp(T, row.count, "last_used", &row.last_used)?,
     })
 }
 

@@ -69,7 +69,7 @@ pub mod own_packages_table;
 pub mod own_settings_table;
 pub mod own_tasks_table;
 pub mod own_unseen_tasks_table;
-pub mod own_usage_events_table;
+pub mod own_usage_summary_procedure;
 pub mod patch_epic_reducer;
 pub mod patch_learning_reducer;
 pub mod patch_task_reducer;
@@ -170,6 +170,7 @@ pub mod update_epic_reducer;
 pub mod update_task_reducer;
 pub mod update_work_package_with_links_reducer;
 pub mod usage_event_type;
+pub mod usage_summary_row_type;
 pub mod user_profile_type;
 pub mod user_profiles_table;
 pub mod visible_agents_table;
@@ -256,7 +257,7 @@ pub use own_packages_table::*;
 pub use own_settings_table::*;
 pub use own_tasks_table::*;
 pub use own_unseen_tasks_table::*;
-pub use own_usage_events_table::*;
+pub use own_usage_summary_procedure::own_usage_summary;
 pub use patch_epic_reducer::patch_epic;
 pub use patch_learning_reducer::patch_learning;
 pub use patch_task_reducer::patch_task;
@@ -357,6 +358,7 @@ pub use update_epic_reducer::update_epic;
 pub use update_task_reducer::update_task;
 pub use update_work_package_with_links_reducer::update_work_package_with_links;
 pub use usage_event_type::UsageEvent;
+pub use usage_summary_row_type::UsageSummaryRow;
 pub use user_profile_type::UserProfile;
 pub use user_profiles_table::*;
 pub use visible_agents_table::*;
@@ -1699,7 +1701,6 @@ pub struct DbUpdate {
     own_settings: __sdk::TableUpdate<Setting>,
     own_tasks: __sdk::TableUpdate<Task>,
     own_unseen_tasks: __sdk::TableUpdate<UnseenTask>,
-    own_usage_events: __sdk::TableUpdate<UsageEvent>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
     rules_version: __sdk::TableUpdate<RulesVersion>,
@@ -1757,9 +1758,6 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "own_unseen_tasks" => db_update
                     .own_unseen_tasks
                     .append(own_unseen_tasks_table::parse_table_update(table_update)?),
-                "own_usage_events" => db_update
-                    .own_usage_events
-                    .append(own_usage_events_table::parse_table_update(table_update)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
                     .append(repo_base_branches_table::parse_table_update(table_update)?),
@@ -1891,8 +1889,6 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.own_tasks = cache.apply_diff_to_table::<Task>("own_tasks", &self.own_tasks);
         diff.own_unseen_tasks =
             cache.apply_diff_to_table::<UnseenTask>("own_unseen_tasks", &self.own_unseen_tasks);
-        diff.own_usage_events =
-            cache.apply_diff_to_table::<UsageEvent>("own_usage_events", &self.own_usage_events);
         diff.unseen_items =
             cache.apply_diff_to_table::<UnseenItem>("unseen_items", &self.unseen_items);
         diff.visible_agents =
@@ -1972,9 +1968,6 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "own_unseen_tasks" => db_update
                     .own_unseen_tasks
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "own_usage_events" => db_update
-                    .own_usage_events
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
@@ -2082,9 +2075,6 @@ impl __sdk::DbUpdate for DbUpdate {
                 "own_unseen_tasks" => db_update
                     .own_unseen_tasks
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "own_usage_events" => db_update
-                    .own_usage_events
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2175,7 +2165,6 @@ pub struct AppliedDiff<'r> {
     own_settings: __sdk::TableAppliedDiff<'r, Setting>,
     own_tasks: __sdk::TableAppliedDiff<'r, Task>,
     own_unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
-    own_usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
     rules_version: __sdk::TableAppliedDiff<'r, RulesVersion>,
@@ -2230,11 +2219,6 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<UnseenTask>(
             "own_unseen_tasks",
             &self.own_unseen_tasks,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<UsageEvent>(
-            "own_usage_events",
-            &self.own_usage_events,
             event,
         );
         callbacks.invoke_table_row_callbacks::<RepoBaseBranch>(
@@ -3004,7 +2988,6 @@ impl __sdk::SpacetimeModule for RemoteModule {
         own_settings_table::register_table(client_cache);
         own_tasks_table::register_table(client_cache);
         own_unseen_tasks_table::register_table(client_cache);
-        own_usage_events_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
         rules_version_table::register_table(client_cache);
@@ -3038,7 +3021,6 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "own_settings",
         "own_tasks",
         "own_unseen_tasks",
-        "own_usage_events",
         "repo_base_branches",
         "repo_paths",
         "rules_version",

@@ -29,23 +29,24 @@ use crate::spacetime::bindings::{
     fail_interrupted_dispatch_requests as _, fail_interrupted_session_requests as _,
     flatten_epic as _, grant_super_admin as _, ingest_feed as _, link_work_package_item as _,
     mark_pr_learnings_gate_shown as _, mark_task_seen as _, move_epic_to_workspace as _,
-    override_poll_owner as _, patch_epic as _, patch_learning as _, patch_task as _,
-    patch_work_package as _, record_base_branch as _, record_learning_retrieval as _,
-    record_notification as _, record_pre_tool_use as _, record_usage_event as _,
-    record_user_prompt_submit as _, register_host as _, regroup_epic as _, remove_member as _,
-    rename_workspace as _, report_dispatch_failed as _, report_dispatch_provisioned as _,
-    report_pr_status as _, report_pr_unreadable as _, report_session_request_done as _,
-    report_session_request_failed as _, request_dispatch as _, request_exit_session as _,
-    request_wrap_up as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
-    revoke_super_admin as _, save_repo_path as _, save_setting as _, set_display_name as _,
-    set_epic_visibility as _, set_member_role as _, set_task_epic as _, set_verify_command as _,
-    set_work_package_visibility as _, subagent_clear as _,
-    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, super_admin_delete_unseen_item as _, try_record_stop as _,
-    unlink_work_package_item as _, unsubscribe_from_epic as _, update_epic as _, update_task as _,
-    update_work_package_with_links as _, DbConnection, OwnEpicsTableAccess as _,
-    OwnPackagesTableAccess as _, OwnTasksTableAccess as _, VisibleDispatchRequestsTableAccess as _,
-    VisibleLearningsTableAccess as _, VisibleSessionRequestsTableAccess as _,
+    override_poll_owner as _, own_usage_summary as _, patch_epic as _, patch_learning as _,
+    patch_task as _, patch_work_package as _, record_base_branch as _,
+    record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
+    record_usage_event as _, record_user_prompt_submit as _, register_host as _, regroup_epic as _,
+    remove_member as _, rename_workspace as _, report_dispatch_failed as _,
+    report_dispatch_provisioned as _, report_pr_status as _, report_pr_unreadable as _,
+    report_session_request_done as _, report_session_request_failed as _, request_dispatch as _,
+    request_exit_session as _, request_wrap_up as _, rescope_epic_learnings as _,
+    respawn_phoenix_successor as _, revoke_super_admin as _, save_repo_path as _,
+    save_setting as _, set_display_name as _, set_epic_visibility as _, set_member_role as _,
+    set_task_epic as _, set_verify_command as _, set_work_package_visibility as _,
+    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
+    subagent_stop as _, subscribe_to_epic as _, super_admin_delete_unseen_item as _,
+    try_record_stop as _, unlink_work_package_item as _, unsubscribe_from_epic as _,
+    update_epic as _, update_task as _, update_work_package_with_links as _, DbConnection,
+    OwnEpicsTableAccess as _, OwnPackagesTableAccess as _, OwnTasksTableAccess as _,
+    VisibleDispatchRequestsTableAccess as _, VisibleLearningsTableAccess as _,
+    VisibleSessionRequestsTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -619,6 +620,30 @@ impl ReducerCaller for SdkReducerCaller {
         cap: i64,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(self, "the usage event", record_usage_event_then(row, cap))
+    }
+
+    async fn own_usage_summary(
+        &self,
+        category: Option<String>,
+        actor: Option<String>,
+        since: Option<String>,
+        limit: i64,
+    ) -> anyhow::Result<Vec<bindings::UsageSummaryRow>> {
+        let connection = self.connection()?;
+        let answer = awaiting_answer("the usage query", move |tx| {
+            connection.procedures.own_usage_summary_then(
+                category,
+                actor,
+                since,
+                limit,
+                move |_, result| {
+                    fire(tx, result);
+                },
+            );
+            Ok(())
+        })
+        .await?;
+        answer.map_err(|why| anyhow!("the shared store could not answer the usage query: {why}"))
     }
 
     // -- Agent session state (Phase 6b) --------------------------------------

@@ -98,7 +98,6 @@ fn every_source_the_board_reads_is_asked_for() {
         "own_settings",
         "visible_learnings",
         "visible_learning_retrievals",
-        "own_usage_events",
         "visible_dispatch_requests",
         "visible_session_requests",
         "visible_agents",

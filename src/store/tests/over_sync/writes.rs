@@ -110,6 +110,7 @@ enum Sent {
     ApplyLearningVerdicts(usize),
     ArchiveStaleLearnings(String),
     RecordUsageEvent(Box<bindings::UsageEvent>, i64),
+    OwnUsageSummary(Option<String>, Option<String>, Option<String>, i64),
     CreateWorkPackage(Box<bindings::WorkPackage>),
     CreateWorkPackageWithLinks(Box<bindings::WorkPackage>, Vec<(String, i64)>),
     PatchWorkPackage(i64, Box<bindings::WorkPackagePatch>),
@@ -567,6 +568,24 @@ impl ReducerCaller for RecordingCaller {
         cap: i64,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::RecordUsageEvent(Box::new(row), cap))
+    }
+
+    async fn own_usage_summary(
+        &self,
+        category: Option<String>,
+        actor: Option<String>,
+        since: Option<String>,
+        limit: i64,
+    ) -> anyhow::Result<Vec<bindings::UsageSummaryRow>> {
+        self.answer(Sent::OwnUsageSummary(category, actor, since, limit))?;
+        Ok(vec![bindings::UsageSummaryRow {
+            category: "keybinding".into(),
+            action: "open".into(),
+            detail: None,
+            actor: "human".into(),
+            count: 2,
+            last_used: "2026-01-03 10:00:00.000".into(),
+        }])
     }
 
     async fn subagent_start(
@@ -1060,3 +1079,34 @@ mod creates;
 mod host_and_settings;
 mod requests;
 mod session_hooks;
+
+// -- Usage (task #98756) -----------------------------------------------------
+
+/// `query_usage` asks the store on demand, in the store's timestamp text and
+/// with the limit clamped, and decodes what comes back. The board holds no
+/// usage rows to answer from.
+#[tokio::test]
+async fn query_usage_asks_the_store_with_its_filters() {
+    use crate::store::{UsageQuery, UsageStore};
+    let (store, caller) = writer_with(RecordingCaller::default());
+    let since = chrono::DateTime::parse_from_rfc3339(AT)
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let summary = store
+        .query_usage(&UsageQuery {
+            category: Some("keybinding".into()),
+            actor: None,
+            since: Some(since),
+            limit: Some(9999),
+        })
+        .await
+        .unwrap();
+    assert_eq!(summary.len(), 1);
+    assert_eq!(summary[0].count, 2);
+    assert!(caller.sent().contains(&Sent::OwnUsageSummary(
+        Some("keybinding".into()),
+        None,
+        Some(AT_STORED.into()),
+        500
+    )));
+}

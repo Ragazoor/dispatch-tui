@@ -162,9 +162,18 @@
 -- THE PRIVATE FLIP (task #98691). The board subscribes through these views
 -- and every table above is private in the same change. usage_events gained an
 -- indexed recorded_by column, stamped with the caller by record_usage_event
--- (actor says only human or agent), and the own_usage_events view serves the
--- rows a caller recorded: an event names no task, so the held-task rule cannot
--- apply to it. A row recorded before the column existed is nobody's.
+-- (actor says only human or agent). An event names no task, so the held-task
+-- rule cannot apply to it: an event is its recorder's alone. A row recorded
+-- before the column existed is nobody's.
+--
+-- Usage is served ON DEMAND, not through a view (task #98756). A view is
+-- recomputed whole when its read set changes, and record_usage_event fires on
+-- every keybinding, hook and dispatch, so an own_usage_events view would have
+-- re-run over a person's whole history (up to the 100,000-row cap) on every
+-- event. The own_usage_summary procedure instead runs when query_usage asks:
+-- it reads the caller's rows through the recorded_by index, applies the
+-- category, actor and since filters, and returns the grouped counts. The
+-- board holds no usage rows and subscribes to nothing for them.
 
 use "./core.allium" as core
 use "./work-packages.allium" as wp
@@ -1152,7 +1161,7 @@ surface StoreReads {
         -- learning retrievals and verdicts are visible only when the task
         -- they name is (the views serve them for the tasks the board holds). Poll-owner rows follow their scope (an epic or a
         -- task). A usage event names no task, so it is its recorder's alone
-        -- (own_usage_events). Host rows carry no task content and stay
+        -- (own_usage_summary). Host rows carry no task content and stay
         -- readable by all.
         --
         -- KNOWN GAP (task #98806): the subscriptions table is still public,

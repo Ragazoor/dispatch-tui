@@ -8,13 +8,12 @@ use crate::spacetime::bindings::{
     CoveredEpicsTableAccess as _, CoveredTasksTableAccess as _, DbConnection,
     HostsTableAccess as _, OwnEpicsTableAccess as _, OwnPackagesTableAccess as _,
     OwnSettingsTableAccess as _, OwnTasksTableAccess as _, OwnUnseenTasksTableAccess as _,
-    OwnUsageEventsTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
-    SubscriptionsTableAccess as _, UnseenItemsTableAccess as _, UserProfilesTableAccess as _,
-    VisibleAgentsTableAccess as _, VisibleDispatchRequestsTableAccess as _,
-    VisibleLearningRetrievalsTableAccess as _, VisibleLearningsTableAccess as _,
-    VisibleMembershipsTableAccess as _, VisiblePollOwnersTableAccess as _,
-    VisibleSessionRequestsTableAccess as _, VisibleWorkPackageLinksTableAccess as _,
-    VisibleWorkspacesTableAccess as _,
+    RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _, SubscriptionsTableAccess as _,
+    UnseenItemsTableAccess as _, UserProfilesTableAccess as _, VisibleAgentsTableAccess as _,
+    VisibleDispatchRequestsTableAccess as _, VisibleLearningRetrievalsTableAccess as _,
+    VisibleLearningsTableAccess as _, VisibleMembershipsTableAccess as _,
+    VisiblePollOwnersTableAccess as _, VisibleSessionRequestsTableAccess as _,
+    VisibleWorkPackageLinksTableAccess as _, VisibleWorkspacesTableAccess as _,
 };
 
 // One table's three callbacks, so "every table gets all three" is
@@ -188,13 +187,6 @@ impl SpacetimeSdkConnector {
             visible_learning_retrievals,
             upsert_learning_retrieval,
             retire_learning_retrieval
-        );
-        wire_view!(
-            self,
-            db,
-            own_usage_events,
-            upsert_usage_event,
-            retire_usage_event
         );
         wire_view!(
             self,

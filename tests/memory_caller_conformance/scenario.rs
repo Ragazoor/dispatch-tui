@@ -751,32 +751,19 @@ fn memory_caller_matches_the_real_reducers() {
                 .await
                 .unwrap();
         }
-        wait_for!(
-            rows_real
-                .usage_summary(&dispatch_tui::store::UsageQuery::default())
-                .iter()
-                .map(|s| s.count)
-                .sum::<i64>()
-                == cap
-        );
         for _ in 0..5 {
             mem.record_usage_event(usage_event("conformance"), cap)
                 .await
                 .unwrap();
         }
-        assert_eq!(
-            rows_real
-                .usage_summary(&dispatch_tui::store::UsageQuery::default())
-                .iter()
-                .map(|s| s.count)
-                .sum::<i64>(),
-            rows_mem
-                .usage_summary(&dispatch_tui::store::UsageQuery::default())
-                .iter()
-                .map(|s| s.count)
-                .sum::<i64>(),
-            "usage_events after prune"
-        );
+        // Usage is served on demand (`own_usage_summary`), not by a view, so
+        // both backends are asked the same question.
+        let usage_total =
+            |rows: Vec<bindings::UsageSummaryRow>| rows.iter().map(|s| s.count).sum::<i64>();
+        let usage_real = real.own_usage_summary(None, None, None, 50).await.unwrap();
+        let usage_mem = mem.own_usage_summary(None, None, None, 50).await.unwrap();
+        assert_eq!(usage_total(usage_real), cap);
+        assert_eq!(usage_total(usage_mem), cap, "usage_events after prune");
         let refused_real = real
             .record_usage_event(usage_event("conformance"), 0)
             .await

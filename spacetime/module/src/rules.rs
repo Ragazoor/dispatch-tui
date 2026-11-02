@@ -58,6 +58,10 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 31: usage is served on demand. The `own_usage_events` view is gone and the
+///    `own_usage_summary` procedure answers `query_usage` with the caller's
+///    grouped events, because a view over usage re-ran over a person's whole
+///    history on every recorded event (`views.rs`, `config.rs`).
 /// 30: the new-task signal clears per task — `mark_task_seen` replaces
 ///    `mark_epic_seen`, so the cursor resting on a task card ends that one
 ///    mark and entering an epic ends none (`unseen.rs`;
@@ -153,7 +157,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 30;
+pub const RULES_VERSION: i64 = 31;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

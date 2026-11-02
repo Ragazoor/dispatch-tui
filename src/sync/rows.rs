@@ -35,14 +35,12 @@
 use std::collections::BTreeMap;
 use std::sync::RwLock;
 
-use chrono::{DateTime, Utc};
-
 use tokio::sync::watch;
 
 use crate::models::{
     Agent, AgentId, DispatchRequest, DispatchRequestId, Epic, EpicId, Learning, LearningFilter,
     LearningId, LearningRetrieval, PollScopeId, SessionRequest, SessionRequestId, Task, TaskId,
-    UsageQuery, UsageSummary, WorkPackage, WorkPackageId, WorkPackageLink,
+    WorkPackage, WorkPackageId, WorkPackageLink,
 };
 use crate::spacetime::bindings;
 
@@ -91,17 +89,6 @@ pub struct PollOwnerRow {
     pub host: String,
 }
 
-/// One `usage_events` row (Phase 11, task #4915).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UsageEventRow {
-    pub id: i64,
-    pub recorded_at: DateTime<Utc>,
-    pub category: String,
-    pub action: String,
-    pub detail: Option<String>,
-    pub actor: String,
-}
-
 #[derive(Default)]
 struct Rows {
     tasks: BTreeMap<i64, Task>,
@@ -138,7 +125,6 @@ struct Rows {
     learning_retrievals: BTreeMap<i64, LearningRetrieval>,
     /// Telemetry (Phase 11, task #4915). Unconditionally subscribed, like
     /// `learnings` above — nothing here is scoped by owner or host.
-    usage_events: BTreeMap<i64, UsageEventRow>,
     /// The tables the store's task, subscription and settings reads need
     /// beyond the ones above (task #4916). None carries a sentinel, an enum or a timestamp a reader
     /// interprets, so they are held as the store sends them.
@@ -221,7 +207,6 @@ impl Rows {
             && self.poll_owners.is_empty()
             && self.learnings.is_empty()
             && self.learning_retrievals.is_empty()
-            && self.usage_events.is_empty()
             && self.subscriptions.is_empty()
             && self.unseen_tasks.is_empty()
             && self.user_profiles.is_empty()
@@ -504,22 +489,6 @@ impl SharedRows {
 
     pub fn remove_learning_retrieval(&self, id: i64) {
         self.write(|rows| rows.learning_retrievals.remove(&id).is_some());
-    }
-
-    pub fn upsert_usage_event(&self, row: &bindings::UsageEvent) {
-        match decode::usage_event(row) {
-            Ok(event) => self.write(|rows| {
-                rows.usage_events.insert(event.id, event);
-                true
-            }),
-            Err(e) => {
-                super::drop_undecodable("usage event", &e);
-            }
-        }
-    }
-
-    pub fn remove_usage_event(&self, id: i64) {
-        self.write(|rows| rows.usage_events.remove(&id).is_some());
     }
 
     pub fn upsert_subscription(&self, row: &bindings::Subscription) {
@@ -850,13 +819,6 @@ impl SharedRows {
             return;
         };
         self.write(|rows| remove_if_held(&mut rows.learning_retrievals, &old.id, &old));
-    }
-
-    pub fn retire_usage_event(&self, old: &bindings::UsageEvent) {
-        let Ok(old) = decode::usage_event(old) else {
-            return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.usage_events, &old.id, &old));
     }
 
     pub fn retire_unseen_task(&self, old: &bindings::UnseenTask) {
@@ -1289,72 +1251,6 @@ impl SharedRows {
                     .filter(|r| r.task_id == task_id),
                 |r| r.id,
             )
-        })
-    }
-
-    /// Aggregated usage rows matching `query`, ordered `count ASC` — the same
-    /// order `UsageStore::query_usage`'s SQL uses, and for the same reason:
-    /// the rarest features surface first as pruning candidates.
-    ///
-    /// The `GROUP BY category, action, detail, actor` / `COUNT(*)` /
-    /// `MAX(recorded_at)` the SQL path expresses declaratively has to be done
-    /// by hand here — a subscription is rows, not a query engine — but it is
-    /// the same aggregation over the same rows, so the two backends answer
-    /// the same summary for the same events.
-    pub fn usage_summary(&self, query: &UsageQuery) -> Vec<UsageSummary> {
-        /// `(category, action, detail, actor) -> (count, last_used)`.
-        type UsageGroups = std::collections::HashMap<
-            (String, String, Option<String>, String),
-            (i64, DateTime<Utc>),
-        >;
-
-        self.read(|rows| {
-            let mut groups: UsageGroups = std::collections::HashMap::new();
-
-            for event in rows.usage_events.values() {
-                if let Some(cat) = &query.category {
-                    if &event.category != cat {
-                        continue;
-                    }
-                }
-                if let Some(actor) = &query.actor {
-                    if &event.actor != actor {
-                        continue;
-                    }
-                }
-                if let Some(since) = query.since {
-                    if event.recorded_at < since {
-                        continue;
-                    }
-                }
-                let key = (
-                    event.category.clone(),
-                    event.action.clone(),
-                    event.detail.clone(),
-                    event.actor.clone(),
-                );
-                let entry = groups.entry(key).or_insert((0, event.recorded_at));
-                entry.0 += 1;
-                entry.1 = entry.1.max(event.recorded_at);
-            }
-
-            let mut out: Vec<UsageSummary> = groups
-                .into_iter()
-                .map(
-                    |((category, action, detail, actor), (count, last_used))| UsageSummary {
-                        category,
-                        action,
-                        detail,
-                        actor,
-                        count,
-                        last_used,
-                    },
-                )
-                .collect();
-            out.sort_by_key(|s| s.count);
-            let limit = query.limit.unwrap_or(50).clamp(1, 500);
-            out.truncate(limit);
-            out
         })
     }
 }

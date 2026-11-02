@@ -2,20 +2,19 @@ use super::*;
 
 /// **Test 1 of Phase 11 (task #4915), against a real server**, as the private
 /// flip (task #98691) left it: a board sees the usage events it recorded and
-/// no one else's (`own_usage_events`, workspaces.allium "THE PRIVATE FLIP").
+/// no one else's (`own_usage_summary`, workspaces.allium "THE PRIVATE FLIP").
 ///
 /// Another identity records first, through the CLI — a different process,
 /// the same convention `a_row_written_elsewhere_arrives_through_the_subscription`
 /// uses. This board records second. The store applies the two in order, so
-/// once this board's event has arrived, the other one would have arrived
-/// before it if the view served it.
+/// once this board's event is recorded, the other one would be in the
+/// answer if the procedure served it.
 #[test]
 fn a_board_sees_the_usage_events_it_recorded_and_no_one_elses() {
     if !spacetime_available_or_skip() {
         return;
     }
     use dispatch_tui::spacetime::bindings;
-    use dispatch_tui::store::UsageQuery;
     use dispatch_tui::sync::{ReducerCaller, SdkReducerCaller, SettledIdentity};
 
     let instance = Instance::start("module-test");
@@ -70,16 +69,12 @@ fn a_board_sees_the_usage_events_it_recorded_and_no_one_elses() {
             .applied()
             .unwrap_or_else(|why| panic!("record_usage_event refused: {why}"));
 
-        // A wake can come from another subscription update before the usage
-        // row lands, so wait for the row itself. Bounded by a timeout, not a
-        // sleep.
-        wait_for(&rows, |rows| {
-            !rows.usage_summary(&UsageQuery::default()).is_empty()
-        })
-        .await
-        .unwrap_or_else(|_| panic!("this board's own usage event never arrived"));
-
-        let summary = rows.usage_summary(&UsageQuery::default());
+        // Served on demand by the `own_usage_summary` procedure: the store
+        // answers once the reducer has applied, so nothing to wait for.
+        let summary = caller
+            .own_usage_summary(None, None, None, 50)
+            .await
+            .unwrap_or_else(|e| panic!("own_usage_summary: {e}"));
         assert_eq!(summary.len(), 1, "only this board's event: {summary:?}");
         assert_eq!(summary[0].action, "dispatch_task");
         assert_eq!(summary[0].count, 1);

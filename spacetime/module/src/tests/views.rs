@@ -490,14 +490,59 @@ fn a_super_admin_sees_every_workspace_and_its_memberships() {
 }
 
 #[test]
-fn usage_events_are_served_to_whoever_recorded_them() {
+fn usage_is_summarised_for_whoever_recorded_it() {
     let mut store = tree();
-    let event = |id, who: &str| UsageEvent {
+    let event = |id, who: &str, action: &str, at: &str| UsageEvent {
         id,
         recorded_by: who.to_string(),
+        category: "keybinding".to_string(),
+        action: action.to_string(),
+        recorded_at: at.to_string(),
+        actor: "human".to_string(),
         ..blank_usage_event()
     };
-    store.usage_events = vec![event(1, "ann"), event(2, "bob"), event(3, "")];
-    assert_eq!(ids(&usage_events_visible_to(&store, "ann"), |e| e.id), [1]);
-    assert_eq!(ids(&usage_events_visible_to(&store, "bob"), |e| e.id), [2]);
+    store.usage_events = vec![
+        event(1, "ann", "open", "2026-01-01 10:00:00.000"),
+        event(2, "ann", "open", "2026-01-03 10:00:00.000"),
+        event(3, "ann", "close", "2026-01-02 10:00:00.000"),
+        event(4, "bob", "open", "2026-01-02 10:00:00.000"),
+        event(5, "", "open", "2026-01-02 10:00:00.000"),
+    ];
+    let filter = UsageFilter {
+        limit: 50,
+        ..UsageFilter::default()
+    };
+    let ann = usage_summary_for(&store, "ann", &filter);
+    // Rarest first; only ann's rows, none of bob's or the nobody row.
+    let shape: Vec<_> = ann
+        .iter()
+        .map(|r| (r.action.as_str(), r.count, r.last_used.as_str()))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            ("close", 1, "2026-01-02 10:00:00.000"),
+            ("open", 2, "2026-01-03 10:00:00.000")
+        ]
+    );
+    assert_eq!(usage_summary_for(&store, "bob", &filter)[0].count, 1);
+    assert!(usage_summary_for(&store, "carol", &filter).is_empty());
+
+    let since = UsageFilter {
+        since: Some("2026-01-02 10:00:00.000".to_string()),
+        ..filter.clone()
+    };
+    let counts: Vec<_> = usage_summary_for(&store, "ann", &since)
+        .iter()
+        .map(|r| (r.action.clone(), r.count))
+        .collect();
+    assert_eq!(counts, [("close".to_string(), 1), ("open".to_string(), 1)]);
+
+    let wrong_actor = UsageFilter {
+        actor: Some("agent".to_string()),
+        ..filter.clone()
+    };
+    assert!(usage_summary_for(&store, "ann", &wrong_actor).is_empty());
+    let one = UsageFilter { limit: 1, ..filter };
+    assert_eq!(usage_summary_for(&store, "ann", &one).len(), 1);
 }
