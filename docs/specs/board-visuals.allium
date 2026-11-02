@@ -924,7 +924,9 @@ use "./core.allium" as core
 --                                                on; its siblings keep ◆
 --   cursor_on_a_marked_epic_clears_nothing       the epic mark is derived
 --   moving_the_cursor_onto_an_unseen_task_clears_it
+--                                                a key that moves the cursor
 --   a_refresh_that_slides_an_unseen_task_under_the_cursor_clears_it
+--                                                a cursor that did not move
 --   message_flash_never_colours_the_card_frame   a live flash leaves the
 --                                                frame alone: no column
 --                                                hue, and the only
