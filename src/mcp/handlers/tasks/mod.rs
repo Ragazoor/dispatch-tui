@@ -30,6 +30,7 @@ pub(super) use crud::{
 };
 pub(super) use dispatch::handle_dispatch_task;
 pub(super) use resume::handle_resume_task;
+pub(crate) use resume::{unresumable, Unresumable};
 pub(super) use verify::handle_set_verify_command;
 pub(super) use wrap_up::{handle_exit_session, handle_wrap_up};
 

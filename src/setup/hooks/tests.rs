@@ -391,6 +391,62 @@ fn hook_forwards_send_message_on_post_tool_use() {
     );
 }
 
+/// A send that reached nobody comes back with `success: false`; the hook
+/// forwards it as undelivered so the board can tell the sender how to wake
+/// the target (`agent-health.allium: UndeliveredPeerMessage`). Claude Code
+/// may hand the tool response over as the object or as its JSON text.
+#[cfg(unix)]
+#[test]
+fn hook_forwards_a_failed_send_message_as_undelivered() {
+    for (n, response) in [
+        (
+            "122",
+            r#"{"success":false,"message":"No agent named 'ada' is reachable."}"#.to_string(),
+        ),
+        (
+            "123",
+            serde_json::to_string(
+                r#"{"success":false,"message":"No agent named 'ada' is reachable."}"#,
+            )
+            .unwrap(),
+        ),
+    ] {
+        let (_tmp, repo, script_path, observed, path) =
+            spawn_hook_harness(&format!("{n}-undelivered"));
+        let payload = format!(
+            r#"{{"cwd":"{}","hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{{"to":"ada","message":"hello"}},"tool_response":{response}}}"#,
+            repo.display()
+        );
+        invoke_hook(&script_path, &repo, &path, &payload);
+
+        let log = std::fs::read_to_string(&observed).unwrap_or_default();
+        assert!(
+            log.contains(&format!(
+                "hook-peer-message {n} --target ada --body hello --undelivered"
+            )),
+            "a failed send must be forwarded as undelivered; got: {log:?}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn hook_does_not_mark_a_delivered_send_message_undelivered() {
+    let (_tmp, repo, script_path, observed, path) = spawn_hook_harness("124-delivered");
+    let payload = format!(
+        r#"{{"cwd":"{}","hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{{"to":"ada","message":"hello"}},"tool_response":{{"success":true}}}}"#,
+        repo.display()
+    );
+    invoke_hook(&script_path, &repo, &path, &payload);
+
+    let log = std::fs::read_to_string(&observed).unwrap_or_default();
+    assert!(
+        log.contains("hook-peer-message 124 --target ada --body hello"),
+        "got: {log:?}"
+    );
+    assert!(!log.contains("--undelivered"), "got: {log:?}");
+}
+
 #[cfg(unix)]
 #[test]
 fn hook_does_not_forward_send_message_on_pre_tool_use() {

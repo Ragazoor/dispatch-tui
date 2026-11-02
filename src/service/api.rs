@@ -278,6 +278,16 @@ macro_rules! task_service_api {
                 target_name: &str
             ) -> Result<(), $crate::service::ServiceError>;
 
+            /// Stamp a `SendMessage` that reached nobody on the sender's row
+            /// only, and return the task `target_name` resolves to, if any.
+            /// Only a missing *sender* is an error. See
+            /// `UndeliveredPeerMessage` in `docs/specs/agent-health.allium`.
+            async fn record_peer_message_undelivered(
+                &self,
+                sender_id: $crate::models::TaskId,
+                target_name: &str
+            ) -> Result<Option<$crate::models::TaskId>, $crate::service::ServiceError>;
+
             /// Record a subagent lifecycle event and, when it drains the last
             /// subagent for a task carrying a deferred Stop, apply that Stop.
             /// See `HookSubagentStart` / `HookSubagentStop` in

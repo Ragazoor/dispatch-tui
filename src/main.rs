@@ -134,6 +134,13 @@ enum Commands {
         /// removed `send_message` MCP tool.
         #[arg(long)]
         body: String,
+        /// The send failed: nothing answered to `--target`. The board records
+        /// the sender's stamp only, and its answer, when `--target` names a
+        /// dispatch task, is printed as the `PostToolUse` hook's
+        /// `additionalContext`: how to wake the target, or why it cannot be
+        /// woken (`docs/specs/agent-health.allium`'s `UndeliveredPeerMessage`).
+        #[arg(long)]
+        undelivered: bool,
         #[command(flatten)]
         board: hooks::BoardAddress,
     },
@@ -877,8 +884,22 @@ async fn run_async(
             id,
             target,
             body,
+            undelivered: false,
             board,
         } => hooks::run_peer_message(board.port, id, target, body).await?,
+        Commands::HookPeerMessage {
+            id,
+            target,
+            body,
+            undelivered: true,
+            board,
+        } => {
+            if let Some(hint) =
+                hooks::run_undelivered_peer_message(board.port, id, target, body).await?
+            {
+                println!("{}", hooks::post_tool_use_context(&hint));
+            }
+        }
         Commands::AgentTree { task_id, board } => {
             cmd_agent_tree(data_dir, board.port, task_id).await?
         }

@@ -616,7 +616,8 @@ surface DispatchCommandLine {
         --   plan <id> <path>            PlanFileIsCheckedBeforeTheStore; mcp-task-tools.allium: AttachPlanViaCli
         --   uninstall [--yes] [--purge] mcp-task-tools.allium, "Other CLI subcommands"
         --   hook, hook-subagent,
-        --   hook-peer-message           agent-health.allium: HookDelivery
+        --   hook-peer-message           agent-health.allium: HookDelivery;
+        --                               --undelivered: UndeliveredPeerMessage
         --   pr-gate <id>                pr-workflow.allium: PrLearningsGate
         --   agent-tree <task_id>        agent-tree.allium; PaneRendererGivesTheTerminalBack
         --   agent-diff <task_id>        agent-tree.allium; PaneRendererGivesTheTerminalBack

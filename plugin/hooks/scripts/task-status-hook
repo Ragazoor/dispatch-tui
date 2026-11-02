@@ -65,8 +65,21 @@ case "$EVENT" in
             if [[ "$TOOL" == "SendMessage" ]]; then
                 MSG_TO=$(echo "$INPUT" | jq -r '.tool_input.to // empty')
                 MSG_BODY=$(echo "$INPUT" | jq -r '.tool_input.message // empty')
+                # A send that reached nobody reports `success: false`. The
+                # board then answers with what to tell the sender (how to
+                # resume the target, or why it cannot be), which dispatch
+                # prints as this hook's additionalContext (task #98782,
+                # UndeliveredPeerMessage in docs/specs/agent-health.allium).
+                # The response may arrive as the object or as its JSON text.
+                MSG_FAILED=$(echo "$INPUT" | jq -r '.tool_response
+                    | (if type == "string" then (try fromjson catch null) else . end)
+                    | if type == "object" and .success == false then "yes" else empty end')
                 if [[ -n "$MSG_TO" ]]; then
-                    dispatch hook-peer-message "$ID" --target "$MSG_TO" --body "$MSG_BODY"
+                    if [[ -n "$MSG_FAILED" ]]; then
+                        dispatch hook-peer-message "$ID" --target "$MSG_TO" --body "$MSG_BODY" --undelivered
+                    else
+                        dispatch hook-peer-message "$ID" --target "$MSG_TO" --body "$MSG_BODY"
+                    fi
                 fi
             fi
         fi

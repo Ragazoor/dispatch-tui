@@ -243,6 +243,44 @@ pub async fn run_peer_message(port: u16, id: TaskId, target: String, body: Strin
     .await
 }
 
+/// `dispatch hook-peer-message <id> … --undelivered`: the task's
+/// `SendMessage` reached nobody. Records the send and returns what the board
+/// says to tell the sender, if anything (`docs/specs/agent-health.allium`'s
+/// `UndeliveredPeerMessage`). An unreachable board is an error, as for every
+/// observer; a board that could not decide is one too, and the failed send
+/// stands as Claude Code reported it.
+pub async fn run_undelivered_peer_message(
+    port: u16,
+    id: TaskId,
+    target: String,
+    body: String,
+) -> Result<Option<String>> {
+    let question = Question::UndeliveredPeerMessage {
+        task_id: id,
+        target,
+        body,
+    };
+    match send(port, &HookRequest::Ask(question)).await? {
+        HookResponse::Answer(Answer::UndeliveredPeerMessage { hint }) => Ok(hint),
+        HookResponse::Answer(Answer::Failed { reason }) => Err(anyhow::anyhow!(
+            "the dispatch board could not record the undelivered message: {reason}"
+        )),
+        other => Err(unexpected_answer(other)),
+    }
+}
+
+/// The JSON a `PostToolUse` hook prints on stdout to add `context` to the
+/// tool result Claude reads.
+pub fn post_tool_use_context(context: &str) -> String {
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": context,
+        }
+    })
+    .to_string()
+}
+
 /// Ask the running board on `port` for task `task_id`'s [`wire::PaneView`]
 /// (agent-tree.allium: BoardPaneView). Every failure -- unreachable, too slow,
 /// refused, an answer this version cannot read -- is an `Err` naming the

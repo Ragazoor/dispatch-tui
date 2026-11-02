@@ -522,6 +522,207 @@ async fn pr_gate_reminder_names_task_id_with_this_tasks_id() {
 }
 
 // ---------------------------------------------------------------------------
+// 2d. An undelivered peer message tells the sender how to wake the target
+// (agent-health.allium: UndeliveredPeerMessage)
+// ---------------------------------------------------------------------------
+
+/// `dispatch hook-peer-message … --undelivered`: exit status and the
+/// `additionalContext` it printed for Claude Code, if any.
+async fn run_undelivered(port: u16, sender: &str, target: &str) -> (bool, Option<String>, String) {
+    let (out, stderr) = run(
+        port,
+        &[
+            "hook-peer-message",
+            sender,
+            "--target",
+            target,
+            "--body",
+            "ping",
+            "--undelivered",
+        ],
+    )
+    .await;
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let context = (!stdout.trim().is_empty()).then(|| {
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|e| panic!("stdout must be hook JSON ({e}): {stdout}"));
+        assert_eq!(v["hookSpecificOutput"]["hookEventName"], "PostToolUse");
+        v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no additionalContext in {stdout}"))
+            .to_string()
+    });
+    (out.status.success(), context, stderr)
+}
+
+/// A running task with a worktree on disk and no window: a paused agent.
+async fn seed_detached(
+    board: &Board,
+    title: &str,
+) -> (dispatch_tui::models::TaskId, tempfile::TempDir) {
+    let id = seed_running_task(&board.db, title, SubStatus::Stale).await;
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = dir.path().to_str().unwrap().to_string();
+    board
+        .db
+        .patch_task(
+            id,
+            &TaskPatch::new().worktree(Some(&worktree)).tmux_window(None),
+        )
+        .await
+        .unwrap();
+    (id, dir)
+}
+
+async fn current_agent_name(board: &Board, id: dispatch_tui::models::TaskId) -> String {
+    use dispatch_tui::store::AgentRead;
+    board
+        .db
+        .list_agents()
+        .await
+        .into_iter()
+        .find(|a| a.task_id == id && a.is_current())
+        .expect("the seeded task has a current agent")
+        .name
+}
+
+#[tokio::test]
+async fn undelivered_message_to_a_paused_agent_tells_the_sender_to_resume_it() {
+    let board = spawn_board().await;
+    let (sender, sender_arg) = seed(&board, "Sender").await;
+    let (target, _dir) = seed_detached(&board, "Target").await;
+    let name = current_agent_name(&board, target).await;
+
+    let (ok, context, stderr) = run_undelivered(board.port, &sender_arg, &name).await;
+    assert!(ok, "stderr: {stderr}");
+    let context = context.expect("a paused target must produce a hint");
+    assert!(
+        context.contains(&format!("resume_task(task_id: {}", target.0)),
+        "the hint must give the exact call, got: {context}"
+    );
+    assert!(context.contains(&name), "got: {context}");
+    assert!(context.contains("not running"), "got: {context}");
+
+    assert!(board.task(sender).await.last_peer_message_sent_at.is_some());
+    assert!(
+        board
+            .task(target)
+            .await
+            .last_peer_message_received_at
+            .is_none(),
+        "a message nobody received must not flash the target as receiving one"
+    );
+}
+
+/// An ended agent's name resolves to its task; a resume wakes the task's
+/// current agent, and the hint says which.
+#[tokio::test]
+async fn undelivered_message_to_an_ended_agent_names_the_current_one() {
+    let board = spawn_board().await;
+    let (_sender, sender_arg) = seed(&board, "Sender").await;
+    let (target, _dir) = seed_detached(&board, "Target").await;
+    let ended = current_agent_name(&board, target).await;
+    board.db.give_agent(target);
+    let current = current_agent_name(&board, target).await;
+    assert_ne!(ended, current, "precondition: a second agent took over");
+
+    let (ok, context, stderr) = run_undelivered(board.port, &sender_arg, &ended).await;
+    assert!(ok, "stderr: {stderr}");
+    let context = context.expect("a paused target must produce a hint");
+    assert!(
+        context.contains(&format!("resume_task(task_id: {}", target.0)),
+        "got: {context}"
+    );
+    assert!(
+        context.contains(&format!("{ended} is no longer")) && context.contains(&current),
+        "the hint must say the current agent gets the message, got: {context}"
+    );
+}
+
+#[tokio::test]
+async fn undelivered_message_by_task_window_name_resolves_the_same_task() {
+    let board = spawn_board().await;
+    let (_sender, sender_arg) = seed(&board, "Sender").await;
+    let (target, _dir) = seed_detached(&board, "Target").await;
+
+    let (ok, context, stderr) =
+        run_undelivered(board.port, &sender_arg, &format!("task-{}", target.0)).await;
+    assert!(ok, "stderr: {stderr}");
+    let context = context.expect("a paused target must produce a hint");
+    assert!(
+        context.contains(&format!("resume_task(task_id: {}", target.0)),
+        "got: {context}"
+    );
+}
+
+#[tokio::test]
+async fn undelivered_message_to_a_task_that_never_ran_says_why_and_suggests_no_dispatch() {
+    let board = spawn_board().await;
+    let (_sender, sender_arg) = seed(&board, "Sender").await;
+    let target = seed_task(&board.db, "Backlog target").await;
+    board.db.give_agent(target);
+    let name = current_agent_name(&board, target).await;
+
+    let (ok, context, stderr) = run_undelivered(board.port, &sender_arg, &name).await;
+    assert!(ok, "stderr: {stderr}");
+    let context = context.expect("a known but unresumable target must produce a reason");
+    assert!(context.contains("cannot be resumed"), "got: {context}");
+    assert!(!context.contains("resume_task("), "got: {context}");
+    assert!(
+        !context.contains("dispatch_task"),
+        "starting a fresh agent is the operator's call, got: {context}"
+    );
+}
+
+#[tokio::test]
+async fn undelivered_message_to_a_task_whose_worktree_is_gone_says_so() {
+    let board = spawn_board().await;
+    let (_sender, sender_arg) = seed(&board, "Sender").await;
+    let (target, dir) = seed_detached(&board, "Target").await;
+    drop(dir);
+
+    let (ok, context, stderr) =
+        run_undelivered(board.port, &sender_arg, &format!("task-{}", target.0)).await;
+    assert!(ok, "stderr: {stderr}");
+    let context = context.expect("a known but unresumable target must produce a reason");
+    assert!(context.contains("no longer on disk"), "got: {context}");
+    assert!(!context.contains("resume_task("), "got: {context}");
+}
+
+/// The board still holds the window, yet the send failed: the session in it
+/// has exited or does not answer. resume_task would refuse it as attached.
+#[tokio::test]
+async fn undelivered_message_to_a_task_with_an_open_window_points_at_the_operator() {
+    let board = spawn_board().await;
+    let (_sender, sender_arg) = seed(&board, "Sender").await;
+    let (target, _dir) = seed_detached(&board, "Target").await;
+    let window = dispatch_tui::models::TmuxWindow::for_task(target);
+    board
+        .db
+        .patch_task(target, &TaskPatch::new().tmux_window(Some(&window)))
+        .await
+        .unwrap();
+
+    let (ok, context, stderr) =
+        run_undelivered(board.port, &sender_arg, &format!("task-{}", target.0)).await;
+    assert!(ok, "stderr: {stderr}");
+    let context = context.expect("a known target must produce a reason");
+    assert!(context.contains("operator"), "got: {context}");
+    assert!(!context.contains("resume_task("), "got: {context}");
+}
+
+#[tokio::test]
+async fn undelivered_message_to_an_unknown_name_adds_nothing() {
+    let board = spawn_board().await;
+    let (sender, sender_arg) = seed(&board, "Sender").await;
+
+    let (ok, context, stderr) = run_undelivered(board.port, &sender_arg, "nobody-here").await;
+    assert!(ok, "stderr: {stderr}");
+    assert_eq!(context, None);
+    assert!(board.task(sender).await.last_peer_message_sent_at.is_some());
+}
+
+// ---------------------------------------------------------------------------
 // 3. Structural: no hook path opens the database
 // ---------------------------------------------------------------------------
 

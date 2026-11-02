@@ -206,7 +206,7 @@ async fn apply(
                 .task_svc
                 .record_peer_message_sent(task_id, &target)
                 .await?;
-            append_peer_message_trajectory(state, task_id, &target, &body);
+            append_peer_message_trajectory(state, task_id, &target, &body, true);
             Ok(())
         }
         // Answered in `observe`, before any task is touched.
@@ -234,20 +234,120 @@ async fn answer(state: &McpState, question: Question) -> Answer {
                 }
             }
         },
+        Question::UndeliveredPeerMessage { target, body, .. } => {
+            match state
+                .task_svc
+                .record_peer_message_undelivered(task_id, &target)
+                .await
+            {
+                Ok(resolved) => {
+                    append_peer_message_trajectory(state, task_id, &target, &body, false);
+                    Answer::UndeliveredPeerMessage {
+                        hint: match resolved {
+                            Some(target_id) => undelivered_hint(state, &target, target_id).await,
+                            None => None,
+                        },
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(task_id = task_id.0, "undelivered peer message failed: {e}");
+                    Answer::Failed {
+                        reason: e.to_string(),
+                    }
+                }
+            }
+        }
     }
+}
+
+/// What to tell an agent whose `SendMessage` to `to` reached nobody, `to`
+/// having resolved to task `target_id`
+/// (`agent-health.allium: UndeliveredPeerMessage`). `None` when the task is
+/// gone. Never suggests a fresh dispatch: a new agent has none of the old
+/// conversation, so starting one is the operator's call.
+async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Option<String> {
+    use super::tasks::Unresumable;
+
+    let task = state.task_svc.get_task(target_id).await.ok()?;
+    let n = target_id.0;
+    let agent = {
+        state
+            .db
+            .list_agents()
+            .await
+            .into_iter()
+            .find(|a| a.task_id == target_id && a.is_current())
+            .map(|a| a.name)
+    };
+    let not_running = format!("{to} is not running, so your message was not delivered.");
+    let Some(why) = super::tasks::unresumable(&task, &state.host_id).await else {
+        let agent =
+            agent.unwrap_or_else(|| crate::models::TmuxWindow::for_task(target_id).to_string());
+        let named = to.split(' ').next().unwrap_or(to);
+        let ended = if named != agent && !named.starts_with("task-") {
+            format!(" {named} is no longer that task's agent; a resume wakes its current agent, {agent}.")
+        } else {
+            String::new()
+        };
+        let moves = match task.status {
+            crate::models::TaskStatus::Review | crate::models::TaskStatus::Done => format!(
+                " The task is in {}, and resuming moves it back to running.",
+                task.status
+            ),
+            _ => String::new(),
+        };
+        return Some(format!(
+            "{not_running} It is task #{n}'s agent {agent}.{ended} To wake it with your \
+             message, call the dispatch MCP tool resume_task(task_id: {n}, message: <your \
+             message>): the message becomes the agent's first input when its session \
+             restarts.{moves}"
+        ));
+    };
+    let reason = match why {
+        Unresumable::Attached => {
+            return Some(format!(
+                "{to} did not answer, so your message was not delivered, but the board still \
+                 shows task #{n}'s window open: the session in it has exited or is not \
+                 responding. resume_task refuses a task whose window is open. Tell your \
+                 operator so they can check the window."
+            ))
+        }
+        Unresumable::NeverRan(status) => {
+            format!("it is {status} and no agent has run on it yet")
+        }
+        Unresumable::NoWorktree => {
+            "it has no worktree, so there is no conversation to continue".to_string()
+        }
+        Unresumable::OtherMachine => {
+            "its worktree is on another machine, and only that machine can resume it".to_string()
+        }
+        Unresumable::WorktreeGone(worktree) => {
+            format!("its worktree {worktree} is no longer on disk")
+        }
+    };
+    Some(format!(
+        "{not_running} It is task #{n}, which cannot be resumed: {reason}. Starting a new \
+         agent on it is your operator's decision; tell your user if the message matters."
+    ))
 }
 
 /// The `SendMessage` trajectory entry, appended off the response path the way
 /// every other trajectory write is. It used to be written by the hook process
 /// into the data dir beside the database; the hook has no data dir any more,
 /// so the board writes it into its own.
-fn append_peer_message_trajectory(state: &McpState, task_id: TaskId, target: &str, body: &str) {
+fn append_peer_message_trajectory(
+    state: &McpState,
+    task_id: TaskId,
+    target: &str,
+    body: &str,
+    delivered: bool,
+) {
     let entry = trajectory::TrajectoryEntry {
         timestamp: chrono::Utc::now(),
         task_id: task_id.0,
         method: "SendMessage".to_string(),
         args: serde_json::json!({"target": target, "body": body}),
-        result: serde_json::json!({"observed": true}),
+        result: serde_json::json!({"observed": true, "delivered": delivered}),
         duration_ms: 0,
     };
     let data_dir = state.data_dir.clone();

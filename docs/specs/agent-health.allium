@@ -826,7 +826,79 @@ rule HookPeerMessageSent {
         --
         -- Only `PostToolUse` fires this — `PreToolUse` for the same call is
         -- ignored, since the message hasn't actually been sent until the
-        -- tool call completes.
+        -- tool call completes. A send that fails also reaches PostToolUse;
+        -- that is UndeliveredPeerMessage below, not this rule, so a message
+        -- nobody received never flashes a card as having received one.
+}
+
+rule UndeliveredPeerMessage {
+    -- Fires when a task's agent calls `SendMessage` and the send fails
+    -- because nothing answers to the name (task #98782). A dispatch agent
+    -- whose session is not running is not reachable, so the send fails; the
+    -- sender is then told how to wake it, or why it cannot be woken. Dispatch
+    -- does not resume the target itself: the sender chooses to, by calling
+    -- resume_task with the message (mcp-task-tools.allium: ResumeTaskViaMcp),
+    -- which delivers it as the resumed session's first input.
+    when: SendMessageUndelivered(sender, to, message)
+
+    -- `to` is an agent name (current or ended), or a `task-<id>` name. An
+    -- ended agent's name resolves to its task, and the task's CURRENT agent
+    -- is the one a resume wakes; the hint names it.
+    let target = core/Task.find_by_session_name(to)
+
+    requires: target != null
+
+    ensures: sender.last_peer_message_sent_at = now
+    ensures:
+        if target.status in {running, review, done}
+           and target.worktree != null
+           and target.is_locally_owned
+           and current_agent(target).tmux_window = null
+           and target.worktree_on_disk:
+            SenderToldToResume(sender: sender, target: target, agent: current_agent(target))
+        else:
+            SenderToldWhyNotResumable(sender: sender, target: target)
+
+    @guidance
+        -- == What the sender reads ==
+        -- The answer is added to the failed tool call's result as context the
+        -- sender's Claude reads at once. SenderToldToResume names, in order:
+        -- that `to` is not running; the task id and its current agent's name;
+        -- and the exact call to make, `resume_task(task_id: <id>, message:
+        -- <the same message>)`, saying the message becomes the resumed
+        -- agent's first input and that a review or done task moves back to
+        -- running. When `to` was an ended agent's name, it says the message
+        -- goes to the task's current agent instead.
+        --
+        -- SenderToldWhyNotResumable gives the one reason, in the same words
+        -- resume_task would refuse with: a task that never ran (backlog), no
+        -- worktree, a worktree on another machine, or a worktree gone from
+        -- disk. It never suggests a fresh dispatch: a fresh agent has none of
+        -- the old conversation, so starting one is the operator's decision.
+        -- The one reason resume_task does not have is a task whose window
+        -- the board still holds open: the send failed, so the session in it
+        -- has exited or does not answer. The sender is told that and told to
+        -- raise it with the operator; resume_task would refuse it as attached.
+        --
+        -- A `to` that resolves to no dispatch task (a typo, a session outside
+        -- dispatch's fleet, a deleted task) adds nothing: Claude Code's own
+        -- "No agent named … is reachable" error stands alone. The sender's
+        -- sent stamp is still taken, as HookPeerMessageSent takes it.
+        --
+        -- == Why the sender resumes, not dispatch ==
+        -- The operator chose this over resuming inside the hook. The sender
+        -- sees the outcome of its own resume_task call, a resume costs the
+        -- target a session start, and the call path already exists and is
+        -- already gated (ResumeTaskViaMcp). The hook only answers.
+        --
+        -- == How it is observed ==
+        -- The PostToolUse hook already sees every SendMessage call
+        -- (HookPeerMessageSent). A failed send carries `success: false` in
+        -- the tool response, and the hook asks the board what to tell the
+        -- sender — a question, like the PR gate (pr-workflow.allium:
+        -- PrLearningsGate), not an observation. It fails open: no board, an
+        -- unreadable answer, or no task behind `to` adds nothing, and the
+        -- failed send stands as Claude Code reported it.
 }
 
 
@@ -849,11 +921,13 @@ surface HookDelivery {
     -- a hook runs on every tool call of every live session. What that process
     -- is allowed to touch is therefore the whole subject of this surface.
     --
-    -- One further command travels this way without being one of the events
-    -- above: the PR gate (pr-workflow.allium: PrLearningsGate), which is a
-    -- hook that answers rather than observes. HookNeverOpensTheDatabase
-    -- covers it; the outcome guarantees below do not, because an event it
-    -- could merely drop is not what it has.
+    -- Two further commands travel this way as questions rather than
+    -- observations: the PR gate (pr-workflow.allium: PrLearningsGate), and
+    -- `hook-peer-message --undelivered` (UndeliveredPeerMessage), whose
+    -- answer is printed as the PostToolUse hook's additionalContext for the
+    -- sender to read. HookNeverOpensTheDatabase covers both; the outcome
+    -- guarantees below do not, because an event they could merely drop is
+    -- not what they have.
     --
     -- A second travels this way from the agent-tree companion and diff
     -- panes rather than from a hook: ObservedEvent::PaneKey, one per

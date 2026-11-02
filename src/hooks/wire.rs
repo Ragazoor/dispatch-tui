@@ -112,12 +112,23 @@ impl ObservedEvent {
 pub enum Question {
     /// `dispatch pr-gate <id>`: may this task create its PR yet?
     PrGate { task_id: TaskId },
+    /// `dispatch hook-peer-message <id> --target <to> --body <body>
+    /// --undelivered`: the task's `SendMessage` reached nobody. What should
+    /// the sender be told? See `UndeliveredPeerMessage` in
+    /// `docs/specs/agent-health.allium`. Asked rather than observed because
+    /// the sender reads the answer; the board still records the send, as it
+    /// does for [`ObservedEvent::PeerMessage`].
+    UndeliveredPeerMessage {
+        task_id: TaskId,
+        target: String,
+        body: String,
+    },
 }
 
 impl Question {
     pub fn task_id(&self) -> TaskId {
         match self {
-            Self::PrGate { task_id } => *task_id,
+            Self::PrGate { task_id } | Self::UndeliveredPeerMessage { task_id, .. } => *task_id,
         }
     }
 }
@@ -227,6 +238,11 @@ pub enum Answer {
     /// would let a stale installed binary silently override the deciding
     /// board's text.
     PrGate { reminder: Option<String> },
+    /// What to tell an agent whose `SendMessage` reached nobody: how to wake
+    /// the target, or why it cannot be woken. Absent when `to` names no task
+    /// on this board, so Claude Code's own error stands alone. Worded by the
+    /// board for the reason [`Answer::PrGate`] is.
+    UndeliveredPeerMessage { hint: Option<String> },
     /// The board could not decide. The gate treats this as permission to
     /// proceed — see `PrLearningsGate` in `docs/specs/pr-workflow.allium`.
     Failed { reason: String },

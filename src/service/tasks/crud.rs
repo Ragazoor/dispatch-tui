@@ -712,30 +712,8 @@ impl TaskService {
         sender_id: TaskId,
         target_name: &str,
     ) -> Result<(), ServiceError> {
-        if !self.db.task_exists(sender_id).await {
-            return Err(Self::task_not_found(sender_id));
-        }
-
-        let now = self.clock.now();
-        self.db
-            .patch_task(
-                sender_id,
-                &TaskPatch::new().last_peer_message_sent_at(Some(now)),
-            )
-            .await?;
-
-        let by_agent_name = {
-            let name = peer_message_target_name(target_name);
-            self.db
-                .list_agents()
-                .await
-                .into_iter()
-                .find(|a| a.name == name)
-                .map(|a| a.task_id)
-        };
-        if let Some(target_id) =
-            by_agent_name.or_else(|| parse_peer_message_target_name(target_name))
-        {
+        let now = self.stamp_peer_message_sender(sender_id).await?;
+        if let Some(target_id) = self.resolve_peer_message_target(target_name).await {
             // No existence pre-check: patch_task itself is the only
             // authoritative answer to "does this row still exist", and
             // checking first would leave a race (the target could be
@@ -763,6 +741,57 @@ impl TaskService {
         }
 
         Ok(())
+    }
+
+    /// Record a `SendMessage` from `sender_id`'s agent that reached nobody
+    /// (`agent-health.allium: UndeliveredPeerMessage`): the sender's stamp
+    /// only, since no session received it. Returns the task `target_name`
+    /// resolves to, the same way [`record_peer_message_sent`] resolves it, or
+    /// `None` when it names no task. Only a missing sender is an error.
+    ///
+    /// [`record_peer_message_sent`]: Self::record_peer_message_sent
+    pub async fn record_peer_message_undelivered(
+        &self,
+        sender_id: TaskId,
+        target_name: &str,
+    ) -> Result<Option<TaskId>, ServiceError> {
+        self.stamp_peer_message_sender(sender_id).await?;
+        Ok(self.resolve_peer_message_target(target_name).await)
+    }
+
+    /// Stamp `last_peer_message_sent_at` on the sender's row, returning the
+    /// stamp. A missing sender is [`ServiceError::NotFound`].
+    async fn stamp_peer_message_sender(
+        &self,
+        sender_id: TaskId,
+    ) -> Result<chrono::DateTime<chrono::Utc>, ServiceError> {
+        if !self.db.task_exists(sender_id).await {
+            return Err(Self::task_not_found(sender_id));
+        }
+        let now = self.clock.now();
+        self.db
+            .patch_task(
+                sender_id,
+                &TaskPatch::new().last_peer_message_sent_at(Some(now)),
+            )
+            .await?;
+        Ok(now)
+    }
+
+    /// The task a `SendMessage` `to` names: an agent name first (current or
+    /// ended — a session is named after its agent,
+    /// `AgentSessionIsNamedAfterTheAgent`), then the `task-<id>` name a
+    /// session started before agents still carries. Does not check that the
+    /// task still exists.
+    async fn resolve_peer_message_target(&self, target_name: &str) -> Option<TaskId> {
+        let name = peer_message_target_name(target_name);
+        self.db
+            .list_agents()
+            .await
+            .into_iter()
+            .find(|a| a.name == name)
+            .map(|a| a.task_id)
+            .or_else(|| parse_peer_message_target_name(target_name))
     }
 
     /// Record a subagent lifecycle event and, when it drains the last
