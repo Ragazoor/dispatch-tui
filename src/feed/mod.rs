@@ -144,7 +144,9 @@ const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Write-time validation is what normally keeps a sub-floor row from
 /// existing, so reaching the below-floor arm means the value arrived by a
 /// path that bypassed the service — a hand-edited database, or a bug — and
-/// the runner must not make it work anyway. Skipped rather than clamped: a
+/// the runner must not make it work anyway. This predicate stays pure: the
+/// warning is [`FeedRunner::warn_below_floor_once`]'s, so it is not repeated
+/// every tick. Skipped rather than clamped: a
 /// clamped feed would run at a cadence nobody chose while looking healthy.
 ///
 /// This also covers the negative case, which failed differently and worse.
@@ -153,17 +155,7 @@ const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// logged.
 fn epic_due(epic: &Epic, last_run: &HashMap<EpicId, Instant>, now: Instant) -> bool {
     let interval = match epic.feed_interval_secs {
-        Some(s) if s < MIN_FEED_INTERVAL_SECS => {
-            tracing::warn!(
-                epic_id = epic.id.0,
-                epic_title = %epic.title,
-                feed_interval_secs = s,
-                min_feed_interval_secs = MIN_FEED_INTERVAL_SECS,
-                "FeedRunner: feed_interval_secs is below the minimum; \
-                 not polling this epic until it is corrected"
-            );
-            return false;
-        }
+        Some(s) if s < MIN_FEED_INTERVAL_SECS => return false,
         // The guard above proves `s >= MIN_FEED_INTERVAL_SECS`, which is
         // positive, so this conversion is lossless. `unsigned_abs`
         // rather than the `as u64` it replaces: `as` is what turned a
@@ -201,6 +193,10 @@ pub struct FeedRunner {
     /// [`FeedRunner::sync_guard`] — the manual path holding a DIFFERENT
     /// `FeedSyncGuard` type-checks and silently serialises nothing.
     guard: Arc<FeedSyncGuard>,
+    /// The below-floor `feed_interval_secs` already warned about, per epic, so
+    /// the warning is logged once per value rather than every tick. Cleared for
+    /// an epic once its interval is valid again.
+    warned_below_floor: HashMap<EpicId, i64>,
     /// Read seam for `core/PollOwner` — `FeedTick`'s host-scoping
     /// (feeds.allium: FeedTick) needs to know who currently owns a given
     /// epic's polling before spawning its cycle. Writes (claiming an
@@ -251,6 +247,7 @@ impl FeedRunner {
             epic_changed_rx,
             epic_changed_tx,
             guard: Arc::new(FeedSyncGuard::default()),
+            warned_below_floor: HashMap::new(),
             board_reads,
             host_id,
             #[cfg(test)]
@@ -303,6 +300,32 @@ impl FeedRunner {
         });
     }
 
+    /// Whether `epic`'s stored interval is below the floor (so it is skipped),
+    /// logging the warning only when this value has not been warned about yet.
+    /// A valid interval forgets an earlier warning, so a later bad value warns
+    /// afresh. feeds.allium: FeedTick.
+    fn warn_below_floor_once(&mut self, epic: &Epic) -> bool {
+        match epic.feed_interval_secs {
+            Some(s) if s < MIN_FEED_INTERVAL_SECS => {
+                if self.warned_below_floor.insert(epic.id, s) != Some(s) {
+                    tracing::warn!(
+                        epic_id = epic.id.0,
+                        epic_title = %epic.title,
+                        feed_interval_secs = s,
+                        min_feed_interval_secs = MIN_FEED_INTERVAL_SECS,
+                        "FeedRunner: feed_interval_secs is below the minimum; \
+                         not polling this epic until it is corrected"
+                    );
+                }
+                true
+            }
+            _ => {
+                self.warned_below_floor.remove(&epic.id);
+                false
+            }
+        }
+    }
+
     pub async fn tick(&mut self) {
         let Some(epics) = self.list_epics_for_tick().await else {
             return;
@@ -317,6 +340,10 @@ impl FeedRunner {
             // pollable at all; the command the cycle actually runs is re-read
             // from the epic inside FeedCycle::run, after the claim.
             if epic.feed_command.is_none() {
+                continue;
+            }
+
+            if self.warn_below_floor_once(&epic) {
                 continue;
             }
 

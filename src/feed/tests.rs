@@ -692,6 +692,55 @@ async fn tick_skips_an_epic_whose_stored_interval_is_below_the_floor() {
     }
 }
 
+/// F7: the below-floor warning fires once per epic per interval value, not on
+/// every 2-second tick (~43k lines a day per epic in an unrotated app.log).
+/// A DIFFERENT bad value warns again; a corrected value forgets the warning, so
+/// breaking it again warns again. feeds.allium: FeedTick.
+#[tokio::test]
+async fn below_floor_interval_warns_once_per_value_not_every_tick() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let epic = db.create_epic("Too Fast", "", None).await.unwrap();
+    let set = |secs: i64| {
+        let db = db.clone();
+        async move {
+            db.patch_epic(
+                epic.id,
+                &EpicPatch::new()
+                    .feed_command(Some("echo '[]'"))
+                    .feed_interval_secs(Some(secs)),
+            )
+            .await
+            .unwrap();
+        }
+    };
+    let (mut runner, _rx) = make_runner(db.clone());
+    let warnings = |log: &str| log.matches("below the minimum").count();
+
+    set(MIN_FEED_INTERVAL_SECS - 1).await;
+    let log = crate::test_log::logged_during(|| async {
+        runner.tick().await;
+        runner.tick().await;
+        runner.tick().await;
+    })
+    .await;
+    assert_eq!(warnings(&log), 1, "same bad value: one warning, got: {log}");
+
+    set(MIN_FEED_INTERVAL_SECS - 2).await;
+    let log = crate::test_log::logged_during(|| async { runner.tick().await }).await;
+    assert_eq!(warnings(&log), 1, "a different bad value warns again");
+
+    set(MIN_FEED_INTERVAL_SECS).await;
+    runner.tick().await;
+    runner.join_spawned_jobs().await;
+    set(MIN_FEED_INTERVAL_SECS - 2).await;
+    let log = crate::test_log::logged_during(|| async { runner.tick().await }).await;
+    assert_eq!(
+        warnings(&log),
+        1,
+        "a corrected then re-broken value warns again"
+    );
+}
+
 /// A negative interval failed differently and worse than a zero one: `as
 /// u64` wrapped it into an effectively infinite cadence, so the feed went
 /// permanently silent with nothing logged. It now takes the same visible

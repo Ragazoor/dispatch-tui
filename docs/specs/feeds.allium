@@ -971,7 +971,10 @@ rule FeedTick {
     --
     -- An epic whose STORED interval is below core/config.min_feed_interval is
     -- not polled at all. It is skipped and a warning naming the epic is
-    -- emitted, on EVERY tick it remains misconfigured. Write-time validation
+    -- emitted ONCE per epic per stored value, not on every tick (a 2-second
+    -- tick would log ~43k lines a day per epic): a different bad value warns
+    -- again, and a valid value forgets the warning so a later bad one warns
+    -- again. The skip itself holds on every tick. Write-time validation
     -- (epics.allium: CreateEpic, UpdateEpicViaMcp, SetManagedFeedConfig) is
     -- what normally keeps such a row from existing, so reaching this branch
     -- means the value arrived by a path that bypassed the service -- a
