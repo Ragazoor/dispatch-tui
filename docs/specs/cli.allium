@@ -329,17 +329,16 @@ rule PruneRepoPathsViaCli {
     let mine = core/SavedRepoPaths where host = this_host
     let missing = mine where not path_exists_on_disk(path)
     let unowned = core/SavedRepoPaths where host = null
-    let unowned_missing = unowned where not path_exists_on_disk(path)
     let unowned_here = unowned where path_exists_on_disk(path)
 
     ensures:
-        for repo in missing + unowned_missing:
-            SavedRepoPathForgotten(repo: repo)
+        for repo in missing:
+            SavedRepoPathForgotten(repo: repo, host: this_host)
             CliPrinted(line: "removed: " + repo.path)
         for repo in unowned_here:
             SavedRepoPathAdopted(repo: repo, host: this_host)
             CliPrinted(line: "adopted: " + repo.path)
-    ensures: CliPrinted(line: prune_summary(missing.count + unowned_missing.count, core/SavedRepoPaths.count - missing.count - unowned_missing.count))
+    ensures: CliPrinted(line: prune_summary(missing.count, core/SavedRepoPaths.count - missing.count))
 
     @guidance
         -- `dispatch prune-repo-paths`. Existence is judged on THIS machine's
@@ -347,10 +346,16 @@ rule PruneRepoPathsViaCli {
         -- never judged and never removed: its path says nothing about this
         -- disk, and its verify command goes with the row. A row saved before
         -- rows carried a host (host = null) belongs to no one, so every
-        -- host's prune judges it: where the path exists on this disk the
-        -- host adopts it (stamps itself, keeping the verify command), and
-        -- where it is missing the row is removed. Without this rule such a
-        -- row would live forever. The summary line reads `<removed> path(s)
+        -- host's prune may adopt it: where the path exists on this disk the
+        -- host adopts it (stamps itself, keeping the verify command). Where
+        -- it is missing here the row is left alone, never removed: a path
+        -- missing on this disk says nothing about the host that saved it, and
+        -- removing it would take that host's verify command with it. The
+        -- adoption stamps only a row that is still unowned (the module's
+        -- adopt_repo_path), and the removal names the host it expects to
+        -- own the row (the module's delete_repo_path), so a prune working
+        -- from a stale view cannot touch a row another host has since
+        -- adopted. The summary line reads `<removed> path(s)
         -- removed, <kept> kept.`; kept counts every row left in the store,
         -- adopted ones included, not only this host's. A row this host
         -- removes takes its verify command with it.

@@ -1147,7 +1147,10 @@ entity SavedRepoPath {
                              -- A path is a place on ONE machine's disk, so only that host can say it is gone:
                              -- prune-repo-paths (cli.allium: PruneRepoPathsViaCli) touches only its own host's rows.
                              -- Identity stays the path alone (verify_command is keyed by it); host is a stamp
-                             -- rewritten by each save, so a path two hosts both use belongs to the later saver.
+                             -- set once: a save never changes a non-null host (it only stamps a null one), so a
+                             -- path two hosts both use stays with the host that saved it first. Only the
+                             -- adopt-repo-path rule stamps a null host deliberately, and a delete names the
+                             -- host it expects, removing the row only if that host still owns it.
 
     invariant VerifyCommandSingleLine {
         verify_command = null or not (verify_command.contains("\n") or verify_command.contains("\r"))  -- short-circuits: rhs only evaluated when verify_command != null

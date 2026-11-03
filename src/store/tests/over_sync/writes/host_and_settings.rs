@@ -445,6 +445,7 @@ async fn every_store_mutation_reaches_the_transport() {
         .await
         .unwrap();
     db.record_base_branch("/repo", "main").await.unwrap();
+    db.adopt_repo_path("/repo").await.unwrap();
     db.delete_repo_path("/repo").await.unwrap();
 
     db.subscribe_to_epic("user-me", EpicId(1)).await.unwrap();
@@ -604,6 +605,7 @@ async fn every_store_mutation_reaches_the_transport() {
             "SaveRepoPath",
             "SetVerifyCommand",
             "RecordBaseBranch",
+            "AdoptRepoPath",
             "DeleteRepoPath",
             "Subscribe",
             "Unsubscribe",

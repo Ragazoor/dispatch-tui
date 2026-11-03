@@ -347,7 +347,10 @@ mod unconnected {
         );
         refused(
             "delete_repo_path",
-            caller.delete_repo_path("/repo".into()).await.unwrap_err(),
+            caller
+                .delete_repo_path("/repo".into(), "h".into())
+                .await
+                .unwrap_err(),
         );
         refused(
             "clear_setting",

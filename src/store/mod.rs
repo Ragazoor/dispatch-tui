@@ -748,7 +748,11 @@ pub trait RepoConfigRead: Send + Sync {
 #[async_trait::async_trait]
 pub trait RepoConfigStore: RepoConfigRead {
     async fn save_repo_path(&self, path: &str) -> Result<()>;
-    /// Remove the `repo_paths` row.
+    /// Stamp this host on `path`'s row if no host owns it yet. A row another
+    /// host owns, or no row, is left as it is.
+    async fn adopt_repo_path(&self, path: &str) -> Result<()>;
+    /// Remove `path`'s row if this host owns it. A row another host or no
+    /// host owns stays.
     async fn delete_repo_path(&self, path: &str) -> Result<()>;
 
     /// Set the verify command for a saved repo path.

@@ -96,22 +96,14 @@ pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<(
             removed += 1;
         }
     }
-    // Rows saved before hosts were stamped belong to no one: judge them here
-    // too, or they live forever. Present on this disk, this host adopts the
-    // row (a re-save stamps the host and keeps the verify command); missing,
-    // the row goes.
+    // Rows saved before hosts were stamped belong to no one. Present on this
+    // disk, this host adopts the row (keeping its verify command). Missing
+    // here, the row is left alone: the path says nothing about the host that
+    // will adopt it.
     for p in &database.list_unowned_repo_paths().await {
-        match path_on_disk(p) {
-            Ok(false) => {
-                database.delete_repo_path(p).await?;
-                writeln!(out, "removed: {p}")?;
-                removed += 1;
-            }
-            Ok(true) => {
-                database.save_repo_path(p).await?;
-                writeln!(out, "adopted: {p}")?;
-            }
-            Err(_) => {}
+        if matches!(path_on_disk(p), Ok(true)) {
+            database.adopt_repo_path(p).await?;
+            writeln!(out, "adopted: {p}")?;
         }
     }
     writeln!(out, "{removed} path(s) removed, {} kept.", total - removed)?;

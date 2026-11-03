@@ -7,6 +7,7 @@
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod add_member_reducer;
+pub mod adopt_repo_path_reducer;
 pub mod agent_type;
 pub mod apply_learning_verdicts_reducer;
 pub mod archive_stale_learnings_reducer;
@@ -195,6 +196,7 @@ pub mod work_package_type;
 pub mod workspace_type;
 
 pub use add_member_reducer::add_member;
+pub use adopt_repo_path_reducer::adopt_repo_path;
 pub use agent_type::Agent;
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
 pub use archive_stale_learnings_reducer::archive_stale_learnings;
@@ -395,6 +397,10 @@ pub enum Reducer {
         user: String,
         role: String,
     },
+    AdoptRepoPath {
+        path: String,
+        host: String,
+    },
     ApplyLearningVerdicts {
         task_id: i64,
         verdicts: Vec<LearningVerdictInput>,
@@ -467,6 +473,7 @@ pub enum Reducer {
     },
     DeleteRepoPath {
         path: String,
+        host: String,
     },
     DeleteTask {
         id: i64,
@@ -824,6 +831,7 @@ impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
             Reducer::AddMember { .. } => "add_member",
+            Reducer::AdoptRepoPath { .. } => "adopt_repo_path",
             Reducer::ApplyLearningVerdicts { .. } => "apply_learning_verdicts",
             Reducer::ArchiveStaleLearnings { .. } => "archive_stale_learnings",
             Reducer::BackfillAgents => "backfill_agents",
@@ -951,6 +959,13 @@ impl __sdk::Reducer for Reducer {
                 user: user.clone(),
                 role: role.clone(),
 }),
+            Reducer::AdoptRepoPath{
+                path,
+                host,
+}             => __sats::bsatn::to_vec(&adopt_repo_path_reducer::AdoptRepoPathArgs {
+                path: path.clone(),
+                host: host.clone(),
+}),
             Reducer::ApplyLearningVerdicts{
                 task_id,
                 verdicts,
@@ -1074,8 +1089,10 @@ Reducer::ClearSetting{
 }),
             Reducer::DeleteRepoPath{
                 path,
+                host,
 }             => __sats::bsatn::to_vec(&delete_repo_path_reducer::DeleteRepoPathArgs {
                 path: path.clone(),
+                host: host.clone(),
 }),
             Reducer::DeleteTask{
                 id,

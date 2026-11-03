@@ -8,11 +8,15 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct DeleteRepoPathArgs {
     pub path: String,
+    pub host: String,
 }
 
 impl From<DeleteRepoPathArgs> for super::Reducer {
     fn from(args: DeleteRepoPathArgs) -> Self {
-        Self::DeleteRepoPath { path: args.path }
+        Self::DeleteRepoPath {
+            path: args.path,
+            host: args.host,
+        }
     }
 }
 
@@ -31,8 +35,8 @@ pub trait delete_repo_path {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`delete_repo_path:delete_repo_path_then`] to run a callback after the reducer completes.
-    fn delete_repo_path(&self, path: String) -> __sdk::Result<()> {
-        self.delete_repo_path_then(path, |_, _| {})
+    fn delete_repo_path(&self, path: String, host: String) -> __sdk::Result<()> {
+        self.delete_repo_path_then(path, host, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `delete_repo_path` to run as soon as possible,
@@ -44,6 +48,7 @@ pub trait delete_repo_path {
     fn delete_repo_path_then(
         &self,
         path: String,
+        host: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -55,12 +60,13 @@ impl delete_repo_path for super::RemoteReducers {
     fn delete_repo_path_then(
         &self,
         path: String,
+        host: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(DeleteRepoPathArgs { path }, callback)
+            .invoke_reducer_with_callback(DeleteRepoPathArgs { path, host }, callback)
     }
 }

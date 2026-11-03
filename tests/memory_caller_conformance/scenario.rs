@@ -283,9 +283,75 @@ fn memory_caller_matches_the_real_reducers() {
             "base_branches"
         );
 
-        real.delete_repo_path("/repo".into()).await.unwrap();
+        // K2: a save never takes over a host's row, adopt stamps only an
+        // unowned row, delete only removes a row the named host owns.
+        real.save_repo_path(
+            "/repo".into(),
+            ts("2026-01-03 00:00:00.000"),
+            "other-host".into(),
+        )
+        .await
+        .unwrap();
+        real.save_repo_path(
+            "/legacy".into(),
+            ts("2026-01-03 00:00:00.000"),
+            String::new(),
+        )
+        .await
+        .unwrap();
+        real.adopt_repo_path("/legacy".into(), "adopter".into())
+            .await
+            .unwrap();
+        real.adopt_repo_path("/repo".into(), "adopter".into())
+            .await
+            .unwrap();
+        real.delete_repo_path("/repo".into(), "adopter".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real.repo_paths_saved_by("adopter") == vec!["/legacy".to_string()]);
+        mem.save_repo_path(
+            "/repo".into(),
+            ts("2026-01-03 00:00:00.000"),
+            "other-host".into(),
+        )
+        .await
+        .unwrap();
+        mem.save_repo_path(
+            "/legacy".into(),
+            ts("2026-01-03 00:00:00.000"),
+            String::new(),
+        )
+        .await
+        .unwrap();
+        mem.adopt_repo_path("/legacy".into(), "adopter".into())
+            .await
+            .unwrap();
+        mem.adopt_repo_path("/repo".into(), "adopter".into())
+            .await
+            .unwrap();
+        mem.delete_repo_path("/repo".into(), "adopter".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.repo_paths_saved_by("adopter"),
+            rows_mem.repo_paths_saved_by("adopter"),
+            "adopt and host-guarded delete"
+        );
+        assert_eq!(rows_real.repo_paths(), rows_mem.repo_paths(), "repo_paths");
+
+        real.delete_repo_path("/repo".into(), "h".into())
+            .await
+            .unwrap();
+        real.delete_repo_path("/legacy".into(), "adopter".into())
+            .await
+            .unwrap();
         wait_for!(rows_real.repo_paths().is_empty());
-        mem.delete_repo_path("/repo".into()).await.unwrap();
+        mem.delete_repo_path("/repo".into(), "h".into())
+            .await
+            .unwrap();
+        mem.delete_repo_path("/legacy".into(), "adopter".into())
+            .await
+            .unwrap();
         assert!(rows_mem.repo_paths().is_empty());
 
         // -- subscriptions ----------------------------------------------------------

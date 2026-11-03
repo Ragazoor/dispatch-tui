@@ -109,3 +109,118 @@ fn a_task_created_in_a_grouped_epic_lands_in_its_repo_sub_epic() {
         "in the sub-epic, not the root"
     );
 }
+
+fn repo_host(store: &Store, path: &str) -> Option<String> {
+    store
+        .db()
+        .repo_paths()
+        .iter()
+        .find(|r| r.path == path)
+        .map(|r| r.host)
+}
+
+/// `core.allium: SavedRepoPath.host` — a save never takes over another host's row.
+#[test]
+fn saving_a_path_keeps_the_host_that_owns_it() {
+    let store = Store::new();
+    store
+        .call("alice", |ctx| {
+            save_repo_path(ctx, "/repo".into(), "t1".into(), "host-a".into())
+        })
+        .expect("first save");
+    store
+        .call("bob", |ctx| {
+            save_repo_path(ctx, "/repo".into(), "t2".into(), "host-b".into())
+        })
+        .expect("second save");
+    assert_eq!(repo_host(&store, "/repo").as_deref(), Some("host-a"));
+}
+
+/// A save by a host still stamps a row no one owns yet.
+#[test]
+fn saving_a_path_stamps_a_row_that_has_no_host() {
+    let store = Store::new();
+    store
+        .call("alice", |ctx| {
+            save_repo_path(ctx, "/repo".into(), "t1".into(), String::new())
+        })
+        .expect("legacy save");
+    store
+        .call("bob", |ctx| {
+            save_repo_path(ctx, "/repo".into(), "t2".into(), "host-b".into())
+        })
+        .expect("save");
+    assert_eq!(repo_host(&store, "/repo").as_deref(), Some("host-b"));
+}
+
+/// `cli.allium: PruneRepoPathsViaCli` — adoption stamps only an unowned row.
+#[test]
+fn adopting_a_path_stamps_only_an_unowned_row() {
+    let store = Store::new();
+    store
+        .call("alice", |ctx| {
+            save_repo_path(ctx, "/legacy".into(), "t".into(), String::new())
+        })
+        .expect("legacy");
+    store
+        .call("alice", |ctx| {
+            save_repo_path(ctx, "/owned".into(), "t".into(), "host-a".into())
+        })
+        .expect("owned");
+
+    store
+        .call("bob", |ctx| {
+            adopt_repo_path(ctx, "/legacy".into(), "host-b".into())
+        })
+        .expect("adopt legacy");
+    store
+        .call("bob", |ctx| {
+            adopt_repo_path(ctx, "/owned".into(), "host-b".into())
+        })
+        .expect("adopt owned is a no-op");
+    store
+        .call("bob", |ctx| {
+            adopt_repo_path(ctx, "/missing".into(), "host-b".into())
+        })
+        .expect("adopt unknown is a no-op");
+
+    assert_eq!(repo_host(&store, "/legacy").as_deref(), Some("host-b"));
+    assert_eq!(repo_host(&store, "/owned").as_deref(), Some("host-a"));
+    assert_eq!(repo_host(&store, "/missing"), None);
+}
+
+/// A delete names the host it expects; any other owner keeps the row.
+#[test]
+fn deleting_a_path_removes_only_a_row_the_named_host_owns() {
+    let store = Store::new();
+    store
+        .call("alice", |ctx| {
+            save_repo_path(ctx, "/repo".into(), "t".into(), "host-a".into())
+        })
+        .expect("save");
+    store
+        .call("alice", |ctx| {
+            save_repo_path(ctx, "/legacy".into(), "t".into(), String::new())
+        })
+        .expect("legacy");
+
+    store
+        .call("bob", |ctx| {
+            delete_repo_path(ctx, "/repo".into(), "host-b".into())
+        })
+        .expect("foreign delete is a no-op");
+    store
+        .call("bob", |ctx| {
+            delete_repo_path(ctx, "/legacy".into(), "host-b".into())
+        })
+        .expect("unowned delete is a no-op");
+    assert_eq!(repo_host(&store, "/repo").as_deref(), Some("host-a"));
+    assert_eq!(repo_host(&store, "/legacy").as_deref(), Some(""));
+
+    store
+        .call("alice", |ctx| {
+            delete_repo_path(ctx, "/repo".into(), "host-a".into())
+        })
+        .expect("owner delete");
+    assert_eq!(repo_host(&store, "/repo"), None);
+}

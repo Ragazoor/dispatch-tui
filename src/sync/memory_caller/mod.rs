@@ -544,8 +544,12 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_save_repo_path(path, last_used, host)
     }
 
-    async fn delete_repo_path(&self, path: String) -> Result<ReducerOutcome> {
-        self.apply_delete_repo_path(path)
+    async fn adopt_repo_path(&self, path: String, host: String) -> Result<ReducerOutcome> {
+        self.apply_adopt_repo_path(path, host)
+    }
+
+    async fn delete_repo_path(&self, path: String, host: String) -> Result<ReducerOutcome> {
+        self.apply_delete_repo_path(path, host)
     }
 
     async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome> {

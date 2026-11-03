@@ -10,8 +10,10 @@ use super::*;
 /// the same repo. Two rows for one path would give the verify command two
 /// answers.
 ///
-/// `host` is stamped on both arms: a row saved before hosts were recorded is
-/// adopted by the first host to save it again.
+/// `host` is stamped on a new row. On an existing row it is stamped only when
+/// the row has none (saved before hosts were recorded): a save never takes
+/// over a row another host owns. `adopt_repo_path` is the deliberate way to
+/// claim an unowned row without touching `last_used`.
 #[spacetimedb::reducer]
 pub fn save_repo_path(
     ctx: &ReducerContext,
@@ -23,11 +25,18 @@ pub fn save_repo_path(
         return Err("repo path is empty".into());
     }
     match ctx.db.repo_paths().iter().find(|r| r.path == path) {
-        Some(existing) => ctx.db.repo_paths().id().update(RepoPath {
-            last_used,
-            host,
-            ..existing
-        }),
+        Some(existing) => {
+            let host = if existing.host.is_empty() {
+                host
+            } else {
+                existing.host.clone()
+            };
+            ctx.db.repo_paths().id().update(RepoPath {
+                last_used,
+                host,
+                ..existing
+            })
+        }
         None => ctx.db.repo_paths().insert(RepoPath {
             id: 0,
             path,
@@ -39,13 +48,39 @@ pub fn save_repo_path(
     Ok(())
 }
 
+/// Claim a row no host owns for `host`, keeping its verify command and
+/// `last_used`.
+///
+/// Stamps only when the stored host is empty: a row another host owns, or no
+/// row at all, is left as it is (not an error: a stale view is no reason to
+/// fail a prune).
 #[spacetimedb::reducer]
-pub fn delete_repo_path(ctx: &ReducerContext, path: String) -> Result<(), String> {
+pub fn adopt_repo_path(ctx: &ReducerContext, path: String, host: String) -> Result<(), String> {
+    if host.is_empty() {
+        return Err("host is empty".into());
+    }
+    if let Some(existing) = ctx
+        .db
+        .repo_paths()
+        .iter()
+        .find(|r| r.path == path && r.host.is_empty())
+    {
+        ctx.db.repo_paths().id().update(RepoPath { host, ..existing });
+    }
+    Ok(())
+}
+
+/// Remove a repo path, but only the row `host` owns.
+///
+/// A row another host owns, or one nobody owns, stays: the caller judged it
+/// from a view that may be stale, and the row's verify command goes with it.
+#[spacetimedb::reducer]
+pub fn delete_repo_path(ctx: &ReducerContext, path: String, host: String) -> Result<(), String> {
     for row in ctx
         .db
         .repo_paths()
         .iter()
-        .filter(|r| r.path == path)
+        .filter(|r| r.path == path && r.host == host)
         .collect::<Vec<_>>()
     {
         ctx.db.repo_paths().id().delete(row.id);

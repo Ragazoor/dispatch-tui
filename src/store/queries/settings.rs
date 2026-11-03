@@ -124,9 +124,16 @@ impl super::super::RepoConfigStore for Store {
             .applied()
     }
 
+    async fn adopt_repo_path(&self, path: &str) -> Result<()> {
+        self.caller
+            .adopt_repo_path(path.to_string(), self.host.clone())
+            .await?
+            .applied()
+    }
+
     async fn delete_repo_path(&self, path: &str) -> Result<()> {
         self.caller
-            .delete_repo_path(path.to_string())
+            .delete_repo_path(path.to_string(), self.host.clone())
             .await?
             .applied()
     }

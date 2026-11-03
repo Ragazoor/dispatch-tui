@@ -839,10 +839,10 @@ async fn prune_repo_paths_keeps_a_missing_path_another_host_saved() {
     );
 }
 
-// W2 — a row saved before rows carried a host has no owner, so every host's
-// prune judges it: gone from this disk, it is removed with its verify command.
+// K1 — an unowned row whose path is missing HERE says nothing about the host
+// that will adopt it: prune leaves it alone, verify command included.
 #[tokio::test]
-async fn prune_repo_paths_removes_an_unowned_row_whose_path_is_missing_here() {
+async fn prune_repo_paths_keeps_an_unowned_row_whose_path_is_missing_here() {
     let (_dir, db, memory) = shared_store_with_caller();
     let legacy = "/dispatch-test-nonexistent-legacy-77777";
     seed_repo_path_saved_by(&db, &memory, "", legacy).await;
@@ -851,18 +851,16 @@ async fn prune_repo_paths_removes_an_unowned_row_whose_path_is_missing_here() {
     commands::prune_repo_paths(&db, &mut out).await.unwrap();
     let stdout = String::from_utf8(out).unwrap();
 
+    assert!(!stdout.contains("removed: "), "got: {stdout}");
     assert!(
-        stdout.contains(&format!("removed: {legacy}")),
+        stdout.contains("0 path(s) removed, 1 kept."),
         "got: {stdout}"
     );
-    assert!(
-        stdout.contains("1 path(s) removed, 0 kept."),
-        "got: {stdout}"
-    );
-    assert!(
+    assert_eq!(
         dispatch_tui::store::RepoConfigRead::get_verify_command(&db, legacy)
             .await
-            .is_none()
+            .as_deref(),
+        Some("cargo test")
     );
 }
 

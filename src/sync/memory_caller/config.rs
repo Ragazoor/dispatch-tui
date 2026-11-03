@@ -101,6 +101,11 @@ impl MemoryReducerCaller {
         let existing = tables.repo_paths.values().find(|r| r.path == path).cloned();
         match existing {
             Some(row) => {
+                let host = if row.host.is_empty() {
+                    host
+                } else {
+                    row.host.clone()
+                };
                 self.write_repo_path(
                     &mut tables,
                     module::RepoPath {
@@ -126,12 +131,36 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    pub(super) fn apply_delete_repo_path(&self, path: String) -> Result<ReducerOutcome> {
+    pub(super) fn apply_adopt_repo_path(
+        &self,
+        path: String,
+        host: String,
+    ) -> Result<ReducerOutcome> {
+        if host.is_empty() {
+            return Ok(ReducerOutcome::Refused("host is empty".into()));
+        }
+        let mut tables = self.lock();
+        let existing = tables
+            .repo_paths
+            .values()
+            .find(|r| r.path == path && r.host.is_empty())
+            .cloned();
+        if let Some(row) = existing {
+            self.write_repo_path(&mut tables, module::RepoPath { host, ..row });
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    pub(super) fn apply_delete_repo_path(
+        &self,
+        path: String,
+        host: String,
+    ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
         let ids: Vec<i64> = tables
             .repo_paths
             .values()
-            .filter(|r| r.path == path)
+            .filter(|r| r.path == path && r.host == host)
             .map(|r| r.id)
             .collect();
         for id in ids {

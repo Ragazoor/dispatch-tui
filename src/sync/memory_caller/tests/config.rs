@@ -116,8 +116,76 @@ async fn delete_repo_path_removes_every_row_for_that_path() {
         .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into())
         .await
         .unwrap();
-    caller.delete_repo_path("/repo".into()).await.unwrap();
+    caller
+        .delete_repo_path("/repo".into(), "h".into())
+        .await
+        .unwrap();
     assert!(rows.repo_paths().is_empty());
+}
+
+#[tokio::test]
+async fn delete_repo_path_keeps_a_row_another_host_owns() {
+    let (caller, rows) = caller();
+    caller
+        .save_repo_path("/repo".into(), at(TEST_STAMP), "a".into())
+        .await
+        .unwrap();
+    caller
+        .save_repo_path("/legacy".into(), at(TEST_STAMP), String::new())
+        .await
+        .unwrap();
+    caller
+        .delete_repo_path("/repo".into(), "b".into())
+        .await
+        .unwrap();
+    caller
+        .delete_repo_path("/legacy".into(), "b".into())
+        .await
+        .unwrap();
+    assert_eq!(rows.repo_paths().len(), 2);
+}
+
+#[tokio::test]
+async fn save_repo_path_never_takes_over_another_hosts_row() {
+    let (caller, rows) = caller();
+    caller
+        .save_repo_path("/repo".into(), at(TEST_STAMP), "a".into())
+        .await
+        .unwrap();
+    caller
+        .save_repo_path("/repo".into(), at(TEST_STAMP), "b".into())
+        .await
+        .unwrap();
+    assert_eq!(rows.repo_paths_saved_by("a"), vec!["/repo".to_string()]);
+    assert!(rows.repo_paths_saved_by("b").is_empty());
+}
+
+#[tokio::test]
+async fn adopt_repo_path_stamps_only_an_unowned_row() {
+    let (caller, rows) = caller();
+    caller
+        .save_repo_path("/legacy".into(), at(TEST_STAMP), String::new())
+        .await
+        .unwrap();
+    caller
+        .save_repo_path("/owned".into(), at(TEST_STAMP), "a".into())
+        .await
+        .unwrap();
+    caller
+        .adopt_repo_path("/legacy".into(), "b".into())
+        .await
+        .unwrap();
+    caller
+        .adopt_repo_path("/owned".into(), "b".into())
+        .await
+        .unwrap();
+    caller
+        .adopt_repo_path("/missing".into(), "b".into())
+        .await
+        .unwrap();
+    assert_eq!(rows.repo_paths_saved_by("b"), vec!["/legacy".to_string()]);
+    assert_eq!(rows.repo_paths_saved_by("a"), vec!["/owned".to_string()]);
+    assert_eq!(rows.repo_paths().len(), 2);
 }
 
 // -- Subscriptions ------------------------------------------------------------

@@ -236,7 +236,10 @@ pub trait ReducerCaller: Send + Sync {
         last_used: DateTime<Utc>,
         host: String,
     ) -> Result<ReducerOutcome>;
-    async fn delete_repo_path(&self, path: String) -> Result<ReducerOutcome>;
+    /// Stamp `host` on the row for `path` only if no host owns it yet.
+    async fn adopt_repo_path(&self, path: String, host: String) -> Result<ReducerOutcome>;
+    /// Remove the row for `path` only if `host` owns it.
+    async fn delete_repo_path(&self, path: String, host: String) -> Result<ReducerOutcome>;
     async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome>;
     async fn record_base_branch(
         &self,
