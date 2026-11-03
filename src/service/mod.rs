@@ -13,9 +13,7 @@ pub mod work_packages;
 pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi, WorkPackageServiceApi};
 #[cfg(test)]
 pub use api::{LearningServiceApiStub, MockLearningService, TaskServiceApiStub};
-pub use epics::{
-    require_epic_accepting_work, CreateEpicParams, EpicService, UpdateEpicParams, UpdateEpicResult,
-};
+pub use epics::{CreateEpicParams, EpicService, UpdateEpicParams, UpdateEpicResult};
 pub use learnings::{CreateLearningParams, LearningService, QueryLearningsParams};
 pub use managed_feeds::{
     provision_managed_feeds_from_settings, read_managed_feed_settings, write_managed_feed_settings,

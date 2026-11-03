@@ -992,8 +992,8 @@ rule WritesRequireSight {
         -- ensure_managed_epics looks only among visible epics. Host-internal
         -- calls are not exempt: only the operator is.
         --
-        -- Created-by. A new epic with no creator is stamped with the caller,
-        -- so a private epic always has someone to be private to.
+        -- Created-by. Every new epic and work package is stamped with the
+        -- caller, so a private one always has someone to be private to.
 }
 
 -- Learnings and settings -------------------------------------
@@ -1254,6 +1254,6 @@ surface SuperAdministration {
 
 open question "UnseenItemListingContents lists only private epics with no private ancestor (A5), but under the nearest-holder reading (D5) a private sub-epic of a private epic is its own creator's. When that sub-epic's creator leaves while the ancestor's creator stays, SuperAdminDeletesUnseenItem accepts it but the listing never shows it. Should the listing show every private epic whose own holder has left?"
 
-open question "SetWorkPackageVisibility has no counterpart to EpicIsPrivateOnlyWithACreator, and the store does not stamp created_by on a new package. Should a package with no creator be refused as private?"
+open question "SetWorkPackageVisibility has no counterpart to EpicIsPrivateOnlyWithACreator. The store stamps created_by on every new package, so only a package from before that stamp can lack a creator. Should such a package be refused as private?"
 
 open question "'PR poll state' has no table of its own: the PR state lives on the task and poll_owners (scope task) follows its task. Is anything else meant?"

@@ -549,13 +549,13 @@ rule SubscribeOnceIdentityIsSettled {
         --     the person's sight of its task: unfollowing the epic of a
         --     teammate's task one dispatched must not lose the wrap-up row
         --     or its serving), and the links, poll claims,
-        --     learnings, settings, workspaces, memberships and usage events
-        --     the caller may see.
-        -- Public tables (hosts, user_profiles, repo lists, this person's own
-        -- subscription rows) are asked for directly. The board narrows
-        -- subscriptions to its own rows, but the store does not: any client
-        -- can read every follow (known gap, workspaces.allium:
-        -- AClientReceivesOnlyWhatItCanSee, task #98806).
+        --     learnings, settings, workspaces and memberships the caller
+        --     may see.
+        -- Usage is not a view: the board asks the store on demand
+        -- (own_usage_summary). Public tables (hosts, user_profiles, repo
+        -- lists) are asked for directly. This person's own follows come
+        -- through the own_subscriptions view; the subscriptions table is
+        -- private, so no client can read another person's follows.
         --
         -- THE STORE WALKS THE TREE, THE BOARD DOES NOT. covered_epics is
         -- derived from the Subscription rows on the store's side, so a

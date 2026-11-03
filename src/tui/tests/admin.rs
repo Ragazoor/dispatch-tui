@@ -500,3 +500,23 @@ fn a_created_workspace_is_highlighted_by_name_on_the_reload() {
     let screen = app.input.admin.as_ref().unwrap();
     assert_eq!(screen.current_workspace().map(|w| w.id), Some(3));
 }
+
+#[test]
+fn a_refused_create_does_not_move_the_cursor_to_the_existing_name() {
+    let mut app = open(snapshot(true));
+    press(&mut app, 'n');
+    type_text(&mut app, "Beta");
+    app.handle_key(make_key(KeyCode::Enter));
+    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+        "Workspace name already taken".to_string(),
+    )));
+    let mut snap = snapshot(true);
+    snap.workspaces.insert(0, workspace(3, "Beta", vec![]));
+    app.update(Message::Admin(AdminMessage::Loaded(Box::new(snap))));
+    let screen = app.input.admin.as_ref().unwrap();
+    assert_eq!(
+        screen.current_workspace().map(|w| w.id),
+        Some(1),
+        "the highlight stays on the workspace it was on"
+    );
+}

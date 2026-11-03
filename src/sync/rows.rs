@@ -120,18 +120,16 @@ struct Rows {
     /// insert/remove. `poll_owner()` is read on every `PollPrStatus`/
     /// `FeedTick` tick and must not degrade to a scan as the table grows.
     poll_owners_by_scope: BTreeMap<(String, i64), i64>,
-    /// The knowledge base (Phase 10, task #4914). Unlike every table above,
-    /// nothing here is scoped by owner or epic — subscribed to unconditionally,
-    /// like `repo_paths` — so there is no per-caller filtering to do on the way
-    /// in, only on the way out (`SharedRows::learnings_matching`).
+    /// The knowledge base (Phase 10, task #4914). Arrives through the
+    /// `visible_learnings` and `visible_learning_retrievals` views, so the
+    /// store has already narrowed it to what this person may see; the only
+    /// filtering left is on the way out (`SharedRows::learnings_matching`).
     ///
     /// The embedding travels alongside its `Learning` in one map rather than
     /// in a second one keyed the same way: two maps that must always agree on
     /// which ids exist is the kind of invariant a single map holds for free.
     learnings: BTreeMap<i64, (Learning, Option<Vec<u8>>)>,
     learning_retrievals: BTreeMap<i64, LearningRetrieval>,
-    /// Telemetry (Phase 11, task #4915). Unconditionally subscribed, like
-    /// `learnings` above — nothing here is scoped by owner or host.
     /// The tables the store's task, subscription and settings reads need
     /// beyond the ones above (task #4916). None carries a sentinel, an enum or a timestamp a reader
     /// interprets, so they are held as the store sends them.
@@ -146,8 +144,8 @@ struct Rows {
     /// `workspaces.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
     /// the directory of identities and names is readable by every client.
     user_profiles: BTreeMap<String, bindings::UserProfile>,
-    /// `core.allium: Workspace` and `Membership`. Unfiltered until the
-    /// read-enforcement task serves them through per-caller views.
+    /// `core.allium: Workspace` and `Membership`. Served through the
+    /// `visible_workspaces` and `visible_memberships` views.
     workspaces: BTreeMap<i64, bindings::Workspace>,
     memberships: BTreeMap<i64, bindings::Membership>,
     /// `admin-surfaces.allium: UnseenItem`, from the `unseen_items` view: empty

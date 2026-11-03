@@ -73,7 +73,7 @@ pub(crate) struct FeedOutput {
 pub(crate) const MAX_FEED_STDOUT_BYTES: usize = 32 * 1024 * 1024;
 
 /// SIGKILL every process in the group `pid` leads. `pid` is the `sh -c` spawned
-/// with `process_group(0)`, so its pid is the group id. Goes through `kill(1)`
+/// with `setsid`, so its pid is the group id. Goes through `kill(1)`
 /// rather than libc to keep the crate free of `unsafe`; the spawn is async so
 /// it never blocks the runtime thread.
 async fn kill_process_group(pid: Option<u32>) {
@@ -102,11 +102,14 @@ pub async fn run_feed_command_bounded(
     // The command runs in its own process group so a timeout (or an oversized
     // stdout) can kill the whole pipeline: `kill_on_drop` alone reaches only
     // the `sh -c`, and `gh | jq` children would survive every timeout.
-    let mut child = match tokio::process::Command::new("sh")
-        .args(["-c", cmd])
-        .process_group(0)
-        // Same non-interactive environment as `run_bounded`: a prompt would
-        // stop the background-group command with SIGTTIN and read as a timeout.
+    let mut command = std::process::Command::new("sh");
+    command.args(["-c", cmd]);
+    // Same as `run_bounded`: its own session, so no controlling terminal and a
+    // prompt (ssh passphrase) fails at once instead of reading as a timeout.
+    crate::process::detach_from_terminal(&mut command);
+    let mut command = tokio::process::Command::from(command);
+    let spawned = command
+        // Same non-interactive environment as `run_bounded`.
         .envs(crate::process::non_interactive_env(
             std::env::var("GIT_SSH_COMMAND").ok().as_deref(),
         ))
@@ -114,8 +117,8 @@ pub async fn run_feed_command_bounded(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
+        .spawn();
+    let mut child = match spawned {
         Ok(child) => child,
         Err(err) => return Err(format!("{err:#}")),
     };

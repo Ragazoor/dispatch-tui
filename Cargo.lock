@@ -866,6 +866,7 @@ dependencies = [
  "hyper-util",
  "include_dir",
  "insta",
+ "libc",
  "proptest",
  "ratatui",
  "regex",

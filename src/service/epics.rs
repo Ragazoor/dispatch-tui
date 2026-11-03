@@ -5,23 +5,6 @@ use crate::store::{self, EpicPatch};
 
 use super::{validate_feed_interval, FieldUpdate, ServiceError};
 
-/// Load the epic a caller NAMED as a target for new work, or fail with
-/// `NotFound`.
-///
-/// Extracted because the existence check had been written inline three times
-/// and had begun to drift: the same operator mistake, naming an epic that does
-/// not exist, answered `NotFound` on the reassign path and something else on
-/// the create path. One helper means one answer. Never a routed substitute:
-/// the store routes a grouped epic's work into its sub-epic itself.
-pub async fn require_epic_accepting_work(
-    db: &dyn store::EpicRead,
-    epic_id: EpicId,
-) -> Result<Epic, ServiceError> {
-    db.get_epic(epic_id)
-        .await
-        .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))
-}
-
 // ---------------------------------------------------------------------------
 // UpdateEpicParams
 // ---------------------------------------------------------------------------

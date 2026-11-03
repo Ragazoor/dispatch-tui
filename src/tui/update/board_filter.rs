@@ -90,8 +90,8 @@ impl App {
         vec![]
     }
 
-    /// Space on an epic row (`ToggleHiddenEpic`): a hidden or partly hidden
-    /// epic shows its whole subtree, clearing every sub-epic's own hide; a
+    /// Space on an epic row (`ToggleHiddenEpic`): an epic on the list, or
+    /// partly hidden, shows its whole subtree, clearing every sub-epic's own hide; a
     /// shown one, or one hidden only by its parent, goes on the list.
     pub(in crate::tui) fn handle_toggle_hidden_epic(&mut self, id: EpicId) -> Vec<Command> {
         // The row's own mark, so Space does what the row shows. The id
@@ -102,7 +102,9 @@ impl App {
             .find(|r| r.id == id)
             .map(|r| r.mark);
         let hidden = &mut self.filter.hidden_epics;
-        if let Some(FilterEpicMark::Hidden | FilterEpicMark::PartlyHidden) = mark {
+        // The epic's own hide comes first: a `[-]` mark must not mask it.
+        let own_hide = hidden.contains(&id);
+        if own_hide || matches!(mark, Some(FilterEpicMark::PartlyHidden)) {
             // Inclusive of `id` itself.
             let subtree = crate::models::descendant_epic_ids(id, &self.board.epics);
             hidden.retain(|e| !subtree.contains(e));

@@ -294,6 +294,22 @@ fn space_on_a_partly_hidden_row_shows_the_subtree_then_hides_the_parent() {
 }
 
 #[test]
+fn space_on_a_hidden_child_of_a_hidden_parent_removes_the_childs_own_hide() {
+    let mut app = deep_overlay_app();
+    app.filter.hidden_epics.extend([EpicId(1), EpicId(2)]);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('Z'));
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.filter_epic_rows()[1].id, EpicId(2));
+    press(&mut app, KeyCode::Char(' '));
+    assert_eq!(
+        app.filter.hidden_epics,
+        [EpicId(1)].into_iter().collect(),
+        "Space removes the child's own hide and leaves the parent's"
+    );
+}
+
+#[test]
 fn slash_filters_the_epic_tree_by_title_and_keeps_ancestors() {
     let mut app = overlay_app();
     press(&mut app, KeyCode::Tab);

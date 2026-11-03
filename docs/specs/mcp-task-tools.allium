@@ -984,8 +984,8 @@ rule CreateTaskViaMcp {
         -- An unknown epic_id is a not-found condition, like an unknown
         -- caller-task above, and returns -32001 for the same reason: the epic
         -- named is not there, which is not the same answer as the argument
-        -- being malformed. require_epic_accepting_work (src/service/epics.rs)
-        -- raises it, so create_task and the
+        -- being malformed. The store refuses the write and the service maps
+        -- that refusal to NotFound, so create_task and the
         -- reassign path in MoveTaskToEpic give one answer to one operator
         -- mistake rather than -32602 and -32001 by entry point. It sits in the
         -- service rather than the handler so the TUI create path is held to it

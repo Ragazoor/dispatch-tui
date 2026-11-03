@@ -604,20 +604,6 @@ fn non_interactive_env_ignores_an_empty_ssh_command() {
 }
 
 #[test]
-fn ssh_config_args_are_empty_without_a_configured_command() {
-    assert!(ssh_config_args(None).is_empty());
-    assert!(ssh_config_args(Some("  \n")).is_empty());
-}
-
-#[test]
-fn ssh_config_args_append_batch_mode_to_the_configured_command() {
-    assert_eq!(
-        ssh_config_args(Some("ssh -i /k\n")),
-        vec!["-c", "core.sshCommand=ssh -i /k -o BatchMode=yes"]
-    );
-}
-
-#[test]
 fn run_bounded_children_never_prompt_for_git_credentials() {
     let out = run_bounded(
         "sh",
@@ -629,38 +615,39 @@ fn run_bounded_children_never_prompt_for_git_credentials() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "0");
 }
 
-/// R1: a user's `core.sshCommand` must still be the command git runs, with
-/// `BatchMode=yes` added, and not be replaced by a `GIT_SSH_COMMAND` override.
+/// K3: a bounded child has no controlling terminal, so an ssh that wants a
+/// passphrase fails at once instead of stopping on SIGTTIN until the deadline.
+/// The fake `ssh` stands in for it: it tries to open `/dev/tty`.
 #[test]
-fn run_bounded_git_keeps_the_users_core_ssh_command() {
-    if std::env::var_os("GIT_SSH_COMMAND").is_some() {
-        return; // the caller's own command legitimately wins
-    }
-    let dir = tempfile::tempdir().unwrap();
-    let repo = dir.path();
-    crate::test_git::git(repo, &["init", "-q"]);
-    let log = repo.join("ssh-args");
-    let script = repo.join("fake-ssh");
-    std::fs::write(
-        &script,
-        format!("#!/bin/sh\necho \"$@\" > '{}'\nexit 1\n", log.display()),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    crate::test_git::git(
-        repo,
-        &["config", "core.sshCommand", &script.display().to_string()],
-    );
-    let repo_str = repo.display().to_string();
-    let _ = run_bounded(
-        "git",
-        &["-C", &repo_str, "ls-remote", "ssh://example.invalid/x"],
+fn run_bounded_children_have_no_controlling_terminal() {
+    let out = run_bounded(
+        "sh",
+        &[
+            "-c",
+            "if (: < /dev/tty) 2>/dev/null; then echo tty; else echo no-tty; fi",
+        ],
         None,
-        Duration::from_secs(20),
+        Duration::from_secs(10),
     )
     .unwrap();
-    let args = std::fs::read_to_string(&log).expect("core.sshCommand was not used");
-    assert!(args.contains("BatchMode=yes"), "got {args:?}");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "no-tty");
+}
+
+/// The child leads its own session, so its pid is also its group id and the
+/// deadline kill still reaches the whole group.
+#[test]
+fn run_bounded_children_lead_their_own_session() {
+    let out = run_bounded(
+        "sh",
+        &["-c", "echo $$; ps -o sid= -p $$"],
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let mut ids = text.split_whitespace().map(|n| n.parse::<u32>().unwrap());
+    let (pid, sid) = (ids.next().unwrap(), ids.next().unwrap());
+    assert_eq!(sid, pid, "the child is its session leader");
 }
 
 #[test]
