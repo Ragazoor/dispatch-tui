@@ -1247,6 +1247,17 @@ rule SerialisedFeedCycle {
     -- in-flight work per epic at one cycle regardless of how many requests
     -- arrive while it runs.
     --
+    -- == Scope across hosts (decided, task #98854; NOT YET IMPLEMENTED) ==
+    --
+    -- The claim registry is per PROCESS. Two hosts of the one person who set
+    -- the command may both run it, so two hosts can reconcile one epic and an
+    -- older emission from one can delete what the other just wrote.
+    -- DECISION: only the epic's poll owner reconciles. A manual "r" on a host
+    -- that is not the poll owner writes a refresh request that the poll
+    -- owner's reactor serves on its next tick (the guard stays per process);
+    -- the requesting host's status line says the owner will refresh. Until
+    -- that lands, the race above is open. Follow-up: task #98873.
+    --
     -- == Scope: this closes the feed-vs-feed race ONLY ==
     --
     -- The claim serialises feed cycles against EACH OTHER. It does nothing
@@ -1680,7 +1691,7 @@ rule UpsertFeedTasks {
         -- exist only there. src/feed/mod.rs::split_removed_by_host hands the
         -- cleanup only rows this host owns (or that were never dispatched); a
         -- row another host owns is logged and left for that host. OPEN
-        -- (task #98854): carrying the teardown to the owning host needs a
+        -- (follow-up task #98873): carrying the teardown to the owning host needs a
         -- request row written with the delete, which the module does not yet
         -- have for a row that no longer exists.
         --
