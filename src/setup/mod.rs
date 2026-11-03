@@ -139,6 +139,57 @@ pub(super) fn write_json_file(path: &std::path::Path, value: &Value) -> Result<(
     .with_context(|| format!("Failed to write {}", path.display()))
 }
 
+/// How often [`update_json_file`] re-merges after the file changed under it.
+const UPDATE_JSON_ATTEMPTS: usize = 5;
+
+/// Read `path`, let `merge` produce the new value (`None` = nothing to write),
+/// and write it back, re-merging if the file changed between our read and the
+/// write. Claude Code rewrites `~/.claude.json` often; a plain read-merge-write
+/// would drop a write that landed in between. Returns whether it wrote.
+pub(super) fn update_json_file(
+    path: &std::path::Path,
+    merge: impl FnMut(Option<Value>) -> Option<Value>,
+) -> Result<bool> {
+    update_json_file_with(path, merge, || {})
+}
+
+/// [`update_json_file`] with a hook that runs after the merge and before the
+/// compare, so a test can land a concurrent write in that window.
+fn update_json_file_with(
+    path: &std::path::Path,
+    mut merge: impl FnMut(Option<Value>) -> Option<Value>,
+    mut before_check: impl FnMut(),
+) -> Result<bool> {
+    let read_raw = |path: &std::path::Path| match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("Failed to read {}", path.display())),
+    };
+    for _ in 0..UPDATE_JSON_ATTEMPTS {
+        let raw = read_raw(path)?;
+        let existing = match &raw {
+            Some(bytes) => Some(
+                serde_json::from_slice::<Value>(bytes)
+                    .with_context(|| format!("Invalid JSON in {}", path.display()))?,
+            ),
+            None => None,
+        };
+        let Some(merged) = merge(existing) else {
+            return Ok(false);
+        };
+        before_check();
+        if read_raw(path)? != raw {
+            continue;
+        }
+        write_json_file(path, &merged)?;
+        return Ok(true);
+    }
+    anyhow::bail!(
+        "{} kept changing while it was being updated; gave up after {UPDATE_JSON_ATTEMPTS} attempts",
+        path.display()
+    )
+}
+
 /// Whether `path` already holds exactly `content` — the single definition of "this
 /// file is already up to date" for everything setup manages.
 ///
@@ -177,12 +228,15 @@ fn write_file_if_changed(path: &std::path::Path, content: &str, executable: bool
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create {}", parent.display()))?;
     }
-    fs::write(path, content).with_context(|| format!("Failed to write {}", path.display()))?;
-    if executable {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-            .with_context(|| format!("Failed to set permissions on {}", path.display()))?;
-    }
+    // Atomic, with the final mode set at creation: a live agent's hook or
+    // `--settings` read never sees a truncated or not-yet-executable file.
+    let mode = if executable { 0o755 } else { 0o644 };
+    crate::atomic_write::write_bytes(
+        path,
+        crate::atomic_write::Mode::Fixed(mode),
+        content.as_bytes(),
+    )
+    .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(true)
 }
 

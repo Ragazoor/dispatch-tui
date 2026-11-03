@@ -94,6 +94,101 @@ fn write_file_if_changed_sets_executable_permission() {
     assert_eq!(mode & 0o755, 0o755, "should have executable permissions");
 }
 
+#[test]
+fn write_file_if_changed_new_script_has_mode_0755_at_creation() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("script.sh");
+    write_file_if_changed(&path, "#!/bin/bash", true).unwrap();
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+        0o755
+    );
+}
+
+#[test]
+fn write_file_if_changed_new_plain_file_has_mode_0644() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plain.json");
+    write_file_if_changed(&path, "{}", false).unwrap();
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+        0o644
+    );
+}
+
+#[test]
+fn write_file_if_changed_replaces_the_inode_rather_than_truncating() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hook.sh");
+    fs::write(&path, "old").unwrap();
+    let before = fs::metadata(&path).unwrap().ino();
+    // A reader holding the old file open keeps seeing the old, whole content.
+    let reader = fs::File::open(&path).unwrap();
+    write_file_if_changed(&path, "new", true).unwrap();
+    assert_ne!(fs::metadata(&path).unwrap().ino(), before);
+    let mut seen = String::new();
+    std::io::Read::read_to_string(&mut &reader, &mut seen).unwrap();
+    assert_eq!(seen, "old");
+}
+
+// -- update_json_file (compare-and-retry) --
+
+#[test]
+fn update_json_file_remerges_when_the_file_changes_before_the_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.json");
+    fs::write(&path, r#"{"a":1}"#).unwrap();
+    let mut interfered = false;
+    let wrote = update_json_file_with(
+        &path,
+        |existing| {
+            let mut v = existing.unwrap();
+            v["dispatch"] = serde_json::json!(true);
+            Some(v)
+        },
+        || {
+            if !interfered {
+                interfered = true;
+                fs::write(&path, r#"{"a":1,"trust":"yes"}"#).unwrap();
+            }
+        },
+    )
+    .unwrap();
+    assert!(wrote);
+    let v = read_json_file(&path).unwrap().unwrap();
+    assert_eq!(v["trust"], "yes", "the concurrent write must survive");
+    assert_eq!(v["dispatch"], true);
+}
+
+#[test]
+fn update_json_file_gives_up_after_bounded_retries() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.json");
+    fs::write(&path, r#"{"n":0}"#).unwrap();
+    let mut n = 0;
+    let result = update_json_file_with(
+        &path,
+        |existing| existing,
+        || {
+            n += 1;
+            fs::write(&path, format!(r#"{{"n":{n}}}"#)).unwrap();
+        },
+    );
+    assert!(result.is_err());
+    assert!(n <= 10, "retries must be bounded, saw {n}");
+}
+
+#[test]
+fn update_json_file_writes_nothing_when_closure_returns_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.json");
+    assert!(!update_json_file_with(&path, |_| None, || {}).unwrap());
+    assert!(!path.exists());
+}
+
 // -- MCP setup application --
 
 #[test]

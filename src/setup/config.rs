@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 
-use super::{read_json_file, write_json_file};
+use super::{read_json_file, update_json_file};
 use crate::models::TaskId;
 
 // ---------------------------------------------------------------------------
@@ -160,27 +160,16 @@ pub fn has_dispatch_entry(mcp_path: &std::path::Path) -> bool {
 }
 
 pub fn remove_mcp_config(mcp_path: &std::path::Path) -> Result<bool> {
-    let existing = match read_json_file(mcp_path)? {
-        Some(v) => v,
-        None => return Ok(false),
-    };
-
-    let mut root = match existing {
-        Value::Object(map) => map,
-        _ => return Ok(false),
-    };
-
-    let had_dispatch = if let Some(Value::Object(servers)) = root.get_mut("mcpServers") {
-        servers.remove(SERVER_NAME).is_some()
-    } else {
-        false
-    };
-
-    if had_dispatch {
-        write_json_file(mcp_path, &Value::Object(root))?;
-    }
-
-    Ok(had_dispatch)
+    update_json_file(mcp_path, |existing| {
+        let Some(Value::Object(mut root)) = existing else {
+            return None;
+        };
+        let had_dispatch = match root.get_mut("mcpServers") {
+            Some(Value::Object(servers)) => servers.remove(SERVER_NAME).is_some(),
+            _ => false,
+        };
+        had_dispatch.then_some(Value::Object(root))
+    })
 }
 
 // ---------------------------------------------------------------------------

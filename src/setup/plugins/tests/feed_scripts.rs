@@ -593,9 +593,16 @@ fn install_shipped_feed_scripts_names_the_backup_even_when_the_write_fails() {
     let data_dir = tempfile::tempdir().unwrap();
     let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
     let path = plant(data_dir.path(), "fetch-reviews.sh", edit);
-    // Readable (so the copy succeeds) but not writable (so the write does
-    // not). The directory stays writable, so the .bak lands.
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    // The script is a symlink into a read-only directory: readable (so the
+    // copy succeeds) but the atomic replace cannot create its temporary file
+    // beside the target (so the write does not). `scripts/` stays writable,
+    // so the .bak lands.
+    let locked = data_dir.path().join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    let real = locked.join("fetch-reviews.sh");
+    std::fs::rename(&path, &real).unwrap();
+    std::os::unix::fs::symlink(&real, &path).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
 
     let reports = install_shipped_feed_scripts(
         data_dir.path(),
@@ -603,7 +610,7 @@ fn install_shipped_feed_scripts_names_the_backup_even_when_the_write_fails() {
     )
     .unwrap();
 
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
     let report = report_for(&reports, "fetch-reviews.sh");
     let backup =
         scripts_dir(data_dir.path()).join(format!("fetch-reviews.sh{SCRIPT_BACKUP_SUFFIX}"));

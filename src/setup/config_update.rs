@@ -15,12 +15,15 @@ use super::*;
 pub(super) fn apply_mcp_setup(target: &Path, legacy: &Path, port: u16) -> Result<bool> {
     let mut changed = false;
 
-    let existing = read_json_file(target)?;
-    let merged = merge_mcp_config(existing, port);
-    if merged.changed {
-        let display = display_for(target);
-        write_json_file(target, &merged.value)?;
-        println!("MCP config: added dispatch to {display} (port {port})");
+    let wrote = update_json_file(target, |existing| {
+        let merged = merge_mcp_config(existing, port);
+        merged.changed.then_some(merged.value)
+    })?;
+    if wrote {
+        println!(
+            "MCP config: added dispatch to {} (port {port})",
+            display_for(target)
+        );
         changed = true;
     }
 

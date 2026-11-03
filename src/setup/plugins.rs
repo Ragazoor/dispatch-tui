@@ -386,7 +386,11 @@ fn write_script_manifest(data_dir: &Path, manifest: &std::collections::BTreeMap<
             return;
         }
     };
-    if let Err(e) = fs::write(&path, encoded) {
+    if let Err(e) = crate::atomic_write::write_bytes(
+        &path,
+        crate::atomic_write::Mode::Fixed(0o644),
+        encoded.as_bytes(),
+    ) {
         tracing::warn!("failed to write {}: {e}", path.display());
     }
 }
