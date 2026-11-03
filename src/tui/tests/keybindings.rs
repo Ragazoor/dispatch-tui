@@ -695,9 +695,9 @@ fn a_key_with_no_row_runs_nothing_and_records_nothing() {
 // Rebinding is an edit to one row (KeypressRunsItsRowsAction)
 // ---------------------------------------------------------------------------
 
-/// The real table with board.normal's delete_task row answering `W` instead
+/// The real table with board.normal's delete_task row answering `O` instead
 /// of `x`, and nothing else changed.
-fn table_with_delete_rebound_to_w() -> &'static [KeyBinding] {
+fn table_with_delete_rebound_to_o() -> &'static [KeyBinding] {
     let rows: Vec<KeyBinding> = KEY_BINDINGS
         .iter()
         .map(|b| {
@@ -707,7 +707,7 @@ fn table_with_delete_rebound_to_w() -> &'static [KeyBinding] {
                     &["x"],
                     "the fixture assumes x is delete_task's only key"
                 );
-                KeyBinding { keys: &["W"], ..*b }
+                KeyBinding { keys: &["O"], ..*b }
             } else {
                 *b
             }
@@ -715,9 +715,9 @@ fn table_with_delete_rebound_to_w() -> &'static [KeyBinding] {
         .collect();
     assert!(
         !rows.iter().any(|b| b.namespace == KeyNamespace::BoardNormal
-            && b.keys.contains(&"W")
+            && b.keys.contains(&"O")
             && b.action != "delete_task"),
-        "W must be free in board.normal for this fixture"
+        "O must be free in board.normal for this fixture"
     );
     Box::leak(rows.into_boxed_slice())
 }
@@ -725,23 +725,23 @@ fn table_with_delete_rebound_to_w() -> &'static [KeyBinding] {
 #[test]
 fn a_rebound_key_runs_the_rows_action() {
     let mut app = on_running_card(make_app());
-    app.set_key_table(table_with_delete_rebound_to_w());
-    let cmds = press(&mut app, "W");
+    app.set_key_table(table_with_delete_rebound_to_o());
+    let cmds = press(&mut app, "O");
     assert_eq!(
         recorded(&cmds),
-        vec![("delete_task".to_string(), Some("W".to_string()))]
+        vec![("delete_task".to_string(), Some("O".to_string()))]
     );
     assert_eq!(
         app.input.mode,
         InputMode::ConfirmDone,
-        "W on a Running task runs delete_task, which asks to move it to Done"
+        "O on a Running task runs delete_task, which asks to move it to Done"
     );
 }
 
 #[test]
 fn the_key_a_row_no_longer_lists_does_nothing() {
     let mut app = on_running_card(make_app());
-    app.set_key_table(table_with_delete_rebound_to_w());
+    app.set_key_table(table_with_delete_rebound_to_o());
     let cmds = press(&mut app, "x");
     assert!(
         cmds.is_empty(),
@@ -762,8 +762,8 @@ fn the_default_table_is_key_bindings() {
     assert_eq!(app.input.mode, InputMode::ConfirmDone);
 
     let mut app = on_running_card(make_app());
-    let cmds = press(&mut app, "W");
-    assert!(cmds.is_empty(), "W has no row in the real table");
+    let cmds = press(&mut app, "O");
+    assert!(cmds.is_empty(), "O has no row in the real table");
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 

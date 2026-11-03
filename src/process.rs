@@ -536,6 +536,14 @@ fn sccache_on_path() -> bool {
     })
 }
 
+/// Whether an executable named `name` exists in some `PATH` entry. Not
+/// memoized: callers that ask on a hot path should cache the answer.
+pub fn program_on_path(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| is_executable_file(&dir.join(name)))
+    })
+}
+
 /// [`sccache_on_path`]'s search, over an arbitrary directory list rather than
 /// the process's own `PATH` — the seam that lets a test check the scan logic
 /// without mutating process-global environment state.

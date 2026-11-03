@@ -1,0 +1,239 @@
+-- allium: 3
+-- keep-awake.allium
+--
+-- Scope: The board's keep-awake toggle. While it is on, the operator's own
+--        machine does not lock, blank its screen or suspend for being idle.
+--        It replaces leaving a video playing to hold the machine awake.
+-- Includes: KeepAwake (one per running board, never stored); the [W] toggle,
+--           the request to the operating system and its answer, losing the
+--           hold while on, release on toggle-off and on board exit, the
+--           board badge, the unsupported-platform refusal.
+-- Excludes: which operating-system facility holds the machine awake (an
+--           implementation detail; the spec names only what it must block);
+--           any agent or MCP control (KeepAwakeIsKeyboardOnly); any shared
+--           store row (KeepAwakeIsNeverStored); platforms other than Linux
+--           (KeepAwakeIsLinuxOnly).
+--
+-- Decided with the operator on 2026-11-03 (task #98768):
+--   - It blocks all three idle effects: screen lock, screen blanking and
+--     suspend. Blocking one alone does not replace the video.
+--   - It always starts off. It ends on toggle-off or when the board exits,
+--     including a crash. It is never remembered across restarts.
+--   - One board key toggles it. A steady badge shows while it holds.
+--   - A refusal, or a hold that ends on its own, turns it off with an error
+--     message. There is no automatic retry.
+--   - Linux only; keyboard only; no MCP tool.
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+-- The board's keep-awake state. There is exactly one per running board
+-- process, created `off` when the board starts and gone when it exits. It is
+-- process-local: no other host, board or agent can see it.
+entity KeepAwake {
+    status: off | requesting | on
+
+    transitions status {
+        off -> requesting
+        requesting -> on
+        requesting -> off
+        on -> off
+    }
+
+    -- The board badge is shown exactly when the operating system has
+    -- confirmed the hold. `requesting` shows no badge: a badge must never
+    -- claim a hold the machine has not granted.
+    shows_badge: status = on
+}
+
+given {
+    keep_awake: KeepAwake
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule KeepAwakeStartsOff {
+    when: BoardStarted()
+
+    ensures: KeepAwake.created(status: off)
+
+    @guidance
+        -- Every board start begins with keep-awake off, whatever it was when
+        -- the previous board exited. A board restart (startup.allium) is a
+        -- new process, so it too starts off.
+}
+
+rule RequestKeepAwake {
+    when: UserAction("W")
+
+    requires: keep_awake.status = off
+    requires: platform_is_linux()
+
+    ensures: keep_awake.status = requesting
+    ensures: KeepAwakeRequested(blocks: {screen_lock, screen_blank, suspend})
+
+    @guidance
+        -- The request asks the operating system to hold off all three idle
+        -- effects at once. The board does not wait for the answer; the
+        -- answer arrives as KeepAwakeGranted or KeepAwakeRefused.
+        --
+        -- Which facility holds the machine is not fixed here. Where the
+        -- desktop's own session manager offers one (GNOME), it is preferred,
+        -- because the desktop honours it for screen lock and blanking. The
+        -- generic system facility is the fallback; on some desktops it holds
+        -- off suspend reliably but lock and blanking only best-effort.
+        -- Granted means the facility confirmed the hold, never merely that
+        -- the request was sent.
+}
+
+rule RefuseKeepAwakeOffLinux {
+    when: UserAction("W")
+
+    requires: keep_awake.status = off
+    requires: not platform_is_linux()
+
+    ensures: ErrorShown(message: "Keep-awake is only supported on Linux")
+}
+
+rule IgnoreToggleWhileRequesting {
+    when: UserAction("W")
+
+    requires: keep_awake.status = requesting
+
+    ensures: ToggleHasNoEffect()
+
+    @guidance
+        -- A second press before the answer does nothing. Unlike split
+        -- mode's held toggle, nothing is replayed: the request settles in
+        -- well under a second, and a dropped press here leaves the badge
+        -- telling the operator the true state.
+}
+
+rule KeepAwakeGranted {
+    when: KeepAwakeHoldGranted()
+
+    requires: keep_awake.status = requesting
+
+    ensures: keep_awake.status = on
+}
+
+rule KeepAwakeRefused {
+    when: KeepAwakeHoldRefused(reason)
+
+    requires: keep_awake.status = requesting
+
+    ensures: keep_awake.status = off
+    ensures: ErrorShown(message: "Keep-awake failed: " + reason)
+
+    @guidance
+        -- No retry. The operator presses [W] again if they want another try.
+}
+
+rule KeepAwakeLost {
+    when: KeepAwakeHoldEnded(reason)
+
+    requires: keep_awake.status = on
+
+    ensures: keep_awake.status = off
+    ensures: ErrorShown(message: "Keep-awake stopped: " + reason)
+
+    @guidance
+        -- The hold ended without the operator asking: the facility holding
+        -- it went away or was stopped from outside. The badge goes the
+        -- moment this is noticed, so it never outlives the hold. No retry.
+}
+
+rule ReleaseKeepAwake {
+    when: UserAction("W")
+
+    requires: keep_awake.status = on
+
+    ensures: keep_awake.status = off
+    ensures: KeepAwakeReleased()
+}
+
+rule ReleaseKeepAwakeOnExit {
+    when: BoardExiting()
+
+    requires: keep_awake.status in {requesting, on}
+
+    ensures: KeepAwakeReleased()
+
+    @guidance
+        -- Covers every way the board process ends, a crash or kill
+        -- included: the hold must be tied to the board process so that the
+        -- operating system drops it when the process goes, with no cleanup
+        -- step that a crash could skip. Nothing is left holding the machine
+        -- awake after the board is gone.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface KeepAwakeToggle {
+    facing operator: User
+
+    exposes:
+        keep_awake.shows_badge
+
+    provides:
+        UserAction("W")
+
+    @guarantee BadgeMeansHeld
+        -- The board shows a steady "awake [W]" badge in the top indicator
+        -- row, beside the notifications badge, while, and only while,
+        -- keep_awake.status = on. Off and requesting show nothing there.
+        -- The top row is chosen over the status bar because transient
+        -- messages replace the status bar's content; the top row is steady.
+
+    @guarantee KeepAwakeIsNeverStored
+        -- Keep-awake state is never written to the shared store, a Setting
+        -- (settings.allium) or any file. It describes this one machine's
+        -- power state for the life of one board process.
+
+    @guarantee KeepAwakeIsKeyboardOnly
+        -- Only the operator's [W] key changes it. No MCP tool reads or
+        -- changes it: it controls the operator's physical machine, and that
+        -- is the operator's call alone.
+
+    @guarantee KeepAwakeIsLinuxOnly
+        -- Requests are made on Linux only; elsewhere [W] reports that it is
+        -- unsupported and keep-awake stays off (RefuseKeepAwakeOffLinux).
+
+    @guarantee KeyIsInTheTable
+        -- [W] is a row of the board's normal-mode keybinding table
+        -- (keybindings.allium), so it appears in the [?] help overlay and in
+        -- list_keybindings like every other key.
+}
+
+surface KeepAwakeHold {
+    facing system: OperatingSystem
+
+    -- The operating system's side of the hold. The board asks
+    -- (KeepAwakeRequested) and lets go (KeepAwakeReleased); the system
+    -- answers once per request and reports a hold that ends on its own.
+    provides:
+        KeepAwakeHoldGranted()
+        KeepAwakeHoldRefused(reason)
+        KeepAwakeHoldEnded(reason)
+
+    @guarantee AnswersBelongToOneRequest
+        -- Each answer belongs to the request that caused it. An answer from
+        -- an earlier request (for example the end of a hold the operator
+        -- already released, arriving after a new request) changes nothing.
+
+    @guarantee HoldDiesWithTheBoard
+        -- The hold belongs to the board process. When the process ends for
+        -- any reason, the system drops the hold without the board doing
+        -- anything (ReleaseKeepAwakeOnExit).
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+-- None.

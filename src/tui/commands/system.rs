@@ -1,4 +1,5 @@
-//! System-level side-effect commands: notifications and browser-opens.
+//! System-level side-effect commands: notifications, browser-opens and the
+//! keep-awake hold.
 
 /// System-level side-effect commands.
 ///
@@ -13,4 +14,10 @@ pub enum SystemCommand {
     },
     /// Open a URL in the user's browser.
     OpenInBrowser { url: String },
+    /// Ask the operating system to hold this machine awake. Its answers come
+    /// back as `SystemMessage::KeepAwake` tagged with `generation`
+    /// (keep-awake.allium: RequestKeepAwake).
+    RequestKeepAwake { generation: u64 },
+    /// Let go of the keep-awake hold (keep-awake.allium: ReleaseKeepAwake).
+    ReleaseKeepAwake,
 }

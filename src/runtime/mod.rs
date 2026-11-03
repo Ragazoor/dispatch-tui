@@ -668,6 +668,10 @@ struct TuiRuntime {
     /// editor is currently open. We enforce "at most one editor at a time"
     /// by refusing to start a new one while this slot is populated.
     editor_session: Arc<std::sync::Mutex<Option<editor::EditorSession>>>,
+    /// The keep-awake hold, while one is requested or held
+    /// (docs/specs/keep-awake.allium). Dropping it releases the hold, so the
+    /// runtime's own drop releases it on exit (ReleaseKeepAwakeOnExit).
+    keep_awake: std::sync::Mutex<Option<crate::keep_awake::Hold>>,
     feed_runner: Option<crate::feed::FeedRunner>,
     /// Fires the `FeedRunner`'s feed-command cache invalidation. Cloned from
     /// `feed_runner.epic_invalidate_tx()` at construction so both mutation-
@@ -740,6 +744,7 @@ mod dispatch_host;
 mod editor;
 mod epics;
 mod event_loop;
+mod keep_awake;
 mod learnings;
 mod people;
 mod pr;
@@ -990,6 +995,7 @@ impl TuiRuntime {
             msg_tx,
             runner: runner.clone(),
             editor_session: Arc::new(std::sync::Mutex::new(None)),
+            keep_awake: std::sync::Mutex::new(None),
             emb_svc: emb_svc.clone(),
             last_change_count: Arc::new(AtomicI64::new(-1)),
             // Deliberately not derived from `data_dir`: the subscription windows

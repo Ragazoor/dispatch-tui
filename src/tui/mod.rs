@@ -13,6 +13,7 @@ mod work_packages;
 
 pub(in crate::tui) use search::*;
 pub use types::*;
+pub(crate) use update::keep_awake::KeepAwakeState;
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -306,6 +307,9 @@ pub struct App {
     /// AbortWhenTheHostIdentityStoreIsUnusable), so `None` is the state an
     /// `App` built directly — as tests do — is in.
     pub(in crate::tui) local_host_id: Option<String>,
+    /// The keep-awake toggle (docs/specs/keep-awake.allium). Starts off on
+    /// every board start (KeepAwakeStartsOff).
+    pub(in crate::tui) keep_awake: KeepAwakeState,
 }
 
 /// FNV-1a offset basis, used as the seed for the layout-cache fingerprints
@@ -377,6 +381,7 @@ impl App {
             last_stale_cleanup_at: None,
             build_output_cleared: HashSet::new(),
             local_host_id: None,
+            keep_awake: KeepAwakeState::default(),
         };
         // Prime all caches so the first render is a cache hit instead of recomputing.
         let _ = app.cached_epic_stats();

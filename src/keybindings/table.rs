@@ -402,6 +402,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "Toggle the notification panel",
     ),
     normal(
+        &["W"],
+        None,
+        "toggle_keep_awake",
+        "Keep this computer awake: no screen lock, blanking or suspend while on (Linux)",
+    ),
+    normal(
         &["s"],
         None,
         "toggle_split_mode",

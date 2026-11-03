@@ -275,6 +275,7 @@ pub(super) fn editor_runtime_on_host(
         msg_tx,
         runner,
         editor_session: Arc::new(Mutex::new(None)),
+        keep_awake: Mutex::new(None),
         emb_svc: EmbeddingService::new_noop(),
         last_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
         budget_snapshot_path: std::path::PathBuf::from("/nonexistent-test-path/rate-limits.json"),

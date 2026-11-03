@@ -18,6 +18,7 @@ pub mod feed;
 pub mod git;
 pub mod hooks;
 pub mod host_file;
+pub mod keep_awake;
 pub mod keybindings;
 pub mod mcp;
 pub mod models;

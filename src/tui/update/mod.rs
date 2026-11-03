@@ -13,6 +13,7 @@ pub(in crate::tui) mod epic_input;
 mod epics;
 mod feeds;
 pub(in crate::tui) mod forms;
+pub(in crate::tui) mod keep_awake;
 mod lifecycle;
 mod move_task;
 mod navigation;

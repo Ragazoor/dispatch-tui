@@ -316,6 +316,8 @@ fn dispatch_system(rt: &super::TuiRuntime, cmd: crate::tui::commands::SystemComm
             urgent,
         } => drop(rt.exec_send_notification(&title, &body, urgent)),
         OpenInBrowser { url } => drop(rt.exec_open_in_browser(url)),
+        RequestKeepAwake { generation } => rt.exec_request_keep_awake(generation),
+        ReleaseKeepAwake => rt.exec_release_keep_awake(),
     }
 }
 

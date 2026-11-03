@@ -184,22 +184,34 @@ fn todo_keys_are_inert_on_the_board() {
 // ---------------------------------------------------------------------------
 // `W` removal (docs/plans/archive/2026-07-31-3809-keybinding-pruning-implementation.md §1):
 // the board's wrap-up entry point is gone. Wrap-up is agent-driven only,
-// through the MCP `wrap_up` tool — never through a TUI key.
+// through the MCP `wrap_up` tool — never through a TUI key. `W` was later
+// reused for the keep-awake toggle (keep-awake.allium), so the guard is now
+// that `W` only ever toggles keep-awake, whatever card is selected.
 // ---------------------------------------------------------------------------
 
+fn only_toggles_keep_awake(cmds: &[Command]) -> bool {
+    use crate::tui::commands::SystemCommand;
+    cmds.iter().all(|c| {
+        matches!(
+            c,
+            Command::System(SystemCommand::RequestKeepAwake { .. }) | Command::Usage(_)
+        )
+    })
+}
+
 #[test]
-fn w_key_is_inert_on_review_task_with_worktree() {
+fn w_key_does_not_wrap_up_a_review_task_with_worktree() {
     let mut app = App::new(vec![{ make_task(1, TaskStatus::Review) }]);
     let mode_before = app.input.mode.clone();
 
     let cmds = app.handle_key(make_key(KeyCode::Char('W')));
 
-    assert!(cmds.is_empty());
+    assert!(only_toggles_keep_awake(&cmds), "got {cmds:?}");
     assert_eq!(app.input.mode, mode_before);
 }
 
 #[test]
-fn w_key_is_inert_on_epic() {
+fn w_key_does_not_wrap_up_an_epic() {
     let mut app = App::new(vec![make_review_subtask(1, 10, 1)]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
@@ -210,7 +222,7 @@ fn w_key_is_inert_on_epic() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('W')));
 
-    assert!(cmds.is_empty());
+    assert!(only_toggles_keep_awake(&cmds), "got {cmds:?}");
     assert_eq!(app.input.mode, mode_before);
 }
 

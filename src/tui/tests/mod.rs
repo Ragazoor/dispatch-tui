@@ -21,6 +21,7 @@ mod filter_overlay;
 mod help_overlay;
 mod helpers;
 mod input_handlers;
+mod keep_awake;
 mod keybindings;
 mod layout_cache;
 mod move_task;

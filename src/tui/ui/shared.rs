@@ -265,6 +265,12 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
         };
         parts.push(Span::styled(label, Style::default().fg(MUTED)));
     }
+    // Shown only while the machine is really held awake
+    // (keep-awake.allium: BadgeMeansHeld). ASCII on purpose: the width
+    // accounting below counts codepoints, so an emoji would cost a column.
+    if app.keep_awake.shows_badge() {
+        parts.push(Span::styled("awake [W]  ", Style::default().fg(GREEN)));
+    }
     if app.notifications_enabled() {
         parts.push(Span::styled("\u{1F514} [N]", Style::default().fg(YELLOW)));
     } else {

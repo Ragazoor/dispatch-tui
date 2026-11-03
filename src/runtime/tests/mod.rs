@@ -293,6 +293,7 @@ pub(super) async fn make_runtime(
         msg_tx: tx,
         runner,
         editor_session: Arc::new(std::sync::Mutex::new(None)),
+        keep_awake: std::sync::Mutex::new(None),
         emb_svc: crate::embeddings::EmbeddingService::new_noop(),
         last_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
         budget_snapshot_path: std::path::PathBuf::from("/nonexistent-test-path/rate-limits.json"),
