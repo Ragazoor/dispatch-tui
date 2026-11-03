@@ -211,6 +211,9 @@ pub enum Message {
     Feed(crate::tui::messages::FeedMessage),
     /// Budget-indicator messages — see [`crate::tui::messages::BudgetMessage`].
     Budget(crate::tui::messages::BudgetMessage),
+    /// Keep-awake toggle messages — see
+    /// [`crate::tui::messages::KeepAwakeMessage`].
+    KeepAwake(crate::tui::messages::KeepAwakeMessage),
     /// Work-package messages — see
     /// [`crate::tui::messages::WorkPackageMessage`].
     WorkPackage(crate::tui::messages::WorkPackageMessage),
@@ -267,6 +270,9 @@ pub enum Command {
     /// Budget-indicator side-effect commands — see
     /// [`crate::tui::commands::BudgetCommand`].
     Budget(crate::tui::commands::BudgetCommand),
+    /// Keep-awake hold side-effect commands — see
+    /// [`crate::tui::commands::KeepAwakeCommand`].
+    KeepAwake(crate::tui::commands::KeepAwakeCommand),
     /// Work-package side-effect commands — see
     /// [`crate::tui::commands::WorkPackageCommand`].
     WorkPackage(crate::tui::commands::WorkPackageCommand),

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::tui::commands::{BudgetCommand, LearningCommand, UsageCommand};
+use crate::tui::commands::{BudgetCommand, KeepAwakeCommand, LearningCommand, UsageCommand};
 
 /// Full `Command` match dispatch — one entry per variant, in `Command` enum order.
 ///
@@ -59,6 +59,14 @@ pub(super) async fn dispatch(
         }
         Budget(BudgetCommand::Refresh) => {
             drop(rt.exec_refresh_budget());
+            vec![]
+        }
+        KeepAwake(KeepAwakeCommand::Request { generation }) => {
+            rt.exec_request_keep_awake(generation);
+            vec![]
+        }
+        KeepAwake(KeepAwakeCommand::Release) => {
+            rt.exec_release_keep_awake();
             vec![]
         }
         WorkPackage(cmd) => {
@@ -316,8 +324,6 @@ fn dispatch_system(rt: &super::TuiRuntime, cmd: crate::tui::commands::SystemComm
             urgent,
         } => drop(rt.exec_send_notification(&title, &body, urgent)),
         OpenInBrowser { url } => drop(rt.exec_open_in_browser(url)),
-        RequestKeepAwake { generation } => rt.exec_request_keep_awake(generation),
-        ReleaseKeepAwake => rt.exec_release_keep_awake(),
     }
 }
 

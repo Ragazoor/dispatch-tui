@@ -208,13 +208,7 @@ pub fn module_hash(wasm: &[u8]) -> String {
 /// published to and (for a store that was not spawned by this board) found
 /// through it.
 pub fn spacetime_cli_on_path() -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|dir| {
-            std::fs::metadata(dir.join("spacetime"))
-                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        })
-    })
+    crate::process::program_on_path("spacetime")
 }
 
 /// The module this binary publishes: the committed, prebuilt

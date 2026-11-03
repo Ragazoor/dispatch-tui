@@ -528,29 +528,21 @@ pub trait ProcessRunner: Send + Sync {
 /// an unmemoized version would re-`stat` every `PATH` entry on each one.
 fn sccache_on_path() -> bool {
     static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *CACHED.get_or_init(|| {
-        let Some(path) = std::env::var_os("PATH") else {
-            return false;
-        };
-        sccache_in_dirs(std::env::split_paths(&path))
-    })
+    *CACHED.get_or_init(|| program_on_path("sccache"))
 }
 
-/// Whether an executable named `name` exists in some `PATH` entry. Not
-/// memoized here: `keep_awake::hold_command_for_this_machine` caches its
-/// own answer.
+/// Whether an executable named `name` exists in some `PATH` entry — the
+/// same resolution a shell does before running a bare command name. Not
+/// memoized: callers on a hot path cache the answer themselves.
 pub fn program_on_path(name: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|dir| is_executable_file(&dir.join(name)))
-    })
+    std::env::var_os("PATH").is_some_and(|path| program_in_dirs(name, std::env::split_paths(&path)))
 }
 
-/// [`sccache_on_path`]'s search, over an arbitrary directory list rather than
+/// [`program_on_path`]'s search, over an arbitrary directory list rather than
 /// the process's own `PATH` — the seam that lets a test check the scan logic
 /// without mutating process-global environment state.
-fn sccache_in_dirs(dirs: impl Iterator<Item = std::path::PathBuf>) -> bool {
-    dirs.map(|dir| dir.join("sccache"))
-        .any(|c| is_executable_file(&c))
+fn program_in_dirs(name: &str, mut dirs: impl Iterator<Item = std::path::PathBuf>) -> bool {
+    dirs.any(|dir| is_executable_file(&dir.join(name)))
 }
 
 #[cfg(unix)]

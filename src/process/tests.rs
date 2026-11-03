@@ -77,29 +77,38 @@ fn mock_with_sccache_available_overrides_the_default() {
 }
 
 #[test]
-fn sccache_in_dirs_finds_an_executable_named_sccache() {
+fn program_in_dirs_finds_an_executable_named_sccache() {
     let dir = tempfile::tempdir().unwrap();
     let bin = dir.path().join("sccache");
     std::fs::write(&bin, "#!/bin/sh\n").unwrap();
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    assert!(sccache_in_dirs(std::iter::once(dir.path().to_path_buf())));
+    assert!(program_in_dirs(
+        "sccache",
+        std::iter::once(dir.path().to_path_buf())
+    ));
 }
 
 #[test]
-fn sccache_in_dirs_ignores_a_non_executable_file_named_sccache() {
+fn program_in_dirs_ignores_a_non_executable_file_named_sccache() {
     let dir = tempfile::tempdir().unwrap();
     let bin = dir.path().join("sccache");
     std::fs::write(&bin, "#!/bin/sh\n").unwrap();
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-    assert!(!sccache_in_dirs(std::iter::once(dir.path().to_path_buf())));
+    assert!(!program_in_dirs(
+        "sccache",
+        std::iter::once(dir.path().to_path_buf())
+    ));
 }
 
 #[test]
-fn sccache_in_dirs_false_when_no_dir_has_it() {
+fn program_in_dirs_false_when_no_dir_has_it() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(!sccache_in_dirs(std::iter::once(dir.path().to_path_buf())));
+    assert!(!program_in_dirs(
+        "sccache",
+        std::iter::once(dir.path().to_path_buf())
+    ));
 }
 
 #[test]

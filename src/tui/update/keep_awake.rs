@@ -2,11 +2,11 @@
 //!
 //! The App holds only the state machine. The hold itself is a child process
 //! the runtime owns (`crate::keep_awake`); its answers come back as
-//! `SystemMessage::KeepAwake`, tagged with the generation of the request
+//! `KeepAwakeMessage::Answer`, tagged with the generation of the request
 //! that caused them.
 
 use crate::keep_awake::HoldEvent;
-use crate::tui::commands::SystemCommand;
+use crate::tui::commands::KeepAwakeCommand;
 use crate::tui::types::Command;
 use crate::tui::App;
 
@@ -57,20 +57,19 @@ impl App {
         let state = &mut self.keep_awake;
         match state.status {
             KeepAwakeStatus::Off if !state.supported => {
-                self.status.error_popup = Some("Keep-awake is only supported on Linux".to_string());
-                vec![]
+                self.handle_error("Keep-awake is only supported on Linux".to_string())
             }
             KeepAwakeStatus::Off => {
                 state.generation += 1;
                 state.status = KeepAwakeStatus::Requesting;
-                vec![Command::System(SystemCommand::RequestKeepAwake {
+                vec![Command::KeepAwake(KeepAwakeCommand::Request {
                     generation: state.generation,
                 })]
             }
             KeepAwakeStatus::Requesting => vec![],
             KeepAwakeStatus::On => {
                 state.status = KeepAwakeStatus::Off;
-                vec![Command::System(SystemCommand::ReleaseKeepAwake)]
+                vec![Command::KeepAwake(KeepAwakeCommand::Release)]
             }
         }
     }
@@ -85,29 +84,26 @@ impl App {
         if generation != self.keep_awake.generation {
             return vec![];
         }
-        let status = self.keep_awake.status;
-        let error = match (status, event) {
+        match (self.keep_awake.status, event) {
             (KeepAwakeStatus::Requesting, HoldEvent::Granted) => {
                 self.keep_awake.status = KeepAwakeStatus::On;
-                None
+                self.dirty = true;
+                vec![]
             }
             (KeepAwakeStatus::Requesting, HoldEvent::Refused(reason)) => {
                 self.keep_awake.status = KeepAwakeStatus::Off;
-                Some(format!("Keep-awake failed: {reason}"))
+                self.dirty = true;
+                self.handle_error(format!("Keep-awake failed: {reason}"))
             }
             (KeepAwakeStatus::On, HoldEvent::Ended(reason)) => {
                 self.keep_awake.status = KeepAwakeStatus::Off;
-                Some(format!("Keep-awake stopped: {reason}"))
+                self.dirty = true;
+                self.handle_error(format!("Keep-awake stopped: {reason}"))
             }
             // Anything else is the tail of a hold the operator already let
             // go of (an `Ended` after ReleaseKeepAwake), or an order the
             // helper never produces. Neither changes the state.
-            _ => return vec![],
-        };
-        self.dirty = true;
-        if let Some(text) = error {
-            self.status.error_popup = Some(text);
+            _ => vec![],
         }
-        vec![]
     }
 }

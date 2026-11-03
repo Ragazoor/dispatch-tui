@@ -75,7 +75,10 @@ impl App {
             "toggle_notifications" => {
                 keyed(self, Message::System(SystemMessage::ToggleNotifications))
             }
-            "toggle_keep_awake" => keyed(self, Message::System(SystemMessage::ToggleKeepAwake)),
+            "toggle_keep_awake" => keyed(
+                self,
+                Message::KeepAwake(crate::tui::messages::KeepAwakeMessage::Toggle),
+            ),
             "set_display_name" => keyed(self, Message::Input(InputMessage::StartSetDisplayName)),
             "open_admin_screen" => keyed(
                 self,

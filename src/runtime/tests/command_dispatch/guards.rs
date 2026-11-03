@@ -28,6 +28,7 @@ fn every_command_sub_enum_is_named_by_this_module() {
             Command::Learning(_) => "Learning",
             Command::Usage(_) => "Usage",
             Command::Budget(_) => "Budget",
+            Command::KeepAwake(_) => "KeepAwake",
             Command::WorkPackage(_) => "WorkPackage",
             Command::People(_) => "People",
         }
@@ -65,6 +66,7 @@ fn every_command_sub_enum_is_named_by_this_module() {
             },
         )),
         Command::Budget(crate::tui::commands::BudgetCommand::Refresh),
+        Command::KeepAwake(crate::tui::commands::KeepAwakeCommand::Release),
         Command::WorkPackage(crate::tui::commands::WorkPackageCommand::Delete(
             models::WorkPackageId(1),
         )),

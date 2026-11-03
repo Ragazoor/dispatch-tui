@@ -1,25 +1,25 @@
 //! The board's keep-awake toggle (docs/specs/keep-awake.allium).
 //!
 //! These drive the App's state machine directly: the operating system's
-//! answers arrive as `SystemMessage::KeepAwake` messages, so no process is
+//! answers arrive as `KeepAwakeMessage::Answer` messages, so no process is
 //! started here. The process side is covered in `src/keep_awake.rs`.
 
 use crossterm::event::KeyCode;
 
 use crate::keep_awake::HoldEvent;
-use crate::tui::commands::SystemCommand;
-use crate::tui::messages::SystemMessage;
+use crate::tui::commands::KeepAwakeCommand;
+use crate::tui::messages::KeepAwakeMessage;
 use crate::tui::tests::helpers::{make_app, make_key, render_to_buffer};
 use crate::tui::types::{Command, Message};
 use crate::tui::update::keep_awake::KeepAwakeStatus;
 use crate::tui::App;
 
 fn toggle(app: &mut App) -> Vec<Command> {
-    app.update(Message::System(SystemMessage::ToggleKeepAwake))
+    app.update(Message::KeepAwake(KeepAwakeMessage::Toggle))
 }
 
 fn answer(app: &mut App, generation: u64, event: HoldEvent) -> Vec<Command> {
-    app.update(Message::System(SystemMessage::KeepAwake {
+    app.update(Message::KeepAwake(KeepAwakeMessage::Answer {
         generation,
         event,
     }))
@@ -27,14 +27,14 @@ fn answer(app: &mut App, generation: u64, event: HoldEvent) -> Vec<Command> {
 
 fn requested_generation(cmds: &[Command]) -> Option<u64> {
     cmds.iter().find_map(|c| match c {
-        Command::System(SystemCommand::RequestKeepAwake { generation }) => Some(*generation),
+        Command::KeepAwake(KeepAwakeCommand::Request { generation }) => Some(*generation),
         _ => None,
     })
 }
 
 fn releases(cmds: &[Command]) -> bool {
     cmds.iter()
-        .any(|c| matches!(c, Command::System(SystemCommand::ReleaseKeepAwake)))
+        .any(|c| matches!(c, Command::KeepAwake(KeepAwakeCommand::Release)))
 }
 
 fn supported_app() -> App {
@@ -109,7 +109,7 @@ fn toggle_while_requesting_does_nothing() {
     toggle(&mut app);
     let cmds = toggle(&mut app);
     assert!(
-        cmds.iter().all(|c| !matches!(c, Command::System(_))),
+        cmds.iter().all(|c| !matches!(c, Command::KeepAwake(_))),
         "got {cmds:?}"
     );
     assert_eq!(app.keep_awake.status, KeepAwakeStatus::Requesting);

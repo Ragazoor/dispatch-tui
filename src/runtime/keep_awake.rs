@@ -1,6 +1,6 @@
 //! Keep-awake hold executor (docs/specs/keep-awake.allium).
 
-use crate::tui::messages::SystemMessage;
+use crate::tui::messages::KeepAwakeMessage;
 use crate::tui::types::Message;
 
 impl super::TuiRuntime {
@@ -11,9 +11,9 @@ impl super::TuiRuntime {
     pub(super) fn exec_request_keep_awake(&self, generation: u64) {
         let tx = self.msg_tx.clone();
         let hold = crate::keep_awake::start(
-            &crate::keep_awake::hold_command_for_this_machine(),
+            crate::keep_awake::hold_command_for_this_machine(),
             move |event| {
-                let _ = tx.send(Message::System(SystemMessage::KeepAwake {
+                let _ = tx.send(Message::KeepAwake(KeepAwakeMessage::Answer {
                     generation,
                     event,
                 }));

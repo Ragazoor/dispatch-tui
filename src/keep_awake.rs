@@ -22,13 +22,16 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 
 /// The line the inner command prints once the helper has taken the hold.
-pub const READY: &str = "ready";
+const READY: &str = "ready";
 
 /// The inner command the helper runs while it holds the machine awake.
 const INNER: &[&str] = &["sh", "-c", "echo ready; exec cat"];
 
 /// Why the hold was asked for, as the helpers show it to the desktop.
 const REASON: &str = "dispatch keep-awake";
+
+/// `systemd-inhibit`'s spelling of [`REASON`].
+const WHY_FLAG: &str = "--why=dispatch keep-awake";
 
 /// What the operating system answered, or what became of a granted hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +56,6 @@ pub struct HoldCommand {
 /// generic systemd inhibitor is the fallback everywhere else.
 pub fn hold_command(desktop: Option<&str>, gnome_inhibit_on_path: bool) -> HoldCommand {
     let on_gnome = desktop.is_some_and(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("GNOME")));
-    let why = format!("--why={REASON}");
     let (program, flags): (&str, Vec<&str>) = if on_gnome && gnome_inhibit_on_path {
         (
             "gnome-session-inhibit",
@@ -62,7 +64,12 @@ pub fn hold_command(desktop: Option<&str>, gnome_inhibit_on_path: bool) -> HoldC
     } else {
         (
             "systemd-inhibit",
-            vec!["--what=idle:sleep", "--who=dispatch", "--mode=block", &why],
+            vec![
+                "--what=idle:sleep",
+                "--who=dispatch",
+                "--mode=block",
+                WHY_FLAG,
+            ],
         )
     };
     HoldCommand {
@@ -80,17 +87,15 @@ pub fn hold_command(desktop: Option<&str>, gnome_inhibit_on_path: bool) -> HoldC
 /// Memoized: neither the desktop nor the installed helpers change over the
 /// life of the board, and the PATH scan is filesystem work that must not
 /// repeat on the async command path (docs/conventions.md).
-pub fn hold_command_for_this_machine() -> HoldCommand {
+pub fn hold_command_for_this_machine() -> &'static HoldCommand {
     static CACHED: std::sync::OnceLock<HoldCommand> = std::sync::OnceLock::new();
-    CACHED
-        .get_or_init(|| {
-            let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
-            hold_command(
-                desktop.as_deref(),
-                crate::process::program_on_path("gnome-session-inhibit"),
-            )
-        })
-        .clone()
+    CACHED.get_or_init(|| {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+        hold_command(
+            desktop.as_deref(),
+            crate::process::program_on_path("gnome-session-inhibit"),
+        )
+    })
 }
 
 /// A requested hold. Dropping it releases the hold.
@@ -175,6 +180,20 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
 
+    fn inner() -> Vec<String> {
+        INNER.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_inner_command_prints_the_ready_line() {
+        assert!(INNER[2].starts_with(&format!("echo {READY};")), "{INNER:?}");
+    }
+
+    #[test]
+    fn the_why_flag_carries_the_reason() {
+        assert_eq!(WHY_FLAG, format!("--why={REASON}"));
+    }
+
     fn sh(script: &str) -> HoldCommand {
         HoldCommand {
             program: "sh".to_string(),
@@ -247,9 +266,7 @@ mod tests {
         let cmd = hold_command(Some("GNOME"), true);
         assert_eq!(cmd.program, "gnome-session-inhibit");
         assert!(cmd.args.contains(&"idle:suspend".to_string()), "{cmd:?}");
-        assert!(cmd
-            .args
-            .ends_with(&INNER.iter().map(|s| s.to_string()).collect::<Vec<_>>()));
+        assert!(cmd.args.ends_with(&inner()));
     }
 
     #[test]
@@ -276,9 +293,7 @@ mod tests {
             cmd.args.contains(&"--what=idle:sleep".to_string()),
             "{cmd:?}"
         );
-        assert!(cmd
-            .args
-            .ends_with(&INNER.iter().map(|s| s.to_string()).collect::<Vec<_>>()));
+        assert!(cmd.args.ends_with(&inner()));
         assert_eq!(hold_command(None, true).program, "systemd-inhibit");
     }
 }

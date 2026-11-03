@@ -234,3 +234,37 @@ async fn dispatch_budget_refresh_reads_the_snapshot_file_off_the_event_loop() {
         other => panic!("expected a parsed budget snapshot, got {other:?}"),
     }
 }
+
+// --- KeepAwakeCommand ---------------------------------------------------
+
+/// ReleaseKeepAwake: the release command drops the runtime's hold, and
+/// dropping it ends the helper. A fake helper stands in for the real one so
+/// the test never holds the machine awake.
+#[tokio::test]
+async fn dispatch_keep_awake_release_drops_the_hold_and_ends_the_helper() {
+    let mut h = quiet_harness().await;
+    let fake = crate::keep_awake::HoldCommand {
+        program: "sh".into(),
+        args: vec!["-c".into(), "echo ready; exec cat".into()],
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let hold = crate::keep_awake::start(&fake, move |e| {
+        let _ = tx.send(e);
+    });
+    assert_eq!(rx.recv().await, Some(crate::keep_awake::HoldEvent::Granted));
+    *h.rt.keep_awake.lock().unwrap() = Some(hold);
+
+    h.dispatch(Command::KeepAwake(
+        crate::tui::commands::KeepAwakeCommand::Release,
+    ))
+    .await;
+
+    assert!(h.rt.keep_awake.lock().unwrap().is_none());
+    assert!(
+        matches!(
+            rx.recv().await,
+            Some(crate::keep_awake::HoldEvent::Ended(_))
+        ),
+        "dropping the hold must end the helper"
+    );
+}

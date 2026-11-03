@@ -29,13 +29,6 @@ pub enum SystemMessage {
     ToggleNotifications,
     /// Open a URL in the user's browser.
     OpenInBrowser { url: String },
-    /// Flip the keep-awake toggle (keep-awake.allium: the `W` key).
-    ToggleKeepAwake,
-    /// An answer about the keep-awake hold requested as `generation`.
-    KeepAwake {
-        generation: u64,
-        event: crate::keep_awake::HoldEvent,
-    },
 }
 
 impl SystemMessage {
@@ -52,10 +45,6 @@ impl SystemMessage {
             SystemMessage::ToggleHelp => app.handle_toggle_help(),
             SystemMessage::ToggleNotifications => app.handle_toggle_notifications(),
             SystemMessage::OpenInBrowser { url } => app.handle_open_in_browser(url),
-            SystemMessage::ToggleKeepAwake => app.handle_toggle_keep_awake(),
-            SystemMessage::KeepAwake { generation, event } => {
-                app.handle_keep_awake_event(generation, event)
-            }
         }
     }
 }

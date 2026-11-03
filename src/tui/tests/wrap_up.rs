@@ -190,11 +190,11 @@ fn todo_keys_are_inert_on_the_board() {
 // ---------------------------------------------------------------------------
 
 fn only_toggles_keep_awake(cmds: &[Command]) -> bool {
-    use crate::tui::commands::SystemCommand;
+    use crate::tui::commands::KeepAwakeCommand;
     cmds.iter().all(|c| {
         matches!(
             c,
-            Command::System(SystemCommand::RequestKeepAwake { .. }) | Command::Usage(_)
+            Command::KeepAwake(KeepAwakeCommand::Request { .. }) | Command::Usage(_)
         )
     })
 }
