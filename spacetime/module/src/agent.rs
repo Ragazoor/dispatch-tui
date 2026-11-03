@@ -40,7 +40,9 @@ pub struct Agent {
     #[unique]
     pub name: String,
     /// The machine its session runs on: the requester of the claim that
-    /// started it, or the task's host for a backfilled agent.
+    /// started it, or the task's host for a backfilled agent. Indexed: the
+    /// per-caller view serves a person the agents on the hosts they own.
+    #[index(btree)]
     pub host: String,
     /// [`AGENT_START_MODES`].
     pub start_mode: String,

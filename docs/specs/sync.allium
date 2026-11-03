@@ -543,8 +543,12 @@ rule SubscribeOnceIdentityIsSettled {
         --     and the epic-less tasks they own (own_creations);
         --   covered_epics, covered_tasks: the epics this person follows and
         --     every descendant, at any depth, and their tasks;
-        --   rows about a held task (agents, dispatch and session requests,
-        --     learning retrievals, unseen marks) and the links, poll claims,
+        --   rows about a held task (learning retrievals, unseen marks),
+        --     agents and dispatch and session requests (a held task's, plus
+        --     every row on a host this person owns, so a request outlives
+        --     the person's sight of its task: unfollowing the epic of a
+        --     teammate's task one dispatched must not lose the wrap-up row
+        --     or its serving), and the links, poll claims,
         --     learnings, settings, workspaces, memberships and usage events
         --     the caller may see.
         -- Public tables (hosts, user_profiles, repo lists, this person's own

@@ -82,6 +82,7 @@ impl __sdk::__query_builder::HasCols for Agent {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct AgentIxCols {
+    pub host: __sdk::__query_builder::IxCol<Agent, String>,
     pub id: __sdk::__query_builder::IxCol<Agent, i64>,
     pub name: __sdk::__query_builder::IxCol<Agent, String>,
     pub task_id: __sdk::__query_builder::IxCol<Agent, i64>,
@@ -91,6 +92,7 @@ impl __sdk::__query_builder::HasIxCols for Agent {
     type IxCols = AgentIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         AgentIxCols {
+            host: __sdk::__query_builder::IxCol::new(table_name, "host"),
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
             name: __sdk::__query_builder::IxCol::new(table_name, "name"),
             task_id: __sdk::__query_builder::IxCol::new(table_name, "task_id"),

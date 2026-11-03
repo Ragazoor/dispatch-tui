@@ -154,6 +154,13 @@ use super::*;
 ///    moved out of the service into `create_work_package_with_links` and
 ///    `update_work_package_with_links`, one transaction each (`packages.rs`).
 ///
+/// A change to the board's subscription set warrants a bump: a table going
+/// private, a view added or removed, a view the board asks for under a new
+/// name. 2e681e34 made `subscriptions` private and moved the board to
+/// `own_subscriptions` without one, so a board built in between passed the
+/// gate and retried a refused subscription forever, with no message saying
+/// to upgrade. (Changing which rows an existing view serves is not a bump.)
+///
 /// Not a bump: a new Task column the board validates, such as `model`. It
 /// widens `create_task`'s and `patch_task`'s argument types, but moves no rule
 /// into the module; `alias` (fbbd14c6) set the precedent.

@@ -306,3 +306,88 @@ fn an_epic_update_in_an_ignored_column_keeps_the_new_row() {
     rows.retire_epic(&old);
     assert!(rows.epic(EpicId(7)).is_some());
 }
+
+/// Y2: an agent update in `stop_pending_at`, a column the decoder drops, must
+/// not be erased by the delete half of the pair.
+#[test]
+fn an_agent_update_in_an_ignored_column_keeps_the_new_row() {
+    let agent = |stop_pending_at: &str| bindings::Agent {
+        id: 4,
+        task_id: 9,
+        name: "a".into(),
+        host: "host-a".into(),
+        start_mode: "research".into(),
+        state: "current".into(),
+        started_at: "2026-10-16 10:00:00.000".into(),
+        stop_pending_at: stop_pending_at.into(),
+        ..dispatch_spacetime_module::blank_agent().into()
+    };
+    let (old, new) = (agent(""), agent("2026-11-03 10:00:00.000"));
+    let rows = SharedRows::new();
+    rows.upsert_agent(&old);
+    rows.upsert_agent(&new);
+    rows.retire_agent(&old);
+    assert_eq!(rows.agents().len(), 1, "insert first");
+    assert!(rows.current_agent(TaskId(9)).is_some(), "index survives");
+
+    let rows = SharedRows::new();
+    rows.upsert_agent(&old);
+    rows.retire_agent(&old);
+    rows.upsert_agent(&new);
+    assert_eq!(rows.agents().len(), 1, "delete first");
+}
+
+/// Y2: a poll claim re-written in `claimed_at` keeps its row.
+#[test]
+fn a_poll_owner_update_in_an_ignored_column_keeps_the_new_row() {
+    let claim = |claimed_at: &str| bindings::PollOwner {
+        id: 3,
+        scope: "epic".into(),
+        scope_id: 5,
+        host: "host-a".into(),
+        claimed_at: claimed_at.into(),
+    };
+    let (old, new) = (claim("2026-11-03 09:00:00"), claim("2026-11-03 10:00:00"));
+    let rows = SharedRows::new();
+    rows.upsert_poll_owner(&old);
+    rows.upsert_poll_owner(&new);
+    rows.retire_poll_owner(&old);
+    assert!(
+        rows.poll_owner(crate::models::PollScopeId::Epic(EpicId(5)))
+            .is_some(),
+        "insert first"
+    );
+}
+
+/// Y4: a second undecodable version must keep the mark, whichever half of the
+/// update arrives first.
+#[test]
+fn an_undecodable_to_undecodable_task_update_keeps_the_mark() {
+    let bad = |title: &str| {
+        let mut t = task(title);
+        t.epic_id = 3;
+        t.status = "teleported".into();
+        t
+    };
+    let (old, new) = (bad("v1"), bad("v2"));
+    let rows = SharedRows::new();
+    rows.upsert_task(&old);
+    rows.upsert_task(&new);
+    rows.retire_task(&old);
+    assert_eq!(
+        rows.undecodable_task_ids_for_epic(EpicId(3)),
+        vec![TaskId(7)]
+    );
+}
+
+/// Y4: an epic that stops decoding leaves the board instead of lingering in
+/// its old form.
+#[test]
+fn an_epic_that_stops_decoding_is_removed() {
+    let rows = SharedRows::new();
+    rows.upsert_epic(&epic("fine"));
+    let mut bad = epic("bad");
+    bad.status = "teleported".into();
+    rows.upsert_epic(&bad);
+    assert!(rows.epic(EpicId(7)).is_none());
+}

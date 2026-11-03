@@ -103,12 +103,19 @@ struct Rows {
     /// store, so a subtree check has to be able to count them
     /// (epics.allium: `DeleteEpicRefused`). A later good copy or a removal
     /// forgets the entry.
-    undecodable_tasks: BTreeMap<i64, i64>,
+    ///
+    /// The value is the raw row, so `retire_task` can tell whether a departing
+    /// row is the one the mark belongs to (an undecodable-to-undecodable
+    /// update is insert(new) then delete(old)).
+    undecodable_tasks: BTreeMap<i64, bindings::Task>,
     epics: BTreeMap<i64, Epic>,
     repo_paths: BTreeMap<i64, RepoPathRow>,
     repo_base_branches: BTreeMap<i64, RepoBaseBranchRow>,
     hosts: BTreeMap<String, HostRow>,
     poll_owners: BTreeMap<i64, PollOwnerRow>,
+    /// The raw row behind each `poll_owners` entry; `retire_poll_owner`
+    /// compares against it (the decoder drops `claimed_at`).
+    raw_poll_owners: BTreeMap<i64, bindings::PollOwner>,
     /// `(scope, scope_id) -> id`, kept in step with `poll_owners` on every
     /// insert/remove. `poll_owner()` is read on every `PollPrStatus`/
     /// `FeedTick` tick and must not degrade to a scan as the table grows.
@@ -164,6 +171,9 @@ struct Rows {
     /// agents A1. Arrive unfiltered (`sync.allium: SubscribeToAgents`),
     /// current and ended alike.
     agents: BTreeMap<i64, Agent>,
+    /// The raw row behind each `agents` entry; `retire_agent` compares
+    /// against it (the decoder drops `stop_pending_at`).
+    raw_agents: BTreeMap<i64, bindings::Agent>,
     /// `task id -> id of its current agent`, kept in step with `agents` on
     /// every insert and remove. Every task read lays the current agent's
     /// session facts over the task (`models::with_session_of`), so the lookup
@@ -319,7 +329,7 @@ impl SharedRows {
                 self.write(|rows| {
                     rows.tasks.remove(&row.id);
                     rows.raw_tasks.remove(&row.id);
-                    rows.undecodable_tasks.insert(row.id, row.epic_id);
+                    rows.undecodable_tasks.insert(row.id, row.clone());
                     false
                 });
             }
@@ -349,7 +359,7 @@ impl SharedRows {
         if decode::task(old).is_err() {
             // Never stored decoded; only its undecodable mark can remain.
             let id = old.id;
-            self.write(|rows| rows.undecodable_tasks.remove(&id).is_some());
+            self.write(|rows| remove_if_held(&mut rows.undecodable_tasks, &id, old));
             return;
         }
         self.write(|rows| {
@@ -389,6 +399,12 @@ impl SharedRows {
             }),
             Err(e) => {
                 super::drop_undecodable("epic", &e);
+                // As `upsert_task`: a row that stops decoding leaves the
+                // board rather than lingering in its old form.
+                self.write(|rows| {
+                    rows.raw_epics.remove(&row.id);
+                    rows.epics.remove(&row.id).is_some()
+                });
             }
         }
     }
@@ -441,6 +457,7 @@ impl SharedRows {
         self.write(|rows| {
             rows.poll_owners_by_scope
                 .insert((value.scope.clone(), value.scope_id), value.id);
+            rows.raw_poll_owners.insert(value.id, row.clone());
             rows.poll_owners.insert(value.id, value);
             true
         });
@@ -449,6 +466,7 @@ impl SharedRows {
     pub fn remove_poll_owner(&self, id: i64) {
         self.write(|rows| match rows.poll_owners.remove(&id) {
             Some(row) => {
+                rows.raw_poll_owners.remove(&id);
                 rows.poll_owners_by_scope.remove(&(row.scope, row.scope_id));
                 true
             }
@@ -728,6 +746,7 @@ impl SharedRows {
                     rows.current_agent_by_task
                         .insert(agent.task_id.0, agent.id.0);
                 }
+                rows.raw_agents.insert(agent.id.0, row.clone());
                 rows.agents.insert(agent.id.0, agent);
                 true
             }),
@@ -735,6 +754,7 @@ impl SharedRows {
                 super::drop_undecodable("agent", &e);
                 self.write(|rows| {
                     rows.index_agent_out(row.id);
+                    rows.raw_agents.remove(&row.id);
                     rows.agents.remove(&row.id).is_some()
                 });
             }
@@ -744,6 +764,7 @@ impl SharedRows {
     pub fn remove_agent(&self, id: AgentId) {
         self.write(|rows| {
             rows.index_agent_out(id.0);
+            rows.raw_agents.remove(&id.0);
             rows.agents.remove(&id.0).is_some()
         });
     }
@@ -791,12 +812,13 @@ impl SharedRows {
     }
 
     pub fn retire_poll_owner(&self, old: &bindings::PollOwner) {
-        let old = decode::poll_owner(old);
+        let decoded = decode::poll_owner(old);
         self.write(|rows| {
-            let held = remove_if_held(&mut rows.poll_owners, &old.id, &old);
+            let held = remove_if_held(&mut rows.raw_poll_owners, &old.id, old);
             if held {
+                rows.poll_owners.remove(&old.id);
                 rows.poll_owners_by_scope
-                    .remove(&(old.scope.clone(), old.scope_id));
+                    .remove(&(decoded.scope.clone(), decoded.scope_id));
             }
             held
         });
@@ -856,13 +878,14 @@ impl SharedRows {
     }
 
     pub fn retire_agent(&self, old: &bindings::Agent) {
-        let Ok(old) = decode::agent(old) else {
+        if decode::agent(old).is_err() {
             return;
-        };
+        }
         self.write(|rows| {
-            if rows.agents.get(&old.id.0) == Some(&old) {
-                rows.index_agent_out(old.id.0);
-                rows.agents.remove(&old.id.0);
+            if rows.raw_agents.get(&old.id) == Some(old) {
+                rows.index_agent_out(old.id);
+                rows.raw_agents.remove(&old.id);
+                rows.agents.remove(&old.id);
                 true
             } else {
                 false
@@ -921,7 +944,7 @@ impl SharedRows {
         self.read(|rows| {
             rows.undecodable_tasks
                 .iter()
-                .filter(|(_, e)| **e == epic.0)
+                .filter(|(_, t)| t.epic_id == epic.0)
                 .map(|(id, _)| TaskId(*id))
                 .collect()
         })

@@ -42,6 +42,10 @@ pub trait StoreReads {
     fn agents_of(&self, task_id: i64) -> Vec<Agent>;
     fn dispatch_requests_of(&self, task_id: i64) -> Vec<DispatchRequest>;
     fn session_requests_of(&self, task_id: i64) -> Vec<SessionRequest>;
+    /// Rows on one machine, whatever the caller can see of their task.
+    fn agents_on_host(&self, host: &str) -> Vec<Agent>;
+    fn dispatch_requests_on_host(&self, host: &str) -> Vec<DispatchRequest>;
+    fn session_requests_on_host(&self, host: &str) -> Vec<SessionRequest>;
     fn unseen_of(&self, subscriber: &str) -> Vec<UnseenTask>;
     fn subagents_of(&self, task_id: i64) -> Vec<TaskSubagent>;
     /// Rows naming the task as the watcher or as the target.
@@ -166,6 +170,23 @@ macro_rules! impl_store_reads {
                     .session_requests()
                     .task_id()
                     .filter(&task_id)
+                    .collect()
+            }
+            fn agents_on_host(&self, host: &str) -> Vec<Agent> {
+                self.db.agents().host().filter(&host.to_string()).collect()
+            }
+            fn dispatch_requests_on_host(&self, host: &str) -> Vec<DispatchRequest> {
+                self.db
+                    .dispatch_requests()
+                    .host()
+                    .filter(&host.to_string())
+                    .collect()
+            }
+            fn session_requests_on_host(&self, host: &str) -> Vec<SessionRequest> {
+                self.db
+                    .session_requests()
+                    .host()
+                    .filter(&host.to_string())
                     .collect()
             }
             fn unseen_of(&self, subscriber: &str) -> Vec<UnseenTask> {
@@ -414,16 +435,52 @@ fn rows_about_held_tasks<T, K: Ord>(
     )
 }
 
+/// Rows on the machines `who` owns, whatever `who` can see of their task.
+///
+/// A request, and the agent it starts, belongs to the machine that serves it.
+/// Serving it by sight of the task alone loses it the moment the caller stops
+/// holding the task (an unfollowed epic): the reactor never sees a wrap-up it
+/// must act on, and the requester's read-back never finds its own row.
+fn rows_on_owned_hosts<T>(
+    r: &impl StoreReads,
+    who: &str,
+    rows_on: impl Fn(&str) -> Vec<T>,
+) -> Vec<T> {
+    r.hosts_owned_by(who)
+        .iter()
+        .flat_map(|h| rows_on(&h.id))
+        .collect()
+}
+
 pub fn agents_of_held(r: &impl StoreReads, who: &str) -> Vec<Agent> {
-    rows_about_held_tasks(r, who, |t| r.agents_of(t), |a| a.id)
+    dedup_by(
+        rows_about_held_tasks(r, who, |t| r.agents_of(t), |a| a.id)
+            .into_iter()
+            .chain(rows_on_owned_hosts(r, who, |h| r.agents_on_host(h))),
+        |a| a.id,
+    )
 }
 
 pub fn dispatch_requests_of_held(r: &impl StoreReads, who: &str) -> Vec<DispatchRequest> {
-    rows_about_held_tasks(r, who, |t| r.dispatch_requests_of(t), |d| d.id)
+    dedup_by(
+        rows_about_held_tasks(r, who, |t| r.dispatch_requests_of(t), |d| d.id)
+            .into_iter()
+            .chain(rows_on_owned_hosts(r, who, |h| {
+                r.dispatch_requests_on_host(h)
+            })),
+        |d| d.id,
+    )
 }
 
 pub fn session_requests_of_held(r: &impl StoreReads, who: &str) -> Vec<SessionRequest> {
-    rows_about_held_tasks(r, who, |t| r.session_requests_of(t), |s| s.id)
+    dedup_by(
+        rows_about_held_tasks(r, who, |t| r.session_requests_of(t), |s| s.id)
+            .into_iter()
+            .chain(rows_on_owned_hosts(r, who, |h| {
+                r.session_requests_on_host(h)
+            })),
+        |s| s.id,
+    )
 }
 
 pub fn subagents_of_held(r: &impl StoreReads, who: &str) -> Vec<TaskSubagent> {

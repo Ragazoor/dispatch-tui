@@ -14,6 +14,8 @@ struct Store {
     subscriptions: Vec<Subscription>,
     links: Vec<WorkPackageLink>,
     agents: Vec<Agent>,
+    dispatch_requests: Vec<DispatchRequest>,
+    session_requests: Vec<SessionRequest>,
     unseen: Vec<UnseenTask>,
     poll_owners: Vec<PollOwner>,
     learnings: Vec<Learning>,
@@ -85,11 +87,20 @@ impl StoreReads for Store {
     fn agents_of(&self, task: i64) -> Vec<Agent> {
         keep(&self.agents, |a| a.task_id == task)
     }
-    fn dispatch_requests_of(&self, _: i64) -> Vec<DispatchRequest> {
-        Vec::new()
+    fn dispatch_requests_of(&self, task: i64) -> Vec<DispatchRequest> {
+        keep(&self.dispatch_requests, |d| d.task_id == task)
     }
-    fn session_requests_of(&self, _: i64) -> Vec<SessionRequest> {
-        Vec::new()
+    fn session_requests_of(&self, task: i64) -> Vec<SessionRequest> {
+        keep(&self.session_requests, |s| s.task_id == task)
+    }
+    fn agents_on_host(&self, host: &str) -> Vec<Agent> {
+        keep(&self.agents, |a| a.host == host)
+    }
+    fn dispatch_requests_on_host(&self, host: &str) -> Vec<DispatchRequest> {
+        keep(&self.dispatch_requests, |d| d.host == host)
+    }
+    fn session_requests_on_host(&self, host: &str) -> Vec<SessionRequest> {
+        keep(&self.session_requests, |s| s.host == host)
     }
     fn unseen_of(&self, who: &str) -> Vec<UnseenTask> {
         keep(&self.unseen, |u| u.subscriber == who)
@@ -329,6 +340,66 @@ fn rows_about_a_task_are_served_only_for_tasks_the_caller_holds() {
     ];
     assert_eq!(ids(&agents_of_held(&store, "ann"), |a| a.id), [1]);
     assert_eq!(ids(&agents_of_held(&store, "bob"), |a| a.id), [1, 2]);
+}
+
+/// Y3: a request row follows the HOST, not the caller's sight of the task. A
+/// caller who dispatched a teammate's task and then lost sight of it (an
+/// unfollowed epic) still gets the requests and agents on their own hosts, and
+/// nobody else's.
+#[test]
+fn request_and_agent_rows_follow_the_callers_hosts_not_sight_of_the_task() {
+    let mut store = tree();
+    // Task 10 sits in bob's private epic: ann has no sight of it.
+    store.tasks = vec![task(10, 3, "bob", "")];
+    store.hosts = vec![
+        Host {
+            id: "ann-laptop".into(),
+            owner: "ann".into(),
+            label: String::new(),
+        },
+        Host {
+            id: "bob-laptop".into(),
+            owner: "bob".into(),
+            label: String::new(),
+        },
+    ];
+    store.dispatch_requests = vec![
+        DispatchRequest {
+            id: 1,
+            task_id: 10,
+            host: "ann-laptop".into(),
+            ..blank_dispatch_request()
+        },
+        DispatchRequest {
+            id: 2,
+            task_id: 10,
+            host: "bob-laptop".into(),
+            ..blank_dispatch_request()
+        },
+    ];
+    store.session_requests = vec![SessionRequest {
+        id: 1,
+        task_id: 10,
+        host: "ann-laptop".into(),
+        ..blank_session_request()
+    }];
+    store.agents = vec![Agent {
+        id: 1,
+        task_id: 10,
+        host: "ann-laptop".into(),
+        ..blank_agent()
+    }];
+    assert_eq!(
+        ids(&dispatch_requests_of_held(&store, "ann"), |d| d.id),
+        [1]
+    );
+    assert_eq!(ids(&session_requests_of_held(&store, "ann"), |s| s.id), [1]);
+    assert_eq!(ids(&agents_of_held(&store, "ann"), |a| a.id), [1]);
+    // Bob holds the task, so he sees every request about it.
+    assert_eq!(
+        ids(&dispatch_requests_of_held(&store, "bob"), |d| d.id),
+        [1, 2]
+    );
 }
 
 #[test]

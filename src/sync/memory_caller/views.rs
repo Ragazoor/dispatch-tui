@@ -88,6 +88,15 @@ impl StoreReads for Tables {
             d.task_id == task_id
         })
     }
+    fn agents_on_host(&self, host: &str) -> Vec<module::Agent> {
+        keep(self.agents.values().cloned(), |a| a.host == host)
+    }
+    fn dispatch_requests_on_host(&self, host: &str) -> Vec<module::DispatchRequest> {
+        keep(self.dispatch_requests.values().cloned(), |d| d.host == host)
+    }
+    fn session_requests_on_host(&self, host: &str) -> Vec<module::SessionRequest> {
+        keep(self.session_requests.values().cloned(), |s| s.host == host)
+    }
     fn session_requests_of(&self, task_id: i64) -> Vec<module::SessionRequest> {
         keep(self.session_requests.values().cloned(), |s| {
             s.task_id == task_id
