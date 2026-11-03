@@ -240,10 +240,18 @@ pub fn settle_new_epic(ctx: &ReducerContext, row: Epic) -> Result<Epic, String> 
         caller
     };
     check_private_has_creator(&row.visibility, &created_by)?;
+    // `FeedCommandAuthority` at creation: a command on a new epic is its
+    // creator's, whatever the row names.
+    let feed_command_set_by = if row.feed_command.is_empty() {
+        String::new()
+    } else {
+        created_by.clone()
+    };
     Ok(Epic {
         workspace_id,
         parent_epic_id: parent_id,
         created_by,
+        feed_command_set_by,
         ..row
     })
 }
@@ -455,6 +463,9 @@ pub(crate) fn set_epic_visibility_row(
     epic.visibility = visibility;
     epic.updated_at = now(ctx);
     ctx.db.epics().id().update(epic);
+    // `ClaimsFollowSight`: a flip to private takes the tree from every other
+    // member, and their hosts' claims with it.
+    crate::config::release_claims_without_sight(ctx, &collect_epic_subtree_ids(ctx, epic_id));
     Ok(())
 }
 
@@ -581,7 +592,7 @@ pub(crate) fn move_epic_row(
     // `MoveEpicToWorkspace` (V6): a host whose owner is not in the destination
     // can no longer read the tree, so it must not keep the feed's claim.
     let tree_set: std::collections::HashSet<i64> = tree.iter().copied().collect();
-    crate::config::release_poll_claims(ctx, &tree_set, |owner| {
+    crate::config::release_poll_claims(ctx, &tree_set, |_, owner| {
         !workspace_has_member(ctx, workspace_id, owner)
     });
     let marks: Vec<String> = ctx

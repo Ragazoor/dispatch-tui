@@ -523,7 +523,14 @@ impl SharedTable {
             // Who created the epic (`core.allium: Epic.created_by`) — an
             // epic has no `owner` counterpart, since nobody's user board
             // holds one.
-            SharedTable::Epics => &["created_by", "workspace_id", "visibility"],
+            SharedTable::Epics => &[
+                "created_by",
+                "workspace_id",
+                "visibility",
+                // Who set the feed command (task #98851); a restore without
+                // one falls back to the creator.
+                "feed_command_set_by",
+            ],
             // The workspace columns (`workspaces.allium`); SQLite had none.
             SharedTable::WorkPackages => &["workspace_id", "visibility"],
             SharedTable::Learnings => &["workspace_id"],

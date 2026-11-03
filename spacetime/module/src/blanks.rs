@@ -82,6 +82,7 @@ pub fn blank_epic() -> Epic {
         created_by: String::new(),
         workspace_id: 0,
         visibility: VISIBILITY_PUBLIC.into(),
+        feed_command_set_by: String::new(),
     }
 }
 

@@ -46,6 +46,12 @@ pub struct Epic {
     /// for a row from before workspaces existed.
     pub workspace_id: i64,
     pub visibility: crate::models::Visibility,
+    /// The person whose command `feed_command` is: who last set it, or the
+    /// epic's creator for a command that predates the record. A host runs the
+    /// command only when its owner is this person (`feeds.allium:
+    /// FeedCommandRunsOnSettersHost`). `None` when nobody is on record, which
+    /// no host's owner matches.
+    pub feed_setter: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

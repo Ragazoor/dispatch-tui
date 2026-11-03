@@ -311,10 +311,17 @@ impl Tables {
         if row.visibility == module::VISIBILITY_PRIVATE && created_by.is_empty() {
             return Err("a private epic needs a creator".into());
         }
+        // A command on a new epic is its creator's, whatever the row names.
+        let feed_command_set_by = if row.feed_command.is_empty() {
+            String::new()
+        } else {
+            created_by.clone()
+        };
         Ok(module::Epic {
             workspace_id,
             parent_epic_id: parent_id,
             created_by,
+            feed_command_set_by,
             ..row
         })
     }
@@ -530,7 +537,11 @@ impl MemoryReducerCaller {
         }
         epic.visibility = visibility;
         epic.updated_at = self.now();
+        let epic_id = epic.id;
         self.write_epic(&mut tables, epic);
+        // `ClaimsFollowSight`.
+        let subtree = Self::collect_epic_subtree_ids(&tables, epic_id);
+        self.release_claims_without_sight(&mut tables, &subtree);
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
@@ -673,7 +684,7 @@ impl MemoryReducerCaller {
             .filter(|m| m.workspace_id == workspace_id)
             .map(|m| m.user.clone())
             .collect();
-        self.release_poll_claims(&mut tables, &tree_set, |owner| {
+        self.release_poll_claims(&mut tables, &tree_set, |_, owner| {
             !members.iter().any(|m| m == owner)
         });
         let marks: Vec<String> = tables

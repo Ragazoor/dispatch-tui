@@ -28,6 +28,17 @@ impl MemoryReducerCaller {
         self.rows.upsert_user_profile(&row.into());
     }
 
+    /// Record `setter` as the person who set `epic_id`'s feed command, as that
+    /// person's own `patch_epic` would have: for a test about whose host may
+    /// run it.
+    pub fn seed_feed_setter(&self, epic_id: i64, setter: &str) {
+        let mut tables = self.lock();
+        if let Some(row) = tables.epics.get_mut(&epic_id) {
+            row.feed_command_set_by = setter.to_string();
+            self.rows.upsert_epic(&row.clone().into());
+        }
+    }
+
     /// A profile for ANOTHER person, as their own first connection would have
     /// made it: for a test whose subject is a second person in the directory.
     /// Idempotent; an existing profile keeps its name.

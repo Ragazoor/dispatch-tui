@@ -36,9 +36,58 @@ pub(crate) fn decide_poll_action(current_owner: Option<&str>, host_id: &str) -> 
     }
 }
 
+/// Whether a host whose owner is `host_owner` may run a feed epic's command,
+/// given who set it (`feeds.allium: FeedCommandRunsOnSettersHost`). Both must
+/// be on record: a command with no setter, or a host with no owner, runs
+/// nowhere. Pure, like [`decide_poll_action`].
+pub(crate) fn host_runs_feed_of(host_owner: Option<&str>, setter: Option<&str>) -> bool {
+    matches!((host_owner, setter), (Some(owner), Some(setter)) if owner == setter)
+}
+
+/// [`decide_poll_action`] for a feed epic: a host whose owner did not set the
+/// command neither claims nor runs it, whoever holds the claim.
+pub(crate) fn decide_feed_poll_action(
+    current_owner: Option<&str>,
+    host_id: &str,
+    runs_here: bool,
+) -> PollAction {
+    if runs_here {
+        decide_poll_action(current_owner, host_id)
+    } else {
+        PollAction::Skip
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_feed_runs_only_on_the_host_of_the_person_who_set_it() {
+        assert!(host_runs_feed_of(Some("bob"), Some("bob")));
+        assert!(!host_runs_feed_of(Some("carol"), Some("bob")));
+        assert!(!host_runs_feed_of(None, Some("bob")));
+        assert!(!host_runs_feed_of(Some("bob"), None));
+        assert!(!host_runs_feed_of(None, None));
+    }
+
+    #[test]
+    fn a_feed_this_host_may_not_run_is_skipped_claimed_or_not() {
+        for owner in [None, Some("me"), Some("someone-else")] {
+            assert_eq!(
+                decide_feed_poll_action(owner, "me", false),
+                PollAction::Skip
+            );
+        }
+        assert_eq!(
+            decide_feed_poll_action(None, "me", true),
+            PollAction::ClaimAndProceed
+        );
+        assert_eq!(
+            decide_feed_poll_action(Some("me"), "me", true),
+            PollAction::Proceed
+        );
+    }
 
     #[test]
     fn an_unclaimed_scope_is_claimed_and_proceeded_with() {

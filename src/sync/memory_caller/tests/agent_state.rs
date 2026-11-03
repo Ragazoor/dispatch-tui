@@ -403,11 +403,41 @@ async fn mark_pr_learnings_gate_shown_refuses_a_repeat() {
     assert!(!second.won());
 }
 
+/// A bare task row, for a claim on a scope that must exist.
+fn task_row(id: i64) -> module::Task {
+    module::Task {
+        id,
+        ..module::blank_task()
+    }
+}
+
+#[tokio::test]
+async fn claim_and_override_poll_owner_refuse_a_scope_that_does_not_exist() {
+    let (caller, rows) = owning_caller();
+    for target in [PollScopeId::Task(TaskId(9)), PollScopeId::Epic(EpicId(9))] {
+        let claim = caller
+            .claim_poll_owner(target, "host-a".into())
+            .await
+            .unwrap();
+        let reassign = caller
+            .override_poll_owner(target, "host-a".into())
+            .await
+            .unwrap();
+        assert!(matches!(claim, ReducerOutcome::Refused(_)), "{claim:?}");
+        assert!(
+            matches!(reassign, ReducerOutcome::Refused(_)),
+            "{reassign:?}"
+        );
+        assert!(rows.poll_owner(target).is_none());
+    }
+}
+
 // -- Poll ownership -----------------------------------------------------------
 
 #[tokio::test]
 async fn claim_poll_owner_fills_an_absent_row_and_leaves_an_existing_one() {
     let (caller, rows) = owning_caller();
+    caller.lock().tasks.insert(1, task_row(1));
     caller
         .claim_poll_owner(PollScopeId::Task(TaskId(1)), "host-a".into())
         .await
@@ -425,6 +455,7 @@ async fn claim_poll_owner_fills_an_absent_row_and_leaves_an_existing_one() {
 #[tokio::test]
 async fn override_poll_owner_reassigns_an_existing_row() {
     let (caller, rows) = owning_caller();
+    caller.lock().tasks.insert(1, task_row(1));
     caller
         .claim_poll_owner(PollScopeId::Task(TaskId(1)), "host-a".into())
         .await

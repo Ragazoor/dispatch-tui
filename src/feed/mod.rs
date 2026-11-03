@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::board_event::BoardEvent;
-use crate::models::{decide_poll_action, PollAction};
+use crate::models::{decide_feed_poll_action, host_runs_feed_of, PollAction};
 use crate::models::{Epic, EpicId, MIN_FEED_INTERVAL_SECS};
 use crate::process::ProcessRunner;
 use crate::store::{RemovedFeedTask, TaskStore};
@@ -221,6 +221,18 @@ pub struct FeedRunner {
     spawned: Vec<tokio::task::JoinHandle<()>>,
 }
 
+/// `feeds.allium: FeedCommandRunsOnSettersHost`: whether the host `host_id`
+/// may run `epic`'s feed command, for the auto-poll and the manual refresh
+/// alike. True only when the host's owner is the person who set the command.
+pub(crate) async fn host_may_run_feed(
+    board_reads: &dyn crate::store::BoardReads,
+    host_id: &str,
+    epic: &crate::models::Epic,
+) -> bool {
+    let owner = board_reads.host_owner(host_id).await;
+    host_runs_feed_of(owner.as_deref(), epic.feed_setter.as_deref())
+}
+
 impl FeedRunner {
     pub fn new(
         db: Arc<dyn TaskStore>,
@@ -321,7 +333,7 @@ impl FeedRunner {
             // `SerialisedFeedCycle` contention: a non-owning host must not
             // retry every tick just because it lost the ownership check.
             self.last_run.insert(epic.id, now);
-            if !self.this_host_polls(epic.id).await {
+            if !self.this_host_polls(&epic).await {
                 continue;
             }
 
@@ -361,12 +373,16 @@ impl FeedRunner {
     /// Whether this host should run `epic_id`'s cycle this tick, per
     /// `core/PollOwner`. Claims ownership (without waiting for the answer) when
     /// no host has it yet.
-    async fn this_host_polls(&mut self, epic_id: EpicId) -> bool {
+    async fn this_host_polls(&mut self, epic: &crate::models::Epic) -> bool {
+        let epic_id = epic.id;
         let owner = self
             .board_reads
             .poll_owner(crate::models::PollScopeId::Epic(epic_id))
             .await;
-        match decide_poll_action(owner.as_deref(), &self.host_id) {
+        // `FeedCommandRunsOnSettersHost` comes first: a host whose owner did
+        // not set the command neither claims nor runs it.
+        let runs_here = host_may_run_feed(&*self.board_reads, &self.host_id, epic).await;
+        match decide_feed_poll_action(owner.as_deref(), &self.host_id, runs_here) {
             PollAction::Skip => return false,
             // Fired without awaiting it: `tick` must not block on a
             // network round-trip for one epic while others are still

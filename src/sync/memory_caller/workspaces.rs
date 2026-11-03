@@ -309,7 +309,7 @@ impl MemoryReducerCaller {
             .filter(|e| e.workspace_id == workspace_id)
             .map(|e| e.id)
             .collect();
-        self.release_poll_claims(tables, &epics, |owner| owner == user);
+        self.release_poll_claims(tables, &epics, |_, owner| owner == user);
         let marks: Vec<String> = tables
             .unseen_tasks
             .values()

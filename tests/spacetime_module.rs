@@ -227,6 +227,7 @@ fn epic_json(id: i64, title: &str, status: &str, parent: i64) -> serde_json::Val
         "created_by": "",
         "workspace_id": 0,
         "visibility": "public",
+        "feed_command_set_by": "",
     })
 }
 

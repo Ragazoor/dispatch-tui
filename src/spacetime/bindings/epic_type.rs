@@ -27,6 +27,7 @@ pub struct Epic {
     pub created_by: String,
     pub workspace_id: i64,
     pub visibility: String,
+    pub feed_command_set_by: String,
 }
 
 impl __sdk::InModule for Epic {
@@ -57,6 +58,7 @@ pub struct EpicCols {
     pub created_by: __sdk::__query_builder::Col<Epic, String>,
     pub workspace_id: __sdk::__query_builder::Col<Epic, i64>,
     pub visibility: __sdk::__query_builder::Col<Epic, String>,
+    pub feed_command_set_by: __sdk::__query_builder::Col<Epic, String>,
 }
 
 impl __sdk::__query_builder::HasCols for Epic {
@@ -83,6 +85,10 @@ impl __sdk::__query_builder::HasCols for Epic {
             created_by: __sdk::__query_builder::Col::new(table_name, "created_by"),
             workspace_id: __sdk::__query_builder::Col::new(table_name, "workspace_id"),
             visibility: __sdk::__query_builder::Col::new(table_name, "visibility"),
+            feed_command_set_by: __sdk::__query_builder::Col::new(
+                table_name,
+                "feed_command_set_by",
+            ),
         }
     }
 }

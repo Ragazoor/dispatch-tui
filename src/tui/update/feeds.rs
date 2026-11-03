@@ -70,6 +70,18 @@ impl App {
     /// The refresh was dropped because a cycle for this epic was already
     /// running (feeds.allium: SerialisedFeedCycle). No `RefreshFromDb`: nothing
     /// was written, so there is nothing to reload.
+    /// The refresh was refused because this host's owner did not set the
+    /// epic's command (feeds.allium: FeedCommandRunsOnSettersHost). Nothing ran.
+    pub(in crate::tui) fn handle_feed_not_authors_host(
+        &mut self,
+        epic_title: String,
+    ) -> Vec<Command> {
+        self.status.set(format!(
+            "Feed for '{epic_title}' runs only on its author's host"
+        ));
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_feed_already_refreshing(
         &mut self,
         epic_title: String,

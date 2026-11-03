@@ -277,6 +277,18 @@ is below the floor, warning on each tick rather than quietly clamping. See
 "Interval literals" in `docs/specs/core.allium` for why the floor lives in the
 service and not in the interval grammar.
 
+**A feed runs only on the host of the person who set its command.** A feed
+command is a shell command run with its host's credentials, so seeing an epic,
+following it or holding its poll claim does not let your machine run a command
+somebody else wrote. The store records who last set the command
+(`feed_command_set_by`, stamped with the caller, never client-named) and falls
+back to the epic's creator for a command that predates the record. Both the
+auto-poll and the `r` refresh run only on a host whose owner is that person, and
+the store refuses a claim on a feed epic from any other host. A teammate's feed
+therefore pauses while the setter's host is offline. Changing the command makes
+the changer its setter and releases the other hosts' claims. See
+`FeedCommandRunsOnSettersHost` in `docs/specs/feeds.allium`.
+
 Generic feeds come in two flavours, both upstream-agnostic: **flat** (one task
 per item under the epic) and **group_by_repo** (items bucketed into per-repo
 sub-epics). Author your own script, point an epic's `feed_command` at it, and

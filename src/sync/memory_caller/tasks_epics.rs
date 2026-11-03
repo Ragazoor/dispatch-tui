@@ -667,7 +667,7 @@ impl MemoryReducerCaller {
             if scope.on() && !module::may_change_feed_command(&*tables, &row, command, &self.sender)
             {
                 return Ok(ReducerOutcome::Refused(format!(
-                    "only the creator of epic {}, the owner of the host that polls it, or an admin of its workspace may change its feed command",
+                    "only the creator of epic {} or an admin of its workspace may change its feed command",
                     row.id
                 )));
             }
@@ -676,7 +676,15 @@ impl MemoryReducerCaller {
         let was_child_of = row.parent_epic_id;
         let caller_named_a_completion = patch.completed_at.is_some();
 
+        let command_changed = patch
+            .feed_command
+            .as_ref()
+            .is_some_and(|c| *c != row.feed_command);
+        let reparented = patch.parent_epic_id.is_some_and(|p| p != was_child_of);
         module::apply_epic_patch(&mut row, patch);
+        if command_changed {
+            row.feed_command_set_by = self.sender.clone();
+        }
         if !caller_named_a_completion && module::stamps_completion(&prior_status, &row.status) {
             row.completed_at = self.now();
         }
@@ -688,6 +696,20 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
         self.write_epic(&mut tables, row);
+        if command_changed {
+            // Only the setter's own host may run the command now.
+            let setter = self.sender.clone();
+            self.release_poll_claims(
+                &mut tables,
+                &std::collections::HashSet::from([id]),
+                |_, owner| owner != setter,
+            );
+        }
+        if reparented {
+            // `ClaimsFollowSight`.
+            let subtree = Self::collect_epic_subtree_ids(&tables, id);
+            self.release_claims_without_sight(&mut tables, &subtree);
+        }
 
         self.recalculate_epic_chain(&mut tables, id);
         if was_child_of != 0 {

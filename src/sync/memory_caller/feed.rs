@@ -357,10 +357,18 @@ impl MemoryReducerCaller {
                 row.visibility = module::VISIBILITY_PRIVATE.to_string();
             }
             if let Some((cmd, interval)) = command {
+                if row.feed_command != cmd {
+                    row.feed_command_set_by = self.sender.clone();
+                }
                 row.feed_command = cmd.to_string();
                 row.feed_interval_secs = interval;
             }
             self.write_epic(tables, row);
+            // `ClaimsFollowSight`: the root turned private above.
+            if make_private {
+                let subtree = Self::collect_epic_subtree_ids(tables, id);
+                self.release_claims_without_sight(tables, &subtree);
+            }
             return id;
         }
         let (feed_command, feed_interval_secs) =
@@ -388,6 +396,11 @@ impl MemoryReducerCaller {
                 title: managed_role_title(role).to_string(),
                 parent_epic_id,
                 feed_role: role.to_string(),
+                feed_command_set_by: if feed_command.is_empty() {
+                    String::new()
+                } else {
+                    self.sender.clone()
+                },
                 feed_command,
                 feed_interval_secs,
                 created_by: self.sender.clone(),

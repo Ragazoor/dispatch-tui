@@ -230,6 +230,7 @@ fn epic_struct_fields() {
         workspace_id: 0,
         visibility: crate::models::Visibility::Public,
         origin: EpicOrigin::Manual,
+        feed_setter: None,
         created_at: now,
         updated_at: now,
     };

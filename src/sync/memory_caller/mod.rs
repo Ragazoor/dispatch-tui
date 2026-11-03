@@ -88,6 +88,7 @@ const ACTIVE: &str = "active";
 const AWAITING_REVIEW: &str = "awaiting_review";
 const NEEDS_INPUT: &str = "needs_input";
 const POLL_SCOPE_EPIC: &str = "epic";
+const POLL_SCOPE_TASK: &str = "task";
 
 /// Mirrors the module's own `MAX_EPIC_DEPTH`: a corrupt `parent_epic_id` cycle
 /// is unreachable through any writer here, so this is a stack-overflow guard

@@ -1032,15 +1032,18 @@ impl SharedRows {
         })
     }
 
-    // `hosts` is DELIVERED and stored but has no accessor, and that is the
-    // honest state rather than an omission: a card naming another machine needs
-    // the registry present when something finally resolves it, and an accessor
-    // written now would be an ordering nothing tests and nothing calls. Phase 6
-    // adds the reader together with the test that needs it.
+    // `hosts` has one reader, `host_owner`: whose machine is this host, for
+    // the feed gate (`feeds.allium: FeedCommandRunsOnSettersHost`).
     //
     // `poll_owners` is the exception, added in Phase 7: `PollPrStatus`/
     // `FeedTick` need "who owns this scope?" on every tick, so this reader
     // arrives with its own consumer rather than waiting the way `hosts` is.
+
+    /// The owner of the host `host_id`, or `None` when the host is unknown or
+    /// has no owner. `core.allium: Host.owner`.
+    pub fn host_owner(&self, host_id: &str) -> Option<String> {
+        self.read(|rows| rows.hosts.get(host_id).and_then(|h| h.owner.clone()))
+    }
 
     /// The `PollOwner` row for `(scope, scope_id)`, or `None` if unclaimed.
     /// `core.allium: PollOwner`.

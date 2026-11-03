@@ -2106,6 +2106,15 @@ rule ClaimPollOwner {
 
     -- D11: only the host's own owner may claim for it.
     requires: host.owner != null and host.owner = caller()
+    -- Task #98851 (M2): the caller must see the scope. An unseen epic or
+    -- task is refused as "does not exist", so a claim cannot take or stall
+    -- the poll of something its caller cannot read. A feed epic is also
+    -- refused to a host whose owner did not set its command
+    -- (feeds.allium: FeedCommandRunsOnSettersHost).
+    requires: caller().sees(scope, scope_id)
+    let target = Epic{id: scope_id}    -- only read when scope = epic
+    requires: scope != epic or target.feed_command = null
+        or host.owner = (target.feed_command_set_by ?? target.created_by)
 
     ensures: core/PollOwner.claimed_if_absent(scope, scope_id, host)
 
@@ -2120,6 +2129,11 @@ rule OverridePollOwner {
     -- D11: a client can move a scope only to a host it owns, never to
     -- someone else's machine, so a poll cannot be stolen for another host.
     requires: host.owner != null and host.owner = caller()
+    -- Task #98851 (M2): the same sight and setter checks as ClaimPollOwner.
+    requires: caller().sees(scope, scope_id)
+    let target = Epic{id: scope_id}    -- only read when scope = epic
+    requires: scope != epic or target.feed_command = null
+        or host.owner = (target.feed_command_set_by ?? target.created_by)
 
     ensures: core/PollOwner.reassigned(scope, scope_id, host)
 

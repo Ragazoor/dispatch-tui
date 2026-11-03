@@ -14,12 +14,13 @@ use super::{MemoryReducerCaller, Tables, POLL_SCOPE_EPIC};
 
 impl MemoryReducerCaller {
     /// Mirrors the module's `release_poll_claims`: drop every epic-scoped
-    /// claim on an epic in `epics` held by a host whose owner `loses_sight`.
+    /// claim on an epic in `epics` held by a host whose owner
+    /// `loses_sight(epic_id, owner)`.
     pub(super) fn release_poll_claims(
         &self,
         tables: &mut Tables,
         epics: &std::collections::HashSet<i64>,
-        loses_sight: impl Fn(&str) -> bool,
+        loses_sight: impl Fn(i64, &str) -> bool,
     ) {
         let stale: Vec<i64> = tables
             .poll_owners
@@ -29,7 +30,7 @@ impl MemoryReducerCaller {
                 tables
                     .hosts
                     .get(&p.host)
-                    .is_some_and(|h| loses_sight(&h.owner))
+                    .is_some_and(|h| loses_sight(p.scope_id, &h.owner))
             })
             .map(|p| p.id)
             .collect();
@@ -37,6 +38,33 @@ impl MemoryReducerCaller {
             tables.poll_owners.remove(&row_id);
             self.rows.remove_poll_owner(row_id);
         }
+    }
+
+    /// Mirrors the module's `release_claims_without_sight`
+    /// (`workspaces.allium: ClaimsFollowSight`): the one helper every
+    /// loss-of-sight path calls once its change is written.
+    pub(super) fn release_claims_without_sight(
+        &self,
+        tables: &mut Tables,
+        epics: &std::collections::HashSet<i64>,
+    ) {
+        let unseen: Vec<(i64, String)> = tables
+            .poll_owners
+            .values()
+            .filter(|p| p.scope == POLL_SCOPE_EPIC && epics.contains(&p.scope_id))
+            .filter_map(|p| {
+                let owner = tables.hosts.get(&p.host)?.owner.clone();
+                let sees = tables
+                    .epics
+                    .get(&p.scope_id)
+                    .is_some_and(|e| module::epic_visible_to(&*tables, e, &owner));
+                (!sees).then_some((p.scope_id, owner))
+            })
+            .collect();
+        let gone: std::collections::HashSet<(i64, String)> = unseen.into_iter().collect();
+        self.release_poll_claims(tables, epics, |epic_id, owner| {
+            gone.contains(&(epic_id, owner.to_string()))
+        });
     }
 
     pub(super) fn write_repo_path(&self, tables: &mut Tables, mut row: module::RepoPath) -> i64 {
@@ -247,7 +275,7 @@ impl MemoryReducerCaller {
             module::epics_losing_coverage(epic_id, &remaining, &parents)
                 .into_iter()
                 .collect();
-        self.release_poll_claims(&mut tables, &released, |owner| owner == subscriber);
+        self.release_poll_claims(&mut tables, &released, |_, owner| owner == subscriber);
         Ok(ReducerOutcome::Applied(vec![]))
     }
 

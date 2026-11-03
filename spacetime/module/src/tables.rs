@@ -199,6 +199,14 @@ pub struct Epic {
     #[default("public")]
     #[index(btree)]
     pub visibility: String,
+    /// Who last set `feed_command` (`core.allium: Epic.feed_command_set_by`):
+    /// stamped by the module with the caller whenever the command is created
+    /// or changed, never client-named. `""` for a command that predates the
+    /// column, which then counts as set by `created_by`. A host runs the
+    /// command only when its owner is this person (task #98851, M2).
+    /// Appended last, with a default, so the module still automigrates.
+    #[default("")]
+    pub feed_command_set_by: String,
 }
 
 /// DEAD TABLE, kept for the same reason `TaskShell` is: this store's

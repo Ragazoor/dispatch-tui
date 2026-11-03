@@ -34,6 +34,10 @@ pub enum FeedMessage {
     /// success nor a failure, and reporting it as a failure would blame the
     /// user's feed command for a serialisation decision.
     AlreadyRefreshing { epic_title: String },
+    /// The refresh ran nothing: this host's owner is not the person who set
+    /// the epic's command (feeds.allium: FeedCommandRunsOnSettersHost). Not a
+    /// failure of the command, which never ran.
+    NotAuthorsHost { epic_title: String },
 }
 
 impl FeedMessage {
@@ -49,6 +53,9 @@ impl FeedMessage {
             FeedMessage::Failed { epic_title, error } => app.handle_feed_failed(epic_title, error),
             FeedMessage::AlreadyRefreshing { epic_title } => {
                 app.handle_feed_already_refreshing(epic_title)
+            }
+            FeedMessage::NotAuthorsHost { epic_title } => {
+                app.handle_feed_not_authors_host(epic_title)
             }
         }
     }

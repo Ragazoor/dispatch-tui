@@ -35,6 +35,7 @@ impl EpicBuilder {
                 origin: EpicOrigin::Manual,
                 workspace_id: 0,
                 visibility: crate::models::Visibility::Public,
+                feed_setter: None,
                 created_at: now,
                 updated_at: now,
             },
@@ -43,6 +44,12 @@ impl EpicBuilder {
 
     pub fn workspace(mut self, workspace_id: i64) -> Self {
         self.epic.workspace_id = workspace_id;
+        self
+    }
+
+    /// Who set the feed command, for a test about whose host may run it.
+    pub fn feed_setter(mut self, setter: impl Into<String>) -> Self {
+        self.epic.feed_setter = Some(setter.into());
         self
     }
 

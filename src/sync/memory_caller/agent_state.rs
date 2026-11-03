@@ -11,7 +11,10 @@ use crate::spacetime::bindings;
 
 use super::super::encode;
 use super::super::writes::{DrainReadBack, ReducerOutcome, StoreRefusal};
-use super::{MemoryReducerCaller, Tables, ACTIVE, AWAITING_REVIEW, NEEDS_INPUT, REVIEW, RUNNING};
+use super::{
+    MemoryReducerCaller, Tables, ACTIVE, AWAITING_REVIEW, NEEDS_INPUT, POLL_SCOPE_TASK, REVIEW,
+    RUNNING,
+};
 
 impl MemoryReducerCaller {
     /// Delete every `task_subagents` row for `task_id`, and detach/cascade its learnings.
@@ -449,6 +452,27 @@ impl MemoryReducerCaller {
         }
     }
 
+    /// Mirrors the module's `require_claimable_scope`: the caller sees the
+    /// scope, and a feed epic is claimed only for its setter.
+    fn require_claimable_scope(
+        &self,
+        tables: &Tables,
+        scope: &str,
+        scope_id: i64,
+    ) -> Result<(), String> {
+        let seen = self.scope();
+        if scope == POLL_SCOPE_TASK {
+            return tables
+                .visible_task(&seen, scope_id)
+                .map(|_| ())
+                .ok_or_else(|| format!("task {scope_id} does not exist"));
+        }
+        match tables.visible_epic(&seen, scope_id) {
+            Some(epic) => module::check_feed_claim_by(&epic, &self.sender),
+            None => Err(format!("epic {scope_id} does not exist")),
+        }
+    }
+
     pub(super) fn apply_claim_poll_owner(
         &self,
         target: PollScopeId,
@@ -457,6 +481,9 @@ impl MemoryReducerCaller {
         let (scope, scope_id) = target.wire();
         let mut tables = self.lock();
         if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        if let Err(why) = self.require_claimable_scope(&tables, scope, scope_id) {
             return Ok(ReducerOutcome::Refused(why));
         }
         self.write_poll_owner_row(&mut tables, scope, scope_id, host, false);
@@ -471,6 +498,9 @@ impl MemoryReducerCaller {
         let (scope, scope_id) = target.wire();
         let mut tables = self.lock();
         if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        if let Err(why) = self.require_claimable_scope(&tables, scope, scope_id) {
             return Ok(ReducerOutcome::Refused(why));
         }
         self.write_poll_owner_row(&mut tables, scope, scope_id, host, true);

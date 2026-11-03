@@ -1004,8 +1004,12 @@ rule FeedTick {
                     -- unclaimed epic is claimed here, permanently, by
                     -- whichever host's tick reaches it first; a claimed epic
                     -- is polled only by its owner. See "Host scoping" below.
+                    -- FeedCommandRunsOnSettersHost comes first: a host whose
+                    -- owner did not set the command neither claims nor runs.
                     let poll_owner = core/PollOwner{scope: epic, scope_id: epic.id}
-                    if not exists poll_owner:
+                    if local_host().owner != (epic.feed_command_set_by ?? epic.created_by):
+                        -- skipped, last_run bumped as below
+                    else if not exists poll_owner:
                         core/PollOwner.created(
                             scope: epic,
                             scope_id: epic.id,
@@ -1080,12 +1084,12 @@ rule FeedTick {
         -- Decision 1, "feed polling is not yet host-scoped"). The claim
         -- above closes it to exactly one host per epic. This is narrower
         -- than PollPrStatus's host scoping in one respect: it applies ONLY
-        -- to FeedTick's own auto-poll gate. ManualFeedTrigger (the "r" key,
-        -- below) is unaffected and still reaches SerialisedFeedCycle
-        -- directly on ANY host — a human asking for a fresh fetch right now
-        -- is a different question from "who runs the recurring poll", and
-        -- answering the second must not stop a human on a non-owning host
-        -- from getting the first.
+        -- to FeedTick's own claim gate. ManualFeedTrigger (the "r" key,
+        -- below) is not held to the claim: a human asking for a fresh fetch
+        -- right now is a different question from "who runs the recurring
+        -- poll". It IS held to FeedCommandRunsOnSettersHost (task #98851),
+        -- because that rule is about whose command this is, not about who
+        -- polls it.
         --
         -- The feed SCRIPT still executes locally, on whichever host owns
         -- the claim — nothing here changes where or how the subprocess
@@ -1135,23 +1139,34 @@ rule OverrideFeedOwner {
 rule FeedCommandAuthority {
     when: EpicFeedCommandSet(epic, command)
 
-    -- Task #98746 (V8). The epic's poll-owner host runs feed_command as a
-    -- shell command, so changing it is changing what another person's
-    -- machine runs. Only three roles may do it: the epic's creator, the owner
-    -- of the host that holds the epic's core/PollOwner claim, and an admin of
-    -- the epic's workspace (a super-admin and the store operator always may).
-    -- Anyone else who merely sees the epic is refused. A patch that leaves
-    -- feed_command as it is, or sets it to the value it already has, is not a
-    -- change and needs no authority.
+    -- Task #98746 (V8), #98851 (M2). A host runs feed_command as a shell
+    -- command, so changing it is changing what a person's machine runs. Only
+    -- three roles may change it: the epic's creator and an admin of the
+    -- epic's workspace (a super-admin and the store operator always may). The
+    -- owner of the host that holds the poll claim has NO authority of its
+    -- own: a claim is something any host can take, so it cannot stand for
+    -- authorship. A patch that leaves feed_command as it is, or sets it to the
+    -- value it already has, is not a change and needs no authority.
+    --
+    -- The rule also runs at CREATION: a new epic that carries a feed_command
+    -- is a command set by its creator, so the creator is the setter.
     requires:
         command = epic.feed_command
         or caller() = epic.created_by
-        or exists core/PollOwner{scope: epic, scope_id: epic.id}
-            where host.owner = caller()
         or epic.workspace.is_admin(caller())
         or is_super_admin(caller())
 
-    ensures: epic.feed_command = command
+    ensures:
+        epic.feed_command = command
+        -- A real change records who made it, and drops every claim held by a
+        -- host whose owner is not that person (FeedCommandRunsOnSettersHost),
+        -- so the setter's own host can claim the feed at its next tick.
+        if command != old(epic.feed_command):
+            epic.feed_command_set_by = caller()
+            for claim in core/PollOwners.where(p =>
+                    p.scope = epic and p.scope_id = epic.id
+                    and p.host.owner != caller()):
+                not exists claim
 
     @guidance
         -- Module: spacetime/module/src/tasks_epics.rs::patch_epic via
@@ -1159,6 +1174,35 @@ rule FeedCommandAuthority {
         -- MemoryReducerCaller's apply_patch_epic. The managed root's own
         -- reconcile (epics.allium: ProvisionManagedEpics) writes only a root
         -- its caller created, so it needs no check of its own.
+}
+
+rule FeedCommandRunsOnSettersHost {
+    when: FeedCycleWanted(epic, host)
+
+    -- Task #98851 (M2), decided with the user: option (a). A host runs an
+    -- epic's feed_command, whether for FeedTick's auto-poll or for the "r"
+    -- refresh, only when the host's OWNER is the person who last set it. Seeing
+    -- an epic, following it, or holding its claim does not let a person's host
+    -- run a command somebody else wrote. A shared feed is therefore polled by
+    -- its setter's host alone, and pauses while that host is offline.
+    --
+    -- A null feed_command_set_by (a command that predates the column) counts
+    -- as set by created_by.
+    let setter = epic.feed_command_set_by ?? epic.created_by
+    requires: setter != null and host.owner = setter
+
+    ensures: FeedCycleRequested(epic: epic)
+
+    @guidance
+        -- Three enforcement points, so no single one is the only guard:
+        --   1. Module: claim_poll_owner and override_poll_owner refuse a
+        --      claim on a feed epic by a host whose owner is not the setter
+        --      (store-split.allium: ClaimPollOwner), so a stranger's host
+        --      cannot hold the claim.
+        --   2. FeedTick: src/models/poll_action.rs::decide_poll_action skips
+        --      an epic this host's owner did not set, claimed or not.
+        --   3. ManualFeedTrigger: the "r" key refuses with the status line
+        --      "Feed for '<title>' runs only on its author's host".
 }
 
 rule SerialisedFeedCycle {
@@ -3172,6 +3216,9 @@ rule ManualFeedTrigger {
 
     requires: epic.feed_command != null
 
+    -- FeedCommandRunsOnSettersHost (task #98851): when local_host().owner is
+    -- not the person who set the command, nothing runs and the status line
+    -- is "Feed for '{epic.title}' runs only on its author's host".
     ensures:
         status_bar = "Fetching feed for '{epic.title}'…"
         -- Spawns epic.feed_command; on success:

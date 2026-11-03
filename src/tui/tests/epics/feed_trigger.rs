@@ -204,6 +204,23 @@ fn feed_failed_sets_status_no_refresh() {
 }
 
 #[test]
+fn feed_not_authors_host_names_why_and_does_not_refresh() {
+    let mut app = App::new(vec![]);
+
+    let cmds = app.update(Message::Feed(
+        crate::tui::messages::FeedMessage::NotAuthorsHost {
+            epic_title: "Their Feed".to_string(),
+        },
+    ));
+
+    assert_eq!(
+        app.status_message(),
+        Some("Feed for 'Their Feed' runs only on its author's host")
+    );
+    assert!(cmds.is_empty(), "nothing ran, so nothing to reload");
+}
+
+#[test]
 fn epic_action_hints_shows_refresh_for_feed_epic() {
     let mut epic = make_epic(1);
     epic.feed_command = Some("echo '[]'".to_string());

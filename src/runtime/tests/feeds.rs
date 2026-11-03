@@ -459,6 +459,38 @@ mod feed_epic_trigger {
         .unwrap();
     }
 
+    /// `FeedCommandRunsOnSettersHost`: the "r" key runs the command on this
+    /// machine, so it refuses a command another person set and runs nothing.
+    #[tokio::test]
+    async fn exec_trigger_epic_feed_refuses_a_command_another_person_set() {
+        let db = test_db().await;
+        let epic = db.create_epic("Theirs", "", None).await.unwrap();
+        let cmd = r#"echo '[{"external_id":"v1","title":"T","description":"","status":"backlog","tag":"fix"}]'"#;
+        set_feed_command(&db, epic.id, cmd).await;
+        db.seed_feed_setter(epic.id, "someone-else");
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![]))).await;
+
+        rt.exec_trigger_epic_feed(epic.id, "Theirs".to_string());
+
+        let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+            .await
+            .expect("timed out")
+            .expect("channel closed");
+        assert!(
+            matches!(
+                msg,
+                Message::Feed(crate::tui::messages::FeedMessage::NotAuthorsHost { .. })
+            ),
+            "expected NotAuthorsHost, got: {msg:?}"
+        );
+        assert!(
+            db.list_tasks_for_epic(epic.id).await.is_empty(),
+            "the refused refresh must run no command"
+        );
+    }
+
     #[tokio::test]
     async fn exec_trigger_epic_feed_success() {
         let db = test_db().await;

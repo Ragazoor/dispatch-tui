@@ -102,6 +102,7 @@ fn blank_epic() -> bindings::Epic {
         created_by: String::new(),
         workspace_id: DEFAULT_WORKSPACE,
         visibility: "public".into(),
+        feed_command_set_by: String::new(),
     }
 }
 

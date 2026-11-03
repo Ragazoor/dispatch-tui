@@ -556,7 +556,9 @@ rule SetEpicVisibility {
     requires: visibility = public or epic.created_by != null
     requires: visibility = public or epic.origin != repo_group    -- RepoGroupsStayPublic
 
-    ensures: epic.visibility = visibility
+    ensures:
+        epic.visibility = visibility
+        -- Task #98851 (M4): ClaimsFollowSight, below.
 
     @guidance
         -- An admin can act only on an epic they can see, one with no
@@ -570,6 +572,22 @@ rule SetEpicVisibility {
         -- authority), are for the creator, an admin of the epic's workspace
         -- or a super-admin. Every other write on an epic the caller can see
         -- stays open to teammates (WritesRequireSight).
+}
+
+rule ClaimsFollowSight {
+    when: SightChanged(epic)    -- RemoveMember, MoveEpicToWorkspace, SetEpicVisibility, a re-parent, the managed-root private flip
+
+    -- Task #98851 (M4). A poll claim must not outlive the sight that made it
+    -- workable. After ANY change that can take an epic out of someone's
+    -- sight, every epic-scoped core/PollOwner on the epic or its sub-epics
+    -- held by a host whose owner no longer sees that epic is released, so
+    -- another host can claim the feed instead of it stalling. One helper
+    -- serves every path, and one conformance test runs each of them.
+    ensures:
+        for owner_row in core/PollOwners.where(p =>
+                p.scope = epic and p.scope_id in epic.subtree
+                    and not epic.visible_to(p.host.owner)):
+            not exists owner_row
 }
 
 rule EpicStaysInItsWorkspace {

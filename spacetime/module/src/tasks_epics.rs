@@ -834,13 +834,35 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     let was_child_of = row.parent_epic_id;
     let caller_named_a_completion = patch.completed_at.is_some();
 
+    // A real change of the command makes the caller its setter
+    // (`FeedCommandAuthority`); setting the value it already has is not one.
+    let command_changed = patch
+        .feed_command
+        .as_ref()
+        .is_some_and(|c| *c != row.feed_command);
+    let reparented = patch.parent_epic_id.is_some_and(|p| p != was_child_of);
+
     apply_epic_patch(&mut row, patch);
+    if command_changed {
+        row.feed_command_set_by = caller_identity(ctx);
+    }
     if !caller_named_a_completion && stamps_completion(&prior_status, &row.status) {
         row.completed_at = now(ctx);
     }
     row.updated_at = now(ctx);
     validate_status("epic", row.id, &row.status)?;
     ctx.db.epics().id().update(row);
+    if command_changed {
+        // Only the setter's own host may run the command now.
+        let setter = caller_identity(ctx);
+        crate::config::release_poll_claims(ctx, &std::collections::HashSet::from([id]), |_, owner| {
+            owner != setter
+        });
+    }
+    if reparented {
+        // `ClaimsFollowSight`: a new parent can change who sees the subtree.
+        crate::config::release_claims_without_sight(ctx, &collect_epic_subtree_ids(ctx, id));
+    }
 
     recalculate_epic_chain(ctx, id);
     if was_child_of != 0 {
@@ -849,11 +871,12 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     Ok(())
 }
 
-/// `feeds.allium: FeedCommandAuthority` (task #98746, V8). The poll-owner
-/// host runs `feed_command` as a shell command, so a patch that changes it
-/// needs the epic's creator, the owner of a host holding the epic's poll
-/// claim, or an admin of the epic's workspace. The operator and a super-admin
-/// always may. Setting the value the epic already has changes nothing.
+/// `feeds.allium: FeedCommandAuthority` (task #98746, V8; #98851, M2). A host
+/// runs `feed_command` as a shell command, so a patch that changes it needs
+/// the epic's creator or an admin of the epic's workspace. The operator and a
+/// super-admin always may. The owner of the host holding the epic's poll claim
+/// has no authority of its own. Setting the value the epic already has changes
+/// nothing.
 fn check_feed_command_authority(
     ctx: &ReducerContext,
     epic: &Epic,
@@ -870,7 +893,7 @@ fn check_feed_command_authority(
         Ok(())
     } else {
         Err(format!(
-            "only the creator of epic {}, the owner of the host that polls it, or an admin of its workspace may change its feed command",
+            "only the creator of epic {} or an admin of its workspace may change its feed command",
             epic.id
         ))
     }
@@ -886,12 +909,6 @@ pub fn may_change_feed_command(
 ) -> bool {
     command == epic.feed_command
         || (!epic.created_by.is_empty() && epic.created_by == caller)
-        || {
-            let hosts = r.hosts_owned_by(caller);
-            r.poll_owners_of(epic.id)
-                .iter()
-                .any(|p| p.scope == POLL_SCOPE_EPIC && hosts.iter().any(|h| h.id == p.host))
-        }
         || workspace_has_admin(r, epic.workspace_id, caller)
         || is_super_admin(r, caller)
 }

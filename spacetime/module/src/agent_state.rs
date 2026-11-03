@@ -140,6 +140,47 @@ pub(crate) fn require_poll_scope(scope: &str) -> Result<(), String> {
     }
 }
 
+/// Who `epic`'s feed command is: whoever last set it, or the creator for a
+/// command that predates the record (`core.allium: Epic.feed_command_set_by`).
+/// `""` when nobody is on record, which no host's owner matches. `pub` so
+/// `MemoryReducerCaller` applies the same rule.
+pub fn feed_setter(epic: &Epic) -> &str {
+    if epic.feed_command_set_by.is_empty() {
+        &epic.created_by
+    } else {
+        &epic.feed_command_set_by
+    }
+}
+
+/// `feeds.allium: FeedCommandRunsOnSettersHost`, as a refusal: a feed epic is
+/// claimed only by a host whose owner set its command. An epic with no
+/// command is nobody's to run, so any host that sees it may claim. The same
+/// answer for the module and the in-memory store.
+pub fn check_feed_claim_by(epic: &Epic, host_owner: &str) -> Result<(), String> {
+    if epic.feed_command.is_empty() || (!host_owner.is_empty() && host_owner == feed_setter(epic)) {
+        Ok(())
+    } else {
+        Err(format!(
+            "the feed command of epic {} runs only on the host of the person who set it",
+            epic.id
+        ))
+    }
+}
+
+/// `store-split.allium: ClaimPollOwner`/`OverridePollOwner`: the caller must
+/// see the scope (an unseen one is "does not exist", never which), and a feed
+/// epic may only be claimed for its setter. Checked after the host check, so
+/// the caller is the host's owner.
+fn require_claimable_scope(ctx: &ReducerContext, scope: &str, scope_id: i64) -> Result<(), String> {
+    if scope == POLL_SCOPE_TASK {
+        visible_task(ctx, scope_id).ok_or_else(|| format!("task {scope_id} does not exist"))?;
+        return Ok(());
+    }
+    let epic = visible_epic(ctx, scope_id)
+        .ok_or_else(|| format!("epic {scope_id} does not exist"))?;
+    check_feed_claim_by(&epic, &caller_identity(ctx))
+}
+
 /// Claim an unowned scope. `core.allium: PollOwner`. Only the host's owner
 /// may name it (D11, `store-split.allium: ClaimPollOwner`).
 #[spacetimedb::reducer]
@@ -151,6 +192,7 @@ pub fn claim_poll_owner(
 ) -> Result<(), String> {
     require_poll_scope(&scope)?;
     require_acting_for(ctx, &host)?;
+    require_claimable_scope(ctx, &scope, scope_id)?;
     write_poll_owner_row(ctx, &scope, scope_id, host, false);
     Ok(())
 }
@@ -167,6 +209,7 @@ pub fn override_poll_owner(
 ) -> Result<(), String> {
     require_poll_scope(&scope)?;
     require_acting_for(ctx, &host)?;
+    require_claimable_scope(ctx, &scope, scope_id)?;
     write_poll_owner_row(ctx, &scope, scope_id, host, true);
     Ok(())
 }

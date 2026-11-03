@@ -1328,6 +1328,18 @@ impl Store {
             .seed_person(identity, display_name);
     }
 
+    /// Make `setter` the person who set `epic`'s feed command, for a test
+    /// about whose host may run it (`feeds.allium:
+    /// FeedCommandRunsOnSettersHost`). Only an in-memory handle has one.
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(clippy::expect_used)]
+    pub fn seed_feed_setter(&self, epic: crate::models::EpicId, setter: &str) {
+        self.memory_caller
+            .as_ref()
+            .expect("seed_feed_setter needs an in-memory handle")
+            .seed_feed_setter(epic.0, setter);
+    }
+
     /// [`DispatchRequestStore::give_agent`] without the trait in scope.
     #[cfg(any(test, feature = "test-support"))]
     #[allow(clippy::expect_used)]

@@ -282,6 +282,9 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
             EpicOrigin::Manual
         }),
         workspace_id: row.workspace_id,
+        feed_setter: text(&row.feed_command_set_by)
+            .or_else(|| text(&row.created_by))
+            .map(str::to_owned),
         visibility: crate::models::Visibility::parse(&row.visibility).unwrap_or_else(|| {
             let count = super::bump_decode_fallback();
             tracing::warn!(count, value = %row.visibility, "unknown epic visibility from the shared store; treating it as public");

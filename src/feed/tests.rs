@@ -69,6 +69,40 @@ async fn tick_background_task_upserts_tasks() {
     assert_eq!(tasks[0].title, "BG");
 }
 
+/// `feeds.allium: FeedCommandRunsOnSettersHost`: a command somebody else set
+/// is neither claimed nor run on this host, though the host sees the epic.
+#[tokio::test]
+async fn tick_neither_claims_nor_runs_a_command_another_person_set() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let epic = db.create_epic("Theirs", "", None).await.unwrap();
+    db.patch_epic(
+        epic.id,
+        &EpicPatch::new().feed_command(Some(
+            r#"echo '[{"external_id":"t1","title":"T","description":"","status":"backlog","tag":"bug"}]'"#,
+        )),
+    )
+    .await
+    .unwrap();
+    db.seed_feed_setter(epic.id, "someone-else");
+
+    let (mut runner, _rx) = make_runner(db.clone());
+    runner.tick().await;
+    runner.join_spawned_jobs().await;
+
+    assert!(
+        db.list_tasks_for_epic(epic.id).await.is_empty(),
+        "the command ran on a host whose owner did not set it"
+    );
+    let board: Arc<dyn crate::store::BoardReads> = db.clone();
+    assert_eq!(
+        board
+            .poll_owner(crate::models::PollScopeId::Epic(epic.id))
+            .await,
+        None,
+        "this host must not claim a feed it may not run"
+    );
+}
+
 #[tokio::test]
 async fn tick_done_epic_moves_to_backlog_when_new_feed_tasks_added() {
     // Regression test: a done epic should regress to backlog when the feed

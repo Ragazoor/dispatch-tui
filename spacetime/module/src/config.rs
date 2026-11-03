@@ -234,19 +234,19 @@ pub fn unsubscribe_from_epic(
         epics_losing_coverage(epic_id, &remaining, &parents)
             .into_iter()
             .collect();
-    release_poll_claims(ctx, &released, |owner| owner == subscriber);
+    release_poll_claims(ctx, &released, |_, owner| owner == subscriber);
     Ok(())
 }
 
 /// `workspaces.allium: RemoveMember`, `MoveEpicToWorkspace` (task #98746, V6):
 /// release every epic-scoped poll claim on an epic in `epics` held by a host
-/// whose owner `loses_sight` of it, so another host can claim the feed
-/// instead of the epic stalling on a host that can no longer read it. The
-/// twin of the release in [`unsubscribe_from_epic`].
+/// whose owner `loses_sight(epic_id, owner)` of it, so another host can claim
+/// the feed instead of the epic stalling on a host that can no longer read it.
+/// The twin of the release in [`unsubscribe_from_epic`].
 pub(crate) fn release_poll_claims(
     ctx: &ReducerContext,
     epics: &std::collections::HashSet<i64>,
-    loses_sight: impl Fn(&str) -> bool,
+    loses_sight: impl Fn(i64, &str) -> bool,
 ) {
     let stale: Vec<i64> = epics
         .iter()
@@ -257,13 +257,32 @@ pub(crate) fn release_poll_claims(
                 .hosts()
                 .id()
                 .find(&p.host)
-                .is_some_and(|h| loses_sight(&h.owner))
+                .is_some_and(|h| loses_sight(p.scope_id, &h.owner))
         })
         .map(|p| p.id)
         .collect();
     for row_id in stale {
         ctx.db.poll_owners().id().delete(row_id);
     }
+}
+
+/// `workspaces.allium: ClaimsFollowSight` (task #98851, M4): the one helper
+/// every loss-of-sight path calls once the change is written. Releases the
+/// epic-scoped claims on `epics` held by a host whose owner no longer sees
+/// that epic, judged on the store as it is now. A path that can take sight
+/// away MUST call this; `every_loss_of_sight_path_releases_the_claims_it_strands`
+/// (`src/sync/memory_caller/tests/feed_authority.rs`) runs each one.
+pub(crate) fn release_claims_without_sight(
+    ctx: &ReducerContext,
+    epics: &std::collections::HashSet<i64>,
+) {
+    release_poll_claims(ctx, epics, |epic_id, owner| {
+        ctx.db
+            .epics()
+            .id()
+            .find(epic_id)
+            .is_none_or(|epic| !epic_visible_to(ctx, &epic, owner))
+    });
 }
 
 /// The epics in `unfollowed`'s subtree (itself included) that a person whose

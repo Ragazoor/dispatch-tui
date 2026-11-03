@@ -58,6 +58,13 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 32: feed command authority and poll claims — a feed epic records who set
+///    its command (`feed_command_set_by`) and is claimed only by a host whose
+///    owner did; `claim_poll_owner` and `override_poll_owner` need sight of the
+///    scope; the poll-owner arm of the command authority is gone; every
+///    loss-of-sight path releases the claims it strands
+///    (`agent_state.rs`, `tasks_epics.rs`, `visibility.rs`, `feed.rs`,
+///    `config.rs`).
 /// 31: usage is served on demand. The `own_usage_events` view is gone and the
 ///    `own_usage_summary` procedure answers `query_usage` with the caller's
 ///    grouped events, because a view over usage re-ran over a person's whole
@@ -157,7 +164,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 31;
+pub const RULES_VERSION: i64 = 32;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

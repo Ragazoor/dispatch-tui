@@ -444,10 +444,21 @@ fn ensure_role_epic(
             row.visibility = VISIBILITY_PRIVATE.to_string();
         }
         if let Some((cmd, interval)) = command {
+            if row.feed_command != cmd {
+                row.feed_command_set_by = created_by.to_string();
+            }
             row.feed_command = cmd.to_string();
             row.feed_interval_secs = interval;
         }
         ctx.db.epics().id().update(row);
+        // `ClaimsFollowSight` (M4): the managed root turned private above
+        // takes the shared PR Reviews tree from every member but its creator.
+        if make_private {
+            crate::config::release_claims_without_sight(
+                ctx,
+                &crate::tasks_epics::collect_epic_subtree_ids(ctx, id),
+            );
+        }
         return id;
     }
     let (feed_command, feed_interval_secs) =
@@ -458,6 +469,11 @@ fn ensure_role_epic(
             title: managed_role_title(role).to_string(),
             parent_epic_id,
             feed_role: role.to_string(),
+            feed_command_set_by: if feed_command.is_empty() {
+                String::new()
+            } else {
+                created_by.to_string()
+            },
             feed_command,
             feed_interval_secs,
             created_by: created_by.to_string(),

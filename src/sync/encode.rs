@@ -346,6 +346,8 @@ pub fn create_epic_row_with(
         // parent's workspace, which the store would use whatever this said.
         workspace_id,
         visibility: visibility.as_str().to_string(),
+        // Stamped by the module with the caller; never client-named.
+        feed_command_set_by: String::new(),
     }
 }
 

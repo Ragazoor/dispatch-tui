@@ -330,9 +330,24 @@ impl TuiRuntime {
             command_timeout: crate::feed::FEED_COMMAND_TIMEOUT,
         };
         let tx = self.msg_tx.clone();
+        let board_reads = self.board_reads.clone();
+        let host_id = self.host_id.clone();
 
         tokio::spawn(async move {
             use crate::tui::messages::FeedMessage;
+
+            // `FeedCommandRunsOnSettersHost`: a refresh runs the command on
+            // THIS machine, so it needs the person who set it to be this
+            // machine's owner. Read from the epic as it is now, like the
+            // command itself.
+            let may_run = match board_reads.get_epic(epic_id).await {
+                Some(epic) => crate::feed::host_may_run_feed(&*board_reads, &host_id, &epic).await,
+                None => false,
+            };
+            if !may_run {
+                let _ = tx.send(Message::Feed(FeedMessage::NotAuthorsHost { epic_title }));
+                return;
+            }
 
             // The cycle has already torn down every removed task's worktree by
             // the time it returns, so "N task(s) synced" means reconciled AND

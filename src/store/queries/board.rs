@@ -18,6 +18,10 @@ impl crate::store::BoardReads for Store {
         self.rows.poll_owner(target).map(|row| row.host)
     }
 
+    async fn host_owner(&self, host_id: &str) -> Option<String> {
+        self.rows.host_owner(host_id)
+    }
+
     async fn unseen_task_ids(&self) -> Vec<TaskId> {
         self.rows.unseen_task_ids()
     }

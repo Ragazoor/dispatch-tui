@@ -49,6 +49,12 @@ pub trait BoardReads:
     /// callers.
     async fn poll_owner(&self, target: PollScopeId) -> Option<String>;
 
+    /// The person who owns the host `host_id` (`core.allium: Host.owner`), or
+    /// `None` for an unregistered or unowned host. A host runs a feed epic's
+    /// command only when this is the person who set it
+    /// (`feeds.allium: FeedCommandRunsOnSettersHost`).
+    async fn host_owner(&self, host_id: &str) -> Option<String>;
+
     /// A number that changes when the rows do.
     ///
     /// The subscription's generation, read straight from the rows in memory, so

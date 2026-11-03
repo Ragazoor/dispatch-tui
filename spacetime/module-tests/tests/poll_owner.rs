@@ -8,10 +8,14 @@ use dispatch_spacetime_module::*;
 #[allow(unused_imports)]
 use spacetimedb::Table;
 
+/// Two of alice's hosts, and the scopes the claims name: her task 1 and epic
+/// 1 (a claim on a scope that does not exist is refused).
 fn two_hosts() -> Store {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
     store.register_host_for(HOST_B, "alice");
+    assert_eq!(store.create("alice", user_task("t", "alice")), 1);
+    assert_eq!(store.create_epic("alice", "e", false), 1);
     store
 }
 

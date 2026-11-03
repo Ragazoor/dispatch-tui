@@ -110,7 +110,9 @@ pub use patches::{
 };
 
 mod poll_action;
-pub(crate) use poll_action::{decide_poll_action, PollAction};
+pub(crate) use poll_action::{
+    decide_feed_poll_action, decide_poll_action, host_runs_feed_of, PollAction,
+};
 
 /// Whether `query` matches an item with this `title` and `description`.
 ///

