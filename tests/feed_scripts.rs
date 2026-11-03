@@ -275,3 +275,64 @@ fn cve_feed_paginates_dependabot_alerts() {
     let code = feed_script_code("scripts/fetch-cve.sh");
     assert!(code.contains("--paginate"), "fetch-cve.sh must paginate");
 }
+
+/// Runs `scripts/fetch-reviews.sh` with the given `teams.conf` body and a stub
+/// `gh` whose body is `gh_body`. Returns (success, stdout, stderr).
+fn run_fetch_reviews(teams_conf: &str, gh_body: &str) -> (bool, String, String) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("fetch-reviews.sh");
+    std::fs::write(&script, repo_file("scripts/fetch-reviews.sh")).unwrap();
+    std::fs::write(dir.path().join("teams.conf"), teams_conf).unwrap();
+    std::fs::write(dir.path().join("repos.conf"), "REPOS=(o/r)\n").unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let gh = bin.join("gh");
+    std::fs::write(&gh, format!("#!/usr/bin/env bash\n{gh_body}\n")).unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = std::process::Command::new("bash")
+        .arg(&script)
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// A `gh` that answers every search with an empty list and fails nothing.
+const GH_OK: &str = r#"case "$1" in search) echo '[]' ;; api) echo me ;; *) echo '[]' ;; esac"#;
+
+#[test]
+fn fetch_reviews_hints_on_stderr_when_teams_conf_lists_no_teams() {
+    let (ok, stdout, stderr) = run_fetch_reviews("TEAMS=()\n", GH_OK);
+    assert!(ok, "an empty teams list is not a failure, stderr: {stderr}");
+    assert_eq!(stdout.trim(), "[]");
+    assert!(
+        stderr.contains("teams.conf") && stderr.contains("TEAMS"),
+        "must say Team Reviews is empty because TEAMS is: {stderr}"
+    );
+}
+
+#[test]
+fn fetch_reviews_is_quiet_about_teams_when_one_is_listed() {
+    let (ok, _, stderr) = run_fetch_reviews("TEAMS=(org/team)\n", GH_OK);
+    assert!(ok, "stderr: {stderr}");
+    assert!(!stderr.contains("TEAMS is empty"), "stderr: {stderr}");
+}
+
+#[test]
+fn fetch_reviews_fails_the_emission_when_a_search_fails() {
+    // gh search fails (rate limit); everything else succeeds.
+    let gh = r#"case "$1" in search) echo 'rate limited' >&2; exit 1 ;; api) echo me ;; *) echo '[]' ;; esac"#;
+    let (ok, stdout, stderr) = run_fetch_reviews("TEAMS=(org/team)\n", gh);
+    assert!(!ok, "a failed search must fail the run; stdout: {stdout}");
+    assert!(stderr.contains("failed"), "stderr: {stderr}");
+}

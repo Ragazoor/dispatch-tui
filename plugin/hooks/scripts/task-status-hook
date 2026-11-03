@@ -78,7 +78,7 @@ case "$EVENT" in
                     MSG_FLAGS+=(--undelivered)
                 fi
                 if [[ -n "$MSG_TO" ]]; then
-                    dispatch hook-peer-message "$ID" --target "$MSG_TO" --body "$MSG_BODY" "${MSG_FLAGS[@]}"
+                    dispatch hook-peer-message "$ID" --target "$MSG_TO" --body="$MSG_BODY" ${MSG_FLAGS[@]+"${MSG_FLAGS[@]}"}
                 fi
             fi
         fi

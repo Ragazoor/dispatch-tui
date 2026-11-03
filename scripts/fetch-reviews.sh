@@ -309,9 +309,11 @@ search_prs() {
     --json id,number,title,body,url,repository,isDraft,author \
     --limit 100 \
     -- $qualifier); then
+    # Fail the whole emission: an empty array here would read as "no PRs" and
+    # the reconcile would delete tasks that a rate-limited cycle merely could
+    # not see. The non-zero exit trips the degraded-emission guards instead.
     echo "fetch-reviews: gh search prs ($qualifier) failed" >&2
-    echo "[]"
-    return 0
+    return 1
   fi
 
   printf '%s' "$raw" | to_feed_items "$signal"
@@ -372,6 +374,9 @@ search_team_prs() {
   local team
   local -a team_owner_flags
 
+  if [[ ${#TEAMS[@]} -eq 0 ]]; then
+    echo "fetch-reviews: TEAMS is empty - Team Reviews stays empty. List \"<org>/<team-slug>\" entries in teams.conf to fill it." >&2
+  fi
   for team in ${TEAMS[@]+"${TEAMS[@]}"}; do
     team_owner_flags=(--owner "${team%%/*}")
     search_prs "team-review-requested:$team" "team-request" team_owner_flags
@@ -542,6 +547,10 @@ fetch_pr_state() {
 # by several queries keeps all its signals). NOT unique_by, which would drop
 # all but one object and lose the other queries' signals.
 deduped=$({
+  # Command substitutions do not inherit errexit outside POSIX mode, so ask
+  # for it here: a failed search must abort this group, and pipefail then
+  # carries the failure out through the assignment.
+  set -e
   # No repo-scoped review-requested:@me: it is team-inclusive (any team I am
   # in). Team requests come only from the teams.conf pass below.
   search_prs "user-review-requested:@me" "direct-request" repo_flags

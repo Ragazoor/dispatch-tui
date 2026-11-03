@@ -382,7 +382,7 @@ fn hook_forwards_send_message_on_post_tool_use() {
 
     let log = std::fs::read_to_string(&observed).unwrap_or_default();
     assert!(
-        log.contains("hook-peer-message 119 --target task-42 --body hello sibling"),
+        log.contains("hook-peer-message 119 --target task-42 --body=hello sibling"),
         "expected hook-peer-message forwarded for SendMessage; got: {log:?}"
     );
     assert!(
@@ -422,7 +422,7 @@ fn hook_forwards_a_failed_send_message_as_undelivered() {
         let log = std::fs::read_to_string(&observed).unwrap_or_default();
         assert!(
             log.contains(&format!(
-                "hook-peer-message {n} --target ada --body hello --undelivered"
+                "hook-peer-message {n} --target ada --body=hello --undelivered"
             )),
             "a failed send must be forwarded as undelivered; got: {log:?}"
         );
@@ -441,7 +441,7 @@ fn hook_does_not_mark_a_delivered_send_message_undelivered() {
 
     let log = std::fs::read_to_string(&observed).unwrap_or_default();
     assert!(
-        log.contains("hook-peer-message 124 --target ada --body hello"),
+        log.contains("hook-peer-message 124 --target ada --body=hello"),
         "got: {log:?}"
     );
     assert!(!log.contains("--undelivered"), "got: {log:?}");
@@ -786,5 +786,39 @@ fn hooks_json_registers_post_tool_use_hook() {
     assert!(
         commands.iter().any(|c| c.contains("task-status-hook")),
         "task-status-hook must be registered under PostToolUse"
+    );
+}
+
+/// macOS ships bash 3.2, where expanding an empty array under `set -u` is an
+/// "unbound variable" error. The delivered-send path leaves `MSG_FLAGS` empty,
+/// so the expansion must use the `${arr[@]+...}` guard. Comments are stripped
+/// so prose quoting the guard cannot satisfy the assertion.
+#[test]
+fn hook_guards_empty_msg_flags_expansion_for_bash_3_2() {
+    let code: String = hook_script()
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        code.contains(r#"${MSG_FLAGS[@]+"${MSG_FLAGS[@]}"}"#),
+        "MSG_FLAGS must expand with the bash 3.2-safe guard"
+    );
+}
+
+/// A message body starting with `-` must reach dispatch as a value, not a flag.
+#[cfg(unix)]
+#[test]
+fn hook_passes_a_dash_leading_body_as_a_value() {
+    let (_tmp, repo, script_path, observed, path) = spawn_hook_harness("125-tree");
+    let payload = format!(
+        r#"{{"cwd":"{}","hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{{"to":"ada","message":"--help me"}},"tool_response":{{"success":true}}}}"#,
+        repo.display()
+    );
+    invoke_hook(&script_path, &repo, &path, &payload);
+    let log = std::fs::read_to_string(&observed).unwrap_or_default();
+    assert!(
+        log.contains("--body=--help me"),
+        "body must be bound with --body=; got: {log:?}"
     );
 }
