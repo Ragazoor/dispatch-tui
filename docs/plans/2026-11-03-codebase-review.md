@@ -205,6 +205,8 @@ Changes since 2026-10-31: `src/sync/rows.rs` (396 lines changed in range; Y2, Y4
 - **T2 residue** — `free_address` binds and drops a port in three test harnesses. Raised 10-28, 10-31 and now; task #98751 was closed Done without it. **Ask the user** the same.
 - **M3** — the detach rule is a design decision; see the finding.
 
+Filed: the user chose one package for S2 and T2, task #98860. All findings are in epic #69683 (tasks #98850–#98861, plans in `docs/plans/review-2026-11-03/`).
+
 **Graduate to a check.** The class "a sibling path forgets the rule its fix added" appeared in N1 (10-28), R2 (10-31) and now M2, M4, M5, Y2 and K2. Last round's checks were meant to catch it and do not (G1, G2). The deliverable is G1 and G2 fixed, plus one new conformance test that runs every loss-of-sight path (visibility flip, re-parent, workspace move, member removal, managed-root flip) against a "poll claims released" assertion (M4), and a `sync` test that, for every table behind a view, sends an update that changes only a column the decoder drops (Y2).
 
 ## 6. Areas read
