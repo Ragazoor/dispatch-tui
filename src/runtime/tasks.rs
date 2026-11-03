@@ -1124,18 +1124,24 @@ impl TuiRuntime {
         let agent_name = match dispatch::current_agent_name(&*self.database, id).await {
             Ok(name) => name,
             Err(e) => {
-                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Resume failed: {e:#}"),
-                )));
+                let _ = tx.send(Message::Task(
+                    crate::tui::messages::TaskMessage::ResumeFailed {
+                        id,
+                        error: format!("Resume failed: {e:#}"),
+                    },
+                ));
                 return;
             }
         };
         // Read at resume, not at dispatch: a model changed while the agent was
         // stopped takes effect here (`tasks.allium: SetModel`).
         let Some(model) = self.database.get_task(id).await.map(|t| t.launch_model()) else {
-            let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                format!("Resume failed: task {id} not found"),
-            )));
+            let _ = tx.send(Message::Task(
+                crate::tui::messages::TaskMessage::ResumeFailed {
+                    id,
+                    error: format!("Resume failed: task {id} not found"),
+                },
+            ));
             return;
         };
         let worktree_path = worktree.unwrap_or_default();
@@ -1158,9 +1164,12 @@ impl TuiRuntime {
                     }));
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("Resume failed: {e:#}"),
-                    )));
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::ResumeFailed {
+                            id,
+                            error: format!("Resume failed: {e:#}"),
+                        },
+                    ));
                 }
             }
         });

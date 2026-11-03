@@ -45,8 +45,9 @@ config {
     -- shells out to git, which can block on a lock, NFS or a network remote.
     statusline_chain_timeout: Duration = 2.seconds
 
-    -- Parallel build jobs an agent's cargo runs when the board's own
-    -- environment names none (see AgentBuildsRunFewerParallelJobs).
+    -- Most parallel build jobs an agent's cargo runs when neither the board's
+    -- own environment nor a cargo config names any (see
+    -- AgentBuildsRunFewerParallelJobs). Never more than the machine's cores.
     agent_cargo_build_jobs: Integer = 8
 
     -- The systemd user slice every agent runs in, and the cap dispatch gives
@@ -443,13 +444,18 @@ rule ProvisionDispatch {
         -- claude), which have no such fallback.
 
     @guarantee AgentBuildsRunFewerParallelJobs
-        -- Every agent launch sets CARGO_BUILD_JOBS in the tmux window's
+        -- Every agent launch decides CARGO_BUILD_JOBS in the tmux window's
         -- environment, through the same seam as RUSTC_WRAPPER above, so no
         -- launcher can set one without the other. The value is the board's
         -- own CARGO_BUILD_JOBS when its environment carries one — that is
-        -- how an operator chooses another number — and
-        -- config.agent_cargo_build_jobs otherwise. Unlike RUSTC_WRAPPER it
-        -- is set unconditionally: it names no tool that could be missing.
+        -- how an operator chooses another number. Otherwise it is
+        -- min(config.agent_cargo_build_jobs, the machine's cores), EXCEPT
+        -- that the variable is left unset when a cargo config sets
+        -- build.jobs, in the worktree's `.cargo/` or any parent's, or in
+        -- CARGO_HOME (default ~/.cargo). Cargo ranks the environment above
+        -- config files, so setting it would raise a repo or user that chose
+        -- `jobs = 2` to save memory back to the default. Detection is a text
+        -- scan for the key; a miss only costs the default.
         --
         -- Why (task #98833): cargo's default is one job per core. One
         -- `cargo test` in this repo links 34+ test binaries, each link
@@ -489,6 +495,16 @@ rule ProvisionDispatch {
         -- behaviour — and dispatch logs why. A wrapper that cannot start
         -- would leave a window with no agent in it and nothing on the board
         -- saying so, which is worse than an uncapped agent.
+        --
+        -- "Can be reached" is checked twice, because the board and the pane
+        -- can see different buses (a tmux server started over ssh or from a
+        -- TTY has no user bus, and systemd-run may not be on its PATH). The
+        -- board probes with `systemd-run --user --scope -- true` before it
+        -- reads the cap, and decides once per board run, not per launch. The
+        -- wrapped command probes again in the pane and runs the bare command
+        -- when the probe fails, as an if/else so a failing agent is never
+        -- run twice. A launch past its dispatch deadline skips the scope and
+        -- the sccache start, and the sccache start is bounded at 5 seconds.
 
     @guarantee SccacheServerStartsOutsideTheCap
         -- When RUSTC_WRAPPER=sccache is set, dispatch starts the sccache
@@ -1219,6 +1235,18 @@ rule ResumeTask {
         -- section (agent-tree.allium: ResumeDetachedAgentFromThePane), which
         -- carries none. All three reach the same board handler and the same
         -- launch, so every precondition and ensures here holds for each.
+        --
+        -- == One resume per task at a time (ResumeTaskOncePerTask) ==
+        -- The window is recorded only when the launch reports back, so the
+        -- tmux_window = null precondition stays true while a launch is in
+        -- flight, and the live has_window() re-check and the launch are
+        -- separate steps. A second ask in that gap (Space pressed twice, a
+        -- pane resume next to MCP resume_task, RetryResume pressed twice)
+        -- would start a second `claude --continue` in the same worktree. So
+        -- the board keeps the set of tasks with a resume in flight, refuses
+        -- another resume of such a task with a status message, and drops the
+        -- task from the set when the launch reports success (Resumed) or
+        -- failure (ResumeFailed).
         --
         -- A message is delivered as the FIRST INPUT of the resumed session:
         -- it is the positional prompt of the same `claude ... --continue`

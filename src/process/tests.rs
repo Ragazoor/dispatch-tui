@@ -662,3 +662,27 @@ fn run_bounded_git_keeps_the_users_core_ssh_command() {
     let args = std::fs::read_to_string(&log).expect("core.sshCommand was not used");
     assert!(args.contains("BatchMode=yes"), "got {args:?}");
 }
+
+#[test]
+fn wait_bounded_kills_a_child_that_outlasts_the_timeout() {
+    let child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn sleep");
+
+    let result = super::wait_bounded(child, Duration::from_millis(50));
+
+    assert_eq!(
+        result.expect_err("must time out").kind(),
+        std::io::ErrorKind::TimedOut
+    );
+}
+
+#[test]
+fn wait_bounded_returns_the_status_of_a_child_that_exits() {
+    let child = std::process::Command::new("true").spawn().expect("spawn");
+
+    let status = super::wait_bounded(child, Duration::from_secs(10)).expect("exits");
+
+    assert!(status.success());
+}

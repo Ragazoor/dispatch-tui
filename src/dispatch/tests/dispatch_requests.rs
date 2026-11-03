@@ -158,3 +158,32 @@ fn requested_rows_in_the_initial_rows_are_served() {
 
     assert_eq!(observer.observe(&rows).len(), 2);
 }
+
+#[test]
+fn a_passed_deadline_starts_no_scope_and_no_sccache_server() {
+    use crate::clock::FixedClock;
+    use crate::dispatch::DeadlineRunner;
+    use crate::process::{AgentScope, MockProcessRunner, ProcessRunner};
+    use std::sync::Arc;
+
+    let start = Utc.with_ymd_and_hms(2026, 11, 3, 12, 0, 0).unwrap();
+    let clock = FixedClock::new(start);
+    let mock = Arc::new(
+        MockProcessRunner::new(vec![]).with_agent_scope(AgentScope::new("dispatch-agents.slice")),
+    );
+    let runner = DeadlineRunner::new(
+        mock.clone(),
+        Arc::new(clock.clone()),
+        start + chrono::Duration::seconds(10),
+    );
+
+    assert!(runner.agent_scope().is_some(), "time left: scope is asked");
+    runner.start_sccache_server();
+    assert_eq!(mock.sccache_server_starts(), 1);
+
+    clock.advance(chrono::Duration::seconds(11));
+
+    assert_eq!(runner.agent_scope(), None, "no time left: launch unwrapped");
+    runner.start_sccache_server();
+    assert_eq!(mock.sccache_server_starts(), 1, "no second start past it");
+}

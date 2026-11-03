@@ -243,6 +243,12 @@ pub struct App {
     /// supersedes the entry, a refusal drains it. No watchdog: the request
     /// row's own deadline ends a stuck dispatch (`FailedRequestReported`).
     pub(in crate::tui) dispatching: HashSet<TaskId>,
+    /// Tasks with a resume handed to the runtime and not yet answered by
+    /// `Resumed` or `ResumeFailed`. The task's window is only recorded when
+    /// `Resumed` returns, so without this a second ask in between would start a
+    /// second `claude --continue` in the same worktree
+    /// (`dispatch.allium: ResumeTaskOncePerTask`).
+    pub(in crate::tui) resuming: HashSet<TaskId>,
     /// DispatchingFeedback's OPEN part: this host's dispatch request rows as
     /// the last board reload delivered them. See [`DispatchRequestView`].
     pub(in crate::tui) dispatch_requests: DispatchRequestView,
@@ -365,6 +371,7 @@ impl App {
             folds: SectionFoldState::default(),
             epic_folds: EpicFoldState::default(),
             dispatching: HashSet::new(),
+            resuming: HashSet::new(),
             dispatch_requests: DispatchRequestView::default(),
             schedule_fired: HashMap::new(),
             spinner_tick: 0,

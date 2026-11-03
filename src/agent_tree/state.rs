@@ -166,7 +166,16 @@ pub struct RenderState {
     /// attached jumps there; the cursor leaving its row, or the task leaving
     /// the list, drops it (`ForgetPendingResumeJump`).
     pub pending_jump: Option<crate::models::TaskId>,
+    /// List reads that showed `pending_jump`'s row still detached; the wait
+    /// ends at [`RESUME_JUMP_MAX_READS`] (`ResumeJumpWaitEnds`).
+    pending_jump_reads: u32,
 }
+
+/// How many list reads a resumed agent may stay detached before the pane stops
+/// waiting for its window: about half a minute at the agents timer's one-second
+/// pace. Counted in reads rather than read off a clock, so the deadline needs no
+/// wall-clock time to test (`ResumeJumpWaitEnds` in docs/specs/agent-tree.allium).
+pub const RESUME_JUMP_MAX_READS: u32 = 30;
 
 impl RenderState {
     pub fn new() -> Self {
@@ -184,6 +193,7 @@ impl RenderState {
             selected_commit: None,
             usage: Vec::new(),
             pending_jump: None,
+            pending_jump_reads: 0,
         }
     }
 
@@ -244,8 +254,19 @@ impl RenderState {
                 }
                 let waiting = self.pending_jump?;
                 match self.agents.rows().iter().find(|row| row.id == waiting) {
-                    // Still detached: keep waiting.
-                    Some(row) if row.window.is_none() => None,
+                    // Still detached: keep waiting, for a bounded time. A launch
+                    // can fail on the board after it accepted the request.
+                    Some(row) if row.window.is_none() => {
+                        self.pending_jump_reads += 1;
+                        if self.pending_jump_reads >= RESUME_JUMP_MAX_READS {
+                            self.pending_jump = None;
+                            self.notice = Some(Notice::agent_jump(format!(
+                                "task {waiting} did not start after a resume; \
+                                 press Space to try again"
+                            )));
+                        }
+                        None
+                    }
                     // Attached now: jump, once. Gone: stop waiting.
                     row => {
                         let window = row.and_then(|row| row.window.clone());
@@ -275,6 +296,7 @@ impl RenderState {
             // arrive after the user moved on.
             Ok(PaneResumeAnswer::Accepted) => {
                 self.pending_jump = Some(task);
+                self.pending_jump_reads = 0;
                 self.forget_pending_jump_if_moved();
             }
             Ok(PaneResumeAnswer::Refused { reason }) | Err(reason) => {

@@ -210,6 +210,54 @@ fn the_read_that_shows_the_resumed_agent_attached_jumps_to_it_once() {
     assert_eq!(state.adopt_agent_list(Ok(vec![agent(7, false)])), None);
 }
 
+/// `ResumeJumpWaitEnds`: `Accepted` only means "handed to the board". A launch
+/// that fails there leaves the row detached for ever, so the wait ends after
+/// a bounded number of list reads and the pane says so.
+#[test]
+fn a_resume_that_never_attaches_ends_the_wait_with_a_notice() {
+    use crate::agent_tree::state::RESUME_JUMP_MAX_READS;
+    let mut state = pane_with(vec![detached(7)]);
+    state.adopt_resume_answer(
+        TaskId(7),
+        Ok(crate::hooks::wire::PaneResumeAnswer::Accepted),
+    );
+
+    for _ in 0..RESUME_JUMP_MAX_READS - 1 {
+        assert_eq!(state.adopt_agent_list(Ok(vec![detached(7)])), None);
+        assert_eq!(state.pending_jump, Some(TaskId(7)), "still waiting");
+        assert_eq!(state.notice, None);
+    }
+    assert_eq!(state.adopt_agent_list(Ok(vec![detached(7)])), None);
+
+    assert_eq!(state.pending_jump, None);
+    let Some(Notice::AgentJump(text)) = &state.notice else {
+        panic!("expected an agent-jump notice, got {:?}", state.notice);
+    };
+    assert!(text.contains("did not start"), "{text}");
+}
+
+/// A fresh accepted resume starts a fresh wait.
+#[test]
+fn a_new_accepted_resume_restarts_the_wait() {
+    use crate::agent_tree::state::RESUME_JUMP_MAX_READS;
+    let mut state = pane_with(vec![detached(7)]);
+    let accept = |state: &mut RenderState| {
+        state.adopt_resume_answer(
+            TaskId(7),
+            Ok(crate::hooks::wire::PaneResumeAnswer::Accepted),
+        )
+    };
+    accept(&mut state);
+    for _ in 0..RESUME_JUMP_MAX_READS - 1 {
+        state.adopt_agent_list(Ok(vec![detached(7)]));
+    }
+    accept(&mut state);
+    state.adopt_agent_list(Ok(vec![detached(7)]));
+
+    assert_eq!(state.pending_jump, Some(TaskId(7)));
+    assert_eq!(state.notice, None);
+}
+
 /// RefreshAgentTreeAgentList: a resumed task that left the list stops the wait.
 #[test]
 fn a_resumed_task_that_leaves_the_list_stops_the_wait() {

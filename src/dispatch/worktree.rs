@@ -849,7 +849,7 @@ pub(super) fn provision_worktree(
     // flag kept in sync: a create that never happened leaves no window for this
     // attempt to roll back. See "Provisioning-failure rollback" in
     // docs/specs/dispatch.allium for why that distinction matters.
-    let launch_env = super::agent_launch_env(runner);
+    let launch_env = super::agent_launch_env(runner, &worktree_path);
     if let Err(e) = tmux::new_window(
         &tmux_window,
         &worktree_path,

@@ -252,6 +252,54 @@ fn dispatch_agent_passes_the_boards_own_cargo_build_jobs() {
 }
 
 #[test]
+fn dispatch_agent_leaves_cargo_build_jobs_to_a_cargo_config_that_sets_it() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = script.runner().with_cargo_config_jobs();
+
+    dispatch_with(&mock, &repo_path);
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert_eq!(window_env(new_window_args, "CARGO_BUILD_JOBS"), None);
+}
+
+#[test]
+fn the_boards_own_cargo_build_jobs_wins_over_a_cargo_config() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = script
+        .runner()
+        .with_cargo_config_jobs()
+        .with_board_cargo_build_jobs("3");
+
+    dispatch_with(&mock, &repo_path);
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert_eq!(
+        window_env(new_window_args, "CARGO_BUILD_JOBS").as_deref(),
+        Some("3")
+    );
+}
+
+#[test]
+fn dispatch_agent_never_asks_for_more_jobs_than_the_machine_has_cores() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = script.runner().with_cores(4);
+
+    dispatch_with(&mock, &repo_path);
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert_eq!(
+        window_env(new_window_args, "CARGO_BUILD_JOBS").as_deref(),
+        Some("4")
+    );
+}
+
+#[test]
 fn resume_agent_sets_default_cargo_build_jobs() {
     let (_dir, worktree_path) = make_test_repo();
     let script = DispatchScript::resume();
@@ -294,8 +342,9 @@ fn resume_agent_starts_the_sccache_server_when_sccache_available() {
 
 // --- AgentsShareOneMemoryCap (task #98833) ---
 
-const SCOPE_PREFIX: &str = "systemd-run --user --scope --quiet --collect \
-     --slice=dispatch-agents.slice -p OOMPolicy=continue -- ";
+/// The pane runs the scoped launch through a probing `sh -c`, with the real
+/// command as its one quoted argument.
+const SCOPE_PREFIX: &str = "sh -c 'if systemd-run --user --scope --quiet -- true";
 
 fn scoped(mock: MockProcessRunner) -> MockProcessRunner {
     mock.with_agent_scope(crate::process::AgentScope::new("dispatch-agents.slice"))
@@ -312,7 +361,7 @@ fn dispatch_agent_runs_claude_inside_the_agent_scope() {
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(
-        launch.starts_with(&format!("{SCOPE_PREFIX}bash -c ")),
+        launch.starts_with(SCOPE_PREFIX) && launch.contains(" sh 'bash -c "),
         "got: {launch}"
     );
 }
@@ -328,7 +377,7 @@ fn resume_agent_runs_claude_inside_the_agent_scope() {
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(launch.starts_with(SCOPE_PREFIX), "got: {launch}");
-    assert!(launch.ends_with(" --continue"), "got: {launch}");
+    assert!(launch.ends_with(" --continue'"), "got: {launch}");
 }
 
 #[test]
@@ -342,7 +391,7 @@ fn resume_agent_with_message_runs_claude_inside_the_agent_scope() {
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(
-        launch.starts_with(&format!("{SCOPE_PREFIX}bash -c ")),
+        launch.starts_with(SCOPE_PREFIX) && launch.contains(" sh 'bash -c "),
         "got: {launch}"
     );
 }

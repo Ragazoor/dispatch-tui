@@ -687,11 +687,28 @@ impl App {
                 .set("Cannot resume: task already has an agent attached".to_string());
             return vec![];
         }
+        if !self.resuming.insert(id) {
+            self.status
+                .set(format!("Task {id} is already being resumed"));
+            return vec![];
+        }
+        let worktree = self.board.find_task(id).and_then(|t| t.worktree.clone());
         vec![Command::Task(crate::tui::commands::TaskCommand::Resume {
-            id: task.id,
-            worktree: task.worktree.clone(),
+            id,
+            worktree,
             message,
         })]
+    }
+
+    /// The resume for `id` failed: allow another, and say why.
+    pub(in crate::tui) fn handle_resume_failed(
+        &mut self,
+        id: TaskId,
+        error: String,
+    ) -> Vec<Command> {
+        self.resuming.remove(&id);
+        self.status.error_popup = Some(error);
+        vec![]
     }
 
     pub(in crate::tui) fn handle_resumed(
@@ -699,6 +716,7 @@ impl App {
         id: TaskId,
         tmux_window: TmuxWindow,
     ) -> Vec<Command> {
+        self.resuming.remove(&id);
         if let Some(task) = self.find_task_mut(id) {
             task.tmux_window = Some(tmux_window);
             task.status = TaskStatus::Running;

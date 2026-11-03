@@ -1548,9 +1548,9 @@ async fn exec_resume_sends_error_on_failure() {
     assert!(
         matches!(
             msg,
-            Message::System(crate::tui::messages::SystemMessage::Error(_))
+            Message::Task(crate::tui::messages::TaskMessage::ResumeFailed { .. })
         ),
-        "Expected Error, got: {msg:?}"
+        "Expected ResumeFailed, got: {msg:?}"
     );
 }
 
@@ -1581,8 +1581,9 @@ async fn exec_resume_without_a_current_agent_sends_error() {
         .await
         .unwrap()
         .unwrap();
-    let Message::System(crate::tui::messages::SystemMessage::Error(text)) = msg else {
-        panic!("Expected Error, got: {msg:?}");
+    let Message::Task(crate::tui::messages::TaskMessage::ResumeFailed { error: text, .. }) = msg
+    else {
+        panic!("Expected ResumeFailed, got: {msg:?}");
     };
     assert!(text.contains("no current agent"), "{text}");
 }

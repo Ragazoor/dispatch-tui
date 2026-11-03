@@ -43,12 +43,23 @@ impl AgentScope {
     /// `command` (one shell command line, as sent to the agent's pane) run in a
     /// fresh scope inside this slice. `--collect` unloads the scope even when
     /// its command fails, so a crashed agent leaves no failed unit behind.
+    ///
+    /// The pane's shell can see another user bus than the board did (a tmux
+    /// server started over ssh or from a TTY), and `systemd-run` may be absent
+    /// from its `PATH`. So the pane probes first and runs the command bare when
+    /// the probe fails: a window must never be left with no agent in it. An
+    /// `if`, not `A || B`, so a failing agent is never run a second time. The
+    /// command travels as `$1` of a POSIX `sh`, which also keeps the line valid
+    /// in whatever shell the pane runs.
     pub fn wrap(&self, command: &str) -> String {
-        format!(
-            "systemd-run --user --scope --quiet --collect --slice={} \
-             -p OOMPolicy=continue -- {command}",
+        let script = format!(
+            "if systemd-run --user --scope --quiet -- true >/dev/null 2>&1; then \
+             exec systemd-run --user --scope --quiet --collect --slice={} \
+             -p OOMPolicy=continue -- sh -c \"$1\"; \
+             else exec sh -c \"$1\"; fi",
             self.slice
-        )
+        );
+        format!("sh -c '{script}' sh {}", super::shell_quote(command))
     }
 }
 
@@ -58,6 +69,7 @@ impl AgentScope {
 ///
 /// A cap that is already set, by an earlier launch or by the operator, is kept.
 pub fn prepare_agent_scope<R: ProcessRunner + ?Sized>(runner: &R) -> Option<AgentScope> {
+    probe_scope(runner)?;
     let shown = systemctl(
         runner,
         &["--user", "show", AGENT_SLICE, "-p", "MemoryMax", "--value"],
@@ -68,6 +80,24 @@ pub fn prepare_agent_scope<R: ProcessRunner + ?Sized>(runner: &R) -> Option<Agen
         systemctl(runner, &args)?;
     }
     Some(AgentScope::new(AGENT_SLICE))
+}
+
+/// Start a throwaway scope, the way a launch would. `systemctl` and
+/// `systemd-run` can disagree about the bus, and `systemd-run` may not be
+/// installed, so reading the slice is no proof that a scope can start.
+fn probe_scope<R: ProcessRunner + ?Sized>(runner: &R) -> Option<()> {
+    let args = ["--user", "--scope", "--quiet", "--", "true"];
+    match runner.run_with_timeout("systemd-run", &args, SYSTEMCTL_TIMEOUT) {
+        Ok(out) if out.status.success() => Some(()),
+        other => {
+            let why = match other {
+                Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                Err(e) => e.to_string(),
+            };
+            tracing::warn!(%why, "systemd-run cannot start a scope; launching the agent without the shared memory cap");
+            None
+        }
+    }
 }
 
 /// Run `systemctl` and return its stdout, or log why not and return `None`.

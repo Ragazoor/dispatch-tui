@@ -534,3 +534,89 @@ fn resume_requested_for_a_task_without_a_worktree_says_so() {
         .status_message()
         .is_some_and(|m| m.contains("no worktree")));
 }
+
+fn resumable_app() -> App {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = None;
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("this-machine".to_string());
+    app
+}
+
+fn is_resume(cmd: &Command) -> bool {
+    matches!(cmd, Command::Task(TaskCommand::Resume { .. }))
+}
+
+/// One resume per task at a time: the window is only recorded when `Resumed`
+/// comes back, so until then a second ask would start a second `claude
+/// --continue` in the same worktree.
+#[test]
+fn a_second_resume_while_one_is_in_flight_is_refused() {
+    let mut app = resumable_app();
+
+    let first = app.update(Message::Task(TaskMessage::Resume(TaskId(4))));
+    let second = app.update(Message::Task(TaskMessage::Resume(TaskId(4))));
+    let via_mcp = app.update(Message::Task(TaskMessage::ResumeRequested {
+        id: TaskId(4),
+        message: Some("hi".to_string()),
+    }));
+
+    assert!(first.iter().any(is_resume));
+    assert!(!second.iter().any(is_resume), "got: {second:?}");
+    assert!(!via_mcp.iter().any(is_resume), "got: {via_mcp:?}");
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .is_some_and(|m| m.contains("already being resumed")));
+}
+
+#[test]
+fn resumed_ends_the_in_flight_resume() {
+    let mut app = resumable_app();
+    app.update(Message::Task(TaskMessage::Resume(TaskId(4))));
+
+    app.update(Message::Task(TaskMessage::Resumed {
+        id: TaskId(4),
+        tmux_window: crate::models::TmuxWindow::for_task(TaskId(4)),
+    }));
+    app.board.tasks[0].tmux_window = None;
+    let again = app.update(Message::Task(TaskMessage::Resume(TaskId(4))));
+
+    assert!(again.iter().any(is_resume), "got: {again:?}");
+}
+
+#[test]
+fn a_failed_resume_ends_the_in_flight_resume_and_says_why() {
+    let mut app = resumable_app();
+    app.update(Message::Task(TaskMessage::Resume(TaskId(4))));
+
+    app.update(Message::Task(TaskMessage::ResumeFailed {
+        id: TaskId(4),
+        error: "tmux is gone".to_string(),
+    }));
+    let again = app.update(Message::Task(TaskMessage::Resume(TaskId(4))));
+
+    assert!(again.iter().any(is_resume), "got: {again:?}");
+    assert!(app
+        .status
+        .error_popup
+        .as_deref()
+        .is_some_and(|m| m.contains("tmux is gone")));
+}
+
+#[test]
+fn a_second_resume_of_another_task_is_not_blocked() {
+    let mut app = resumable_app();
+    let mut other = make_task(5, TaskStatus::Running);
+    other.tmux_window = None;
+    other.worktree = Some("/repo/.worktrees/5-task-5".to_string());
+    other.host = Some("this-machine".to_string());
+    app.board.tasks.push(other);
+    app.update(Message::Task(TaskMessage::Resume(TaskId(4))));
+
+    let cmds = app.update(Message::Task(TaskMessage::Resume(TaskId(5))));
+
+    assert!(cmds.iter().any(is_resume), "got: {cmds:?}");
+}

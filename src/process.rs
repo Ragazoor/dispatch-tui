@@ -499,6 +499,20 @@ pub trait ProcessRunner: Send + Sync {
         None
     }
 
+    /// How many cores this machine has, for the default `CARGO_BUILD_JOBS`
+    /// (`AgentBuildsRunFewerParallelJobs`). Fixed at 8 by default, so a test's
+    /// expected job count does not depend on the machine it runs on.
+    fn available_cores(&self) -> usize {
+        8
+    }
+
+    /// Whether a cargo config in reach of `dir` sets `build.jobs`, which an
+    /// exported `CARGO_BUILD_JOBS` would override. Inert by default: only
+    /// [`RealProcessRunner`] reads the developer's `~/.cargo`.
+    fn cargo_config_sets_jobs(&self, _dir: &str) -> bool {
+        false
+    }
+
     /// The shared-memory-cap scope this launch's `claude` command runs in, or
     /// `None` to launch it unwrapped — see `AgentsShareOneMemoryCap` in
     /// docs/specs/dispatch.allium. Consulted once per agent launch.
@@ -611,8 +625,24 @@ impl ProcessRunner for RealProcessRunner {
             .filter(|jobs| !jobs.trim().is_empty())
     }
 
+    fn available_cores(&self) -> usize {
+        std::thread::available_parallelism().map_or(1, |n| n.get())
+    }
+
+    fn cargo_config_sets_jobs(&self, dir: &str) -> bool {
+        let cargo_home = std::env::var_os("CARGO_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cargo")));
+        crate::dispatch::cargo_config_sets_jobs(std::path::Path::new(dir), cargo_home.as_deref())
+    }
+
     fn agent_scope(&self) -> Option<AgentScope> {
-        prepare_agent_scope(self)
+        // Decided once per board: the probe and the cap read are two to three
+        // subprocesses, and the answer does not change while the board runs.
+        // A static, not a field: callers build `RealProcessRunner::default()`
+        // freely, and each would otherwise ask again.
+        static SCOPE: std::sync::OnceLock<Option<AgentScope>> = std::sync::OnceLock::new();
+        SCOPE.get_or_init(|| prepare_agent_scope(self)).clone()
     }
 
     fn start_sccache_server(&self) {
@@ -626,7 +656,8 @@ impl ProcessRunner for RealProcessRunner {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status();
+            .spawn()
+            .and_then(|child| wait_bounded(child, SCCACHE_START_TIMEOUT));
         match status {
             Ok(s) if s.success() => tracing::info!("started the sccache server"),
             // sccache exits non-zero with "Address in use" when a server is
@@ -636,6 +667,34 @@ impl ProcessRunner for RealProcessRunner {
             }
             Err(e) => tracing::warn!(error = %e, "could not run sccache --start-server"),
         }
+    }
+}
+
+/// How long `sccache --start-server` may take. It forks the server and
+/// returns, so a call that outlasts this is stuck, and the launch goes on
+/// without waiting for it.
+const SCCACHE_START_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Wait for `child` to exit, for at most `timeout`; kill it after that.
+/// Streams are the caller's to null, so nothing is drained here.
+fn wait_bounded(
+    mut child: std::process::Child,
+    timeout: Duration,
+) -> std::io::Result<std::process::ExitStatus> {
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out",
+            ));
+        }
+        std::thread::sleep(EXIT_POLL_STEP);
     }
 }
 
@@ -700,6 +759,10 @@ pub struct MockProcessRunner {
     /// What [`ProcessRunner::board_cargo_build_jobs`] answers — `None` by
     /// default, like the trait's own default.
     board_cargo_build_jobs: Option<String>,
+    /// What [`ProcessRunner::cargo_config_sets_jobs`] answers.
+    cargo_config_jobs: bool,
+    /// What [`ProcessRunner::available_cores`] answers.
+    cores: usize,
     /// What [`ProcessRunner::agent_scope`] answers — `None` by default.
     agent_scope: Option<AgentScope>,
     /// How many times [`ProcessRunner::start_sccache_server`] was called.
@@ -727,9 +790,23 @@ impl MockProcessRunner {
             claude_json: None,
             sccache_available: false,
             board_cargo_build_jobs: None,
+            cargo_config_jobs: false,
+            cores: 8,
             agent_scope: None,
             sccache_server_starts: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Make this runner report a cargo config that sets `build.jobs`.
+    pub fn with_cargo_config_jobs(mut self) -> Self {
+        self.cargo_config_jobs = true;
+        self
+    }
+
+    /// Make this runner report a machine with `cores` cores.
+    pub fn with_cores(mut self, cores: usize) -> Self {
+        self.cores = cores;
+        self
     }
 
     /// Make this runner report `jobs` as the board's own `CARGO_BUILD_JOBS`.
@@ -1016,6 +1093,14 @@ impl ProcessRunner for MockProcessRunner {
 
     fn board_cargo_build_jobs(&self) -> Option<String> {
         self.board_cargo_build_jobs.clone()
+    }
+
+    fn available_cores(&self) -> usize {
+        self.cores
+    }
+
+    fn cargo_config_sets_jobs(&self, _dir: &str) -> bool {
+        self.cargo_config_jobs
     }
 
     fn agent_scope(&self) -> Option<AgentScope> {

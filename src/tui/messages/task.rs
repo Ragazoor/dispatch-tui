@@ -50,6 +50,12 @@ pub enum TaskMessage {
         id: TaskId,
         tmux_window: TmuxWindow,
     },
+    /// The resume handed to the runtime for `id` failed. Ends the in-flight
+    /// resume, so the task can be resumed again, and reports `error`.
+    ResumeFailed {
+        id: TaskId,
+        error: String,
+    },
     /// A dispatch ask ended without writing a request: the module refused it
     /// (another entry point claimed the task first, its worktree is on another
     /// machine, an open request already exists), the store could not be
@@ -156,6 +162,7 @@ impl TaskMessage {
                 app.handle_resume_requested(id, message)
             }
             TaskMessage::Resumed { id, tmux_window } => app.handle_resumed(id, tmux_window),
+            TaskMessage::ResumeFailed { id, error } => app.handle_resume_failed(id, error),
             TaskMessage::DispatchAbandoned(id) => app.handle_dispatch_abandoned(id),
             TaskMessage::MarkDispatching(id) => app.handle_mark_dispatching(id),
             TaskMessage::DispatchRequestsRefreshed(rows) => {

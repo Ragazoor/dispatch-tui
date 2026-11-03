@@ -146,12 +146,25 @@ impl ProcessRunner for DeadlineRunner {
         self.inner.board_cargo_build_jobs()
     }
 
+    fn available_cores(&self) -> usize {
+        self.inner.available_cores()
+    }
+
+    fn cargo_config_sets_jobs(&self, dir: &str) -> bool {
+        self.inner.cargo_config_sets_jobs(dir)
+    }
+
     fn agent_scope(&self) -> Option<crate::process::AgentScope> {
+        // Past the deadline the launch goes unwrapped rather than spend the
+        // probe and the cap read outside it.
+        self.left("systemd-run").ok()?;
         self.inner.agent_scope()
     }
 
     fn start_sccache_server(&self) {
-        self.inner.start_sccache_server();
+        if self.left("sccache").is_ok() {
+            self.inner.start_sccache_server();
+        }
     }
 }
 

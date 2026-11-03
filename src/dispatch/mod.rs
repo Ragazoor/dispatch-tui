@@ -3,9 +3,6 @@ use anyhow::Context;
 use crate::models::extract_github_repo;
 use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
-/// `dispatch.allium: config.agent_cargo_build_jobs`.
-const AGENT_CARGO_BUILD_JOBS: &str = "8";
-
 /// The tmux window environment every agent launch sets — task or resumed
 /// alike, including `spacetime/module`'s separate wasm32 workspace, which picks
 /// up a plain environment variable with no config of its own.
@@ -19,18 +16,27 @@ const AGENT_CARGO_BUILD_JOBS: &str = "8";
 ///   blocking it. When it is set, the sccache server is started here first,
 ///   from the board's own process, so it does not land inside the first
 ///   agent's memory-capped scope (`SccacheServerStartsOutsideTheCap`).
-/// - `CARGO_BUILD_JOBS`, always: the board's own value when it has one, the
-///   default otherwise (`AgentBuildsRunFewerParallelJobs`).
-fn agent_launch_env(runner: &dyn ProcessRunner) -> Vec<(&'static str, String)> {
+/// - `CARGO_BUILD_JOBS`: the board's own value when it has one; otherwise
+///   the default, unless a cargo config in reach of `worktree_path` sets
+///   `build.jobs`, which the variable would override
+///   (`AgentBuildsRunFewerParallelJobs`).
+fn agent_launch_env(
+    runner: &dyn ProcessRunner,
+    worktree_path: &str,
+) -> Vec<(&'static str, String)> {
     let mut env = Vec::new();
     if runner.sccache_available() {
         runner.start_sccache_server();
         env.push(("RUSTC_WRAPPER", "sccache".to_string()));
     }
-    let jobs = runner
-        .board_cargo_build_jobs()
-        .unwrap_or_else(|| AGENT_CARGO_BUILD_JOBS.to_string());
-    env.push(("CARGO_BUILD_JOBS", jobs));
+    match runner.board_cargo_build_jobs() {
+        Some(jobs) => env.push(("CARGO_BUILD_JOBS", jobs)),
+        None if runner.cargo_config_sets_jobs(worktree_path) => {}
+        None => env.push((
+            "CARGO_BUILD_JOBS",
+            build_jobs::default_build_jobs(runner.available_cores()).to_string(),
+        )),
+    }
     env
 }
 
@@ -51,6 +57,7 @@ fn in_agent_scope(command: String, runner: &dyn ProcessRunner) -> String {
 
 mod agents;
 mod allium_specs;
+mod build_jobs;
 mod build_output;
 mod bump;
 mod caller_identity;
@@ -73,6 +80,7 @@ pub use agents::{
     resume_agent_with_message, resync_agent_tree_pane, run_agent_for_mode, toggle_agent_tree_pane,
     DispatchInputs,
 };
+pub(crate) use build_jobs::cargo_config_sets_jobs;
 pub use build_output::{clear_build_output, BuildOutputCleared, CACHEDIR_TAG_SIGNATURE};
 pub use finish::{finish_task, finish_task_with_abort_runner, FinishContext, FinishError};
 // Test-only re-export: `prompts` is private, and the routing tests in

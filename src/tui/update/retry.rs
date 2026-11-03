@@ -72,11 +72,15 @@ impl App {
                     crate::tui::commands::TaskCommand::KillTmuxWindow { window },
                 ));
             }
-            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Resume {
-                id,
-                worktree,
-                message: None,
-            }));
+            // One resume per task at a time, here too: a double press must not
+            // start a second `claude --continue`.
+            if self.resuming.insert(id) {
+                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Resume {
+                    id,
+                    worktree,
+                    message: None,
+                }));
+            }
             cmds.extend(self.maybe_respawn_split_pane(id));
             cmds
         } else {

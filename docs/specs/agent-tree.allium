@@ -508,6 +508,8 @@ entity AgentTreePane {
     -- leaves the list (ForgetPendingResumeJump), so a resume that never
     -- comes up cannot jump the user away later.
     pending_jump: core/Task?
+    -- List reads that showed the pending_jump row still detached (ResumeJumpWaitEnds).
+    pending_jump_reads: Integer
 
     -- The task under the agents section's cursor; null when the list is
     -- empty. View state, moved by the cursor motions and kept on its task
@@ -618,6 +620,10 @@ entity AgentTreePane {
 ------------------------------------------------------------
 
 config {
+    -- Agent-list reads a resumed agent may stay detached before the pane stops
+    -- waiting for its window (see ResumeJumpWaitEnds). One read a second.
+    resume_jump_max_reads: Integer = 30
+
     -- Width of the companion pane as a percentage of the agent window.
     -- Deliberately narrower than the board's own 40% split-pane: Claude's CLI
     -- output needs the room, and a file tree is mostly short path segments.
@@ -2616,6 +2622,25 @@ rule AgentTreeResumeRefusedIsVisible {
         -- the jump's notice source and no timer clears it. A board that could
         -- not be reached is answered the same way, with a refusal naming the
         -- board's address.
+}
+
+rule ResumeJumpWaitEnds {
+    -- The pane read the agent list config.resume_jump_max_reads times and the
+    -- resumed agent was still detached each time.
+    when: AgentTreeAgentListRead(pane)
+
+    requires: pane.pending_jump != null
+    requires: pane.pending_jump_reads >= config.resume_jump_max_reads
+
+    ensures: pane.pending_jump = null
+    ensures: pane.error_notice = "the agent did not start after a resume"
+    ensures: pane.notice_source = agent_jump
+
+    @guidance
+        -- "Accepted" means only that the board took the request; the launch
+        -- can still fail there, and without an end the pane would wait for
+        -- ever and say nothing. The deadline is counted in list reads (one a
+        -- second, about half a minute) rather than read off a clock.
 }
 
 rule ForgetPendingResumeJump {
