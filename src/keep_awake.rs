@@ -76,12 +76,21 @@ pub fn hold_command(desktop: Option<&str>, gnome_inhibit_on_path: bool) -> HoldC
 }
 
 /// The helper for this machine, read from its environment.
+///
+/// Memoized: neither the desktop nor the installed helpers change over the
+/// life of the board, and the PATH scan is filesystem work that must not
+/// repeat on the async command path (docs/conventions.md).
 pub fn hold_command_for_this_machine() -> HoldCommand {
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
-    hold_command(
-        desktop.as_deref(),
-        crate::process::program_on_path("gnome-session-inhibit"),
-    )
+    static CACHED: std::sync::OnceLock<HoldCommand> = std::sync::OnceLock::new();
+    CACHED
+        .get_or_init(|| {
+            let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+            hold_command(
+                desktop.as_deref(),
+                crate::process::program_on_path("gnome-session-inhibit"),
+            )
+        })
+        .clone()
 }
 
 /// A requested hold. Dropping it releases the hold.

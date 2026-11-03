@@ -537,7 +537,8 @@ fn sccache_on_path() -> bool {
 }
 
 /// Whether an executable named `name` exists in some `PATH` entry. Not
-/// memoized: callers that ask on a hot path should cache the answer.
+/// memoized here: `keep_awake::hold_command_for_this_machine` caches its
+/// own answer.
 pub fn program_on_path(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|dir| is_executable_file(&dir.join(name)))
