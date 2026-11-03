@@ -76,3 +76,42 @@ fn the_committed_module_automigrates_into_the_working_tree_module() {
         "re-stamping must record the running module's own version"
     );
 }
+
+/// A board's login cannot take the publisher role, and the publisher's own
+/// claim on a store that already recorded it is refused harmlessly, which the
+/// bring-up treats as success. Also: the restore-only reducers refuse a board.
+#[test]
+fn only_the_publisher_may_claim_or_use_the_restore_only_reducers() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = Instance::start("module-test");
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let again = instance.call("claim_store_owner", &[]);
+    assert!(!again.status.success(), "{}", describe(&again));
+    assert!(
+        describe(&again).contains("already has a recorded publisher"),
+        "{}",
+        describe(&again)
+    );
+
+    let board = instance.call_as("board", "claim_store_owner", &[]);
+    assert!(!board.status.success(), "{}", describe(&board));
+    for (reducer, args) in [
+        ("set_schema_version", vec!["97"]),
+        ("burn_id_sequence", vec!["\"tasks\"", "3"]),
+        ("probe_generated_task_id", vec![]),
+    ] {
+        let out = instance.call_as("board", reducer, &args);
+        assert!(!out.status.success(), "{reducer}: {}", describe(&out));
+        assert!(
+            describe(&out).contains("restore"),
+            "{reducer}: {}",
+            describe(&out)
+        );
+    }
+    let ok = instance.call("set_schema_version", &["97"]);
+    assert!(ok.status.success(), "{}", describe(&ok));
+}

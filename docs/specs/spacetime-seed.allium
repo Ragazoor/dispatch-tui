@@ -842,15 +842,31 @@ invariant OneSequencePerTable {
 -- recorded publisher and refuses every board: failing closed is the point, as
 -- a board could otherwise claim the role by being first to ask.
 --
--- A STORE PUBLISHED BEFORE THAT ROW EXISTED (task #98755). Its publisher is
--- recorded by `claim_store_owner`, a reducer with no arguments: the caller
--- becomes the publisher, but ONLY while no row exists, and the call is refused
--- once one does. The module cannot verify who published, so the rule is the
--- operator's: run it as the CLI login that owns the database (the identity
--- startup.allium already checks before publishing), straight after the
--- publish and before any other board connects, with
--- `spacetime call <db> claim_store_owner`. A store that already has a row is
--- not changed by it, so a board cannot take the role later.
+-- A STORE PUBLISHED BEFORE THAT ROW EXISTED (tasks #98755, #98850). Its
+-- publisher is recorded by `claim_store_owner`, a reducer with no arguments:
+-- the caller becomes the publisher, but ONLY while no row exists, and the call
+-- is refused once one does. The managed bring-up runs it as the CLI login
+-- straight after every `spacetime publish` it makes, and treats "already has a
+-- recorded publisher" as success, so a store that predates the row is fixed on
+-- the board's next start. A store the board did not publish (a named
+-- `--spacetime-server`) is claimed by hand, as the login that owns the
+-- database: `spacetime call <db> claim_store_owner`. The import's refusal
+-- names this fix.
+--
+-- KNOWN WINDOW. The module cannot learn who owns the database: a reducer's
+-- context carries the caller and the module's own identity, not the publisher's
+-- (`ctx.identity()` is the module's). So `claim_store_owner` cannot check that
+-- its caller is the owner, and on a store with no row the FIRST caller wins.
+-- The window is the time between a publish over an old store and the claim that
+-- follows it; the bring-up closes it by claiming in the same step. A store
+-- published by this version of the module records its publisher in `init` and
+-- has no window.
+--
+-- RESTORE-ONLY REDUCERS. Besides every seed_* reducer, three reducers exist
+-- only for restore and publish and are gated the same way, by the store itself
+-- or its publisher: `burn_id_sequence` (a large ceiling stalls the
+-- transaction), `probe_generated_task_id` and `set_schema_version`. Any other
+-- caller is refused before anything is written.
 actor Operator {
     identified_by: core/Host where id != "" and owner = store_publisher()
 }

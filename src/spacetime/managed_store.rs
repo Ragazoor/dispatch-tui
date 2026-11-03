@@ -494,6 +494,50 @@ impl SpacetimeCliPublisher {
     }
 }
 
+impl SpacetimeCliPublisher {
+    /// Record the CLI login as the store's publisher, for a store published
+    /// before the module recorded one (`spacetime-seed.allium: Operator`).
+    ///
+    /// Run as the same login, straight after [`Self::publish`], so the
+    /// publisher is the identity that owns the database. A store that already
+    /// has a publisher refuses the call; that is the wanted end state, so it is
+    /// `Ok`. Any other failure is returned for the caller to report.
+    pub fn claim_store_owner(&self) -> Result<(), String> {
+        let mut argv: Vec<String> = Vec::new();
+        if let Some(config) = &self.config_path {
+            argv.push(format!("--config-path={}", config.display()));
+        }
+        argv.extend(
+            [
+                "call",
+                "-s",
+                &self.server,
+                "-y",
+                MANAGED_DATABASE_NAME,
+                "claim_store_owner",
+            ]
+            .map(String::from),
+        );
+        let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+        match self.runner.run("spacetime", &args) {
+            Err(e) => Err(format!("{e:#}")),
+            Ok(output) if output.status.success() => Ok(()),
+            Ok(output) => {
+                let text = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stderr),
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                if text.contains("already has a recorded publisher") {
+                    Ok(())
+                } else {
+                    Err(text.trim().to_string())
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The real ports
 // ---------------------------------------------------------------------------
@@ -829,7 +873,16 @@ impl ManagedStorePorts for SpacetimeManagedStore {
         if let Some(config) = &self.config_path {
             publisher = publisher.with_config_path(config);
         }
-        publisher.publish()
+        let outcome = publisher.publish();
+        if outcome == ModulePublishOutcome::Published {
+            // A store published before the module recorded its publisher has
+            // none, and `dispatch store import` would be refused. Not fatal:
+            // only a restore needs it.
+            if let Err(e) = publisher.claim_store_owner() {
+                tracing::warn!("could not record the store's publisher: {e}");
+            }
+        }
+        outcome
     }
 
     fn managed_store_failed_to_save(&self) -> bool {

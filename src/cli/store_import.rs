@@ -314,6 +314,21 @@ pub async fn import_store(
     outcome
 }
 
+/// The module's refusal of a board that is not the store's publisher, with the
+/// way out: a store published before the module recorded its publisher has none
+/// until `claim_store_owner` runs as the CLI login that owns the database.
+fn with_publisher_hint(message: &str) -> String {
+    if message.contains("only the store's publisher may restore") {
+        format!(
+            "{message}\nThis store has no recorded publisher, or it is another login. \
+             Run `spacetime call <database> claim_store_owner` as the login that \
+             published the database, then import again."
+        )
+    } else {
+        message.to_string()
+    }
+}
+
 async fn run(
     data_dir: &Path,
     server: &str,
@@ -342,7 +357,7 @@ async fn run(
     let target = store_for(server);
     let report = crate::spacetime::import_old_store(&target, &snapshot, &operator)
         .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(|e| anyhow::anyhow!("{}", with_publisher_hint(&e.to_string())))?;
     writeln!(
         out,
         "Imported {} rows into {server}; {} were already there, {} dropped.\n{}",

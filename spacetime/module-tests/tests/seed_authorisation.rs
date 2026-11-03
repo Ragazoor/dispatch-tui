@@ -223,3 +223,63 @@ fn the_store_itself_may_name_the_creator_of_an_epic() {
     let epic = store.db().epics().iter().next().expect("epic");
     assert_eq!(epic.created_by, identity_of("bob"));
 }
+
+#[test]
+fn a_board_cannot_burn_an_id_sequence() {
+    let store = published_by("publisher");
+    let err = store
+        .call("board", |ctx| burn_id_sequence(ctx, "tasks".into(), 3))
+        .expect_err("refused");
+    assert!(err.contains("restore"), "{err}");
+}
+
+#[test]
+fn a_board_cannot_probe_the_task_id_sequence() {
+    let store = published_by("publisher");
+    let err = store
+        .call("board", probe_generated_task_id)
+        .expect_err("refused");
+    assert!(err.contains("restore"), "{err}");
+}
+
+#[test]
+fn a_board_cannot_rewrite_the_schema_version() {
+    let store = published_by("publisher");
+    let err = store
+        .call("board", |ctx| set_schema_version(ctx, 97))
+        .expect_err("refused");
+    assert!(err.contains("restore"), "{err}");
+}
+
+#[test]
+fn the_publisher_may_use_the_restore_only_sequence_and_version_reducers() {
+    let store = published_by("publisher");
+    store
+        .call("publisher", |ctx| burn_id_sequence(ctx, "tasks".into(), 3))
+        .expect("burn");
+    store
+        .call("publisher", probe_generated_task_id)
+        .expect("probe");
+    store
+        .call("publisher", |ctx| set_schema_version(ctx, 97))
+        .expect("version");
+}
+
+#[test]
+fn a_second_claimant_is_refused_and_the_first_stays_publisher() {
+    // A store published before `store_owner` existed: no row until claimed.
+    let store = Store::bare();
+    store
+        .call("publisher", |ctx| claim_store_owner(ctx))
+        .expect("first claim");
+    let err = store
+        .call("board", |ctx| claim_store_owner(ctx))
+        .expect_err("second claim refused");
+    assert!(err.contains("already"), "{err}");
+    assert!(store
+        .call("board", |ctx| seed_user_profiles(ctx, vec![]))
+        .is_err());
+    store
+        .call("publisher", |ctx| seed_user_profiles(ctx, vec![]))
+        .expect("the first claimant restores");
+}

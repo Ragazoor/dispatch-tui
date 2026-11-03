@@ -315,3 +315,18 @@ async fn a_scratch_copy_goes_under_the_given_root_and_a_failure_keeps_the_log() 
         "the error should name the log: {err}"
     );
 }
+
+#[test]
+fn a_refusal_for_a_missing_publisher_names_the_fix() {
+    let message = with_publisher_hint("only the store's publisher may restore (seed) data");
+    assert!(message.contains("claim_store_owner"), "{message}");
+    assert!(message.contains("only the store's publisher"), "{message}");
+}
+
+#[test]
+fn any_other_error_is_left_as_it_is() {
+    assert_eq!(
+        with_publisher_hint("connection refused"),
+        "connection refused"
+    );
+}

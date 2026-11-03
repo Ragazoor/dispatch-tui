@@ -243,9 +243,11 @@ pub fn init(ctx: &ReducerContext) {
 ///
 /// A publish over an existing database does not re-run `init`, so without this
 /// the number would keep describing the schema the database was *created* with.
-/// Called by the publish step, not by a restore.
+/// Called by the publish step, not by a restore. Restore-only, so only the
+/// store itself or its publisher may call it (`SeedRequiresTheOperator`).
 #[spacetimedb::reducer]
-pub fn set_schema_version(ctx: &ReducerContext, version: i64) {
+pub fn set_schema_version(ctx: &ReducerContext, version: i64) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     let row = SchemaVersion {
         id: 1,
         version,
@@ -256,6 +258,7 @@ pub fn set_schema_version(ctx: &ReducerContext, version: i64) {
     } else {
         ctx.db.schema_version().insert(row);
     }
+    Ok(())
 }
 
 /// The data rules this module enforces, published for a board to read.

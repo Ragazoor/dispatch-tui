@@ -1283,3 +1283,50 @@ fn the_health_interval_matches_the_spec_default() {
         Duration::from_secs(10)
     );
 }
+
+// ---------------------------------------------------------------------------
+// SpacetimeCliPublisher::claim_store_owner — a store published before the
+// module recorded its publisher (`spacetime-seed.allium: Operator`)
+// ---------------------------------------------------------------------------
+
+fn claim_with(response: anyhow::Result<std::process::Output>) -> (Result<(), String>, Vec<String>) {
+    let runner = Arc::new(MockProcessRunner::new(vec![response]).with_queued_window_lookup());
+    let outcome = SpacetimeCliPublisher::new(runner.clone(), "/data/dispatch_module.wasm")
+        .claim_store_owner();
+    let calls = runner.recorded_calls();
+    assert_eq!(calls.len(), 1, "one call, one shell-out: {calls:?}");
+    assert_eq!(calls[0].0, "spacetime");
+    (outcome, calls[0].1.clone())
+}
+
+#[test]
+fn claiming_calls_the_reducer_on_the_managed_database_as_the_cli_login() {
+    let (outcome, argv) = claim_with(MockProcessRunner::ok());
+    assert_eq!(outcome, Ok(()));
+    assert!(argv.contains(&"call".to_string()), "{argv:?}");
+    let server = argv
+        .iter()
+        .position(|a| a == "-s")
+        .expect("names the server");
+    assert!(argv[server + 1].contains(MANAGED_STORE_ADDRESS), "{argv:?}");
+    let db = argv
+        .iter()
+        .position(|a| a == MANAGED_DATABASE_NAME)
+        .expect("names the database");
+    assert_eq!(argv[db + 1], "claim_store_owner", "{argv:?}");
+}
+
+#[test]
+fn a_store_that_already_has_a_publisher_counts_as_claimed() {
+    let (outcome, _) = claim_with(MockProcessRunner::fail(
+        "Error: this store already has a recorded publisher",
+    ));
+    assert_eq!(outcome, Ok(()));
+}
+
+#[test]
+fn any_other_claim_error_is_reported() {
+    let (outcome, _) = claim_with(MockProcessRunner::fail("error: connection refused"));
+    let err = outcome.expect_err("a failed claim is reported");
+    assert!(err.contains("connection refused"), "{err}");
+}

@@ -31,6 +31,8 @@ use super::*;
 /// an id as a count or a position.
 #[spacetimedb::reducer]
 pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Result<(), String> {
+    // Restore-only: a large `ceiling` stalls the transaction.
+    require_restore_authority(ctx)?;
     // One arm per generating table, each identical but for the accessor and the
     // blank row. Written as a macro so a seventh generating table is one line
     // rather than six, and so the six cannot drift apart — this is the one code
@@ -115,6 +117,7 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
 /// of `tasks` and deletes the row.
 #[spacetimedb::reducer]
 pub fn probe_generated_task_id(ctx: &ReducerContext) -> Result<(), String> {
+    require_restore_authority(ctx)?;
     write_task(
         ctx,
         Task {
