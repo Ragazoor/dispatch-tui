@@ -125,7 +125,12 @@ Check:
 - **Standing items.** A finding raised in two reports with no action, or a design
   decision waiting on the user, moves to a "Standing items" section with one line
   each. Do not raise it again as a finding. Ask the user once whether to file it
-  as its own task or drop it.
+  as its own task or drop it (on 2026-11-03 the user chose one package for two
+  long-carried items). A standing item whose task is Done is not closed until the
+  tree shows it: on 2026-11-03 two were still open after their tasks closed.
+- **Graduated checks get audited too.** Mutation-test a check-*.sh or guard
+  test that a previous round added: re-introduce the original bug and confirm it
+  fails. On 2026-11-03 both such checks passed green while missing their class.
 - **Graduate repeats into checks.** When the same *class* of finding appears in
   two runs, the deliverable is a mechanical check (a clippy lint in `Cargo.toml`,
   a `scripts/check-*.sh`, or a test), not another one-off fix.
