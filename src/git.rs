@@ -212,6 +212,30 @@ pub fn detect_default_branch(repo_path: &str, runner: &dyn ProcessRunner) -> Str
     "main".to_string()
 }
 
+/// The `owner/repo` of a clone's `origin` remote, when it is a GitHub remote
+/// git can read. `None` for no remote, a non-GitHub host or a failed git call.
+///
+/// Handles `https://github.com/o/r[.git]` and `git@github.com:o/r[.git]`.
+pub(crate) fn origin_github_repo(repo_path: &str, runner: &dyn ProcessRunner) -> Option<String> {
+    let output = git_in(
+        runner,
+        &crate::models::expand_tilde(repo_path),
+        &["remote", "get-url", "origin"],
+        SUBPROCESS_TIMEOUT,
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let https = match url.strip_prefix("git@github.com:") {
+        Some(rest) => format!("https://github.com/{rest}"),
+        None => url,
+    };
+    let repo = crate::models::extract_github_repo(&https)?;
+    Some(repo.strip_suffix(".git").unwrap_or(repo).to_string())
+}
+
 /// [`detect_default_branch`] off the async event loop.
 ///
 /// It shells out synchronously, so every async caller has to hand it to the

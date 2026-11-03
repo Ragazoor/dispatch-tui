@@ -201,9 +201,9 @@ impl FeedCycle {
     ) -> anyhow::Result<crate::store::FeedIngestOutcome> {
         let known_paths = match &self.known_paths {
             Some(paths) => Arc::clone(paths),
-            None => Arc::new(self.db.list_repo_paths().await),
+            None => Arc::new(self.db.list_repo_paths_saved_by_this_host().await),
         };
-        let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
+        let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths, &*self.runner);
         let base_branches = super::resolve_base_branches(&repo_paths, &*self.runner);
         let entries = super::FeedItemWithTarget::zip(items, repo_paths, base_branches);
 

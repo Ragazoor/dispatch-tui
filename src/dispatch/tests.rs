@@ -233,6 +233,71 @@ fn resolve_repo_path_handles_empty_paths() {
     assert_eq!(resolve_repo_path("org/repo", &[]), None);
 }
 
+/// Answers `git -C <dir> remote get-url origin` from a fixed table; a dir not in
+/// the table has no readable remote.
+struct RemoteTable(Vec<(&'static str, &'static str)>);
+
+impl ProcessRunner for RemoteTable {
+    fn run(&self, _: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+        let dir = args.get(1).copied().unwrap_or_default();
+        match self.0.iter().find(|(d, _)| *d == dir) {
+            Some((_, url)) => MockProcessRunner::ok_with_stdout(format!("{url}\n").as_bytes()),
+            None => MockProcessRunner::fail("fatal: not a git repository"),
+        }
+    }
+}
+
+fn item_for(url: &str) -> crate::models::FeedItem {
+    serde_json::from_value(serde_json::json!({
+        "external_id": "1", "title": "T", "description": "", "url": url,
+        "status": "backlog", "tag": "bug",
+    }))
+    .unwrap()
+}
+
+/// F2: two clones share a directory name; the item's `owner/repo` picks the one
+/// whose origin is that repository, not the first by name.
+#[test]
+fn feed_item_repo_path_matches_the_clone_by_owner_and_repo() {
+    let paths = vec!["/work/orga/api".to_string(), "/work/orgb/api".to_string()];
+    let runner = RemoteTable(vec![
+        ("/work/orga/api", "git@github.com:orgA/api.git"),
+        ("/work/orgb/api", "https://github.com/orgB/api.git"),
+    ]);
+    let items = [
+        item_for("https://github.com/orgB/api/pull/3"),
+        item_for("https://github.com/orgA/api/pull/4"),
+    ];
+    assert_eq!(
+        resolve_feed_item_repo_paths(&items, &paths, &runner),
+        vec!["/work/orgb/api".to_string(), "/work/orga/api".to_string()],
+    );
+}
+
+/// F2: a lone clone of `orgA/api` is not the clone for `orgB/api`.
+#[test]
+fn feed_item_repo_path_rejects_a_clone_of_a_different_owner() {
+    let paths = vec!["/work/api".to_string()];
+    let runner = RemoteTable(vec![("/work/api", "https://github.com/orgA/api.git")]);
+    let items = [item_for("https://github.com/orgB/api/pull/3")];
+    assert_eq!(
+        resolve_feed_item_repo_paths(&items, &paths, &runner),
+        vec![String::new()],
+    );
+}
+
+/// A clone whose remote cannot be read keeps the old short-name match: the
+/// remote is a tie-breaker, not a new way for a feed task to lose its repo.
+#[test]
+fn feed_item_repo_path_falls_back_to_the_name_when_the_remote_is_unreadable() {
+    let paths = vec!["/work/api".to_string()];
+    let items = [item_for("https://github.com/orgB/api/pull/3")];
+    assert_eq!(
+        resolve_feed_item_repo_paths(&items, &paths, &RemoteTable(vec![])),
+        vec!["/work/api".to_string()],
+    );
+}
+
 #[test]
 fn build_prompt_contains_task_info() {
     let prompt = build_prompt(

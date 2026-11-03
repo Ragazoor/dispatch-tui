@@ -283,15 +283,29 @@ pub fn pr_head_branch(pr_url: &str, runner: &dyn ProcessRunner) -> Option<String
 ///
 /// For each item, attempts `extract_github_repo(url)` → `resolve_repo_path(...)`.
 /// Items whose URL cannot be resolved get an empty-string sentinel (`""`).
+///
+/// `known_paths` must be THIS host's clones (`list_repo_paths_saved_by_this_host`),
+/// since the result is stamped on a task this host dispatches from. A clone's
+/// `origin` remote is read at most once per path per call, and only for a path
+/// whose directory name matches a repo some item names.
 pub fn resolve_feed_item_repo_paths(
     items: &[crate::models::FeedItem],
     known_paths: &[String],
+    runner: &dyn ProcessRunner,
 ) -> Vec<String> {
+    let mut remotes: std::collections::HashMap<String, Option<String>> = Default::default();
     items
         .iter()
         .map(|item| {
             extract_github_repo(&item.url)
-                .and_then(|r| resolve_repo_path(r, known_paths))
+                .and_then(|r| {
+                    resolve_repo_path_with(r, known_paths, |path| {
+                        remotes
+                            .entry(path.to_string())
+                            .or_insert_with(|| crate::git::origin_github_repo(path, runner))
+                            .clone()
+                    })
+                })
                 .unwrap_or_default()
         })
         .collect()
@@ -299,18 +313,40 @@ pub fn resolve_feed_item_repo_paths(
 
 /// Resolve a GitHub repo name (e.g. `"org/repo"`) to a local filesystem path
 /// by matching against known repo paths.  Returns the first path whose
-/// directory name equals the short repo name.
+/// directory name equals the short repo name. Name only: see
+/// [`resolve_repo_path_with`] for matching on the owner too.
 pub fn resolve_repo_path(github_repo: &str, known_paths: &[String]) -> Option<String> {
+    resolve_repo_path_with(github_repo, known_paths, |_| None)
+}
+
+/// [`resolve_repo_path`], then narrowed by each candidate's `origin` remote
+/// (`remote_of`, as `owner/repo`): a candidate whose remote is positively a
+/// different repository is rejected, so `orgA/api` and `orgB/api` do not share
+/// a clone; a candidate whose remote is unknown still matches by name; and a
+/// candidate whose remote equals `github_repo` (case-insensitively) wins over
+/// one that is merely unknown.
+fn resolve_repo_path_with(
+    github_repo: &str,
+    known_paths: &[String],
+    mut remote_of: impl FnMut(&str) -> Option<String>,
+) -> Option<String> {
     let repo_short = github_repo.split('/').next_back().unwrap_or(github_repo);
-    known_paths
-        .iter()
-        .find(|p| {
-            std::path::Path::new(p)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|dir| dir == repo_short)
-        })
-        .cloned()
+    let mut unknown: Option<&String> = None;
+    for path in known_paths.iter().filter(|p| {
+        std::path::Path::new(p)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|dir| dir == repo_short)
+    }) {
+        match remote_of(path) {
+            Some(remote) if remote.eq_ignore_ascii_case(github_repo) => return Some(path.clone()),
+            Some(_) => {}
+            None => {
+                unknown.get_or_insert(path);
+            }
+        }
+    }
+    unknown.cloned()
 }
 
 /// Close a task's attached PR via `gh pr close`.

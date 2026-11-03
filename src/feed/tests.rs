@@ -1366,6 +1366,12 @@ impl ProcessRunner for PerRepoBranchRunner {
         assert_eq!(program, "git");
         // args = ["-C", <path>, "symbolic-ref", "refs/remotes/origin/HEAD"]
         let path = args.get(1).copied().unwrap_or("");
+        // Only the default-branch lookup is counted. The repo-path resolver
+        // also reads each clone's remote (`remote get-url origin`), once per
+        // path per cycle; that is not what this runner measures.
+        if args.get(2).copied() == Some("remote") {
+            return crate::process::MockProcessRunner::fail("no remote");
+        }
         *self
             .calls
             .lock()

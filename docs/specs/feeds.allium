@@ -1441,14 +1441,20 @@ rule UpsertFeedTasks {
     --      well-formed GitHub URLs (https://github.com/org/repo/...)
     --      or None for empty, non-GitHub, or malformed URLs.
     --   2. resolve_repo_path("org/repo", known_paths) matches that
-    --      pair against the local repo paths registered in the
-    --      dispatch DB (db.list_repo_paths). Returns Some(local_path)
-    --      on match, None otherwise.
+    --      pair against the repo paths THIS HOST registered
+    --      (db.list_repo_paths_saved_by_this_host) — never another
+    --      host's clones, whose paths do not exist here and would block
+    --      dispatch. A path matches by directory name, narrowed by the
+    --      clone's origin remote: a clone whose remote is positively a
+    --      different owner/repo is rejected (orgA/api is not orgB/api), a
+    --      remote equal to org/repo wins, and a remote git cannot read
+    --      keeps the name match. Returns Some(local_path) on match, None
+    --      otherwise.
     --   3. If either step yields None, the item's resolved path is the
     --      empty-string sentinel "". An empty repo_path is a valid
     --      stored state but blocks dispatch (see DispatchRequiresRepoPath).
     --
-    -- If db.list_repo_paths fails the runner logs a warning and treats
+    -- If db.list_repo_paths_saved_by_this_host fails the runner logs a warning and treats
     -- known_paths as empty, so every item resolves to "".
     --
     -- == Per-item upsert ==
@@ -1529,7 +1535,7 @@ rule UpsertFeedTasks {
     -- them apart, nor does it need to.
 
     ensures:
-        let known_paths = list_repo_paths() ?? {}
+        let known_paths = list_repo_paths_saved_by_this_host() ?? {}
         for item in items:
             let github_repo = extract_github_repo(item.url)
             let resolved =

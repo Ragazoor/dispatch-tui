@@ -332,7 +332,7 @@ impl FeedRunner {
         };
 
         // Fetch once per tick so N concurrent spawned tasks don't each hit the DB.
-        let known_paths = Arc::new(self.db.list_repo_paths().await);
+        let known_paths = Arc::new(self.db.list_repo_paths_saved_by_this_host().await);
 
         let now = Instant::now();
         for epic in epics {
