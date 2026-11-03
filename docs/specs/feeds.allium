@@ -152,8 +152,8 @@ contract RouteSignals {
 -- WHY THE RESCUE IS THE REQUEST SIGNALS AND NOT A FETCHED REVIEWER LIST.
 -- "A review is pending from me" is already a fact the feed produces:
 -- direct_request when the request names the user personally, team_request
--- when it names a team the user belongs to. Between them they cover both
--- shapes a re-request can take, so nothing else is needed.
+-- when it names one of the teams the user lists in teams.conf. Between them
+-- they cover both shapes a re-request can take, so nothing else is needed.
 --
 -- An earlier draft of this contract added a third rescuing signal for the
 -- same fact, read from the PR's own pending-reviewer list. It was rejected
@@ -259,7 +259,8 @@ contract ExcludeFromReviews {
 --
 -- direct_request means a review is currently requested from the user
 -- PERSONALLY; team_request means one is requested from a team the user
--- belongs to. That distinction is why both rescue an approved PR: a
+-- lists in teams.conf (feed-scripts.allium, "Team Reviews is the PRs
+-- requested from the listed teams"). That distinction is why both rescue an approved PR: a
 -- re-request can take either shape.
 enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me | org_review | approved }
 
@@ -459,6 +460,7 @@ config {
         "repos.conf",
         "bots.conf",
         "org.conf",
+        "teams.conf",
         "log-warnings.conf"
     ]
 
@@ -2233,7 +2235,7 @@ rule RoleRoutedFeedSync {
         --
         -- Known limitation — GitHub search lag. GitHub's search API is
         -- eventually consistent: a just-reviewed PR can still match
-        -- review-requested:@me for a poll cycle or two, so a role move may lag
+        -- a review-request qualifier for a poll cycle or two, so a role move may lag
         -- the real-world action briefly. Routing is correct once signals
         -- settle; this is documented, not a bug.
 }

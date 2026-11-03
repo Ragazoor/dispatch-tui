@@ -204,6 +204,32 @@ JSON
   exit 0
 fi
 
+# Team-scoped pass (teams.conf): the ONLY producer of team-request. Checked
+# before the org-scoped branch because it is also --owner scoped.
+# "team-review-requested:" does not contain "review-requested:@me", so the
+# order against the personal qualifiers does not matter.
+if [[ "$args" == *"team-review-requested:testorg/ai-core-team"* ]]; then
+  cat <<'JSON'
+[
+  {"id":"PR_1","number":1,"title":"Add feature","body":"d","url":"https://github.com/testorg/repo/pull/1","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"alice"}},
+  {"id":"PR_2","number":2,"title":"Bump dep","body":"","url":"https://github.com/testorg/repo/pull/2","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"kognic-renovate[bot]"}},
+  {"id":"PR_5","number":5,"title":"Draft PR","body":"","url":"https://github.com/testorg/repo/pull/5","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":true,"author":{"login":"bob"}}
+]
+JSON
+  exit 0
+elif [[ "$args" == *"team-review-requested:testorg/scala-core"* ]]; then
+  # PR_1 is requested from BOTH teams: it must still appear once.
+  cat <<'JSON'
+[
+  {"id":"PR_1","number":1,"title":"Add feature","body":"d","url":"https://github.com/testorg/repo/pull/1","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"alice"}}
+]
+JSON
+  exit 0
+elif [[ "$args" == *"team-review-requested:"* ]]; then
+  printf '%s\n' '[]'
+  exit 0
+fi
+
 if [[ "$args" == *"--owner"* ]]; then
   # Org-scoped pass. "user-review-requested:@me" must be checked before the
   # bare "review-requested:@me" (substring of the former).
@@ -243,11 +269,12 @@ fi
 if [[ "$args" == *"user-review-requested:@me"* ]]; then
   printf '%s\n' '[]'
 elif [[ "$args" == *"review-requested:@me"* ]]; then
+  # Team-inclusive: matches a request to ANY team the user is in. Team
+  # requests come only from teams.conf now, so this must never run; if it
+  # regresses, PR11 (a request to an unlisted team) leaks into the output.
   cat <<'JSON'
 [
-  {"id":"PR_1","number":1,"title":"Add feature","body":"d","url":"https://github.com/testorg/repo/pull/1","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"alice"}},
-  {"id":"PR_2","number":2,"title":"Bump dep","body":"","url":"https://github.com/testorg/repo/pull/2","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"kognic-renovate[bot]"}},
-  {"id":"PR_5","number":5,"title":"Draft PR","body":"","url":"https://github.com/testorg/repo/pull/5","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":true,"author":{"login":"bob"}}
+  {"id":"PR_11","number":11,"title":"Unlisted team PR","body":"","url":"https://github.com/testorg/repo/pull/11","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"frank"}}
 ]
 JSON
 elif [[ "$args" == *"reviewed-by:@me"* ]]; then
@@ -275,6 +302,7 @@ cp "$REVIEWS_SCRIPT" "$WORKDIR/fetch-reviews.sh"
 chmod +x "$WORKDIR/fetch-reviews.sh"
 echo 'REPOS=("testorg/repo")' >"$WORKDIR/repos.conf"
 echo 'ORGS=("testorg")' >"$WORKDIR/org.conf"
+echo 'TEAMS=("testorg/ai-core-team" "testorg/scala-core")' >"$WORKDIR/teams.conf"
 echo 'BOT_AUTHORS=("app/testbot" "app/dependabot" "app/kognic-renovate")' >"$WORKDIR/bots.conf"
 
 output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh")"
@@ -361,6 +389,29 @@ assert "org-scoped-only PR7 keeps tag pr-review" \
 assert "team-inclusive org-scoped query never runs (PR8 absent)" \
   '[.[] | select(.url | endswith("/pull/8"))] | length == 0'
 
+# --- Team-scoped pass (teams.conf) -----------------------------------------
+# "Team Reviews is the PRs requested from the listed teams" in
+# docs/specs/feed-scripts.allium.
+
+# PR11 is only returned by a repo-scoped review-requested:@me — a request to a
+# team the user is in but did not list. It must not reach Team Reviews.
+assert "team-inclusive repo-scoped query never runs (PR11 absent)" \
+  '[.[] | select(.url | endswith("/pull/11"))] | length == 0'
+assert "PR5, requested only from a listed team, carries team-request" \
+  'map(select(.url | endswith("/pull/5"))) | .[0].signals | index("team-request")'
+assert "PR1, requested from both listed teams, appears once" \
+  '[.[] | select(.url | endswith("/pull/1"))] | length == 1'
+team_calls="$(grep -c 'team-review-requested:' "$WORKDIR/gh-args.log" || true)"
+[[ "$team_calls" == "2" ]] ||
+  fail "expected one team-review-requested search per listed team (2), got $team_calls"
+while IFS= read -r line; do
+  [[ "$line" == *"--owner testorg"* ]] ||
+    fail "a team search must be scoped to its team's org: $line"
+done < <(grep 'team-review-requested:' "$WORKDIR/gh-args.log")
+if grep -E -- '(^| )review-requested:@me' "$WORKDIR/gh-args.log" | grep -qv 'user-review-requested'; then
+  fail "the team-inclusive review-requested:@me qualifier must not run in any scope"
+fi
+
 # --- Bot-author pass (bots.conf) -------------------------------------------
 
 # PR9 is matched by NO review query — only by --author app/testbot. It must
@@ -420,12 +471,12 @@ while read -r line; do
     fail "bot-author call must scope ONE repo, got $repo_count: $line"
 done < <(grep -- '--author app/' "$WORKDIR/gh-args.log")
 
-# Only the seven review searches (4 repo-scoped + 3 org-scoped) draw on the
-# REST search pool, whatever the bot config. Before task 77856 the bot pass
+# Only the eight review searches (3 repo-scoped + 3 org-scoped + 1 per team
+# in teams.conf) draw on the REST search pool, whatever the bot config. Before task 77856 the bot pass
 # added one search per (repo x author) and tripped the secondary rate limit.
 search_calls="$(grep -c '^search prs' "$WORKDIR/gh-args.log" || true)"
-[[ "$search_calls" == "7" ]] ||
-  fail "expected exactly 7 search-pool calls (the review searches), got $search_calls"
+[[ "$search_calls" == "8" ]] ||
+  fail "expected exactly 8 search-pool calls (the review searches), got $search_calls"
 
 # Every repo is probed once before its bot PRs are listed, since gh pr list
 # reads an unreachable repo as an empty one.
@@ -729,8 +780,8 @@ bot_calls="$(grep -c -- '--author app/busybot' "$WORKDIR/gh-args.log" || true)"
 [[ "$bot_calls" == "2" ]] ||
   fail "expected 2 bot-author calls (2 repos x 1 author), got $bot_calls"
 search_calls="$(grep -c '^search prs' "$WORKDIR/gh-args.log" || true)"
-[[ "$search_calls" == "7" ]] ||
-  fail "with 2 repos the search pool still sees only the 7 review searches, got $search_calls"
+[[ "$search_calls" == "8" ]] ||
+  fail "with 2 repos the search pool still sees only the 8 review searches, got $search_calls"
 
 # --- An unreachable repo is skipped LOUDLY ----------------------------------
 # gh pr list reads a repo it cannot see as one with no PRs. The probe turns
@@ -748,6 +799,17 @@ assert "an unreachable repo does not cost the other repos their bot PRs" \
   '[.[] | select(.external_id | startswith("review:testorg/quiet#"))] | length == 1'
 if grep -q -- '--repo testorg/busy' <(grep -- '--author app/' "$WORKDIR/gh-args.log"); then
   fail "the bot-author pass listed PRs in a repo whose probe failed"
+fi
+
+# --- Team-scoped pass is inert without teams.conf --------------------------
+
+rm "$WORKDIR/teams.conf"
+: >"$WORKDIR/gh-args.log"
+output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh")"
+assert "without teams.conf, no item carries team-request" \
+  'all(.signals | index("team-request") == null)'
+if grep -q 'team-review-requested:' "$WORKDIR/gh-args.log"; then
+  fail "team-scoped pass ran without teams.conf"
 fi
 
 echo "test-fetch-reviews: all assertions passed"

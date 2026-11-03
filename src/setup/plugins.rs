@@ -256,10 +256,11 @@ pub const SHIPPED_SCRIPTS: [ShippedFile; 5] = [
 ///
 /// `bots.conf` is read by both `fetch-dependabot.sh` and `fetch-reviews.sh`'s
 /// bot-author pass — one list, so a deployment does not spell its bots twice.
-pub const SHIPPED_SCRIPT_CONFIGS: [ShippedFile; 4] = [
+pub const SHIPPED_SCRIPT_CONFIGS: [ShippedFile; 5] = [
     shipped("repos.conf", include_str!("../../scripts/repos.conf")),
     shipped("bots.conf", include_str!("../../scripts/bots.conf")),
     shipped("org.conf", include_str!("../../scripts/org.conf")),
+    shipped("teams.conf", include_str!("../../scripts/teams.conf")),
     shipped(
         "log-warnings.conf",
         include_str!("../../scripts/log-warnings.conf"),

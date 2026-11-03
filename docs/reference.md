@@ -346,11 +346,13 @@ identical, which is how a deployment predating the manifest heals itself — in
   `<name>.bak` before it writes. `dispatch setup --yes` never asks and never
   overwrites such a file; it reports it and moves on.
 
-**Config files** — `repos.conf`, `bots.conf`, `org.conf`, `log-warnings.conf` —
-are yours. Setup creates them if they are missing and never touches them again.
-There is no flag or prompt that overwrites one. They are the entire edit
-surface: put your repos, orgs, bot logins and log paths here rather than in the
-scripts.
+**Config files** — `repos.conf`, `bots.conf`, `org.conf`, `teams.conf`,
+`log-warnings.conf` — are yours. Setup creates them if they are missing and
+never touches them again. There is no flag or prompt that overwrites one. They
+are the entire edit surface: put your repos, orgs, teams, bot logins and log
+paths here rather than in the scripts. `teams.conf` is the only source of Team
+Reviews: it lists the `<org>/<team-slug>` teams whose review requests you want
+there.
 
 A missing or corrupt manifest is treated as empty and never fails setup. Only
 scripts that DIFFER fall back to asking: a missing script is still installed and
@@ -470,7 +472,7 @@ Routing into the My/Team/Bots buckets is done by dispatch from these signals
 | `reviewed` / `commented` (and **not** `author-me`) | you reviewed or commented on a PR that isn't yours | **My Reviews** (engagement wins, even over `author-bot`) |
 | `author-bot` | the PR author login ends in `[bot]` (Renovate/Dependabot) | **Bots** |
 | `direct-request` | `user-review-requested:@me` — you were asked directly | **My Reviews** |
-| `team-request` | `review-requested:@me` — your team was asked | **Team Reviews** |
+| `team-request` | `team-review-requested:<org>/<team>` — a team listed in `teams.conf` was asked | **Team Reviews** |
 | *(none of the above / empty)* | fallback | **My Reviews** (logged as a warning) |
 
 `author-me` (the PR is yours) suppresses the engagement rule, so your own
@@ -480,7 +482,7 @@ arbitrarily — group by URL and union the arrays. Unrecognised signal strings
 are dropped with a warning rather than failing the whole feed.
 
 > **Known limitation — GitHub search lag.** GitHub's search API is eventually
-> consistent: a just-reviewed PR can still match `review-requested:@me` for a
+> consistent: a just-reviewed PR can still match a review-request search for a
 > poll cycle or two. Routing is correct once the signals settle, so a bucket
 > move may lag the real-world action briefly. This is expected, not a bug.
 

@@ -744,8 +744,15 @@ fn shipped_script_set_is_the_whole_shipped_set_not_a_curated_subset() {
             .iter()
             .map(|f| f.name)
             .collect::<Vec<_>>(),
-        vec!["repos.conf", "bots.conf", "org.conf", "log-warnings.conf"],
-        "org.conf and log-warnings.conf are the confs of the newly shipped readers"
+        vec![
+            "repos.conf",
+            "bots.conf",
+            "org.conf",
+            "teams.conf",
+            "log-warnings.conf"
+        ],
+        "every conf a shipped reader sources ships beside it; teams.conf is the only \
+         source of Team Reviews, so fetch-reviews.sh without it is inert for that epic"
     );
     assert_eq!(SCRIPT_MANIFEST_NAME, ".install-manifest.json");
     assert_eq!(SCRIPT_BACKUP_SUFFIX, ".bak");

@@ -183,16 +183,16 @@
 -- the user is involved with — the union of these `gh search prs --state=open`
 -- queries, each matched PR tagged with the Signal it matched:
 --
---   - review-requested:@me        -> signal team_request   (direct + team)
 --   - user-review-requested:@me   -> signal direct_request (direct only)
 --   - reviewed-by:@me             -> signal reviewed
 --   - commenter:@me -author:@me   -> signal commented (excludes the user's
 --                                    own PRs)
 --
--- These four queries are scoped by REPO (the same `repos.conf` REPOS list
--- fetch-cve.sh reads) and feed all three sub-epics (My/Team/Bots) exactly as
--- before. THREE of the four qualifiers are ALSO run a second time, scoped by
--- GitHub ORG instead, via a separate `org.conf` (ORGS array) read only by
+-- These three queries are scoped by REPO (the same `repos.conf` REPOS list
+-- fetch-cve.sh reads). Team requests come from a separate, TEAM-scoped pass
+-- (see "Team Reviews is the PRs requested from the listed teams" below), not
+-- from a repo-scoped query. All three qualifiers are ALSO run a second
+-- time, scoped by GitHub ORG instead, via a separate `org.conf` (ORGS array) read only by
 -- this second pass — repo-scope and org-scope are deliberately kept in
 -- different config files so widening "my reviews" to whole orgs doesn't
 -- accidentally widen the Team/Bots queries too. Every org-scoped match
@@ -206,16 +206,47 @@
 --     qualifier keeps its own signal" below for why this one is the
 --     exception.
 --
--- review-requested:@me is DELIBERATELY EXCLUDED from the org-scoped pass: it
--- matches PRs requested from a team the user belongs to, not just PRs
--- requested from the user personally (unlike the other three qualifiers,
--- which are always personal). Org-wide, that team-inclusive match would
--- sweep in far more team-request noise than the repo-scoped pass ever did,
--- so the org-scoped pass only fires for qualifiers that are unambiguously
--- about the user themselves.
+-- review-requested:@me is run in NEITHER scope: it matches PRs requested
+-- from ANY team the user belongs to, not just from the user personally, and
+-- membership is not the same as wanting the team's review work.
+--
+-- == Team Reviews is the PRs requested from the listed teams ==
+--
+-- A TEAM-scoped pass is the only producer of team_request. A FOURTH config
+-- file, `teams.conf` (the TEAMS array of "<org>/<team-slug>" entries, e.g.
+-- "annotell/scala-core"), names the teams whose review requests the user
+-- wants. One query per listed team:
+--
+--   - team-review-requested:<org>/<team>  (with --owner <org>)
+--                                          -> signal team_request
+--
+-- It is ORG-WIDE, not repo-scoped: a team's PRs live in whatever repos the
+-- team owns, and repos.conf lists the repos the user watches for CVEs, not
+-- the repos a team works in. Before this pass, team_request came from a
+-- repo-scoped review-requested:@me, so a PR requested from a team the user
+-- had joined reached Team Reviews only if its repo happened to be in
+-- repos.conf — and a PR asking for the ai-core team in kognic-mcp never did.
+--
+-- It REPLACES the repo-scoped review-requested:@me rather than adding to it,
+-- by the user's decision: Team Reviews means "a PR for one of my teams", not
+-- "a PR in one of my repos that asks any team I am in". A request to an
+-- unlisted team (python-core, say) in a repos.conf repo no longer appears.
+-- A request naming the user personally is unaffected: user-review-requested
+-- still yields direct_request and My Reviews.
+--
+-- An absent teams.conf, or an empty TEAMS, skips the pass, so Team Reviews
+-- stays empty. A misspelt entry needs no check of its own: GitHub rejects an
+-- unknown team name ("is not a valid team name"), the query fails, and the
+-- script says so on stderr — which makes the cycle sync additively (see
+-- FeedCommandStderrOnSuccess) instead of deleting the team's cards.
+--
+-- team_request keeps its meaning for the rest of the system — a review is
+-- requested from a team the user cares about — so it still rescues a settled
+-- approval (feeds.allium's ExcludeFromReviews) and still routes to
+-- team_reviews (RouteSignals rule 4), losing to the earlier rules unchanged.
 --
 -- A FIFTH pass covers BOT-AUTHORED PRs the user has no review involvement
--- with at all. The four review qualifiers above are all about the user, so a
+-- with at all. The review qualifiers above are all about the user, so a
 -- Renovate or Dependabot PR reached the bots sub-epic only when the user
 -- happened to be a requested reviewer on it — which for dependency-update PRs
 -- is the exception, not the rule. This pass queries by AUTHOR instead:
@@ -256,9 +287,9 @@
 -- search pool (30 requests/min, plus secondary burst limits). The per-(repo x
 -- author) split costs len(REPOS) * len(authors) calls a poll — 20 for a
 -- 10-repo, 2-bot deployment — and as `gh search prs` calls those, fired back
--- to back after the seven review searches, tripped GitHub's secondary rate
+-- to back after the review searches, tripped GitHub's secondary rate
 -- limit every busy cycle (task 77856). `gh pr list --author` runs its search
--- through GraphQL, a separate 5000-point/hour budget, so only the seven review
+-- through GraphQL, a separate 5000-point/hour budget, so only the review
 -- searches draw on the search pool and the no-starvation split costs nothing
 -- there.
 --
@@ -421,9 +452,8 @@
 -- The org pass's guarantee — every match lands in My Reviews, never Team or
 -- Bots — is unaffected.
 --
--- review-requested:@me is still excluded from the org-scoped pass entirely:
--- unlike the other three it is team-inclusive, and org-wide that would sweep
--- in team-request noise.
+-- review-requested:@me is not run at all: it is team-inclusive, and team
+-- requests come only from the teams.conf pass.
 --
 -- The script takes NO scope argument. It emits the full involved-PR set once;
 -- the dispatch role router (feed_role = reviews_parent) splits that single
