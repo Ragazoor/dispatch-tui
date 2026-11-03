@@ -139,7 +139,17 @@ impl FeedCycle {
         // means reconciled AND cleaned up, so the board never shows a row gone
         // while its worktree is still being removed. feeds.allium
         // RoleRoutedFeedSync, teardown-vs-notification.
-        super::cleanup_removed_feed_tasks(self.runner.clone(), outcome.removed).await;
+        let (local, foreign) = super::split_removed_by_host(outcome.removed, self.db.host_id());
+        for task in &foreign {
+            // Tearing these down needs a request to the owning host's reactor,
+            // which the module does not yet carry for a deleted row.
+            tracing::warn!(
+                task_id = task.id.0,
+                host = task.host.as_deref().unwrap_or_default(),
+                "feed cleanup: task was dispatched on another host; its worktree and window are left for that host"
+            );
+        }
+        super::cleanup_removed_feed_tasks(self.runner.clone(), local).await;
 
         FeedCycleOutcome::Synced {
             count,

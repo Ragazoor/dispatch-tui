@@ -51,6 +51,10 @@ pub struct RemovedFeedTask {
     pub repo_path: String,
     pub worktree: Option<String>,
     pub tmux_window: Option<crate::models::TmuxWindow>,
+    /// The host that dispatched the task and so holds its worktree and window
+    /// (`Task.host`); `None` for a task never dispatched. Only that host can tear
+    /// the row down (`docs/invariants.md`, session seam).
+    pub host: Option<String>,
 }
 
 /// What [`TaskCrud::ingest_feed`] did, as this board sees it afterwards.

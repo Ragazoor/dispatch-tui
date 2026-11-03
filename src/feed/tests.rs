@@ -1672,7 +1672,25 @@ fn removed_task(
         repo_path: repo.to_string(),
         worktree: worktree.map(str::to_string),
         tmux_window: window.map(test_tmux_window),
+        host: None,
     }
+}
+
+/// F1: only the host that dispatched a task can tear it down. A row owned by
+/// another host is left for that host; a never-dispatched row (no host) and this
+/// host's own rows are torn down here.
+#[test]
+fn removed_tasks_split_by_owning_host() {
+    let on = |id: i64, host: Option<&str>| RemovedFeedTask {
+        host: host.map(str::to_string),
+        ..removed_task(id, "/repo", Some("/repo/.worktrees/x"), Some("dispatch:x"))
+    };
+    let (local, foreign) = split_removed_by_host(
+        vec![on(1, Some("me")), on(2, Some("other")), on(3, None)],
+        "me",
+    );
+    assert_eq!(local.iter().map(|t| t.id.0).collect::<Vec<_>>(), vec![1, 3]);
+    assert_eq!(foreign.iter().map(|t| t.id.0).collect::<Vec<_>>(), vec![2]);
 }
 
 #[tokio::test]

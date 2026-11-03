@@ -29,6 +29,20 @@ pub(crate) use ingest::{ingest_emission, FeedItemWithTarget, SyncMode};
 // callers. See feeds.allium's FeedItemParse block.
 pub use parse::parse_feed_items;
 
+/// Split removed feed tasks into those this host may tear down and those
+/// another host owns. A task's worktree and tmux window live on the host that
+/// dispatched it (`Task.host`); only that host tears them down (the session
+/// seam, `docs/invariants.md`). A row with no host was never dispatched, so
+/// whichever host ran the cycle owes it the (best-effort) teardown as before.
+pub(crate) fn split_removed_by_host(
+    removed: Vec<RemovedFeedTask>,
+    this_host: &str,
+) -> (Vec<RemovedFeedTask>, Vec<RemovedFeedTask>) {
+    removed
+        .into_iter()
+        .partition(|t| t.host.as_deref().is_none_or(|h| h == this_host))
+}
+
 /// Tear down the worktree and tmux window of every feed task a sync removed.
 ///
 /// A feed-driven removal is a deletion like any other and owes the same

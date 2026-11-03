@@ -204,6 +204,7 @@ impl Store {
                     repo_path: candidate.repo_path,
                     worktree: candidate.worktree,
                     tmux_window: candidate.tmux_window,
+                    host: candidate.host,
                 });
             }
         }

@@ -1672,6 +1672,14 @@ rule UpsertFeedTasks {
         -- src/store/mod.rs::FeedIngestOutcome, and the feed cycle passes them
         -- to src/feed/mod.rs::cleanup_removed_feed_tasks — see the TaskTeardown
         -- fan-out paragraph under RoleRoutedFeedSync for the whole path.
+        -- HOST: a removed row carries the host that dispatched it
+        -- (RemovedFeedTask.host = Task.host), because its worktree and window
+        -- exist only there. src/feed/mod.rs::split_removed_by_host hands the
+        -- cleanup only rows this host owns (or that were never dispatched); a
+        -- row another host owns is logged and left for that host. OPEN
+        -- (task #98854): carrying the teardown to the owning host needs a
+        -- request row written with the delete, which the module does not yet
+        -- have for a row that no longer exists.
         --
         -- HOW THE REPORT IS BUILT. The delete itself is unconditional (every
         -- stale row is removed whether or not it is reported). A reducer
