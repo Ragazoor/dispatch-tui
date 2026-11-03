@@ -117,6 +117,26 @@ async fn exec_feed_command_err_carries_stderr_of_failed_command() {
 }
 
 #[tokio::test]
+async fn exec_feed_command_err_names_the_exit_status_when_stderr_is_empty() {
+    let err = exec_feed_command("exit 3", 6, "test-epic", TEST_CMD_TIMEOUT)
+        .await
+        .expect_err("non-zero exit must be an error");
+    assert!(
+        err.contains("exit status: 3"),
+        "a silent failure must still say how it exited, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn exec_feed_command_err_keeps_stderr_and_adds_the_exit_status() {
+    let err = exec_feed_command("echo 'boom' >&2; exit 2", 7, "test-epic", TEST_CMD_TIMEOUT)
+        .await
+        .expect_err("non-zero exit must be an error");
+    assert!(err.contains("boom"), "stderr stays in the message: {err}");
+    assert!(err.contains("exit status: 2"), "status is added: {err}");
+}
+
+#[tokio::test]
 async fn exec_feed_command_returns_empty_stdout_on_zero_exit_with_no_output() {
     let out = exec_feed_command("true", 4, "test-epic", TEST_CMD_TIMEOUT)
         .await

@@ -2429,7 +2429,9 @@ rule FeedCommandFailure {
         -- src/feed/cycle.rs::FeedCycle::run, which drives claim -> read config
         -- -> exec -> parse -> sync -> teardown. The command failure arms live
         -- at: spawn, timeout, and non-zero exit in
-        -- src/feed/exec.rs::exec_feed_command, and the JSON parse in
+        -- src/feed/exec.rs::exec_feed_command (a non-zero exit's error always
+        -- names the exit status, e.g. "command failed (exit status: 1)", so a
+        -- command that wrote nothing to stderr still reports a cause), and the JSON parse in
         -- src/feed/parse.rs::parse_feed_items. Parse is shared
         -- exactly as exec is: the auto-poll path, the manual "r" refresh
         -- (src/runtime/epics.rs::exec_trigger_epic_feed) and the verify-feed

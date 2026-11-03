@@ -228,9 +228,16 @@ pub(crate) async fn exec_feed_command(
         tracing::warn!(
             epic_id,
             epic_title,
-            "feed: command exited non-zero: {stderr}"
+            "feed: command exited non-zero ({}): {stderr}",
+            output.status
         );
-        return Err(stderr);
+        // Name the exit status: `exit 1` or a quiet `jq` writes nothing to
+        // stderr, and an empty message reads as "Failed: " with no cause.
+        return Err(if stderr.is_empty() {
+            format!("command failed ({})", output.status)
+        } else {
+            format!("{stderr} ({})", output.status)
+        });
     }
 
     if !stderr.is_empty() {
