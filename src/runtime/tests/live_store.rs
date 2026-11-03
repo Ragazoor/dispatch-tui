@@ -15,9 +15,6 @@ use std::time::{Duration, Instant};
 
 use crate::spacetime::managed_store::{probe_address, ManagedAddressState, SpacetimeStartSpawner};
 
-/// How many free ports `LiveStore::start` tries before giving up.
-const PORT_ATTEMPTS: usize = 5;
-
 /// How long a started store has to answer as a store.
 const START_DEADLINE: Duration = Duration::from_secs(30);
 
@@ -34,74 +31,78 @@ pub(super) fn spacetime(cli_config: &Path, args: &[&str]) -> Output {
         .expect("run the spacetime CLI")
 }
 
-/// Whether a store's stderr says it lost the race for its port: the only early
-/// exit worth another attempt. Any other exit is a real failure to report.
-fn is_address_in_use(stderr: &str) -> bool {
-    let lower = stderr.to_lowercase();
-    lower.contains("address already in use") || lower.contains("addrinuse")
-}
-
 /// A standalone store on a free loopback port, killed on drop.
 pub(super) struct LiveStore {
     child: Child,
     port: u16,
 }
 
+/// The port a store reports binding, from its stdout: `Starting SpacetimeDB
+/// listening on 127.0.0.1:<port>`.
+fn bound_port(stdout: &str) -> Option<u16> {
+    let after = stdout.split("listening on ").nth(1)?;
+    let address = after.split_whitespace().next()?;
+    address.rsplit(':').next()?.parse().ok()
+}
+
 impl LiveStore {
     /// Start a store over `data_dir`, signing with the key pair in
     /// `keys_dir` (created there when absent), and return once it answers as
-    /// a store. Panics on the deadline, or when every port tried was taken.
+    /// a store. The store binds port 0 and reports the port it got on stdout,
+    /// so no other process can take it between a pick and the bind. Panics,
+    /// showing the exit status, stdout and stderr, on an early exit and on the
+    /// deadline.
     pub(super) fn start(data_dir: &Path, keys_dir: &Path, cli_config: &Path) -> LiveStore {
-        // A port picked by binding and dropping can be taken before the store
-        // binds it; the store then exits, and the next attempt picks again.
-        for _ in 0..PORT_ATTEMPTS {
-            if let Some(store) = Self::try_start(data_dir, keys_dir, cli_config) {
-                return store;
-            }
-        }
-        panic!("no store stayed up on a free port in {PORT_ATTEMPTS} attempts");
-    }
-
-    /// One attempt on a fresh port. `None` when the store exited because the
-    /// port was taken; panics, showing the exit status and stderr, on any other
-    /// early exit, and on the deadline.
-    fn try_start(data_dir: &Path, keys_dir: &Path, cli_config: &Path) -> Option<LiveStore> {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .and_then(|l| l.local_addr())
-            .expect("pick a free port")
-            .port();
-        let address = format!("127.0.0.1:{port}");
-        let stderr_path = keys_dir.with_file_name(format!("store-{port}.stderr"));
+        // One pair of output files per store: a test may hold two at once.
+        static STARTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let stem = keys_dir.with_file_name(format!("store-{n}"));
+        let stdout_path = stem.with_extension("stdout");
+        let stderr_path = stem.with_extension("stderr");
+        let stdout_file = std::fs::File::create(&stdout_path).expect("create the stdout file");
         let stderr_file = std::fs::File::create(&stderr_path).expect("create the stderr file");
         let child = SpacetimeStartSpawner::new()
             .with_config_path(cli_config)
             .with_key_dir(keys_dir)
-            .command(&address, data_dir)
-            .stdout(Stdio::null())
+            .command("127.0.0.1:0", data_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout_file))
             .stderr(Stdio::from(stderr_file))
             .spawn()
             .expect("spawn spacetime start");
-        let mut store = LiveStore { child, port };
+        let mut store = LiveStore { child, port: 0 };
+        let report = |what: &str| {
+            format!(
+                "{what}\nstdout:\n{}\nstderr:\n{}",
+                std::fs::read_to_string(&stdout_path).unwrap_or_default(),
+                std::fs::read_to_string(&stderr_path).unwrap_or_default()
+            )
+        };
         let deadline = Instant::now() + START_DEADLINE;
         loop {
             // Our own child first: a probe that answers while it is dead is
             // another test's store on this port.
             if let Some(status) = store.child.try_wait().expect("poll the store") {
-                let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
-                if is_address_in_use(&stderr) {
-                    return None;
-                }
-                panic!("the store exited during startup with {status} on port {port}:\n{stderr}");
+                panic!(
+                    "{}",
+                    report(&format!("the store exited during startup with {status}"))
+                );
             }
-            if probe_address(&address, Duration::from_secs(2))
-                == ManagedAddressState::StoreAnswering
+            if store.port == 0 {
+                let stdout = std::fs::read_to_string(&stdout_path).unwrap_or_default();
+                store.port = bound_port(&stdout).unwrap_or(0);
+            }
+            if store.port != 0
+                && probe_address(&store.address(), Duration::from_secs(2))
+                    == ManagedAddressState::StoreAnswering
                 && store.child.try_wait().expect("poll the store").is_none()
             {
-                return Some(store);
+                return store;
             }
             assert!(
                 Instant::now() < deadline,
-                "the store never answered on port {port}"
+                "{}",
+                report("the store never answered")
             );
             // allow-test-sleep: deadline-bounded poll, not a fixed wait.
             std::thread::sleep(Duration::from_millis(50));
@@ -160,10 +161,11 @@ fn a_live_store_serves_and_frees_its_port_on_drop() {
 }
 
 #[test]
-fn only_an_address_in_use_exit_is_retried() {
-    assert!(is_address_in_use(
-        "Error: Address already in use (os error 98)"
-    ));
-    assert!(!is_address_in_use("Error: failed to open the database"));
-    assert!(!is_address_in_use(""));
+fn the_bound_port_is_read_from_the_stores_stdout() {
+    assert_eq!(
+        bound_port("2026-11-03T15:39:49Z  INFO start.rs:266: Starting SpacetimeDB listening on 127.0.0.1:32919\n"),
+        Some(32919)
+    );
+    assert_eq!(bound_port("database running in data directory /x\n"), None);
+    assert_eq!(bound_port(""), None);
 }

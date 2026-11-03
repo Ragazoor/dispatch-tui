@@ -328,6 +328,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
                 task,
                 Some(Some(EpicId(other))),
                 String::new(),
+                String::new(),
                 illegal_with_repo.clone(),
             )
             .await
@@ -335,6 +336,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             mem.update_task(
                 task,
                 Some(Some(EpicId(other))),
+                String::new(),
                 String::new(),
                 illegal_with_repo,
             )
@@ -353,22 +355,34 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             ..blank_task_patch()
         };
         let why = refused(
-            real.update_task(task, Some(Some(missing)), String::new(), retitle.clone())
-                .await
-                .unwrap(),
-            mem.update_task(task, Some(Some(missing)), String::new(), retitle)
-                .await
-                .unwrap(),
+            real.update_task(
+                task,
+                Some(Some(missing)),
+                String::new(),
+                String::new(),
+                retitle.clone(),
+            )
+            .await
+            .unwrap(),
+            mem.update_task(
+                task,
+                Some(Some(missing)),
+                String::new(),
+                String::new(),
+                retitle,
+            )
+            .await
+            .unwrap(),
         );
         assert!(why.contains("does not exist"), "{why}");
         same_task(task.0);
 
         let gone = TaskId(9_999_999);
         let why = refused(
-            real.update_task(gone, None, String::new(), blank_task_patch())
+            real.update_task(gone, None, String::new(), String::new(), blank_task_patch())
                 .await
                 .unwrap(),
-            mem.update_task(gone, None, String::new(), blank_task_patch())
+            mem.update_task(gone, None, String::new(), String::new(), blank_task_patch())
                 .await
                 .unwrap(),
         );
@@ -439,12 +453,18 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             completed_at: Some(stale.into()),
             ..blank_task_patch()
         };
-        real.update_task(done_real, None, String::new(), to_done.clone())
-            .await
-            .unwrap()
-            .applied()
-            .unwrap();
-        mem.update_task(done_mem, None, String::new(), to_done)
+        real.update_task(
+            done_real,
+            None,
+            String::new(),
+            String::new(),
+            to_done.clone(),
+        )
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+        mem.update_task(done_mem, None, String::new(), String::new(), to_done)
             .await
             .unwrap()
             .applied()

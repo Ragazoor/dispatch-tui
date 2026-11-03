@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::models::{
     classify_agent_activity, EpicId, HookEventKind, NotificationWrite, SubagentEvent, Task, TaskId,
-    TaskStatus, TaskUrl, WrapUpBlock, DEFAULT_BASE_BRANCH,
+    TaskStatus, WrapUpBlock, DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
 use crate::store::{self, CreateTaskRequest, TaskPatch};
@@ -16,22 +16,6 @@ use crate::store::{self, CreateTaskRequest, TaskPatch};
 use super::params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 use super::validators::build_task_patch;
 use crate::service::UrlUpdate;
-
-/// `ClosePrOnDone` (`docs/specs/pr-workflow.allium`): the PR url to close,
-/// exactly when `prior`/`next` is a genuine transition into Done and `url` is
-/// pr-typed.
-///
-/// Deliberately fires for every route into Done, including `PrMerged`: there
-/// is no cheap signal here distinguishing "entered Done because this task's
-/// own PR was just merged" from any other route, and closing an
-/// already-merged PR is a no-op `gh` itself refuses — see
-/// `TaskService::spawn_close_attached_pr` for how that outcome is logged.
-fn pr_url_to_close(prior: TaskStatus, next: TaskStatus, url: Option<&TaskUrl>) -> Option<String> {
-    if next != TaskStatus::Done || prior == TaskStatus::Done {
-        return None;
-    }
-    url.filter(|u| u.is_pr()).map(|u| u.url.clone())
-}
 
 /// Substrings of `gh pr close`'s stderr meaning the PR was already in a state
 /// `gh` refuses to change — expected, not a fault, so
@@ -182,8 +166,8 @@ impl TaskService {
         let patch = build_task_patch(&params, expanded_repo_path.as_deref(), params.sub_status);
 
         // Snapshot the task before the write, whenever `status` changes: the
-        // PR-finalisation check and ClosePrOnDone below read the prior row.
-        // Nothing else here needs it.
+        // PR-finalisation check reads the prior row. It only words a nudge, so
+        // a stale cache costs a missing or extra reminder, not a data decision.
         let is_pr_url_set = matches!(
             params.url.as_ref(),
             Some(UrlUpdate::Set(u)) if u.is_pr()
@@ -210,16 +194,12 @@ impl TaskService {
             .await
             .map_err(|e| Self::refusal_as_not_found(e, task_id, params.epic_id))?;
 
-        // ClosePrOnDone (docs/specs/pr-workflow.allium): resolved from the
-        // final url this call leaves the task with — an explicit `params.url`
-        // wins, otherwise the prior row's url carries over unchanged — not
-        // just `prior`'s, so a call that attaches a pr-typed url and moves to
-        // Done in the same write is still caught.
-        let final_url = match params.url.as_ref() {
-            Some(u) => u.as_option(),
-            None => prior.as_ref().and_then(|t| t.url.as_ref()),
-        };
-        self.close_pr_on_done(task_id, prior.as_ref(), params.status, final_url);
+        // ClosePrOnDone (docs/specs/pr-workflow.allium) is not decided here: the
+        // module's `update_task` sees the real prior row and the final url, and
+        // writes a windowless close row when this call moves the task into Done
+        // with a pr-typed url. The host serving that row runs `gh pr close`
+        // (`TaskService::serve_session_request`), so a stale board cache can
+        // neither skip the close nor repeat it.
 
         // No epic recalculation, no stop_pending clear and no phoenix respawn
         // here: `update_task` does all three in its transaction
@@ -240,29 +220,6 @@ impl TaskService {
             was_pr_finalisation,
             completed_at_after_write,
         })
-    }
-
-    /// `ClosePrOnDone` (`docs/specs/pr-workflow.allium`): one call site per
-    /// status-writing method — derive from (prior, next), then act — rather than each
-    /// caller separately computing `pr_url_to_close` and separately guarding
-    /// the close.
-    ///
-    /// Synchronous: the close itself never runs on this call's stack, so there
-    /// is nothing here to await. See `spawn_close_attached_pr`.
-    fn close_pr_on_done(
-        &self,
-        task_id: TaskId,
-        prior: Option<&Task>,
-        new_status: Option<TaskStatus>,
-        url: Option<&TaskUrl>,
-    ) {
-        let Some(new_status) = new_status else {
-            return;
-        };
-        let Some(prior) = prior else { return };
-        if let Some(pr_url) = pr_url_to_close(prior.status, new_status, url) {
-            self.spawn_close_attached_pr(task_id, pr_url);
-        }
     }
 
     /// Spawn `gh pr close <url>` for a task that just entered Done carrying a

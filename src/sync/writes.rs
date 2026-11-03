@@ -181,11 +181,14 @@ pub trait ReducerCaller: Send + Sync {
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
     /// `store-split.allium: UpdateTaskIsOneTransaction`: the relink and the
     /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.
+    /// `host` is the caller's own host: a move into Done that leaves a pr-typed
+    /// url writes a close row for it (`UpdateTaskDoneWritesACloseRow`).
     async fn update_task(
         &self,
         id: TaskId,
         epic_id: Option<Option<EpicId>>,
         owner: String,
+        host: String,
         patch: bindings::TaskPatch,
     ) -> Result<ReducerOutcome>;
     async fn delete_task(&self, id: TaskId) -> Result<ReducerOutcome>;

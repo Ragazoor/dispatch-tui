@@ -491,9 +491,16 @@ impl ReducerCaller for MemoryReducerCaller {
         id: TaskId,
         epic_id: Option<Option<EpicId>>,
         owner: String,
+        host: String,
         patch: bindings::TaskPatch,
     ) -> Result<ReducerOutcome> {
-        self.apply_update_task(id, epic_id.map(crate::sync::encode::epic_ref), owner, patch)
+        self.apply_update_task(
+            id,
+            epic_id.map(crate::sync::encode::epic_ref),
+            owner,
+            host,
+            patch,
+        )
     }
 
     async fn delete_task(&self, id: TaskId) -> Result<ReducerOutcome> {

@@ -283,7 +283,7 @@ impl MemoryReducerCaller {
         id: TaskId,
         patch: bindings::TaskPatch,
     ) -> Result<ReducerOutcome> {
-        self.patch_task_row(id, patch, false)
+        self.patch_task_row(id, patch, false, None)
     }
 
     /// `apply_patch_task`'s body; `store_owns_completion` is the module's
@@ -293,6 +293,7 @@ impl MemoryReducerCaller {
         id: TaskId,
         patch: bindings::TaskPatch,
         store_owns_completion: bool,
+        close_host: Option<&str>,
     ) -> Result<ReducerOutcome> {
         let scope = self.scope();
         let mut tables = self.lock();
@@ -361,11 +362,19 @@ impl MemoryReducerCaller {
 
         let status_changed = prior_status != row.status;
         let finished = status_changed && row.status == DONE;
+        // Mirrors the module: a move into Done that leaves a pr-typed url
+        // writes a windowless close row (`UpdateTaskDoneWritesACloseRow`).
+        let closed_task =
+            (close_host.is_some() && finished && module::close_has_host_work(&row, ""))
+                .then(|| row.clone());
         if let Err(why) = self.write_task(&mut tables, row) {
             return Ok(ReducerOutcome::Refused(why));
         }
         if finished {
             self.clear_unseen_for_task(&mut tables, id.0);
+        }
+        if let (Some(task), Some(host)) = (closed_task, close_host) {
+            self.request_close_teardown(&mut tables, &task, "", host, &self.now());
         }
 
         if status_changed {
@@ -392,6 +401,7 @@ impl MemoryReducerCaller {
         id: TaskId,
         epic_id: Option<i64>,
         owner: String,
+        host: String,
         patch: bindings::TaskPatch,
     ) -> Result<ReducerOutcome> {
         {
@@ -428,7 +438,7 @@ impl MemoryReducerCaller {
         }
         let relink_first = patch.repo_path.is_some();
         let Some(epic_id) = epic_id else {
-            return self.patch_task_row(id, patch, true);
+            return self.patch_task_row(id, patch, true, Some(&host));
         };
         let epic = (epic_id != 0).then_some(EpicId(epic_id));
         if relink_first {
@@ -436,9 +446,9 @@ impl MemoryReducerCaller {
             if matches!(moved, ReducerOutcome::Refused(_)) {
                 return Ok(moved);
             }
-            self.patch_task_row(id, patch, true)
+            self.patch_task_row(id, patch, true, Some(&host))
         } else {
-            let patched = self.patch_task_row(id, patch, true)?;
+            let patched = self.patch_task_row(id, patch, true, Some(&host))?;
             if matches!(patched, ReducerOutcome::Refused(_)) {
                 return Ok(patched);
             }

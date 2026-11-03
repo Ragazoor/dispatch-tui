@@ -25,17 +25,12 @@ use crate::spacetime::managed_store::{
     embedded_module_hash, FileModuleHashRecord, ManagedStore, ManagedStoreLayout, ModuleHashRecord,
     SpacetimeManagedStore, SpacetimeStartSpawner, EMBEDDED_MODULE,
 };
+use crate::spacetime::tests::managed_store_real::{
+    failure_with_log, free_address, is_address_in_use, PORT_ATTEMPTS,
+};
 
 /// How long a write may take to come back through the subscription.
 const ROW_DEADLINE: Duration = Duration::from_secs(20);
-
-/// A free loopback port with nothing on it, as `host:port`.
-fn free_address() -> String {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .expect("pick a free port")
-        .to_string()
-}
 
 /// A managed store laid out on `address`, over `store_data_dir` (where the
 /// module hash is recorded). It starts the store itself when nothing answers
@@ -140,17 +135,31 @@ async fn a_fresh_install_starts_against_a_real_store() {
     let store_data = dir.path().join("store");
     let cli_config = dir.path().join("cli.toml");
     let keys = dir.path().join("keys");
-    let address = free_address();
     let (data_dir, paths) = board_dir(dir.path());
+    // A port taken between the pick and the store's bind is a lost race: the
+    // launch starts over on a fresh one, and any other failure is reported
+    // with the store's own log.
+    let mut attempts = 0;
+    let (address, first_guard, first) = loop {
+        let address = free_address();
+        let first_target =
+            managed_target(address.clone(), &store_data, dir.path(), &cli_config, &keys);
+        // Declared before `first`, so the store outlives the board it serves
+        // and is still stopped when an assertion panics.
+        let first_guard = ManagedStoreGuard(first_target.managed().cloned());
+        match boot(&data_dir, &paths, first_target).await {
+            Ok(first) => break (address, first_guard, first),
+            Err(e) => {
+                attempts += 1;
+                let said = failure_with_log(e, &dir.path().join("managed-store.log"));
+                if is_address_in_use(&said) && attempts < PORT_ATTEMPTS {
+                    continue;
+                }
+                panic!("fresh-install smoke: bootstrap aborted: {said}");
+            }
+        }
+    };
     let target = || managed_target(address.clone(), &store_data, dir.path(), &cli_config, &keys);
-
-    let first_target = target();
-    // Declared before `first`, so the store outlives the board it serves and
-    // is still stopped when an assertion panics.
-    let first_guard = ManagedStoreGuard(first_target.managed().cloned());
-    let first = boot(&data_dir, &paths, first_target)
-        .await
-        .unwrap_or_else(|e| panic!("fresh-install smoke: bootstrap aborted: {e}"));
     assert_eq!(
         first.store_server,
         format!("http://{address}"),

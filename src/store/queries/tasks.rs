@@ -160,7 +160,13 @@ impl TaskCrud for Store {
             None => String::new(),
         };
         self.caller
-            .update_task(id, epic, owner, encode::task_patch(patch))
+            .update_task(
+                id,
+                epic,
+                owner,
+                self.host.clone(),
+                encode::task_patch(patch),
+            )
             .await?
             .applied()
     }

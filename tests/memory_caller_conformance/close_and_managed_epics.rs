@@ -178,6 +178,62 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
             other => panic!("both sides must refuse, got {other:?}"),
         }
 
+        // -- update_task into Done: a windowless close row for a pr-typed url ----------
+        // (store-split.allium: UpdateTaskDoneWritesACloseRow). The store decides
+        // from its own prior row; both sides write the same row, none for a
+        // task with no pr url, and none again for a Done -> Done re-save.
+        let edit_epic = {
+            let row = bindings::Epic {
+                created_by: identity.clone(),
+                ..blank_epic()
+            };
+            let r = real.create_epic(row.clone()).await.unwrap();
+            let m = mem.create_epic(row).await.unwrap();
+            assert_eq!(r, m);
+            r
+        };
+        let with_pr = create(in_epic(edit_epic.0)).await;
+        let without_pr = create(in_epic(edit_epic.0)).await;
+        wait_for!(rows_real.task(without_pr).is_some());
+        patch(
+            with_pr,
+            bindings::TaskPatch {
+                url: Some("https://github.com/acme/repo/pull/42".into()),
+                url_type: Some("pr".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await;
+        let to_done = || bindings::TaskPatch {
+            status: Some("done".into()),
+            ..blank_task_patch()
+        };
+        for task in [with_pr, without_pr] {
+            both_applied(
+                real.update_task(task, None, String::new(), "host-a".into(), to_done())
+                    .await
+                    .unwrap(),
+                mem.update_task(task, None, String::new(), "host-a".into(), to_done())
+                    .await
+                    .unwrap(),
+            );
+        }
+        wait_for!(!close_shapes(with_pr).0.is_empty());
+        let (real_rows, mem_rows) = close_shapes(with_pr);
+        assert_eq!(real_rows.len(), 1);
+        assert_eq!(real_rows, mem_rows);
+        assert_eq!(close_shapes(without_pr), (vec![], vec![]));
+        both_applied(
+            real.update_task(with_pr, None, String::new(), "host-a".into(), to_done())
+                .await
+                .unwrap(),
+            mem.update_task(with_pr, None, String::new(), "host-a".into(), to_done())
+                .await
+                .unwrap(),
+        );
+        assert_eq!(close_shapes(with_pr).0.len(), 1, "done -> done adds none");
+        assert_eq!(close_shapes(with_pr).1.len(), 1, "nor on the memory side");
+
         // -- The full close: stuck wrap_up, stop_pending, epic rollup, phoenix ---------
         let epic = {
             let row = bindings::Epic {

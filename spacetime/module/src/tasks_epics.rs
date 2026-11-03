@@ -366,7 +366,7 @@ pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), Stri
 /// SQLite side already makes.
 #[spacetimedb::reducer]
 pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(), String> {
-    patch_task_row(ctx, id, patch, false)
+    patch_task_row(ctx, id, patch, false, None)
 }
 
 /// [`patch_task`]'s body, shared with [`update_task`] so the two cannot drift.
@@ -381,6 +381,7 @@ fn patch_task_row(
     id: i64,
     patch: TaskPatch,
     store_owns_completion: bool,
+    close_host: Option<&str>,
 ) -> Result<(), String> {
     let Some(mut row) = visible_task(ctx, id) else {
         return Ok(());
@@ -445,9 +446,18 @@ fn patch_task_row(
 
     let status_changed = prior_status != row.status;
     let finished = status_changed && row.status == DONE;
+    // `ClosePrOnDone`, decided here on the store's own prior row, not on a
+    // subscription view that may be stale: a move into Done that leaves a
+    // pr-typed url writes a windowless close row, so the host that serves it
+    // runs `gh pr close` and nothing else.
+    let closed_task =
+        (close_host.is_some() && finished && close_has_host_work(&row, "")).then(|| row.clone());
     write_task(ctx, row)?;
     if finished {
         clear_unseen_for_task(ctx, id);
+    }
+    if let (Some(task), Some(host)) = (closed_task, close_host) {
+        request_close_teardown(ctx, &task, "", host, &now(ctx));
     }
 
     // ONLY WHEN THE DERIVATION'S INPUT MOVED. `derive_epic_status` reads the
@@ -624,12 +634,17 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
 /// that also changes the repo relinks first, so the patch's repo change
 /// re-routes inside the subtree the relink named and the task ends where
 /// routing by the NEW repo puts it; otherwise the patch goes first.
+///
+/// `host` is the caller's own host: a move into Done that leaves a pr-typed
+/// url writes a close row for it (`UpdateTaskDoneWritesACloseRow`), when the
+/// task's host, else this one, is the caller's.
 #[spacetimedb::reducer]
 pub fn update_task(
     ctx: &ReducerContext,
     id: i64,
     epic_id: Option<i64>,
     owner: String,
+    host: String,
     patch: TaskPatch,
 ) -> Result<(), String> {
     if visible_task(ctx, id).is_none() {
@@ -649,13 +664,13 @@ pub fn update_task(
     match epic_id {
         Some(epic_id) if relink_first => {
             move_task_row(ctx, id, epic_id, owner)?;
-            patch_task_row(ctx, id, patch, true)
+            patch_task_row(ctx, id, patch, true, Some(&host))
         }
         Some(epic_id) => {
-            patch_task_row(ctx, id, patch, true)?;
+            patch_task_row(ctx, id, patch, true, Some(&host))?;
             move_task_row(ctx, id, epic_id, owner)
         }
-        None => patch_task_row(ctx, id, patch, true),
+        None => patch_task_row(ctx, id, patch, true, Some(&host)),
     }
 }
 

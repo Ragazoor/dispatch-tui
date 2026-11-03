@@ -1337,3 +1337,135 @@ async fn close_task_fails_a_stuck_wrap_up_instead_of_refusing() {
     assert_eq!(stuck.state, SessionRequestState::Failed);
     assert_eq!(stuck.reason.as_deref(), Some("task closed"));
 }
+
+// ===========================================================================
+// ClosePrOnDone for an edit (`UpdateTaskDoneWritesACloseRow`)
+// ===========================================================================
+//
+// `update_task` no longer decides the close from the board's cache: the module
+// sees the real prior row and writes a windowless close row, and this host's
+// reactor serves it. These tests drive that path end to end.
+
+const EDIT_PR_URL: &str = "https://github.com/acme/repo/pull/42";
+
+/// A backlog task of this board with `url` and `status`, built by the service.
+async fn edited_task(fx: &Fx, url: Option<TaskUrl>, status: TaskStatus) -> TaskId {
+    let svc = fx.svc(MockProcessRunner::unused());
+    let id = svc
+        .create_task(make_task_params_on_branch(REPO, "main"))
+        .await
+        .unwrap();
+    let mut params = UpdateTaskParams::for_task(id).status(status);
+    if let Some(url) = url {
+        params = params.url(crate::service::UrlUpdate::Set(url));
+    }
+    svc.update_task(params).await.unwrap();
+    id
+}
+
+fn pr_url() -> TaskUrl {
+    TaskUrl::new(EDIT_PR_URL.to_string(), UrlType::Pr)
+}
+
+async fn close_rows_of(fx: &Fx, task: TaskId) -> Vec<SessionRequest> {
+    fx.db
+        .session_requests()
+        .await
+        .into_iter()
+        .filter(|r| r.task_id == task && r.kind == SessionRequestKind::Close)
+        .collect()
+}
+
+/// An edit to Done of a task carrying a PR runs nothing itself (the runner
+/// panics on any call) and leaves ONE close row with no window; serving it runs
+/// `gh pr close` once.
+#[tokio::test]
+async fn an_edit_into_done_with_a_pr_leaves_a_close_row_the_host_serves() {
+    let fx = fx();
+    let id = edited_task(&fx, Some(pr_url()), TaskStatus::Review).await;
+    assert!(
+        close_rows_of(&fx, id).await.is_empty(),
+        "Review is no close"
+    );
+
+    fx.svc(MockProcessRunner::unused())
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+
+    let rows = close_rows_of(&fx, id).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].tmux_window, None, "an edit kills no window");
+    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let svc = fx.svc(runner.clone());
+    let served = svc.serve_session_request(rows[0].clone()).await;
+    svc.wait_for_background_pr_closes().await;
+
+    assert!(matches!(served.outcome, SessionOutcome::Done), "{served:?}");
+    assert_eq!(
+        runner.recorded_calls(),
+        vec![(
+            "gh".to_string(),
+            vec![
+                "pr".to_string(),
+                "close".to_string(),
+                EDIT_PR_URL.to_string()
+            ]
+        )]
+    );
+}
+
+/// A pr-typed url attached in the same call as Done is the final url.
+#[tokio::test]
+async fn an_edit_attaching_a_pr_and_moving_to_done_leaves_a_close_row() {
+    let fx = fx();
+    let id = edited_task(&fx, Some(pr_url()), TaskStatus::Done).await;
+    assert_eq!(close_rows_of(&fx, id).await.len(), 1);
+}
+
+/// No url, a non-pr url and a Done -> Done re-save leave no close row.
+#[tokio::test]
+async fn an_edit_with_no_pr_or_no_transition_leaves_no_close_row() {
+    let fx = fx();
+    let bare = edited_task(&fx, None, TaskStatus::Done).await;
+    let issue = edited_task(
+        &fx,
+        Some(TaskUrl::new(
+            "https://github.com/acme/repo/issues/9".to_string(),
+            UrlType::Issue,
+        )),
+        TaskStatus::Done,
+    )
+    .await;
+    assert!(close_rows_of(&fx, bare).await.is_empty());
+    assert!(close_rows_of(&fx, issue).await.is_empty());
+
+    let resaved = edited_task(&fx, Some(pr_url()), TaskStatus::Done).await;
+    let first = close_rows_of(&fx, resaved).await.len();
+    fx.svc(MockProcessRunner::unused())
+        .update_task(UpdateTaskParams::for_task(resaved).status(TaskStatus::Done))
+        .await
+        .unwrap();
+    assert_eq!(
+        close_rows_of(&fx, resaved).await.len(),
+        first,
+        "done -> done"
+    );
+}
+
+/// A failed `gh pr close` never fails or reverts the Done.
+#[tokio::test]
+async fn a_failed_pr_close_leaves_the_edit_done() {
+    let fx = fx();
+    let id = edited_task(&fx, Some(pr_url()), TaskStatus::Done).await;
+    let rows = close_rows_of(&fx, id).await;
+    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "GraphQL: Pull request Update failed: Pull request is already merged",
+    )]));
+    let svc = fx.svc(runner.clone());
+    svc.serve_session_request(rows[0].clone()).await;
+    svc.wait_for_background_pr_closes().await;
+
+    assert_eq!(runner.recorded_calls().len(), 1, "the close was attempted");
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
+}

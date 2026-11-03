@@ -1022,6 +1022,58 @@ rule UpdateTaskIsOneTransaction {
         -- older module does not have.
 }
 
+rule UpdateTaskDoneWritesACloseRow {
+    when: TaskUpdateRequested(task, epic?, patch, host)
+
+    -- The store, not the board's cache, decides ClosePrOnDone for an edit
+    -- (pr-workflow.allium). update_task takes the caller's host and, when the
+    -- call moves the task into Done (status was not done, is done after the
+    -- patch) and the task then carries a pr-typed url, writes a close row for
+    -- the host to serve. The close is windowless: an edit to Done never killed
+    -- a window, and still does not.
+    let was_already_done = task.status = done
+    let has_pr_url = task.url != null and task.url.url_type = pr
+    let teardown_host = if task.host != null: task.host else: host
+    let may_tear_down = teardown_host.owner != null and teardown_host.owner = caller()
+
+    ensures:
+        if not was_already_done and patch.status = done and has_pr_url and may_tear_down:
+            SessionRequest.created(
+                task: task,
+                kind: close,
+                action: done,
+                host: teardown_host,
+                requested_by: caller(),
+                state: requested,
+                requested_at: now,
+                tmux_window: null
+            )
+
+    @guidance
+        -- WHY A ROW. A reducer answers only success or failure, so the board
+        -- cannot learn from the call whether it performed the Done transition.
+        -- It used to guess from its subscription cache, which is stale when
+        -- another host already moved the task (a repeat close) or the row has
+        -- just arrived (a missed one). The module reads its own prior row, so
+        -- both are decided where the transition happens. Raised in four
+        -- consecutive reviews (2026-10-22 to 2026-11-03).
+        --
+        -- THE FINAL URL. The url is the task's after the patch, so a call
+        -- that attaches a pr-typed url and moves to Done together is caught.
+        --
+        -- SERVED LIKE ANY CLOSE ROW. The host runs gh pr close best effort
+        -- (pr-workflow.allium: ExitSessionTeardown), reading the task when it
+        -- serves the row and closing only if it is still done. D11 applies as
+        -- in RequestCloseTask: a teammate's host, a host with no owner or an
+        -- unregistered one gets no row, and the task still goes Done. An open
+        -- session request on the task is failed "task closed" first, so
+        -- OneOpenSessionRequestPerTask holds. patch_task writes no row: it
+        -- has no host argument, and no board route uses it for a status
+        -- edit.
+        --
+        -- RULES_VERSION moves to 34: the board passes the new argument.
+}
+
 rule UpdateEpicIsOneTransaction {
     when: EpicUpdateRequested(epic, patch, workspace?, visibility?)
 

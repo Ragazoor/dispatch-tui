@@ -296,15 +296,7 @@ impl MemoryReducerCaller {
         };
         let stamp = self.now();
         let window = module::session_window(&self.agent_store(&mut tables), task_id);
-        let open: Vec<module::SessionRequest> = tables
-            .session_requests
-            .values()
-            .filter(|r| r.task_id == task_id && module::session_request_is_open(&r.state))
-            .cloned()
-            .collect();
-        for row in open {
-            self.fail_session_request(&mut tables, row, module::SESSION_REASON_TASK_CLOSED);
-        }
+        self.fail_open_session_requests_for_close(&mut tables, task_id);
 
         let epic_id = task.epic_id;
         let mut closed = module::apply_done_close(task.clone(), &stamp);
@@ -322,19 +314,46 @@ impl MemoryReducerCaller {
         module::close_agent_session(&mut self.agent_store(&mut tables), task_id);
         self.recalculate_epic_chain(&mut tables, epic_id);
 
-        let row = module::new_close_request(&task, &window, host, &stamp);
-        if module::close_has_host_work(&task, &window)
-            && self.acting_for(&tables, &row.host).is_ok()
-        {
+        self.request_close_teardown(&mut tables, &task, &window, host, &stamp);
+        Ok(vec![])
+    }
+
+    /// Mirrors the module's `fail_open_session_requests_for_close`: every open
+    /// session request of the task fails "task closed".
+    fn fail_open_session_requests_for_close(&self, tables: &mut Tables, task_id: i64) {
+        let open: Vec<module::SessionRequest> = tables
+            .session_requests
+            .values()
+            .filter(|r| r.task_id == task_id && module::session_request_is_open(&r.state))
+            .cloned()
+            .collect();
+        for row in open {
+            self.fail_session_request(tables, row, module::SESSION_REASON_TASK_CLOSED);
+        }
+    }
+
+    /// Mirrors the module's `request_close_teardown`: a close's host work as a
+    /// `close` row, written only when there is some and its host is the
+    /// caller's own. An open session request on the task is failed first.
+    pub(super) fn request_close_teardown(
+        &self,
+        tables: &mut Tables,
+        task: &module::Task,
+        window: &str,
+        host: &str,
+        stamp: &str,
+    ) {
+        let row = module::new_close_request(task, window, host, stamp);
+        if module::close_has_host_work(task, window) && self.acting_for(tables, &row.host).is_ok() {
+            self.fail_open_session_requests_for_close(tables, task.id);
             self.write_session_request(
-                &mut tables,
+                tables,
                 module::SessionRequest {
                     requested_by: self.sender.clone(),
                     ..row
                 },
             );
         }
-        Ok(vec![])
     }
 
     /// Mirrors the module's `respawn_phoenix_successor_of`: the successor row,

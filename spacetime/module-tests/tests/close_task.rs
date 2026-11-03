@@ -456,3 +456,97 @@ fn patch_task_into_done_respawns_a_phoenix_task() {
     patch(&store, feed_owned, status_patch("done")).expect("to done");
     assert_eq!(task_count(&store), 3, "a feed-owned task is exempt");
 }
+
+// -- update_task's Done route (store-split.allium: UpdateTaskDoneWritesACloseRow)
+
+/// `update_task`, moving `id` to `status`, as `HOST_A`'s board would.
+fn update_to(store: &Store, id: i64, patch: TaskPatch) -> Result<(), String> {
+    store.call("alice", |ctx| {
+        update_task(ctx, id, None, String::new(), HOST_A.into(), patch)
+    })
+}
+
+fn pr_patch() -> TaskPatch {
+    TaskPatch {
+        url: Some("https://github.com/a/b/pull/1".into()),
+        url_type: Some("pr".into()),
+        ..TaskPatch::default()
+    }
+}
+
+/// The store decides the transition: entering Done with a pr-typed url writes
+/// ONE close row with no window, so the host runs only `gh pr close`.
+#[test]
+fn update_task_into_done_with_a_pr_url_writes_a_windowless_close_row() {
+    let (store, _, ids) = wrappable(false, &["review"]);
+    let id = ids[0];
+    patch(&store, id, pr_patch()).expect("attach the pr");
+    patch(
+        &store,
+        id,
+        TaskPatch {
+            tmux_window: Some(String::new()),
+            ..TaskPatch::default()
+        },
+    )
+    .expect("clear the window");
+
+    update_to(&store, id, status_patch("done")).expect("update_task");
+    let row = session_row(&store, id, SESSION_KIND_CLOSE);
+    assert_eq!(row.tmux_window, "", "an edit to Done kills no window");
+    assert_eq!(row.state, SESSION_REQUESTED);
+    assert_eq!(timers_for(&store, row.id), 1);
+}
+
+/// A pr-typed url set in the same call as Done is the final url, so it counts.
+#[test]
+fn update_task_attaching_a_pr_url_and_moving_to_done_writes_a_close_row() {
+    let (store, _, ids) = wrappable(false, &["review"]);
+    let id = ids[0];
+    let both = TaskPatch {
+        status: Some("done".into()),
+        ..pr_patch()
+    };
+    update_to(&store, id, both).expect("update_task");
+    session_row(&store, id, SESSION_KIND_CLOSE);
+}
+
+/// Done -> Done is no transition; no pr url is no host work; another status is
+/// no transition.
+#[test]
+fn update_task_writes_no_close_row_without_a_transition_or_a_pr_url() {
+    let (store, _, ids) = wrappable(false, &["review", "review", "review"]);
+    update_to(&store, ids[0], status_patch("done")).expect("done without a pr");
+    assert_eq!(session_count(&store), 0, "no pr url");
+
+    patch(&store, ids[1], pr_patch()).expect("attach the pr");
+    update_to(&store, ids[1], status_patch("done")).expect("to done");
+    assert_eq!(session_rows(&store, ids[1], SESSION_KIND_CLOSE).len(), 1);
+    let after_first = session_count(&store);
+    update_to(&store, ids[1], status_patch("done")).expect("done again");
+    assert_eq!(session_count(&store), after_first, "done -> done");
+
+    patch(&store, ids[2], pr_patch()).expect("attach the pr");
+    update_to(&store, ids[2], status_patch("running")).expect("to running");
+    assert_eq!(session_rows(&store, ids[2], SESSION_KIND_CLOSE).len(), 0);
+}
+
+/// D11: a teammate's host is not the caller's to act for; the task still goes Done.
+#[test]
+fn update_task_into_done_on_a_teammates_host_writes_no_row() {
+    let (store, _, ids) = wrappable(false, &["review"]);
+    let id = ids[0];
+    store.register_host_for("their-host", "bob");
+    patch(
+        &store,
+        id,
+        TaskPatch {
+            host: Some("their-host".into()),
+            ..pr_patch()
+        },
+    )
+    .expect("hand the task to their host");
+    update_to(&store, id, status_patch("done")).expect("update_task");
+    assert_eq!(store.task(id).status, "done");
+    assert_eq!(session_rows(&store, id, SESSION_KIND_CLOSE).len(), 0);
+}

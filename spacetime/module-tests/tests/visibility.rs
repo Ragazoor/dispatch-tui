@@ -292,6 +292,7 @@ fn a_member_cannot_write_to_a_task_in_a_private_epic() {
             task,
             None,
             String::new(),
+            String::new(),
             status_patch("running")
         ))
         .is_err());

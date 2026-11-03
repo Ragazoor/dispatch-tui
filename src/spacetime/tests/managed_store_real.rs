@@ -248,9 +248,53 @@ fn ping_server() -> String {
     address
 }
 
-fn free_address() -> String {
+/// How many free ports [`on_free_address`] tries before giving up.
+pub(crate) const PORT_ATTEMPTS: usize = 5;
+
+/// A free loopback port as `host:port`, for a test that never starts a real
+/// store on it (a fake spawner, or an address nothing should answer on). A
+/// test that hands the address to a real `spacetime start` uses
+/// [`on_free_address`] instead: the port is free when this returns, not when
+/// the child binds it.
+pub(crate) fn free_address() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.local_addr().unwrap().to_string()
+}
+
+/// Whether `output` (a store's stderr or log) says it lost the race for its
+/// port: the only early exit worth another attempt. Any other exit is a real
+/// failure to report.
+///
+/// `spacetime start` reports a taken port on STDERR as `Error: Port N is
+/// already in use. ...` (and, without `--non-interactive`, asks on stdout
+/// whether to use the next port). The OS's own `Address already in use` and
+/// `AddrInUse` spellings count too.
+pub(crate) fn is_address_in_use(output: &str) -> bool {
+    let lower = output.to_lowercase();
+    lower.contains("already in use") || lower.contains("addrinuse")
+}
+
+/// `error`, followed by the log it points at, so [`is_address_in_use`] can see
+/// what the store itself said and a panic shows it.
+pub(crate) fn failure_with_log(error: impl std::fmt::Display, log: &Path) -> String {
+    let logged = std::fs::read_to_string(log).unwrap_or_default();
+    format!("{error}\n{logged}")
+}
+
+/// Run `attempt` on a free address, again on a fresh one when it fails because
+/// the store lost the race for its port ([`is_address_in_use`] on the error),
+/// and panic with the error on any other failure or after [`PORT_ATTEMPTS`].
+/// The attempt's error must carry what the store said ([`failure_with_log`]).
+pub(crate) fn on_free_address<T>(mut attempt: impl FnMut(String) -> Result<T, String>) -> T {
+    let mut last = String::new();
+    for _ in 0..PORT_ATTEMPTS {
+        match attempt(free_address()) {
+            Ok(value) => return value,
+            Err(error) if is_address_in_use(&error) => last = error,
+            Err(error) => panic!("the store failed to start: {error}"),
+        }
+    }
+    panic!("no store stayed up on a free port in {PORT_ATTEMPTS} attempts; last error:\n{last}");
 }
 
 fn ports(
@@ -481,36 +525,39 @@ fn a_real_store_is_brought_up_published_to_and_stopped() {
     }
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("cli.toml");
-    let address = free_address();
-    let layout = ManagedStoreLayout {
-        address: address.clone(),
-        data_dir: dir.path().join("data"),
-        log_path: dir.path().join("managed-store.log"),
-    };
-    let real = Arc::new(
-        SpacetimeManagedStore::new(
-            Arc::new(crate::process::RealProcessRunner::default()),
-            Arc::new(
-                SpacetimeStartSpawner::new()
-                    .with_config_path(&config)
-                    .with_key_dir(dir.path().join("keys")),
-            ),
-            layout.clone(),
-            EMBEDDED_MODULE,
-        )
-        .with_config_path(&config)
-        .with_timeouts(Duration::from_secs(60), Duration::from_secs(15)),
-    );
-    let hashes = Arc::new(FileModuleHashRecord::in_data_dir(&layout.data_dir));
-    let managed = ManagedStore::new(real.clone(), hashes.clone(), embedded_module_hash());
-
-    assert_eq!(
-        real.probe_managed_address(),
-        ManagedAddressState::NothingListening
-    );
-    managed
-        .bring_up()
-        .expect("the store comes up and takes the embedded module");
+    // A port taken between the pick and the store's bind is a lost race: the
+    // attempt starts over on a fresh one, with the store's log in the error.
+    let (real, hashes, managed) = on_free_address(|address| {
+        let layout = ManagedStoreLayout {
+            address,
+            data_dir: dir.path().join("data"),
+            log_path: dir.path().join("managed-store.log"),
+        };
+        let real = Arc::new(
+            SpacetimeManagedStore::new(
+                Arc::new(crate::process::RealProcessRunner::default()),
+                Arc::new(
+                    SpacetimeStartSpawner::new()
+                        .with_config_path(&config)
+                        .with_key_dir(dir.path().join("keys")),
+                ),
+                layout.clone(),
+                EMBEDDED_MODULE,
+            )
+            .with_config_path(&config)
+            .with_timeouts(Duration::from_secs(60), Duration::from_secs(15)),
+        );
+        let hashes = Arc::new(FileModuleHashRecord::in_data_dir(&layout.data_dir));
+        let managed = ManagedStore::new(real.clone(), hashes.clone(), embedded_module_hash());
+        assert_eq!(
+            real.probe_managed_address(),
+            ManagedAddressState::NothingListening
+        );
+        managed
+            .bring_up()
+            .map_err(|e| failure_with_log(format!("{e:?}"), &layout.log_path))?;
+        Ok((real, hashes, managed))
+    });
     assert_eq!(
         real.probe_managed_address(),
         ManagedAddressState::StoreAnswering
@@ -599,4 +646,46 @@ fn starting_the_store_moves_the_mark_past_the_old_failure() {
         "a restarted store is not failing for the line it was restarted over"
     );
     assert!(store.stop_managed_store());
+}
+
+#[test]
+fn only_an_address_in_use_failure_is_retried() {
+    assert!(is_address_in_use(
+        "Error: Port 3000 is already in use. Please free up the port or specify a different port with --listen-addr."
+    ));
+    assert!(is_address_in_use(
+        "Error: Address already in use (os error 98)"
+    ));
+    assert!(is_address_in_use("AddrInUse"));
+    assert!(!is_address_in_use("Error: failed to open the database"));
+    assert!(!is_address_in_use(""));
+}
+
+#[test]
+fn on_free_address_retries_a_lost_race_and_stops_at_any_other_failure() {
+    let mut tried = Vec::new();
+    let value = on_free_address(|address| {
+        tried.push(address);
+        if tried.len() < 3 {
+            Err("Error: Port 1 is already in use.".to_string())
+        } else {
+            Ok(tried.len())
+        }
+    });
+    assert_eq!(value, 3, "two lost races, then a start");
+
+    let result = std::panic::catch_unwind(|| {
+        on_free_address(|_| -> Result<(), String> { Err("failed to open the database".into()) })
+    });
+    assert!(result.is_err(), "a failure that is not a lost race panics");
+
+    let mut attempts = 0;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        on_free_address(|_| -> Result<(), String> {
+            attempts += 1;
+            Err("already in use".into())
+        })
+    }));
+    assert!(result.is_err());
+    assert_eq!(attempts, PORT_ATTEMPTS, "gives up after the cap");
 }

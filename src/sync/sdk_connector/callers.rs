@@ -362,12 +362,13 @@ impl ReducerCaller for SdkReducerCaller {
         id: TaskId,
         epic_id: Option<Option<EpicId>>,
         owner: String,
+        host: String,
         patch: bindings::TaskPatch,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the task update",
-            update_task_then(id.0, epic_id.map(encode::epic_ref), owner, patch)
+            update_task_then(id.0, epic_id.map(encode::epic_ref), owner, host, patch)
         )
     }
 

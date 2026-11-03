@@ -433,7 +433,11 @@ rule ClosePrOnDone {
         -- and done branches, and PrMerged).
         -- The gh call needs a host. ConfirmDone and EditTask write through
         -- the board's TaskService::update_task (src/service/tasks/crud.rs),
-        -- which spawns it once the module's patch has landed. ExitSession's
+        -- whose module reducer writes a windowless close row when the call
+        -- enters Done with a pr-typed url (store-split.allium:
+        -- UpdateTaskDoneWritesACloseRow); the host serving it runs the gh
+        -- call, so the decision is the store's, not the board cache's.
+        -- ExitSession's
         -- branches (since store-split M5) and update_tasks' done path
         -- (store-split.allium: RequestCloseTask, since M7) write in the
         -- module instead, and the host serving the close's exit_session or

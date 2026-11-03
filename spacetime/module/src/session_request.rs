@@ -1026,17 +1026,34 @@ pub fn close_task(ctx: &ReducerContext, task_id: i64, host: String) -> Result<()
     close_agent_session(&mut AgentTables(ctx), task_id);
     recalculate_epic_chain(ctx, epic_id);
 
-    let row = new_close_request(&task, &window, &host, &stamp);
-    // D11, without erroring: a row naming a host makes that host's board act,
-    // so only its owner may write one; a non-owner just gets no row.
-    if close_has_host_work(&task, &window) && require_acting_for(ctx, &row.host).is_ok() {
+    request_close_teardown(ctx, &task, &window, &host, &stamp);
+    Ok(())
+}
+
+/// A close's host work, as a `close` row with its backstop timer: written only
+/// when there is host work (a live `window` or a pr-typed url on `task`) and
+/// the row's host (the task's own, else `host`) is the caller's. D11, without
+/// erroring: a row naming a host makes that host's board act, so only its owner
+/// may write one; a non-owner just gets no row.
+///
+/// An open session request on the task is failed first, so the one-open-row
+/// rule holds and a stuck wrap_up cannot outlive the close.
+pub(crate) fn request_close_teardown(
+    ctx: &ReducerContext,
+    task: &Task,
+    window: &str,
+    host: &str,
+    stamp: &str,
+) {
+    let row = new_close_request(task, window, host, stamp);
+    if close_has_host_work(task, window) && require_acting_for(ctx, &row.host).is_ok() {
+        fail_open_session_requests_for_close(ctx, task.id);
         let row = ctx.db.session_requests().insert(SessionRequest {
             requested_by: caller_identity(ctx),
             ..row
         });
         schedule_session_request_timer(ctx, &row);
     }
-    Ok(())
 }
 
 /// `HostRestartFailsInterruptedSessionRequests`: a starting board fails its own

@@ -347,7 +347,7 @@ fn update_task_relinks_and_patches_in_one_call() {
     };
     store
         .call("alice", |ctx| {
-            update_task(ctx, id, Some(epic), String::new(), patch)
+            update_task(ctx, id, Some(epic), String::new(), String::new(), patch)
         })
         .expect("update_task");
     let task = store.task(id);
@@ -368,7 +368,7 @@ fn update_task_with_an_illegal_patch_leaves_the_relink_undone() {
     };
     let why = store
         .call("alice", |ctx| {
-            update_task(ctx, id, Some(epic), String::new(), patch)
+            update_task(ctx, id, Some(epic), String::new(), String::new(), patch)
         })
         .expect_err("the sub_status is illegal for backlog");
     assert!(why.contains("not valid for status"), "{why}");
@@ -387,7 +387,7 @@ fn update_task_into_a_missing_epic_changes_nothing() {
     };
     let why = store
         .call("alice", |ctx| {
-            update_task(ctx, id, Some(9_999), String::new(), patch)
+            update_task(ctx, id, Some(9_999), String::new(), String::new(), patch)
         })
         .expect_err("a missing epic is refused");
     assert!(why.contains("does not exist"), "{why}");
@@ -399,7 +399,7 @@ fn update_task_on_a_missing_task_is_refused() {
     let store = Store::new();
     let why = store
         .call("alice", |ctx| {
-            update_task(ctx, 404, None, String::new(), status_patch("done"))
+            update_task(ctx, 404, None, String::new(), String::new(), status_patch("done"))
         })
         .expect_err("the caller learns the task is gone");
     assert!(why.contains("not found"), "{why}");
@@ -417,7 +417,7 @@ fn update_task_stamps_done_from_the_store_clock_over_a_named_completion() {
     };
     store
         .call("alice", |ctx| {
-            update_task(ctx, id, None, String::new(), patch)
+            update_task(ctx, id, None, String::new(), String::new(), patch)
         })
         .expect("update_task");
     assert_eq!(store.task(id).completed_at, "2026-10-10 12:01:30.000");
@@ -436,7 +436,7 @@ fn update_task_keeps_a_named_completion_on_a_task_already_done() {
     };
     store
         .call("alice", |ctx| {
-            update_task(ctx, id, None, String::new(), patch)
+            update_task(ctx, id, None, String::new(), String::new(), patch)
         })
         .expect("update_task");
     assert_eq!(store.task(id).completed_at, "2001-01-01 00:00:00.000");

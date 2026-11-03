@@ -200,10 +200,22 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
                     ),
                     _ => (
                         p.real
-                            .update_task(task, Some(dest_epic), String::new(), blank_task_patch())
+                            .update_task(
+                                task,
+                                Some(dest_epic),
+                                String::new(),
+                                String::new(),
+                                blank_task_patch(),
+                            )
                             .await,
                         p.mem
-                            .update_task(task, Some(dest_epic), String::new(), blank_task_patch())
+                            .update_task(
+                                task,
+                                Some(dest_epic),
+                                String::new(),
+                                String::new(),
+                                blank_task_patch(),
+                            )
                             .await,
                     ),
                 };
@@ -220,6 +232,7 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
                 both_apply!(p, |c| c.update_task(
                     task,
                     Some(to_id),
+                    String::new(),
                     String::new(),
                     blank_task_patch()
                 ));
@@ -240,6 +253,7 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
                 both_apply!(p, |c| c.update_task(
                     task,
                     None,
+                    String::new(),
                     String::new(),
                     patch.clone()
                 ));
