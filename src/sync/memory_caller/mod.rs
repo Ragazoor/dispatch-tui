@@ -205,7 +205,7 @@ pub enum InjectedFault {
 
 /// The native in-process stand-in for a real SpacetimeDB reducer call.
 pub struct MemoryReducerCaller {
-    tables: Mutex<Tables>,
+    tables: Arc<Mutex<Tables>>,
     rows: Arc<SharedRows>,
     clock: Arc<dyn Clock>,
     /// The identity a real reducer reads off `ctx.sender`. Stamped as
@@ -226,7 +226,7 @@ impl MemoryReducerCaller {
     /// `ctx.timestamp`.
     pub fn new(rows: Arc<SharedRows>, clock: Arc<dyn Clock>) -> Self {
         Self {
-            tables: Mutex::new(Tables::new()),
+            tables: Arc::new(Mutex::new(Tables::new())),
             rows,
             clock,
             sender: String::new(),
@@ -272,6 +272,20 @@ impl MemoryReducerCaller {
                 let _ = apply();
                 anyhow::bail!("injected transport failure: the reply to {reducer} was lost")
             }
+        }
+    }
+
+    /// Another user of the SAME store: shares this caller's tables and rows,
+    /// writes as `sender`. A fixture's way to have a second person own a row
+    /// (a private epic the first caller cannot see). Faults are not shared.
+    pub fn as_user(&self, sender: impl Into<String>) -> Self {
+        Self {
+            tables: Arc::clone(&self.tables),
+            rows: Arc::clone(&self.rows),
+            clock: Arc::clone(&self.clock),
+            sender: sender.into(),
+            workspace_rules: self.workspace_rules,
+            faults: Mutex::new(Vec::new()),
         }
     }
 

@@ -31,12 +31,12 @@ DOUBLE='impl S {
     }
 }'
 expect 1 "$DOUBLE" '' 'a planted double write fails'
-expect 0 "$DOUBLE" 'src/service/thing.rs::update_thing  exclusive branches' 'an allow-listed double write passes'
+expect 0 "$DOUBLE" 'src/service/thing.rs::update_thing  2  exclusive branches' 'an allow-listed double write passes'
 expect 1 'impl S {
     async fn one(&self) {
         self.db.set_a(1).await?;
     }
-}' 'src/service/thing.rs::one  stale' 'a stale allow-list entry fails'
+}' 'src/service/thing.rs::one  2  stale' 'a stale allow-list entry fails'
 expect 0 'impl S {
     async fn read_then_write(&self) {
         let t = self.db.get_task(1).await;
@@ -62,6 +62,52 @@ expect 0 'impl S {
 mod tests {
     async fn t(&self) { self.db.set_a(1); self.db.set_b(1); }
 }' '' 'comments and test modules are ignored'
+
+# G2: wrapped calls, free functions, counts, session_request.
+WRAPPED='impl S {
+    pub async fn update_thing(&self) {
+        self
+            .db
+            .set_a(1)
+            .await?;
+        self
+            .db
+            .set_b(2)
+            .await?;
+    }
+}'
+expect 1 "$WRAPPED" '' 'rustfmt-wrapped double write fails'
+expect 0 "$WRAPPED" 'src/service/thing.rs::update_thing  2  wrapped but exclusive' 'a wrapped double write passes when listed with its count'
+expect 1 "$WRAPPED" 'src/service/thing.rs::update_thing  3  wrong count' 'a wrong allow-list count fails'
+expect 1 'pub async fn free_writes(db: &dyn Store) {
+    db.set_a(1).await?;
+    db.set_b(2).await?;
+}' '' 'a free function with two db writes fails'
+expect 1 'impl S {
+    fn nested(&self) {
+        if x {
+            self.db.set_a(1);
+            self.db.set_b(2);
+        }
+    }
+}' '' 'an indented nested fn with two writes fails'
+expect 0 'impl S {
+    async fn r(&self) {
+        let r = self
+            .db
+            .session_request(1)
+            .await;
+        self.db.set_a(1).await?;
+        let c = self.db.clone();
+    }
+}' '' 'session_request and clone are not writes'
+expect 0 'impl S {
+    async fn r(&self) {
+        let x = my_db.set_a(1);
+        let y = other.db.set_b(1);
+        self.db.set_c(1).await?;
+    }
+}' '' 'only a bare db or self.db receiver counts'
 
 if [[ "$failures" != 0 ]]; then
     echo "$failures check-single-write-service case(s) failed" >&2

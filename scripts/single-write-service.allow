@@ -1,9 +1,11 @@
-# Sanctioned multi-write service functions: `path::function  reason`.
+# Sanctioned multi-write service functions: `path::function  N  reason`, where
+# N is the exact write count (see scripts/check-single-write-service.sh).
 # Each call site must be an exclusive branch or an idempotent retry, never two
 # writes that both land for one logical change.
-src/service/people.rs::set_member  exclusive match arms: remove OR set role
-src/service/tasks/crud.rs::create_task_inner  if/else: signalled OR plain create
-src/service/tasks/crud.rs::record_hook_event  exclusive match arms per hook kind
-src/service/tasks/crud.rs::record_subagent_event  exclusive match arms per event
-src/service/tasks/session.rs::report_rebase_done  one idempotent retry of the same report
-src/service/tasks/session.rs::report_session_done  one idempotent retry of the same report
+src/service/people.rs::set_member  3  exclusive match arms: remove OR set role
+src/service/tasks/crud.rs::create_task_inner  2  if/else: signalled OR plain create
+src/service/tasks/crud.rs::record_hook_event  4  exclusive match arms per hook kind
+src/service/tasks/crud.rs::record_subagent_event  3  exclusive match arms per event
+src/service/tasks/session.rs::report_rebase_done  2  one idempotent retry of the same report
+src/service/tasks/session.rs::report_session_done  2  one idempotent retry of the same report
+src/service/managed_feeds.rs::write_managed_feed_settings  4  four independent settings rows, each written only when provided; intervals are validated before any write

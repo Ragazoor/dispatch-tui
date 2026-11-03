@@ -54,6 +54,8 @@ const MOVE_PATHS: &[(MovePath, &[&str])] = &[
 const COVERED_ELSEWHERE: &[&str] = &[
     // The generic ingest body runs on both sides; `feeds.rs` drives it.
     "feed_ingest.rs::update_task",
+    // The same generic ingest body: it hands the move to `update_task`.
+    "feed_ingest.rs::route_and_move",
 ];
 
 /// Both stores plus the helpers every move path needs.
@@ -63,6 +65,12 @@ struct Pair<'a> {
     rows_real: &'a Arc<SharedRows>,
     rows_mem: &'a Arc<SharedRows>,
     identity: String,
+    /// A second user, a member of the same workspace: owner of the private
+    /// epic the first user must not be able to move a task into.
+    other_real: &'a SdkReducerCaller,
+    other_mem: &'a MemoryReducerCaller,
+    /// The highest id given to an epic the first caller cannot see.
+    hidden_max: std::cell::Cell<i64>,
 }
 
 /// Run one call, written once with `$c` as the caller, on both sides, and
@@ -90,6 +98,34 @@ impl Pair<'_> {
         })
         .await
         .unwrap_or_else(|_| panic!("real store never reached the expected state"));
+    }
+
+    /// An epic another user holds privately: unseen to this caller.
+    async fn private_epic_of_another(&self) -> i64 {
+        let row = bindings::Epic {
+            visibility: "private".into(),
+            ..blank_epic()
+        };
+        // The creator's own subscription may not carry it back either, so
+        // the id is the next one the store hands out.
+        let id = self
+            .rows_real
+            .epics()
+            .iter()
+            .map(|e| e.id.0)
+            .max()
+            .unwrap_or(0)
+            .max(self.hidden_max.get())
+            + 1;
+        self.hidden_max.set(id);
+        let made = self.other_real.create_epic(row.clone()).await;
+        assert!(
+            made.is_ok() || format!("{made:?}").contains("outside this board"),
+            "{made:?}"
+        );
+        self.other_mem.align_next_epic_id(id);
+        assert_eq!(self.other_mem.create_epic(row).await.unwrap().0, id);
+        id
     }
 
     async fn epic(&self, grouped: bool) -> i64 {
@@ -152,27 +188,30 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
         MovePath::SetTaskEpic | MovePath::UpdateTaskRelink => {
             let (from, to) = (p.epic(false).await, p.epic(false).await);
             let task = p.signalled_task(from, "/x/alpha").await;
-            // Sight is checked on the destination: a missing epic is refused
+            // Sight is checked on the destination: a missing or unseen epic is refused
             // identically and the mark stays.
-            let missing = Some(EpicId(999_999));
-            let (r, m) = match path {
-                MovePath::SetTaskEpic => (
-                    p.real.set_task_epic(task, missing, String::new()).await,
-                    p.mem.set_task_epic(task, missing, String::new()).await,
-                ),
-                _ => (
-                    p.real
-                        .update_task(task, Some(missing), String::new(), blank_task_patch())
-                        .await,
-                    p.mem
-                        .update_task(task, Some(missing), String::new(), blank_task_patch())
-                        .await,
-                ),
-            };
-            let (r, m) = (refusal_of(r.unwrap()), refusal_of(m.unwrap()));
-            assert!(r.contains(&m) || m.contains(&r), "{label}: {r:?} vs {m:?}");
-            assert!(p.rows_real.unseen_task_ids().contains(&task), "{label}");
-            assert!(p.rows_mem.unseen_task_ids().contains(&task), "{label}");
+            let hidden = p.private_epic_of_another().await;
+            for dest in [999_999, hidden] {
+                let dest_epic = Some(EpicId(dest));
+                let (r, m) = match path {
+                    MovePath::SetTaskEpic => (
+                        p.real.set_task_epic(task, dest_epic, String::new()).await,
+                        p.mem.set_task_epic(task, dest_epic, String::new()).await,
+                    ),
+                    _ => (
+                        p.real
+                            .update_task(task, Some(dest_epic), String::new(), blank_task_patch())
+                            .await,
+                        p.mem
+                            .update_task(task, Some(dest_epic), String::new(), blank_task_patch())
+                            .await,
+                    ),
+                };
+                let (r, m) = (refusal_of(r.unwrap()), refusal_of(m.unwrap()));
+                assert!(r.contains(&m) || m.contains(&r), "{label}: {r:?} vs {m:?}");
+                assert!(p.rows_real.unseen_task_ids().contains(&task), "{label}");
+                assert!(p.rows_mem.unseen_task_ids().contains(&task), "{label}");
+            }
 
             let to_id = Some(EpicId(to));
             if matches!(path, MovePath::SetTaskEpic) {
@@ -272,7 +311,58 @@ fn every_task_move_path_meets_the_same_rules_on_both_stores() {
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
         join_default_workspace(&real, &mem, &accepted.identity).await;
+        // The second user.
+        let rows_other = Arc::new(SharedRows::new());
+        let connector2 = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows_other.clone(),
+        ));
+        let accepted2 = connector2
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        connector2
+            .subscribe(&SubscriptionRequest::new(
+                accepted2.identity.clone(),
+                "host-b",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        let other_real = SdkReducerCaller::new(connector2, Arc::new(SettledIdentity::default()));
+        let other_mem = mem.as_user(accepted2.identity.clone());
+        // The second user's profile arrives with their subscription; retry
+        // until the store knows the person.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let out = real
+                    .add_member(
+                        DEFAULT_WORKSPACE,
+                        accepted2.identity.clone(),
+                        "member".to_string(),
+                    )
+                    .await;
+                match out {
+                    Ok(ReducerOutcome::Applied(_)) => break,
+                    _ => tokio::task::yield_now().await,
+                }
+            }
+        })
+        .await
+        .expect("the store knows the second user");
+        other_mem.register_user_profile();
+        mem.add_member(
+            DEFAULT_WORKSPACE,
+            accepted2.identity.clone(),
+            "member".to_string(),
+        )
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
         let pair = Pair {
+            other_real: &other_real,
+            other_mem: &other_mem,
+            hidden_max: std::cell::Cell::new(0),
             real: &real,
             mem: &mem,
             rows_real: &rows_real,
@@ -285,9 +375,106 @@ fn every_task_move_path_meets_the_same_rules_on_both_stores() {
     });
 }
 
+/// Whether the struct literal that contains the next line is a `Task`: walk
+/// back over closed literals to the line that opened this one.
+fn opens_task_literal(before: &[&str]) -> bool {
+    let mut depth = 0;
+    for line in before.iter().rev() {
+        let t = line.trim_end();
+        if t.ends_with('}') || t.ends_with("},") {
+            depth += 1;
+        } else if t.ends_with('{') {
+            if depth == 0 {
+                let head = t.trim_end_matches('{').trim_end();
+                return head.ends_with("Task");
+            }
+            depth -= 1;
+        }
+    }
+    false
+}
+
+/// The `module/src` functions that write a task's `epic_id`: a `Task { epic_id,
+/// .. }` literal or an `.epic_id =` assignment. A move path that forgot the
+/// unseen mark would not call `clear_unseen_for_task` at all, so the scan keys
+/// on the write, not on the clear (G1; N1 and R2 were exactly that).
+fn epic_id_writers(file: &str, body: &str) -> Vec<String> {
+    let mut sites = Vec::new();
+    let mut current = String::new();
+    let lines: Vec<&str> = body.lines().collect();
+    for (at, line) in lines.iter().enumerate() {
+        let t = line.trim_start();
+        if let Some(rest) = t
+            .strip_prefix("pub(crate) fn ")
+            .or_else(|| t.strip_prefix("pub fn "))
+            .or_else(|| t.strip_prefix("fn "))
+        {
+            current = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+        }
+        let field = t.strip_prefix("epic_id").is_some_and(|rest| {
+            let rest = rest.trim_start();
+            // `epic_id,` (shorthand) or `epic_id: <value>`, never a parameter
+            // or struct field declaration (`epic_id: i64,`, `Patch<i64>`).
+            rest.starts_with(',')
+                || rest.strip_prefix(':').is_some_and(|v| {
+                    let v = v.trim_start();
+                    !(v.starts_with("i64")
+                        || v.starts_with("Option")
+                        || v.starts_with("Patch")
+                        || v.starts_with("pub"))
+                })
+        });
+        let assigned = t.contains(".epic_id =") && !t.contains(".epic_id ==");
+        if (field && opens_task_literal(&lines[..at])) || assigned {
+            sites.push(format!("{file}::{current}"));
+        }
+    }
+    sites.sort();
+    sites.dedup();
+    sites
+}
+
+/// Writers that are not moves of an existing task, each with why.
+const NOT_A_MOVE: &[(&str, &str)] = &[
+    (
+        "session_request.rs::phoenix_successor",
+        "builds a new task row for an insert: no prior mark",
+    ),
+    (
+        "tasks_epics.rs::respawn_phoenix_successor",
+        "inserts the successor row: no prior mark",
+    ),
+    (
+        "feed.rs::upsert_feed_item",
+        "looked up by (epic_id, external_id): it stays in its epic",
+    ),
+    ("tasks_epics.rs::create_task", "an insert: no prior mark"),
+    (
+        "tasks_epics.rs::create_task_signalled",
+        "an insert: the mark is created for the viewers afterwards",
+    ),
+];
+
+#[test]
+fn the_epic_id_scan_finds_a_writer_that_never_clears_the_mark() {
+    let body = "fn relink_task(ctx: &C, task: Task, target: i64) {\n    write_task(ctx, Task {\n        epic_id: target,\n        ..task\n    });\n}\nfn sig(epic_id: i64) {}\nfn sub() {\n    s(Subscription {\n        epic_id,\n    });\n}";
+    assert_eq!(
+        epic_id_writers("g.rs", body),
+        vec!["g.rs::relink_task".to_string()]
+    );
+    let assign = "fn mv(t: &mut Task) {\n    t.epic_id = 3;\n    if t.epic_id == 3 {}\n}";
+    assert_eq!(
+        epic_id_writers("g.rs", assign),
+        vec!["g.rs::mv".to_string()]
+    );
+}
+
 /// A move path nobody added to the table. Needs no store: it reads the module
-/// source for every function that ends a task's unseen mark on a move and
-/// requires each to be named by a table row or by `COVERED_ELSEWHERE`.
+/// source for every function that writes a task's `epic_id` and requires each
+/// to be named by a table row, by `COVERED_ELSEWHERE` or by `NOT_A_MOVE`.
 #[test]
 fn every_task_move_site_in_the_module_is_in_the_table() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spacetime/module/src");
@@ -298,33 +485,12 @@ fn every_task_move_site_in_the_module_is_in_the_table() {
             continue;
         }
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let body = std::fs::read_to_string(&path).unwrap();
-        let mut current = String::new();
-        for line in body.lines() {
-            let t = line.trim_start();
-            if let Some(rest) = t
-                .strip_prefix("pub(crate) fn ")
-                .or_else(|| t.strip_prefix("pub fn "))
-                .or_else(|| t.strip_prefix("fn "))
-            {
-                current = rest
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
-            }
-            // Deleting or finishing a task also ends the mark; only the
-            // moves matter here, and `delete_task_side_effects` and the
-            // finish path in `patch_task` are not moves.
-            if t.starts_with("clear_unseen_for_task(") {
-                let site = format!("{name}::{current}");
-                if !matches!(
-                    site.as_str(),
-                    "tasks_epics.rs::delete_task_side_effects" | "tasks_epics.rs::patch_task_row"
-                ) {
-                    sites.push(site);
-                }
-            }
+        // Fixtures and tests build tasks, they do not move them.
+        if matches!(name.as_str(), "blanks.rs" | "tests.rs") {
+            continue;
         }
+        let body = std::fs::read_to_string(&path).unwrap();
+        sites.extend(epic_id_writers(&name, &body));
     }
     sites.sort();
     sites.dedup();
@@ -337,9 +503,10 @@ fn every_task_move_site_in_the_module_is_in_the_table() {
             .iter()
             .any(|(_, covers)| covers.contains(&site.as_str()));
         let elsewhere = COVERED_ELSEWHERE.contains(&site.as_str());
+        let not_a_move = NOT_A_MOVE.iter().any(|(s, _)| *s == site);
         assert!(
-            in_table || elsewhere,
-            "{site} ends a task's unseen mark on a move but no MOVE_PATHS row covers it: \
+            in_table || elsewhere || not_a_move,
+            "{site} writes a task's epic_id but no MOVE_PATHS row covers it: \
              add the path to tests/memory_caller_conformance/move_paths.rs"
         );
     }
