@@ -91,8 +91,8 @@ impl App {
     }
 
     /// Space on an epic row (`ToggleHiddenEpic`): an epic on the list, or
-    /// partly hidden, shows its whole subtree, clearing every sub-epic's own hide; a
-    /// shown one, or one hidden only by its parent, goes on the list.
+    /// partly hidden, shows its whole subtree, clearing every sub-epic's own
+    /// hide; a shown one, or one hidden only by its parent, goes on the list.
     pub(in crate::tui) fn handle_toggle_hidden_epic(&mut self, id: EpicId) -> Vec<Command> {
         // The row's own mark, so Space does what the row shows. The id
         // comes from the cursor row, so it is listed.

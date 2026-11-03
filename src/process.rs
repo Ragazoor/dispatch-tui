@@ -281,8 +281,8 @@ fn abandon(child: &mut std::process::Child, program: &str, timeout: Duration) ->
 /// competes with the board for keystrokes (a verify run's test once did).
 ///
 /// The child runs in its **own session** (so its own process group, with no
-/// controlling terminal), and an overrun kills the whole group. A child that spawns children of its own (`git fetch` over ssh or
-/// https) would otherwise leave them running past the deadline, holding the
+/// controlling terminal), and an overrun kills the whole group. A child that
+/// spawns children of its own (`git fetch` over ssh or https) would otherwise leave them running past the deadline, holding the
 /// output pipes and the drain threads with them. The cost: the child no longer
 /// shares the terminal's foreground group, so Ctrl-C at the terminal does not
 /// reach it; it runs to its own exit or deadline. For the same reason git must

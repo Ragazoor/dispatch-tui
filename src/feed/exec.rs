@@ -73,9 +73,8 @@ pub(crate) struct FeedOutput {
 pub(crate) const MAX_FEED_STDOUT_BYTES: usize = 32 * 1024 * 1024;
 
 /// SIGKILL every process in the group `pid` leads. `pid` is the `sh -c` spawned
-/// with `setsid`, so its pid is the group id. Goes through `kill(1)`
-/// rather than libc to keep the crate free of `unsafe`; the spawn is async so
-/// it never blocks the runtime thread.
+/// started by `detach_from_terminal`, so its pid is the group id. Goes through
+/// `kill(1)` so the async caller never blocks the runtime thread.
 async fn kill_process_group(pid: Option<u32>) {
     let Some(pid) = pid else { return };
     let _ = tokio::process::Command::new("kill")
