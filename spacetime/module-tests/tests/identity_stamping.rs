@@ -61,41 +61,31 @@ fn a_created_task_is_stamped_with_its_creator() {
 }
 
 #[test]
-fn detaching_a_task_puts_it_on_the_callers_board_whatever_owner_is_named() {
+fn a_member_cannot_detach_a_task_from_its_workspace_whatever_owner_is_named() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
-    // Private to alice, so she is the holder and may move the task out.
-    store
-        .call("alice", |ctx| {
-            set_epic_visibility(ctx, epic, "private".into())
-        })
-        .expect("private");
     let id = store.create("alice", epic_task("T", epic, "backlog"));
 
-    store
+    let why = store
         .call("alice", |ctx| set_task_epic(ctx, id, 0, "nobody".into()))
-        .expect("detach");
-    assert_eq!(store.task(id).owner, identity_of("alice"));
+        .unwrap_err();
+    assert!(why.contains("stays in its workspace"), "{why}");
+    assert_eq!(store.task(id).epic_id, epic);
 }
 
 #[test]
-fn update_task_detach_takes_the_caller_as_owner() {
+fn update_task_cannot_detach_a_task_from_its_workspace() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
-    // Private to alice, so she is the holder and may move the task out.
-    store
-        .call("alice", |ctx| {
-            set_epic_visibility(ctx, epic, "private".into())
-        })
-        .expect("private");
     let id = store.create("alice", epic_task("T", epic, "backlog"));
 
-    store
+    let why = store
         .call("alice", |ctx| {
             update_task(ctx, id, Some(0), identity_of("bob"), TaskPatch::default())
         })
-        .expect("detach");
-    assert_eq!(store.task(id).owner, identity_of("alice"));
+        .unwrap_err();
+    assert!(why.contains("stays in its workspace"), "{why}");
+    assert_eq!(store.task(id).epic_id, epic);
 }
 
 #[test]

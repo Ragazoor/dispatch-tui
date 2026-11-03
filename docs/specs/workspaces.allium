@@ -662,15 +662,13 @@ rule ReParentingKeepsTheHolder {
         -- admin of the workspace it moves into (or out of, for a move onto
         -- a user board), or a super-admin. The destination is the epic the
         -- task lands in after repo-group routing (route_target), which
-        -- shares its grouped root's holder. A task detached onto a user
-        -- board lands on the CALLER's board (identity stamping, below), so
-        -- the board is the caller's: moving a task the caller sees off a
-        -- public epic onto it is allowed for any member (task #98783). It
-        -- hides nothing the caller could not already change. Moving a task
-        -- off someone else's private epic onto it still needs the authority
-        -- above. Refusal: "task N: only the person it is private to, or an
-        -- admin, may move it into or out of a private epic". Module:
-        -- check_task_move, task_move_permitted (shared with
+        -- shares its grouped root's holder. A move onto a user board, or
+        -- into another workspace's epic, is refused first
+        -- (TaskMovesStayInTheWorkspace), so the authority above only
+        -- ever judges a move inside one workspace, or an epic-less task
+        -- joining an epic. Refusal: "task N: only the person it is private
+        -- to, or an admin, may move it into or out of a private epic".
+        -- Module: check_task_move, task_move_permitted (shared with
         -- MemoryReducerCaller).
         -- The store itself (the operator) is exempt, as from every sight
         -- check (WritesRequireSight). Separately, the repo-group relinks
@@ -749,32 +747,27 @@ rule TaskEntersAnEpicTheCallerCanSee {
         -- needs ReParentingKeepsTheHolder.
 }
 
-rule TaskMovedToAnotherWorkspace {
+rule TaskMovesStayInTheWorkspace {
     when: TaskMoved(task, destination, owner)    -- destination null: onto the user board of `owner`
 
-    let before = if task.epic != null: task.epic.workspace else: null
-    let after = if destination != null: destination.workspace else: null
-
-    requires: before != null and after != null and before != after
-
-    ensures:
-        for link in WorkPackageLinks where link.item = task:
-            not exists link
-        for learning in Learnings
-                where learning.scope = task and learning.item_in(task):
-            learning.workspace = after
+    requires:
+        task.epic = null
+        or (destination != null and destination.workspace = task.epic.workspace)
 
     @guidance
-        -- Task #98744. The task twin of MoveEpicToWorkspace's clean-up, and
-        -- what keeps LinkedItemsShareThePackagesWorkspace true: the task's
-        -- package links were the old workspace's, so they go, and its
-        -- task-scoped learnings follow it into the new workspace (D8). The
-        -- task and the packages are otherwise untouched. A move inside one
-        -- workspace keeps both.
-        -- Only a move between two workspaces cleans up: a task on a user
-        -- board has no workspace and may be linked to a package anywhere
-        -- (D6), so a move onto or off a board keeps its links.
-        -- Module: move_task_row (set_task_epic, update_task).
+        -- A task in an epic belongs to that epic's workspace and never
+        -- leaves it: not onto a user board (that would hide it from the
+        -- team that was working on it, task #98852) and not into another
+        -- workspace's epic. Nobody is exempt but the store itself (the
+        -- operator). A task on a user board has no workspace, so it may
+        -- join any epic the caller sees (TaskEntersAnEpicTheCallerCanSee).
+        -- Only the store itself can still move a task across workspaces; it
+        -- drops the task's package links and re-homes its task-scoped
+        -- learnings (LinkedItemsShareThePackagesWorkspace, D8), in
+        -- move_task_row.
+        -- Refusal: "task N: a task stays in its workspace; it cannot move
+        -- onto a board or into another workspace". Module: check_task_move,
+        -- task_move_leaves_workspace (shared with MemoryReducerCaller).
 }
 
 -- Work packages ----------------------------------------------
@@ -1032,8 +1025,7 @@ rule LearningVisibility {
         -- user, task #98523; there is no personal workspace, D2). The
         -- same holds for a task-scoped learning on a main-board task.
         -- The workspace follows the item afterwards: an epic tree moved
-        -- (MoveEpicToWorkspace), a task moved (TaskMovedToAnotherWorkspace)
-        -- and an epic-scoped learning re-scoped to another epic
+        -- (MoveEpicToWorkspace), an epic-scoped learning re-scoped to another epic
         -- (rescope_epic_learnings; learnings.allium:
         -- ReScopeLearningsOnRepoGroupDelete) all take the new item's
         -- workspace.
@@ -1259,10 +1251,6 @@ surface SuperAdministration {
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
-
-open question "TaskMovedToAnotherWorkspace: the store treats a user board as a workspace of its own (none), so a task moved onto or off a user board drops all its package links even when the package is in the epic's workspace, and D6 lets a main-board task be linked to a package anywhere. Should a move onto a user board keep the links (D6), and a move off one keep those in the destination epic's workspace? The approved rule (task #98744) names only a move to an epic in another workspace."
-
-open question "ReParentingKeepsTheHolder makes moving a task off a public epic onto a member's own user board a holder change (nobody to that member), so only an admin or super-admin may do it. Is that intended, or should a member be able to pull a visible public task onto their own board?"
 
 open question "UnseenItemListingContents lists only private epics with no private ancestor (A5), but under the nearest-holder reading (D5) a private sub-epic of a private epic is its own creator's. When that sub-epic's creator leaves while the ancestor's creator stays, SuperAdminDeletesUnseenItem accepts it but the listing never shows it. Should the listing show every private epic whose own holder has left?"
 

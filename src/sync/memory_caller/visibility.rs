@@ -401,7 +401,16 @@ impl Tables {
         task: &module::Task,
         epic_id: i64,
     ) -> Result<(), String> {
-        if !scope.on || module::task_move_permitted(self, task, epic_id, &scope.who) {
+        if !scope.on {
+            return Ok(());
+        }
+        if module::task_move_leaves_workspace(self, task, epic_id) {
+            return Err(format!(
+                "task {}: a task stays in its workspace; it cannot move onto a board or into another workspace",
+                task.id
+            ));
+        }
+        if module::task_move_permitted(self, task, epic_id, &scope.who) {
             return Ok(());
         }
         Err(format!(

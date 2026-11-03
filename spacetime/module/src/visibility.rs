@@ -346,11 +346,6 @@ pub fn task_move_permitted(r: &impl StoreReads, task: &Task, epic_id: i64, calle
     if before == holder_of(epic_id) || before.as_deref() == Some(caller) {
         return true;
     }
-    // A detach lands on the caller's own board (`owner` is stamped as the
-    // caller), so a task the caller sees off a public epic hides nothing new.
-    if epic_id == 0 && before.is_none() && r.epic(task.epic_id).is_some() {
-        return true;
-    }
     let workspace = r
         .epic(epic_id)
         .or_else(|| r.epic(task.epic_id))
@@ -358,8 +353,34 @@ pub fn task_move_permitted(r: &impl StoreReads, task: &Task, epic_id: i64, calle
     workspace.is_some_and(|w| workspace_has_admin(r, w, caller)) || is_super_admin(r, caller)
 }
 
+/// `TaskMovesStayInTheWorkspace`: a task in an epic moves only to another epic
+/// of the same workspace. A move onto a board (`epic_id == 0`) leaves it, and
+/// so does a move into an epic of another workspace. An epic-less task joins
+/// any epic its caller sees. Shared with `MemoryReducerCaller`.
+pub fn task_move_leaves_workspace(r: &impl StoreReads, task: &Task, epic_id: i64) -> bool {
+    if task.epic_id == 0 {
+        return false;
+    }
+    let Some(source) = r.epic(task.epic_id) else {
+        return false;
+    };
+    match r.epic(epic_id) {
+        Some(destination) => destination.workspace_id != source.workspace_id,
+        None => epic_id == 0,
+    }
+}
+
 pub fn check_task_move(ctx: &ReducerContext, task: &Task, epic_id: i64) -> Result<(), String> {
-    if is_operator(ctx) || task_move_permitted(ctx, task, epic_id, &caller_identity(ctx)) {
+    if is_operator(ctx) {
+        return Ok(());
+    }
+    if task_move_leaves_workspace(ctx, task, epic_id) {
+        return Err(format!(
+            "task {}: a task stays in its workspace; it cannot move onto a board or into another workspace",
+            task.id
+        ));
+    }
+    if task_move_permitted(ctx, task, epic_id, &caller_identity(ctx)) {
         return Ok(());
     }
     Err(format!(

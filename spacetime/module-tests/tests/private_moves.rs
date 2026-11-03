@@ -177,13 +177,41 @@ fn a_task_leaves_your_private_epic_for_a_public_one() {
 }
 
 #[test]
-fn a_member_detaches_a_task_from_a_public_epic_onto_their_own_board() {
+fn a_task_cannot_leave_its_workspace_for_a_board() {
     let (store, a, _) = world();
     let shared = make_epic(&store, "bob", a, 0, "public");
     let task = store.create("bob", epic_task("t", shared, "backlog"));
-    move_task(&store, "alice", task, 0).expect("the caller's own board holds nothing new");
-    assert_eq!(store.task(task).epic_id, 0);
-    assert_eq!(store.task(task).owner, identity_of("alice"));
+    for who in ["alice", "bob"] {
+        let why = move_task(&store, who, task, 0).unwrap_err();
+        assert!(why.contains("workspace"), "{why}");
+    }
+    assert_eq!(store.task(task).epic_id, shared);
+}
+
+#[test]
+fn a_task_cannot_move_to_an_epic_of_another_workspace() {
+    let (store, a, b) = world();
+    let shared = make_epic(&store, "alice", a, 0, "public");
+    let other = make_epic(&store, "carol", b, 0, "public");
+    let task = store.create("alice", epic_task("t", shared, "backlog"));
+    store
+        .call("root", |ctx| {
+            add_member(ctx, b, identity_of("alice"), "member".into())
+        })
+        .expect("alice joins B");
+    let why = move_task(&store, "alice", task, other).unwrap_err();
+    assert!(why.contains("workspace"), "{why}");
+    assert_eq!(store.task(task).epic_id, shared);
+}
+
+#[test]
+fn a_task_moves_between_epics_of_its_workspace() {
+    let (store, a, _) = world();
+    let one = make_epic(&store, "alice", a, 0, "public");
+    let two = make_epic(&store, "alice", a, 0, "public");
+    let task = store.create("alice", epic_task("t", one, "backlog"));
+    move_task(&store, "alice", task, two).expect("same workspace");
+    assert_eq!(store.task(task).epic_id, two);
 }
 
 #[test]
@@ -337,57 +365,6 @@ fn flattening_a_grouped_epic_clears_the_unseen_marks_of_its_tasks() {
             .iter()
             .any(|u| u.task_id == signalled),
         "the task left its epic, so its mark ends"
-    );
-}
-
-// -- V10: cross-workspace task moves ------------------------------------------
-
-#[test]
-fn a_task_moved_to_another_workspace_drops_its_links_and_takes_its_learnings_along() {
-    let (store, a, b) = world();
-    for who in ["alice"] {
-        store
-            .call("root", |ctx| {
-                add_member(ctx, b, identity_of(who), "member".into())
-            })
-            .expect("alice joins B");
-    }
-    let from = make_epic(&store, "alice", a, 0, "public");
-    let to = make_epic(&store, "alice", b, 0, "public");
-    let task = store.create("alice", epic_task("t", from, "backlog"));
-    store
-        .call("alice", |ctx| {
-            create_work_package(
-                ctx,
-                WorkPackage {
-                    title: "p".into(),
-                    workspace_id: a,
-                    visibility: "public".into(),
-                    ..blank_work_package()
-                },
-            )
-        })
-        .expect("package");
-    let package = store
-        .db()
-        .work_packages()
-        .iter()
-        .map(|p| p.id)
-        .max()
-        .expect("package");
-    store
-        .call("alice", |ctx| {
-            link_work_package_item(ctx, package, "task".into(), task)
-        })
-        .expect("link");
-    assert_eq!(store.db().work_package_links().iter().count(), 1);
-
-    move_task(&store, "alice", task, to).expect("move");
-
-    assert_eq!(
-        store.db().work_package_links().iter().count(),
-        0,
-        "a link never crosses workspaces"
     );
 }
 

@@ -332,6 +332,11 @@ pub fn check_task_patch(row: &Task, patch: &TaskPatch) -> Result<(), String> {
     if patch.epic_id.is_some() {
         return Err("epic_id cannot be changed by patch_task; use set_task_epic".into());
     }
+    // The store owns `owner` (`set_task_epic` stamps it); a client-named one
+    // would orphan the task, since `AdoptOwnerless` adopts only empty owners.
+    if patch.owner.is_some() {
+        return Err("owner cannot be changed by patch_task; the store sets it".into());
+    }
     if let Some(sub_status) = &patch.sub_status {
         let status = patch.status.as_deref().unwrap_or(&row.status);
         validate_sub_status(status, sub_status)?;

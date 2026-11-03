@@ -171,5 +171,108 @@ fn memory_caller_moves_an_epic_like_the_real_reducer() {
                 .is_none(),
             "twin released the claim"
         );
+
+        // `update_epic` is all-or-nothing, and each part is judged against the
+        // epic as the parts before it left it (task #98852, M6).
+        let mut make_epic = |parent_epic_id: i64| {
+            let epic = bindings::Epic {
+                workspace_id: DEFAULT_WORKSPACE,
+                parent_epic_id,
+                created_by: identity.clone(),
+                ..blank_epic()
+            };
+            async move { epic }
+        };
+        let mut ids = Vec::new();
+        for parent in [0, 0] {
+            let epic = make_epic(parent).await;
+            let id = real.create_epic(epic.clone()).await.unwrap().0;
+            wait_for!(rows_real.epic(EpicId(id)).is_some());
+            mem.align_next_epic_id(id);
+            assert_eq!(mem.create_epic(epic).await.unwrap().0, id);
+            ids.push(id);
+        }
+        let (loose, parent) = (ids[0], ids[1]);
+        let child = make_epic(parent).await;
+        let child_id = real.create_epic(child.clone()).await.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(child_id)).is_some());
+        mem.align_next_epic_id(child_id);
+        assert_eq!(mem.create_epic(child).await.unwrap().0, child_id);
+
+        // A root epic given a parent AND a workspace: the move refuses the
+        // sub-epic, so the parent must not be written either.
+        let adopt = || bindings::EpicPatch {
+            parent_epic_id: Some(parent),
+            ..blank_epic_patch()
+        };
+        let real_out = real
+            .update_epic(EpicId(loose), adopt(), Some(other), None)
+            .await
+            .unwrap();
+        let mem_out = mem
+            .update_epic(EpicId(loose), adopt(), Some(other), None)
+            .await
+            .unwrap();
+        assert!(
+            matches!(real_out, ReducerOutcome::Refused(_)),
+            "{real_out:?}"
+        );
+        assert!(matches!(mem_out, ReducerOutcome::Refused(_)), "{mem_out:?}");
+        assert_eq!(rows_real.epic(EpicId(loose)).unwrap().parent_epic_id, None);
+        assert_eq!(rows_mem.epic(EpicId(loose)).unwrap().parent_epic_id, None);
+
+        // A sub-epic made a root AND moved: the patch runs first, so the move
+        // sees a root and both succeed.
+        let detach = || bindings::EpicPatch {
+            parent_epic_id: Some(0),
+            ..blank_epic_patch()
+        };
+        real.update_epic(EpicId(child_id), detach(), Some(other), None)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        mem.update_epic(EpicId(child_id), detach(), Some(other), None)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        wait_for!(rows_real
+            .epic(EpicId(child_id))
+            .is_some_and(|e| e.workspace_id == other));
+        for rows in [&rows_real, &rows_mem] {
+            let e = rows.epic(EpicId(child_id)).unwrap();
+            assert_eq!((e.parent_epic_id, e.workspace_id), (None, other));
+        }
+
+        // A task never leaves its workspace for another workspace's epic
+        // (`TaskMovesStayInTheWorkspace`).
+        let stay = bindings::Task {
+            created_by: identity.clone(),
+            ..blank_task_in_epic(loose)
+        };
+        let task = real.create_task(stay.clone()).await.unwrap();
+        wait_for!(rows_real.task(task).is_some());
+        mem.align_next_task_id(task.0);
+        assert_eq!(mem.create_task(stay).await.unwrap(), task);
+        let real_out = real
+            .set_task_epic(task, Some(EpicId(child_id)), String::new())
+            .await
+            .unwrap();
+        let mem_out = mem
+            .set_task_epic(task, Some(EpicId(child_id)), String::new())
+            .await
+            .unwrap();
+        for out in [real_out, mem_out] {
+            match out {
+                ReducerOutcome::Refused(why) => {
+                    assert!(why.contains("stays in its workspace"), "{why}")
+                }
+                other => panic!("the move must be refused, got {other:?}"),
+            }
+        }
+        for rows in [&rows_real, &rows_mem] {
+            assert_eq!(rows.task(task).unwrap().epic_id, Some(EpicId(loose)));
+        }
     });
 }

@@ -86,7 +86,7 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
             "twin must hold the stamped task"
         );
 
-        // -- detach with a stranger as owner: it lands on the caller's board ----
+        // -- detach: refused, and so is a patch that names an owner -------------
         let epic = bindings::Epic {
             created_by: identity.clone(),
             ..blank_epic()
@@ -103,21 +103,33 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
         wait_for!(rows_real.task(d).is_some());
         mem.align_next_task_id(d.0);
         assert_eq!(mem.create_task(inside).await.unwrap(), d);
-        real.set_task_epic(d, None, "someone-else".into())
-            .await
-            .unwrap()
-            .applied()
-            .unwrap();
-        mem.set_task_epic(d, None, "someone-else".into())
-            .await
-            .unwrap()
-            .applied()
-            .unwrap();
-        wait_for!(rows_real.task(d).is_some_and(|t| t.epic_id.is_none()));
+        // A task in an epic cannot leave its workspace for a board
+        // (`TaskMovesStayInTheWorkspace`, task #98852).
+        let why = refused(
+            real.set_task_epic(d, None, "someone-else".into())
+                .await
+                .unwrap(),
+            mem.set_task_epic(d, None, "someone-else".into())
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("stays in its workspace"), "{why}");
         assert_eq!(
             rows_real.task(d).map(|t| t.epic_id),
             rows_mem.task(d).map(|t| t.epic_id)
         );
+        assert!(rows_real.task(d).is_some_and(|t| t.epic_id.is_some()));
+
+        // The store owns `owner`: a patch that names one is refused.
+        let name_owner = bindings::TaskPatch {
+            owner: Some("someone-else".into()),
+            ..blank_task_patch()
+        };
+        let why = refused(
+            real.patch_task(d, name_owner.clone()).await.unwrap(),
+            mem.patch_task(d, name_owner).await.unwrap(),
+        );
+        assert!(why.contains("owner"), "{why}");
 
         // -- unsubscribe: another person's subscriber is refused ----------------
         let why = refused(
@@ -136,6 +148,28 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
                 .await
                 .unwrap(),
             mem.unsubscribe_from_epic(identity.clone(), EpicId(999_999))
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("no epic"), "{why}");
+
+        // -- subscribe: another person's subscriber is refused ------------------
+        let why = refused(
+            real.subscribe_to_epic("someone-else".into(), EpicId(e))
+                .await
+                .unwrap(),
+            mem.subscribe_to_epic("someone-else".into(), EpicId(e))
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("caller") || why.contains("identity"), "{why}");
+
+        // -- subscribe: an epic that does not exist reads as missing ------------
+        let why = refused(
+            real.subscribe_to_epic(identity.clone(), EpicId(999_999))
+                .await
+                .unwrap(),
+            mem.subscribe_to_epic(identity.clone(), EpicId(999_999))
                 .await
                 .unwrap(),
         );

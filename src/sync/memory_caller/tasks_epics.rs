@@ -609,17 +609,53 @@ impl MemoryReducerCaller {
                 )));
             }
         }
-        let mut parts = vec![self.patch_epic_row(id, patch.clone(), true)?];
-        if let Some(workspace_id) = workspace_id {
-            parts.push(self.move_epic_row(id, workspace_id, true)?);
+        // The module runs the parts in order, each seeing what the one before
+        // wrote. Dry-run them the same way: the patch's parent and the move's
+        // workspace are laid over the row for the checks after them, then put
+        // back. Nothing is written until every part has said yes.
+        let original = self.lock().epics.get(&id.0).cloned();
+        let lay_over = |parent: Option<i64>, workspace: Option<i64>| {
+            let mut tables = self.lock();
+            if let Some(row) = tables.epics.get_mut(&id.0) {
+                if let Some(parent) = parent {
+                    row.parent_epic_id = parent;
+                }
+                if let Some(workspace) = workspace {
+                    row.workspace_id = workspace;
+                }
+            }
+        };
+        let restore = || {
+            if let Some(original) = &original {
+                self.lock().epics.insert(id.0, original.clone());
+            }
+        };
+        let mut refusal = None;
+        let patched = self.patch_epic_row(id, patch.clone(), true)?;
+        if matches!(patched, ReducerOutcome::Refused(_)) {
+            refusal = Some(patched);
         }
-        if let Some(visibility) = &visibility {
-            parts.push(self.set_epic_visibility_row(id, visibility.clone(), true)?);
+        if refusal.is_none() {
+            lay_over(patch.parent_epic_id, None);
+            if let Some(workspace_id) = workspace_id {
+                let moved = self.move_epic_row(id, workspace_id, true)?;
+                if matches!(moved, ReducerOutcome::Refused(_)) {
+                    refusal = Some(moved);
+                } else {
+                    lay_over(None, Some(workspace_id));
+                }
+            }
         }
-        if let Some(refusal) = parts
-            .into_iter()
-            .find(|p| matches!(p, ReducerOutcome::Refused(_)))
-        {
+        if refusal.is_none() {
+            if let Some(visibility) = &visibility {
+                let set = self.set_epic_visibility_row(id, visibility.clone(), true)?;
+                if matches!(set, ReducerOutcome::Refused(_)) {
+                    refusal = Some(set);
+                }
+            }
+        }
+        restore();
+        if let Some(refusal) = refusal {
             return Ok(refusal);
         }
         self.patch_epic_row(id, patch, false)?;

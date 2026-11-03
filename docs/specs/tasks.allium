@@ -1135,9 +1135,8 @@ rule MoveTaskToEpic {
         -- enforced by the handler, so the MCP relink path (update_tasks with
         -- an epic_id, mcp-task-tools.allium) is held to it too. So are the
         -- store's checks on who may move what (workspaces.allium:
-        -- TaskEntersAnEpicTheCallerCanSee, ReParentingKeepsTheHolder) and the
-        -- clean-up of a move to another workspace
-        -- (TaskMovedToAnotherWorkspace).
+        -- TaskEntersAnEpicTheCallerCanSee, ReParentingKeepsTheHolder,
+        -- TaskMovesStayInTheWorkspace).
         --
         -- A collapsible tree overlay lists only epics that are relevant
         -- targets: it excludes epics in Done status and epics hidden by

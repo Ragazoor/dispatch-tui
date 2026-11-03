@@ -113,6 +113,18 @@ fn a_task_patch_naming_epic_id_is_refused() {
         .contains("set_task_epic"));
 }
 
+#[test]
+fn a_task_patch_naming_owner_is_refused() {
+    let row = task_with("backlog", "none");
+    let patch = TaskPatch {
+        owner: Some("x".into()),
+        ..TaskPatch::default()
+    };
+    assert!(check_task_patch(&row, &patch)
+        .unwrap_err()
+        .contains("owner"));
+}
+
 fn subtree(edges: &[(i64, i64)]) -> impl Fn(i64) -> Vec<i64> {
     let edges = edges.to_vec();
     move |id| {
