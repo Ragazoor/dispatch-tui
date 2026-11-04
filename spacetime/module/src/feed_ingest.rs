@@ -110,15 +110,17 @@ impl IngestStore for ReducerStore<'_> {
         self.0.db.epics().insert(inherit_workspace(self.0, row)).id
     }
     fn update_task(&mut self, row: Task) {
-        let left_its_epic = self
-            .0
-            .db
-            .tasks()
-            .id()
-            .find(row.id)
-            .is_some_and(|old| old.epic_id != row.epic_id);
-        if left_its_epic {
+        let prior = self.0.db.tasks().id().find(row.id);
+        let left_its_epic = prior.as_ref().is_some_and(|old| old.epic_id != row.epic_id);
+        // This write skips `store_task`, so it repeats its Done rule: entering
+        // Done ends every unseen mark and bookmark
+        // (`BookmarkEndsWithTheTaskFinishing`).
+        let finished = prior.as_ref().is_some_and(|old| old.status != DONE) && row.status == DONE;
+        if left_its_epic || finished {
             clear_unseen_for_task(self.0, row.id);
+        }
+        if finished {
+            clear_bookmarks_for_task(self.0, row.id);
         }
         self.0.db.tasks().id().update(row);
     }

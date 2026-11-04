@@ -364,7 +364,17 @@ rule UpdateTaskViaMcp {
         -- to done, which MarkTaskDoneViaMcp refuses on its own terms.
         if bookmarked != null:
             BookmarkSet(subscriber: core/local_host().owner, task: task, bookmarked: bookmarked)
-    ensures: task.updated_at = now
+    -- A call whose only field is `bookmarked` writes no Task field, so it
+    -- leaves task.updated_at alone: a person's own mark is not an edit of the
+    -- shared task. Every other call stamps it.
+    ensures:
+        if not (bookmarked != null and status = null and sub_status = null
+                and plan = null and title = null and description = null
+                and repo_path = null and sort_order = null and epic_id = null
+                and url = null and tag = null and base_branch = null
+                and wrap_up_mode = omitted and model = omitted
+                and auto_run_plan = null and phoenix = null and schedule = null):
+            task.updated_at = now
 
     @guidance
         -- MCP update_tasks accepts status, sub_status, plan_path, title,

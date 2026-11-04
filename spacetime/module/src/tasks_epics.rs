@@ -73,7 +73,8 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
         // `UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing` and
         // `BookmarkEndsWithTheTaskFinishing`: entering Done ends both marks,
         // whichever writer moved it there (a patch, a session close, a merged
-        // PR, a batch move, a feed).
+        // PR, a batch move). The feed's direct write repeats this rule
+        // (`feed_ingest.rs`).
         if prior.status != DONE && row.status == DONE {
             clear_unseen_for_task(ctx, row.id);
             clear_bookmarks_for_task(ctx, row.id);

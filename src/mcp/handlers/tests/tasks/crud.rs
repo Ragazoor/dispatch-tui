@@ -1042,3 +1042,21 @@ async fn bookmarked_cannot_travel_with_status_done() {
         error_message(&resp)
     );
 }
+
+/// A call that sets no task field and no bookmark (a lone `url_type`) is still
+/// refused, as it was before `bookmarked` could stand alone.
+#[tokio::test]
+async fn update_tasks_with_only_url_type_is_still_refused() {
+    let (state, _store, epic) = signal_fixture().await;
+    create_in_epic(&state, epic, json!({})).await;
+    let task = state.db.list_all().await[0].id;
+
+    let resp = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "url_type": "pr" }),
+    )
+    .await;
+
+    assert!(is_error(&resp), "{resp:?}");
+}

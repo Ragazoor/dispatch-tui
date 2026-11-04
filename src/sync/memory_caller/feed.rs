@@ -10,7 +10,7 @@ use crate::models::EpicId;
 use crate::spacetime::bindings;
 
 use super::super::writes::ReducerOutcome;
-use super::{MemoryReducerCaller, Tables, MAX_EPIC_DEPTH};
+use super::{MemoryReducerCaller, Tables, DONE, MAX_EPIC_DEPTH};
 
 impl MemoryReducerCaller {
     /// The `retired_feed_items` delete helper — shared by
@@ -495,13 +495,16 @@ impl module::IngestStore for TablesIngest<'_> {
     }
 
     fn update_task(&mut self, row: module::Task) {
-        let left_its_epic = self
-            .tables
-            .tasks
-            .get(&row.id)
-            .is_some_and(|old| old.epic_id != row.epic_id);
-        if left_its_epic {
+        let prior = self.tables.tasks.get(&row.id);
+        let left_its_epic = prior.is_some_and(|old| old.epic_id != row.epic_id);
+        // Mirrors the module: this write skips `write_task`, so it repeats its
+        // Done rule.
+        let finished = prior.is_some_and(|old| old.status != DONE) && row.status == DONE;
+        if left_its_epic || finished {
             self.caller.clear_unseen_for_task(self.tables, row.id);
+        }
+        if finished {
+            self.caller.clear_bookmarks_for_task(self.tables, row.id);
         }
         self.tables.tasks.insert(row.id, row.clone());
         self.caller.rows.upsert_task(&row.into());

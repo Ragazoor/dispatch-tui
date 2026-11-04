@@ -62,7 +62,9 @@ async fn handle_update_task(
         .collect();
 
     let mut nudge = "";
-    if !fields.is_empty() {
+    // A call that sets no task field and no bookmark (a lone `url_type`) still
+    // reaches `update_task`, which refuses it as it always has.
+    if !fields.is_empty() || bookmarked.is_none() {
         let result = match state.task_svc.update_task(params).await {
             Ok(result) => result,
             Err(e) => return service_err_to_response(id, e),
