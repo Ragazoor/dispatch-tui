@@ -208,7 +208,9 @@ fn a_claim_on_an_epic_the_caller_cannot_see_is_refused() {
     let (store, a, _) = world();
     let epic = feed_epic(&store, a);
     store
-        .call("alice", |ctx| set_epic_visibility(ctx, epic, "private".into()))
+        .call("alice", |ctx| {
+            set_epic_visibility(ctx, epic, "private".into())
+        })
         .expect("private");
     assert!(claim(&store, "carol", "epic", epic, "h-carol").is_err());
     assert!(override_to(&store, "carol", "epic", epic, "h-carol").is_err());
@@ -374,7 +376,9 @@ fn a_visibility_flip_also_releases_claims_on_the_sub_epics() {
     );
     legacy_claim(&store, sub, "h-carol");
     store
-        .call("alice", |ctx| set_epic_visibility(ctx, root, "private".into()))
+        .call("alice", |ctx| {
+            set_epic_visibility(ctx, root, "private".into())
+        })
         .expect("private");
     assert!(claim_hosts(&store).is_empty());
 }

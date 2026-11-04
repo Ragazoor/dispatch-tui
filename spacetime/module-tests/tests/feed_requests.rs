@@ -156,7 +156,14 @@ fn a_stale_delete_writes_no_row_for_a_host_of_another_person() {
 fn an_ingest_from_a_host_the_caller_does_not_own_is_refused() {
     let (store, epic) = world();
     let refused = store.call("alice", |ctx| {
-        ingest_feed(ctx, epic, vec![], false, "creator".into(), "host-bob".into())
+        ingest_feed(
+            ctx,
+            epic,
+            vec![],
+            false,
+            "creator".into(),
+            "host-bob".into(),
+        )
     });
     assert!(refused.is_err());
 }
@@ -235,10 +242,16 @@ fn only_the_rows_own_host_claims_and_reports_it() {
         .expect("claim");
     assert_eq!(feed_rows(&store)[0].state, FEED_RUNNING);
     assert!(store
-        .call("alice", |ctx| report_feed_request_done(ctx, id, HOST_B.into()))
+        .call("alice", |ctx| report_feed_request_done(
+            ctx,
+            id,
+            HOST_B.into()
+        ))
         .is_err());
     store
-        .call("alice", |ctx| report_feed_request_done(ctx, id, HOST_A.into()))
+        .call("alice", |ctx| {
+            report_feed_request_done(ctx, id, HOST_A.into())
+        })
         .expect("done");
     assert_eq!(feed_rows(&store)[0].state, FEED_DONE);
     assert!(!feed_rows(&store)[0].finished_at.is_empty());
@@ -249,7 +262,11 @@ fn a_report_needs_a_running_row_and_a_failure_keeps_its_reason() {
     let (store, epic) = world();
     let id = requested_refresh(&store, epic);
     assert!(store
-        .call("alice", |ctx| report_feed_request_done(ctx, id, HOST_A.into()))
+        .call("alice", |ctx| report_feed_request_done(
+            ctx,
+            id,
+            HOST_A.into()
+        ))
         .is_err());
     store
         .call("alice", |ctx| claim_feed_request(ctx, id, HOST_A.into()))
@@ -294,13 +311,55 @@ fn retention_keeps_open_teardowns_and_prunes_old_terminal_and_stale_refresh_rows
     let cutoff = "2026-01-10 00:00:00.000";
     let stale = "2026-01-20 00:00:00.000";
     let rows = vec![
-        row(1, FEED_REQUEST_TEARDOWN, FEED_REQUESTED, "2026-01-01 00:00:00.000", ""),
-        row(2, FEED_REQUEST_TEARDOWN, FEED_RUNNING, "2026-01-01 00:00:00.000", ""),
-        row(3, FEED_REQUEST_TEARDOWN, FEED_DONE, "2026-01-01 00:00:00.000", "2026-01-02 00:00:00.000"),
-        row(4, FEED_REQUEST_REFRESH, FEED_FAILED, "2026-01-12 00:00:00.000", "2026-01-12 00:00:01.000"),
-        row(5, FEED_REQUEST_REFRESH, FEED_REQUESTED, "2026-01-19 00:00:00.000", ""),
-        row(6, FEED_REQUEST_REFRESH, FEED_REQUESTED, "2026-01-21 00:00:00.000", ""),
-        row(7, FEED_REQUEST_REFRESH, FEED_RUNNING, "2026-01-19 00:00:00.000", ""),
+        row(
+            1,
+            FEED_REQUEST_TEARDOWN,
+            FEED_REQUESTED,
+            "2026-01-01 00:00:00.000",
+            "",
+        ),
+        row(
+            2,
+            FEED_REQUEST_TEARDOWN,
+            FEED_RUNNING,
+            "2026-01-01 00:00:00.000",
+            "",
+        ),
+        row(
+            3,
+            FEED_REQUEST_TEARDOWN,
+            FEED_DONE,
+            "2026-01-01 00:00:00.000",
+            "2026-01-02 00:00:00.000",
+        ),
+        row(
+            4,
+            FEED_REQUEST_REFRESH,
+            FEED_FAILED,
+            "2026-01-12 00:00:00.000",
+            "2026-01-12 00:00:01.000",
+        ),
+        row(
+            5,
+            FEED_REQUEST_REFRESH,
+            FEED_REQUESTED,
+            "2026-01-19 00:00:00.000",
+            "",
+        ),
+        row(
+            6,
+            FEED_REQUEST_REFRESH,
+            FEED_REQUESTED,
+            "2026-01-21 00:00:00.000",
+            "",
+        ),
+        row(
+            7,
+            FEED_REQUEST_REFRESH,
+            FEED_RUNNING,
+            "2026-01-19 00:00:00.000",
+            "",
+        ),
     ];
     assert_eq!(prunable_feed_requests(cutoff, stale, &rows), vec![3, 5]);
 }

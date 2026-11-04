@@ -55,7 +55,12 @@ fn a_bookmark_is_written_only_by_its_own_person() {
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
     assert!(store
-        .call("alice", |ctx| set_bookmark(ctx, identity_of("bob"), task, true))
+        .call("alice", |ctx| set_bookmark(
+            ctx,
+            identity_of("bob"),
+            task,
+            true
+        ))
         .is_err());
     assert!(bookmarks_for(&store, "bob").is_empty());
 }
@@ -147,4 +152,57 @@ fn deleting_a_task_removes_its_bookmarks() {
         .expect("delete_task");
 
     assert!(bookmarks_for(&store, "alice").is_empty());
+}
+
+/// Done ends the bookmark on every write path, not only `patch_task`: here
+/// the close a `wrap_up`/done-path runs (`close_task`).
+#[test]
+fn closing_a_task_ends_its_bookmarks_and_unseen_marks() {
+    let store = Store::new();
+    store.register_host_for("host-a", "alice");
+    let epic = store.create_epic("alice", "E", false);
+    store.enrol("bob");
+    let task = store.create_signalled("alice", epic_task("t", epic, "review"));
+    set(&store, "alice", task, true).expect("set");
+    assert!(store.db().unseen_tasks().iter().next().is_some());
+
+    store
+        .call("alice", |ctx| close_task(ctx, task, "host-a".into()))
+        .expect("close_task");
+
+    assert_eq!(store.task(task).status, "done");
+    assert!(store.db().bookmarks().iter().next().is_none());
+    assert!(store.db().unseen_tasks().iter().next().is_none());
+}
+
+/// A person removed from the workspace loses their bookmarks in it
+/// (`workspaces.allium: RemoveMember`); nobody else's.
+#[test]
+fn removing_a_member_drops_their_bookmarks_in_the_workspace() {
+    let store = Store::new();
+    store
+        .call("root", |ctx| {
+            stamp_rules_version_on_connect(ctx);
+            claim_super_admin(ctx)
+        })
+        .expect("claim");
+    let epic = store.create_epic("alice", "E", false);
+    store.enrol("bob");
+    let task = store.create("alice", epic_task("t", epic, "backlog"));
+    set(&store, "alice", task, true).expect("set");
+    set(&store, "bob", task, true).expect("set");
+    let bob = store
+        .db()
+        .memberships()
+        .iter()
+        .find(|m| m.user == identity_of("bob"))
+        .expect("membership")
+        .id;
+
+    store
+        .call("root", |ctx| remove_member(ctx, bob))
+        .expect("remove_member");
+
+    assert!(bookmarks_for(&store, "bob").is_empty());
+    assert_eq!(bookmarks_for(&store, "alice"), vec![task]);
 }

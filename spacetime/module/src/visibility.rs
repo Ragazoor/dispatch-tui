@@ -628,6 +628,18 @@ pub(crate) fn move_epic_row(
     for id in marks {
         ctx.db.unseen_tasks().id().delete(&id);
     }
+    let bookmarks: Vec<String> = ctx
+        .db
+        .bookmarks()
+        .iter()
+        .filter(|b| {
+            task_ids.contains(&b.task_id) && !workspace_has_member(ctx, workspace_id, &b.subscriber)
+        })
+        .map(|b| b.id)
+        .collect();
+    for id in bookmarks {
+        ctx.db.bookmarks().id().delete(&id);
+    }
     Ok(())
 }
 

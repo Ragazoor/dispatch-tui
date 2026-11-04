@@ -120,7 +120,9 @@ fn seeing_a_task_clears_only_that_task_for_that_person() {
     let deep = store.create_signalled("alice", epic_task("deep", child, "backlog"));
 
     store
-        .call("bob", |ctx| mark_task_seen(ctx, identity_of("bob"), shallow))
+        .call("bob", |ctx| {
+            mark_task_seen(ctx, identity_of("bob"), shallow)
+        })
         .expect("mark_task_seen");
 
     assert_eq!(unseen_for(&store, "bob"), vec![sibling, deep]);

@@ -69,6 +69,16 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
     } else {
         row
     };
+    if let Some(prior) = prior.as_ref() {
+        // `UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing` and
+        // `BookmarkEndsWithTheTaskFinishing`: entering Done ends both marks,
+        // whichever writer moved it there (a patch, a session close, a merged
+        // PR, a batch move, a feed).
+        if prior.status != DONE && row.status == DONE {
+            clear_unseen_for_task(ctx, row.id);
+            clear_bookmarks_for_task(ctx, row.id);
+        }
+    }
     if prior.is_some() {
         let row = ctx.db.tasks().id().update(row);
         // `agents.allium`: EndAgentWhenWorktreeGoes, in the same transaction
@@ -453,9 +463,6 @@ fn patch_task_row(
     let closed_task =
         (close_host.is_some() && finished && close_has_host_work(&row, "")).then(|| row.clone());
     write_task(ctx, row)?;
-    if finished {
-        clear_unseen_for_task(ctx, id);
-    }
     if let (Some(task), Some(host)) = (closed_task, close_host) {
         request_close_teardown(ctx, &task, "", host, &now(ctx));
     }
@@ -521,6 +528,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
     clear_unseen_for_task(ctx, task_id);
+    clear_bookmarks_for_task(ctx, task_id);
     // agents.allium: AgentsGoWithTheirTask. Their names stay in the ledger.
     delete_agents_of(&mut AgentTables(ctx), task_id);
     detach_learnings_from_task(ctx, task_id);
@@ -870,9 +878,11 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     if command_changed {
         // Only the setter's own host may run the command now.
         let setter = caller_identity(ctx);
-        crate::config::release_poll_claims(ctx, &std::collections::HashSet::from([id]), |_, owner| {
-            owner != setter
-        });
+        crate::config::release_poll_claims(
+            ctx,
+            &std::collections::HashSet::from([id]),
+            |_, owner| owner != setter,
+        );
     }
     if reparented {
         // `ClaimsFollowSight`: a new parent can change who sees the subtree.

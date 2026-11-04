@@ -81,7 +81,14 @@ fn update_task_cannot_detach_a_task_from_its_workspace() {
 
     let why = store
         .call("alice", |ctx| {
-            update_task(ctx, id, Some(0), identity_of("bob"), String::new(), TaskPatch::default())
+            update_task(
+                ctx,
+                id,
+                Some(0),
+                identity_of("bob"),
+                String::new(),
+                TaskPatch::default(),
+            )
         })
         .unwrap_err();
     assert!(why.contains("stays in its workspace"), "{why}");

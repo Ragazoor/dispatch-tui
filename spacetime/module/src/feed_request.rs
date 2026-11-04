@@ -332,11 +332,9 @@ pub(crate) fn write_teardown_request_if_owed(ctx: &ReducerContext, task: &Task, 
         return;
     }
     prune_feed_requests(ctx);
-    ctx.db.feed_requests().insert(new_teardown_request(
-        task,
-        &caller_identity(ctx),
-        &now(ctx),
-    ));
+    ctx.db
+        .feed_requests()
+        .insert(new_teardown_request(task, &caller_identity(ctx), &now(ctx)));
 }
 
 /// `RequestFeedRefresh`: a host that is not the epic's poll owner asks the
@@ -359,13 +357,9 @@ pub fn request_feed_refresh(
         .as_ref()
         .and_then(|p| ctx.db.hosts().id().find(&p.host));
     let open_for_epic = owner_row.as_ref().is_some_and(|p| {
-        ctx.db
-            .feed_requests()
-            .host()
-            .filter(&p.host)
-            .any(|r| {
-                r.kind == FEED_REQUEST_REFRESH && r.epic_id == epic_id && feed_request_is_open(&r.state)
-            })
+        ctx.db.feed_requests().host().filter(&p.host).any(|r| {
+            r.kind == FEED_REQUEST_REFRESH && r.epic_id == epic_id && feed_request_is_open(&r.state)
+        })
     });
     let decision = decide_feed_refresh(
         epic.as_ref(),

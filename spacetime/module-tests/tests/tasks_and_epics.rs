@@ -399,7 +399,14 @@ fn update_task_on_a_missing_task_is_refused() {
     let store = Store::new();
     let why = store
         .call("alice", |ctx| {
-            update_task(ctx, 404, None, String::new(), String::new(), status_patch("done"))
+            update_task(
+                ctx,
+                404,
+                None,
+                String::new(),
+                String::new(),
+                status_patch("done"),
+            )
         })
         .expect_err("the caller learns the task is gone");
     assert!(why.contains("not found"), "{why}");

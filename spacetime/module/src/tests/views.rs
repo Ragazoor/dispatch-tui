@@ -18,6 +18,7 @@ struct Store {
     session_requests: Vec<SessionRequest>,
     feed_requests: Vec<FeedRequest>,
     unseen: Vec<UnseenTask>,
+    bookmarks: Vec<Bookmark>,
     poll_owners: Vec<PollOwner>,
     learnings: Vec<Learning>,
     hosts: Vec<Host>,
@@ -108,6 +109,9 @@ impl StoreReads for Store {
     }
     fn unseen_of(&self, who: &str) -> Vec<UnseenTask> {
         keep(&self.unseen, |u| u.subscriber == who)
+    }
+    fn bookmarks_of(&self, who: &str) -> Vec<Bookmark> {
+        keep(&self.bookmarks, |b| b.subscriber == who)
     }
     fn subagents_of(&self, _: i64) -> Vec<TaskSubagent> {
         Vec::new()
@@ -426,6 +430,20 @@ fn unseen_marks_are_the_callers_own_on_tasks_they_can_see() {
     store.unseen = vec![mark("ann", 10), mark("ann", 11), mark("bob", 10)];
     assert_eq!(ids(&own_unseen_of(&store, "ann"), |u| u.task_id), [10]);
     assert_eq!(ids(&own_unseen_of(&store, "bob"), |u| u.task_id), [10]);
+}
+
+#[test]
+fn bookmarks_are_the_callers_own_on_tasks_they_can_see() {
+    let mut store = tree();
+    store.tasks = vec![task(10, 2, "bob", ""), task(11, 3, "bob", "")];
+    let mark = |who: &str, task_id| Bookmark {
+        id: bookmark_id(who, task_id),
+        task_id,
+        subscriber: who.to_string(),
+    };
+    store.bookmarks = vec![mark("ann", 10), mark("ann", 11), mark("bob", 10)];
+    assert_eq!(ids(&own_bookmarks_of(&store, "ann"), |b| b.task_id), [10]);
+    assert_eq!(ids(&own_bookmarks_of(&store, "bob"), |b| b.task_id), [10]);
 }
 
 #[test]

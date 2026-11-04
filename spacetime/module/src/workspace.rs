@@ -299,7 +299,7 @@ pub fn remove_member(ctx: &ReducerContext, membership_id: i64) -> Result<(), Str
     Ok(())
 }
 
-/// `RemoveMember`: end `user`'s subscriptions and unseen marks inside
+/// `RemoveMember`: end `user`'s subscriptions, unseen marks and bookmarks inside
 /// `workspace_id`, and nothing in their other workspaces.
 fn drop_follows_in_workspace(ctx: &ReducerContext, user: &str, workspace_id: i64) {
     let in_workspace = |epic_id: i64| {
@@ -346,6 +346,23 @@ fn drop_follows_in_workspace(ctx: &ReducerContext, user: &str, workspace_id: i64
         .collect();
     for id in marks {
         ctx.db.unseen_tasks().id().delete(&id);
+    }
+    let bookmarks: Vec<String> = ctx
+        .db
+        .bookmarks()
+        .subscriber()
+        .filter(&user.to_string())
+        .filter(|b| {
+            ctx.db
+                .tasks()
+                .id()
+                .find(b.task_id)
+                .is_some_and(|t| t.epic_id != 0 && in_workspace(t.epic_id))
+        })
+        .map(|b| b.id)
+        .collect();
+    for id in bookmarks {
+        ctx.db.bookmarks().id().delete(&id);
     }
 }
 

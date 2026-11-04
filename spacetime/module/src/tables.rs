@@ -720,6 +720,24 @@ pub struct UnseenTask {
     pub subscriber: String,
 }
 
+/// One person's bookmark on one task (`core.allium: Bookmark`).
+///
+/// Written and removed only by its own person (`set_bookmark`); ended for
+/// everyone when the task enters Done or is deleted. A move to another epic
+/// keeps it. An epic's bookmark mark is never a row: it is derived from these.
+#[spacetimedb::table(accessor = bookmarks)]
+#[derive(Clone, Debug)]
+pub struct Bookmark {
+    /// `<subscriber>/<task_id>`, derived for the reason `UnseenTask::id` is.
+    #[primary_key]
+    pub id: String,
+    #[index(btree)]
+    pub task_id: i64,
+    /// The `UserIdentity` whose bookmark this is.
+    #[index(btree)]
+    pub subscriber: String,
+}
+
 /// One person as the store presents them to others
 /// (`workspaces.allium: UserProfile`). One row per identity, created the first
 /// time that identity connects.

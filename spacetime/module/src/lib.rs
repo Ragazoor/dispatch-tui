@@ -66,6 +66,7 @@ macro_rules! apply_patch {
 mod agent;
 mod agent_state;
 mod blanks;
+mod bookmark;
 mod config;
 mod dispatch_request;
 mod feed;
@@ -94,6 +95,7 @@ mod workspace;
 pub use agent::*;
 pub use agent_state::*;
 pub use blanks::*;
+pub use bookmark::*;
 pub use config::*;
 pub use dispatch_request::*;
 pub use feed::*;

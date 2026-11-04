@@ -48,6 +48,7 @@ pub trait StoreReads {
     fn session_requests_on_host(&self, host: &str) -> Vec<SessionRequest>;
     fn feed_requests_on_host(&self, host: &str) -> Vec<FeedRequest>;
     fn unseen_of(&self, subscriber: &str) -> Vec<UnseenTask>;
+    fn bookmarks_of(&self, subscriber: &str) -> Vec<Bookmark>;
     fn subagents_of(&self, task_id: i64) -> Vec<TaskSubagent>;
     /// Rows naming the task as the watcher or as the target.
     fn watchers_of(&self, task_id: i64) -> Vec<TaskWatcher>;
@@ -200,6 +201,13 @@ macro_rules! impl_store_reads {
             fn unseen_of(&self, subscriber: &str) -> Vec<UnseenTask> {
                 self.db
                     .unseen_tasks()
+                    .subscriber()
+                    .filter(&subscriber.to_string())
+                    .collect()
+            }
+            fn bookmarks_of(&self, subscriber: &str) -> Vec<Bookmark> {
+                self.db
+                    .bookmarks()
                     .subscriber()
                     .filter(&subscriber.to_string())
                     .collect()
@@ -522,6 +530,18 @@ pub fn verdicts_of_held(r: &impl StoreReads, who: &str) -> Vec<LearningVerdict> 
     rows_about_held_tasks(r, who, |t| r.verdicts_of(t), |l| l.id)
 }
 
+/// `own_bookmarks`: the caller's own bookmarks, on tasks they can still see
+/// (`core.allium: Bookmark`).
+pub fn own_bookmarks_of(r: &impl StoreReads, who: &str) -> Vec<Bookmark> {
+    dedup_by(
+        r.bookmarks_of(who).into_iter().filter(|b| {
+            r.task(b.task_id)
+                .is_some_and(|t| task_visible_to(r, &t, who))
+        }),
+        |b| b.id.clone(),
+    )
+}
+
 /// `own_unseen_tasks`: the caller's own marks, on tasks they can still see.
 pub fn own_unseen_of(r: &impl StoreReads, who: &str) -> Vec<UnseenTask> {
     dedup_by(
@@ -768,6 +788,11 @@ fn own_subscriptions(ctx: &ViewContext) -> Vec<Subscription> {
 #[spacetimedb::view(accessor = own_unseen_tasks, public)]
 fn own_unseen_tasks(ctx: &ViewContext) -> Vec<UnseenTask> {
     own_unseen_of(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = own_bookmarks, public)]
+fn own_bookmarks(ctx: &ViewContext) -> Vec<Bookmark> {
+    own_bookmarks_of(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = visible_task_subagents, public)]

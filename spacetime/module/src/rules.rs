@@ -58,6 +58,10 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 36: bookmarks — `bookmarks`, `set_bookmark` and the `own_bookmarks` view
+///    the board subscribes to; entering Done, on any write path, ends every
+///    unseen mark and bookmark on the task (`bookmark.rs`, `tasks_epics.rs`;
+///    `core.allium: Bookmark`).
 /// 35: feed requests — `feed_requests`, `request_feed_refresh` and the
 ///    claim/report reducers; `ingest_feed` takes the ingesting host and the
 ///    stale delete writes a teardown request for a task another host holds
@@ -186,7 +190,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 35;
+pub const RULES_VERSION: i64 = 36;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

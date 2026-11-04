@@ -1335,7 +1335,7 @@ rule SetBookmark {
         -- same task gets a row of their own.
         --
         -- Implementation: the module's set_bookmark reducer
-        -- (spacetime/module/src/bookmarks.rs).
+        -- (spacetime/module/src/bookmark.rs).
 }
 
 rule BookmarkEndsWithTheTaskFinishing {

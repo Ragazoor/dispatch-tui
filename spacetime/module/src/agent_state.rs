@@ -176,8 +176,8 @@ fn require_claimable_scope(ctx: &ReducerContext, scope: &str, scope_id: i64) -> 
         visible_task(ctx, scope_id).ok_or_else(|| format!("task {scope_id} does not exist"))?;
         return Ok(());
     }
-    let epic = visible_epic(ctx, scope_id)
-        .ok_or_else(|| format!("epic {scope_id} does not exist"))?;
+    let epic =
+        visible_epic(ctx, scope_id).ok_or_else(|| format!("epic {scope_id} does not exist"))?;
     check_feed_claim_by(&epic, &caller_identity(ctx))
 }
 
