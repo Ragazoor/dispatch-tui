@@ -424,25 +424,21 @@ pub type EpicPlacementMap = HashMap<EpicId, EpicPlacement>;
 #[derive(Debug, Clone, Default)]
 pub(in crate::tui) struct FlattenedGroupKeys {
     pub(in crate::tui) done: Option<HashMap<EpicId, DateTime<Utc>>>,
-    /// Where each epic sits in the epic tree, outside Done: its pre-order
-    /// rank is the group key, so a child's group follows its parent's
-    /// (board-layout.allium: "Flattening", `EpicGroupTree`).
-    pub(in crate::tui) tree: EpicTree,
 }
 
 /// One epic's place in the [`EpicTree`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::tui) struct TreePlace {
     /// Pre-order position: an epic, then its children's subtrees in order.
     pub(in crate::tui) rank: usize,
-    /// 0 at the tree's top; one more per drawn ancestor.
-    pub(in crate::tui) depth: usize,
-    /// The nearest ancestor that counts, skipping any that do not.
-    pub(in crate::tui) parent: Option<EpicId>,
+    /// The epic and its counted ancestors, top first; its depth is
+    /// `path.len() - 1`.
+    pub(in crate::tui) path: Vec<EpicId>,
 }
 
 /// The epic tree a flattened section lays its groups out as
-/// (board-layout.allium: `EpicGroupTree`).
+/// (board-layout.allium: `EpicGroupTree`). Built once per render pass
+/// (`EpicSearchPass::epic_tree`) and shared by every column.
 ///
 /// An ancestor counts when it is on the board and, in an epic view, strictly
 /// below the viewed epic. The viewed epic is never an ancestor: it is the
@@ -456,28 +452,25 @@ pub(in crate::tui) struct EpicTree {
 impl EpicTree {
     pub(in crate::tui) fn build(epics: &[Epic], viewed: Option<EpicId>) -> Self {
         let lookup = crate::models::epic_id_lookup(epics);
-        // Whether `id` is strictly below the viewed epic. Walks at most
-        // `epics.len()` links, so a cycle in bad data cannot hang the render.
-        let below_viewed = |id: EpicId| -> bool {
-            let Some(viewed) = viewed else { return true };
-            let mut next = lookup.get(&id).and_then(|e| e.parent_epic_id);
-            for _ in 0..epics.len() {
-                match next {
-                    Some(p) if p == viewed => return true,
-                    Some(p) => next = lookup.get(&p).and_then(|e| e.parent_epic_id),
-                    None => return false,
-                }
+        let counts: std::collections::HashSet<EpicId> = match viewed {
+            None => lookup.keys().copied().collect(),
+            Some(viewed) => {
+                let mut below = crate::models::descendant_epic_ids(viewed, epics);
+                below.remove(&viewed);
+                below
             }
-            false
         };
-        let counts =
-            |id: EpicId| Some(id) != viewed && lookup.contains_key(&id) && below_viewed(id);
+        // The nearest ancestor that counts. A visited set guards against a
+        // cycle in bad data, as `models::epic_path` does.
         let drawn_parent = |epic: &Epic| -> Option<EpicId> {
+            let mut seen = std::collections::HashSet::new();
             let mut next = epic.parent_epic_id;
-            for _ in 0..epics.len() {
-                let p = next?;
-                if counts(p) {
+            while let Some(p) = next {
+                if counts.contains(&p) {
                     return Some(p);
+                }
+                if !seen.insert(p) {
+                    return None;
                 }
                 next = lookup.get(&p).and_then(|e| e.parent_epic_id);
             }
@@ -485,60 +478,36 @@ impl EpicTree {
         };
 
         let mut children: HashMap<Option<EpicId>, Vec<&Epic>> = HashMap::new();
-        let mut parents: HashMap<EpicId, Option<EpicId>> = HashMap::with_capacity(epics.len());
         for epic in epics {
-            let parent = drawn_parent(epic);
-            parents.insert(epic.id, parent);
-            children.entry(parent).or_default().push(epic);
+            children.entry(drawn_parent(epic)).or_default().push(epic);
         }
         for list in children.values_mut() {
             list.sort_by_key(|e| (Some(e.id) != viewed, e.sort_key(), e.id.0));
         }
 
         let mut places = HashMap::with_capacity(epics.len());
-        // Pre-order walk; a stack of (epic, depth), pushed in reverse so the
-        // first child pops first.
-        let mut stack: Vec<(&Epic, usize)> = children
+        // Pre-order walk carrying each epic's parent path; pushed in reverse
+        // so the first child pops first.
+        let mut stack: Vec<(&Epic, Vec<EpicId>)> = children
             .get(&None)
-            .map(|roots| roots.iter().rev().map(|&e| (e, 0)).collect())
+            .map(|roots| roots.iter().rev().map(|&e| (e, Vec::new())).collect())
             .unwrap_or_default();
-        while let Some((epic, depth)) = stack.pop() {
+        while let Some((epic, mut path)) = stack.pop() {
             if places.contains_key(&epic.id) {
                 continue;
             }
-            let rank = places.len();
-            places.insert(
-                epic.id,
-                TreePlace {
-                    rank,
-                    depth,
-                    parent: parents.get(&epic.id).copied().flatten(),
-                },
-            );
+            path.push(epic.id);
             if let Some(kids) = children.get(&Some(epic.id)) {
-                stack.extend(kids.iter().rev().map(|&e| (e, depth + 1)));
+                stack.extend(kids.iter().rev().map(|&e| (e, path.clone())));
             }
+            let rank = places.len();
+            places.insert(epic.id, TreePlace { rank, path });
         }
         Self { places }
     }
 
-    pub(in crate::tui) fn place(&self, epic: EpicId) -> Option<TreePlace> {
-        self.places.get(&epic).copied()
-    }
-
-    /// `epic` and its counted ancestors, top first.
-    pub(in crate::tui) fn path(&self, epic: EpicId) -> Vec<EpicId> {
-        let mut path = vec![epic];
-        let mut next = self.place(epic).and_then(|p| p.parent);
-        while let Some(id) = next {
-            if path.len() > self.places.len() {
-                break;
-            }
-            path.push(id);
-            next = self.place(id).and_then(|p| p.parent);
-        }
-        path.reverse();
-        path
+    pub(in crate::tui) fn place(&self, epic: EpicId) -> Option<&TreePlace> {
+        self.places.get(&epic)
     }
 }
 
@@ -552,13 +521,13 @@ impl FlattenedGroupKeys {
         &self,
         task: &crate::models::Task,
         epic_lookup: &HashMap<EpicId, &Epic>,
+        tree: &EpicTree,
     ) -> CardOrderKey {
         let epic = task.epic_id.and_then(|eid| epic_lookup.get(&eid));
         match (epic, &self.done) {
             // Outside Done a group sorts by its epic's place in the tree.
             (Some(epic), None) => CardOrderKey::Generic(
-                self.tree
-                    .place(epic.id)
+                tree.place(epic.id)
                     .map_or(epic.sort_key(), |p| p.rank as i64),
             ),
             // In Done a group takes its newest member's completion. The epic's

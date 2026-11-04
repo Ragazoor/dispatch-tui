@@ -174,31 +174,27 @@ impl App {
             .view()
             .column_items_for_status_with_placements(status, Some(&placements));
         // The epic's header can open a group in more than one section; the
-        // first that holds anything wins.
-        let mut rest = items.as_slice();
-        while let Some(at) = rest
+        // first that holds anything wins. A header no deeper than this one
+        // ends the subtree.
+        let within = |item: &ColumnItem<'_>, depth: usize| match item {
+            ColumnItem::EpicHeader(h) => h.depth > depth,
+            ColumnItem::FoldedEpic(h) => h.depth > depth,
+            ColumnItem::Task(_) => true,
+            _ => false,
+        };
+        items
             .iter()
-            .position(|i| matches!(i, ColumnItem::EpicHeader(h) if h.epic.id == epic))
-        {
-            let ColumnItem::EpicHeader(header) = rest[at] else {
-                break;
-            };
-            let found = rest[at + 1..]
-                .iter()
-                .take_while(|i| match i {
-                    // A header at the same depth or shallower ends the subtree.
-                    ColumnItem::EpicHeader(h) => h.depth > header.depth,
-                    ColumnItem::FoldedEpic(h) => h.depth > header.depth,
-                    ColumnItem::Task(_) => true,
-                    _ => false,
-                })
-                .find_map(ColumnItem::anchor);
-            if found.is_some() {
-                return found;
-            }
-            rest = &rest[at + 1..];
-        }
-        None
+            .enumerate()
+            .filter_map(|(at, item)| match item {
+                ColumnItem::EpicHeader(h) if h.epic.id == epic => Some((at, h.depth)),
+                _ => None,
+            })
+            .find_map(|(at, depth)| {
+                items[at + 1..]
+                    .iter()
+                    .take_while(|item| within(item, depth))
+                    .find_map(ColumnItem::anchor)
+            })
     }
 
     fn persist_epic_folds(&self) -> Vec<Command> {

@@ -599,7 +599,7 @@ pub(crate) async fn read_agent_rows(
         let path = row
             .epic
             .as_ref()
-            .map(crate::agent_tree::render::agents::epic_path);
+            .map(crate::agent_tree::render::agents::pane_epic_path);
         (row.epic.is_none(), path, row.id)
     });
     Ok(rows)

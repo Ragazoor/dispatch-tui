@@ -116,7 +116,7 @@ impl ListCursor for AgentsSection {
 
 /// A group's epic ids from the root down to its own: its place in the epic
 /// tree the section lays its groups out as (`AgentListGroupsByEpic`).
-pub(crate) fn epic_path(epic: &PaneEpic) -> Vec<crate::models::EpicId> {
+pub(crate) fn pane_epic_path(epic: &PaneEpic) -> Vec<crate::models::EpicId> {
     epic.ancestors
         .iter()
         .map(|a| a.id)
@@ -150,7 +150,7 @@ pub(crate) fn drawn_lines(rows: &[AgentRow]) -> Vec<DrawnLine> {
     for (index, row) in rows.iter().enumerate() {
         match row.epic.as_ref() {
             Some(epic) => {
-                let path = epic_path(epic);
+                let path = pane_epic_path(epic);
                 if path != open {
                     let shared = open.iter().zip(&path).take_while(|(a, b)| a == b).count();
                     // The group's own header always draws, even when the

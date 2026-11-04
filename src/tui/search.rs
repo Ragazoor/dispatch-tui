@@ -285,6 +285,7 @@ pub(in crate::tui) struct EpicSearchPass<'a> {
     index: OnceCell<Option<EpicSearchIndex<'a>>>,
     packages: OnceCell<PackagePlacementMap>,
     hidden_epics: OnceCell<HashSet<EpicId>>,
+    epic_tree: OnceCell<crate::tui::types::EpicTree>,
 }
 
 impl<'a> EpicSearchPass<'a> {
@@ -306,6 +307,19 @@ impl<'a> EpicSearchPass<'a> {
 
     /// Where each package card sits in this pass, built on the first call
     /// (`BoardView::compute_package_placements`). Empty outside the main board.
+    /// The epic tree flattened columns lay their groups out as, built on the
+    /// first call and shared by every column (board-layout.allium:
+    /// `EpicGroupTree`).
+    pub(in crate::tui) fn epic_tree(&self, view: BoardView<'a>) -> &crate::tui::types::EpicTree {
+        self.epic_tree.get_or_init(|| {
+            let viewed = match view.effective_view_mode() {
+                crate::tui::types::BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
+                _ => None,
+            };
+            crate::tui::types::EpicTree::build(&view.board.epics, viewed)
+        })
+    }
+
     pub(in crate::tui) fn package_placements(&self, view: BoardView<'a>) -> &PackagePlacementMap {
         self.packages
             .get_or_init(|| view.compute_package_placements())

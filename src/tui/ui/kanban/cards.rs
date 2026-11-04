@@ -522,14 +522,15 @@ fn frame_card(
     let margin = || Span::styled(MARGIN_STR, Style::default().bg(ground));
     let horizontal = "\u{2500}".repeat(content_width);
 
-    // The indent is column ground too, left of the left margin.
-    let lead = || -> Vec<Span<'static>> {
-        let mut spans = Vec::with_capacity(2);
-        if indent > 0 {
-            spans.push(Span::styled(
-                " ".repeat(usize::from(indent)),
-                Style::default().bg(ground),
-            ));
+    // The indent is column ground too, left of the left margin. Sliced from
+    // a static so a card row allocates no String for it; the indent never
+    // exceeds the capped depth's (`epic_header::epic_indent`).
+    const INDENT_STR: &str = "        ";
+    let indent_str = INDENT_STR.get(..usize::from(indent)).unwrap_or(INDENT_STR);
+    let lead = |extra: usize| -> Vec<Span<'static>> {
+        let mut spans = Vec::with_capacity(3 + extra);
+        if !indent_str.is_empty() {
+            spans.push(Span::styled(indent_str, Style::default().bg(ground)));
         }
         spans.push(margin());
         spans
@@ -537,7 +538,7 @@ fn frame_card(
 
     let rail = |inner: Line<'static>| -> Line<'static> {
         let pad = content_width.saturating_sub(inner.width());
-        let mut spans = lead();
+        let mut spans = lead(inner.spans.len() + 3);
         spans.push(Span::styled("\u{2502}", style));
         spans.extend(inner.spans);
         if pad > 0 {
@@ -549,7 +550,7 @@ fn frame_card(
     };
 
     let border = |left: &str, right: &str| -> Line<'static> {
-        let mut spans = lead();
+        let mut spans = lead(1);
         spans.push(Span::styled(format!("{left}{horizontal}{right}"), style));
         spans.push(margin());
         Line::from(spans)

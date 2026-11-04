@@ -416,7 +416,7 @@ impl<'a> BoardView<'a> {
             .collect();
 
         let items = if self.is_flattened_for_status(status) {
-            self.flattened_column_items(status, tasks)
+            self.flattened_column_items(status, tasks, pass.epic_tree(self))
         } else {
             self.hierarchical_column_items(status, tasks, placements, pass)
         };
@@ -438,6 +438,7 @@ impl<'a> BoardView<'a> {
         self,
         status: TaskStatus,
         tasks: Vec<&'a Task>,
+        tree: &crate::tui::types::EpicTree,
     ) -> Vec<ColumnItem<'a>> {
         let epic_lookup = crate::models::epic_id_lookup(&self.board.epics);
 
@@ -453,7 +454,7 @@ impl<'a> BoardView<'a> {
             .map(|t| {
                 (
                     ColumnSection::for_task(t),
-                    group_keys.key_for(t, &epic_lookup),
+                    group_keys.key_for(t, &epic_lookup, tree),
                     CardOrderKey::for_task(t, status),
                     t,
                 )
@@ -497,7 +498,7 @@ impl<'a> BoardView<'a> {
             // header alone; an open one contributes the epic header (when
             // the epic resolves) followed by its cards, and an orphan
             // separator when the run transitions away from an epic group.
-            self.push_epic_groups(status, run, &epic_lookup, &group_keys.tree, &mut items);
+            self.push_epic_groups(status, run, &epic_lookup, tree, &mut items);
         }
 
         items
@@ -522,31 +523,26 @@ impl<'a> BoardView<'a> {
         // with it, and draws the rest. Under a folded header nothing more is
         // drawn; the group's cards join that header's hidden count.
         let mut open: Vec<(EpicId, Option<usize>)> = Vec::new();
-        let mut in_epics = false;
         for group in run.chunk_by(|(_, _, _, a), (_, _, _, b)| a.epic_id == b.epic_id) {
             let t0 = group[0].3;
             // A task naming an epic the board does not hold has no group to
             // join: it is an orphan, sorted with them (`FlattenedGroupKeys::
             // key_for`), so it goes below the separator like one.
             let Some(eid) = t0.epic_id.filter(|eid| epic_lookup.contains_key(eid)) else {
-                if in_epics {
+                if !open.is_empty() {
                     items.push(ColumnItem::OrphanSeparator);
-                    in_epics = false;
+                    open.clear();
                 }
-                open.clear();
                 items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
                 continue;
             };
-            in_epics = true;
-            let path: Vec<&'a Epic> = tree
-                .path(eid)
-                .into_iter()
-                .filter_map(|id| epic_lookup.get(&id).copied())
-                .collect();
+            // Every epic on a tree path is on the board, so the lookup holds it.
+            let own_path = [eid];
+            let path = tree.place(eid).map_or(&own_path[..], |p| p.path.as_slice());
             let shared = open
                 .iter()
-                .zip(&path)
-                .take_while(|((open_id, _), epic)| *open_id == epic.id)
+                .zip(path)
+                .take_while(|((open_id, _), id)| open_id == *id)
                 .count();
             open.truncate(shared);
             // Already under a folded header: count the cards there.
@@ -557,7 +553,10 @@ impl<'a> BoardView<'a> {
                 continue;
             }
             let mut folded_at = None;
-            for (depth, &epic) in path.iter().enumerate().skip(shared) {
+            for (depth, id) in path.iter().enumerate().skip(shared) {
+                let Some(&epic) = epic_lookup.get(id) else {
+                    continue;
+                };
                 let fold_ref = EpicFoldRef::new(status, epic.id);
                 if self.epic_group_renders_folded(fold_ref) {
                     folded_at = Some(items.len());
@@ -680,14 +679,7 @@ impl<'a> BoardView<'a> {
         epic_lookup: &HashMap<EpicId, &Epic>,
     ) -> FlattenedGroupKeys {
         if status != TaskStatus::Done {
-            let viewed = match self.effective_view_mode() {
-                BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
-                BoardViewMode::Board(_) | BoardViewMode::Package { .. } => None,
-            };
-            return FlattenedGroupKeys {
-                done: None,
-                tree: crate::tui::types::EpicTree::build(&self.board.epics, viewed),
-            };
+            return FlattenedGroupKeys::default();
         }
         // One pass, and only over epics the board actually holds: an entry for
         // an epic_id naming no board epic could never be read, because such a
@@ -702,10 +694,7 @@ impl<'a> BoardView<'a> {
                 done.insert(eid, at);
             }
         }
-        FlattenedGroupKeys {
-            done: Some(done),
-            tree: crate::tui::types::EpicTree::default(),
-        }
+        FlattenedGroupKeys { done: Some(done) }
     }
 
     /// The section an epic card renders under in the `status` column. `None`
