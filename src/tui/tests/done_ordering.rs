@@ -28,7 +28,7 @@ fn done_cards(app: &App) -> Vec<(&'static str, i64)> {
         .filter_map(|i| match i {
             ColumnItem::Task(t) => Some(("task", t.id.0)),
             ColumnItem::Epic(e) => Some(("epic", e.id.0)),
-            ColumnItem::EpicHeader(e) => Some(("header", e.id.0)),
+            ColumnItem::EpicHeader(h) => Some(("header", h.epic.id.0)),
             _ => None,
         })
         .collect()

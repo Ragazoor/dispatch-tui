@@ -606,3 +606,31 @@ async fn an_unreachable_board_is_a_failed_agent_read_naming_the_board() {
     let reason = read.expect_err("an unreachable board must not read as an empty list");
     assert!(reason.contains("127.0.0.1:8899"), "{reason}");
 }
+
+/// The groups come in tree order: a child epic's group right after its
+/// parent's, before the next top-level epic, whatever the ids
+/// (RefreshAgentTreeAgentList's grouped_by_epic, task #98901).
+#[tokio::test]
+async fn the_agent_list_lays_its_groups_out_as_the_epic_tree() {
+    let ten = pane_epic(10, &["Ten"]);
+    let twenty = pane_epic(20, &["Twenty"]);
+    let mut thirty = pane_epic(30, &["Thirty"]);
+    thirty.ancestors = vec![crate::hooks::wire::PaneEpicRef {
+        id: crate::models::EpicId(10),
+        title: "Ten".into(),
+    }];
+    let with = |id, epic: &crate::hooks::wire::PaneEpic| crate::hooks::wire::PaneAgent {
+        epic: Some(epic.clone()),
+        ..pane_agent(id)
+    };
+    let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
+        task: None,
+        detached_agents: vec![],
+        live_agents: vec![with(1, &twenty), with(2, &thirty), with(3, &ten)],
+    }));
+
+    let rows = read_agent_rows(&board, TaskId(9)).await.unwrap();
+
+    let order: Vec<i64> = rows.iter().map(|row| row.id.0).collect();
+    assert_eq!(order, vec![3, 2, 1]);
+}

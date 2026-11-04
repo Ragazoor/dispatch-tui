@@ -16,6 +16,7 @@ mod done_ordering;
 mod epic_folds;
 mod epic_jump;
 mod epic_placement;
+mod epic_tree;
 mod epics;
 mod filter_overlay;
 mod help_overlay;

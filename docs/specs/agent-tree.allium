@@ -2431,13 +2431,14 @@ rule RefreshAgentTreeAgentList {
         -- tasks inside a group in ascending task id, and the tasks with no
         -- epic last, also by task id. A task's group is its own epic, never
         -- an ancestor's, so a sub-epic's tasks form a group of their own. The
-        -- groups are laid out as the epic tree, exactly as a flattened board
-        -- section lays out its own (board-layout.allium, "Flattening",
+        -- groups are laid out as the epic tree, the shape a flattened board
+        -- section lays out its own in (board-layout.allium, "Flattening",
         -- EpicGroupTree): an epic's group, then its child epics' subtrees in
-        -- ascending epic id, the top-level groups in ascending epic id. How
-        -- the groups are drawn is AgentListGroupsByEpic. The order therefore never changes under the
-        -- cursor except when an agent starts or finishes, or a task moves to
-        -- another epic.
+        -- ascending epic id, the top-level groups in ascending epic id. (The
+        -- board orders siblings by card order; the pane is sent ids only.)
+        -- How the groups are drawn is AgentListGroupsByEpic. The order
+        -- therefore never changes under the cursor except when an agent
+        -- starts or finishes, or a task moves to another epic.
         --
         -- == The cursor follows its task ==
         -- A read that changes the list keeps the agents cursor on the task it

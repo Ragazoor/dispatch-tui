@@ -384,16 +384,21 @@ fn label_color(chip: &str) -> Color {
 }
 
 /// Render a decorative epic-header separator row (non-selectable).
-/// Shows the epic's own id, then its own title — never its ancestors':
-/// `── #NNN self ──────────`.
-pub(super) fn render_epic_header_item(epic: &Epic, col_width: u16) -> ListItem<'static> {
+/// Shows the epic's own id, then its own title — never its ancestors' —
+/// indented by its depth in the epic tree: `  #NNN self ──────────`.
+pub(super) fn render_epic_header_item(
+    epic: &Epic,
+    depth: usize,
+    col_width: u16,
+) -> ListItem<'static> {
     // The id and title are the epic's own — the one whose task group this
-    // header precedes — never an ancestor's (board-layout.allium,
-    // "Flattening").
+    // header precedes — never an ancestor's; nesting is the indent
+    // (board-layout.allium, "Flattening").
     ListItem::new(crate::epic_header::epic_header_line(
         epic.id,
         &epic.title,
         col_width,
+        depth,
     ))
 }
 
@@ -413,16 +418,18 @@ pub(super) fn render_folded_epic_header(
     is_cursor: bool,
 ) -> ListItem<'static> {
     let epic = header.epic;
+    // Keeps its group's indent, and like the open header draws no rule left
+    // of the id (board-layout.allium: "Epic Folding").
+    let indent = " ".repeat(crate::epic_header::epic_indent(header.depth));
     let id_prefix = format!("#{} ", epic.id);
     let suffix = format!(" ({}) \u{22ef}", header.hidden);
 
-    let reserved =
-        "\u{2500}\u{2500} ".chars().count() + id_prefix.chars().count() + suffix.chars().count();
+    let reserved = indent.len() + id_prefix.chars().count() + suffix.chars().count();
     let budget = (col_width as usize).saturating_sub(reserved);
     let title = crate::tui::ui::shared::truncate(&epic.title, budget);
 
     crate::tui::ui::shared::section_header_item(
-        format!("\u{2500}\u{2500} {}{}{}", id_prefix, title, suffix),
+        format!("{indent}{id_prefix}{title}{suffix}"),
         first,
         is_cursor,
     )
@@ -438,10 +445,15 @@ pub(super) fn render_folded_epic_header(
 /// inset by [`CARD_MARGIN`] on each side, so the renderer has to paint the
 /// margin cells in the column's own ground rather than let them inherit the card
 /// surface (`board-visuals.allium`: "Task card frame").
+#[derive(Clone, Copy)]
 pub(super) struct ColRenderCtx {
     pub color: Color,
+    /// The card's width: the column's, less `indent`.
     pub width: u16,
     pub ground: Color,
+    /// Cells of column ground left of the card, beyond its margin: a nested
+    /// flattened group's indent (board-layout.allium: "Flattening").
+    pub indent: u16,
 }
 
 /// The marker a phoenix task's title line carries (`♻`, U+267B). See "Phoenix
@@ -493,6 +505,7 @@ fn frame_card(
     col_width: u16,
     frame_color: Color,
     ground: Color,
+    indent: u16,
 ) -> Vec<Line<'static>> {
     let card_width = (col_width as usize).saturating_sub(CARD_MARGIN * 2);
     let content_width = card_width.saturating_sub(2);
@@ -509,9 +522,23 @@ fn frame_card(
     let margin = || Span::styled(MARGIN_STR, Style::default().bg(ground));
     let horizontal = "\u{2500}".repeat(content_width);
 
+    // The indent is column ground too, left of the left margin.
+    let lead = || -> Vec<Span<'static>> {
+        let mut spans = Vec::with_capacity(2);
+        if indent > 0 {
+            spans.push(Span::styled(
+                " ".repeat(usize::from(indent)),
+                Style::default().bg(ground),
+            ));
+        }
+        spans.push(margin());
+        spans
+    };
+
     let rail = |inner: Line<'static>| -> Line<'static> {
         let pad = content_width.saturating_sub(inner.width());
-        let mut spans = vec![margin(), Span::styled("\u{2502}", style)];
+        let mut spans = lead();
+        spans.push(Span::styled("\u{2502}", style));
         spans.extend(inner.spans);
         if pad > 0 {
             spans.push(Span::raw(" ".repeat(pad)));
@@ -522,11 +549,10 @@ fn frame_card(
     };
 
     let border = |left: &str, right: &str| -> Line<'static> {
-        Line::from(vec![
-            margin(),
-            Span::styled(format!("{left}{horizontal}{right}"), style),
-            margin(),
-        ])
+        let mut spans = lead();
+        spans.push(Span::styled(format!("{left}{horizontal}{right}"), style));
+        spans.push(margin());
+        Line::from(spans)
     };
 
     vec![
@@ -722,7 +748,14 @@ pub(super) fn build_task_list_item<'a>(
     } else {
         card_surface_color()
     };
-    let mut item = ListItem::new(frame_card(line1, line2, col_width, frame_color, ctx.ground));
+    let mut item = ListItem::new(frame_card(
+        line1,
+        line2,
+        col_width,
+        frame_color,
+        ctx.ground,
+        ctx.indent,
+    ));
 
     // Base style for the whole card, so the frame rows inherit the surface and
     // the card reads as one lit object. Margin spans override back to ground.
@@ -846,8 +879,15 @@ pub(super) fn render_epic_item(
     // Epics carry no CardIndicator, so they claim no state colour — but the
     // precedence itself is shared, so the rule lives in one place.
     let frame_color = resolve_frame_color(is_cursor, None);
-    ListItem::new(frame_card(line1, line2, col_width, frame_color, ctx.ground))
-        .style(Style::default().bg(card_surface_color()).fg(FG))
+    ListItem::new(frame_card(
+        line1,
+        line2,
+        col_width,
+        frame_color,
+        ctx.ground,
+        ctx.indent,
+    ))
+    .style(Style::default().bg(card_surface_color()).fg(FG))
 }
 
 /// A work package's card (`work-packages.allium: PackageCardPlacement`).
@@ -905,8 +945,15 @@ pub(super) fn render_package_item(
         ),
     ]);
     let frame_color = resolve_frame_color(is_cursor, None);
-    ListItem::new(frame_card(line1, line2, col_width, frame_color, ctx.ground))
-        .style(Style::default().bg(card_surface_color()).fg(FG))
+    ListItem::new(frame_card(
+        line1,
+        line2,
+        col_width,
+        frame_color,
+        ctx.ground,
+        ctx.indent,
+    ))
+    .style(Style::default().bg(card_surface_color()).fg(FG))
 }
 
 #[cfg(test)]

@@ -116,7 +116,13 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
         color,
         width: col_area.width,
         ground: column_bg_color(status, is_focused),
+        indent: 0,
     };
+    // A flattened group's cards step in with the header above them
+    // (board-layout.allium: "Flattening", EpicGroupTree). Every group's cards
+    // follow its own header directly, so the last header's depth is theirs;
+    // anything that ends a group resets it.
+    let mut card_indent: u16 = 0;
 
     for item in items.iter() {
         // The cursor advances over selectable items only, so decoration is
@@ -134,6 +140,11 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
         };
 
         let first = list_items.is_empty();
+        card_indent = match item {
+            ColumnItem::EpicHeader(header) => indent_cells(header.depth),
+            ColumnItem::Task(_) => card_indent,
+            _ => 0,
+        };
         push_item!(match item {
             ColumnItem::WorkPackage(package) => render_package_item(
                 package,
@@ -142,7 +153,12 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
                 &ctx,
             ),
             ColumnItem::Task(task) => {
-                build_task_list_item(task, status, app, now, is_cursor, &ctx)
+                let indented = ColRenderCtx {
+                    width: ctx.width.saturating_sub(card_indent),
+                    indent: card_indent,
+                    ..ctx
+                };
+                build_task_list_item(task, status, app, now, is_cursor, &indented)
             }
             ColumnItem::Epic(epic) => {
                 render_epic_item(
@@ -162,8 +178,8 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
             ColumnItem::FoldedSection(header) => {
                 render_folded_section_header(header, first, is_cursor)
             }
-            ColumnItem::EpicHeader(epic) => {
-                render_epic_header_item(epic, col_area.width)
+            ColumnItem::EpicHeader(header) => {
+                render_epic_header_item(header.epic, header.depth, col_area.width)
             }
             ColumnItem::FoldedEpic(header) => {
                 render_folded_epic_header(header, col_area.width, first, is_cursor)
@@ -181,6 +197,11 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
         status,
         color,
     }
+}
+
+/// The indent of a group at `depth`, in cells.
+fn indent_cells(depth: usize) -> u16 {
+    u16::try_from(crate::epic_header::epic_indent(depth)).unwrap_or(u16::MAX)
 }
 
 // ---------------------------------------------------------------------------

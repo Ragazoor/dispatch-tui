@@ -495,24 +495,27 @@ value EpicCardPlacement {
 --     So, within each substatus section, the epic groups are laid out as
 --     the epic tree (EpicGroupTree below):
 --       - Groups come in tree order: an epic's group, then each of its
---         child epics' subtrees in ascending epic id. Inside one epic's
---         group its own tasks come first, then its children's groups.
---         Top-level groups are in ascending epic id.
+--         child epics' subtrees in the epics' own card order (sort_order,
+--         else id — the key top-level groups already sorted by). Inside one
+--         epic's group its own tasks come first, then its children's
+--         groups. Top-level groups are in the same order.
 --       - A header is drawn for every epic on the path between a group and
 --         the tree's top, even when that epic has no task of its own in the
 --         section: an empty parent header is what shows the child is
 --         nested. Such a header is followed directly by its children.
---       - The tree's top: on the main board, epics with no parent; in an
---         epic view, the viewed epic's direct sub-epics. The viewed epic
---         itself is already named by the border title ("Epic View Panel
---         Title"), so its own direct tasks keep a depth-0 header of their
---         own and its sub-epics are depth 0 beside it, not under it.
+--       - The tree's top: on the main board and in a work-package view,
+--         epics with no parent; in an epic view, the viewed epic's direct
+--         sub-epics. The viewed epic itself is already named by the border
+--         title ("Epic View Panel Title"), so its own direct tasks keep a
+--         depth-0 header of their own, first, and its sub-epics are depth 0
+--         after it, not under it.
 --       - Only epics the column can draw count as ancestors. An ancestor
---         that is out of the view — on the hide-list, in a filtered-out
---         repo, or above the viewed epic — is skipped, and its nearest
---         drawn descendant takes its place in the tree, at its depth. A
---         child whose parent is out of view is therefore depth 0, never
---         indented under a header that is not there.
+--         that is out of the view — above the viewed epic, or not on the
+--         board at all — is skipped, and its nearest drawn descendant takes
+--         its place in the tree, at its depth. A child whose parent is out
+--         of view is therefore depth 0, never indented under a header that
+--         is not there. (A hidden epic never arises here: hiding an epic
+--         hides its whole subtree.)
 --       - Each row of a group — its header and its task cards alike — is
 --         indented by `config.epic_indent_step` columns per level of depth,
 --         depth counted from 0 at the tree's top. The indent stops growing
@@ -605,8 +608,8 @@ config {
 
 -- The epic tree one flattened section (or the agent-tree pane's agents
 -- section) lays its groups out as. `drawn` is the set of epics that count
--- as ancestors: those not hidden, in the active repo filter, and — in an
--- epic view — strictly below the viewed epic. The viewed epic's own group is
+-- as ancestors: the epics on the board, and — in an epic view — only those
+-- strictly below the viewed epic. The viewed epic's own group is
 -- still drawn, at depth 0; it is only never an ancestor.
 value EpicGroupTree {
     drawn: Set<core/Epic>

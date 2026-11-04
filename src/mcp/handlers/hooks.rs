@@ -94,6 +94,30 @@ pub async fn handle_hook(
     })
 }
 
+/// `epic`'s ancestors, root first, as the pane's tree layout reads them
+/// (`agent-tree.allium: AgentListGroupsByEpic`). An ancestor the board does not
+/// hold ends the chain there; at most `by_id.len()` links are walked, so a
+/// cycle in bad data cannot hang the read.
+fn pane_ancestors(
+    epic: &crate::models::Epic,
+    by_id: &std::collections::HashMap<crate::models::EpicId, &crate::models::Epic>,
+) -> Vec<crate::hooks::wire::PaneEpicRef> {
+    let mut chain = Vec::new();
+    let mut next = epic.parent_epic_id;
+    while let Some(parent) = next.and_then(|id| by_id.get(&id)) {
+        if chain.len() >= by_id.len() {
+            break;
+        }
+        chain.push(crate::hooks::wire::PaneEpicRef {
+            id: parent.id,
+            title: parent.title.clone(),
+        });
+        next = parent.parent_epic_id;
+    }
+    chain.reverse();
+    chain
+}
+
 /// `BoardPaneView` (`docs/specs/agent-tree.allium`): the companion panes' read.
 /// Answered from the board's own rows, changes nothing and notifies nobody. A
 /// row the board does not hold yet is an answer with no task, not an error; an
@@ -127,6 +151,7 @@ pub async fn handle_pane_view(
             slot.insert(PaneEpic {
                 id,
                 breadcrumb: vec![epic.title.clone()],
+                ancestors: pane_ancestors(epic, &by_id),
             });
         }
     }

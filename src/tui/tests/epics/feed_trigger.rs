@@ -282,7 +282,7 @@ fn flat_view_inserts_epic_header_before_group() {
         .collect();
     assert_eq!(headers.len(), 1, "one EpicHeader");
     assert!(
-        matches!(headers[0], ColumnItem::EpicHeader(e) if e.id == EpicId(10)),
+        matches!(headers[0], ColumnItem::EpicHeader(h) if h.epic.id == EpicId(10)),
         "header must be for epic 10"
     );
 }
@@ -417,7 +417,7 @@ fn flat_view_tie_break_by_epic_id_when_sort_orders_equal() {
         .iter()
         .filter_map(|i| {
             if let ColumnItem::EpicHeader(e) = i {
-                Some(e.id)
+                Some(e.epic.id)
             } else {
                 None
             }

@@ -139,7 +139,7 @@ fn folding_an_epic_hides_its_cards_but_keeps_its_header() {
     assert!(
         items
             .iter()
-            .any(|i| matches!(i, ColumnItem::EpicHeader(e) if e.id == EpicId(20))),
+            .any(|i| matches!(i, ColumnItem::EpicHeader(h) if h.epic.id == EpicId(20))),
         "epic 20's own header is unaffected"
     );
 }
@@ -225,11 +225,16 @@ fn an_epic_fold_does_nothing_in_an_unflattened_column() {
 fn only_a_folded_epic_is_selectable() {
     let epic = make_epic(10);
     let at = EpicFoldRef::new(TaskStatus::Running, EpicId(10));
-    assert!(!ColumnItem::EpicHeader(&epic).is_selectable());
+    assert!(!ColumnItem::EpicHeader(crate::tui::types::EpicHeaderRow {
+        epic: &epic,
+        depth: 0
+    })
+    .is_selectable());
     assert!(ColumnItem::FoldedEpic(FoldedEpicHeader {
         at,
         epic: &epic,
-        hidden: 2
+        hidden: 2,
+        depth: 0,
     })
     .is_selectable());
 }
@@ -242,6 +247,7 @@ fn anchor_of_a_folded_epic_header_is_the_epic_fold_ref() {
         at,
         epic: &epic,
         hidden: 2,
+        depth: 0,
     });
     assert_eq!(item.anchor(), Some(ColumnAnchor::EpicFold(at)));
 }

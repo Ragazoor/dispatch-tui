@@ -234,6 +234,19 @@ pub struct PaneEpic {
     /// and the pane draws its last segment, so a pane and board of different
     /// builds still agree.
     pub breadcrumb: Vec<String>,
+    /// The epic's ancestors, root first, so the section can lay its groups
+    /// out as the epic tree (`agent-tree.allium`, `AgentListGroupsByEpic`).
+    /// Empty for a root epic, and from a board that predates the tree
+    /// layout: every group then reads as top-level.
+    #[serde(default)]
+    pub ancestors: Vec<PaneEpicRef>,
+}
+
+/// One ancestor of a [`PaneEpic`]: enough to draw its header.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneEpicRef {
+    pub id: EpicId,
+    pub title: String,
 }
 
 /// The path a companion pane asks the board to resume a detached agent on,
@@ -279,4 +292,19 @@ pub enum Answer {
     /// The board could not decide. The gate treats this as permission to
     /// proceed — see `PrLearningsGate` in `docs/specs/pr-workflow.allium`.
     Failed { reason: String },
+}
+
+#[cfg(test)]
+mod pane_epic_tests {
+    use super::*;
+
+    /// A board that predates the tree layout sends no ancestors; the pane
+    /// then reads every group as top-level (agent-tree.allium:
+    /// AgentListGroupsByEpic).
+    #[test]
+    fn a_pane_epic_without_ancestors_reads_as_top_level() {
+        let epic: PaneEpic =
+            serde_json::from_str(r#"{"id":3,"breadcrumb":["Three"]}"#).expect("parse");
+        assert!(epic.ancestors.is_empty());
+    }
 }

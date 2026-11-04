@@ -10,20 +10,37 @@ use crate::models::EpicId;
 use crate::palette::{MUTED, PURPLE};
 use crate::text::truncate;
 
-/// `── #<id> <title> ───`, filling `width`: the rule and id muted, the title
-/// purple. `title` is the epic's own title, never its ancestors'
-/// (`board-layout.allium`, "Flattening"); it ends in an ellipsis when it
-/// does not fit.
-pub(crate) fn epic_header_line(id: EpicId, title: &str, width: u16) -> Line<'static> {
+/// Columns of indent per level of epic depth (`board-layout.allium`:
+/// `config.epic_indent_step`).
+pub(crate) const EPIC_INDENT_STEP: usize = 2;
+
+/// The depth past which the indent stops growing (`board-layout.allium`:
+/// `config.epic_indent_max_depth`).
+pub(crate) const EPIC_INDENT_MAX_DEPTH: usize = 3;
+
+/// The indent, in columns, of an epic group's rows at `depth`
+/// (`board-layout.allium`: `EpicGroupTree.indent`).
+pub(crate) fn epic_indent(depth: usize) -> usize {
+    depth.min(EPIC_INDENT_MAX_DEPTH) * EPIC_INDENT_STEP
+}
+
+/// `#<id> <title> ───`, indented by [`epic_indent`]`(depth)` and filling
+/// `width` less one cell: the id and the rule muted, the title purple. No rule is drawn left
+/// of the id, so the indent is what shows the nesting. `title` is the epic's
+/// own title, never its ancestors' (`board-layout.allium`, "Flattening"); it
+/// ends in an ellipsis when it does not fit.
+pub(crate) fn epic_header_line(id: EpicId, title: &str, width: u16, depth: usize) -> Line<'static> {
+    let indent = epic_indent(depth);
     let id_prefix = format!("#{id} ");
-    // "── " + text + " " + rule reserves the text's length plus 5, beside the
-    // id prefix's own width.
-    let reserved = 5 + id_prefix.chars().count();
-    let budget = usize::from(width).saturating_sub(reserved);
+    // The row is indent + id + title + " " + rule, one cell short of `width`
+    // so its right end lines up with a card's right margin; the title leaves
+    // room for at least one rule cell.
+    let fixed = indent + id_prefix.chars().count() + 2;
+    let budget = usize::from(width).saturating_sub(fixed + 1);
     let title = truncate(title, budget);
-    let rule_count = usize::from(width).saturating_sub(title.chars().count() + reserved);
+    let rule_count = usize::from(width).saturating_sub(fixed + title.chars().count());
     Line::from(vec![
-        Span::styled("\u{2500}\u{2500} ", Style::default().fg(MUTED)),
+        Span::raw(" ".repeat(indent)),
         Span::styled(id_prefix, Style::default().fg(MUTED)),
         Span::styled(title, Style::default().fg(PURPLE)),
         Span::styled(

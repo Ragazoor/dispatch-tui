@@ -588,18 +588,17 @@ async fn flat_view_epic_breadcrumb_is_purple() {
     // Target the breadcrumb row itself. Counting purple anywhere in the buffer is
     // not enough: the epic *card* is purple too, so such a test passes even with
     // the breadcrumb drawn in grey — it measures the card and reports the
-    // breadcrumb. Find the row that opens with the "── " rule and read the colour
-    // of the title that follows it. The title sits after the rule's "── " and
-    // the muted "#{id} " prefix (board-layout.allium, "Flattening") — search
-    // for it rather than assuming a fixed offset, so the id prefix's width
-    // doesn't matter here.
+    // breadcrumb. Find the header row by its muted "#{id} " prefix (no rule
+    // is drawn left of it: board-layout.allium, "Flattening") and read the
+    // colour of the title that follows it — search for it rather than
+    // assuming a fixed offset, so the id prefix's width doesn't matter here.
     let mut breadcrumb_title_colours: Vec<Color> = Vec::new();
     'rows: for y in buf.area.top()..buf.area.bottom() {
         for x in buf.area.left()..buf.area.right().saturating_sub(3) {
-            let is_rule_prefix = buf[(x, y)].symbol() == "\u{2500}"
-                && buf[(x + 1, y)].symbol() == "\u{2500}"
-                && buf[(x + 2, y)].symbol() == " ";
-            if !is_rule_prefix {
+            let is_id_prefix = buf[(x, y)].symbol() == "#"
+                && buf[(x + 1, y)].symbol() == "1"
+                && buf[(x + 2, y)].symbol() == "0";
+            if !is_id_prefix {
                 continue;
             }
             let search_start = x + 3;
@@ -618,7 +617,7 @@ async fn flat_view_epic_breadcrumb_is_purple() {
 
     assert!(
         !breadcrumb_title_colours.is_empty(),
-        "expected a \"── Epic 10\" breadcrumb row in the flattened view"
+        "expected a \"#10 Epic 10\" header row in the flattened view"
     );
     for c in &breadcrumb_title_colours {
         assert_eq!(

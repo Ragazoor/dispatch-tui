@@ -225,8 +225,8 @@ async fn the_pane_view_carries_the_current_agents_name() {
     assert!(view.live_agents.iter().all(|a| a.id != nameless));
 }
 
-/// The pane view carries each live agent's own epic and that epic's own title
-/// alone — none of its ancestors' — for the section's group headers
+/// The pane view carries each live agent's own epic, that epic's own title
+/// for its header, and its ancestors root first for the tree layout
 /// (agent-tree.allium: AgentListGroupsByEpic); an epicless agent carries none.
 #[tokio::test]
 async fn the_pane_view_carries_each_agents_epic_and_own_title() {
@@ -285,6 +285,10 @@ async fn the_pane_view_carries_each_agents_epic_and_own_title() {
         Some(crate::hooks::wire::PaneEpic {
             id: sub.id,
             breadcrumb: vec!["Store".into()],
+            ancestors: vec![crate::hooks::wire::PaneEpicRef {
+                id: root.id,
+                title: "Dispatch".into(),
+            }],
         })
     );
     assert_eq!(by_id(bare).epic, None);

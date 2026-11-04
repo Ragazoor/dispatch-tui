@@ -415,7 +415,7 @@ fn buf_find_char(buf: &Buffer, y: u16, needle: char) -> Option<u16> {
 /// The rendered text of a single epic's header row.
 fn epic_header_row(epic: &Epic, width: u16) -> String {
     buf_row(
-        &render_list_item_to_buf(render_epic_header_item(epic, width), width, 1),
+        &render_list_item_to_buf(render_epic_header_item(epic, 0, width), width, 1),
         0,
     )
 }
@@ -434,10 +434,10 @@ fn epic_header_row_names_only_the_nested_epic_itself() {
     let mut leaf = make_epic_with_title(3, "Leaf");
     leaf.parent_epic_id = Some(EpicId(2));
 
-    let item = render_epic_header_item(&leaf, 60);
+    let item = render_epic_header_item(&leaf, 0, 60);
     let row = buf_row(&render_list_item_to_buf(item, 60, 1), 0);
 
-    assert!(row.contains("── #3 Leaf ──"), "got: {row:?}");
+    assert!(row.starts_with("#3 Leaf ──"), "got: {row:?}");
     assert!(
         !row.contains('\u{203a}'),
         "breadcrumb separator drawn, got: {row:?}"
@@ -454,12 +454,13 @@ fn folded_epic_header_names_only_the_nested_epic_itself() {
         at: crate::tui::types::EpicFoldRef::new(TaskStatus::Running, EpicId(3)),
         epic: &leaf,
         hidden: 2,
+        depth: 0,
     };
 
     let item = render_folded_epic_header(&header, 60, true, false);
     let row = buf_row(&render_list_item_to_buf(item, 60, 1), 0);
 
-    assert!(row.contains("── #3 Leaf (2) \u{22ef}"), "got: {row:?}");
+    assert!(row.starts_with("#3 Leaf (2) \u{22ef}"), "got: {row:?}");
 }
 
 /// A title too long for the column ends in an ellipsis inside the row.
@@ -476,7 +477,7 @@ fn epic_header_row_truncates_a_long_title() {
 #[test]
 fn epic_header_id_prefix_is_muted_not_purple() {
     let epic = make_epic_with_title(7, "Alpha");
-    let item = render_epic_header_item(&epic, 40);
+    let item = render_epic_header_item(&epic, 0, 40);
     let buf = render_list_item_to_buf(item, 40, 1);
 
     let hash_x = buf_find_char(&buf, 0, '#').expect("row should contain the id marker '#'");
@@ -492,6 +493,55 @@ fn epic_header_id_prefix_is_muted_not_purple() {
         Some(PURPLE),
         "breadcrumb title should stay PURPLE"
     );
+}
+
+/// A nested header steps in by the indent step per level, capped at the
+/// max depth (board-layout.allium, "Flattening", EpicGroupTree).
+#[test]
+fn epic_header_row_indents_by_depth_up_to_the_cap() {
+    let epic = make_epic_with_title(3, "Leaf");
+    let row_at = |depth| {
+        buf_row(
+            &render_list_item_to_buf(render_epic_header_item(&epic, depth, 40), 40, 1),
+            0,
+        )
+    };
+    assert!(
+        row_at(1).starts_with("  #3 Leaf ──"),
+        "got: {:?}",
+        row_at(1)
+    );
+    assert!(
+        row_at(2).starts_with("    #3 Leaf ──"),
+        "got: {:?}",
+        row_at(2)
+    );
+    assert!(
+        row_at(3).starts_with("      #3 Leaf ──"),
+        "got: {:?}",
+        row_at(3)
+    );
+    assert_eq!(
+        row_at(5),
+        row_at(3),
+        "the indent stops growing past the cap"
+    );
+    assert_eq!(row_at(2).chars().count(), 40, "still fills the column");
+}
+
+/// A folded header keeps its group's indent.
+#[test]
+fn folded_epic_header_keeps_its_indent() {
+    let leaf = make_epic_with_title(3, "Leaf");
+    let header = crate::tui::types::FoldedEpicHeader {
+        at: crate::tui::types::EpicFoldRef::new(TaskStatus::Running, EpicId(3)),
+        epic: &leaf,
+        hidden: 2,
+        depth: 1,
+    };
+    let item = render_folded_epic_header(&header, 60, true, false);
+    let row = buf_row(&render_list_item_to_buf(item, 60, 1), 0);
+    assert!(row.starts_with("  #3 Leaf (2) \u{22ef}"), "got: {row:?}");
 }
 
 /// Reserving width for the id prefix means a wider id leaves less room for

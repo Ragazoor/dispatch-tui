@@ -591,9 +591,17 @@ pub(crate) async fn read_agent_rows(
         .into_iter()
         .map(|agent| row(agent, None));
     let mut rows: Vec<AgentRow> = live.chain(detached).collect();
-    // Grouped by epic: epics by id, epicless last, tasks by id inside a group
+    // Grouped by epic and laid out as the epic tree: each group's path of
+    // epic ids from the root, so a child follows its parent and siblings come
+    // by id; epicless last, tasks by id inside a group
     // (RefreshAgentTreeAgentList's grouped_by_epic).
-    rows.sort_by_key(|row| (row.epic.is_none(), row.epic.as_ref().map(|e| e.id), row.id));
+    rows.sort_by_cached_key(|row| {
+        let path = row
+            .epic
+            .as_ref()
+            .map(crate::agent_tree::render::agents::epic_path);
+        (row.epic.is_none(), path, row.id)
+    });
     Ok(rows)
 }
 

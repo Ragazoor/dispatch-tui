@@ -553,10 +553,10 @@ fn flattening_applies_in_a_package_view() {
     // Grouped under each task's own epic, as on the main board.
     assert!(running
         .iter()
-        .any(|i| matches!(i, ColumnItem::EpicHeader(e) if e.id == EpicId(2))));
+        .any(|i| matches!(i, ColumnItem::EpicHeader(e) if e.epic.id == EpicId(2))));
     assert!(running
         .iter()
-        .any(|i| matches!(i, ColumnItem::EpicHeader(e) if e.id == EpicId(4))));
+        .any(|i| matches!(i, ColumnItem::EpicHeader(e) if e.epic.id == EpicId(4))));
 }
 
 #[test]
