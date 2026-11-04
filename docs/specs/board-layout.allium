@@ -472,27 +472,66 @@ value EpicCardPlacement {
 --   - Epic membership is carried by the epic-header rule below, not by
 --     the task card itself: a flattened task card renders exactly as it
 --     does in hierarchical mode, with no epic badge of its own.
---   - The decorative epic-header rule that precedes each epic's task group is
---     prefixed with that epic's own numeric id, `#{id}`, styled the same
+--   - The decorative epic-header row that precedes each epic's task group
+--     starts with that epic's own numeric id, `#{id}`, styled the same
 --     muted, neutral colour as the id badge on a task card or an epic card —
---     not the row's purple. It is the id of the epic the group belongs to:
---     a nested epic's header carries one id, its own.
+--     not the row's purple — and a muted rule fills the rest of the row to
+--     its right: `#{id} <title> ───`. No rule is drawn to the left of the
+--     id, so the row's indent (below) is the first thing it shows. It is
+--     the id of the epic the group belongs to: a nested epic's header
+--     carries one id, its own.
 --   - After the id, the row shows that epic's own title and nothing else —
 --     not its ancestors. A nested epic's header names only the epic its
 --     tasks sit in directly, root or not: the full ancestor path is long
 --     and buries the one title that tells the groups apart. The id still
 --     names the epic uniquely when two share a title. The title is
---     bounded by the column width, less the space the id prefix takes —
---     the same reservation task cards and epic cards already make for their
---     own id badge before computing their truncation budget — and truncated
---     with an ellipsis when it does not fit.
+--     bounded by the column width, less the row's indent and the space the
+--     id prefix takes — the same reservation task cards and epic cards
+--     already make for their own id badge before computing their truncation
+--     budget — and truncated with an ellipsis when it does not fit.
+--   - Nesting is carried by order and indent, not by header text (task
+--     #98901). With own-title-only headers sorted by epic id, a sub-epic's
+--     group could sit far from its parent's and the two read as unrelated.
+--     So, within each substatus section, the epic groups are laid out as
+--     the epic tree (EpicGroupTree below):
+--       - Groups come in tree order: an epic's group, then each of its
+--         child epics' subtrees in ascending epic id. Inside one epic's
+--         group its own tasks come first, then its children's groups.
+--         Top-level groups are in ascending epic id.
+--       - A header is drawn for every epic on the path between a group and
+--         the tree's top, even when that epic has no task of its own in the
+--         section: an empty parent header is what shows the child is
+--         nested. Such a header is followed directly by its children.
+--       - The tree's top: on the main board, epics with no parent; in an
+--         epic view, the viewed epic's direct sub-epics. The viewed epic
+--         itself is already named by the border title ("Epic View Panel
+--         Title"), so its own direct tasks keep a depth-0 header of their
+--         own and its sub-epics are depth 0 beside it, not under it.
+--       - Only epics the column can draw count as ancestors. An ancestor
+--         that is out of the view — on the hide-list, in a filtered-out
+--         repo, or above the viewed epic — is skipped, and its nearest
+--         drawn descendant takes its place in the tree, at its depth. A
+--         child whose parent is out of view is therefore depth 0, never
+--         indented under a header that is not there.
+--       - Each row of a group — its header and its task cards alike — is
+--         indented by `config.epic_indent_step` columns per level of depth,
+--         depth counted from 0 at the tree's top. The indent stops growing
+--         at `config.epic_indent_max_depth`: deeper groups draw at that
+--         depth's indent, so a narrow column keeps room for its titles. A
+--         card's width shrinks by its indent; the card renders otherwise
+--         exactly as it does at depth 0. Cards are indented with their
+--         header, not left flush: a header stepped in above flush cards
+--         reads as a header that drifted, not as a child group.
 --   - Within each substatus group, epic-owned tasks come first and tasks
---     with no epic come last. A second decorative rule — visually distinct
---     from the epic-header one — separates the two, marking where the
---     epic groups end. It is drawn only at that transition, so a group of
---     all-epic or all-orphan tasks shows none. Like the epic header it is
---     decoration: neither rule is selectable and neither counts towards
---     the column's navigable items.
+--     with no epic come last, unindented. A second decorative rule —
+--     visually distinct from the epic-header one — separates the two,
+--     marking where the epic groups end. It is drawn only at that
+--     transition, so a group of all-epic or all-orphan tasks shows none.
+--     Like the epic header it is decoration: neither rule is selectable and
+--     neither counts towards the column's navigable items.
+--   - The flattened Done column has no sections and draws no epic headers
+--     (see "Done Column Ordering"), so it has no tree to show: it keeps its
+--     freshest-first group order and draws no indent.
 --
 -- State model:
 --   - Flattened is derived from the board lens (BoardLens.flattened): it
@@ -554,6 +593,35 @@ value FlattenedView {
         and not board_hides.task_is_hidden(task)
         and (view.is_board or task.is_descendant_of(view.current_epic))
         and (flattens(status) or directly_under(task, view))
+}
+
+config {
+    -- Columns of indent per level of epic depth, for a flattened column's
+    -- epic headers and cards and the agent-tree pane's agents section.
+    epic_indent_step: Integer = 2
+    -- The depth past which the indent stops growing.
+    epic_indent_max_depth: Integer = 3
+}
+
+-- The epic tree one flattened section (or the agent-tree pane's agents
+-- section) lays its groups out as. `drawn` is the set of epics that count
+-- as ancestors: those not hidden, in the active repo filter, and — in an
+-- epic view — strictly below the viewed epic. The viewed epic's own group is
+-- still drawn, at depth 0; it is only never an ancestor.
+value EpicGroupTree {
+    drawn: Set<core/Epic>
+
+    -- parent_chain(epic): epic.parent, then its parent, and so on up to a
+    -- root epic, nearest first.
+
+    -- The nearest ancestor the view draws, skipping any it does not.
+    drawn_parent(epic): parent_chain(epic).first(a => a in drawn)
+
+    -- 0 at the tree's top; one more per drawn ancestor.
+    depth(epic): parent_chain(epic).count(a => a in drawn)
+
+    indent(epic):
+        min(depth(epic), config.epic_indent_max_depth) * config.epic_indent_step
 }
 
 -- == Epic View Panel Title ==
@@ -841,6 +909,17 @@ entity CollapsedSections {
 --   - A folded group whose last card disappears loses its header, and the
 --     cursor clamps within the same column, as it does for any card that
 --     leaves the board.
+--   - Nested groups (see FlattenedView, EpicGroupTree): a folded epic hides
+--     its whole subtree in that section — its own cards and every
+--     descendant's header and cards — and its hidden count is the subtree's
+--     tasks there. A folded header keeps its indent and, like the open one,
+--     has no rule to the left of its id. Folding a parent does not touch a
+--     descendant's recorded fold: when the parent unfolds, each descendant
+--     draws folded or open exactly as it was recorded before. A folded
+--     parent with no task of its own keeps its header while any descendant
+--     has a task in the section. An open parent header with no task of its
+--     own in the column cannot be folded: no card there belongs to it, and
+--     the open header is decoration (tasks.allium: ToggleEpicFold).
 --
 -- Toggling is specified in tasks.allium: ToggleEpicFold.
 --

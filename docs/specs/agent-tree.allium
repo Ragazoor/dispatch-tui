@@ -2427,12 +2427,15 @@ rule RefreshAgentTreeAgentList {
         -- and the pane never opens the store (PanesReadThroughTheBoard).
         --
         -- == Order ==
-        -- grouped_by_epic puts the tasks of one epic next to each other: the
-        -- groups in ascending epic id, the tasks inside a group in ascending
-        -- task id, and the tasks with no epic last, also by task id. A task's
-        -- group is its own epic, never an ancestor's, so a sub-epic's tasks
-        -- form a group of their own. How the groups are drawn is
-        -- AgentListGroupsByEpic. The order therefore never changes under the
+        -- grouped_by_epic puts the tasks of one epic next to each other, the
+        -- tasks inside a group in ascending task id, and the tasks with no
+        -- epic last, also by task id. A task's group is its own epic, never
+        -- an ancestor's, so a sub-epic's tasks form a group of their own. The
+        -- groups are laid out as the epic tree, exactly as a flattened board
+        -- section lays out its own (board-layout.allium, "Flattening",
+        -- EpicGroupTree): an epic's group, then its child epics' subtrees in
+        -- ascending epic id, the top-level groups in ascending epic id. How
+        -- the groups are drawn is AgentListGroupsByEpic. The order therefore never changes under the
         -- cursor except when an agent starts or finishes, or a task moves to
         -- another epic.
         --
@@ -3121,11 +3124,24 @@ surface AgentTreeCompanionPane {
         -- (board-layout.allium, "Flattening"): each epic's agents sit under a
         -- header row, so the user sees at a glance which agents work on the
         -- same epic. The header is the board's epic header, drawn the same
-        -- way: `── #<epic id> <title> ───`, the rule and id muted and the
-        -- title purple, filling the pane's width. The id and the title are
-        -- the group's own epic, never its ancestors: a nested epic's header
-        -- names only the epic its agents sit in directly. The title is
-        -- truncated with an ellipsis when the pane is narrow.
+        -- way: `#<epic id> <title> ───`, the id and the rule muted and the
+        -- title purple, filling the pane's width, with no rule left of the
+        -- id. The id and the title are the group's own epic, never its
+        -- ancestors: a nested epic's header names only the epic its agents
+        -- sit in directly. The title is truncated with an ellipsis when the
+        -- pane is narrow.
+        --
+        -- Nesting is shown by order and indent, as on the board (task
+        -- #98901). The groups come in tree order (see "Order" in
+        -- RefreshAgentTreeAgentList). Every ancestor of a group draws its
+        -- header above it even when no agent sits in that ancestor
+        -- directly, so a sub-epic never reads as unrelated to its parent.
+        -- Each header and each agent row of a group is indented by
+        -- board-layout's EpicGroupTree.indent: config.epic_indent_step
+        -- columns per level, growing no further past
+        -- config.epic_indent_max_depth. The pane lists every repo and every
+        -- epic, so every ancestor counts; the tree's top is the root epics.
+        -- The epicless agents below the dashed rule are not indented.
         --
         -- The agents with no epic come last, under the board's dashed rule
         -- (`╌╌ · ╌╌╌`, muted). The rule is drawn only where the epic groups
@@ -3145,9 +3161,12 @@ surface AgentTreeCompanionPane {
         -- The pane reads the epic from the board's answer (the hooks wire's
         -- PaneAgent.epic). Its breadcrumb holds the epic's own title alone;
         -- the header draws its last segment, which an older board that still
-        -- sends the full path ends with too. A board that predates it sends
-        -- none, and every agent then reads as epicless: the list is the plain
-        -- id-ordered list with no headers and no rule.
+        -- sends the full path ends with too. Its ancestors (id and own title,
+        -- root first) come beside it; a board that predates them sends none,
+        -- and every group then reads as top-level: headers in ascending epic
+        -- id, nothing indented, as before. A board that predates the epic
+        -- itself sends none, and every agent then reads as epicless: the list
+        -- is the plain id-ordered list with no headers and no rule.
 
     @guarantee AgentKeysFollowFocus
         -- With the commits or the agents section focused, the cursor motions
