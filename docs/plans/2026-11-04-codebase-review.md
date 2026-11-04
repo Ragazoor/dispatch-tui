@@ -223,6 +223,8 @@ Claims checked against code: `serve_dispatch_request` is called only from `src/r
 - **N3** — one row per repo path vs one per (path, host). A design decision in `core.allium`.
 - **M11's decision** — caafe9ea made "only the operator detaches" the rule. Confirm that is the intent before the TUI and spec are aligned to it.
 
+Filed: the user chose its own package for T2 (task #98917). All findings are in epic #69686 (tasks #98909–#98917, plans in `docs/plans/review-2026-11-04/`). N3 and M11 are decision items in tasks #98914 and #98916.
+
 **Graduate to a check.**
 - "Commits reach `main` through a rebase with no lint gate" (2026-10-14, now C1): the verify command (C2).
 - "A sibling path forgets the rule its fix added" appeared again: M10 (task scope), M12 (`subagents_of_held`, the task itself), M15 (sibling error branches), Q7 (twin sight). The checks meant for it now catch more but still have holes (G3, G4), and the two demanded tests are partial (G5). The deliverable stays the mechanical tests in G5, not more one-off fixes.
