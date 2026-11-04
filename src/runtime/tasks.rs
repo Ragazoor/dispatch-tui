@@ -957,7 +957,7 @@ impl TuiRuntime {
             return;
         };
         let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Updated(
-            epic,
+            Box::new(epic),
         )));
 
         let tasks = db.list_tasks_for_epic(epic_id).await;

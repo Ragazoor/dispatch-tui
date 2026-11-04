@@ -34,7 +34,7 @@ impl TuiRuntime {
         {
             Ok(epic) => {
                 app.update(Message::Epic(crate::tui::messages::EpicMessage::Created(
-                    epic,
+                    Box::new(epic),
                 )));
             }
             Err(e) => {
@@ -176,7 +176,7 @@ impl TuiRuntime {
         };
         epic.completed_at = new_completed_at;
         app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
-            epic,
+            Box::new(epic),
         )));
     }
 
@@ -236,7 +236,7 @@ impl TuiRuntime {
                 match self.board_reads.get_epic(id).await {
                     Some(persisted) => {
                         app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
-                            persisted,
+                            Box::new(persisted),
                         )));
                     }
                     // Nothing better to do than leave the flip standing: the

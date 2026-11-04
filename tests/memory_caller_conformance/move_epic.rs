@@ -174,7 +174,7 @@ fn memory_caller_moves_an_epic_like_the_real_reducer() {
 
         // `update_epic` is all-or-nothing, and each part is judged against the
         // epic as the parts before it left it (task #98852, M6).
-        let mut make_epic = |parent_epic_id: i64| {
+        let make_epic = |parent_epic_id: i64| {
             let epic = bindings::Epic {
                 workspace_id: DEFAULT_WORKSPACE,
                 parent_epic_id,

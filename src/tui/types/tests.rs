@@ -31,13 +31,21 @@ fn make_test_task(id: i64, status: TaskStatus, epic: Option<i64>) -> Task {
 /// together, which keeps the spread small while the total doubles. A fixed
 /// ceiling would catch that, but its first failure invites a bump; the
 /// relation states the actual invariant and never needs maintenance.
+///
+/// The bound is the *smaller* of `Task` and `Epic`: against `Task` alone an
+/// inline `Epic` passed unnoticed, because `Task` is the larger entity
+/// (`EpicMessage` carried three inline `Epic` payloads until
+/// `Epic::feed_setter` pushed it past `clippy::large_enum_variant`).
 fn assert_no_entity_inline<T>(name: &str) {
     let size = std::mem::size_of::<T>();
     let task = std::mem::size_of::<Task>();
+    let epic = std::mem::size_of::<Epic>();
+    let bound = task.min(epic);
     assert!(
-        size < task,
-        "{name} is {size} bytes against a {task}-byte `Task` — an entity has \
-             been inlined into the bus. Box the payload rather than relaxing this."
+        size < bound,
+        "{name} is {size} bytes against a {task}-byte `Task` and a {epic}-byte \
+             `Epic` — an entity has been inlined into the bus. Box the payload \
+             rather than relaxing this."
     );
 }
 

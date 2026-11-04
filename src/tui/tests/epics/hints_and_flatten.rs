@@ -16,7 +16,7 @@ fn epic_edited_splices_all_fields_including_feed_settings() {
     edited.feed_interval_secs = Some(300);
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
-        edited.clone(),
+        Box::new(edited.clone()),
     )));
 
     let spliced = app.board.epics.iter().find(|e| e.id == EpicId(1)).unwrap();

@@ -132,7 +132,7 @@ fn epic_created_adds_to_state() {
     let mut app = App::new(vec![]);
     let epic = make_epic(1);
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Created(
-        epic,
+        Box::new(epic),
     )));
     assert_eq!(app.board.epics.len(), 1);
 }

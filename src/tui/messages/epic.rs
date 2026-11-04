@@ -23,10 +23,10 @@ pub enum EpicMessage {
     JumpToDeepest(EpicId, crate::models::TaskStatus),
     Refresh(Vec<Epic>),
     /// Splice a single fresh epic into `app.board.epics`.
-    Updated(Epic),
-    Created(Epic),
+    Updated(Box<Epic>),
+    Created(Box<Epic>),
     Edit(EpicId),
-    Edited(Epic),
+    Edited(Box<Epic>),
     Delete(EpicId),
     ToggleAutoDispatch(EpicId),
     ToggleGroupByRepo(EpicId),
@@ -62,10 +62,10 @@ impl EpicMessage {
             EpicMessage::JumpTo(target) => app.handle_jump_to_epic(target),
             EpicMessage::JumpToDeepest(id, status) => app.handle_jump_to_deepest_epic(id, status),
             EpicMessage::Refresh(epics) => app.handle_refresh_epics(epics),
-            EpicMessage::Updated(epic) => app.handle_epic_updated(epic),
-            EpicMessage::Created(epic) => app.handle_epic_created(epic),
+            EpicMessage::Updated(epic) => app.handle_epic_updated(*epic),
+            EpicMessage::Created(epic) => app.handle_epic_created(*epic),
             EpicMessage::Edit(id) => app.handle_edit_epic(id),
-            EpicMessage::Edited(epic) => app.handle_epic_edited(epic),
+            EpicMessage::Edited(epic) => app.handle_epic_edited(*epic),
             EpicMessage::Delete(id) => app.handle_delete_epic(id),
             EpicMessage::ToggleAutoDispatch(id) => {
                 selection::toggle_epic_auto_dispatch(&mut app.board.epics, id)

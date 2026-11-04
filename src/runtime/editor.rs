@@ -453,7 +453,7 @@ impl TuiRuntime {
         let feed_command_changed =
             updated.feed_command.is_some() && updated.feed_command != original_feed_command;
         let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
-            updated,
+            Box::new(updated),
         )));
 
         // Take-over prompt (epics.allium: EditEpic, feeds.allium:

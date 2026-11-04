@@ -192,7 +192,7 @@ fn epic_created_invalidates_cache() {
     let _ = app.cached_epic_stats();
     assert!(app.layout.epic_stats_cache.is_some());
 
-    app.update(Message::Epic(EpicMessage::Created(make_epic(42))));
+    app.update(Message::Epic(EpicMessage::Created(Box::new(make_epic(42)))));
 
     // Cache should be None (invalidated) or Some with new epic — either is acceptable;
     // the key property is that it reflects the new state.

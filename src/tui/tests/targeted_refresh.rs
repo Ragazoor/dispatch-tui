@@ -66,7 +66,7 @@ fn epic_updated_replaces_existing_row() {
     let count_before = app.board.epics.len();
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
-        renamed,
+        Box::new(renamed),
     )));
 
     let now = app
@@ -85,7 +85,7 @@ fn epic_updated_appends_new_epic() {
     let before = app.board.epics.len();
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
-        make_epic(42),
+        Box::new(make_epic(42)),
     )));
 
     assert_eq!(app.board.epics.len(), before + 1);
