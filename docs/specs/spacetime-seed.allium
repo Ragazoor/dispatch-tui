@@ -86,6 +86,11 @@ use "./core.allium" as core
 -- that for people who may have looked since. Losing the marks on a restore is
 -- accepted. These are the only exceptions to "every table it holds" below.
 --
+-- `bookmarks` (core.allium: Bookmark) is NOT an exception and is carried. A
+-- bookmark is a person's own request to come back to a task, not a claim
+-- about what they have looked at, so a restore that dropped it would lose
+-- something nobody can rebuild.
+--
 -- `user_profiles`, `workspaces` and `memberships` (workspaces.allium) ARE
 -- here, because epics, work packages and learnings now point at a workspace
 -- by id: a restore without them would leave every one of those ids dangling,

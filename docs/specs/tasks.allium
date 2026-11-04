@@ -1272,6 +1272,94 @@ rule UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing {
         -- the store's relink_task, which clears the marks with the move.
 }
 
+-- == Bookmark ==
+--
+-- A person bookmarks a task to come back to it (core/Bookmark, task #98906).
+-- The bookmark is drawn on the card and, derived, on every epic above it
+-- (board-visuals.allium, "Bookmark"), so the trail leads back to the task.
+-- These rules set and end it. The MCP twin is UpdateTasksViaMcp's
+-- `bookmarked` (mcp-task-tools.allium); both write through the store's
+-- set_bookmark, so the rules below hold for either.
+
+rule ToggleBookmarkFromBoard {
+    when: ToggleBookmarkKeyPressed(viewer, task)
+
+    -- `b` on a task card (keybindings: board.normal toggle_bookmark, "on a
+    -- task card"). On an epic or work package card the row does not apply,
+    -- so the key does nothing (keybindings: KeyWithoutARowCannotAct).
+    ensures: BookmarkSet(viewer: viewer, task: task,
+                         bookmarked: not exists core/Bookmark.where(b =>
+                             b.subscriber = viewer and b.task = task))
+
+    @guidance
+        -- The status bar confirms which way it went: "Bookmarked #<id>" or
+        -- "Bookmark removed from #<id>". A refusal (SetBookmark) shows its
+        -- message in the status bar instead.
+        --
+        -- Applies to the card under the cursor only, never to a multi-card
+        -- selection: a bookmark is "this one", and a toggle over a mixed
+        -- selection would have no single meaning.
+        --
+        -- Implementation: the board.normal `b` row in src/keybindings/table.rs.
+}
+
+rule SetBookmark {
+    when: BookmarkSet(subscriber, task, bookmarked)
+
+    -- Only the person themselves writes their own bookmark.
+    requires: subscriber = caller()
+    -- A task the caller cannot see is refused as a missing one
+    -- (workspaces.allium: UnseenIsAsMissing).
+    requires: task.visible_to(caller())
+    -- A Done task cannot be bookmarked (core/Bookmark:
+    -- BookmarkedTaskIsNotDone). Removing a bookmark is never refused on
+    -- status: there is nothing to remove from a Done task, so it is a no-op.
+    requires: bookmarked = false or task.status != done
+
+    ensures:
+        if bookmarked:
+            if not exists core/Bookmark.where(b => b.subscriber = subscriber and b.task = task):
+                core/Bookmark.created(subscriber: subscriber, task: task)
+        else:
+            for b in core/Bookmark.where(b => b.subscriber = subscriber and b.task = task):
+                not exists b
+
+    @guidance
+        -- Idempotent both ways: setting a set bookmark or clearing a clear one
+        -- changes nothing and is not an error, so an agent can state the
+        -- wanted end state without reading first.
+        --
+        -- The Done refusal reads "Task <id> is done and cannot be bookmarked".
+        --
+        -- Nobody else's bookmark is touched. A second person bookmarking the
+        -- same task gets a row of their own.
+        --
+        -- Implementation: the module's set_bookmark reducer
+        -- (spacetime/module/src/bookmarks.rs).
+}
+
+rule BookmarkEndsWithTheTaskFinishing {
+    when: TaskFinishes(task)   -- task.status becoming done
+
+    -- Reaching Done ends every person's bookmark on it. "Done" means the
+    -- status, not a column position. A task that moves back out of done is
+    -- not re-bookmarked.
+    ensures:
+        for b in core/Bookmark.where(b => b.task = task):
+            not exists b
+
+    @guidance
+        -- Deleting the task removes its rows with it: a Bookmark cannot
+        -- outlive the task it names.
+        --
+        -- Unlike UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing, a move
+        -- to another epic does NOT end a bookmark. The person asked to come
+        -- back to this task, wherever it now sits; the trail simply follows
+        -- it to its new epic. So no relink path (MoveTaskToEpic, update_tasks'
+        -- epic_id, a feed routing move, RegroupEpic, FlattenEpic, a
+        -- repo_path reroute) touches a Bookmark.
+}
+
 -- == Delete ==
 
 -- TaskTeardown (conceptual): the single named account of what it means to

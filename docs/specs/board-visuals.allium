@@ -707,6 +707,42 @@ use "./core.allium" as core
 -- Cards for which the viewing person has no row are unmarked, whatever
 -- another person sees.
 
+-- == Bookmark ==
+--
+-- A task the viewing person has bookmarked (core/Bookmark; tasks.allium:
+-- ToggleBookmarkFromBoard) carries the same diamond glyph (◆ U+25C6) as the
+-- new-task signal, in BOOKMARK: a hue added to the palette for this one
+-- meaning, a cool mint green (Rgb 80 250 123). It is brighter and bluer than
+-- GREEN, which already says Done and "merged" on cards, so a bookmark does
+-- not read as finished work. The glyph is the same so the two marks read as
+-- one family, "look here"; the hue says which kind.
+--
+-- Which cards are marked, on the same terms as the new-task signal:
+--   - a TASK card whose task has a Bookmark row for this person;
+--   - an EPIC card whose subtree (itself or any descendant epic) holds such a
+--     task. Derived, never stored, so the whole chain from the top-level epic
+--     down to the one holding the task is marked, and it follows the task
+--     when the task moves to another epic.
+--
+-- The glyph sits in the new-task signal's slot, after the message flash and
+-- phoenix glyphs. A card is never given two diamonds. When the new-task
+-- signal and a bookmark both apply to one card, task or epic, the slot shows
+-- the new-task ◆ in SIGNAL. That is the mark that clears by looking, so once
+-- the cursor has rested on the card (or, for an epic, on every new task
+-- below it) the slot shows the bookmark ◆ in BOOKMARK.
+--
+-- Unlike the new-task signal, a bookmark never recolours an epic's stripe.
+-- The stripe keeps PURPLE. A bookmark can last for days, and a stripe that
+-- stays recoloured that long would stop meaning "epic". A task card's stripe
+-- is not touched either. Nor is the frame: like the other title-line glyphs
+-- it is an attribute of the card, never a condition wanting a human.
+--
+-- The cursor resting on a bookmarked card clears nothing. Only the person
+-- toggling it off, or the task reaching Done, ends it.
+--
+-- Cards for which the viewing person has no row are unmarked, whatever
+-- another person has bookmarked.
+
 -- == Phoenix marker ==
 --
 -- A task with phoenix = true carries a recycling glyph (♻ U+267B) on its
@@ -927,6 +963,21 @@ use "./core.allium" as core
 --                                                a key that moves the cursor
 --   a_refresh_that_slides_an_unseen_task_under_the_cursor_clears_it
 --                                                a cursor that did not move
+--   bookmarked_task_card_shows_bookmark_glyph    a task with a Bookmark row
+--                                                for the viewer draws ◆ in
+--                                                BOOKMARK on its title line
+--   epic_on_the_path_to_a_bookmarked_task_is_marked
+--                                                every epic whose subtree
+--                                                holds one draws ◆ in
+--                                                BOOKMARK, however deep
+--   bookmarked_epic_stripe_stays_purple          the epic stripe keeps PURPLE
+--   unseen_wins_the_glyph_slot_over_bookmark     a card both new and
+--                                                bookmarked draws one ◆, in
+--                                                SIGNAL, on task and epic cards
+--   bookmark_is_per_viewer                       another person's bookmark
+--                                                marks nothing for this viewer
+--   cursor_on_a_bookmarked_task_clears_nothing   the bookmark outlives the
+--                                                cursor landing on it
 --   message_flash_never_colours_the_card_frame   a live flash leaves the
 --                                                frame alone: no column
 --                                                hue, and the only

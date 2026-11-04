@@ -130,7 +130,8 @@
 --     unseen_tasks, task_subagents, learning_retrievals, learning_verdicts):
 --     one view each, serving the rows of the tasks the board holds (own
 --     tasks and covered tasks). Never wider than the task's own visibility.
---   unseen_tasks is the caller's own marks only.
+--   unseen_tasks is the caller's own marks only. bookmarks
+--     (core/Bookmark) likewise: the caller's own, on tasks they still see.
 --   task_watchers is dead (no reducer writes it), so its view is the
 --     tasks-held rule above like the rest.
 --   poll_owners follow their scope: an epic-scoped row is served while the
@@ -456,6 +457,8 @@ rule RemoveMember {
             not exists s
         for u in UnseenTasks where u.subscriber = user and u.task.epic != null and u.task.epic.workspace = workspace:
             not exists u
+        for b in Bookmarks where b.subscriber = user and b.task.epic != null and b.task.epic.workspace = workspace:
+            not exists b
         -- Task #98746 (V6). A claim must not outlive the sight that made it
         -- workable: every epic-scoped core/PollOwner row on an epic of this
         -- workspace held by a host `user` owns is released, as
@@ -706,6 +709,9 @@ rule MoveEpicToWorkspace {
         for follow in Subscriptions where follow.epic in epic.subtree:
             if not destination.has_member(follow.subscriber):
                 not exists follow
+        for mark in Bookmarks where mark.task.epic in epic.subtree:
+            if not destination.has_member(mark.subscriber):
+                not exists mark
         -- Task #98746 (V6). A host whose owner is not a member of the
         -- destination loses sight of the tree, so its epic-scoped
         -- core/PollOwner claims on the tree are released: the feed pauses
@@ -726,8 +732,9 @@ rule MoveEpicToWorkspace {
         -- A refusal for a sub-epic names its root so the caller can retry.
         -- The same workspace is refused rather than treated as a no-op,
         -- so a caller never thinks it moved something.
-        -- Unseen marks of people who lose sight of the epic are dropped
-        -- with their follows, as RemoveMember does for a whole workspace.
+        -- Unseen marks and bookmarks (core/Bookmark) of people who lose
+        -- sight of the epic are dropped with their follows, as RemoveMember
+        -- does for a whole workspace.
 }
 
 -- Tasks -----------------------------------------------------

@@ -633,6 +633,43 @@ entity UnseenTask {
     }
 }
 
+-- Bookmark records that one person has asked to come back to one task
+-- (task #98906). It is the whole of the bookmark's stored state. Only the
+-- person themselves sets or clears it, from the board (tasks.allium:
+-- ToggleBookmarkFromBoard) or over MCP (mcp-task-tools.allium:
+-- UpdateTasksViaMcp's `bookmarked`).
+--
+-- It is UnseenTask's twin in shape and in how it is drawn, and differs in
+-- how it ends. An UnseenTask means "you have not looked yet" and ends when the
+-- cursor lands on the card. A Bookmark means "come back to this" and ends only
+-- when the person removes it or the task is Done or deleted.
+--
+-- An EPIC's bookmark mark is never stored, on the same terms as UnseenTask:
+-- an epic is marked for a person exactly when some Bookmark row for that
+-- person names a task in the epic's subtree. See "Bookmark" in
+-- board-visuals.allium for how it is drawn.
+--
+-- Rows exist for people, not for machines: keyed by UserIdentity, so a
+-- bookmark set on one laptop shows on the person's other one.
+--
+-- Only a task can be bookmarked, never an epic, and never a task that is
+-- Done. A row lives until it is toggled off, its task enters Done or is
+-- deleted, or its person loses sight of the task (tasks.allium:
+-- BookmarkEndsWithTheTaskFinishing; workspaces.allium: RemoveMember,
+-- MoveEpicToWorkspace). It survives the task moving to another epic.
+entity Bookmark {
+    subscriber: UserIdentity
+    task: Task
+
+    invariant BookmarkIsUniquePerSubscriberAndTask {
+        Bookmarks.where(b => b.subscriber = subscriber and b.task = task).count = 1
+    }
+
+    invariant BookmarkedTaskIsNotDone {
+        task.status != done
+    }
+}
+
 -- TaskUrl is the single typed URL attached to a Task. The url_type is stored
 -- explicitly (not inferred from the string at render time), so the system
 -- knows whether the URL is a PR, security alert, issue, or something else.
