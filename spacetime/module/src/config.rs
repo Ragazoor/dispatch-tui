@@ -65,7 +65,10 @@ pub fn adopt_repo_path(ctx: &ReducerContext, path: String, host: String) -> Resu
         .iter()
         .find(|r| r.path == path && r.host.is_empty())
     {
-        ctx.db.repo_paths().id().update(RepoPath { host, ..existing });
+        ctx.db
+            .repo_paths()
+            .id()
+            .update(RepoPath { host, ..existing });
     }
     Ok(())
 }
@@ -407,6 +410,13 @@ pub(crate) fn prune_usage_events(ctx: &ReducerContext, highest: i64, cap: i64) {
 /// The caller's usage, grouped, on demand (task #98756). `query_usage` calls
 /// it; no view or subscription serves usage rows, because a view over them
 /// would re-run over a person's whole history on every recorded event.
+///
+/// Built for wasm only. A procedure's transaction calls host imports
+/// (`procedure_start_mut_tx` and friends) that the native `test-utils` store
+/// does not provide, so compiling it into `spacetime/module-tests` fails the
+/// link of every test binary there. Its body is `usage_summary_for`, which the
+/// module's own unit tests cover natively.
+#[cfg(target_arch = "wasm32")]
 #[spacetimedb::procedure]
 pub fn own_usage_summary(
     ctx: &mut spacetimedb::ProcedureContext,
