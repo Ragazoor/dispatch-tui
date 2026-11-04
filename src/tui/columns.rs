@@ -525,7 +525,10 @@ impl<'a> BoardView<'a> {
         let mut in_epics = false;
         for group in run.chunk_by(|(_, _, _, a), (_, _, _, b)| a.epic_id == b.epic_id) {
             let t0 = group[0].3;
-            let Some(eid) = t0.epic_id else {
+            // A task naming an epic the board does not hold has no group to
+            // join: it is an orphan, sorted with them (`FlattenedGroupKeys::
+            // key_for`), so it goes below the separator like one.
+            let Some(eid) = t0.epic_id.filter(|eid| epic_lookup.contains_key(eid)) else {
                 if in_epics {
                     items.push(ColumnItem::OrphanSeparator);
                     in_epics = false;
@@ -534,14 +537,6 @@ impl<'a> BoardView<'a> {
                 items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
                 continue;
             };
-            if !epic_lookup.contains_key(&eid) {
-                // The epic named by this group does not resolve (e.g.
-                // filtered out of the current view): fall back to plain
-                // cards, under no header.
-                open.clear();
-                items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
-                continue;
-            }
             in_epics = true;
             let path: Vec<&'a Epic> = tree
                 .path(eid)

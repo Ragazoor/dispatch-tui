@@ -7,7 +7,8 @@
 --        the board lens, and the filters that narrow what a column renders.
 -- Includes: Board Columns (the navigation index space, review-section order,
 --           row navigation and the `gg` chord),
---           EpicCardPlacement, FlattenedView, ColumnSectionLayout,
+--           EpicCardPlacement, FlattenedView, EpicGroupTree (and the
+--           epic indent config), ColumnSectionLayout,
 --           collapsed sections
 --           (SectionRef, CollapsedSections), epic folding
 --           (EpicFoldRef, FoldedEpics), board vertical layout, the
@@ -901,7 +902,9 @@ entity CollapsedSections {
 --     is decoration, exactly as it is today, and does not.
 --   - Folding puts the cursor on the group's own folded header; unfolding
 --     puts it on the group's first card — for a parent with no card of its
---     own in the column, the first card of its subtree. No action but the toggle does
+--     own in the column, the first row of its subtree that holds the
+--     cursor: a card, or a folded descendant's header, whichever is drawn
+--     first. No action but the toggle does
 --     anything with the cursor on a folded header — see Collapsed
 --     Sections's identical rule for why.
 --   - While a search query is active and some card it admits sits in a

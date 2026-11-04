@@ -301,3 +301,23 @@ fn a_folded_child_sits_directly_under_its_parents_header() {
     let (_, y30) = find_text(&buf, "#30 Thirty").expect("folded child drawn");
     assert_eq!(y30, y10 + 1);
 }
+
+/// A task naming an epic the board does not hold is an orphan: below the
+/// separator, never drawn as part of the last epic group.
+#[test]
+fn a_task_with_an_unknown_epic_goes_below_the_separator() {
+    let app = flat_app(
+        vec![owned(3, 30), owned(4, 99)],
+        vec![epic_under(10, None), epic_under(30, Some(10))],
+    );
+    let items = app.view().column_items_for_status(TaskStatus::Running);
+    let separator = items
+        .iter()
+        .position(|i| matches!(i, ColumnItem::OrphanSeparator))
+        .expect("separator drawn");
+    let stray = items
+        .iter()
+        .position(|i| matches!(i, ColumnItem::Task(t) if t.id.0 == 4))
+        .expect("task drawn");
+    assert!(stray > separator, "{items:?}");
+}
