@@ -123,6 +123,7 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
     // follow its own header directly, so the last header's depth is theirs;
     // anything that ends a group resets it.
     let mut card_indent: u16 = 0;
+    let mut previous: Option<&ColumnItem<'_>> = None;
 
     for item in items.iter() {
         // The cursor advances over selectable items only, so decoration is
@@ -140,6 +141,10 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
         };
 
         let first = list_items.is_empty();
+        // A folded child right under its parent's open header belongs with it,
+        // so it draws no blank line above (board-layout.allium: "Epic Folding").
+        let under_header = matches!(previous, Some(ColumnItem::EpicHeader(_)));
+        previous = Some(item);
         card_indent = match item {
             ColumnItem::EpicHeader(header) => indent_cells(header.depth),
             ColumnItem::Task(_) => card_indent,
@@ -182,7 +187,7 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
                 render_epic_header_item(header.epic, header.depth, col_area.width)
             }
             ColumnItem::FoldedEpic(header) => {
-                render_folded_epic_header(header, col_area.width, first, is_cursor)
+                render_folded_epic_header(header, col_area.width, first || under_header, is_cursor)
             }
             ColumnItem::OrphanSeparator => render_orphan_separator(col_area.width, first),
         });

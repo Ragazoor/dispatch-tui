@@ -251,3 +251,53 @@ fn a_nested_groups_header_and_cards_are_indented_together() {
     let c30 = card_corner(&buf, y30 + 1, start).expect("child's card under its header");
     assert_eq!(c30, c10 + 2, "the child's card steps in with its header");
 }
+
+/// Unfolding a parent with no card of its own puts the cursor on the first
+/// card of its subtree (board-layout.allium: "Epic Folding").
+#[test]
+fn unfolding_a_parent_with_no_own_card_lands_on_its_subtrees_first_card() {
+    let mut app = flat_app(
+        vec![owned(1, 5), owned(6, 5), owned(3, 30), owned(2, 20)],
+        vec![
+            epic_under(5, None),
+            epic_under(10, None),
+            epic_under(20, None),
+            epic_under(30, Some(10)),
+        ],
+    );
+    app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
+    app.selection_mut().set_column(2); // Running
+    for _ in 0..2 {
+        app.handle_key(make_key(crossterm::event::KeyCode::Char('j')));
+    }
+    assert!(
+        matches!(app.selected_column_item(), Some(ColumnItem::FoldedEpic(h)) if h.epic.id == EpicId(10)),
+        "set-up: the cursor is on the folded parent, got {:?}",
+        app.selected_column_item()
+    );
+
+    app.handle_key(make_key(crossterm::event::KeyCode::Enter));
+
+    assert!(!app.epic_folds.is_folded(TaskStatus::Running, EpicId(10)));
+    match app.selected_column_item() {
+        Some(ColumnItem::Task(t)) => assert_eq!(t.id.0, 3),
+        other => panic!("cursor should rest on the child's card, got {other:?}"),
+    }
+}
+
+/// A folded child right under its parent's open header draws no blank line
+/// between the two.
+#[test]
+fn a_folded_child_sits_directly_under_its_parents_header() {
+    let mut ten = make_epic_with_title(10, "Ten");
+    ten.parent_epic_id = None;
+    let mut thirty = make_epic_with_title(30, "Thirty");
+    thirty.parent_epic_id = Some(EpicId(10));
+    let mut app = flat_app(vec![owned(3, 30)], vec![ten, thirty]);
+    app.epic_folds.toggle(TaskStatus::Running, EpicId(30));
+
+    let buf = render_to_buffer(&mut app, 160, 40);
+    let (_, y10) = find_text(&buf, "#10 Ten").expect("parent header drawn");
+    let (_, y30) = find_text(&buf, "#30 Thirty").expect("folded child drawn");
+    assert_eq!(y30, y10 + 1);
+}

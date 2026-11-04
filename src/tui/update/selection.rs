@@ -159,8 +159,10 @@ impl App {
         }
     }
 
-    /// The anchor of the first card in `epic`'s flattened group within
-    /// `status`, or `None` when it holds none.
+    /// The anchor of the first selectable item under `epic`'s open header in
+    /// `status` — its own first card, or with none of its own, the first in
+    /// its subtree (board-layout.allium: "Epic Folding") — or `None` when the
+    /// group holds nothing.
     fn first_card_anchor_in_epic_group(
         &mut self,
         status: TaskStatus,
@@ -168,13 +170,35 @@ impl App {
     ) -> Option<ColumnAnchor> {
         let cached = self.view().cached_placements();
         let placements = self.view().placements_or_compute(cached.as_deref());
-        self.view()
-            .column_items_for_status_with_placements(status, Some(&placements))
-            .into_iter()
-            .find_map(|item| match item {
-                ColumnItem::Task(t) if t.epic_id == Some(epic) => item.anchor(),
-                _ => None,
-            })
+        let items = self
+            .view()
+            .column_items_for_status_with_placements(status, Some(&placements));
+        // The epic's header can open a group in more than one section; the
+        // first that holds anything wins.
+        let mut rest = items.as_slice();
+        while let Some(at) = rest
+            .iter()
+            .position(|i| matches!(i, ColumnItem::EpicHeader(h) if h.epic.id == epic))
+        {
+            let ColumnItem::EpicHeader(header) = rest[at] else {
+                break;
+            };
+            let found = rest[at + 1..]
+                .iter()
+                .take_while(|i| match i {
+                    // A header at the same depth or shallower ends the subtree.
+                    ColumnItem::EpicHeader(h) => h.depth > header.depth,
+                    ColumnItem::FoldedEpic(h) => h.depth > header.depth,
+                    ColumnItem::Task(_) => true,
+                    _ => false,
+                })
+                .find_map(ColumnItem::anchor);
+            if found.is_some() {
+                return found;
+            }
+            rest = &rest[at + 1..];
+        }
+        None
     }
 
     fn persist_epic_folds(&self) -> Vec<Command> {

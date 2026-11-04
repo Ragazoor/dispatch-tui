@@ -900,7 +900,8 @@ entity CollapsedSections {
 --     back to a group whose cards are all hidden. An open epic-header row
 --     is decoration, exactly as it is today, and does not.
 --   - Folding puts the cursor on the group's own folded header; unfolding
---     puts it on the group's first card. No action but the toggle does
+--     puts it on the group's first card — for a parent with no card of its
+--     own in the column, the first card of its subtree. No action but the toggle does
 --     anything with the cursor on a folded header — see Collapsed
 --     Sections's identical rule for why.
 --   - While a search query is active and some card it admits sits in a
@@ -919,6 +920,8 @@ entity CollapsedSections {
 --     has no rule to the left of its id. Folding a parent does not touch a
 --     descendant's recorded fold: when the parent unfolds, each descendant
 --     draws folded or open exactly as it was recorded before. A folded
+--     header directly under its parent's open header draws no blank line
+--     above it: the two belong together. A folded
 --     parent with no task of its own keeps its header while any descendant
 --     has a task in the section. An open parent header with no task of its
 --     own in the column cannot be folded: no card there belongs to it, and
