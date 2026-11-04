@@ -38,6 +38,10 @@ mod dispatch_requests;
 #[cfg(test)]
 mod session_requests;
 
+/// The feed-request rules (`feed_request.rs`) as pure functions over rows.
+#[cfg(test)]
+mod feed_requests;
+
 /// The agent rules of agents.allium step A1 (task #90115), generic over
 /// `AgentStore` and run here over a plain in-test store (`agent.rs`).
 #[cfg(test)]

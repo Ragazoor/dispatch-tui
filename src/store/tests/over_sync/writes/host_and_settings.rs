@@ -71,7 +71,13 @@ async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
     );
     assert_eq!(
         sent.sent(),
-        vec![Sent::IngestFeed(1, 1, false, "user-me".to_string())],
+        vec![Sent::IngestFeed(
+            1,
+            1,
+            false,
+            "user-me".to_string(),
+            "host-me".to_string()
+        )],
         "the wire item count is what was sent, not the candidate count"
     );
 }
@@ -95,7 +101,13 @@ async fn ingest_feed_is_one_call_and_reports_only_confirmed_removals() {
     assert_eq!(outcome.affected_epics, vec![EpicId(1)]);
     assert_eq!(
         sent.sent(),
-        vec![Sent::IngestFeed(1, 0, false, "user-me".to_string())]
+        vec![Sent::IngestFeed(
+            1,
+            0,
+            false,
+            "user-me".to_string(),
+            "host-me".to_string()
+        )]
     );
 }
 
@@ -121,7 +133,13 @@ async fn feed_upsert_with_no_settled_identity_still_applies_with_an_empty_create
 
     assert_eq!(
         sent.sent(),
-        vec![Sent::IngestFeed(1, 1, false, String::new())],
+        vec![Sent::IngestFeed(
+            1,
+            1,
+            false,
+            String::new(),
+            "host-me".to_string()
+        )],
         "no settled identity stamps an empty created_by, not a refusal"
     );
 }

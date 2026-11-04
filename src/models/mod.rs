@@ -11,6 +11,7 @@
 //! - [`tmux_window`] — [`TmuxWindow`], the `task-<id>` window/session naming convention
 //! - [`tasks`] — tasks, statuses, tags, dispatch mode, slugify, age formatting
 //! - [`dispatch_request`] — the store-split M4 dispatch request row and its vocabulary
+//! - [`feed_request`] — a request one host makes of another for a feed epic
 //! - [`session_request`] — the store-split M5 wrap-up and exit-session request row
 //! - [`agents`] — the agents A1 agent row and its vocabulary
 //! - [`epics`] — epics, epic sub-status, descendant traversal
@@ -66,6 +67,8 @@ pub mod dispatch_request;
 pub use dispatch_request::*;
 pub mod agents;
 pub use agents::*;
+pub mod feed_request;
+pub use feed_request::*;
 pub mod session_request;
 pub use session_request::*;
 

@@ -141,12 +141,14 @@ impl FeedCycle {
         // RoleRoutedFeedSync, teardown-vs-notification.
         let (local, foreign) = super::split_removed_by_host(outcome.removed, self.db.host_id());
         for task in &foreign {
-            // Tearing these down needs a request to the owning host's reactor,
-            // which the module does not yet carry for a deleted row.
-            tracing::warn!(
+            // The module wrote a teardown request for the holding host in the
+            // same transaction as the delete (store-split.allium:
+            // StaleDeleteRequestsTeardownOnTheHoldingHost); that host's feed
+            // runner serves it.
+            tracing::debug!(
                 task_id = task.id.0,
                 host = task.host.as_deref().unwrap_or_default(),
-                "feed cleanup: task was dispatched on another host; its worktree and window are left for that host"
+                "feed cleanup: task was dispatched on another host; a teardown request was written for it"
             );
         }
         super::cleanup_removed_feed_tasks(self.runner.clone(), local).await;

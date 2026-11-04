@@ -114,6 +114,9 @@ pub(in crate::sync) fn subscription_queries(
         // delete, and its outcome would be lost.
         format!("SELECT * FROM visible_dispatch_requests WHERE host = '{host}'"),
         format!("SELECT * FROM visible_session_requests WHERE host = '{host}'"),
+        // Feed requests (refresh and teardown): the rows on this host. The
+        // view serves every host this person owns; the ask narrows it.
+        format!("SELECT * FROM visible_feed_requests WHERE host = '{host}'"),
         // Agents (agents A1): the rows of the tasks the caller holds.
         "SELECT * FROM visible_agents".to_string(),
     ])

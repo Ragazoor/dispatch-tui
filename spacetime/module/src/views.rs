@@ -46,6 +46,7 @@ pub trait StoreReads {
     fn agents_on_host(&self, host: &str) -> Vec<Agent>;
     fn dispatch_requests_on_host(&self, host: &str) -> Vec<DispatchRequest>;
     fn session_requests_on_host(&self, host: &str) -> Vec<SessionRequest>;
+    fn feed_requests_on_host(&self, host: &str) -> Vec<FeedRequest>;
     fn unseen_of(&self, subscriber: &str) -> Vec<UnseenTask>;
     fn subagents_of(&self, task_id: i64) -> Vec<TaskSubagent>;
     /// Rows naming the task as the watcher or as the target.
@@ -185,6 +186,13 @@ macro_rules! impl_store_reads {
             fn session_requests_on_host(&self, host: &str) -> Vec<SessionRequest> {
                 self.db
                     .session_requests()
+                    .host()
+                    .filter(&host.to_string())
+                    .collect()
+            }
+            fn feed_requests_on_host(&self, host: &str) -> Vec<FeedRequest> {
+                self.db
+                    .feed_requests()
                     .host()
                     .filter(&host.to_string())
                     .collect()
@@ -483,6 +491,15 @@ pub fn session_requests_of_held(r: &impl StoreReads, who: &str) -> Vec<SessionRe
     )
 }
 
+/// Feed requests are about no held task (a teardown's task is deleted), so a
+/// caller sees only the rows on the hosts it owns.
+pub fn feed_requests_of_owner(r: &impl StoreReads, who: &str) -> Vec<FeedRequest> {
+    dedup_by(
+        rows_on_owned_hosts(r, who, |h| r.feed_requests_on_host(h)),
+        |f| f.id,
+    )
+}
+
 pub fn subagents_of_held(r: &impl StoreReads, who: &str) -> Vec<TaskSubagent> {
     // No primary key: a row is the (task, agent, session) it names.
     rows_about_held_tasks(
@@ -736,6 +753,11 @@ fn visible_dispatch_requests(ctx: &ViewContext) -> Vec<DispatchRequest> {
 #[spacetimedb::view(accessor = visible_session_requests, public)]
 fn visible_session_requests(ctx: &ViewContext) -> Vec<SessionRequest> {
     session_requests_of_held(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = visible_feed_requests, public)]
+fn visible_feed_requests(ctx: &ViewContext) -> Vec<FeedRequest> {
+    feed_requests_of_owner(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = own_subscriptions, public)]

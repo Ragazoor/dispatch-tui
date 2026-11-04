@@ -36,9 +36,10 @@ fn ingest(store: &Store, epic: i64, items: Vec<FeedTaskUpsertItem>, created_by: 
             signals: vec![],
         })
         .collect();
+    store.register_host_for(HOST_A, "alice");
     store
         .call("alice", |ctx| {
-            ingest_feed(ctx, epic, wrapped, false, created_by.into())
+            ingest_feed(ctx, epic, wrapped, false, created_by.into(), HOST_A.into())
         })
         .expect("ingest_feed");
 }

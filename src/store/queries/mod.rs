@@ -5,6 +5,7 @@
 mod board;
 mod dispatch_requests;
 mod epics;
+mod feed_requests;
 mod learnings;
 mod people;
 mod pr_status;
@@ -161,7 +162,7 @@ impl Store {
             .flatten()
             .unwrap_or_default();
         self.caller
-            .ingest_feed(epic_id, wire_items, additive, created_by)
+            .ingest_feed(epic_id, wire_items, additive, created_by, self.host.clone())
             .await?
             .applied()?;
         let mut below: Vec<EpicId> =

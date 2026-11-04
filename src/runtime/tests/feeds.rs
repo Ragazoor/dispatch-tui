@@ -491,6 +491,44 @@ mod feed_epic_trigger {
         );
     }
 
+    /// feeds.allium: ManualFeedTrigger, SerialisedFeedCycle (scope across
+    /// hosts). The "r" key on a host that is not the epic's poll owner runs
+    /// nothing: it writes a refresh request for the owner and says so.
+    #[tokio::test]
+    async fn exec_trigger_epic_feed_on_a_non_owner_host_asks_the_owner() {
+        use crate::store::FeedRequestStore;
+        let db = test_db().await;
+        let epic = db.create_epic("Owned elsewhere", "", None).await.unwrap();
+        let cmd = r#"echo '[{"external_id":"v1","title":"T","description":"","status":"backlog","tag":"fix"}]'"#;
+        set_feed_command(&db, epic.id, cmd).await;
+        db.seed_feed_setter(epic.id, crate::store::MEMORY_USER_ID);
+        db.seed_foreign_poll_owner(epic.id, "owner-host").await;
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![]))).await;
+
+        rt.exec_trigger_epic_feed(epic.id, "Owned elsewhere".to_string());
+
+        let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+            .await
+            .expect("timed out")
+            .expect("channel closed");
+        match msg {
+            Message::Feed(crate::tui::messages::FeedMessage::OwnerWillRefresh {
+                owner_host,
+                ..
+            }) => assert_eq!(owner_host, "owner-host"),
+            other => panic!("expected OwnerWillRefresh, got: {other:?}"),
+        }
+        assert!(
+            db.list_tasks_for_epic(epic.id).await.is_empty(),
+            "a non-owner host must run no command"
+        );
+        let rows = db.feed_requests().await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].host, "owner-host");
+    }
+
     #[tokio::test]
     async fn exec_trigger_epic_feed_success() {
         let db = test_db().await;

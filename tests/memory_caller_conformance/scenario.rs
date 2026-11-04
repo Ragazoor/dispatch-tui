@@ -1647,6 +1647,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![feed_item("feed-a"), feed_item("feed-b")],
             false,
             accepted.identity.clone(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1656,6 +1657,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![feed_item("feed-a"), feed_item("feed-b")],
             false,
             "conformance".into(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1671,6 +1673,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![feed_item("feed-a")],
             false,
             accepted.identity.clone(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1680,6 +1683,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![feed_item("feed-a")],
             false,
             "conformance".into(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1695,6 +1699,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![],
             false,
             accepted.identity.clone(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1706,6 +1711,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![],
             false,
             "conformance".into(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1720,6 +1726,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![feed_item("retire-me")],
             false,
             accepted.identity.clone(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1731,6 +1738,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![feed_item("retire-me")],
             false,
             "conformance".into(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1754,6 +1762,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![feed_item("retire-me")],
             false,
             accepted.identity.clone(),
+            "host-a".into(),
         )
         .await
         .unwrap();
@@ -1762,6 +1771,7 @@ fn memory_caller_matches_the_real_reducers() {
             vec![feed_item("retire-me")],
             false,
             "conformance".into(),
+            "host-a".into(),
         )
         .await
         .unwrap();

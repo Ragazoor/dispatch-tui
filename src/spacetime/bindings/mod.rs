@@ -16,6 +16,7 @@ pub mod batch_delete_reducer;
 pub mod batch_patch_sub_status_reducer;
 pub mod burn_id_sequence_reducer;
 pub mod claim_dispatch_request_reducer;
+pub mod claim_feed_request_reducer;
 pub mod claim_poll_owner_reducer;
 pub mod claim_session_request_reducer;
 pub mod claim_store_owner_reducer;
@@ -45,6 +46,7 @@ pub mod epic_type;
 pub mod fail_interrupted_dispatch_requests_reducer;
 pub mod fail_interrupted_session_requests_reducer;
 pub mod feed_ingest_item_type;
+pub mod feed_request_type;
 pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
 pub mod flatten_epic_reducer;
@@ -94,12 +96,15 @@ pub mod repo_path_type;
 pub mod repo_paths_table;
 pub mod report_dispatch_failed_reducer;
 pub mod report_dispatch_provisioned_reducer;
+pub mod report_feed_request_done_reducer;
+pub mod report_feed_request_failed_reducer;
 pub mod report_pr_status_reducer;
 pub mod report_pr_unreadable_reducer;
 pub mod report_session_request_done_reducer;
 pub mod report_session_request_failed_reducer;
 pub mod request_dispatch_reducer;
 pub mod request_exit_session_reducer;
+pub mod request_feed_refresh_reducer;
 pub mod request_wrap_up_reducer;
 pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
@@ -177,6 +182,7 @@ pub mod user_profiles_table;
 pub mod visible_agents_table;
 pub mod visible_dispatch_requests_table;
 pub mod visible_epics_table;
+pub mod visible_feed_requests_table;
 pub mod visible_learning_retrievals_table;
 pub mod visible_learning_verdicts_table;
 pub mod visible_learnings_table;
@@ -205,6 +211,7 @@ pub use batch_delete_reducer::batch_delete;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_dispatch_request_reducer::claim_dispatch_request;
+pub use claim_feed_request_reducer::claim_feed_request;
 pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use claim_session_request_reducer::claim_session_request;
 pub use claim_store_owner_reducer::claim_store_owner;
@@ -234,6 +241,7 @@ pub use epic_type::Epic;
 pub use fail_interrupted_dispatch_requests_reducer::fail_interrupted_dispatch_requests;
 pub use fail_interrupted_session_requests_reducer::fail_interrupted_session_requests;
 pub use feed_ingest_item_type::FeedIngestItem;
+pub use feed_request_type::FeedRequest;
 pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
 pub use flatten_epic_reducer::flatten_epic;
@@ -283,12 +291,15 @@ pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
 pub use report_dispatch_failed_reducer::report_dispatch_failed;
 pub use report_dispatch_provisioned_reducer::report_dispatch_provisioned;
+pub use report_feed_request_done_reducer::report_feed_request_done;
+pub use report_feed_request_failed_reducer::report_feed_request_failed;
 pub use report_pr_status_reducer::report_pr_status;
 pub use report_pr_unreadable_reducer::report_pr_unreadable;
 pub use report_session_request_done_reducer::report_session_request_done;
 pub use report_session_request_failed_reducer::report_session_request_failed;
 pub use request_dispatch_reducer::request_dispatch;
 pub use request_exit_session_reducer::request_exit_session;
+pub use request_feed_refresh_reducer::request_feed_refresh;
 pub use request_wrap_up_reducer::request_wrap_up;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
@@ -366,6 +377,7 @@ pub use user_profiles_table::*;
 pub use visible_agents_table::*;
 pub use visible_dispatch_requests_table::*;
 pub use visible_epics_table::*;
+pub use visible_feed_requests_table::*;
 pub use visible_learning_retrievals_table::*;
 pub use visible_learning_verdicts_table::*;
 pub use visible_learnings_table::*;
@@ -421,6 +433,10 @@ pub enum Reducer {
         ceiling: i64,
     },
     ClaimDispatchRequest {
+        request_id: i64,
+        host: String,
+    },
+    ClaimFeedRequest {
         request_id: i64,
         host: String,
     },
@@ -507,6 +523,7 @@ pub enum Reducer {
         items: Vec<FeedIngestItem>,
         additive: bool,
         created_by: String,
+        host: String,
     },
     LinkWorkPackageItem {
         work_package_id: i64,
@@ -603,6 +620,15 @@ pub enum Reducer {
         tmux_window: String,
         reused_worktree: bool,
     },
+    ReportFeedRequestDone {
+        request_id: i64,
+        reporter: String,
+    },
+    ReportFeedRequestFailed {
+        request_id: i64,
+        reporter: String,
+        reason: String,
+    },
     ReportPrStatus {
         task_id: i64,
         host: String,
@@ -635,6 +661,10 @@ pub enum Reducer {
         token: i64,
         action: String,
         pr_url: String,
+    },
+    RequestFeedRefresh {
+        epic_id: i64,
+        host: String,
     },
     RequestWrapUp {
         task_id: i64,
@@ -840,6 +870,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::BatchPatchSubStatus { .. } => "batch_patch_sub_status",
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
             Reducer::ClaimDispatchRequest { .. } => "claim_dispatch_request",
+            Reducer::ClaimFeedRequest { .. } => "claim_feed_request",
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::ClaimSessionRequest { .. } => "claim_session_request",
             Reducer::ClaimStoreOwner => "claim_store_owner",
@@ -887,12 +918,15 @@ impl __sdk::Reducer for Reducer {
             Reducer::RenameWorkspace { .. } => "rename_workspace",
             Reducer::ReportDispatchFailed { .. } => "report_dispatch_failed",
             Reducer::ReportDispatchProvisioned { .. } => "report_dispatch_provisioned",
+            Reducer::ReportFeedRequestDone { .. } => "report_feed_request_done",
+            Reducer::ReportFeedRequestFailed { .. } => "report_feed_request_failed",
             Reducer::ReportPrStatus { .. } => "report_pr_status",
             Reducer::ReportPrUnreadable { .. } => "report_pr_unreadable",
             Reducer::ReportSessionRequestDone { .. } => "report_session_request_done",
             Reducer::ReportSessionRequestFailed { .. } => "report_session_request_failed",
             Reducer::RequestDispatch { .. } => "request_dispatch",
             Reducer::RequestExitSession { .. } => "request_exit_session",
+            Reducer::RequestFeedRefresh { .. } => "request_feed_refresh",
             Reducer::RequestWrapUp { .. } => "request_wrap_up",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
@@ -1004,6 +1038,13 @@ Reducer::BatchDelete{
                 request_id,
                 host,
 }             => __sats::bsatn::to_vec(&claim_dispatch_request_reducer::ClaimDispatchRequestArgs {
+                request_id: request_id.clone(),
+                host: host.clone(),
+}),
+            Reducer::ClaimFeedRequest{
+                request_id,
+                host,
+}             => __sats::bsatn::to_vec(&claim_feed_request_reducer::ClaimFeedRequestArgs {
                 request_id: request_id.clone(),
                 host: host.clone(),
 }),
@@ -1146,11 +1187,13 @@ Reducer::ClearSetting{
                 items,
                 additive,
                 created_by,
+                host,
 }             => __sats::bsatn::to_vec(&ingest_feed_reducer::IngestFeedArgs {
                 epic_id: epic_id.clone(),
                 items: items.clone(),
                 additive: additive.clone(),
                 created_by: created_by.clone(),
+                host: host.clone(),
 }),
             Reducer::LinkWorkPackageItem{
                 work_package_id,
@@ -1321,6 +1364,22 @@ Reducer::RecordBaseBranch{
                 tmux_window: tmux_window.clone(),
                 reused_worktree: reused_worktree.clone(),
 }),
+            Reducer::ReportFeedRequestDone{
+                request_id,
+                reporter,
+}             => __sats::bsatn::to_vec(&report_feed_request_done_reducer::ReportFeedRequestDoneArgs {
+                request_id: request_id.clone(),
+                reporter: reporter.clone(),
+}),
+            Reducer::ReportFeedRequestFailed{
+                request_id,
+                reporter,
+                reason,
+}             => __sats::bsatn::to_vec(&report_feed_request_failed_reducer::ReportFeedRequestFailedArgs {
+                request_id: request_id.clone(),
+                reporter: reporter.clone(),
+                reason: reason.clone(),
+}),
             Reducer::ReportPrStatus{
                 task_id,
                 host,
@@ -1380,6 +1439,13 @@ Reducer::RecordBaseBranch{
                 token: token.clone(),
                 action: action.clone(),
                 pr_url: pr_url.clone(),
+}),
+            Reducer::RequestFeedRefresh{
+                epic_id,
+                host,
+}             => __sats::bsatn::to_vec(&request_feed_refresh_reducer::RequestFeedRefreshArgs {
+                epic_id: epic_id.clone(),
+                host: host.clone(),
 }),
             Reducer::RequestWrapUp{
                 task_id,
@@ -1731,6 +1797,7 @@ pub struct DbUpdate {
     visible_agents: __sdk::TableUpdate<Agent>,
     visible_dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
     visible_epics: __sdk::TableUpdate<Epic>,
+    visible_feed_requests: __sdk::TableUpdate<FeedRequest>,
     visible_learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
     visible_learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
     visible_learnings: __sdk::TableUpdate<Learning>,
@@ -1808,6 +1875,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "visible_epics" => db_update
                     .visible_epics
                     .append(visible_epics_table::parse_table_update(table_update)?),
+                "visible_feed_requests" => db_update.visible_feed_requests.append(
+                    visible_feed_requests_table::parse_table_update(table_update)?,
+                ),
                 "visible_learning_retrievals" => db_update.visible_learning_retrievals.append(
                     visible_learning_retrievals_table::parse_table_update(table_update)?,
                 ),
@@ -1918,6 +1988,10 @@ impl __sdk::DbUpdate for DbUpdate {
         );
         diff.visible_epics =
             cache.apply_diff_to_table::<Epic>("visible_epics", &self.visible_epics);
+        diff.visible_feed_requests = cache.apply_diff_to_table::<FeedRequest>(
+            "visible_feed_requests",
+            &self.visible_feed_requests,
+        );
         diff.visible_learning_retrievals = cache.apply_diff_to_table::<LearningRetrieval>(
             "visible_learning_retrievals",
             &self.visible_learning_retrievals,
@@ -2017,6 +2091,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_epics" => db_update
                     .visible_epics
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_feed_requests" => db_update
+                    .visible_feed_requests
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_learning_retrievals" => db_update
                     .visible_learning_retrievals
@@ -2124,6 +2201,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "visible_epics" => db_update
                     .visible_epics
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_feed_requests" => db_update
+                    .visible_feed_requests
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_learning_retrievals" => db_update
                     .visible_learning_retrievals
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2194,6 +2274,7 @@ pub struct AppliedDiff<'r> {
     visible_agents: __sdk::TableAppliedDiff<'r, Agent>,
     visible_dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
     visible_epics: __sdk::TableAppliedDiff<'r, Epic>,
+    visible_feed_requests: __sdk::TableAppliedDiff<'r, FeedRequest>,
     visible_learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
     visible_learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
     visible_learnings: __sdk::TableAppliedDiff<'r, Learning>,
@@ -2282,6 +2363,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<Epic>("visible_epics", &self.visible_epics, event);
+        callbacks.invoke_table_row_callbacks::<FeedRequest>(
+            "visible_feed_requests",
+            &self.visible_feed_requests,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<LearningRetrieval>(
             "visible_learning_retrievals",
             &self.visible_learning_retrievals,
@@ -3017,6 +3103,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         visible_agents_table::register_table(client_cache);
         visible_dispatch_requests_table::register_table(client_cache);
         visible_epics_table::register_table(client_cache);
+        visible_feed_requests_table::register_table(client_cache);
         visible_learning_retrievals_table::register_table(client_cache);
         visible_learning_verdicts_table::register_table(client_cache);
         visible_learnings_table::register_table(client_cache);
@@ -3050,6 +3137,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "visible_agents",
         "visible_dispatch_requests",
         "visible_epics",
+        "visible_feed_requests",
         "visible_learning_retrievals",
         "visible_learning_verdicts",
         "visible_learnings",

@@ -89,6 +89,14 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
         join_default_workspace(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .register_host("host-a".into(), String::new(), identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
 
         let mut woken = rows_real.changed();
         macro_rules! wait_for {
@@ -138,11 +146,17 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
             let identity = identity.clone();
             async move {
                 let r = real
-                    .ingest_feed(EpicId(root), items.clone(), additive, identity.clone())
+                    .ingest_feed(
+                        EpicId(root),
+                        items.clone(),
+                        additive,
+                        identity.clone(),
+                        "host-a".into(),
+                    )
                     .await
                     .unwrap();
                 let m = mem
-                    .ingest_feed(EpicId(root), items, additive, identity)
+                    .ingest_feed(EpicId(root), items, additive, identity, "host-a".into())
                     .await
                     .unwrap();
                 (r, m)
@@ -240,11 +254,11 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
             .expect("the Bots sub-epic exists")
             .id;
         let on_role = real
-            .ingest_feed(role, vec![], false, identity.clone())
+            .ingest_feed(role, vec![], false, identity.clone(), "host-a".into())
             .await
             .unwrap();
         let on_role_mem = mem
-            .ingest_feed(role, vec![], false, identity.clone())
+            .ingest_feed(role, vec![], false, identity.clone(), "host-a".into())
             .await
             .unwrap();
         match (on_role, on_role_mem) {
@@ -258,17 +272,80 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
             other => panic!("both sides must refuse a role sub-epic, got {other:?}"),
         }
         let missing = real
-            .ingest_feed(EpicId(9999), vec![], false, identity.clone())
+            .ingest_feed(
+                EpicId(9999),
+                vec![],
+                false,
+                identity.clone(),
+                "host-a".into(),
+            )
             .await
             .unwrap();
         let missing_mem = mem
-            .ingest_feed(EpicId(9999), vec![], false, identity.clone())
+            .ingest_feed(
+                EpicId(9999),
+                vec![],
+                false,
+                identity.clone(),
+                "host-a".into(),
+            )
             .await
             .unwrap();
         assert!(matches!(missing, ReducerOutcome::Refused(_)), "{missing:?}");
         assert!(
             matches!(missing_mem, ReducerOutcome::Refused(_)),
             "{missing_mem:?}"
+        );
+
+        // -- feed requests (`store-split.allium: FeedRequest`) -----------------------
+        // Both sides must answer every step alike. host-a is this board's host
+        // (its rows arrive on the subscription); host-b is a second host of the
+        // same person that asks host-a, the poll owner, to refresh.
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .register_host("host-b".into(), String::new(), identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        let root_id = EpicId(root);
+        macro_rules! both {
+            ($call:ident($($arg:expr),*)) => {{
+                let r = real.$call($($arg.clone()),*).await.unwrap();
+                let m = mem.$call($($arg.clone()),*).await.unwrap();
+                assert_eq!(r.won(), m.won(), "{}: real {r:?} vs memory {m:?}", stringify!($call));
+                r.won()
+            }};
+        }
+        let host_a = "host-a".to_string();
+        let host_b = "host-b".to_string();
+        // No poll owner yet: refused on both.
+        assert!(!both!(request_feed_refresh(root_id, host_b)));
+        let a = PollScopeId::Epic(root_id);
+        assert!(both!(claim_poll_owner(a, host_a)));
+        // The owner may not ask itself; the other host may.
+        assert!(!both!(request_feed_refresh(root_id, host_a)));
+        assert!(both!(request_feed_refresh(root_id, host_b)));
+        // Coalesced into the open request.
+        assert!(both!(request_feed_refresh(root_id, host_b)));
+        wait_for!(rows_real.feed_requests().len() == 1);
+        assert_eq!(rows_mem.feed_requests().len(), 1);
+        let real_id = rows_real.feed_requests()[0].id;
+        let mem_id = rows_mem.feed_requests()[0].id;
+        assert_eq!(real_id, mem_id, "feed request id");
+        // Only the row's own host claims it; a report needs a running row.
+        assert!(!both!(claim_feed_request(real_id, host_b)));
+        assert!(!both!(report_feed_request_done(real_id, host_a)));
+        assert!(both!(claim_feed_request(real_id, host_a)));
+        assert!(both!(report_feed_request_done(real_id, host_a)));
+        assert!(!both!(report_feed_request_done(real_id, host_a)));
+        wait_for!(
+            rows_real.feed_requests()[0].state == dispatch_tui::models::FeedRequestState::Done
+        );
+        assert_eq!(
+            rows_mem.feed_requests()[0].state,
+            dispatch_tui::models::FeedRequestState::Done
         );
     });
 }

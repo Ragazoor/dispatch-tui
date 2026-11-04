@@ -204,6 +204,24 @@ fn feed_failed_sets_status_no_refresh() {
 }
 
 #[test]
+fn feed_owner_will_refresh_names_the_owner_and_does_not_refresh() {
+    let mut app = App::new(vec![]);
+
+    let cmds = app.update(Message::Feed(
+        crate::tui::messages::FeedMessage::OwnerWillRefresh {
+            epic_title: "Reviews".to_string(),
+            owner_host: "desktop".to_string(),
+        },
+    ));
+
+    assert_eq!(
+        app.status_message(),
+        Some("Feed for 'Reviews': the poll owner (desktop) will refresh it")
+    );
+    assert!(cmds.is_empty(), "nothing ran here, so nothing to reload");
+}
+
+#[test]
 fn feed_not_authors_host_names_why_and_does_not_refresh() {
     let mut app = App::new(vec![]);
 

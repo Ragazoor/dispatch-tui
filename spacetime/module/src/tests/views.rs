@@ -16,6 +16,7 @@ struct Store {
     agents: Vec<Agent>,
     dispatch_requests: Vec<DispatchRequest>,
     session_requests: Vec<SessionRequest>,
+    feed_requests: Vec<FeedRequest>,
     unseen: Vec<UnseenTask>,
     poll_owners: Vec<PollOwner>,
     learnings: Vec<Learning>,
@@ -101,6 +102,9 @@ impl StoreReads for Store {
     }
     fn session_requests_on_host(&self, host: &str) -> Vec<SessionRequest> {
         keep(&self.session_requests, |s| s.host == host)
+    }
+    fn feed_requests_on_host(&self, host: &str) -> Vec<FeedRequest> {
+        keep(&self.feed_requests, |f| f.host == host)
     }
     fn unseen_of(&self, who: &str) -> Vec<UnseenTask> {
         keep(&self.unseen, |u| u.subscriber == who)
@@ -394,6 +398,14 @@ fn request_and_agent_rows_follow_the_callers_hosts_not_sight_of_the_task() {
         [1]
     );
     assert_eq!(ids(&session_requests_of_held(&store, "ann"), |s| s.id), [1]);
+    // A feed request is about no held task: only its host's owner sees it.
+    store.feed_requests = vec![FeedRequest {
+        id: 1,
+        host: "ann-laptop".into(),
+        ..blank_feed_request()
+    }];
+    assert_eq!(ids(&feed_requests_of_owner(&store, "ann"), |f| f.id), [1]);
+    assert!(feed_requests_of_owner(&store, "bob").is_empty());
     assert_eq!(ids(&agents_of_held(&store, "ann"), |a| a.id), [1]);
     // Bob holds the task, so he sees every request about it.
     assert_eq!(

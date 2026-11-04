@@ -42,8 +42,9 @@ use dispatch_spacetime_module as module;
 
 use crate::clock::Clock;
 use crate::models::{
-    DispatchRequestId, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId,
-    RetrievalSource, SessionRequestId, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
+    DispatchRequestId, EpicId, FeedRequestId, LearningId, LearningVerdict, NotificationWrite,
+    PollScopeId, RetrievalSource, SessionRequestId, SubStatus, TaskId, WorkPackageId,
+    WorkPackageItem,
 };
 use crate::spacetime::bindings;
 
@@ -56,6 +57,7 @@ mod config;
 mod convert;
 mod dispatch_requests;
 mod feed;
+mod feed_requests;
 mod grouping;
 mod learnings;
 mod pr_status;
@@ -145,6 +147,8 @@ struct Tables {
     /// store-split M5. As above, the module's timer table has no counterpart:
     /// the backstop is [`MemoryReducerCaller::expire_session_request`].
     session_requests: BTreeMap<i64, module::SessionRequest>,
+    /// `feed_requests`: no timer, so nothing stands in for a backstop.
+    feed_requests: BTreeMap<i64, module::FeedRequest>,
     /// agents A1.
     agents: BTreeMap<i64, module::Agent>,
     /// The name ledger, keyed by name. Never pushed into `SharedRows`: no
@@ -165,6 +169,7 @@ struct Tables {
     next_work_package_id: i64,
     next_dispatch_request_id: i64,
     next_session_request_id: i64,
+    next_feed_request_id: i64,
     next_agent_id: i64,
 }
 
@@ -186,6 +191,7 @@ impl Tables {
             next_work_package_id: 1,
             next_dispatch_request_id: 1,
             next_session_request_id: 1,
+            next_feed_request_id: 1,
             next_agent_id: 1,
             ..Self::default()
         }
@@ -753,8 +759,42 @@ impl ReducerCaller for MemoryReducerCaller {
         items: Vec<bindings::FeedIngestItem>,
         additive: bool,
         created_by: String,
+        host: String,
     ) -> Result<ReducerOutcome> {
-        self.apply_ingest_feed(epic_id, items, additive, created_by)
+        self.apply_ingest_feed(epic_id, items, additive, created_by, host)
+    }
+
+    async fn request_feed_refresh(&self, epic: EpicId, host: String) -> Result<ReducerOutcome> {
+        self.faulted("request_feed_refresh", || {
+            self.apply_request_feed_refresh(epic, host)
+        })
+    }
+
+    async fn claim_feed_request(&self, id: FeedRequestId, host: String) -> Result<ReducerOutcome> {
+        self.faulted("claim_feed_request", || {
+            self.apply_claim_feed_request(id, host)
+        })
+    }
+
+    async fn report_feed_request_done(
+        &self,
+        id: FeedRequestId,
+        reporter: String,
+    ) -> Result<ReducerOutcome> {
+        self.faulted("report_feed_request_done", || {
+            self.apply_report_feed_request_done(id, reporter)
+        })
+    }
+
+    async fn report_feed_request_failed(
+        &self,
+        id: FeedRequestId,
+        reporter: String,
+        reason: String,
+    ) -> Result<ReducerOutcome> {
+        self.faulted("report_feed_request_failed", || {
+            self.apply_report_feed_request_failed(id, reporter, reason)
+        })
     }
 
     async fn ensure_managed_epics(

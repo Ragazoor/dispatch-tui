@@ -82,6 +82,21 @@ impl App {
         vec![]
     }
 
+    /// This host is not the epic's poll owner, so it asked the owner to run the
+    /// refresh (feeds.allium: SerialisedFeedCycle, scope across hosts). Neither
+    /// a success nor a failure; nothing is reloaded, the owner's cycle changes
+    /// the board when it lands.
+    pub(in crate::tui) fn handle_feed_owner_will_refresh(
+        &mut self,
+        epic_title: String,
+        owner_host: String,
+    ) -> Vec<Command> {
+        self.status.set(format!(
+            "Feed for '{epic_title}': the poll owner ({owner_host}) will refresh it"
+        ));
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_feed_already_refreshing(
         &mut self,
         epic_title: String,

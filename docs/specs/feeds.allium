@@ -35,6 +35,7 @@
 -- docs/superpowers/specs/2026-06-15-pr-review-feed-routing-design.md.
 
 use "./core.allium" as core
+use "./store-split.allium" as split
 
 ------------------------------------------------------------
 -- Contracts
@@ -1013,13 +1014,17 @@ rule FeedTick {
                     if local_host().owner != (epic.feed_command_set_by ?? epic.created_by):
                         -- skipped, last_run bumped as below
                     else if not exists poll_owner:
+                        -- CLAIM, THEN RUN (task #98873). The cycle runs only
+                        -- once the claim is answered and the owner read back
+                        -- is this host; see "Claim then run" below.
                         core/PollOwner.created(
                             scope: epic,
                             scope_id: epic.id,
                             host: local_host(),
                             claimed_at: now
                         )
-                        FeedCycleRequested(epic: epic)
+                        if core/PollOwner{scope: epic, scope_id: epic.id}.host = local_host():
+                            FeedCycleRequested(epic: epic)
                     else if poll_owner.host = local_host():
                         FeedCycleRequested(epic: epic)
                     -- else: another host owns this epic's feed. This tick
@@ -1033,6 +1038,21 @@ rule FeedTick {
                     -- epic's own feed interval; the ownership answer changes
                     -- rarely enough that the extra latency to notice a
                     -- reassignment costs nothing real.
+
+    -- FEED REQUESTS ARE SERVED ON EVERY TICK (task #98873). Beside the
+    -- interval walk above, each tick picks up the open feed requests on this
+    -- host (store-split.allium: FeedRequest) that this process has not
+    -- already taken up, whatever the epic's interval and last_run say: a
+    -- refresh because a person pressed "r" on another of their hosts and is
+    -- waiting, a teardown because a removed task's worktree is still here.
+    -- An open row includes a running one a board that died mid-serve left
+    -- behind, so the first ticks after a start catch up everything left open
+    -- while this board was down. See ServeFeedRefreshRequest and
+    -- ServeFeedTeardownRequest.
+    ensures:
+        for request in split/FeedRequests where
+                host = local_host() and is_open and not served_by_this_process(this):
+            FeedRequestPickedUp(request: request)
 
     @guidance
         -- Each epic's last_run timestamp is bumped before the spawn so
@@ -1086,13 +1106,30 @@ rule FeedTick {
         -- (see docs/plans/2026-09-21-phase-6c-feed-watchers-stragglers-reducers.md,
         -- Decision 1, "feed polling is not yet host-scoped"). The claim
         -- above closes it to exactly one host per epic. This is narrower
-        -- than PollPrStatus's host scoping in one respect: it applies ONLY
-        -- to FeedTick's own claim gate. ManualFeedTrigger (the "r" key,
-        -- below) is not held to the claim: a human asking for a fresh fetch
-        -- right now is a different question from "who runs the recurring
-        -- poll". It IS held to FeedCommandRunsOnSettersHost (task #98851),
-        -- because that rule is about whose command this is, not about who
-        -- polls it.
+        -- than PollPrStatus's host scoping in one respect: before task
+        -- #98873 it applied ONLY to FeedTick's own claim gate, and a manual
+        -- "r" ran the cycle on whichever host it was pressed. Since task
+        -- #98873 ONLY THE POLL OWNER RECONCILES AN EPIC, whoever asked: a
+        -- manual "r" on another host becomes a refresh request the owner
+        -- serves (ManualFeedTrigger, ServeFeedRefreshRequest), because two
+        -- hosts of the setter reconciling one epic could let an older
+        -- emission delete what the other just wrote (SerialisedFeedCycle).
+        -- Both paths stay held to FeedCommandRunsOnSettersHost (task
+        -- #98851), because that rule is about whose command this is, not
+        -- about who polls it.
+        --
+        -- == Claim then run (task #98873) ==
+        --
+        -- When no PollOwner row exists, the tick spawns ONE background task
+        -- for the epic that awaits claim_poll_owner and only then runs the
+        -- cycle. If the claim is refused or fails in transport, or the owner
+        -- read back afterwards is another host (a second host of the same
+        -- person won the claim first), the task stands down: no exec, no
+        -- sync. Before this the tick claimed and ran at once, so two hosts
+        -- that both saw no owner could both run a cycle. The tick itself
+        -- never awaits the claim: the event loop stays responsive, as for the
+        -- command (below). A manual "r" on a host with no owner claims first
+        -- the same way (ManualFeedTrigger).
         --
         -- The feed SCRIPT still executes locally, on whichever host owns
         -- the claim — nothing here changes where or how the subprocess
@@ -1197,7 +1234,7 @@ rule FeedCommandRunsOnSettersHost {
     ensures: FeedCycleRequested(epic: epic)
 
     @guidance
-        -- Three enforcement points, so no single one is the only guard:
+        -- Four enforcement points, so no single one is the only guard:
         --   1. Module: claim_poll_owner and override_poll_owner refuse a
         --      claim on a feed epic by a host whose owner is not the setter
         --      (store-split.allium: ClaimPollOwner), so a stranger's host
@@ -1206,6 +1243,10 @@ rule FeedCommandRunsOnSettersHost {
         --      an epic this host's owner did not set, claimed or not.
         --   3. ManualFeedTrigger: the "r" key refuses with the status line
         --      "Feed for '<title>' runs only on its author's host".
+        --   4. ServeFeedRefreshRequest (task #98873): the poll owner
+        --      re-checks this rule before running a refresh another host
+        --      asked for, and fails the row when it no longer holds (the
+        --      command was re-set by someone else after the request).
 }
 
 rule SerialisedFeedCycle {
@@ -1214,8 +1255,11 @@ rule SerialisedFeedCycle {
     -- A FEED CYCLE is the whole sequence a feed request performs for one epic:
     -- exec the feed command, parse its stdout, apply the two degraded-emission
     -- guards, dispatch FeedSync, and tear down the worktrees of any task the sync
-    -- removed. Exactly TWO surfaces request one: FeedTick (per eligible epic,
-    -- above) and ManualFeedRefresh (the "r" key). The verify-feed CLI execs a
+    -- removed that this host holds. Exactly THREE surfaces request one, all on
+    -- the epic's poll owner: FeedTick (per eligible epic, above),
+    -- ManualFeedRefresh (the "r" key, when this host is the owner or claims
+    -- it) and ServeFeedRefreshRequest (an "r" pressed on another host, task
+    -- #98873). The verify-feed CLI execs a
     -- feed command but performs no sync and shares no process with the TUI, so
     -- it is outside this rule.
     --
@@ -1247,16 +1291,29 @@ rule SerialisedFeedCycle {
     -- in-flight work per epic at one cycle regardless of how many requests
     -- arrive while it runs.
     --
-    -- == Scope across hosts (decided, task #98854; NOT YET IMPLEMENTED) ==
+    -- == Scope across hosts (decided in task #98854, built in task #98873) ==
     --
     -- The claim registry is per PROCESS. Two hosts of the one person who set
-    -- the command may both run it, so two hosts can reconcile one epic and an
-    -- older emission from one can delete what the other just wrote.
-    -- DECISION: only the epic's poll owner reconciles. A manual "r" on a host
-    -- that is not the poll owner writes a refresh request that the poll
-    -- owner's reactor serves on its next tick (the guard stays per process);
-    -- the requesting host's status line says the owner will refresh. Until
-    -- that lands, the race above is open. Follow-up: task #98873.
+    -- the command may both run it, so two hosts could reconcile one epic and
+    -- an older emission from one could delete what the other just wrote.
+    -- ONLY THE EPIC'S POLL OWNER RECONCILES IT NOW, so the per-process claim
+    -- is enough: every cycle for an epic runs in one process.
+    --   - FeedTick runs a cycle only on the owner, and claims an unowned epic
+    --     BEFORE running it (claim then run, under FeedTick).
+    --   - A manual "r" on the owner runs the cycle as before. On a host with
+    --     no owner it claims first, the same way. On any other host it runs
+    --     nothing locally: it writes a refresh request
+    --     (store-split.allium: RequestFeedRefresh), and the status line says
+    --     the owner will refresh (ManualFeedTrigger).
+    --   - The owner serves that request on its next poll tick, through this
+    --     same per-process claim (ServeFeedRefreshRequest), so a request
+    --     arriving while the owner's own cycle runs is dropped like any
+    --     other, and the row is reported done.
+    -- FeedCommandRunsOnSettersHost still gates the serving host: being the
+    -- poll owner does not let a host run a command its owner did not set.
+    -- A removed task held by another host is no longer left behind: the
+    -- ingest writes a teardown request for that host (store-split.allium:
+    -- StaleDeleteRequestsTeardownOnTheHoldingHost, ServeFeedTeardownRequest).
     --
     -- == Scope: this closes the feed-vs-feed race ONLY ==
     --
@@ -1364,9 +1421,14 @@ rule SerialisedFeedCycle {
 -- == Where ingestion runs (store-split M3) ==
 
 rule IngestFeedEmission {
-    when: FeedEmissionPosted(epic, items, additive)
+    when: FeedEmissionPosted(epic, items, additive, host)
 
     requires: epic.feed_command != null
+    -- Task #98873: host is the ingesting board's own host, which the caller
+    -- must act for. The stale delete compares each removed task's host with
+    -- it to decide who tears the task down
+    -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost).
+    requires: host.owner != null and host.owner = caller()
 
     -- THE SPLIT (store-split.allium S1, S2). The TUI process keeps what needs
     -- the operator's machine: it claims the poll-owner row (FeedTick), runs
@@ -1406,7 +1468,10 @@ rule IngestFeedEmission {
     -- TaskTeardown those confirmed gone from its own view afterward (see the
     -- shared-store paragraph under UpsertFeedTasks). A task MOVED between
     -- role sub-epics survives and is never reported. An additive call reports
-    -- nothing. The outcome names the feed epic and every epic below it as
+    -- nothing. A removed task another host holds is not torn down here: the
+    -- module writes a teardown request for that host in the same transaction
+    -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost). The
+    -- outcome names the feed epic and every epic below it as
     -- affected, since the module does not say which of them it wrote to (see
     -- Notifications).
     ensures:
@@ -1690,10 +1755,11 @@ rule UpsertFeedTasks {
         -- (RemovedFeedTask.host = Task.host), because its worktree and window
         -- exist only there. src/feed/mod.rs::split_removed_by_host hands the
         -- cleanup only rows this host owns (or that were never dispatched); a
-        -- row another host owns is logged and left for that host. OPEN
-        -- (follow-up task #98873): carrying the teardown to the owning host needs a
-        -- request row written with the delete, which the module does not yet
-        -- have for a row that no longer exists.
+        -- row another host owns is left for that host, which gets a teardown
+        -- request written by the module in the delete's own transaction
+        -- (task #98873; store-split.allium:
+        -- StaleDeleteRequestsTeardownOnTheHoldingHost) and serves it
+        -- whenever its board next runs (ServeFeedTeardownRequest).
         --
         -- HOW THE REPORT IS BUILT. The delete itself is unconditional (every
         -- stale row is removed whether or not it is reported). A reducer
@@ -1704,8 +1770,8 @@ rule UpsertFeedTasks {
         -- afterward. The candidates are every feed task in the epic's subtree,
         -- so a removed row that owned neither a worktree nor a tmux window is
         -- reported too; its teardown runs no command. A candidate that survives the call (raced by a
-        -- concurrent write on another host, since feed polling is not yet
-        -- host-scoped — see the migration plan's Phase 7) is silently
+        -- concurrent non-feed write; since task #98873 only the poll owner
+        -- reconciles an epic, so no other host's cycle races it) is silently
         -- dropped rather than reported, which can under-report a removal —
         -- an orphaned worktree this cycle misses, caught by whichever later
         -- cycle next sees that same row absent and freshly reportable. It
@@ -2242,10 +2308,19 @@ rule RoleRoutedFeedSync {
         -- resource leak.
         --
         -- Teardown-vs-notification ordering is NORMATIVE and the same on both
-        -- feed paths: the teardown of every removed row completes BEFORE the
+        -- feed paths: the teardown of every removed row THIS HOST HOLDS (its
+        -- host is the ingesting host, or it has none) completes BEFORE the
         -- notification for that cycle is sent. So a notification means
-        -- reconciled AND cleaned up, and the board never shows a row gone while
-        -- its worktree is still being removed.
+        -- reconciled AND cleaned up here, and this board never shows a row
+        -- gone while its worktree is still being removed.
+        --
+        -- A removed row ANOTHER host holds is not waited on (task #98873).
+        -- Its teardown is a request row the module wrote in the ingest's own
+        -- transaction (store-split.allium:
+        -- StaleDeleteRequestsTeardownOnTheHoldingHost), served by that host's
+        -- board whenever it next runs (ServeFeedTeardownRequest), which may be
+        -- long after this cycle notifies. Its worktree outlives the row on
+        -- that machine until then; nothing on this board shows it.
         --
         -- This resolves what was previously an unspecified divergence — the
         -- auto-poll path notified first, the manual path cleaned up first — and
@@ -3226,6 +3301,27 @@ rule ManualFeedTrigger {
     --     found nothing to do.
     --   - On failure: "Feed for '<title>' failed: <error>"
     --   - When DROPPED: "Feed for '<title>' is already refreshing…"
+    --   - When ANOTHER HOST owns the poll (task #98873): "Feed for '<title>':
+    --     the poll owner (<host>) will refresh it"
+    --
+    -- WHERE IT RUNS (task #98873). Only the epic's poll owner reconciles it
+    -- (SerialisedFeedCycle, scope across hosts):
+    --   - this host is the poll owner: the cycle runs here, as below;
+    --   - no poll owner yet: this host claims first and runs the cycle only
+    --     once the claim is answered and the owner read back is this host,
+    --     as FeedTick's claim then run does;
+    --   - another host is (or won the claim and became) the owner: nothing
+    --     runs here. The board asks the owner instead
+    --     (store-split.allium: RequestFeedRefresh), which serves the request
+    --     on its next poll tick (ServeFeedRefreshRequest). An accepted ask
+    --     shows the poll-owner line; a refused one (for example the owner is
+    --     another person's host) shows the failure line with the module's
+    --     reason.
+    -- The poll-owner line is the fifth outcome and, like the dropped line,
+    -- NEITHER a success nor a failure: nothing ran here, and the line
+    -- promises only that the owner has been asked. If the owner is offline
+    -- the refresh waits for it, and a request it has not picked up within
+    -- store-split.allium's config.stale_refresh_request_window is pruned.
     --
     -- The dropped line is the third outcome, and it is NEITHER a success nor a
     -- failure: a cycle for this epic was already in flight, so per
@@ -3251,9 +3347,19 @@ rule ManualFeedTrigger {
 
     -- FeedCommandRunsOnSettersHost (task #98851): when local_host().owner is
     -- not the person who set the command, nothing runs and the status line
-    -- is "Feed for '{epic.title}' runs only on its author's host".
+    -- is "Feed for '{epic.title}' runs only on its author's host". It is
+    -- checked before the poll owner is consulted, so a host that may not run
+    -- the command neither claims nor asks.
     ensures:
         status_bar = "Fetching feed for '{epic.title}'…"
+        -- When the poll owner is, or after the claim turns out to be,
+        -- another host, nothing below runs here:
+        --   split/FeedRefreshRequested(epic, local_host())
+        --   status_bar = "Feed for '{epic.title}': the poll owner
+        --                 ({owner_host}) will refresh it"
+        -- or, on a refused request:
+        --   status_bar = "Feed for '{epic.title}' failed: {error}"
+        -- Otherwise this host is the owner, and:
         -- Spawns epic.feed_command; on success:
         --   FeedSync(epic, items)
         --   status_bar = "Feed for '{epic.title}': {count} task(s) synced"
@@ -3272,10 +3378,12 @@ rule ManualFeedTrigger {
     @guidance
         -- Implementation: src/runtime/epics.rs::exec_trigger_epic_feed, which is
         -- presentation only — it builds a src/feed/cycle.rs::FeedCycle, awaits
-        -- it, and maps the outcome onto the four status lines above. The
+        -- it, and maps the outcome onto the status lines above. The
         -- dropped arm is a distinct FeedMessage variant (AlreadyRefreshing),
         -- not a Failed with a special string, so the status bar cannot blame the
-        -- user's feed command for a serialisation decision.
+        -- user's feed command for a serialisation decision. The poll-owner arm
+        -- is likewise its own variant (OwnerWillRefresh, task #98873), not a
+        -- Refreshed with a zero count.
         -- Keybinding: src/tui/input/normal.rs::run_normal, action refresh_feed.
         -- The keypress gate ("is this a feed epic at all?") is still answered
         -- from the TUI's loaded board in
@@ -3303,6 +3411,104 @@ rule ManualFeedTrigger {
         -- src/feed/mod.rs::cleanup_removed_feed_tasks).
         -- FeedCommandFailure (auto-poll failures) remains silent — only
         -- manual trigger failures surface in the status bar.
+}
+
+-- == Serving feed requests (task #98873) ==
+
+rule ServeFeedRefreshRequest {
+    when: FeedRequestPickedUp(request)
+
+    requires: request.kind = refresh
+    requires: request.host = local_host()
+    -- A board serves only rows its own owner asked for. A row another
+    -- identity wrote is logged and left alone (the module's D11 check on the
+    -- write is the first line, this the second).
+    requires: request.requested_by = local_host().owner
+
+    let epic = request.epic
+    let setter = epic.feed_command_set_by ?? epic.created_by
+
+    ensures:
+        -- Claimed first; nothing runs unless the claim is accepted.
+        split/FeedRequestDelivered(request: request, host: local_host())
+        if epic.feed_command != null and local_host().owner = setter
+                and poll_owner(epic) = local_host():
+            -- ONE cycle, through the same per-process claim as every other
+            -- cycle for the epic (SerialisedFeedCycle).
+            FeedCycleRequested(epic: epic)
+        else:
+            split/FeedRequestFailed(
+                request: request,
+                reporter: local_host(),
+                reason: "this host may not run the epic's feed command"
+                    or "this host no longer owns the poll"
+            )
+
+    @guidance
+        -- Driven by FeedTick, which picks the row up on the owner's next poll
+        -- tick whatever the epic's interval. FeedCommandRunsOnSettersHost is
+        -- RE-CHECKED here, against the epic as it is now: the command may
+        -- have been re-set by someone else since the request was written.
+        -- So is the poll ownership: a request written for a host that has
+        -- since lost the poll (OverrideFeedOwner, a loss of sight) is failed,
+        -- not run, so two hosts never reconcile one epic.
+        -- As for ManualFeedTrigger, the epic's last_run is NOT updated: the
+        -- next automatic poll fires at its normal time.
+        --
+        -- THE OUTCOME, reported by reducer call once the cycle ends
+        -- (store-split.allium: HostReportsFeedRequestDone,
+        -- HostReportsFeedRequestFailed):
+        --   - the cycle synced (trusted or additive): done;
+        --   - the cycle was DROPPED because one for the epic was already in
+        --     flight: done, since that cycle reconciles the epic just as
+        --     well, and the asker wanted the epic refreshed, not a second
+        --     exec;
+        --   - the cycle failed (FeedCommandFailure, DegradedEmptyEmission):
+        --     failed, with the cycle's error as the reason.
+        -- The serving board shows no status line: the asking board already
+        -- showed its own, and the owner's cycle presents like an auto-poll
+        -- (silent on failure, FeedCommandFailure). The cycle's own
+        -- notification refreshes every board that sees the epic.
+        --
+        -- The cycle tears down the removed tasks this host holds before it
+        -- notifies, and leaves teardown requests for the rest
+        -- (RoleRoutedFeedSync's teardown fan-out), exactly as an auto-poll
+        -- cycle does.
+}
+
+rule ServeFeedTeardownRequest {
+    when: FeedRequestPickedUp(request)
+
+    requires: request.kind = teardown
+    requires: request.host = local_host()
+    requires: request.requested_by = local_host().owner
+
+    ensures:
+        split/FeedRequestDelivered(request: request, host: local_host())
+        FeedTaskReleased(
+            repo_path: request.repo_path,
+            worktree: request.worktree,
+            tmux_window: request.tmux_window
+        )
+
+    @guidance
+        -- The same teardown the ingesting host performs for its own removed
+        -- tasks in the cycle (tasks.allium: TaskTeardown, via
+        -- src/feed/mod.rs::cleanup_removed_feed_tasks): the tmux window
+        -- killed, the git worktree removed, the branch (derived from the
+        -- worktree) deleted, best effort and warn-logged. Rows of one repo
+        -- are torn down one after another, since git worktree remove and
+        -- branch -D contend on the shared checkout's index lock; different
+        -- repos run in parallel. Read from the row's snapshots, because the
+        -- task row is gone.
+        --
+        -- THE OUTCOME: done when the teardown finishes, failed with its error
+        -- otherwise (store-split.allium: HostReportsFeedRequestDone,
+        -- HostReportsFeedRequestFailed). A worktree or window already gone
+        -- counts as torn down, so serving a row again after a crash is safe.
+        --
+        -- No deadline: a host offline for days serves the row when its board
+        -- next starts, and the row is never pruned while open.
 }
 
 ------------------------------------------------------------

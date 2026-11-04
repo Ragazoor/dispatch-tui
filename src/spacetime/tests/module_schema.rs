@@ -130,6 +130,8 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// M4's D10). A restored open request would have no timer and would hold its
 /// task's claim forever.
 ///
+/// `feed_requests` is excluded for the same reason: a restored open teardown
+/// would tear down a worktree the restored store's task may hold again.
 #[test]
 fn the_module_declares_every_shared_table_and_nothing_else() {
     let module = module_tables();
@@ -147,6 +149,7 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
                     | "dispatch_request_timeouts"
                     | "session_requests"
                     | "session_request_timeouts"
+                    | "feed_requests"
                     | "unseen_tasks"
             )
         })

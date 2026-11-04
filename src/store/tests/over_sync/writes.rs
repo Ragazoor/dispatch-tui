@@ -86,7 +86,11 @@ enum Sent {
     RecordNotification(i64, String, String),
     RecordUserPromptSubmit(i64, String, String),
     MarkPrLearningsGateShown(i64, String),
-    IngestFeed(i64, usize, bool, String),
+    IngestFeed(i64, usize, bool, String, String),
+    RequestFeedRefresh(i64, String),
+    ClaimFeedRequest(i64, String),
+    ReportFeedRequestDone(i64, String),
+    ReportFeedRequestFailed(i64, String, String),
     ClaimPollOwner(String, i64, String),
     OverridePollOwner(String, i64, String),
     BatchPatchSubStatus(usize),
@@ -717,17 +721,52 @@ impl ReducerCaller for RecordingCaller {
         items: Vec<bindings::FeedIngestItem>,
         additive: bool,
         created_by: String,
+        host: String,
     ) -> anyhow::Result<ReducerOutcome> {
         let outcome = self.answer(Sent::IngestFeed(
             epic_id.0,
             items.len(),
             additive,
             created_by,
+            host,
         ))?;
         if matches!(outcome, ReducerOutcome::Applied(_)) {
             self.simulate_feed_removal();
         }
         Ok(outcome)
+    }
+
+    async fn request_feed_refresh(
+        &self,
+        epic: EpicId,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RequestFeedRefresh(epic.0, host))
+    }
+
+    async fn claim_feed_request(
+        &self,
+        id: crate::models::FeedRequestId,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ClaimFeedRequest(id.0, host))
+    }
+
+    async fn report_feed_request_done(
+        &self,
+        id: crate::models::FeedRequestId,
+        reporter: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ReportFeedRequestDone(id.0, reporter))
+    }
+
+    async fn report_feed_request_failed(
+        &self,
+        id: crate::models::FeedRequestId,
+        reporter: String,
+        reason: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ReportFeedRequestFailed(id.0, reporter, reason))
     }
 
     async fn ensure_managed_epics(

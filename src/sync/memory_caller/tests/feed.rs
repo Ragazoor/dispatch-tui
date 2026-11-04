@@ -3,7 +3,19 @@ use crate::models::EpicOrigin;
 
 // -- Feed ingestion -----------------------------------------------------------
 
-fn feed_item(external_id: &str) -> bindings::FeedIngestItem {
+/// A caller that owns the host `laptop` an ingest names (`ingest_feed` takes
+/// the host that runs it, and the caller must act for it).
+async fn feed_caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
+    let (caller, rows) = caller();
+    let caller = caller.with_sender("alice");
+    caller
+        .register_host("laptop".into(), "l".into(), "alice".into())
+        .await
+        .unwrap();
+    (caller, rows)
+}
+
+pub(super) fn feed_item(external_id: &str) -> bindings::FeedIngestItem {
     bindings::FeedIngestItem {
         signals: vec![],
         item: bindings::FeedTaskUpsertItem {
@@ -26,7 +38,7 @@ fn feed_item(external_id: &str) -> bindings::FeedIngestItem {
 
 #[tokio::test]
 async fn ingest_feed_inserts_updates_and_removes_stale_items() {
-    let (caller, rows) = caller();
+    let (caller, rows) = feed_caller().await;
     let epic_id = caller.create_epic(blank_epic()).await.unwrap();
 
     caller
@@ -35,6 +47,7 @@ async fn ingest_feed_inserts_updates_and_removes_stale_items() {
             vec![feed_item("a"), feed_item("b")],
             false,
             "tester".into(),
+            "laptop".into(),
         )
         .await
         .unwrap();
@@ -46,7 +59,13 @@ async fn ingest_feed_inserts_updates_and_removes_stale_items() {
     // raw row delete, not a guarded `delete_task`, so it removes "b"
     // regardless of status.
     caller
-        .ingest_feed(epic_id, vec![feed_item("a")], false, "tester".into())
+        .ingest_feed(
+            epic_id,
+            vec![feed_item("a")],
+            false,
+            "tester".into(),
+            "laptop".into(),
+        )
         .await
         .unwrap();
     let remaining = rows.tasks_for_epic(epic_id);
@@ -56,9 +75,15 @@ async fn ingest_feed_inserts_updates_and_removes_stale_items() {
 
 #[tokio::test]
 async fn ingest_feed_refuses_an_unknown_epic() {
-    let (caller, _rows) = caller();
+    let (caller, _rows) = feed_caller().await;
     let outcome = caller
-        .ingest_feed(EpicId(999), vec![feed_item("a")], false, "tester".into())
+        .ingest_feed(
+            EpicId(999),
+            vec![feed_item("a")],
+            false,
+            "tester".into(),
+            "laptop".into(),
+        )
         .await
         .unwrap();
     assert!(!outcome.won());
@@ -75,7 +100,7 @@ fn feed_item_at(external_id: &str, url: &str) -> bindings::FeedIngestItem {
 /// so that un-grouping the feed (`FlatFeedReconcile`) can find and flatten it.
 #[tokio::test]
 async fn grouped_ingest_creates_repo_group_sub_epics_that_flat_ingest_flattens() {
-    let (caller, rows) = caller();
+    let (caller, rows) = feed_caller().await;
     let epic_id = caller
         .create_epic(bindings::Epic {
             group_by_repo: true,
@@ -86,7 +111,7 @@ async fn grouped_ingest_creates_repo_group_sub_epics_that_flat_ingest_flattens()
     let items = || vec![feed_item_at("a", "https://github.com/org/alpha/pull/1")];
 
     caller
-        .ingest_feed(epic_id, items(), false, "tester".into())
+        .ingest_feed(epic_id, items(), false, "tester".into(), "laptop".into())
         .await
         .unwrap();
     let subs = rows.epics_with_parent(Some(epic_id));
@@ -104,7 +129,7 @@ async fn grouped_ingest_creates_repo_group_sub_epics_that_flat_ingest_flattens()
         .await
         .unwrap();
     caller
-        .ingest_feed(epic_id, items(), false, "tester".into())
+        .ingest_feed(epic_id, items(), false, "tester".into(), "laptop".into())
         .await
         .unwrap();
 

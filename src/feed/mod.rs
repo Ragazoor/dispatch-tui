@@ -3,6 +3,7 @@ mod exec;
 mod guard;
 mod ingest;
 mod parse;
+mod requests;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -220,6 +221,9 @@ pub struct FeedRunner {
     board_reads: Arc<dyn crate::store::BoardReads>,
     /// This machine's own `Host.id`, compared against `core/PollOwner.host`.
     host_id: String,
+    /// Feed request rows this process has already handed out, so a row is
+    /// served once however many ticks see it open.
+    served_requests: std::collections::HashSet<i64>,
     /// Test-only join handles for the jobs spawned by `tick`. Production keeps
     /// firing-and-forgetting: the field, and the push that fills it, exist only
     /// under `cfg(test)`. Tests need it because some feed-cycle outcomes
@@ -229,6 +233,37 @@ pub struct FeedRunner {
     /// banned by `./scripts/check-no-test-sleep.sh`.
     #[cfg(test)]
     spawned: Vec<tokio::task::JoinHandle<()>>,
+}
+
+/// Claim `epic_id`'s poll ownership for `host_id` and wait for the answer.
+/// True only when this host owns the epic afterwards: a failed claim, or a
+/// claim another host won first, stands this host down.
+pub(crate) async fn claim_epic_poll(
+    db: &dyn TaskStore,
+    board_reads: &dyn crate::store::BoardReads,
+    host_id: &str,
+    epic_id: EpicId,
+) -> bool {
+    let scope = crate::models::PollScopeId::Epic(epic_id);
+    if let Err(err) = db.claim_poll_owner(scope).await {
+        tracing::debug!(
+            epic_id = epic_id.0,
+            "FeedRunner: failed to claim poll ownership, standing down: {err:#}"
+        );
+        return false;
+    }
+    // Read back from the subscription. If the claim's row has not landed yet
+    // this reads `None` and stands down; the next tick sees the owner and
+    // runs, so the worst case is one tick late, never two hosts running.
+    let owner = board_reads.poll_owner(scope).await;
+    let won = owner.as_deref() == Some(host_id);
+    if !won {
+        tracing::debug!(
+            epic_id = epic_id.0,
+            "FeedRunner: another host claimed this epic first, standing down"
+        );
+    }
+    won
 }
 
 /// `feeds.allium: FeedCommandRunsOnSettersHost`: whether the host `host_id`
@@ -264,6 +299,7 @@ impl FeedRunner {
             warned_below_floor: HashMap::new(),
             board_reads,
             host_id,
+            served_requests: std::collections::HashSet::new(),
             #[cfg(test)]
             spawned: Vec::new(),
         }
@@ -341,6 +377,11 @@ impl FeedRunner {
     }
 
     pub async fn tick(&mut self) {
+        // Before the feed-command early return: a teardown row outlives the
+        // epic's feed command, and a refresh row asks for a cycle now,
+        // whatever the interval (store-split.allium: FeedRequest).
+        self.serve_feed_requests().await;
+
         let Some(epics) = self.list_epics_for_tick().await else {
             return;
         };
@@ -374,12 +415,116 @@ impl FeedRunner {
             // `SerialisedFeedCycle` contention: a non-owning host must not
             // retry every tick just because it lost the ownership check.
             self.last_run.insert(epic.id, now);
-            if !self.this_host_polls(&epic).await {
+            let Some(claim_first) = self.this_host_polls(&epic).await else {
                 continue;
-            }
+            };
 
-            self.spawn_epic_cycle(epic.id, epic.title, Arc::clone(&known_paths));
+            self.spawn_epic_cycle(epic.id, epic.title, Arc::clone(&known_paths), claim_first);
         }
+    }
+
+    /// Serve the feed requests other hosts wrote for this one: a refresh runs
+    /// one cycle for the epic, a teardown releases a removed task's worktree
+    /// and window. Rows are served once per process; a row left `running` by a
+    /// board that died is served again by the next one.
+    async fn serve_feed_requests(&mut self) {
+        let rows = self.db.feed_requests().await;
+        if rows.iter().all(|r| !r.state.is_open()) {
+            return;
+        }
+        let Some(owner) = self.db.own_identity().await else {
+            // Held back, not acted on: the next tick after the identity
+            // settles hands them out.
+            return;
+        };
+        let work = requests::rows_to_serve(rows, &self.host_id, &owner, &mut self.served_requests);
+        let (refreshes, teardowns): (Vec<_>, Vec<_>) = work
+            .into_iter()
+            .partition(|r| r.kind == crate::models::FeedRequestKind::Refresh);
+        if !teardowns.is_empty() {
+            let db = Arc::clone(&self.db);
+            let runner = Arc::clone(&self.runner);
+            let _handle = tokio::task::spawn(requests::serve_teardowns(db, runner, teardowns));
+            #[cfg(test)]
+            self.spawned.push(_handle);
+        }
+        for row in refreshes {
+            self.spawn_refresh_request(row);
+        }
+    }
+
+    /// Serve one refresh row: claim it, re-check that this host may run the
+    /// epic's command, run the one cycle through the shared guard and report.
+    /// A cycle already in flight satisfies the request (`Busy` is done).
+    fn spawn_refresh_request(&mut self, row: crate::models::FeedRequest) {
+        let Some(epic_id) = row.epic_id else {
+            return;
+        };
+        let db = Arc::clone(&self.db);
+        let runner = Arc::clone(&self.runner);
+        let guard = Arc::clone(&self.guard);
+        let board_reads = Arc::clone(&self.board_reads);
+        let host_id = self.host_id.clone();
+        let notify = self.notify.clone();
+        let _handle = tokio::task::spawn(async move {
+            match db.claim_feed_request(row.id).await {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(err) => {
+                    tracing::warn!(request = row.id.0, "feed refresh: claim not sent: {err:#}");
+                    return;
+                }
+            }
+            let Some(epic) = board_reads.get_epic(epic_id).await else {
+                let _ = db
+                    .report_feed_request_failed(row.id, "epic no longer exists")
+                    .await;
+                return;
+            };
+            if !host_may_run_feed(&*board_reads, &host_id, &epic).await {
+                let _ = db
+                    .report_feed_request_failed(row.id, "this host's owner did not set the command")
+                    .await;
+                return;
+            }
+            // Only the poll owner reconciles: if the poll moved after the
+            // request was written, this host stands down.
+            let owner = board_reads
+                .poll_owner(crate::models::PollScopeId::Epic(epic_id))
+                .await;
+            if owner.as_deref() != Some(host_id.as_str()) {
+                let _ = db
+                    .report_feed_request_failed(row.id, "this host no longer owns the poll")
+                    .await;
+                return;
+            }
+            let cycle = cycle::FeedCycle {
+                db: Arc::clone(&db),
+                runner,
+                guard,
+                epic_id,
+                epic_title: epic.title,
+                known_paths: None,
+                command_timeout: FEED_COMMAND_TIMEOUT,
+            };
+            let reported = match cycle.run().await {
+                FeedCycleOutcome::Synced { affected_epics, .. } => {
+                    for id in affected_epics {
+                        let _ = notify.send(BoardEvent::EpicChanged(id));
+                    }
+                    db.report_feed_request_done(row.id).await
+                }
+                FeedCycleOutcome::Busy => db.report_feed_request_done(row.id).await,
+                FeedCycleOutcome::Failed(reason) => {
+                    db.report_feed_request_failed(row.id, &reason).await
+                }
+            };
+            if let Err(err) = reported {
+                tracing::warn!(request = row.id.0, "feed refresh: report not sent: {err:#}");
+            }
+        });
+        #[cfg(test)]
+        self.spawned.push(_handle);
     }
 
     /// The epics to consider this tick, or `None` when there is nothing to poll
@@ -411,45 +556,28 @@ impl FeedRunner {
         Some(epics)
     }
 
-    /// Whether this host should run `epic_id`'s cycle this tick, per
-    /// `core/PollOwner`. Claims ownership (without waiting for the answer) when
-    /// no host has it yet.
-    async fn this_host_polls(&mut self, epic: &crate::models::Epic) -> bool {
-        let epic_id = epic.id;
+    /// Whether this host should run `epic`'s cycle this tick, per
+    /// `core/PollOwner`: `None` to skip, `Some(claim_first)` to run, where
+    /// `claim_first` says no host owns the epic yet, so the spawned job must
+    /// win the claim before it runs anything
+    /// (feeds.allium: `SerialisedFeedCycle`, scope across hosts).
+    async fn this_host_polls(&mut self, epic: &crate::models::Epic) -> Option<bool> {
         let owner = self
             .board_reads
-            .poll_owner(crate::models::PollScopeId::Epic(epic_id))
+            .poll_owner(crate::models::PollScopeId::Epic(epic.id))
             .await;
         // `FeedCommandRunsOnSettersHost` comes first: a host whose owner did
         // not set the command neither claims nor runs it.
         let runs_here = host_may_run_feed(&*self.board_reads, &self.host_id, epic).await;
         match decide_feed_poll_action(owner.as_deref(), &self.host_id, runs_here) {
-            PollAction::Skip => return false,
-            // Fired without awaiting it: `tick` must not block on a
-            // network round-trip for one epic while others are still
-            // waiting their turn in this loop. This is the same
-            // "proceed optimistically, let the loser's next tick stand
-            // down" tradeoff `exec_check_status_if_owned` makes for the
-            // PR-poll side of the same mechanism (`src/runtime/pr.rs`).
-            PollAction::ClaimAndProceed => {
-                let db = self.db.clone();
-                let _claim_handle = tokio::task::spawn(async move {
-                    if let Err(err) = db
-                        .claim_poll_owner(crate::models::PollScopeId::Epic(epic_id))
-                        .await
-                    {
-                        tracing::debug!(
-                            epic_id = epic_id.0,
-                            "FeedRunner: failed to claim poll ownership, running anyway: {err:#}"
-                        );
-                    }
-                });
-                #[cfg(test)]
-                self.spawned.push(_claim_handle);
-            }
-            PollAction::Proceed => {}
+            PollAction::Skip => None,
+            // The claim is awaited by the spawned job, not here: `tick` must
+            // not block on a network round-trip for one epic while others
+            // wait their turn, but the cycle must not start until this host
+            // owns the epic, or two hosts could both run on a first claim.
+            PollAction::ClaimAndProceed => Some(true),
+            PollAction::Proceed => Some(false),
         }
-        true
     }
 
     /// Spawn one epic's feed cycle, so a slow feed command cannot stall the
@@ -461,6 +589,7 @@ impl FeedRunner {
         epic_id: EpicId,
         epic_title: String,
         known_paths: Arc<Vec<String>>,
+        claim_first: bool,
     ) {
         let cycle = cycle::FeedCycle {
             db: self.db.clone(),
@@ -472,8 +601,13 @@ impl FeedRunner {
             command_timeout: FEED_COMMAND_TIMEOUT,
         };
         let notify = self.notify.clone();
+        let board_reads = Arc::clone(&self.board_reads);
+        let host_id = self.host_id.clone();
 
         let _handle = tokio::task::spawn(async move {
+            if claim_first && !claim_epic_poll(&*cycle.db, &*board_reads, &host_id, epic_id).await {
+                return;
+            }
             match cycle.run().await {
                 // The cycle has already torn down every removed task's
                 // worktree by the time it returns, so these notifications

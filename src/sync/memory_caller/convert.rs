@@ -458,6 +458,26 @@ mirror!(
 );
 
 mirror!(
+    module::FeedRequest,
+    bindings::FeedRequest {
+        id,
+        kind,
+        host,
+        epic_id,
+        task_id,
+        repo_path,
+        worktree,
+        tmux_window,
+        requested_by,
+        state,
+        requested_at,
+        claimed_at,
+        finished_at,
+        reason,
+    }
+);
+
+mirror!(
     module::Agent,
     bindings::Agent {
         id,

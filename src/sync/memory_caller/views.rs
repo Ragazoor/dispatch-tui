@@ -94,6 +94,9 @@ impl StoreReads for Tables {
     fn dispatch_requests_on_host(&self, host: &str) -> Vec<module::DispatchRequest> {
         keep(self.dispatch_requests.values().cloned(), |d| d.host == host)
     }
+    fn feed_requests_on_host(&self, host: &str) -> Vec<module::FeedRequest> {
+        keep(self.feed_requests.values().cloned(), |f| f.host == host)
+    }
     fn session_requests_on_host(&self, host: &str) -> Vec<module::SessionRequest> {
         keep(self.session_requests.values().cloned(), |s| s.host == host)
     }

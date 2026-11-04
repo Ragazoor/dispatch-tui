@@ -38,6 +38,14 @@ pub enum FeedMessage {
     /// the epic's command (feeds.allium: FeedCommandRunsOnSettersHost). Not a
     /// failure of the command, which never ran.
     NotAuthorsHost { epic_title: String },
+    /// The refresh ran nothing here: another host owns this epic's polling, so a
+    /// refresh request was written for it to serve on its next tick
+    /// (feeds.allium: SerialisedFeedCycle, scope across hosts). Neither a
+    /// success nor a failure.
+    OwnerWillRefresh {
+        epic_title: String,
+        owner_host: String,
+    },
 }
 
 impl FeedMessage {
@@ -54,6 +62,10 @@ impl FeedMessage {
             FeedMessage::AlreadyRefreshing { epic_title } => {
                 app.handle_feed_already_refreshing(epic_title)
             }
+            FeedMessage::OwnerWillRefresh {
+                epic_title,
+                owner_host,
+            } => app.handle_feed_owner_will_refresh(epic_title, owner_host),
             FeedMessage::NotAuthorsHost { epic_title } => {
                 app.handle_feed_not_authors_host(epic_title)
             }

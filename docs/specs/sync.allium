@@ -548,7 +548,9 @@ rule SubscribeOnceIdentityIsSettled {
         --     every row on a host this person owns, so a request outlives
         --     the person's sight of its task: unfollowing the epic of a
         --     teammate's task one dispatched must not lose the wrap-up row
-        --     or its serving), and the links, poll claims,
+        --     or its serving); feed requests (store-split.allium:
+        --     FeedRequest), which concern no held task, only on the hosts
+        --     this person owns; and the links, poll claims,
         --     learnings, settings, workspaces and memberships the caller
         --     may see.
         -- Usage is not a view: the board asks the store on demand
@@ -563,10 +565,10 @@ rule SubscribeOnceIdentityIsSettled {
         -- board receives live, with no widening and no reassert. A refused
         -- widening or a mid-walk thin subtree no longer exists.
         --
-        -- Two asks stay narrowed by host, because a view serves every host
+        -- Four asks stay narrowed by host, because a view serves every host
         -- this person owns and a request or setting is one machine's:
-        -- own_settings, visible_dispatch_requests and
-        -- visible_session_requests carry WHERE host = this host, in every
+        -- own_settings, visible_dispatch_requests, visible_session_requests
+        -- and visible_feed_requests carry WHERE host = this host, in every
         -- state, so a row never leaves a state-filtered query as a delete.
         --
         -- WHY own_creations EXISTS, AND WHY IT IS UNCONDITIONAL. A reducer
@@ -687,6 +689,43 @@ rule SubscribeToThisHostsSessionRequests {
         -- rows are included for the same reason as the fifth ask: a row
         -- leaving a state-filtered query would arrive as a delete, and the
         -- outcome would be lost.
+        --
+        -- It does not weaken SubscriptionsCoverOnlyTheOwnBoardAndItsEpics:
+        -- the rows are this machine's own. Re-asserted on every connection,
+        -- like the rest.
+}
+
+rule SubscribeToThisHostsFeedRequests {
+    when: UserIdentitySettled(identity)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures:
+        FeedRequestSubscriptionAsserted(
+            connection: connection,
+            host: core/local_host()
+        )
+
+    @guidance
+        -- A HOST-SCOPED ASK (task #98873), scoped by machine like the fifth
+        -- and sixth and asserted beside them: every store-split.allium
+        -- FeedRequest row whose host is this machine, in every state, read
+        -- through the visible_feed_requests view. The view answers a caller
+        -- with the rows on the hosts its identity owns; the ask narrows that
+        -- to this host, and the board acts only on its own host's rows. A
+        -- refresh row names the epic's poll owner and a teardown row the
+        -- host holding a removed feed task, so this delivers the work this
+        -- host must do (feeds.allium: FeedTick picks the open rows up,
+        -- including those a starting board receives in its initial rows, and
+        -- ServeFeedRefreshRequest and ServeFeedTeardownRequest serve them).
+        -- Finished rows are included for the same reason as the fifth ask: a
+        -- row leaving a state-filtered query would arrive as a delete.
+        --
+        -- Unlike the dispatch and session asks, a feed request concerns no
+        -- task this person can see (a teardown's task is already deleted), so
+        -- there is no held-task leg: only the owned-hosts one.
         --
         -- It does not weaken SubscriptionsCoverOnlyTheOwnBoardAndItsEpics:
         -- the rows are this machine's own. Re-asserted on every connection,

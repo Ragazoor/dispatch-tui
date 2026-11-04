@@ -213,8 +213,9 @@ impl MemoryReducerCaller {
         tables: &mut Tables,
         epic_id: i64,
         keep: &std::collections::HashSet<&str>,
+        ingest_host: &str,
     ) {
-        let stale: Vec<i64> = tables
+        let stale: Vec<module::Task> = tables
             .tasks
             .values()
             .filter(|t| {
@@ -222,11 +223,13 @@ impl MemoryReducerCaller {
                     && !t.external_id.is_empty()
                     && !keep.contains(t.external_id.as_str())
             })
-            .map(|t| t.id)
+            .cloned()
             .collect();
-        for id in stale {
-            self.delete_task_row(tables, id);
-            self.delete_task_side_effects(tables, id);
+        for task in stale {
+            self.delete_task_row(tables, task.id);
+            self.delete_task_side_effects(tables, task.id);
+            // StaleDeleteRequestsTeardownOnTheHoldingHost, as the module.
+            self.write_teardown_request_if_owed(tables, &task, ingest_host);
         }
     }
 
@@ -237,6 +240,7 @@ impl MemoryReducerCaller {
         items: Vec<module::FeedTaskUpsertItem>,
         created_by: &str,
         delete_absent: bool,
+        ingest_host: &str,
     ) -> ReducerOutcome {
         if !tables.epics.contains_key(&epic_id) {
             return ReducerOutcome::Refused(format!(
@@ -250,7 +254,7 @@ impl MemoryReducerCaller {
         if delete_absent {
             let keep: std::collections::HashSet<&str> =
                 items.iter().map(|i| i.external_id.as_str()).collect();
-            self.delete_stale_feed_tasks_in_epic(tables, epic_id, &keep);
+            self.delete_stale_feed_tasks_in_epic(tables, epic_id, &keep, ingest_host);
         }
         ReducerOutcome::Applied(vec![])
     }
@@ -264,15 +268,20 @@ impl MemoryReducerCaller {
         items: Vec<bindings::FeedIngestItem>,
         additive: bool,
         created_by: String,
+        host: String,
     ) -> Result<ReducerOutcome> {
         let items: Vec<module::FeedIngestItem> = items
             .into_iter()
             .map(module::FeedIngestItem::from)
             .collect();
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let mut store = TablesIngest {
             caller: self,
             tables: &mut tables,
+            host,
         };
         Ok(
             match module::ingest_into(&mut store, epic_id.0, items, additive, &created_by) {
@@ -438,6 +447,8 @@ fn managed_role_title(role: &str) -> &'static str {
 struct TablesIngest<'a> {
     caller: &'a MemoryReducerCaller,
     tables: &'a mut Tables,
+    /// The host running the ingest (the module's `ReducerStore.1`).
+    host: String,
 }
 
 impl module::IngestStore for TablesIngest<'_> {
@@ -529,6 +540,7 @@ impl module::IngestStore for TablesIngest<'_> {
             items,
             created_by,
             delete_absent,
+            &self.host,
         ) {
             ReducerOutcome::Refused(why) => Err(why),
             _ => Ok(()),
@@ -537,7 +549,7 @@ impl module::IngestStore for TablesIngest<'_> {
 
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>) {
         self.caller
-            .delete_stale_feed_tasks_in_epic(self.tables, epic_id, keep);
+            .delete_stale_feed_tasks_in_epic(self.tables, epic_id, keep, &self.host);
     }
 
     fn recalculate_epic_chain(&mut self, epic_id: i64) {

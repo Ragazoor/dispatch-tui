@@ -1096,7 +1096,7 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_session_request() {
     };
     let ingest = |items: Vec<FeedIngestItem>| {
         store.call("alice", |ctx| {
-            ingest_feed(ctx, epic, items, false, "test-creator".into())
+            ingest_feed(ctx, epic, items, false, "test-creator".into(), HOST_A.into())
         })
     };
     ingest(vec![item]).expect("first ingest");

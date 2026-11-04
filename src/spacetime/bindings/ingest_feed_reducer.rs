@@ -13,6 +13,7 @@ pub(super) struct IngestFeedArgs {
     pub items: Vec<FeedIngestItem>,
     pub additive: bool,
     pub created_by: String,
+    pub host: String,
 }
 
 impl From<IngestFeedArgs> for super::Reducer {
@@ -22,6 +23,7 @@ impl From<IngestFeedArgs> for super::Reducer {
             items: args.items,
             additive: args.additive,
             created_by: args.created_by,
+            host: args.host,
         }
     }
 }
@@ -47,8 +49,9 @@ pub trait ingest_feed {
         items: Vec<FeedIngestItem>,
         additive: bool,
         created_by: String,
+        host: String,
     ) -> __sdk::Result<()> {
-        self.ingest_feed_then(epic_id, items, additive, created_by, |_, _| {})
+        self.ingest_feed_then(epic_id, items, additive, created_by, host, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `ingest_feed` to run as soon as possible,
@@ -63,6 +66,7 @@ pub trait ingest_feed {
         items: Vec<FeedIngestItem>,
         additive: bool,
         created_by: String,
+        host: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -77,6 +81,7 @@ impl ingest_feed for super::RemoteReducers {
         items: Vec<FeedIngestItem>,
         additive: bool,
         created_by: String,
+        host: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -88,6 +93,7 @@ impl ingest_feed for super::RemoteReducers {
                 items,
                 additive,
                 created_by,
+                host,
             },
             callback,
         )

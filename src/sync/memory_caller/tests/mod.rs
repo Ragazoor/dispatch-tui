@@ -126,6 +126,7 @@ mod dispatch_requests;
 mod epics;
 mod feed;
 mod feed_authority;
+mod feed_requests;
 mod learnings;
 mod pr_status;
 mod rules;

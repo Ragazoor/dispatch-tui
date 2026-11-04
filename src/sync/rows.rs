@@ -38,9 +38,9 @@ use std::sync::RwLock;
 use tokio::sync::watch;
 
 use crate::models::{
-    Agent, AgentId, DispatchRequest, DispatchRequestId, Epic, EpicId, Learning, LearningFilter,
-    LearningId, LearningRetrieval, PollScopeId, SessionRequest, SessionRequestId, Task, TaskId,
-    WorkPackage, WorkPackageId, WorkPackageLink,
+    Agent, AgentId, DispatchRequest, DispatchRequestId, Epic, EpicId, FeedRequest, FeedRequestId,
+    Learning, LearningFilter, LearningId, LearningRetrieval, PollScopeId, SessionRequest,
+    SessionRequestId, Task, TaskId, WorkPackage, WorkPackageId, WorkPackageLink,
 };
 use crate::spacetime::bindings;
 
@@ -166,6 +166,9 @@ struct Rows {
     /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsSessionRequests`),
     /// in every state, so nothing here filters by host or state.
     session_requests: BTreeMap<i64, SessionRequest>,
+    /// Arrive scoped to THIS host by the subscription's `WHERE host = …`
+    /// (`sync.allium: SubscribeToThisHostsFeedRequests`), in every state.
+    feed_requests: BTreeMap<i64, FeedRequest>,
     /// agents A1. Arrive unfiltered (`sync.allium: SubscribeToAgents`),
     /// current and ended alike.
     agents: BTreeMap<i64, Agent>,
@@ -226,6 +229,7 @@ impl Rows {
             && self.work_package_links.is_empty()
             && self.dispatch_requests.is_empty()
             && self.session_requests.is_empty()
+            && self.feed_requests.is_empty()
             && self.agents.is_empty()
     }
 }
@@ -781,6 +785,43 @@ impl SharedRows {
                 self.write(|rows| rows.session_requests.remove(&row.id).is_some());
             }
         }
+    }
+
+    /// A feed request row. An undecodable one is dropped, as a session request
+    /// is.
+    pub fn upsert_feed_request(&self, row: &bindings::FeedRequest) {
+        match decode::feed_request(row) {
+            Ok(request) => self.write(|rows| {
+                rows.feed_requests.insert(request.id.0, request);
+                true
+            }),
+            Err(e) => {
+                super::drop_undecodable("feed request", &e);
+                self.write(|rows| rows.feed_requests.remove(&row.id).is_some());
+            }
+        }
+    }
+
+    pub fn remove_feed_request(&self, id: i64) {
+        self.write(|rows| rows.feed_requests.remove(&id).is_some());
+    }
+
+    pub fn retire_feed_request(&self, old: &bindings::FeedRequest) {
+        let Ok(old) = decode::feed_request(old) else {
+            return;
+        };
+        self.write(|rows| remove_if_held(&mut rows.feed_requests, &old.id.0, &old));
+    }
+
+    /// Every feed request row this subscription holds — this host's, in every
+    /// state — oldest first (by id).
+    pub fn feed_requests(&self) -> Vec<FeedRequest> {
+        self.read(|rows| rows.feed_requests.values().cloned().collect())
+    }
+
+    /// One feed request row by id.
+    pub fn feed_request(&self, id: FeedRequestId) -> Option<FeedRequest> {
+        self.read(|rows| rows.feed_requests.get(&id.0).cloned())
     }
 
     pub fn remove_session_request(&self, id: i64) {

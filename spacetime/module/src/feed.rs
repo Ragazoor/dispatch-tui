@@ -214,18 +214,22 @@ pub(crate) fn delete_stale_feed_tasks_in_epic(
     ctx: &ReducerContext,
     epic_id: i64,
     keep: &std::collections::HashSet<&str>,
+    ingest_host: &str,
 ) {
-    let stale: Vec<i64> = ctx
+    let stale: Vec<Task> = ctx
         .db
         .tasks()
         .epic_id()
         .filter(&epic_id)
         .filter(|t| !t.external_id.is_empty() && !keep.contains(t.external_id.as_str()))
-        .map(|t| t.id)
         .collect();
-    for id in stale {
-        ctx.db.tasks().id().delete(id);
-        delete_task_side_effects(ctx, id);
+    for task in stale {
+        ctx.db.tasks().id().delete(task.id);
+        delete_task_side_effects(ctx, task.id);
+        // feeds.allium / store-split.allium:
+        // StaleDeleteRequestsTeardownOnTheHoldingHost. After the side effects,
+        // so the new row is not swept with the task's own request rows.
+        write_teardown_request_if_owed(ctx, &task, ingest_host);
     }
 }
 
@@ -238,6 +242,7 @@ pub(crate) fn upsert_feed_tasks_inner(
     items: Vec<FeedTaskUpsertItem>,
     created_by: &str,
     delete_absent: bool,
+    ingest_host: &str,
 ) -> Result<(), String> {
     if ctx.db.epics().id().find(epic_id).is_none() {
         return Err(format!("epic {epic_id} not found for upsert_feed_tasks"));
@@ -252,7 +257,7 @@ pub(crate) fn upsert_feed_tasks_inner(
     if delete_absent {
         let keep: std::collections::HashSet<&str> =
             items.iter().map(|i| i.external_id.as_str()).collect();
-        delete_stale_feed_tasks_in_epic(ctx, epic_id, &keep);
+        delete_stale_feed_tasks_in_epic(ctx, epic_id, &keep, ingest_host);
     }
     Ok(())
 }

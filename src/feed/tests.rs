@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use super::*;
 use crate::models::{test_tmux_window, TaskStatus, TaskTag, MIN_FEED_INTERVAL_SECS};
-use crate::store::{EpicCrud, EpicPatch, EpicRead, RepoConfigStore, Store, TaskCrud};
+use crate::store::{
+    EpicCrud, EpicPatch, EpicRead, FeedRequestStore, PollOwnershipStore, RepoConfigStore, Store,
+    TaskCrud,
+};
 
 use super::exec::AlwaysFailRunner;
 
@@ -42,6 +45,44 @@ async fn tick_does_not_block_event_loop() {
     tokio::time::timeout(Duration::from_secs(5), runner.tick())
         .await
         .expect("tick() must dispatch the feed command, not await it");
+}
+
+/// store-split.allium: FeedRequest, feeds.allium: ServeFeedRefreshRequest. A
+/// refresh another host asked of this poll owner runs one cycle on the next
+/// tick, whatever the interval, and its row ends `done`.
+#[tokio::test]
+async fn tick_serves_a_refresh_another_host_asked_for() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let epic = db.create_epic("Asked", "", None).await.unwrap();
+    db.patch_epic(
+        epic.id,
+        &EpicPatch::new().feed_command(Some(
+            r#"echo '[{"external_id":"r1","title":"R","description":"","status":"backlog","tag":"bug"}]'"#,
+        )),
+    )
+    .await
+    .unwrap();
+    db.seed_feed_setter(epic.id, crate::store::MEMORY_USER_ID);
+    db.claim_poll_owner(crate::models::PollScopeId::Epic(epic.id))
+        .await
+        .unwrap();
+    db.seed_feed_refresh_request(epic.id, "other-host").await;
+
+    let (mut runner, _rx) = make_runner(db.clone());
+    // The interval has not elapsed, so only the request can start a cycle.
+    runner.last_run.insert(epic.id, Instant::now());
+    runner.tick().await;
+    runner.join_spawned_jobs().await;
+
+    assert_eq!(db.list_tasks_for_epic(epic.id).await.len(), 1);
+    let rows = db.feed_requests().await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].state, crate::models::FeedRequestState::Done);
+
+    // Served once: a second tick does not run it again.
+    runner.tick().await;
+    runner.join_spawned_jobs().await;
+    assert_eq!(db.feed_requests().await.len(), 1);
 }
 
 #[tokio::test]

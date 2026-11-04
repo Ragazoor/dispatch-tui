@@ -476,6 +476,39 @@ pub trait SessionRequestStore: SessionRequestRead {
     async fn fail_interrupted_session_requests(&self) -> Result<()>;
 }
 
+/// What [`FeedRequestStore::request_feed_refresh`] answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeedRefreshAnswer {
+    /// A refresh request for the epic is open for the poll owner: one this call
+    /// wrote, or one already there.
+    Requested,
+    /// The module's reason, verbatim: no poll owner yet, this host is the owner,
+    /// or the owner belongs to another person.
+    Refused(String),
+}
+
+/// The feed request reducers (`store-split.allium: FeedRequest`). Every call
+/// names THIS host, so a caller cannot ask or report on another machine's
+/// behalf. The reads are the rows this host's subscription holds, in every
+/// state.
+#[async_trait::async_trait]
+pub trait FeedRequestStore: Send + Sync {
+    /// Every feed request row on this host, oldest first.
+    async fn feed_requests(&self) -> Vec<crate::models::FeedRequest>;
+    /// `RequestFeedRefresh`: ask the epic's poll owner to run one cycle.
+    async fn request_feed_refresh(&self, epic: EpicId) -> Result<FeedRefreshAnswer>;
+    /// `HostClaimsFeedRequest`. `false` is a refused claim.
+    async fn claim_feed_request(&self, id: crate::models::FeedRequestId) -> Result<bool>;
+    /// `HostReportsFeedRequestDone`. `false` is a refused report.
+    async fn report_feed_request_done(&self, id: crate::models::FeedRequestId) -> Result<bool>;
+    /// `HostReportsFeedRequestFailed`. `false` is a refused report.
+    async fn report_feed_request_failed(
+        &self,
+        id: crate::models::FeedRequestId,
+        reason: &str,
+    ) -> Result<bool>;
+}
+
 /// PR state (store-split M6: `ReportPrStatus`, `ReportPrUnreadable`). The host
 /// runs `gh` and posts what it read; the module writes the task. Every call
 /// names THIS host. A task write, so reachable from the service layer only.
@@ -1042,6 +1075,7 @@ pub trait TaskStore:
     + UsageStore
     + DispatchRequestStore
     + SessionRequestStore
+    + FeedRequestStore
     + PrStatusStore
     + TaskReadStore
 {
@@ -1061,6 +1095,7 @@ impl<
             + UsageStore
             + DispatchRequestStore
             + SessionRequestStore
+            + FeedRequestStore
             + PrStatusStore
             + TaskReadStore,
     > TaskStore for T
@@ -1346,6 +1381,53 @@ impl Store {
             .as_ref()
             .expect("seed_feed_setter needs an in-memory handle")
             .seed_feed_setter(epic.0, setter);
+    }
+
+    /// Make `host`, another host of this handle's owner, the poll owner of
+    /// `epic`, for a test about a refresh asked of another host. Only an
+    /// in-memory handle has one.
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(clippy::expect_used)]
+    pub async fn seed_foreign_poll_owner(&self, epic: crate::models::EpicId, host: &str) {
+        use crate::sync::ReducerCaller;
+        let memory = self
+            .memory_caller
+            .as_ref()
+            .expect("seed_foreign_poll_owner needs an in-memory handle");
+        memory
+            .register_host(host.into(), String::new(), MEMORY_USER_ID.into())
+            .await
+            .expect("registering the owning host");
+        memory
+            .claim_poll_owner(crate::models::PollScopeId::Epic(epic), host.into())
+            .await
+            .expect("claiming the poll")
+            .applied()
+            .expect("the claim");
+    }
+
+    /// Write a refresh request for `epic` as another host of this handle's owner
+    /// would, for a test about serving one (`store-split.allium:
+    /// RequestFeedRefresh`). This handle's host must already own the epic's
+    /// poll. Only an in-memory handle has one.
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(clippy::expect_used)]
+    pub async fn seed_feed_refresh_request(&self, epic: crate::models::EpicId, requester: &str) {
+        use crate::sync::ReducerCaller;
+        let memory = self
+            .memory_caller
+            .as_ref()
+            .expect("seed_feed_refresh_request needs an in-memory handle");
+        memory
+            .register_host(requester.into(), String::new(), MEMORY_USER_ID.into())
+            .await
+            .expect("registering the requesting host");
+        memory
+            .request_feed_refresh(epic, requester.into())
+            .await
+            .expect("requesting a refresh")
+            .applied()
+            .expect("the refresh request");
     }
 
     /// [`DispatchRequestStore::give_agent`] without the trait in scope.

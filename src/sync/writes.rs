@@ -30,8 +30,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::models::{
-    DispatchRequestId, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId,
-    RetrievalSource, SessionRequestId, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
+    DispatchRequestId, EpicId, FeedRequestId, LearningId, LearningVerdict, NotificationWrite,
+    PollScopeId, RetrievalSource, SessionRequestId, SubStatus, TaskId, WorkPackageId,
+    WorkPackageItem,
 };
 use crate::spacetime::bindings;
 
@@ -399,6 +400,26 @@ pub trait ReducerCaller: Send + Sync {
         items: Vec<bindings::FeedIngestItem>,
         additive: bool,
         created_by: String,
+        host: String,
+    ) -> Result<ReducerOutcome>;
+
+    /// `RequestFeedRefresh`: a host that is not the epic's poll owner asks the
+    /// owner to run one feed cycle. Refused when the epic has no poll owner.
+    async fn request_feed_refresh(&self, epic: EpicId, host: String) -> Result<ReducerOutcome>;
+    /// `HostClaimsFeedRequest`.
+    async fn claim_feed_request(&self, id: FeedRequestId, host: String) -> Result<ReducerOutcome>;
+    /// `HostReportsFeedRequestDone`.
+    async fn report_feed_request_done(
+        &self,
+        id: FeedRequestId,
+        reporter: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostReportsFeedRequestFailed`.
+    async fn report_feed_request_failed(
+        &self,
+        id: FeedRequestId,
+        reporter: String,
+        reason: String,
     ) -> Result<ReducerOutcome>;
 
     /// `ProvisionManagedEpics` (M7, X4): the whole managed feed-epic tree in

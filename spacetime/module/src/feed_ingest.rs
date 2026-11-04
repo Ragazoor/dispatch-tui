@@ -81,7 +81,7 @@ pub trait IngestStore {
 }
 
 /// [`IngestStore`] over a reducer's live tables.
-pub(crate) struct ReducerStore<'a>(pub(crate) &'a ReducerContext);
+pub(crate) struct ReducerStore<'a>(pub(crate) &'a ReducerContext, pub(crate) String);
 
 impl IngestStore for ReducerStore<'_> {
     fn epic(&self, id: i64) -> Option<Epic> {
@@ -138,10 +138,10 @@ impl IngestStore for ReducerStore<'_> {
         created_by: &str,
         delete_absent: bool,
     ) -> Result<(), String> {
-        upsert_feed_tasks_inner(self.0, epic_id, items, created_by, delete_absent)
+        upsert_feed_tasks_inner(self.0, epic_id, items, created_by, delete_absent, &self.1)
     }
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>) {
-        delete_stale_feed_tasks_in_epic(self.0, epic_id, keep)
+        delete_stale_feed_tasks_in_epic(self.0, epic_id, keep, &self.1)
     }
     fn recalculate_epic_chain(&mut self, epic_id: i64) {
         recalculate_epic_chain(self.0, epic_id)
@@ -167,9 +167,11 @@ pub fn ingest_feed(
     items: Vec<FeedIngestItem>,
     additive: bool,
     created_by: String,
+    host: String,
 ) -> Result<(), String> {
+    require_acting_for(ctx, &host)?;
     ingest_into(
-        &mut ReducerStore(ctx),
+        &mut ReducerStore(ctx, host),
         epic_id,
         items,
         additive,

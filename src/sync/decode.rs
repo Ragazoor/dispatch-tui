@@ -31,11 +31,12 @@ use chrono::{DateTime, Utc};
 
 use crate::models::{
     Agent, AgentEndReason, AgentId, AgentState, DispatchMode, DispatchOrigin, DispatchRequest,
-    DispatchRequestId, DispatchRequestState, Epic, EpicId, EpicOrigin, FeedRole, Learning,
-    LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus, RetrievalSource,
-    SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus, Task,
-    TaskId, TaskModel, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, UsageSummary,
-    WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
+    DispatchRequestId, DispatchRequestState, Epic, EpicId, EpicOrigin, FeedRequest, FeedRequestId,
+    FeedRequestKind, FeedRequestState, FeedRole, Learning, LearningId, LearningKind,
+    LearningRetrieval, LearningScope, LearningStatus, RetrievalSource, SessionRequest,
+    SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus, Task, TaskId, TaskModel,
+    TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, UsageSummary, WorkPackage, WorkPackageId,
+    WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 use crate::spacetime::bindings;
 
@@ -603,5 +604,33 @@ pub fn session_request(row: &bindings::SessionRequest) -> Decoded<SessionRequest
         tmux_window: tmux_window(&row.tmux_window),
         chained_task: id(row.chained_task).map(TaskId),
         deadline: timestamp(T, row.id, "deadline", &row.deadline)?,
+    })
+}
+
+/// The store's `feed_requests` row as the board's [`FeedRequest`]. An unknown
+/// kind or state refuses the row: read as open, a row from a newer binary would
+/// be served wrongly.
+pub fn feed_request(row: &bindings::FeedRequest) -> Decoded<FeedRequest> {
+    const T: &str = "feed_requests";
+    let refuse = |detail: String| DecodeError::new(T, row.id, detail);
+    let kind = FeedRequestKind::parse(&row.kind)
+        .ok_or_else(|| refuse(format!("unknown kind {:?}", row.kind)))?;
+    let state = FeedRequestState::parse(&row.state)
+        .ok_or_else(|| refuse(format!("unknown state {:?}", row.state)))?;
+    Ok(FeedRequest {
+        id: FeedRequestId(row.id),
+        kind,
+        host: row.host.clone(),
+        epic_id: id(row.epic_id).map(EpicId),
+        task_id: id(row.task_id).map(TaskId),
+        repo_path: row.repo_path.clone(),
+        worktree: text(&row.worktree).map(str::to_owned),
+        tmux_window: tmux_window(&row.tmux_window),
+        requested_by: row.requested_by.clone(),
+        state,
+        requested_at: required_timestamp(T, row.id, "requested_at", &row.requested_at)?,
+        claimed_at: timestamp(T, row.id, "claimed_at", &row.claimed_at)?,
+        finished_at: timestamp(T, row.id, "finished_at", &row.finished_at)?,
+        reason: text(&row.reason).map(str::to_owned),
     })
 }

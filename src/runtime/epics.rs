@@ -332,6 +332,7 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let board_reads = self.board_reads.clone();
         let host_id = self.host_id.clone();
+        let db = self.feed_db.clone();
 
         tokio::spawn(async move {
             use crate::tui::messages::FeedMessage;
@@ -346,6 +347,46 @@ impl TuiRuntime {
             };
             if !may_run {
                 let _ = tx.send(Message::Feed(FeedMessage::NotAuthorsHost { epic_title }));
+                return;
+            }
+
+            // Only the epic's poll owner reconciles it (feeds.allium:
+            // SerialisedFeedCycle, scope across hosts). A host with no owner yet
+            // claims the epic first and runs once it owns it; a host that is not
+            // the owner asks the owner, whose next tick serves the request.
+            let owner = board_reads
+                .poll_owner(models::PollScopeId::Epic(epic_id))
+                .await;
+            let owner = match crate::models::decide_poll_action(owner.as_deref(), &host_id) {
+                crate::models::PollAction::Proceed => Some(host_id.clone()),
+                crate::models::PollAction::ClaimAndProceed => {
+                    if crate::feed::claim_epic_poll(&*db, &*board_reads, &host_id, epic_id).await {
+                        Some(host_id.clone())
+                    } else {
+                        board_reads
+                            .poll_owner(models::PollScopeId::Epic(epic_id))
+                            .await
+                    }
+                }
+                crate::models::PollAction::Skip => owner,
+            };
+            if owner.as_deref() != Some(host_id.as_str()) {
+                let message = match db.request_feed_refresh(epic_id).await {
+                    Ok(crate::store::FeedRefreshAnswer::Requested) => {
+                        FeedMessage::OwnerWillRefresh {
+                            epic_title,
+                            owner_host: owner.unwrap_or_default(),
+                        }
+                    }
+                    Ok(crate::store::FeedRefreshAnswer::Refused(error)) => {
+                        FeedMessage::Failed { epic_title, error }
+                    }
+                    Err(err) => FeedMessage::Failed {
+                        epic_title,
+                        error: format!("{err:#}"),
+                    },
+                };
+                let _ = tx.send(Message::Feed(message));
                 return;
             }
 
