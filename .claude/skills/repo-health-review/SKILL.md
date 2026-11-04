@@ -85,6 +85,10 @@ Read every non-fix commit in the range. Use these lenses, in this order:
    skip rows already in the live store.
 6. **Gates.** Is `main` green on `cargo test --no-fail-fast` and
    `cargo clippy --all-targets -- -D warnings`? Run both and report the result.
+   Wrap-up rebases land commits on `main` without the pre-push hook, so a red
+   gate is plausible (clippy failed on `main` on 2026-11-04). Before blaming
+   the toolchain, check whether the last run was green on the same `rustc
+   --version`; if it was, find the commit and fix it in this task.
 
 ## 4. One fresh area
 
@@ -126,7 +130,7 @@ Check:
   decision waiting on the user, moves to a "Standing items" section with one line
   each. Do not raise it again as a finding. Ask the user once whether to file it
   as its own task or drop it (on 2026-11-03 the user chose one package for two
-  long-carried items). A standing item whose task is Done is not closed until the
+  long-carried items; on 2026-11-04, its own package for T2). A standing item whose task is Done is not closed until the
   tree shows it: on 2026-11-03 two were still open after their tasks closed.
 - **Graduated checks get audited too.** Mutation-test a check-*.sh or guard
   test that a previous round added: re-introduce the original bug and confirm it
