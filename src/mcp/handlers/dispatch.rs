@@ -174,7 +174,7 @@ mcp_tools! {
     async idempotent "update_tasks" => tasks::handle_update_tasks,
         "Update one or many tasks. Pass task_ids (one id updates one task) plus the fields to set: \
 status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
-epic_id, base_branch, wrap_up_mode, model, auto_run_plan, phoenix, and schedule. At least one field \
+epic_id, base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule, and bookmarked. At least one field \
 must be provided; every field left out is untouched. Every named task is updated whatever its status; \
 pick many ids with list_tasks (epic_id, recursive, status, base_branch). With one id the reply is \
 \"Task N updated (fields)\" or an error. With several it is not atomic: one line per task, success \
@@ -303,6 +303,10 @@ usually the right answer.",
                     "type": "integer",
                     "minimum": 1,
                     "description": "Return at most this many rows. No default: without it every match is returned. When rows are cut, the last line says how many were shown of how many."
+                },
+                "bookmarked": {
+                    "type": "boolean",
+                    "description": "true lists only tasks the board's person has bookmarked; false only those they have not. Combines with the other filters and does not widen your epic scope. A bookmarked task's row says 'bookmarked' after its title."
                 }
             }
         };

@@ -36,6 +36,12 @@ impl MemoryReducerCaller {
         let id = Self::assign_id(row.id, &mut tables.next_task_id);
         row.id = id;
         let prior = tables.tasks.insert(id, row.clone());
+        // Mirrors the module's `store_task`: entering Done ends every unseen
+        // mark and bookmark on the task, whichever writer moved it there.
+        if prior.as_ref().is_some_and(|p| p.status != DONE) && row.status == DONE {
+            self.clear_unseen_for_task(tables, id);
+            self.clear_bookmarks_for_task(tables, id);
+        }
         // Mirrors the module's `write_task`: EndAgentWhenWorktreeGoes
         // (agents.allium).
         module::follow_task_write(&mut self.agent_store(tables), prior.as_ref(), &row);
@@ -369,9 +375,6 @@ impl MemoryReducerCaller {
                 .then(|| row.clone());
         if let Err(why) = self.write_task(&mut tables, row) {
             return Ok(ReducerOutcome::Refused(why));
-        }
-        if finished {
-            self.clear_unseen_for_task(&mut tables, id.0);
         }
         if let (Some(task), Some(host)) = (closed_task, close_host) {
             self.request_close_teardown(&mut tables, &task, "", host, &self.now());

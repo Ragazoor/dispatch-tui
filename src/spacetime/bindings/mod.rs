@@ -14,6 +14,7 @@ pub mod archive_stale_learnings_reducer;
 pub mod backfill_agents_reducer;
 pub mod batch_delete_reducer;
 pub mod batch_patch_sub_status_reducer;
+pub mod bookmark_type;
 pub mod burn_id_sequence_reducer;
 pub mod claim_dispatch_request_reducer;
 pub mod claim_feed_request_reducer;
@@ -67,6 +68,7 @@ pub mod mark_task_seen_reducer;
 pub mod membership_type;
 pub mod move_epic_to_workspace_reducer;
 pub mod override_poll_owner_reducer;
+pub mod own_bookmarks_table;
 pub mod own_epics_table;
 pub mod own_packages_table;
 pub mod own_settings_table;
@@ -143,6 +145,7 @@ pub mod seed_work_packages_reducer;
 pub mod seed_workspaces_reducer;
 pub mod session_request_timeout_type;
 pub mod session_request_type;
+pub mod set_bookmark_reducer;
 pub mod set_display_name_reducer;
 pub mod set_epic_visibility_reducer;
 pub mod set_member_role_reducer;
@@ -209,6 +212,7 @@ pub use archive_stale_learnings_reducer::archive_stale_learnings;
 pub use backfill_agents_reducer::backfill_agents;
 pub use batch_delete_reducer::batch_delete;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
+pub use bookmark_type::Bookmark;
 pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_dispatch_request_reducer::claim_dispatch_request;
 pub use claim_feed_request_reducer::claim_feed_request;
@@ -262,6 +266,7 @@ pub use mark_task_seen_reducer::mark_task_seen;
 pub use membership_type::Membership;
 pub use move_epic_to_workspace_reducer::move_epic_to_workspace;
 pub use override_poll_owner_reducer::override_poll_owner;
+pub use own_bookmarks_table::*;
 pub use own_epics_table::*;
 pub use own_packages_table::*;
 pub use own_settings_table::*;
@@ -338,6 +343,7 @@ pub use seed_work_packages_reducer::seed_work_packages;
 pub use seed_workspaces_reducer::seed_workspaces;
 pub use session_request_timeout_type::SessionRequestTimeout;
 pub use session_request_type::SessionRequest;
+pub use set_bookmark_reducer::set_bookmark;
 pub use set_display_name_reducer::set_display_name;
 pub use set_epic_visibility_reducer::set_epic_visibility;
 pub use set_member_role_reducer::set_member_role;
@@ -767,6 +773,11 @@ pub enum Reducer {
     SeedWorkspaces {
         rows: Vec<Workspace>,
     },
+    SetBookmark {
+        subscriber: String,
+        task_id: i64,
+        bookmarked: bool,
+    },
     SetDisplayName {
         name: String,
     },
@@ -958,6 +969,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedWorkPackageLinks { .. } => "seed_work_package_links",
             Reducer::SeedWorkPackages { .. } => "seed_work_packages",
             Reducer::SeedWorkspaces { .. } => "seed_workspaces",
+            Reducer::SetBookmark { .. } => "set_bookmark",
             Reducer::SetDisplayName { .. } => "set_display_name",
             Reducer::SetEpicVisibility { .. } => "set_epic_visibility",
             Reducer::SetMemberRole { .. } => "set_member_role",
@@ -1618,6 +1630,15 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&seed_workspaces_reducer::SeedWorkspacesArgs {
                 rows: rows.clone(),
 }),
+            Reducer::SetBookmark{
+                subscriber,
+                task_id,
+                bookmarked,
+}             => __sats::bsatn::to_vec(&set_bookmark_reducer::SetBookmarkArgs {
+                subscriber: subscriber.clone(),
+                task_id: task_id.clone(),
+                bookmarked: bookmarked.clone(),
+}),
             Reducer::SetDisplayName{
                 name,
 }             => __sats::bsatn::to_vec(&set_display_name_reducer::SetDisplayNameArgs {
@@ -1782,6 +1803,7 @@ pub struct DbUpdate {
     covered_tasks: __sdk::TableUpdate<Task>,
     handed_out_agent_names: __sdk::TableUpdate<HandedOutAgentName>,
     hosts: __sdk::TableUpdate<Host>,
+    own_bookmarks: __sdk::TableUpdate<Bookmark>,
     own_epics: __sdk::TableUpdate<Epic>,
     own_packages: __sdk::TableUpdate<WorkPackage>,
     own_settings: __sdk::TableUpdate<Setting>,
@@ -1830,6 +1852,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "hosts" => db_update
                     .hosts
                     .append(hosts_table::parse_table_update(table_update)?),
+                "own_bookmarks" => db_update
+                    .own_bookmarks
+                    .append(own_bookmarks_table::parse_table_update(table_update)?),
                 "own_epics" => db_update
                     .own_epics
                     .append(own_epics_table::parse_table_update(table_update)?),
@@ -1968,6 +1993,8 @@ impl __sdk::DbUpdate for DbUpdate {
             cache.apply_diff_to_table::<Epic>("covered_epics", &self.covered_epics);
         diff.covered_tasks =
             cache.apply_diff_to_table::<Task>("covered_tasks", &self.covered_tasks);
+        diff.own_bookmarks =
+            cache.apply_diff_to_table::<Bookmark>("own_bookmarks", &self.own_bookmarks);
         diff.own_epics = cache.apply_diff_to_table::<Epic>("own_epics", &self.own_epics);
         diff.own_packages =
             cache.apply_diff_to_table::<WorkPackage>("own_packages", &self.own_packages);
@@ -2046,6 +2073,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "own_bookmarks" => db_update
+                    .own_bookmarks
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "own_epics" => db_update
                     .own_epics
@@ -2156,6 +2186,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "hosts" => db_update
                     .hosts
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "own_bookmarks" => db_update
+                    .own_bookmarks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "own_epics" => db_update
                     .own_epics
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2259,6 +2292,7 @@ pub struct AppliedDiff<'r> {
     covered_tasks: __sdk::TableAppliedDiff<'r, Task>,
     handed_out_agent_names: __sdk::TableAppliedDiff<'r, HandedOutAgentName>,
     hosts: __sdk::TableAppliedDiff<'r, Host>,
+    own_bookmarks: __sdk::TableAppliedDiff<'r, Bookmark>,
     own_epics: __sdk::TableAppliedDiff<'r, Epic>,
     own_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
     own_settings: __sdk::TableAppliedDiff<'r, Setting>,
@@ -2308,6 +2342,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<Host>("hosts", &self.hosts, event);
+        callbacks.invoke_table_row_callbacks::<Bookmark>(
+            "own_bookmarks",
+            &self.own_bookmarks,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Epic>("own_epics", &self.own_epics, event);
         callbacks.invoke_table_row_callbacks::<WorkPackage>(
             "own_packages",
@@ -3088,6 +3127,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         covered_tasks_table::register_table(client_cache);
         handed_out_agent_names_table::register_table(client_cache);
         hosts_table::register_table(client_cache);
+        own_bookmarks_table::register_table(client_cache);
         own_epics_table::register_table(client_cache);
         own_packages_table::register_table(client_cache);
         own_settings_table::register_table(client_cache);
@@ -3122,6 +3162,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "covered_tasks",
         "handed_out_agent_names",
         "hosts",
+        "own_bookmarks",
         "own_epics",
         "own_packages",
         "own_settings",

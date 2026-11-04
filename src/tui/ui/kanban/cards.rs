@@ -15,7 +15,7 @@ use super::{
     card_border_color, card_surface_color, column_color, cursor_border_color,
     selected_card_surface_color, status_icon,
 };
-use crate::palette::{CYAN, FG, FLASH_BG, GREEN, MUTED, PURPLE, RED, SIGNAL, YELLOW};
+use crate::palette::{BOOKMARK, CYAN, FG, FLASH_BG, GREEN, MUTED, PURPLE, RED, SIGNAL, YELLOW};
 
 /// Format the title text for a task card (line 1 only — status annotations are on line 2).
 fn format_task_title(task: &Task, max_title: usize) -> String {
@@ -477,6 +477,20 @@ pub(super) const UNSEEN_GLYPH: &str = "\u{25c6}";
 /// Cells the marker costs on line 1: a leading space plus the glyph.
 const UNSEEN_MARKER_WIDTH: usize = 2;
 
+/// The hue of the one diamond a card's title line carries, or `None`. The
+/// new-task signal and the bookmark share the slot and the glyph; the
+/// new-task signal wins, because it is the one that clears by looking
+/// (`board-visuals.allium`, "Bookmark").
+fn diamond_color(unseen: bool, bookmarked: bool) -> Option<Color> {
+    if unseen {
+        Some(SIGNAL)
+    } else if bookmarked {
+        Some(BOOKMARK)
+    } else {
+        None
+    }
+}
+
 /// Columns of column-ground left visible on each side of a card, so cards float
 /// inside the column instead of tiling flush against its edges.
 const CARD_MARGIN: usize = 1;
@@ -690,8 +704,13 @@ pub(super) fn build_task_list_item<'a>(
     let any_message_flash = has_message_flash || has_message_flash_sent;
 
     let unseen = app.board.unseen_tasks.contains(&task.id);
+    let diamond = diamond_color(unseen, app.board.bookmarked_tasks.contains(&task.id));
     let prefix_width = task_card_prefix_width(task, has_message_flash, has_message_flash_sent)
-        + if unseen { UNSEEN_MARKER_WIDTH } else { 0 };
+        + if diamond.is_some() {
+            UNSEEN_MARKER_WIDTH
+        } else {
+            0
+        };
     let max_title = (col_width as usize).saturating_sub(prefix_width);
     let title_text = format_task_title(task, max_title);
 
@@ -704,11 +723,12 @@ pub(super) fn build_task_list_item<'a>(
         (has_message_flash, has_message_flash_sent),
     );
     // A glyph only: the stripe carries column identity and the frame carries
-    // state, so neither is touched ("New-task signal", board-visuals.allium).
-    if unseen {
+    // state, so neither is touched ("New-task signal" and "Bookmark",
+    // board-visuals.allium).
+    if let Some(color) = diamond {
         line1.spans.push(Span::styled(
             format!(" {UNSEEN_GLYPH}"),
-            Style::default().fg(SIGNAL),
+            Style::default().fg(color),
         ));
     }
 
@@ -802,12 +822,17 @@ pub(super) fn render_epic_item(
     // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + plan_indicator
     let id_len = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
     let unseen = app.board.epic_has_unseen(epic.id);
+    let diamond = diamond_color(unseen, app.board.epic_has_bookmark(epic.id));
     let prefix_width = 2
         + 1
         + 3
         + id_len
         + plan_indicator.chars().count()
-        + if unseen { UNSEEN_MARKER_WIDTH } else { 0 }
+        + if diamond.is_some() {
+            UNSEEN_MARKER_WIDTH
+        } else {
+            0
+        }
         + CARD_CHROME_WIDTH;
     let max_title = (col_width as usize).saturating_sub(prefix_width);
     let title_text = truncate(&epic.title, max_title);
@@ -821,6 +846,7 @@ pub(super) fn render_epic_item(
     let title_style = Style::default().fg(PURPLE).add_modifier(Modifier::BOLD);
     // A marked epic's stripe takes SIGNAL in place of PURPLE, and its title line
     // ends in the glyph that says why ("New-task signal", board-visuals.allium).
+    // A bookmark never recolours the stripe ("Bookmark").
     let stripe_color = if unseen { SIGNAL } else { PURPLE };
     let mut line1_spans = vec![
         Span::raw(select_prefix.to_string()),
@@ -828,10 +854,10 @@ pub(super) fn render_epic_item(
         Span::styled(format!(" #{} ", epic.id), Style::default().fg(MUTED)),
         Span::styled(format!("{title_text}{plan_indicator}"), title_style),
     ];
-    if unseen {
+    if let Some(color) = diamond {
         line1_spans.push(Span::styled(
             format!(" {UNSEEN_GLYPH}"),
-            Style::default().fg(SIGNAL),
+            Style::default().fg(color),
         ));
     }
     let line1 = Line::from(line1_spans);

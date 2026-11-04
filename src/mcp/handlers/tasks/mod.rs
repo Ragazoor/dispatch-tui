@@ -170,6 +170,14 @@ mcp_args! {
         "type": "string",
         "description": "Run this task on a schedule: a five-field cron string read in UTC (minute hour day-of-month month day-of-week), e.g. '0 9 * * 1' for Mondays 09:00 UTC. A running board dispatches it when due, or as soon as one starts if the time passed. A phoenix task repeats on it; any other task runs once, so for a one-off give a cron matching that date. An empty string clears it."
     };
+
+    // Not a Task field: the board person's own bookmark on the task
+    // (`core.allium: Bookmark`), written through `set_bookmark`.
+    #[serde(default)]
+    optional bookmarked: Option<bool> = [manual] {
+        "type": "boolean",
+        "description": "Bookmark the task for the person whose board this is (true) or remove the bookmark (false). The task and every epic above it are marked on their board until it is removed or the task is done. A done task cannot be bookmarked."
+    };
 }
 
 /// The `update_tasks` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
@@ -216,6 +224,10 @@ pub(super) struct ListTasksArgs {
     pub(super) query: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_limit")]
     pub(super) limit: Option<std::num::NonZeroUsize>,
+    /// Keep only tasks this board's person has bookmarked (true) or has not
+    /// (false). Not a scope filter.
+    #[serde(default)]
+    pub(super) bookmarked: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -339,11 +351,12 @@ pub(super) async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, Strin
 /// The text `get_task` returns for `task`; `dispatch://task/self` serves the
 /// same rendering (`task_detail_text` in the spec).
 pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
-    let (epic_titles, verify_command, dispatch_request, agent) = tokio::join!(
+    let (epic_titles, verify_command, dispatch_request, agent, bookmarks) = tokio::join!(
         build_epic_titles(state),
         crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path),
         state.db.latest_dispatch_request_for_task(task.id),
-        state.db.current_agent(task.id)
+        state.db.current_agent(task.id),
+        state.db.bookmarked_task_ids()
     );
     format_task_detail(
         task,
@@ -351,6 +364,7 @@ pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
         &epic_titles,
         verify_command.as_deref(),
         dispatch_request.as_ref(),
+        bookmarks.contains(&task.id),
     )
 }
 
@@ -386,6 +400,7 @@ fn format_task_detail(
     epic_titles: &HashMap<EpicId, String>,
     verify_command: Option<&str>,
     dispatch_request: Option<&crate::models::DispatchRequest>,
+    bookmarked: bool,
 ) -> String {
     let mut text = format!(
         "Task {id}: {title}\nStatus: {status}\nRepo: {repo}\nDescription: {desc}",
@@ -469,6 +484,11 @@ fn format_task_detail(
     if let Some(why) = task.schedule_error.as_deref() {
         text.push_str(&format!("\nSchedule error: {why}"));
     }
+    // The board person's own bookmark (core.allium: Bookmark), shown only when
+    // set (mcp-task-tools.allium: GetTaskViaMcp).
+    if bookmarked {
+        text.push_str("\nBookmarked: yes");
+    }
     text.push_str(&format!(
         "\nCreated: {}",
         task.created_at.format("%Y-%m-%d %H:%M:%S UTC")
@@ -502,6 +522,7 @@ fn description_preview(s: &str) -> String {
 
 fn format_task_line(
     t: &Task,
+    bookmarked: bool,
     agent: Option<&Agent>,
     epic_titles: &HashMap<EpicId, String>,
     goal: &str,
@@ -530,10 +551,14 @@ fn format_task_line(
     } else {
         format!(" | Goal: {goal}")
     };
+    // mcp-task-tools.allium: ListTasksViaMcp, "bookmarked narrows to the board
+    // person's bookmarks".
+    let bookmark_indicator = if bookmarked { " bookmarked" } else { "" };
     format!(
-        "- [{}] {}{} ({}/{}){}{} | Base: {}{}{}",
+        "- [{}] {}{}{} ({}/{}){}{} | Base: {}{}{}",
         t.id,
         t.title,
+        bookmark_indicator,
         agent_indicator,
         t.status.as_str(),
         t.sub_status.as_str(),
@@ -627,6 +652,7 @@ mod tests {
             &HashMap::new(),
             None,
             None,
+            false,
         );
         assert!(output.contains("\nAgent: ada (live)"), "{output}");
     }
@@ -640,6 +666,7 @@ mod tests {
             &HashMap::new(),
             None,
             None,
+            false,
         );
         assert!(output.contains("\nAgent: ada (paused)"), "{output}");
     }
@@ -647,14 +674,15 @@ mod tests {
     #[test]
     fn format_task_line_names_a_live_agent() {
         let agent = make_agent(Some("task-1"));
-        let line = super::format_task_line(&make_task("main"), Some(&agent), &HashMap::new(), "");
+        let line =
+            super::format_task_line(&make_task("main"), false, Some(&agent), &HashMap::new(), "");
         assert!(line.contains(" agent:ada (live)"), "{line}");
     }
 
     #[test]
     fn format_task_detail_includes_base_branch() {
         let task = make_task("develop");
-        let output = format_task_detail(&task, None, &HashMap::new(), None, None);
+        let output = format_task_detail(&task, None, &HashMap::new(), None, None, false);
         assert!(
             output.contains("Base branch: develop"),
             "expected 'Base branch: develop' in output, got:\n{output}"
@@ -664,7 +692,14 @@ mod tests {
     #[test]
     fn format_task_detail_includes_verify_command_when_set() {
         let task = make_task("main");
-        let output = format_task_detail(&task, None, &HashMap::new(), Some("cargo test"), None);
+        let output = format_task_detail(
+            &task,
+            None,
+            &HashMap::new(),
+            Some("cargo test"),
+            None,
+            false,
+        );
         assert!(
             output.contains("Verify command: cargo test"),
             "expected 'Verify command: cargo test' in output, got:\n{output}"
@@ -681,7 +716,14 @@ mod tests {
     fn get_task_description_quotes_only_labels_the_renderer_emits() {
         let mut task = make_task("main");
         task.wrap_up_mode = Some(crate::models::WrapUpMode::Rebase);
-        let output = format_task_detail(&task, None, &HashMap::new(), Some("cargo test"), None);
+        let output = format_task_detail(
+            &task,
+            None,
+            &HashMap::new(),
+            Some("cargo test"),
+            None,
+            false,
+        );
 
         let defs = crate::mcp::handlers::dispatch::tool_definitions();
         let desc = defs["tools"]
@@ -712,7 +754,7 @@ mod tests {
     #[test]
     fn format_task_detail_omits_verify_command_when_unset() {
         let task = make_task("main");
-        let output = format_task_detail(&task, None, &HashMap::new(), None, None);
+        let output = format_task_detail(&task, None, &HashMap::new(), None, None, false);
         assert!(
             !output.contains("Verify command"),
             "expected no 'Verify command' line in output, got:\n{output}"

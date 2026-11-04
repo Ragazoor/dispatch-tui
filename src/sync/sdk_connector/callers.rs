@@ -41,8 +41,8 @@ use crate::spacetime::bindings::{
     report_session_request_done as _, report_session_request_failed as _, request_dispatch as _,
     request_exit_session as _, request_feed_refresh as _, request_wrap_up as _,
     rescope_epic_learnings as _, respawn_phoenix_successor as _, revoke_super_admin as _,
-    save_repo_path as _, save_setting as _, set_display_name as _, set_epic_visibility as _,
-    set_member_role as _, set_task_epic as _, set_verify_command as _,
+    save_repo_path as _, save_setting as _, set_bookmark as _, set_display_name as _,
+    set_epic_visibility as _, set_member_role as _, set_task_epic as _, set_verify_command as _,
     set_work_package_visibility as _, subagent_clear as _,
     subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
     subscribe_to_epic as _, super_admin_delete_unseen_item as _, try_record_stop as _,
@@ -349,6 +349,19 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "marking the task seen",
             mark_task_seen_then(subscriber, task_id.0)
+        )
+    }
+
+    async fn set_bookmark(
+        &self,
+        subscriber: String,
+        task_id: TaskId,
+        bookmarked: bool,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "setting the bookmark",
+            set_bookmark_then(subscriber, task_id.0, bookmarked)
         )
     }
 

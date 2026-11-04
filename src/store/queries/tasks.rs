@@ -29,6 +29,10 @@ impl super::super::TaskRead for Store {
     async fn find_task_by_plan(&self, plan: &str) -> Option<Task> {
         self.rows.task_by_plan(plan)
     }
+
+    async fn bookmarked_task_ids(&self) -> Vec<TaskId> {
+        self.rows.bookmarked_task_ids()
+    }
 }
 
 #[async_trait::async_trait]
@@ -117,6 +121,19 @@ impl TaskCrud for Store {
             return Ok(());
         };
         self.caller.mark_task_seen(identity, id).await?.applied()
+    }
+
+    async fn set_bookmark(&self, id: TaskId, bookmarked: bool) -> Result<()> {
+        let Some(identity) = self.identity.user().await? else {
+            return Err(crate::sync::writes::StoreRefusal(
+                "this board does not know who you are yet; try again once it has connected".into(),
+            )
+            .into());
+        };
+        self.caller
+            .set_bookmark(identity, id, bookmarked)
+            .await?
+            .applied()
     }
 
     /// tasks.allium: `BatchDelete`'s atomic counterpart to `delete_task`/

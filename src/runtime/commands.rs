@@ -158,6 +158,10 @@ async fn dispatch_task(
             rt.exec_mark_task_seen(id).await;
             vec![]
         }
+        SetBookmark { id, bookmarked } => {
+            rt.exec_set_bookmark(app, id, bookmarked).await;
+            vec![]
+        }
         ClearSubagents { id, mode } => {
             rt.exec_clear_subagents(id, mode).await;
             vec![]

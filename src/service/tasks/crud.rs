@@ -466,6 +466,17 @@ impl TaskService {
         Ok(self.db.mark_task_seen(task_id).await?)
     }
 
+    /// `tasks.allium: SetBookmark`. The store refuses a Done task, an unseen
+    /// one and a board with no identity yet; the refusal reaches the caller as
+    /// a validation error.
+    pub async fn set_bookmark(
+        &self,
+        task_id: TaskId,
+        bookmarked: bool,
+    ) -> Result<(), ServiceError> {
+        Ok(self.db.set_bookmark(task_id, bookmarked).await?)
+    }
+
     pub async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
         self.get_task(task_id).await?;
         self.db

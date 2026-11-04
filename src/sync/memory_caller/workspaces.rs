@@ -282,7 +282,7 @@ impl MemoryReducerCaller {
         applied()
     }
 
-    /// `RemoveMember`: end `user`'s subscriptions and unseen marks inside
+    /// `RemoveMember`: end `user`'s subscriptions, unseen marks and bookmarks inside
     /// `workspace_id`, and nothing in their other workspaces.
     fn drop_follows_in_workspace(&self, tables: &mut Tables, user: &str, workspace_id: i64) {
         let in_workspace = |tables: &Tables, epic_id: i64| {
@@ -325,6 +325,22 @@ impl MemoryReducerCaller {
         for id in marks {
             tables.unseen_tasks.remove(&id);
             self.rows.remove_unseen_task(id);
+        }
+        let bookmarks: Vec<String> = tables
+            .bookmarks
+            .values()
+            .filter(|b| {
+                b.subscriber == user
+                    && tables
+                        .tasks
+                        .get(&b.task_id)
+                        .is_some_and(|t| t.epic_id != 0 && in_workspace(tables, t.epic_id))
+            })
+            .map(|b| b.id.clone())
+            .collect();
+        for id in bookmarks {
+            tables.bookmarks.remove(&id);
+            self.rows.remove_bookmark(id);
         }
     }
 

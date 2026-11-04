@@ -53,6 +53,7 @@ use super::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
 mod agent_state;
 mod agents;
+mod bookmark;
 mod config;
 mod convert;
 mod dispatch_requests;
@@ -117,6 +118,7 @@ struct Tables {
     repo_base_branches: BTreeMap<i64, module::RepoBaseBranch>,
     subscriptions: BTreeMap<String, module::Subscription>,
     unseen_tasks: BTreeMap<String, module::UnseenTask>,
+    bookmarks: BTreeMap<String, module::Bookmark>,
     user_profiles: BTreeMap<String, module::UserProfile>,
     workspaces: BTreeMap<i64, module::Workspace>,
     memberships: BTreeMap<i64, module::Membership>,
@@ -486,6 +488,15 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn mark_task_seen(&self, subscriber: String, task_id: TaskId) -> Result<ReducerOutcome> {
         self.apply_mark_task_seen(subscriber, task_id)
+    }
+
+    async fn set_bookmark(
+        &self,
+        subscriber: String,
+        task_id: TaskId,
+        bookmarked: bool,
+    ) -> Result<ReducerOutcome> {
+        self.apply_set_bookmark(subscriber, task_id, bookmarked)
     }
 
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome> {

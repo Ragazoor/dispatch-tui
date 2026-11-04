@@ -6,15 +6,15 @@ use super::SpacetimeSdkConnector;
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     CoveredEpicsTableAccess as _, CoveredTasksTableAccess as _, DbConnection,
-    HostsTableAccess as _, OwnEpicsTableAccess as _, OwnPackagesTableAccess as _,
-    OwnSettingsTableAccess as _, OwnSubscriptionsTableAccess as _, OwnTasksTableAccess as _,
-    OwnUnseenTasksTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
-    UnseenItemsTableAccess as _, UserProfilesTableAccess as _, VisibleAgentsTableAccess as _,
-    VisibleDispatchRequestsTableAccess as _, VisibleFeedRequestsTableAccess as _,
-    VisibleLearningRetrievalsTableAccess as _, VisibleLearningsTableAccess as _,
-    VisibleMembershipsTableAccess as _, VisiblePollOwnersTableAccess as _,
-    VisibleSessionRequestsTableAccess as _, VisibleWorkPackageLinksTableAccess as _,
-    VisibleWorkspacesTableAccess as _,
+    HostsTableAccess as _, OwnBookmarksTableAccess as _, OwnEpicsTableAccess as _,
+    OwnPackagesTableAccess as _, OwnSettingsTableAccess as _, OwnSubscriptionsTableAccess as _,
+    OwnTasksTableAccess as _, OwnUnseenTasksTableAccess as _, RepoBaseBranchesTableAccess as _,
+    RepoPathsTableAccess as _, UnseenItemsTableAccess as _, UserProfilesTableAccess as _,
+    VisibleAgentsTableAccess as _, VisibleDispatchRequestsTableAccess as _,
+    VisibleFeedRequestsTableAccess as _, VisibleLearningRetrievalsTableAccess as _,
+    VisibleLearningsTableAccess as _, VisibleMembershipsTableAccess as _,
+    VisiblePollOwnersTableAccess as _, VisibleSessionRequestsTableAccess as _,
+    VisibleWorkPackageLinksTableAccess as _, VisibleWorkspacesTableAccess as _,
 };
 
 // One table's three callbacks, so "every table gets all three" is
@@ -188,6 +188,7 @@ impl SpacetimeSdkConnector {
             upsert_unseen_task,
             retire_unseen_task
         );
+        wire_view!(self, db, own_bookmarks, upsert_bookmark, retire_bookmark);
         wire_view!(
             self,
             db,

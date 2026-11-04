@@ -50,6 +50,7 @@ enum Sent {
     CreateTask(Box<bindings::Task>),
     CreateTaskSignalled(Box<bindings::Task>),
     MarkTaskSeen(String, TaskId),
+    SetBookmark(String, TaskId, bool),
     SetDisplayName(String),
     /// Any of the workspace and super-admin reducers, by name.
     Workspace(&'static str),
@@ -371,6 +372,15 @@ impl ReducerCaller for RecordingCaller {
         task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::MarkTaskSeen(subscriber, task_id))
+    }
+
+    async fn set_bookmark(
+        &self,
+        subscriber: String,
+        task_id: TaskId,
+        bookmarked: bool,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::SetBookmark(subscriber, task_id, bookmarked))
     }
 
     async fn patch_task(

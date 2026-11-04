@@ -111,6 +111,7 @@ impl App {
             ),
             "toggle_help" => keyed(self, Message::System(SystemMessage::ToggleHelp)),
             "toggle_split_mode" => keyed(self, Message::Split(SplitMessage::Toggle)),
+            "toggle_bookmark" => keyed(self, Message::Task(TaskMessage::ToggleBookmark)),
             "detach_tmux" => {
                 self.dispatch_prompting_handler_keyed(Self::handle_key_detach, action, label)
             }

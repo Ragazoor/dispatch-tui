@@ -211,6 +211,13 @@ macro_rules! task_service_api {
                 task_id: $crate::models::TaskId
             ) -> Result<(), $crate::service::ServiceError>;
 
+            /// `tasks.allium: SetBookmark`, for this board's person.
+            async fn set_bookmark(
+                &self,
+                task_id: $crate::models::TaskId,
+                bookmarked: bool
+            ) -> Result<(), $crate::service::ServiceError>;
+
             /// `tasks.allium: BatchDelete`'s atomic call — every task and epic
             /// in the selection, deleted together in one operation. See
             /// `TaskService::batch_delete`'s doc comment.

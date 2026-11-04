@@ -205,6 +205,15 @@ mirror!(
 );
 
 mirror!(
+    module::Bookmark,
+    bindings::Bookmark {
+        id,
+        task_id,
+        subscriber
+    }
+);
+
+mirror!(
     module::UnseenTask,
     bindings::UnseenTask {
         id,

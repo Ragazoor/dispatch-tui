@@ -132,6 +132,13 @@ pub enum TaskCommand {
     /// `tasks.allium: SeeTaskByLandingOnIt`, fired when the cursor rests on an
     /// unseen task's card.
     MarkSeen(TaskId),
+    /// `tasks.allium: SetBookmark`, from the `b` key. The board already
+    /// toggled its own copy; the store write makes it this person's
+    /// everywhere.
+    SetBookmark {
+        id: TaskId,
+        bookmarked: bool,
+    },
     Insert {
         draft: TaskDraft,
         epic_id: Option<EpicId>,

@@ -123,6 +123,10 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// too: a mark says "you have not looked yet", which a restore into another
 /// store would invent for people who may have looked since.
 ///
+/// `bookmarks` (`core.allium: Bookmark`) is excluded as well: a restore is a
+/// rare disaster path and a bookmark is cheap to set again
+/// (`spacetime-seed.allium`).
+///
 /// `dispatch_requests`, `dispatch_request_timeouts`, `session_requests` and
 /// `session_request_timeouts` (store-split M5, W10) are excluded too: they
 /// are in-flight state, not domain, and no snapshot carries them
@@ -151,6 +155,7 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
                     | "session_request_timeouts"
                     | "feed_requests"
                     | "unseen_tasks"
+                    | "bookmarks"
             )
         })
         .collect();

@@ -895,3 +895,150 @@ mod model;
 mod query;
 mod schedule;
 mod sub_status;
+
+// -- Bookmarks (`tasks.allium: SetBookmark`; `mcp-task-tools.allium:
+//    UpdateTaskViaMcp`'s `bookmarked`) ---------------------------------------
+
+async fn tool_call(state: &Arc<McpState>, name: &str, arguments: Value) -> JsonRpcResponse {
+    call(
+        state,
+        "tools/call",
+        Some(json!({ "name": name, "arguments": arguments })),
+    )
+    .await
+}
+
+fn text_of(resp: &JsonRpcResponse) -> String {
+    assert!(!is_error(resp), "{}", error_message(resp));
+    resp.result.as_ref().unwrap()["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn update_and_list_schemas_advertise_a_boolean_bookmarked() {
+    for tool in ["update_tasks", "list_tasks"] {
+        let def = tool_def(tool);
+        assert_eq!(
+            def["inputSchema"]["properties"]["bookmarked"]["type"], "boolean",
+            "{tool}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn update_tasks_bookmarked_sets_and_clears_this_persons_bookmark() {
+    let (state, store, epic) = signal_fixture().await;
+    create_in_epic(&state, epic, json!({})).await;
+    let task = state.db.list_all().await[0].id;
+
+    let set = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "bookmarked": true }),
+    )
+    .await;
+    assert!(text_of(&set).contains("bookmarked"), "{}", text_of(&set));
+    assert_eq!(
+        crate::store::TaskRead::bookmarked_task_ids(&*store).await,
+        vec![task]
+    );
+    let detail = text_of(&tool_call(&state, "get_task", json!({ "task_id": task.0 })).await);
+    assert!(detail.contains("\nBookmarked: yes"), "{detail}");
+    let rows = text_of(&tool_call(&state, "list_tasks", json!({})).await);
+    assert!(rows.contains(" bookmarked"), "{rows}");
+
+    tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "bookmarked": false }),
+    )
+    .await;
+    assert!(crate::store::TaskRead::bookmarked_task_ids(&*store)
+        .await
+        .is_empty());
+    let detail = text_of(&tool_call(&state, "get_task", json!({ "task_id": task.0 })).await);
+    assert!(!detail.contains("Bookmarked"), "{detail}");
+}
+
+#[tokio::test]
+async fn list_tasks_bookmarked_filter_keeps_only_this_persons_bookmarks() {
+    let (state, _store, epic) = signal_fixture().await;
+    create_in_epic(&state, epic, json!({ "title": "marked" })).await;
+    create_in_epic(&state, epic, json!({ "title": "plain" })).await;
+    let marked = state
+        .db
+        .list_all()
+        .await
+        .into_iter()
+        .find(|t| t.title == "marked")
+        .unwrap()
+        .id;
+    tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [marked.0], "bookmarked": true }),
+    )
+    .await;
+
+    let only = text_of(&tool_call(&state, "list_tasks", json!({ "bookmarked": true })).await);
+    assert!(only.contains("marked") && !only.contains("plain"), "{only}");
+    let others = text_of(&tool_call(&state, "list_tasks", json!({ "bookmarked": false })).await);
+    assert!(
+        others.contains("plain") && !others.contains("marked"),
+        "{others}"
+    );
+}
+
+#[tokio::test]
+async fn bookmarking_a_done_task_is_refused() {
+    let (state, store, epic) = signal_fixture().await;
+    create_in_epic(&state, epic, json!({})).await;
+    let task = state.db.list_all().await[0].id;
+    let done = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "status": "done" }),
+    )
+    .await;
+    assert!(!is_error(&done), "{}", error_message(&done));
+
+    let resp = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "bookmarked": true }),
+    )
+    .await;
+
+    assert!(is_error(&resp));
+    assert!(
+        error_message(&resp).contains("done"),
+        "{}",
+        error_message(&resp)
+    );
+    assert!(crate::store::TaskRead::bookmarked_task_ids(&*store)
+        .await
+        .is_empty());
+}
+
+#[tokio::test]
+async fn bookmarked_cannot_travel_with_status_done() {
+    let (state, _store, epic) = signal_fixture().await;
+    create_in_epic(&state, epic, json!({})).await;
+    let task = state.db.list_all().await[0].id;
+
+    let resp = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "status": "done", "bookmarked": true }),
+    )
+    .await;
+
+    assert!(is_error(&resp));
+    assert!(
+        error_message(&resp).contains("bookmarked"),
+        "{}",
+        error_message(&resp)
+    );
+}

@@ -228,6 +228,26 @@ impl TuiRuntime {
         }
     }
 
+    /// `tasks.allium: SetBookmark`. The board already flipped its copy; on a
+    /// refusal it re-reads this person's bookmarks so the card shows the truth,
+    /// and the refusal shows in the status bar.
+    pub(super) async fn exec_set_bookmark(
+        &self,
+        app: &mut App,
+        id: models::TaskId,
+        bookmarked: bool,
+    ) {
+        if let Err(e) = self.task_svc.set_bookmark(id, bookmarked).await {
+            let ids = self.board_reads.bookmarked_task_ids().await;
+            app.update(Message::Task(
+                crate::tui::messages::TaskMessage::BookmarksRefreshed(ids),
+            ));
+            app.update(Message::System(
+                crate::tui::messages::SystemMessage::StatusInfo(e.to_string()),
+            ));
+        }
+    }
+
     pub(super) async fn exec_persist_task(
         &self,
         app: &mut App,
@@ -894,6 +914,10 @@ impl TuiRuntime {
         let _ = tx.send(Message::Task(
             crate::tui::messages::TaskMessage::UnseenRefreshed(unseen),
         ));
+        let bookmarks = db.bookmarked_task_ids().await;
+        let _ = tx.send(Message::Task(
+            crate::tui::messages::TaskMessage::BookmarksRefreshed(bookmarks),
+        ));
 
         let epics = db.list_epics().await;
         let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
@@ -1001,6 +1025,10 @@ impl TuiRuntime {
         let unseen = self.board_reads.unseen_task_ids().await;
         cmds.extend(app.update(Message::Task(
             crate::tui::messages::TaskMessage::UnseenRefreshed(unseen),
+        )));
+        let bookmarks = self.board_reads.bookmarked_task_ids().await;
+        cmds.extend(app.update(Message::Task(
+            crate::tui::messages::TaskMessage::BookmarksRefreshed(bookmarks),
         )));
         let requests = self.board_reads.dispatch_requests().await;
         cmds.extend(app.update(Message::Task(

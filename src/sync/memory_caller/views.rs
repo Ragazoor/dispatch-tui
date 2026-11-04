@@ -105,6 +105,11 @@ impl StoreReads for Tables {
             s.task_id == task_id
         })
     }
+    fn bookmarks_of(&self, subscriber: &str) -> Vec<module::Bookmark> {
+        keep(self.bookmarks.values().cloned(), |b| {
+            b.subscriber == subscriber
+        })
+    }
     fn unseen_of(&self, subscriber: &str) -> Vec<module::UnseenTask> {
         keep(self.unseen_tasks.values().cloned(), |u| {
             u.subscriber == subscriber
@@ -206,6 +211,10 @@ impl MemoryReducerCaller {
             "own_unseen_tasks" => module::own_unseen_of(t, who)
                 .into_iter()
                 .map(|u| u.id)
+                .collect(),
+            "own_bookmarks" => module::own_bookmarks_of(t, who)
+                .into_iter()
+                .map(|b| b.id)
                 .collect(),
             "visible_task_subagents" => module::subagents_of_held(t, who)
                 .into_iter()

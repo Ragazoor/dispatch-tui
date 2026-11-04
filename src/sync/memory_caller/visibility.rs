@@ -708,6 +708,18 @@ impl MemoryReducerCaller {
             tables.unseen_tasks.remove(&mark);
             self.rows.remove_unseen_task(mark);
         }
+        let bookmarks: Vec<String> = tables
+            .bookmarks
+            .values()
+            .filter(|b| {
+                task_ids.contains(&b.task_id) && !tables.has_member(workspace_id, &b.subscriber)
+            })
+            .map(|b| b.id.clone())
+            .collect();
+        for id in bookmarks {
+            tables.bookmarks.remove(&id);
+            self.rows.remove_bookmark(id);
+        }
         Ok(ReducerOutcome::Applied(vec![]))
     }
 

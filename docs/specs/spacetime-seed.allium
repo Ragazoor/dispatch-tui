@@ -84,12 +84,14 @@ use "./core.allium" as core
 -- `unseen_tasks` (core.allium: UnseenTask, the new-task signal) is left out
 -- as well: a mark says "you have not looked yet", and a restore would invent
 -- that for people who may have looked since. Losing the marks on a restore is
--- accepted. These are the only exceptions to "every table it holds" below.
+-- accepted.
 --
--- `bookmarks` (core.allium: Bookmark) is NOT an exception and is carried. A
--- bookmark is a person's own request to come back to a task, not a claim
--- about what they have looked at, so a restore that dropped it would lose
--- something nobody can rebuild.
+-- `bookmarks` (core.allium: Bookmark) is left out too, for a different
+-- reason: a bookmark is a person's own "come back to this", cheap to set
+-- again, and a restore is a rare disaster path. Losing them on a restore is
+-- accepted; carrying them would need a seed reducer and a snapshot table of
+-- their own, which can be added later without changing anything else. These
+-- are the only exceptions to "every table it holds" below.
 --
 -- `user_profiles`, `workspaces` and `memberships` (workspaces.allium) ARE
 -- here, because epics, work packages and learnings now point at a workspace

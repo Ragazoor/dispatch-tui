@@ -891,6 +891,7 @@ pub(super) fn cells_with_symbol<'a>(
     out
 }
 
+mod bookmark;
 mod new_task_signal;
 mod palette_and_frames;
 mod selection_reorder_and_flash;

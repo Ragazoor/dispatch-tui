@@ -47,6 +47,44 @@ impl App {
         vec![]
     }
 
+    pub(in crate::tui) fn handle_bookmarks_refreshed(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
+        let ids: std::collections::HashSet<TaskId> = ids.into_iter().collect();
+        if ids != self.board.bookmarked_tasks {
+            self.board.bookmarked_tasks = ids;
+            self.dirty = true;
+        }
+        vec![]
+    }
+
+    /// `tasks.allium: ToggleBookmarkFromBoard`: `b` on the task card under the
+    /// cursor. A Done task cannot be bookmarked, so setting one is refused in
+    /// the status bar without a store call; removing is always allowed. The
+    /// board flips its own copy at once and the store write follows.
+    pub(in crate::tui) fn handle_toggle_bookmark(&mut self) -> Vec<Command> {
+        let Some(ColumnAnchor::Task(id)) = self.anchor_under_cursor() else {
+            return vec![];
+        };
+        let bookmarked = !self.board.bookmarked_tasks.contains(&id);
+        let done = self
+            .board
+            .find_task(id)
+            .is_some_and(|t| t.status == crate::models::TaskStatus::Done);
+        if bookmarked && done {
+            self.status
+                .set(format!("Task #{id} is done and cannot be bookmarked"));
+            return vec![];
+        }
+        if bookmarked {
+            self.board.bookmarked_tasks.insert(id);
+            self.status.set(format!("Bookmarked #{id}"));
+        } else {
+            self.board.bookmarked_tasks.remove(&id);
+            self.status.set(format!("Bookmark removed from #{id}"));
+        }
+        self.dirty = true;
+        vec![Command::Task(TaskCommand::SetBookmark { id, bookmarked })]
+    }
+
     /// Open a nested view (an epic or a work package) over the current one,
     /// with a fresh cursor and the current view kept as its parent, so q
     /// restores it.

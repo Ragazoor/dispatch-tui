@@ -141,6 +141,9 @@ struct Rows {
     /// subscription's `WHERE subscriber = …`, so nothing here filters by
     /// subscriber.
     unseen_tasks: BTreeMap<String, bindings::UnseenTask>,
+    /// `core.allium: Bookmark`. Arrive scoped to this person by the
+    /// `own_bookmarks` view, so nothing here filters by subscriber.
+    bookmarks: BTreeMap<String, bindings::Bookmark>,
     /// `workspaces.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
     /// the directory of identities and names is readable by every client.
     user_profiles: BTreeMap<String, bindings::UserProfile>,
@@ -220,6 +223,7 @@ impl Rows {
             && self.learning_retrievals.is_empty()
             && self.subscriptions.is_empty()
             && self.unseen_tasks.is_empty()
+            && self.bookmarks.is_empty()
             && self.user_profiles.is_empty()
             && self.workspaces.is_empty()
             && self.memberships.is_empty()
@@ -535,6 +539,27 @@ impl SharedRows {
 
     pub fn remove_unseen_task(&self, id: String) {
         self.write(|rows| rows.unseen_tasks.remove(&id).is_some());
+    }
+
+    pub fn upsert_bookmark(&self, row: &bindings::Bookmark) {
+        self.write(|rows| {
+            rows.bookmarks.insert(row.id.clone(), row.clone());
+            true
+        });
+    }
+
+    pub fn remove_bookmark(&self, id: String) {
+        self.write(|rows| rows.bookmarks.remove(&id).is_some());
+    }
+
+    /// The tasks this person has bookmarked, ascending (`core.allium:
+    /// Bookmark`). The rows are already this person's own.
+    pub fn bookmarked_task_ids(&self) -> Vec<TaskId> {
+        self.read(|rows| {
+            let mut ids: Vec<TaskId> = rows.bookmarks.values().map(|b| TaskId(b.task_id)).collect();
+            ids.sort_unstable();
+            ids
+        })
     }
 
     /// The tasks this person has not yet seen, ascending
@@ -888,6 +913,10 @@ impl SharedRows {
 
     pub fn retire_unseen_task(&self, old: &bindings::UnseenTask) {
         self.write(|rows| remove_if_held(&mut rows.unseen_tasks, &old.id, old));
+    }
+
+    pub fn retire_bookmark(&self, old: &bindings::Bookmark) {
+        self.write(|rows| remove_if_held(&mut rows.bookmarks, &old.id, old));
     }
 
     pub fn retire_workspace(&self, old: &bindings::Workspace) {

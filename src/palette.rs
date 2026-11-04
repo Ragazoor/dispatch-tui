@@ -17,6 +17,9 @@ pub(crate) const RED: Color = Color::Rgb(247, 118, 142);
 /// The new-task signal (`board-visuals.allium`, "New-task signal"): one meaning,
 /// no other use on the board.
 pub(crate) const SIGNAL: Color = Color::Rgb(255, 158, 100);
+/// The bookmark (`board-visuals.allium`, "Bookmark"): a cool mint green, apart
+/// from `GREEN`, which says Done and "merged". One meaning, no other use.
+pub(crate) const BOOKMARK: Color = Color::Rgb(80, 250, 123);
 pub(crate) const FLASH_BG: Color = Color::Rgb(62, 52, 20);
 
 // ── Board neutral ramp (board-visuals.allium: BoardNeutralRamp) ──────────────

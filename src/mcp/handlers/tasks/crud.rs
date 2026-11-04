@@ -51,23 +51,34 @@ async fn handle_update_task(
         Err(e) => return service_err_to_response(id, e),
     }
 
+    // `bookmarked` is not a Task field: it is the board person's own row,
+    // written after the task's fields (`UpdateTaskViaMcp`).
+    let bookmarked = parsed.bookmarked.take();
     let params = parsed.apply_to_params(params);
-    let fields_display = params.updated_field_names().join(", ");
+    let mut fields: Vec<String> = params
+        .updated_field_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
 
-    let result = match state.task_svc.update_task(params).await {
-        Ok(result) => result,
-        Err(e) => return service_err_to_response(id, e),
-    };
+    let mut nudge = "";
+    if !fields.is_empty() {
+        let result = match state.task_svc.update_task(params).await {
+            Ok(result) => result,
+            Err(e) => return service_err_to_response(id, e),
+        };
+        if result.was_pr_finalisation {
+            nudge = super::reflection_nudge(&*state.db).await;
+        }
+    }
+    if let Some(bookmarked) = bookmarked {
+        if let Err(e) = state.task_svc.set_bookmark(task_id, bookmarked).await {
+            return service_err_to_response(id, e);
+        }
+        fields.push("bookmarked".to_string());
+    }
     state.notify_task_changed(task_id);
-    let nudge = if result.was_pr_finalisation {
-        super::reflection_nudge(&*state.db).await
-    } else {
-        ""
-    };
-    let text = format!(
-        "Task {} updated ({}){}",
-        result.task_id, fields_display, nudge
-    );
+    let text = format!("Task {} updated ({}){}", task_id, fields.join(", "), nudge);
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
@@ -227,6 +238,7 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
         auto_run_plan,
         phoenix,
         schedule,
+        bookmarked,
     } = parsed;
 
     [
@@ -246,6 +258,7 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
         ("auto_run_plan", auto_run_plan.is_some()),
         ("phoenix", phoenix.is_some()),
         ("schedule", schedule.is_some()),
+        ("bookmarked", bookmarked.is_some()),
     ]
     .into_iter()
     .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -529,6 +542,11 @@ pub(crate) async fn handle_list_tasks(
         Err(e) => return service_err_to_response(id, e),
     };
 
+    let bookmarks: std::collections::HashSet<TaskId> =
+        state.db.bookmarked_task_ids().await.into_iter().collect();
+    if let Some(wanted) = parsed.bookmarked {
+        filtered.retain(|t| bookmarks.contains(&t.id) == wanted);
+    }
     if filtered.is_empty() {
         return JsonRpcResponse::ok(
             id,
@@ -553,7 +571,13 @@ pub(crate) async fn handle_list_tasks(
                 Some(g) if !g.is_empty() => g.clone(),
                 _ => super::description_preview(&t.description),
             };
-            super::format_task_line(t, current_agents.get(&t.id).copied(), &epic_titles, &goal)
+            super::format_task_line(
+                t,
+                bookmarks.contains(&t.id),
+                current_agents.get(&t.id).copied(),
+                &epic_titles,
+                &goal,
+            )
         })
         .collect();
     lines.extend(cut_hint);
@@ -667,6 +691,7 @@ mod tests {
             auto_run_plan: None,
             phoenix: None,
             schedule: None,
+            bookmarked: None,
         }
     }
 
@@ -791,6 +816,13 @@ mod tests {
                 "schedule",
                 UpdateTaskArgs {
                     schedule: Some("0 9 * * 1".into()),
+                    ..base_args()
+                },
+            ),
+            (
+                "bookmarked",
+                UpdateTaskArgs {
+                    bookmarked: Some(true),
                     ..base_args()
                 },
             ),

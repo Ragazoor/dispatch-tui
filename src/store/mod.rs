@@ -93,6 +93,10 @@ pub trait TaskRead: Send + Sync {
     /// rather than decoding every task ever created.
     async fn list_agent_tasks(&self) -> (Vec<Task>, Vec<Task>);
     async fn find_task_by_plan(&self, plan: &str) -> Option<Task>;
+    /// The tasks this board's person has bookmarked (`core.allium:
+    /// Bookmark`), ascending. Drives the board's bookmark mark and the MCP
+    /// `bookmarked` line and filter.
+    async fn bookmarked_task_ids(&self) -> Vec<TaskId>;
 }
 
 /// Reading the agent rows the board's subscription holds, current and ended
@@ -133,6 +137,10 @@ pub trait TaskCrud: TaskRead {
     /// `id`'s card, so this board's person's unseen mark on it ends. A board
     /// with no settled identity has no marks to end and does nothing.
     async fn mark_task_seen(&self, id: TaskId) -> Result<()>;
+    /// `tasks.allium: SetBookmark`: set or remove this board's person's
+    /// bookmark on `id`. Refused for a Done task, an unseen one, and on a
+    /// board that does not yet know who its person is.
+    async fn set_bookmark(&self, id: TaskId, bookmarked: bool) -> Result<()>;
     /// `tasks.allium: BatchDelete`'s atomic counterpart to looping
     /// [`Self::delete_task`]/[`EpicCrud::delete_epic`] once per selected item.
     /// Validates every task and epic against the store's TRUE state and

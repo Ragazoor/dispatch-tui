@@ -74,6 +74,12 @@ pub enum TaskMessage {
     /// The tasks this person has not yet seen, as the latest board reload read
     /// them (`core.allium: UnseenTask`).
     UnseenRefreshed(Vec<TaskId>),
+    /// The tasks this person has bookmarked, as the latest board reload read
+    /// them (`core.allium: Bookmark`).
+    BookmarksRefreshed(Vec<TaskId>),
+    /// `b`: toggle this person's bookmark on the task under the cursor
+    /// (`tasks.allium: ToggleBookmarkFromBoard`).
+    ToggleBookmark,
     Edited(TaskEdit),
     QuickDispatch {
         repo_path: String,
@@ -169,6 +175,8 @@ impl TaskMessage {
                 app.handle_dispatch_requests_refreshed(rows)
             }
             TaskMessage::UnseenRefreshed(ids) => app.handle_unseen_refreshed(ids),
+            TaskMessage::BookmarksRefreshed(ids) => app.handle_bookmarks_refreshed(ids),
+            TaskMessage::ToggleBookmark => app.handle_toggle_bookmark(),
             TaskMessage::Edited(edit) => app.handle_task_edited(edit),
             TaskMessage::QuickDispatch { repo_path, epic_id } => {
                 app.handle_quick_dispatch(repo_path, epic_id)

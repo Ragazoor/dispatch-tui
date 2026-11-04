@@ -357,6 +357,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "open_pr_url",
         "Open the selected task's URL (its pull request, once one is set) in a browser; reports `No URL set` when there is none",
     ),
+    normal(
+        &["b"],
+        Some(C::OnTaskCard),
+        "toggle_bookmark",
+        "Bookmark the task, or remove its bookmark: the card and every epic above it carry a green diamond until you remove it or the task is done",
+    ),
     // ---- board.normal: epic view settings ----
     normal(
         &["U"],

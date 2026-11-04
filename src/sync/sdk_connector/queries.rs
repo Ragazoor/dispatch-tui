@@ -96,6 +96,9 @@ pub(in crate::sync) fn subscription_queries(
         // This person's own unseen marks (sync.allium: own_unseen). Never
         // another person's.
         "SELECT * FROM own_unseen_tasks".to_string(),
+        // This person's own bookmarks (core.allium: Bookmark). Never another
+        // person's.
+        "SELECT * FROM own_bookmarks".to_string(),
         // Settings (`docs/specs/settings.allium`). The view serves the
         // settings of every host this person owns; a setting is this
         // machine's own, so the ask narrows it by host.

@@ -35,6 +35,11 @@ pub struct BoardState {
     /// (`board-visuals.allium`, "New-task signal"); an epic's mark is derived
     /// from it by [`BoardState::epic_has_unseen`], never held.
     pub(in crate::tui) unseen_tasks: HashSet<TaskId>,
+    /// The tasks this person has bookmarked (`core.allium: Bookmark`), as the
+    /// latest board reload read them, plus the board's own toggles since.
+    /// Drives the bookmark mark (`board-visuals.allium`, "Bookmark"); an
+    /// epic's mark is derived by [`BoardState::epic_has_bookmark`].
+    pub(in crate::tui) bookmarked_tasks: HashSet<TaskId>,
 }
 
 impl BoardState {
@@ -46,13 +51,25 @@ impl BoardState {
     /// descendant epic is unseen. Free when nothing is unseen, which is almost
     /// always.
     pub(in crate::tui) fn epic_has_unseen(&self, id: EpicId) -> bool {
-        if self.unseen_tasks.is_empty() {
+        self.subtree_holds_any(id, &self.unseen_tasks)
+    }
+
+    /// Whether `id`'s card carries the bookmark mark: a task in `id` or in any
+    /// descendant epic is bookmarked by this person.
+    pub(in crate::tui) fn epic_has_bookmark(&self, id: EpicId) -> bool {
+        self.subtree_holds_any(id, &self.bookmarked_tasks)
+    }
+
+    /// Whether any task of `marked` sits in `id` or a descendant epic. Free
+    /// when `marked` is empty, which is almost always.
+    fn subtree_holds_any(&self, id: EpicId, marked: &HashSet<TaskId>) -> bool {
+        if marked.is_empty() {
             return false;
         }
         let subtree = crate::models::descendant_epic_ids(id, &self.epics);
-        self.tasks.iter().any(|t| {
-            self.unseen_tasks.contains(&t.id) && t.epic_id.is_some_and(|e| subtree.contains(&e))
-        })
+        self.tasks
+            .iter()
+            .any(|t| marked.contains(&t.id) && t.epic_id.is_some_and(|e| subtree.contains(&e)))
     }
 
     pub(in crate::tui) fn find_epic(&self, id: EpicId) -> Option<&Epic> {

@@ -179,6 +179,13 @@ pub trait ReducerCaller: Send + Sync {
     async fn remove_member(&self, membership_id: i64) -> Result<ReducerOutcome>;
     /// `tasks.allium: SeeTaskByLandingOnIt`.
     async fn mark_task_seen(&self, subscriber: String, task_id: TaskId) -> Result<ReducerOutcome>;
+    /// `tasks.allium: SetBookmark`.
+    async fn set_bookmark(
+        &self,
+        subscriber: String,
+        task_id: TaskId,
+        bookmarked: bool,
+    ) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
     /// `store-split.allium: UpdateTaskIsOneTransaction`: the relink and the
     /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.
