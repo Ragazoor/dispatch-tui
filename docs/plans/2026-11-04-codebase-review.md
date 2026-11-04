@@ -8,7 +8,7 @@ Task #98864. Follows `docs/plans/2026-11-03-codebase-review.md` (task #98753).
 
 **Gates (on `8687f9d4`).**
 - `cargo test --no-fail-fast`: 32 targets, 6,802 passed, 0 failed, 2 ignored, no `skipping:` lines.
-- `cargo clippy --all-targets -- -D warnings`: **failed** — `clippy::large_enum_variant` on `src/runtime/event_loop.rs::LoopEvent`, plus an `unused_mut` in `tests/memory_caller_conformance/move_epic.rs`. Fixed in this task (C1, commit `fix(tui): box Epic payloads on the message bus`); clippy is clean after it.
+- `cargo clippy --all-targets -- -D warnings`: **failed** — `clippy::large_enum_variant` on `src/runtime/event_loop.rs::LoopEvent`, plus an `unused_mut` in `tests/memory_caller_conformance/move_epic.rs`. Fixed in this task (C1, commit `fix(tui): box Epic payloads on the message bus`); clippy is clean after it, and `cargo test` re-ran green on the fixed tree (6,802 passed, 0 failed).
 - The toolchain on this machine is Fedora's rustc/clippy 1.99.1 (installed 2026-11-01, no rustup), not the pinned 1.99.0, so `scripts/check-toolchain.sh` fails here. The same toolchain was clean on 2026-11-03, so C1 is a real regression, not toolchain drift. `scripts/check-spacetime-module.sh` fails here on a link error in `spacetime/module-tests` (missing `openssl-devel`/`gcc-c++`); environment, not code.
 - Coverage not re-measured.
 
