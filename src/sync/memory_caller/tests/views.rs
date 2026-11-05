@@ -132,3 +132,46 @@ fn a_super_admin_sees_every_workspace_without_belonging_to_one() {
 fn a_name_that_is_not_a_view_has_no_keys() {
     assert!(scenario().view_keys("epics").is_none());
 }
+
+/// M12: `me` dispatched bob's task 12 (epic 4, public) and then unfollowed
+/// epic 1. The agent runs on `me`'s host, so the task, and the subagent rows
+/// of it, stay served; with no agent or request there, they do not.
+#[test]
+fn a_task_running_on_the_callers_host_stays_served_after_an_unfollow() {
+    let caller = scenario();
+    {
+        let mut t = caller.lock();
+        let task12 = task(12, 4, "bob");
+        t.tasks.insert(12, task12);
+        t.subscriptions.clear();
+        t.hosts.insert(
+            "h-me".into(),
+            module::Host {
+                id: "h-me".into(),
+                owner: "me".into(),
+                label: String::new(),
+            },
+        );
+        t.task_subagents.push(module::TaskSubagent {
+            task_id: 12,
+            agent_id: "sub".into(),
+            session_id: "s".into(),
+            started_at: String::new(),
+            agent_row: 0,
+        });
+    }
+    assert_eq!(keys(&caller, "own_tasks"), ["10"]);
+    assert!(keys(&caller, "visible_task_subagents").is_empty());
+    caller.lock().agents.insert(
+        1,
+        module::Agent {
+            id: 1,
+            task_id: 12,
+            host: "h-me".into(),
+            state: module::AGENT_CURRENT.into(),
+            ..module::blank_agent()
+        },
+    );
+    assert_eq!(keys(&caller, "own_tasks"), ["10", "12"]);
+    assert_eq!(keys(&caller, "visible_task_subagents"), ["12/sub/s"]);
+}

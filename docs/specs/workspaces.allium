@@ -123,13 +123,19 @@
 --   covered_epics: the epics the caller follows and every descendant, walked
 --     by the SERVER at any depth, stopping at an epic the caller cannot see.
 --   covered_tasks: the tasks of the covered epics.
+--   own_tasks also serves a task run on a host the caller owns (task #98911,
+--     M12): one with a current agent, or an open dispatch or session request,
+--     on such a host, while the caller still sees it. Unfollowing the epic of
+--     a teammate's task one dispatched must not lose the task its agent and
+--     requests name.
 --   visible_epics, visible_tasks, visible_packages: everything visible in a
 --     workspace the caller belongs to; a client narrows with
 --     WHERE workspace_id = N (WHERE epic_id = N for tasks).
 --   Rows about a task (agents, dispatch_requests, session_requests,
 --     unseen_tasks, task_subagents, learning_retrievals, learning_verdicts):
 --     one view each, serving the rows of the tasks the board holds (own
---     tasks and covered tasks). Never wider than the task's own visibility.
+--     tasks, which include the tasks run on the caller's hosts, and covered
+--     tasks). Never wider than the task's own visibility.
 --   unseen_tasks is the caller's own marks only. bookmarks
 --     (core/Bookmark) likewise: the caller's own, on tasks they still see.
 --   task_watchers is dead (no reducer writes it), so its view is the
@@ -586,10 +592,23 @@ rule ClaimsFollowSight {
     -- held by a host whose owner no longer sees that epic is released, so
     -- another host can claim the feed instead of it stalling. One helper
     -- serves every path, and one conformance test runs each of them.
+    --
+    -- Task #98911 (M10): the same holds for TASK-scoped claims. A task claim
+    -- is made under sight of the task (ClaimPollOwner), which is sight of
+    -- its epic, so a claim on a task of the epic or its sub-epics is
+    -- released when its host's owner no longer sees that epic. Otherwise a
+    -- person removed from the workspace, or a task whose epic moves under a
+    -- private one, would keep a claim nobody else may replace and the task's
+    -- PR status would stop updating. RemoveMember and MoveEpicToWorkspace
+    -- judge by membership, the rest by sight; both release both scopes.
     ensures:
         for owner_row in core/PollOwners.where(p =>
                 p.scope = epic and p.scope_id in epic.subtree
                     and not epic.visible_to(p.host.owner)):
+            not exists owner_row
+        for owner_row in core/PollOwners.where(p =>
+                p.scope = task and p.scope_id.epic in epic.subtree
+                    and not p.scope_id.epic.visible_to(p.host.owner)):
             not exists owner_row
 }
 

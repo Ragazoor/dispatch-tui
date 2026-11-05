@@ -37,6 +37,25 @@ fn claim(id: i64, epic_id: i64, host: &str) -> module::PollOwner {
     }
 }
 
+fn task_claim(id: i64, task_id: i64, host: &str) -> module::PollOwner {
+    module::PollOwner {
+        scope: POLL_SCOPE_TASK.into(),
+        scope_id: task_id,
+        ..claim(id, 0, host)
+    }
+}
+
+fn task_in_epic(id: i64, epic_id: i64) -> module::Task {
+    module::Task {
+        id,
+        epic_id,
+        repo_path: "/repo".into(),
+        created_at: TEST_STAMP.into(),
+        updated_at: TEST_STAMP.into(),
+        ..module::blank_task()
+    }
+}
+
 fn epic(id: i64, workspace_id: i64, creator: &str) -> module::Epic {
     module::Epic {
         id,
@@ -628,6 +647,12 @@ async fn every_loss_of_sight_path_releases_the_claims_it_strands() {
             for p in [claim(1, 1, "h-bob"), claim(2, 1, "h-carol")] {
                 t.poll_owners.insert(p.id, p);
             }
+            // M10: a task of that epic is polled by both hosts too. A task
+            // claim follows sight of the task, so it goes the same way.
+            t.tasks.insert(10, task_in_epic(10, 1));
+            for p in [task_claim(3, 10, "h-bob"), task_claim(4, 10, "h-carol")] {
+                t.poll_owners.insert(p.id, p);
+            }
             // Bob stays a member wherever the path leaves the epic.
             t.memberships.insert(6, member(6, WS2, "bob", "member"));
         }
@@ -637,9 +662,10 @@ async fn every_loss_of_sight_path_releases_the_claims_it_strands() {
             !hosts.contains(&"h-carol".to_string()),
             "{path}: carol's claim survived: {hosts:?}"
         );
-        assert!(
-            hosts.contains(&"h-bob".to_string()),
-            "{path}: bob's claim was released: {hosts:?}"
+        assert_eq!(
+            hosts.iter().filter(|h| *h == "h-bob").count(),
+            2,
+            "{path}: bob's epic or task claim was released: {hosts:?}"
         );
     }
 }

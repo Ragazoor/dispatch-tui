@@ -1247,6 +1247,19 @@ rule FeedCommandRunsOnSettersHost {
         --      re-checks this rule before running a refresh another host
         --      asked for, and fails the row when it no longer holds (the
         --      command was re-set by someone else after the request).
+        --
+        -- CLAIMS FROM BEFORE THE RULE (task #98911, M9, decided with the
+        -- user: a one-time sweep). Only a NEW claim is gated, so a claim a
+        -- non-setter's host took before the rule would stall the feed for
+        -- good: that host may no longer run the command and skips, and the
+        -- setter's host sees the claim and skips too. When a store moves onto
+        -- rules version 37, its first connection releases every epic-scoped
+        -- claim on a feed epic held by a host whose owner is not the setter
+        -- (or by a host no longer registered), once. It is not a standing
+        -- rule: from then on enforcement point 1 refuses such a claim.
+        -- Module: spacetime/module/src/config.rs::release_claims_of_non_setter_hosts,
+        -- called by stamp_rules_version_on_connect. The in-memory store starts
+        -- empty on every connection and has no stored claims to sweep.
 }
 
 rule SerialisedFeedCycle {

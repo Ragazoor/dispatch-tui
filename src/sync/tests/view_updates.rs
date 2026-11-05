@@ -391,3 +391,90 @@ fn an_epic_that_stops_decoding_is_removed() {
     rows.upsert_epic(&bad);
     assert!(rows.epic(EpicId(7)).is_none());
 }
+
+fn learning(summary: &str) -> bindings::Learning {
+    bindings::Learning {
+        id: 7,
+        kind: "pitfall".into(),
+        summary: summary.into(),
+        detail: None,
+        scope: "repo".into(),
+        scope_ref: Some("/repo".into()),
+        tags: "[]".into(),
+        status: "approved".into(),
+        source_task_id: None,
+        upvote_count: 0,
+        last_upvoted_at: None,
+        created_at: "2026-09-18 10:00:00".into(),
+        updated_at: "2026-09-18 10:00:00".into(),
+        embedding: None,
+        workspace_id: 0,
+        author: String::new(),
+    }
+}
+
+fn retrieval(source: &str) -> bindings::LearningRetrieval {
+    bindings::LearningRetrieval {
+        id: 7,
+        task_id: 1,
+        learning_id: 2,
+        source: source.into(),
+        retrieved_at: "2026-09-18 10:00:00".into(),
+    }
+}
+
+fn package(created_at: &str) -> bindings::WorkPackage {
+    bindings::WorkPackage {
+        id: 7,
+        title: "pkg".into(),
+        created_at: created_at.into(),
+        updated_at: "2026-09-18 10:00:00".into(),
+        ..dispatch_spacetime_module::blank_work_package().into()
+    }
+}
+
+fn link(kind: &str) -> bindings::WorkPackageLink {
+    bindings::WorkPackageLink {
+        id: "7:task:3".into(),
+        work_package_id: 7,
+        kind: kind.into(),
+        item_id: 3,
+        created_at: "2026-09-18 10:00:00".into(),
+    }
+}
+
+/// M15: the learning, retrieval, package and link rows follow the task and
+/// epic rule. A row that stops decoding leaves the board.
+#[test]
+fn a_learning_that_stops_decoding_is_removed() {
+    let rows = SharedRows::new();
+    rows.upsert_learning(&learning("fine"));
+    let mut bad = learning("bad");
+    bad.kind = "teleported".into();
+    rows.upsert_learning(&bad);
+    assert!(rows.learning(crate::models::LearningId(7)).is_none());
+}
+
+#[test]
+fn a_learning_retrieval_that_stops_decoding_is_removed() {
+    let rows = SharedRows::new();
+    rows.upsert_learning_retrieval(&retrieval("query_learnings"));
+    rows.upsert_learning_retrieval(&retrieval("teleported"));
+    assert!(rows.retrievals_for_task(TaskId(1)).is_empty());
+}
+
+#[test]
+fn a_work_package_that_stops_decoding_is_removed() {
+    let rows = SharedRows::new();
+    rows.upsert_work_package(&package("2026-09-18 10:00:00"));
+    rows.upsert_work_package(&package("not a time"));
+    assert!(rows.work_packages().is_empty());
+}
+
+#[test]
+fn a_work_package_link_that_stops_decoding_is_removed() {
+    let rows = SharedRows::new();
+    rows.upsert_work_package_link(&link("task"));
+    rows.upsert_work_package_link(&link("teleported"));
+    assert!(rows.work_package_links().is_empty());
+}

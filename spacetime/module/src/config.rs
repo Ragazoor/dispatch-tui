@@ -304,23 +304,99 @@ pub(crate) fn release_poll_claims(
     }
 }
 
-/// `workspaces.allium: ClaimsFollowSight` (task #98851, M4): the one helper
-/// every loss-of-sight path calls once the change is written. Releases the
-/// epic-scoped claims on `epics` held by a host whose owner no longer sees
-/// that epic, judged on the store as it is now. A path that can take sight
-/// away MUST call this; `every_loss_of_sight_path_releases_the_claims_it_strands`
+/// `feeds.allium: FeedCommandRunsOnSettersHost` (task #98911, M9): the one-time
+/// sweep for claims held from before the setter rule. Releases every
+/// epic-scoped claim on a feed epic held by a host whose owner did not set its
+/// command (or by a host no longer registered), so the setter's host can claim
+/// it. Run once by `stamp_rules_version_on_connect` on the first connection
+/// after the store moves onto [`FEED_SETTER_CLAIMS_RULES_VERSION`]; the claim
+/// reducers refuse such a claim from then on. Rows are collected before any is
+/// deleted, so none is skipped.
+pub(crate) fn release_claims_of_non_setter_hosts(ctx: &ReducerContext) {
+    let stale: Vec<i64> = ctx
+        .db
+        .poll_owners()
+        .iter()
+        .filter(|p| p.scope == POLL_SCOPE_EPIC)
+        .filter(|p| {
+            let owner = ctx
+                .db
+                .hosts()
+                .id()
+                .find(&p.host)
+                .map(|h| h.owner)
+                .unwrap_or_default();
+            ctx.db
+                .epics()
+                .id()
+                .find(p.scope_id)
+                .is_some_and(|epic| check_feed_claim_by(&epic, &owner).is_err())
+        })
+        .map(|p| p.id)
+        .collect();
+    for row_id in stale {
+        ctx.db.poll_owners().id().delete(row_id);
+    }
+}
+
+/// `workspaces.allium: ClaimsFollowSight` (task #98911, M10): the task-scoped
+/// twin of [`release_poll_claims`]. Releases every task-scoped claim on a task
+/// of an epic in `epics` held by a host whose owner `loses_sight(epic_id,
+/// owner)` of that epic. A task's sight is its epic's, so the epic id is what
+/// the closure judges. Epic-less tasks are their owner's alone and never move
+/// with an epic, so they are not walked.
+pub(crate) fn release_task_poll_claims(
+    ctx: &ReducerContext,
+    epics: &std::collections::HashSet<i64>,
+    loses_sight: impl Fn(i64, &str) -> bool,
+) {
+    let stale: Vec<i64> = epics
+        .iter()
+        .flat_map(|epic_id| ctx.db.tasks().epic_id().filter(epic_id))
+        .flat_map(|task| {
+            ctx.db
+                .poll_owners()
+                .scope_id()
+                .filter(&task.id)
+                .filter(|p| p.scope == POLL_SCOPE_TASK)
+                .filter(|p| {
+                    ctx.db
+                        .hosts()
+                        .id()
+                        .find(&p.host)
+                        .is_some_and(|h| loses_sight(task.epic_id, &h.owner))
+                })
+                .map(|p| p.id)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for row_id in stale {
+        ctx.db.poll_owners().id().delete(row_id);
+    }
+}
+
+/// `workspaces.allium: ClaimsFollowSight` (task #98851, M4; task-scoped claims
+/// #98911, M10): the one helper every loss-of-sight path calls once the
+/// change is written. Releases the epic-scoped claims on `epics`, and the
+/// task-scoped claims on their tasks, held by a host whose owner no longer
+/// sees that epic, judged on the store as it is now. A path that can take
+/// sight away MUST call this (or, for the two paths that judge by membership,
+/// both release functions);
+/// `every_loss_of_sight_path_releases_the_claims_it_strands`
 /// (`src/sync/memory_caller/tests/feed_authority.rs`) runs each one.
 pub(crate) fn release_claims_without_sight(
     ctx: &ReducerContext,
     epics: &std::collections::HashSet<i64>,
 ) {
-    release_poll_claims(ctx, epics, |epic_id, owner| {
+    let loses_sight = |epic_id: i64, owner: &str| {
         ctx.db
             .epics()
             .id()
             .find(epic_id)
             .is_none_or(|epic| !epic_visible_to(ctx, &epic, owner))
-    });
+    };
+    release_poll_claims(ctx, epics, loses_sight);
+    release_task_poll_claims(ctx, epics, loses_sight);
 }
 
 /// The epics in `unfollowed`'s subtree (itself included) that a person whose

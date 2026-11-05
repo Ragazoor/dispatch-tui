@@ -10,7 +10,7 @@ use crate::spacetime::bindings;
 
 use super::super::encode;
 use super::super::writes::ReducerOutcome;
-use super::{MemoryReducerCaller, Tables, POLL_SCOPE_EPIC};
+use super::{MemoryReducerCaller, Tables, POLL_SCOPE_EPIC, POLL_SCOPE_TASK};
 
 impl MemoryReducerCaller {
     /// Mirrors the module's `release_poll_claims`: drop every epic-scoped
@@ -40,9 +40,35 @@ impl MemoryReducerCaller {
         }
     }
 
+    /// Mirrors the module's `release_task_poll_claims` (M10): drop every
+    /// task-scoped claim on a task of an epic in `epics` held by a host whose
+    /// owner `loses_sight(epic_id, owner)` of the task's epic.
+    pub(super) fn release_task_poll_claims(
+        &self,
+        tables: &mut Tables,
+        epics: &std::collections::HashSet<i64>,
+        loses_sight: impl Fn(i64, &str) -> bool,
+    ) {
+        let stale: Vec<i64> = tables
+            .poll_owners
+            .values()
+            .filter(|p| p.scope == POLL_SCOPE_TASK)
+            .filter_map(|p| {
+                let epic_id = tables.tasks.get(&p.scope_id)?.epic_id;
+                let owner = &tables.hosts.get(&p.host)?.owner;
+                (epics.contains(&epic_id) && loses_sight(epic_id, owner)).then_some(p.id)
+            })
+            .collect();
+        for row_id in stale {
+            tables.poll_owners.remove(&row_id);
+            self.rows.remove_poll_owner(row_id);
+        }
+    }
+
     /// Mirrors the module's `release_claims_without_sight`
     /// (`workspaces.allium: ClaimsFollowSight`): the one helper every
-    /// loss-of-sight path calls once its change is written.
+    /// loss-of-sight path calls once its change is written. Epic-scoped and
+    /// task-scoped claims both.
     pub(super) fn release_claims_without_sight(
         &self,
         tables: &mut Tables,
@@ -64,6 +90,27 @@ impl MemoryReducerCaller {
         let gone: std::collections::HashSet<(i64, String)> = unseen.into_iter().collect();
         self.release_poll_claims(tables, epics, |epic_id, owner| {
             gone.contains(&(epic_id, owner.to_string()))
+        });
+        // The tasks' epics are judged the same way, on the store as it is now.
+        let sight_lost = |tables: &Tables, epic_id: i64, owner: &str| {
+            !tables
+                .epics
+                .get(&epic_id)
+                .is_some_and(|e| module::epic_visible_to(tables, e, owner))
+        };
+        let task_gone: std::collections::HashSet<(i64, String)> = tables
+            .poll_owners
+            .values()
+            .filter(|p| p.scope == POLL_SCOPE_TASK)
+            .filter_map(|p| {
+                let epic_id = tables.tasks.get(&p.scope_id)?.epic_id;
+                let owner = tables.hosts.get(&p.host)?.owner.clone();
+                (epics.contains(&epic_id) && sight_lost(tables, epic_id, &owner))
+                    .then_some((epic_id, owner))
+            })
+            .collect();
+        self.release_task_poll_claims(tables, epics, |epic_id, owner| {
+            task_gone.contains(&(epic_id, owner.to_string()))
         });
     }
 

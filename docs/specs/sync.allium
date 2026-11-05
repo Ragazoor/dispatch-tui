@@ -540,7 +540,12 @@ rule SubscribeOnceIdentityIsSettled {
         -- VIEWS"), and the board subscribes to the per-caller views over
         -- them, which answer for the connection's own identity:
         --   own_tasks, own_epics, own_packages: what this person created,
-        --     and the epic-less tasks they own (own_creations);
+        --     and the epic-less tasks they own (own_creations); own_tasks
+        --     also the tasks run on a host this person owns (a current
+        --     agent, or an open dispatch or session request, there), while
+        --     they still see them (task #98911, M12): the host's reactor
+        --     acts on the task a request row names, so the task must
+        --     arrive with the row, and its subagent rows with it;
         --   covered_epics, covered_tasks: the epics this person follows and
         --     every descendant, at any depth, and their tasks;
         --   rows about a held task (learning retrievals, unseen marks),

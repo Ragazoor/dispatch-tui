@@ -329,6 +329,7 @@ fn drop_follows_in_workspace(ctx: &ReducerContext, user: &str, workspace_id: i64
         .map(|e| e.id)
         .collect();
     crate::config::release_poll_claims(ctx, &epics, |_, owner| owner == user);
+    crate::config::release_task_poll_claims(ctx, &epics, |_, owner| owner == user);
     crate::bookmark::drop_marks_where(ctx, |task_id, subscriber| {
         subscriber == user
             && ctx

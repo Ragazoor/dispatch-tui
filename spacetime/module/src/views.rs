@@ -313,13 +313,14 @@ pub fn own_epics_of(r: &impl StoreReads, who: &str) -> Vec<Epic> {
 }
 
 /// `own_tasks`: what the caller created, and the epic-less tasks they own,
-/// while visible.
+/// while visible, and the tasks run on their hosts ([`hosted_tasks_of`]).
 pub fn own_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
     dedup_by(
         r.tasks_created_by(who)
             .into_iter()
             .chain(r.tasks_owned_by(who))
-            .filter(|t| task_visible_to(r, t, who)),
+            .filter(|t| task_visible_to(r, t, who))
+            .chain(hosted_tasks_of(r, who)),
         |t| t.id,
     )
 }
@@ -427,13 +428,50 @@ pub fn visible_packages_of(r: &impl StoreReads, who: &str) -> Vec<WorkPackage> {
     )
 }
 
-/// The tasks the board holds: the caller's own and the covered ones. The rows
-/// about a task are served for these, never for a wider set.
+/// The tasks the board holds: the caller's own and the covered ones (and, by
+/// [`own_tasks_of`], the ones run on their hosts). The rows about a task are
+/// served for these, never for a wider set.
 pub fn held_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
     dedup_by(
         own_tasks_of(r, who)
             .into_iter()
             .chain(covered_tasks_of(r, who)),
+        |t| t.id,
+    )
+}
+
+/// The tasks with a current agent, or an open dispatch or session request, on
+/// a host `who` owns, while `who` still sees them.
+///
+/// A host's reactor serves the requests and agents of its machine, and acts on
+/// the task they name. A caller who dispatched a teammate's task from an epic
+/// and then unfollowed it holds no follow over the task, so without this arm
+/// `get_task` answers None while the agent runs: the wrap-up's rebase fails as
+/// "task deleted" and the agent's subagent rows leave the tree. Sight still
+/// bounds it: a task the caller can no longer see is not carried to them.
+pub fn hosted_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
+    let task_ids: Vec<i64> = rows_on_owned_hosts(r, who, |h| r.agents_on_host(h))
+        .into_iter()
+        .filter(|a| a.state == AGENT_CURRENT)
+        .map(|a| a.task_id)
+        .chain(
+            rows_on_owned_hosts(r, who, |h| r.dispatch_requests_on_host(h))
+                .into_iter()
+                .filter(|d| dispatch_request_is_open(&d.state))
+                .map(|d| d.task_id),
+        )
+        .chain(
+            rows_on_owned_hosts(r, who, |h| r.session_requests_on_host(h))
+                .into_iter()
+                .filter(|s| session_request_is_open(&s.state))
+                .map(|s| s.task_id),
+        )
+        .collect();
+    dedup_by(
+        task_ids
+            .into_iter()
+            .filter_map(|id| r.task(id))
+            .filter(|t| task_visible_to(r, t, who)),
         |t| t.id,
     )
 }

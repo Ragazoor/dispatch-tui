@@ -696,6 +696,9 @@ impl MemoryReducerCaller {
         self.release_poll_claims(&mut tables, &tree_set, |_, owner| {
             !members.iter().any(|m| m == owner)
         });
+        self.release_task_poll_claims(&mut tables, &tree_set, |_, owner| {
+            !members.iter().any(|m| m == owner)
+        });
         self.drop_marks_where(&mut tables, |t, task_id, subscriber| {
             task_ids.contains(&task_id) && !t.has_member(workspace_id, subscriber)
         });

@@ -491,6 +491,9 @@ impl SharedRows {
             }
             Err(e) => {
                 super::drop_undecodable("learning", &e);
+                // As `upsert_task`: a row that stops decoding leaves the
+                // board rather than lingering in its old form.
+                self.write(|rows| rows.learnings.remove(&row.id).is_some());
             }
         }
     }
@@ -507,6 +510,7 @@ impl SharedRows {
             }),
             Err(e) => {
                 super::drop_undecodable("learning retrieval", &e);
+                self.write(|rows| rows.learning_retrievals.remove(&row.id).is_some());
             }
         }
     }
@@ -720,6 +724,7 @@ impl SharedRows {
             }),
             Err(e) => {
                 super::drop_undecodable("work package", &e);
+                self.write(|rows| rows.work_packages.remove(&row.id).is_some());
             }
         }
     }
@@ -736,6 +741,7 @@ impl SharedRows {
             }),
             Err(e) => {
                 super::drop_undecodable("work package link", &e);
+                self.write(|rows| rows.work_package_links.remove(&row.id).is_some());
             }
         }
     }

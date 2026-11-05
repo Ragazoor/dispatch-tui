@@ -332,4 +332,10 @@ pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
     if previous < WORKSPACES_RULES_VERSION {
         migrate_store_to_workspaces(ctx);
     }
+    // Once, for the claims held before the setter rule: only new claims are
+    // gated, so a claim by a host that may not run the command would stall
+    // the feed for good (`feeds.allium: FeedCommandRunsOnSettersHost`).
+    if previous < FEED_SETTER_CLAIMS_RULES_VERSION {
+        release_claims_of_non_setter_hosts(ctx);
+    }
 }

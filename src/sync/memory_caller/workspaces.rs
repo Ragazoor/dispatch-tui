@@ -310,6 +310,7 @@ impl MemoryReducerCaller {
             .map(|e| e.id)
             .collect();
         self.release_poll_claims(tables, &epics, |_, owner| owner == user);
+        self.release_task_poll_claims(tables, &epics, |_, owner| owner == user);
         self.drop_marks_where(tables, |t, task_id, subscriber| {
             subscriber == user
                 && t.tasks

@@ -418,6 +418,84 @@ fn request_and_agent_rows_follow_the_callers_hosts_not_sight_of_the_task() {
     );
 }
 
+/// M12: a task that has a current agent, or an open request, on a host the
+/// caller owns is held by the caller, though no follow covers it. Otherwise
+/// the host's reactor gets a wrap-up request for a task `get_task` cannot
+/// answer, and the task's subagent rows vanish from the agent tree.
+#[test]
+fn a_task_running_on_the_callers_host_is_held_without_a_follow() {
+    let mut store = tree();
+    store.subscriptions.retain(|s| s.subscriber != "ann");
+    // Task 10 is in a public epic ann still sees, and no longer follows.
+    store.tasks = vec![task(10, 2, "bob", ""), task(11, 2, "bob", "")];
+    store.hosts = vec![Host {
+        id: "ann-laptop".into(),
+        owner: "ann".into(),
+        label: String::new(),
+    }];
+    assert!(held_tasks_of(&store, "ann").is_empty());
+
+    store.agents = vec![Agent {
+        id: 1,
+        task_id: 10,
+        host: "ann-laptop".into(),
+        state: AGENT_CURRENT.into(),
+        ..blank_agent()
+    }];
+    assert_eq!(ids(&held_tasks_of(&store, "ann"), |t| t.id), [10]);
+    // Bob's host is not ann's: the task is not ann's to hold on that account.
+    store.agents[0].host = "bob-laptop".into();
+    assert!(held_tasks_of(&store, "ann").is_empty());
+
+    // An ended agent holds nothing; an open request does; a finished one not.
+    store.agents[0].host = "ann-laptop".into();
+    store.agents[0].state = AGENT_ENDED.into();
+    assert!(held_tasks_of(&store, "ann").is_empty());
+    store.dispatch_requests = vec![DispatchRequest {
+        id: 1,
+        task_id: 10,
+        host: "ann-laptop".into(),
+        state: DISPATCH_PROVISIONING.into(),
+        ..blank_dispatch_request()
+    }];
+    assert_eq!(ids(&held_tasks_of(&store, "ann"), |t| t.id), [10]);
+    store.dispatch_requests[0].state = DISPATCH_FAILED.into();
+    assert!(held_tasks_of(&store, "ann").is_empty());
+    store.session_requests = vec![SessionRequest {
+        id: 1,
+        task_id: 11,
+        host: "ann-laptop".into(),
+        state: SESSION_RUNNING.into(),
+        ..blank_session_request()
+    }];
+    assert_eq!(ids(&held_tasks_of(&store, "ann"), |t| t.id), [11]);
+    // The rows about the held task follow.
+    store.agents[0].state = AGENT_CURRENT.into();
+    store.agents[0].task_id = 11;
+    assert_eq!(ids(&agents_of_held(&store, "ann"), |a| a.id), [1]);
+}
+
+/// The held task is served only while the caller still sees it: a host does
+/// not carry a private task's row to someone who lost sight of it.
+#[test]
+fn a_task_on_the_callers_host_is_not_served_once_the_caller_loses_sight_of_it() {
+    let mut store = tree();
+    store.tasks = vec![task(10, 3, "bob", "")]; // bob's private epic
+    store.hosts = vec![Host {
+        id: "ann-laptop".into(),
+        owner: "ann".into(),
+        label: String::new(),
+    }];
+    store.agents = vec![Agent {
+        id: 1,
+        task_id: 10,
+        host: "ann-laptop".into(),
+        state: AGENT_CURRENT.into(),
+        ..blank_agent()
+    }];
+    assert!(held_tasks_of(&store, "ann").is_empty());
+}
+
 #[test]
 fn unseen_marks_are_the_callers_own_on_tasks_they_can_see() {
     let mut store = tree();

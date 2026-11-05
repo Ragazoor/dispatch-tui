@@ -58,6 +58,13 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 37: poll claims and held tasks — a feed epic's claim held by a host whose
+///    owner did not set the command, from before the setter rule, is released
+///    once when a store moves onto this version
+///    (`release_claims_of_non_setter_hosts`, `lib.rs`); task-scoped claims
+///    follow sight like epic-scoped ones (`release_task_poll_claims`); a task
+///    with a current agent or an open request on a host the caller owns is
+///    served to the caller (`hosted_tasks_of`, `views.rs`).
 /// 36: bookmarks — `bookmarks`, `set_bookmark` and the `own_bookmarks` view
 ///    the board subscribes to; entering Done, on any write path, ends every
 ///    unseen mark and bookmark on the task (`bookmark.rs`, `tasks_epics.rs`;
@@ -190,7 +197,12 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 36;
+pub const RULES_VERSION: i64 = 37;
+
+/// The rules version that added the setter-claims sweep: a store stamped with
+/// anything older has its pre-rule feed claims released once, on its first
+/// connection (`config.rs: release_claims_of_non_setter_hosts`).
+pub const FEED_SETTER_CLAIMS_RULES_VERSION: i64 = 37;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

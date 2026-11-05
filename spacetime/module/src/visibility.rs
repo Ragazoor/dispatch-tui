@@ -616,6 +616,9 @@ pub(crate) fn move_epic_row(
     crate::config::release_poll_claims(ctx, &tree_set, |_, owner| {
         !workspace_has_member(ctx, workspace_id, owner)
     });
+    crate::config::release_task_poll_claims(ctx, &tree_set, |_, owner| {
+        !workspace_has_member(ctx, workspace_id, owner)
+    });
     crate::bookmark::drop_marks_where(ctx, |task_id, subscriber| {
         task_ids.contains(&task_id) && !workspace_has_member(ctx, workspace_id, subscriber)
     });

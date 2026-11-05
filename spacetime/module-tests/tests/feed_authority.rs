@@ -348,15 +348,21 @@ fn every_loss_of_sight_path_releases_the_claims_it_strands() {
         let epic = feed_epic(&store, a);
         legacy_claim(&store, epic, "h-alice");
         legacy_claim(&store, epic, "h-carol");
+        // M10: both hosts also poll a task of that epic; a task claim follows
+        // sight of the task, so it goes the same way.
+        let task = store.create("alice", epic_task("t", epic, "backlog"));
+        claim(&store, "alice", "task", task, "h-alice").expect("alice claims the task");
+        claim(&store, "carol", "task", task, "h-carol").expect("carol claims the task");
         carol_loses_sight_by(path, &store, a, epic);
         let hosts = claim_hosts(&store);
         assert!(
             !hosts.contains(&"h-carol".to_string()),
             "{path}: carol's claim survived: {hosts:?}"
         );
-        assert!(
-            hosts.contains(&"h-alice".to_string()),
-            "{path}: alice's claim was released: {hosts:?}"
+        assert_eq!(
+            hosts.iter().filter(|h| *h == "h-alice").count(),
+            2,
+            "{path}: alice's epic or task claim was released: {hosts:?}"
         );
     }
 }
@@ -381,4 +387,80 @@ fn a_visibility_flip_also_releases_claims_on_the_sub_epics() {
         })
         .expect("private");
     assert!(claim_hosts(&store).is_empty());
+}
+
+// -- M9: claims held before the setter rule ------------------------------------
+
+/// Put the store back to the module just before the setter-claims sweep, then
+/// connect: the one moment the sweep runs.
+fn upgrade_from_before_the_sweep(store: &Store) {
+    store
+        .call("root", |ctx| {
+            ctx.db.rules_version().id().update(RulesVersion {
+                id: 1,
+                version: FEED_SETTER_CLAIMS_RULES_VERSION - 1,
+            });
+            Ok(())
+        })
+        .expect("rewind");
+    store
+        .call("alice", |ctx| {
+            stamp_rules_version_on_connect(ctx);
+            Ok(())
+        })
+        .expect("connect");
+}
+
+/// `FeedCommandRunsOnSettersHost`: carol's host claimed alice's shared feed
+/// before the rule. After the upgrade neither host may run it. The one-time
+/// sweep releases the claim of a host whose owner did not set the command, so
+/// the setter's host can claim the feed.
+#[test]
+fn the_upgrade_releases_a_claim_held_by_a_host_that_may_not_run_the_command() {
+    let (store, a, _) = world();
+    let epic = feed_epic(&store, a);
+    legacy_claim(&store, epic, "h-carol");
+    upgrade_from_before_the_sweep(&store);
+    assert!(claim_hosts(&store).is_empty());
+    claim(&store, "alice", "epic", epic, "h-alice").expect("the setter's host may claim now");
+}
+
+/// The sweep leaves every claim that is workable: the setter's own, one on an
+/// epic with no command, and a task-scoped one.
+#[test]
+fn the_upgrade_keeps_the_claims_that_are_workable() {
+    let (store, a, _) = world();
+    let feed = feed_epic(&store, a);
+    legacy_claim(&store, feed, "h-alice");
+    let plain = make_epic(
+        &store,
+        "alice",
+        Epic {
+            title: "plain".into(),
+            workspace_id: a,
+            ..blank_epic()
+        },
+    );
+    legacy_claim(&store, plain, "h-carol");
+    let task = store.create("alice", epic_task("t", plain, "backlog"));
+    claim(&store, "carol", "task", task, "h-carol").expect("a task claim");
+    upgrade_from_before_the_sweep(&store);
+    assert_eq!(claim_hosts(&store), ["h-alice", "h-carol", "h-carol"]);
+}
+
+/// Once: a store already on the new rules is not swept again by a later
+/// connection.
+#[test]
+fn a_later_connection_does_not_sweep_again() {
+    let (store, a, _) = world();
+    let epic = feed_epic(&store, a);
+    upgrade_from_before_the_sweep(&store);
+    legacy_claim(&store, epic, "h-carol");
+    store
+        .call("bob", |ctx| {
+            stamp_rules_version_on_connect(ctx);
+            Ok(())
+        })
+        .expect("connect");
+    assert_eq!(claim_hosts(&store), ["h-carol"]);
 }
