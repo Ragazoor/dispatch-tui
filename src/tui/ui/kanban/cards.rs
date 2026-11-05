@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 use crate::models::{format_age, Epic, EpicSubstatus, Staleness, SubStatus, Task, TaskStatus};
+use crate::tui::types::EpicMarks;
 use crate::tui::{App, EpicStatsMap};
 
 use super::super::shared::{staleness_color, truncate};
@@ -470,12 +471,13 @@ pub(super) const PHOENIX_GLYPH: &str = "\u{267b}";
 /// counts characters and gets away with it.
 const PHOENIX_MARKER_WIDTH: usize = 3;
 
-/// The new-task marker (`◆`, U+25C6), single-column BMP like the flash glyphs.
-/// See "New-task signal" in `docs/specs/board-visuals.allium`.
-pub(super) const UNSEEN_GLYPH: &str = "\u{25c6}";
+/// The diamond (`◆`, U+25C6) the new-task signal and the bookmark share,
+/// single-column BMP like the flash glyphs. See "New-task signal" and
+/// "Bookmark" in `docs/specs/board-visuals.allium`.
+pub(super) const DIAMOND_GLYPH: &str = "\u{25c6}";
 
 /// Cells the marker costs on line 1: a leading space plus the glyph.
-const UNSEEN_MARKER_WIDTH: usize = 2;
+const DIAMOND_MARKER_WIDTH: usize = 2;
 
 /// The hue of the one diamond a card's title line carries, or `None`. The
 /// new-task signal and the bookmark share the slot and the glyph; the
@@ -706,11 +708,7 @@ pub(super) fn build_task_list_item<'a>(
     let unseen = app.board.unseen_tasks.contains(&task.id);
     let diamond = diamond_color(unseen, app.board.bookmarked_tasks.contains(&task.id));
     let prefix_width = task_card_prefix_width(task, has_message_flash, has_message_flash_sent)
-        + if diamond.is_some() {
-            UNSEEN_MARKER_WIDTH
-        } else {
-            0
-        };
+        + diamond.map_or(0, |_| DIAMOND_MARKER_WIDTH);
     let max_title = (col_width as usize).saturating_sub(prefix_width);
     let title_text = format_task_title(task, max_title);
 
@@ -727,7 +725,7 @@ pub(super) fn build_task_list_item<'a>(
     // board-visuals.allium).
     if let Some(color) = diamond {
         line1.spans.push(Span::styled(
-            format!(" {UNSEEN_GLYPH}"),
+            format!(" {DIAMOND_GLYPH}"),
             Style::default().fg(color),
         ));
     }
@@ -808,6 +806,7 @@ pub(super) fn render_epic_item(
     // own placement there, not the epic's board-wide substatus.
     substatus: EpicSubstatus,
     status: TaskStatus,
+    marks: &EpicMarks,
     ctx: &ColRenderCtx,
 ) -> ListItem<'static> {
     let col_width = ctx.width;
@@ -821,18 +820,14 @@ pub(super) fn render_epic_item(
 
     // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + plan_indicator
     let id_len = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
-    let unseen = app.board.epic_has_unseen(epic.id);
-    let diamond = diamond_color(unseen, app.board.epic_has_bookmark(epic.id));
+    let unseen = marks.unseen.contains(&epic.id);
+    let diamond = diamond_color(unseen, marks.bookmarked.contains(&epic.id));
     let prefix_width = 2
         + 1
         + 3
         + id_len
         + plan_indicator.chars().count()
-        + if diamond.is_some() {
-            UNSEEN_MARKER_WIDTH
-        } else {
-            0
-        }
+        + diamond.map_or(0, |_| DIAMOND_MARKER_WIDTH)
         + CARD_CHROME_WIDTH;
     let max_title = (col_width as usize).saturating_sub(prefix_width);
     let title_text = truncate(&epic.title, max_title);
@@ -856,7 +851,7 @@ pub(super) fn render_epic_item(
     ];
     if let Some(color) = diamond {
         line1_spans.push(Span::styled(
-            format!(" {UNSEEN_GLYPH}"),
+            format!(" {DIAMOND_GLYPH}"),
             Style::default().fg(color),
         ));
     }

@@ -60,7 +60,9 @@ pub trait IngestStore {
     fn now(&self) -> String;
     /// Insert an epic with a generated id; its id.
     fn insert_epic(&mut self, row: Epic) -> i64;
-    /// Overwrite a task row as given, with no rule applied: a feed move.
+    /// Overwrite a task row as given, a feed move. Its only rules are the
+    /// per-person marks': leaving the epic ends unseen marks, and entering Done
+    /// ends unseen marks and bookmarks (`end_marks_on_finish`).
     fn update_task(&mut self, row: Task);
     fn find_or_create_repo_group(&mut self, root: i64, title: &str, created_by: String) -> i64;
     fn flatten_epic(&mut self, root: i64) -> Result<(), String>;
@@ -110,17 +112,11 @@ impl IngestStore for ReducerStore<'_> {
         self.0.db.epics().insert(inherit_workspace(self.0, row)).id
     }
     fn update_task(&mut self, row: Task) {
-        let prior = self.0.db.tasks().id().find(row.id);
-        let left_its_epic = prior.as_ref().is_some_and(|old| old.epic_id != row.epic_id);
-        // This write skips `store_task`, so it repeats its Done rule: entering
-        // Done ends every unseen mark and bookmark
-        // (`BookmarkEndsWithTheTaskFinishing`).
-        let finished = prior.as_ref().is_some_and(|old| old.status != DONE) && row.status == DONE;
-        if left_its_epic || finished {
-            clear_unseen_for_task(self.0, row.id);
-        }
-        if finished {
-            clear_bookmarks_for_task(self.0, row.id);
+        if let Some(prior) = self.0.db.tasks().id().find(row.id) {
+            if prior.epic_id != row.epic_id {
+                clear_unseen_for_task(self.0, row.id);
+            }
+            end_marks_on_finish(self.0, &prior, &row);
         }
         self.0.db.tasks().id().update(row);
     }

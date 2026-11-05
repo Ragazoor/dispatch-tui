@@ -33,13 +33,21 @@ pub struct BoardState {
     /// The tasks this person has not yet seen (`core.allium: UnseenTask`), as
     /// the latest board reload read them. Drives the new-task signal
     /// (`board-visuals.allium`, "New-task signal"); an epic's mark is derived
-    /// from it by [`BoardState::epic_has_unseen`], never held.
+    /// from it by [`BoardState::epic_marks`], never held.
     pub(in crate::tui) unseen_tasks: HashSet<TaskId>,
     /// The tasks this person has bookmarked (`core.allium: Bookmark`), as the
     /// latest board reload read them, plus the board's own toggles since.
     /// Drives the bookmark mark (`board-visuals.allium`, "Bookmark"); an
-    /// epic's mark is derived by [`BoardState::epic_has_bookmark`].
+    /// epic's mark is derived by [`BoardState::epic_marks`].
     pub(in crate::tui) bookmarked_tasks: HashSet<TaskId>,
+}
+
+/// The epics whose cards carry a derived mark, for one render pass
+/// ([`BoardState::epic_marks`]).
+#[derive(Debug, Default)]
+pub(in crate::tui) struct EpicMarks {
+    pub(in crate::tui) unseen: HashSet<EpicId>,
+    pub(in crate::tui) bookmarked: HashSet<EpicId>,
 }
 
 impl BoardState {
@@ -48,28 +56,48 @@ impl BoardState {
     }
 
     /// Whether `id`'s card carries the new-task mark: a task in `id` or in any
-    /// descendant epic is unseen. Free when nothing is unseen, which is almost
-    /// always.
+    /// descendant epic is unseen. For one epic, in tests; a render pass asks
+    /// [`Self::epic_marks`] once instead.
+    #[cfg(test)]
     pub(in crate::tui) fn epic_has_unseen(&self, id: EpicId) -> bool {
-        self.subtree_holds_any(id, &self.unseen_tasks)
+        self.marked_epics(&self.unseen_tasks).contains(&id)
     }
 
     /// Whether `id`'s card carries the bookmark mark: a task in `id` or in any
     /// descendant epic is bookmarked by this person.
+    #[cfg(test)]
     pub(in crate::tui) fn epic_has_bookmark(&self, id: EpicId) -> bool {
-        self.subtree_holds_any(id, &self.bookmarked_tasks)
+        self.marked_epics(&self.bookmarked_tasks).contains(&id)
     }
 
-    /// Whether any task of `marked` sits in `id` or a descendant epic. Free
-    /// when `marked` is empty, which is almost always.
-    fn subtree_holds_any(&self, id: EpicId, marked: &HashSet<TaskId>) -> bool {
-        if marked.is_empty() {
-            return false;
+    /// Every epic card's derived marks, computed once for a render pass so
+    /// each card is a set lookup (`board-visuals.allium`, "New-task signal"
+    /// and "Bookmark").
+    pub(in crate::tui) fn epic_marks(&self) -> EpicMarks {
+        EpicMarks {
+            unseen: self.marked_epics(&self.unseen_tasks),
+            bookmarked: self.marked_epics(&self.bookmarked_tasks),
         }
-        let subtree = crate::models::descendant_epic_ids(id, &self.epics);
-        self.tasks
-            .iter()
-            .any(|t| marked.contains(&t.id) && t.epic_id.is_some_and(|e| subtree.contains(&e)))
+    }
+
+    /// The epics whose subtree holds a task of `marked`: each marked task's
+    /// epic and every ancestor of it. Walks up from the few marked tasks
+    /// rather than down from every epic.
+    fn marked_epics(&self, marked: &HashSet<TaskId>) -> HashSet<EpicId> {
+        let mut out = HashSet::new();
+        if marked.is_empty() {
+            return out;
+        }
+        let by_id = crate::models::epic_id_lookup(&self.epics);
+        for task in self.tasks.iter().filter(|t| marked.contains(&t.id)) {
+            let mut cursor = task.epic_id;
+            // `insert` returning false stops the walk on an epic already
+            // marked (its ancestors are too) and on a malformed cycle.
+            while let Some(id) = cursor.filter(|id| out.insert(*id)) {
+                cursor = by_id.get(&id).and_then(|e| e.parent_epic_id);
+            }
+        }
+        out
     }
 
     pub(in crate::tui) fn find_epic(&self, id: EpicId) -> Option<&Epic> {

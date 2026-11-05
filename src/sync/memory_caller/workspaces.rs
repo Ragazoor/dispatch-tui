@@ -310,38 +310,12 @@ impl MemoryReducerCaller {
             .map(|e| e.id)
             .collect();
         self.release_poll_claims(tables, &epics, |_, owner| owner == user);
-        let marks: Vec<String> = tables
-            .unseen_tasks
-            .values()
-            .filter(|u| {
-                u.subscriber == user
-                    && tables
-                        .tasks
-                        .get(&u.task_id)
-                        .is_some_and(|t| t.epic_id != 0 && in_workspace(tables, t.epic_id))
-            })
-            .map(|u| u.id.clone())
-            .collect();
-        for id in marks {
-            tables.unseen_tasks.remove(&id);
-            self.rows.remove_unseen_task(id);
-        }
-        let bookmarks: Vec<String> = tables
-            .bookmarks
-            .values()
-            .filter(|b| {
-                b.subscriber == user
-                    && tables
-                        .tasks
-                        .get(&b.task_id)
-                        .is_some_and(|t| t.epic_id != 0 && in_workspace(tables, t.epic_id))
-            })
-            .map(|b| b.id.clone())
-            .collect();
-        for id in bookmarks {
-            tables.bookmarks.remove(&id);
-            self.rows.remove_bookmark(id);
-        }
+        self.drop_marks_where(tables, |t, task_id, subscriber| {
+            subscriber == user
+                && t.tasks
+                    .get(&task_id)
+                    .is_some_and(|task| task.epic_id != 0 && in_workspace(t, task.epic_id))
+        });
     }
 
     /// `MigrateStoreToWorkspaces`, as the module's connect handler runs it on

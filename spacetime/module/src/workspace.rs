@@ -329,41 +329,15 @@ fn drop_follows_in_workspace(ctx: &ReducerContext, user: &str, workspace_id: i64
         .map(|e| e.id)
         .collect();
     crate::config::release_poll_claims(ctx, &epics, |_, owner| owner == user);
-    let marks: Vec<String> = ctx
-        .db
-        .unseen_tasks()
-        .iter()
-        .filter(|u| {
-            u.subscriber == user
-                && ctx
-                    .db
-                    .tasks()
-                    .id()
-                    .find(u.task_id)
-                    .is_some_and(|t| t.epic_id != 0 && in_workspace(t.epic_id))
-        })
-        .map(|u| u.id)
-        .collect();
-    for id in marks {
-        ctx.db.unseen_tasks().id().delete(&id);
-    }
-    let bookmarks: Vec<String> = ctx
-        .db
-        .bookmarks()
-        .subscriber()
-        .filter(&user.to_string())
-        .filter(|b| {
-            ctx.db
+    crate::bookmark::drop_marks_where(ctx, |task_id, subscriber| {
+        subscriber == user
+            && ctx
+                .db
                 .tasks()
                 .id()
-                .find(b.task_id)
+                .find(task_id)
                 .is_some_and(|t| t.epic_id != 0 && in_workspace(t.epic_id))
-        })
-        .map(|b| b.id)
-        .collect();
-    for id in bookmarks {
-        ctx.db.bookmarks().id().delete(&id);
-    }
+    });
 }
 
 /// `workspaces.allium: MigrateStoreToWorkspaces` (D12). Does nothing once any

@@ -36,11 +36,9 @@ impl MemoryReducerCaller {
         let id = Self::assign_id(row.id, &mut tables.next_task_id);
         row.id = id;
         let prior = tables.tasks.insert(id, row.clone());
-        // Mirrors the module's `store_task`: entering Done ends every unseen
-        // mark and bookmark on the task, whichever writer moved it there.
-        if prior.as_ref().is_some_and(|p| p.status != DONE) && row.status == DONE {
-            self.clear_unseen_for_task(tables, id);
-            self.clear_bookmarks_for_task(tables, id);
+        // Mirrors the module's `store_task`.
+        if let Some(prior) = prior.as_ref() {
+            self.end_marks_on_finish(tables, prior, &row);
         }
         // Mirrors the module's `write_task`: EndAgentWhenWorktreeGoes
         // (agents.allium).

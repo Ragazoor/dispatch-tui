@@ -70,15 +70,7 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
         row
     };
     if let Some(prior) = prior.as_ref() {
-        // `UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing` and
-        // `BookmarkEndsWithTheTaskFinishing`: entering Done ends both marks,
-        // whichever writer moved it there (a patch, a session close, a merged
-        // PR, a batch move). The feed's direct write repeats this rule
-        // (`feed_ingest.rs`).
-        if prior.status != DONE && row.status == DONE {
-            clear_unseen_for_task(ctx, row.id);
-            clear_bookmarks_for_task(ctx, row.id);
-        }
+        end_marks_on_finish(ctx, prior, &row);
     }
     if prior.is_some() {
         let row = ctx.db.tasks().id().update(row);
@@ -528,8 +520,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// without it (task #4971's design doc flagged the gap).
 pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
-    clear_unseen_for_task(ctx, task_id);
-    clear_bookmarks_for_task(ctx, task_id);
+    clear_task_marks(ctx, task_id);
     // agents.allium: AgentsGoWithTheirTask. Their names stay in the ledger.
     delete_agents_of(&mut AgentTables(ctx), task_id);
     detach_learnings_from_task(ctx, task_id);

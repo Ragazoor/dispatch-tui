@@ -696,30 +696,9 @@ impl MemoryReducerCaller {
         self.release_poll_claims(&mut tables, &tree_set, |_, owner| {
             !members.iter().any(|m| m == owner)
         });
-        let marks: Vec<String> = tables
-            .unseen_tasks
-            .values()
-            .filter(|u| {
-                task_ids.contains(&u.task_id) && !tables.has_member(workspace_id, &u.subscriber)
-            })
-            .map(|u| u.id.clone())
-            .collect();
-        for mark in marks {
-            tables.unseen_tasks.remove(&mark);
-            self.rows.remove_unseen_task(mark);
-        }
-        let bookmarks: Vec<String> = tables
-            .bookmarks
-            .values()
-            .filter(|b| {
-                task_ids.contains(&b.task_id) && !tables.has_member(workspace_id, &b.subscriber)
-            })
-            .map(|b| b.id.clone())
-            .collect();
-        for id in bookmarks {
-            tables.bookmarks.remove(&id);
-            self.rows.remove_bookmark(id);
-        }
+        self.drop_marks_where(&mut tables, |t, task_id, subscriber| {
+            task_ids.contains(&task_id) && !t.has_member(workspace_id, subscriber)
+        });
         Ok(ReducerOutcome::Applied(vec![]))
     }
 

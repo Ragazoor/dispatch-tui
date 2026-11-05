@@ -24,6 +24,53 @@ impl MemoryReducerCaller {
         }
     }
 
+    /// Mirrors the module's `clear_task_marks`.
+    pub(super) fn clear_task_marks(&self, tables: &mut Tables, task_id: i64) {
+        self.clear_unseen_for_task(tables, task_id);
+        self.clear_bookmarks_for_task(tables, task_id);
+    }
+
+    /// Mirrors the module's `end_marks_on_finish`.
+    pub(super) fn end_marks_on_finish(
+        &self,
+        tables: &mut Tables,
+        prior: &module::Task,
+        next: &module::Task,
+    ) {
+        if module::stamps_completion(&prior.status, &next.status) {
+            self.clear_task_marks(tables, next.id);
+        }
+    }
+
+    /// Mirrors the module's `drop_marks_where`; `lost_sight` reads the tables
+    /// as they were before any mark is dropped.
+    pub(super) fn drop_marks_where(
+        &self,
+        tables: &mut Tables,
+        lost_sight: impl Fn(&Tables, i64, &str) -> bool,
+    ) {
+        let unseen: Vec<String> = tables
+            .unseen_tasks
+            .values()
+            .filter(|u| lost_sight(tables, u.task_id, &u.subscriber))
+            .map(|u| u.id.clone())
+            .collect();
+        let bookmarks: Vec<String> = tables
+            .bookmarks
+            .values()
+            .filter(|b| lost_sight(tables, b.task_id, &b.subscriber))
+            .map(|b| b.id.clone())
+            .collect();
+        for id in unseen {
+            tables.unseen_tasks.remove(&id);
+            self.rows.remove_unseen_task(id);
+        }
+        for id in bookmarks {
+            tables.bookmarks.remove(&id);
+            self.rows.remove_bookmark(id);
+        }
+    }
+
     /// `tasks.allium: SetBookmark`. Mirrors the module's `set_bookmark`.
     pub(super) fn apply_set_bookmark(
         &self,

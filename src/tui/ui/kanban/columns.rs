@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::models::{EpicId, EpicSubstatus, TaskStatus};
+use crate::tui::types::EpicMarks;
 use crate::tui::{App, ColumnItem, ColumnLayout, EpicPlacementMap, EpicStatsMap, ViewMode};
 
 use super::super::shared::{
@@ -73,6 +74,9 @@ struct TaskColInput<'a> {
     /// Where each epic card landed, so a copy can be labelled with the
     /// substatus of the column it is in rather than the epic's board-wide one.
     placements: &'a EpicPlacementMap,
+    /// Which epic cards carry the new-task or bookmark mark, derived once per
+    /// render pass.
+    marks: &'a EpicMarks,
     col_area: Rect,
     now: DateTime<Utc>,
     status: TaskStatus,
@@ -89,6 +93,7 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
         items,
         epic_stats,
         placements,
+        marks,
         col_area,
         now,
         status,
@@ -176,6 +181,7 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
                         .map(|p| p.substatus_in(epic, status))
                         .unwrap_or(EpicSubstatus::Unplanned),
                     status,
+                    marks,
                     &ctx,
                 )
             }
@@ -261,6 +267,7 @@ pub(super) fn compute_columns_data<'a>(
     // Both `app` (&App reborrow) and `layout` (&ColumnLayout<'a> which holds &'a App)
     // are immutable borrows — Rust allows multiple simultaneous immutable borrows.
     let mut task_cols: Vec<TaskColData> = Vec::with_capacity(TaskStatus::COLUMN_COUNT);
+    let marks = app.board.epic_marks();
     for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let nav_col = task_col_idx + 1;
         let items = layout.get(status);
@@ -270,6 +277,7 @@ pub(super) fn compute_columns_data<'a>(
             items,
             epic_stats,
             placements: layout.placements(),
+            marks: &marks,
             col_area,
             now,
             status,

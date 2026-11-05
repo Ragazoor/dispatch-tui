@@ -616,30 +616,9 @@ pub(crate) fn move_epic_row(
     crate::config::release_poll_claims(ctx, &tree_set, |_, owner| {
         !workspace_has_member(ctx, workspace_id, owner)
     });
-    let marks: Vec<String> = ctx
-        .db
-        .unseen_tasks()
-        .iter()
-        .filter(|u| {
-            task_ids.contains(&u.task_id) && !workspace_has_member(ctx, workspace_id, &u.subscriber)
-        })
-        .map(|u| u.id)
-        .collect();
-    for id in marks {
-        ctx.db.unseen_tasks().id().delete(&id);
-    }
-    let bookmarks: Vec<String> = ctx
-        .db
-        .bookmarks()
-        .iter()
-        .filter(|b| {
-            task_ids.contains(&b.task_id) && !workspace_has_member(ctx, workspace_id, &b.subscriber)
-        })
-        .map(|b| b.id)
-        .collect();
-    for id in bookmarks {
-        ctx.db.bookmarks().id().delete(&id);
-    }
+    crate::bookmark::drop_marks_where(ctx, |task_id, subscriber| {
+        task_ids.contains(&task_id) && !workspace_has_member(ctx, workspace_id, subscriber)
+    });
     Ok(())
 }
 

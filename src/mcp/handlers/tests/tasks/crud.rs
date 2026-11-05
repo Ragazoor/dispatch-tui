@@ -910,10 +910,7 @@ async fn tool_call(state: &Arc<McpState>, name: &str, arguments: Value) -> JsonR
 
 fn text_of(resp: &JsonRpcResponse) -> String {
     assert!(!is_error(resp), "{}", error_message(resp));
-    resp.result.as_ref().unwrap()["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .to_string()
+    extract_response_text(resp)
 }
 
 #[test]
