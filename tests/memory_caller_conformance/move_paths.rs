@@ -544,8 +544,8 @@ fn epic_id_writers(file: &str, body: &str) -> Vec<String> {
             sites.push(format!("{file}::{}", owner(open + first)));
         }
     }
-    for (at, line) in body.match_indices(".epic_id =") {
-        if !body[at..].starts_with(".epic_id ==") && !line.is_empty() {
+    for (at, _) in body.match_indices(".epic_id =") {
+        if !body[at..].starts_with(".epic_id ==") {
             sites.push(format!("{file}::{}", owner(at)));
         }
     }
