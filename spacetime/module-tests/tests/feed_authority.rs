@@ -112,6 +112,44 @@ fn legacy_claim(store: &Store, epic: i64, host: &str) {
     });
 }
 
+/// An unseen mark and a bookmark on `task` for each of `people`, written
+/// straight to the tables so no reducer's own cleanup hides what is under test.
+fn mark_task(store: &Store, task: i64, people: &[&str]) {
+    for who in people {
+        store.db().unseen_tasks().insert(UnseenTask {
+            id: unseen_id(&identity_of(who), task),
+            task_id: task,
+            subscriber: identity_of(who),
+        });
+        store.db().bookmarks().insert(Bookmark {
+            id: bookmark_id(&identity_of(who), task),
+            task_id: task,
+            subscriber: identity_of(who),
+        });
+    }
+}
+
+/// Who holds an (unseen mark, bookmark) on `task`, sorted.
+fn marks_on(store: &Store, task: i64) -> (Vec<String>, Vec<String>) {
+    let mut unseen: Vec<String> = store
+        .db()
+        .unseen_tasks()
+        .iter()
+        .filter(|u| u.task_id == task)
+        .map(|u| u.subscriber)
+        .collect();
+    let mut bookmarks: Vec<String> = store
+        .db()
+        .bookmarks()
+        .iter()
+        .filter(|b| b.task_id == task)
+        .map(|b| b.subscriber)
+        .collect();
+    unseen.sort();
+    bookmarks.sort();
+    (unseen, bookmarks)
+}
+
 fn claim_hosts(store: &Store) -> Vec<String> {
     let mut hosts: Vec<String> = store.db().poll_owners().iter().map(|p| p.host).collect();
     hosts.sort();
@@ -259,16 +297,24 @@ fn an_epic_without_a_command_can_be_claimed_by_any_host_that_sees_it() {
 
 // -- M4: every loss-of-sight path releases the claims it strands ------------------
 
-const LOSS_OF_SIGHT_PATHS: [&str; 5] = [
+const LOSS_OF_SIGHT_PATHS: [&str; 6] = [
     "remove_member",
+    "detach_a_task",
     "move_epic_to_workspace",
     "set_epic_visibility",
     "reparent_under_a_private_epic",
     "managed_root_made_private",
 ];
 
-fn carol_loses_sight_by(path: &str, store: &Store, a: i64, epic: i64) {
+fn carol_loses_sight_by(path: &str, store: &Store, a: i64, epic: i64, task: i64) {
     match path {
+        "detach_a_task" => {
+            // Alice made the task, so she may detach it; carol cannot see a
+            // task on alice's own board.
+            store
+                .call("alice", |ctx| set_task_epic(ctx, task, 0, String::new()))
+                .expect("detach");
+        }
         "remove_member" => {
             let id = store
                 .db()
@@ -353,10 +399,27 @@ fn every_loss_of_sight_path_releases_the_claims_it_strands() {
         let task = store.create("alice", epic_task("t", epic, "backlog"));
         claim(&store, "alice", "task", task, "h-alice").expect("alice claims the task");
         claim(&store, "carol", "task", task, "h-carol").expect("carol claims the task");
-        carol_loses_sight_by(path, &store, a, epic);
+        // B1: the marks follow the claims. Carol and alice both bookmark the
+        // task and have it unseen; only carol loses sight of it.
+        mark_task(&store, task, &["alice", "carol"]);
+        carol_loses_sight_by(path, &store, a, epic, task);
+        // A task move ends every unseen mark on its own
+        // (`UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`).
+        let alice_unseen = if path == "detach_a_task" {
+            vec![]
+        } else {
+            vec![identity_of("alice")]
+        };
+        assert_eq!(
+            marks_on(&store, task),
+            (alice_unseen, vec![identity_of("alice")]),
+            "{path}: carol's marks survived, or alice's were dropped"
+        );
         let hosts = claim_hosts(&store);
+        // A detach moves the task only: carol still sees the epic, so her
+        // epic claim stays.
         assert!(
-            !hosts.contains(&"h-carol".to_string()),
+            path == "detach_a_task" || !hosts.contains(&"h-carol".to_string()),
             "{path}: carol's claim survived: {hosts:?}"
         );
         assert_eq!(
@@ -365,6 +428,211 @@ fn every_loss_of_sight_path_releases_the_claims_it_strands() {
             "{path}: alice's epic or task claim was released: {hosts:?}"
         );
     }
+}
+
+/// Bob's claim, and alice's and bob's marks, on a task of a public epic of
+/// `a` (alice's). Returns the epic and the task.
+fn task_held_by_alice_and_bob(store: &Store, a: i64) -> (i64, i64) {
+    let epic = make_epic(
+        store,
+        "alice",
+        Epic {
+            workspace_id: a,
+            ..blank_epic()
+        },
+    );
+    let task = store.create("alice", epic_task("t", epic, "backlog"));
+    // A task has one claim: bob's host holds it.
+    claim(store, "bob", "task", task, "h-bob").expect("bob claims");
+    mark_task(store, task, &["alice", "bob"]);
+    (epic, task)
+}
+
+fn assert_nothing_is_held(store: &Store, task: i64, what: &str) {
+    assert!(claim_hosts(store).is_empty(), "{what}: {:?}", claim_hosts(store));
+    assert_eq!(marks_on(store, task), (vec![], vec![]), "{what}");
+}
+
+/// A2/B1: a task moved into a private epic leaves every other person's sight,
+/// so their claim and marks end with it.
+#[test]
+fn a_task_move_into_a_private_epic_ends_the_claims_and_marks_it_strands() {
+    let (store, a, _) = world();
+    let (_, task) = task_held_by_alice_and_bob(&store, a);
+    // Only an admin may move a task into a private epic, so the admin's own.
+    let private = make_epic(
+        &store,
+        "boss",
+        Epic {
+            workspace_id: a,
+            visibility: "private".into(),
+            ..blank_epic()
+        },
+    );
+    store
+        .call("boss", |ctx| set_task_epic(ctx, task, private, String::new()))
+        .expect("move");
+    assert_nothing_is_held(&store, task, "move into a private epic");
+}
+
+/// A2/B1: the same through `update_task`, the board's own call.
+#[test]
+fn update_task_into_a_private_epic_ends_the_claims_and_marks_it_strands() {
+    let (store, a, _) = world();
+    let (_, task) = task_held_by_alice_and_bob(&store, a);
+    let private = make_epic(
+        &store,
+        "boss",
+        Epic {
+            workspace_id: a,
+            visibility: "private".into(),
+            ..blank_epic()
+        },
+    );
+    store
+        .call("boss", |ctx| {
+            update_task(
+                ctx,
+                task,
+                Some(private),
+                identity_of("boss"),
+                String::new(),
+                TaskPatch::default(),
+            )
+        })
+        .expect("move");
+    assert_nothing_is_held(&store, task, "update_task into a private epic");
+}
+
+/// A2/B1: an admin detaches alice's task onto the admin's board. Alice and
+/// bob lose sight of it.
+#[test]
+fn a_detach_ends_the_claims_and_marks_of_everyone_but_the_new_owner() {
+    let (store, a, _) = world();
+    let (_, task) = task_held_by_alice_and_bob(&store, a);
+    store
+        .call("boss", |ctx| set_task_epic(ctx, task, 0, String::new()))
+        .expect("the admin detaches");
+    assert_nothing_is_held(&store, task, "detach");
+}
+
+/// A moved task that everyone still sees keeps its claims and marks.
+#[test]
+fn a_task_move_between_public_epics_keeps_claims_and_marks() {
+    let (store, a, _) = world();
+    let (_, task) = task_held_by_alice_and_bob(&store, a);
+    let other = make_epic(
+        &store,
+        "alice",
+        Epic {
+            workspace_id: a,
+            ..blank_epic()
+        },
+    );
+    store
+        .call("alice", |ctx| set_task_epic(ctx, task, other, String::new()))
+        .expect("move");
+    assert_eq!(claim_hosts(&store), vec!["h-bob".to_string()]);
+    assert_eq!(marks_on(&store, task).1.len(), 2);
+}
+
+/// A2 (decided with the user): a detach is refused while another person's
+/// host holds a current agent on the task.
+#[test]
+fn a_detach_is_refused_while_another_persons_host_runs_an_agent_on_it() {
+    let (store, a, _) = world();
+    let (epic, task) = task_held_by_alice_and_bob(&store, a);
+    store.db().agents().insert(Agent {
+        id: 0,
+        task_id: task,
+        name: "bobs-agent".into(),
+        host: "h-bob".into(),
+        start_mode: "dispatch".into(),
+        state: "current".into(),
+        started_at: String::new(),
+        ended_at: String::new(),
+        end_reason: String::new(),
+        tmux_window: String::new(),
+        last_pre_tool_use_at: String::new(),
+        last_notification_at: String::new(),
+        live_subagents: 0,
+        stop_pending: false,
+        stop_pending_at: String::new(),
+    });
+    let why = store
+        .call("boss", |ctx| set_task_epic(ctx, task, 0, String::new()))
+        .unwrap_err();
+    assert!(why.contains("another person's host"), "{why}");
+    assert_eq!(store.task(task).epic_id, epic);
+    assert_eq!(claim_hosts(&store).len(), 1, "a refused move releases nothing");
+}
+
+/// A detach is not blocked by an agent on the caller's own host.
+#[test]
+fn a_detach_is_not_refused_for_an_agent_on_the_callers_own_host() {
+    let (store, a, _) = world();
+    let (_, task) = task_held_by_alice_and_bob(&store, a);
+    store.db().agents().insert(Agent {
+        id: 0,
+        task_id: task,
+        name: "boss-agent".into(),
+        host: "h-alice".into(),
+        start_mode: "dispatch".into(),
+        state: "current".into(),
+        started_at: String::new(),
+        ended_at: String::new(),
+        end_reason: String::new(),
+        tmux_window: String::new(),
+        last_pre_tool_use_at: String::new(),
+        last_notification_at: String::new(),
+        live_subagents: 0,
+        stop_pending: false,
+        stop_pending_at: String::new(),
+    });
+    store
+        .call("alice", |ctx| set_task_epic(ctx, task, 0, String::new()))
+        .expect("alice's own host runs it");
+}
+
+/// A8: a detach leaves the workspace, so the task's package links go.
+#[test]
+fn a_detach_unlinks_the_task_from_its_workspaces_packages() {
+    let (store, a, _) = world();
+    let (_, task) = task_held_by_alice_and_bob(&store, a);
+    store
+        .call("alice", |ctx| {
+            create_work_package(
+                ctx,
+                WorkPackage {
+                    id: 0,
+                    title: "p".into(),
+                    description: String::new(),
+                    sort_order: None,
+                    created_by: String::new(),
+                    created_at: String::new(),
+                    updated_at: String::new(),
+                    workspace_id: a,
+                    visibility: "public".into(),
+                },
+            )
+        })
+        .expect("package");
+    let package = store
+        .db()
+        .work_packages()
+        .iter()
+        .map(|p| p.id)
+        .max()
+        .expect("package");
+    store
+        .call("alice", |ctx| {
+            link_work_package_item(ctx, package, "task".into(), task)
+        })
+        .expect("link");
+    store
+        .call("boss", |ctx| set_task_epic(ctx, task, 0, String::new()))
+        .expect("detach");
+    assert_eq!(store.db().work_package_links().iter().count(), 0);
 }
 
 #[test]

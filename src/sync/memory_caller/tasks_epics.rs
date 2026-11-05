@@ -573,7 +573,13 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused(why));
         }
         self.clear_unseen_for_task(&mut tables, id.0);
-        if matches!((left_workspace, joined_workspace), (Some(a), Some(b)) if a != b) {
+        self.on_task_sight_lost(&mut tables, id.0);
+        let leaves_workspace = match (left_workspace, joined_workspace) {
+            (Some(a), Some(b)) => a != b,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if leaves_workspace {
             // Mirrors the module: the task's links and task-scoped learnings
             // were the old workspace's.
             self.delete_work_package_links_to(&mut tables, module::WORK_PACKAGE_ITEM_TASK, id.0);
@@ -776,7 +782,7 @@ impl MemoryReducerCaller {
         if reparented {
             // `ClaimsFollowSight`.
             let subtree = Self::collect_epic_subtree_ids(&tables, id);
-            self.release_claims_without_sight(&mut tables, &subtree);
+            self.on_sight_lost(&mut tables, &subtree);
         }
 
         self.recalculate_epic_chain(&mut tables, id);

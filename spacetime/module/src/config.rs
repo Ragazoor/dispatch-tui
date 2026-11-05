@@ -554,6 +554,65 @@ pub(crate) fn release_claims_without_sight(
     release_task_poll_claims(ctx, epics, loses_sight);
 }
 
+/// `workspaces.allium: ClaimsFollowSight`, B1 (task #98992): the one helper an
+/// EPIC-level loss-of-sight path calls once its change is written. Releases
+/// the claims ([`release_claims_without_sight`]) and ends every unseen mark
+/// and bookmark on a task of `epics` whose person no longer sees that task,
+/// judged on the store as it is now. A path that can take sight away MUST call
+/// this, or [`on_task_sight_lost`] for a single task;
+/// `every_loss_of_sight_path_releases_the_claims_it_strands` runs each one.
+pub(crate) fn on_sight_lost(ctx: &ReducerContext, epics: &std::collections::HashSet<i64>) {
+    release_claims_without_sight(ctx, epics);
+    let tasks: std::collections::HashSet<i64> = epics
+        .iter()
+        .flat_map(|epic_id| ctx.db.tasks().epic_id().filter(epic_id))
+        .map(|t| t.id)
+        .collect();
+    drop_marks_of_those_who_cannot_see(ctx, &tasks);
+}
+
+/// [`on_sight_lost`] for one task whose own sight changed: a move into a
+/// private epic, or a detach onto a user board.
+pub(crate) fn on_task_sight_lost(ctx: &ReducerContext, task_id: i64) {
+    let Some(task) = ctx.db.tasks().id().find(task_id) else {
+        return;
+    };
+    let stale: Vec<i64> = ctx
+        .db
+        .poll_owners()
+        .scope_id()
+        .filter(&task_id)
+        .filter(|p| p.scope == POLL_SCOPE_TASK)
+        .filter(|p| {
+            ctx.db
+                .hosts()
+                .id()
+                .find(&p.host)
+                .is_some_and(|h| !task_visible_to(ctx, &task, &h.owner))
+        })
+        .map(|p| p.id)
+        .collect();
+    for row_id in stale {
+        ctx.db.poll_owners().id().delete(row_id);
+    }
+    drop_marks_of_those_who_cannot_see(ctx, &std::collections::HashSet::from([task_id]));
+}
+
+fn drop_marks_of_those_who_cannot_see(ctx: &ReducerContext, tasks: &std::collections::HashSet<i64>) {
+    if tasks.is_empty() {
+        return;
+    }
+    crate::bookmark::drop_marks_where(ctx, |task_id, subscriber| {
+        tasks.contains(&task_id)
+            && ctx
+                .db
+                .tasks()
+                .id()
+                .find(task_id)
+                .is_some_and(|t| !task_visible_to(ctx, &t, subscriber))
+    });
+}
+
 /// The epics in `unfollowed`'s subtree (itself included) that a person whose
 /// remaining follows are `followed` no longer covers: an epic is covered when
 /// it, or any ancestor, is followed. `parents` maps every epic id to its

@@ -656,8 +656,12 @@ entity UnseenTask {
 -- Only a task can be bookmarked, never an epic, and never a task that is
 -- Done. A row lives until it is toggled off, its task enters Done or is
 -- deleted, or its person loses sight of the task (tasks.allium:
--- BookmarkEndsWithTheTaskFinishing; workspaces.allium: RemoveMember,
--- MoveEpicToWorkspace). It survives the task moving to another epic.
+-- BookmarkEndsWithTheTaskFinishing; workspaces.allium: ClaimsFollowSight,
+-- on every path that can take sight away: RemoveMember, MoveEpicToWorkspace,
+-- SetEpicVisibility, a re-parent, a task move into a private epic or onto a
+-- user board). Losing sight ENDS the row (task #98992, B1): it does not hide
+-- and come back when sight returns. It survives the task moving to another
+-- epic the person still sees.
 entity Bookmark {
     subscriber: UserIdentity
     task: Task

@@ -611,7 +611,15 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
         },
     )?;
     clear_unseen_for_task(ctx, id);
-    if matches!((left_workspace, joined_workspace), (Some(a), Some(b)) if a != b) {
+    // `ClaimsFollowSight`: the move can take the task out of someone's sight.
+    crate::config::on_task_sight_lost(ctx, id);
+    // A detach leaves the workspace too (`TaskMovesStayInTheWorkspace`, A8).
+    let leaves_workspace = match (left_workspace, joined_workspace) {
+        (Some(a), Some(b)) => a != b,
+        (Some(_), None) => true,
+        _ => false,
+    };
+    if leaves_workspace {
         // `LinkedItemsShareThePackagesWorkspace`: the task's package links and
         // task-scoped learnings were the old workspace's.
         delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, id);
@@ -890,7 +898,7 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     }
     if reparented {
         // `ClaimsFollowSight`: a new parent can change who sees the subtree.
-        crate::config::release_claims_without_sight(ctx, &collect_epic_subtree_ids(ctx, id));
+        crate::config::on_sight_lost(ctx, &collect_epic_subtree_ids(ctx, id));
     }
 
     recalculate_epic_chain(ctx, id);

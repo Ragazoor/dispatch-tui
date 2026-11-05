@@ -390,16 +390,46 @@ pub fn task_detach_refusal(task_id: i64) -> String {
     format!("task {task_id}: only its creator or an admin may detach it from its epic")
 }
 
+/// A2 (task #98992, resolved with the user): a detach would hide the task from
+/// a host that is running it. True when a current agent, or an open dispatch
+/// or session request, sits on a host `caller` does not own. Shared with
+/// `MemoryReducerCaller`.
+pub fn task_detach_strands_a_host(r: &impl StoreReads, task_id: i64, caller: &str) -> bool {
+    let mine: std::collections::HashSet<String> = r
+        .hosts_owned_by(caller)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    r.agents_of(task_id)
+        .iter()
+        .any(|a| a.state == AGENT_CURRENT && !mine.contains(&a.host))
+        || r.dispatch_requests_of(task_id)
+            .iter()
+            .any(|d| dispatch_request_is_open(&d.state) && !mine.contains(&d.host))
+        || r.session_requests_of(task_id)
+            .iter()
+            .any(|s| session_request_is_open(&s.state) && !mine.contains(&s.host))
+}
+
+/// The refusal for a detach that would strand another person's host.
+pub fn task_detach_strands_refusal(task_id: i64) -> String {
+    format!("task {task_id}: another person's host is running it; detach it once that agent has ended")
+}
+
 pub fn check_task_move(ctx: &ReducerContext, task: &Task, epic_id: i64) -> Result<(), String> {
     if is_operator(ctx) {
         return Ok(());
     }
     // A detach is judged by its own authority, not the holder arithmetic below.
     if task_move_is_detach(task, epic_id) {
-        return if task_detach_permitted(ctx, task, &caller_identity(ctx)) {
-            Ok(())
+        let caller = caller_identity(ctx);
+        if !task_detach_permitted(ctx, task, &caller) {
+            return Err(task_detach_refusal(task.id));
+        }
+        return if task_detach_strands_a_host(ctx, task.id, &caller) {
+            Err(task_detach_strands_refusal(task.id))
         } else {
-            Err(task_detach_refusal(task.id))
+            Ok(())
         };
     }
     if task_move_leaves_workspace(ctx, task, epic_id) {
@@ -514,7 +544,7 @@ pub(crate) fn set_epic_visibility_row(
     ctx.db.epics().id().update(epic);
     // `ClaimsFollowSight`: a flip to private takes the tree from every other
     // member, and their hosts' claims with it.
-    crate::config::release_claims_without_sight(ctx, &collect_epic_subtree_ids(ctx, epic_id));
+    crate::config::on_sight_lost(ctx, &collect_epic_subtree_ids(ctx, epic_id));
     Ok(())
 }
 

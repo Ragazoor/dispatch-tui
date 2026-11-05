@@ -386,7 +386,7 @@ impl MemoryReducerCaller {
             // `ClaimsFollowSight`: the root turned private above.
             if make_private {
                 let subtree = Self::collect_epic_subtree_ids(tables, id);
-                self.release_claims_without_sight(tables, &subtree);
+                self.on_sight_lost(tables, &subtree);
             }
             return id;
         }

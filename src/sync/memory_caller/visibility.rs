@@ -406,10 +406,13 @@ impl Tables {
         }
         // A detach is judged by its own authority, as the module does.
         if module::task_move_is_detach(task, epic_id) {
-            return if module::task_detach_permitted(self, task, &scope.who) {
-                Ok(())
+            if !module::task_detach_permitted(self, task, &scope.who) {
+                return Err(module::task_detach_refusal(task.id));
+            }
+            return if module::task_detach_strands_a_host(self, task.id, &scope.who) {
+                Err(module::task_detach_strands_refusal(task.id))
             } else {
-                Err(module::task_detach_refusal(task.id))
+                Ok(())
             };
         }
         if module::task_move_leaves_workspace(self, task, epic_id) {
@@ -558,7 +561,7 @@ impl MemoryReducerCaller {
         self.write_epic(&mut tables, epic);
         // `ClaimsFollowSight`.
         let subtree = Self::collect_epic_subtree_ids(&tables, epic_id);
-        self.release_claims_without_sight(&mut tables, &subtree);
+        self.on_sight_lost(&mut tables, &subtree);
         Ok(ReducerOutcome::Applied(vec![]))
     }
 

@@ -58,6 +58,13 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 41: loss of sight ends claims and marks together — `on_sight_lost` and
+///    `on_task_sight_lost` (`config.rs`) release the poll claims and end the
+///    unseen marks and bookmarks of whoever no longer sees a task, on every
+///    loss-of-sight path including a task move; a detach is refused while
+///    another person's host runs the task, and leaves the workspace for the
+///    package links and task learnings (`visibility.rs`, `tasks_epics.rs`;
+///    `workspaces.allium: ClaimsFollowSight`, `core.allium: Bookmark`).
 /// 39: a task in an epic is detached onto a board by its creator, an admin of
 ///    its workspace or a super-admin (`task_detach_permitted`), no longer by
 ///    nobody; the managed-feed settings are written as one change by
@@ -206,7 +213,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 40;
+pub const RULES_VERSION: i64 = 41;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first

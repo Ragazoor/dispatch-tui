@@ -585,6 +585,7 @@ rule SetEpicVisibility {
 
 rule ClaimsFollowSight {
     when: SightChanged(epic)    -- RemoveMember, MoveEpicToWorkspace, SetEpicVisibility, a re-parent, the managed-root private flip
+       or TaskMoved(task, destination, owner)    -- a move into a private epic, or a detach: the task's own sight changes
 
     -- Task #98851 (M4). A poll claim must not outlive the sight that made it
     -- workable. After ANY change that can take an epic out of someone's
@@ -605,6 +606,16 @@ rule ClaimsFollowSight {
     -- private one, would keep a claim nobody else may replace and the task's
     -- PR status would stop updating. RemoveMember and MoveEpicToWorkspace
     -- judge by membership, the rest by sight; both release both scopes.
+    --
+    -- Task #98992 (A2, B1). A task move changes the task's own sight (a
+    -- move into a private epic, a detach onto a user board), so a task-scoped
+    -- claim on the moved task is released when its host's owner no longer
+    -- sees the task. The marks follow the claims: every unseen mark and
+    -- bookmark whose person no longer sees a task is ended by the same
+    -- helper on the same paths (Bookmark in core.allium: a bookmark ENDS on
+    -- loss of sight and does not come back when sight returns). The module's
+    -- `on_sight_lost` / `on_task_sight_lost` do both, and the conformance
+    -- test lists every path.
     ensures:
         for owner_row in core/PollOwners.where(p =>
                 p.scope = epic and p.scope_id in epic.subtree
@@ -614,6 +625,14 @@ rule ClaimsFollowSight {
                 p.scope = task and p.scope_id.epic in epic.subtree
                     and not p.scope_id.epic.visible_to(p.host.owner)):
             not exists owner_row
+        for owner_row in core/PollOwners.where(p =>
+                p.scope = task and p.scope_id = task
+                    and not task.visible_to(p.host.owner)):
+            not exists owner_row
+        for mark in core/UnseenTasks.where(u => not u.task.visible_to(u.subscriber)):
+            not exists mark
+        for b in core/Bookmark.where(b => not b.task.visible_to(b.subscriber)):
+            not exists b
 }
 
 rule EpicStaysInItsWorkspace {
@@ -806,6 +825,15 @@ rule TaskMovesStayInTheWorkspace {
         -- drops the task's package links and re-homes its task-scoped
         -- learnings (LinkedItemsShareThePackagesWorkspace, D8), in
         -- move_task_row.
+        -- A detach is also refused while a person other than the caller's
+        -- own hosts hold a current agent or an open request on the task: the
+        -- detach would hide the task from the host that is running it
+        -- (task #98992, A2; resolved with the user: refuse, do not serve
+        -- hosted tasks past sight). Refusal: "task N: another person's
+        -- host is running it; detach it once that agent has ended".
+        -- Module: task_detach_strands_a_host (shared with MemoryReducerCaller).
+        -- A detach also leaves the workspace for the package links and the
+        -- task-scoped learnings, as a cross-workspace move does (A8).
         -- Refusals: "task N: a task stays in its workspace; it cannot move
         -- into another workspace", and for a detach by someone with no
         -- authority "task N: only its creator or an admin may detach it from

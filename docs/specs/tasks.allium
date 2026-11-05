@@ -1360,7 +1360,9 @@ rule BookmarkEndsWithTheTaskFinishing {
         -- back to this task, wherever it now sits; the trail simply follows
         -- it to its new epic. So no relink path (MoveTaskToEpic, update_tasks'
         -- epic_id, a feed routing move, RegroupEpic, FlattenEpic, a
-        -- repo_path reroute) touches a Bookmark.
+        -- repo_path reroute) touches a Bookmark for a person who still sees
+        -- the task. A move that takes the task out of a person's sight ends
+        -- their bookmark (workspaces.allium: ClaimsFollowSight).
 }
 
 -- == Delete ==

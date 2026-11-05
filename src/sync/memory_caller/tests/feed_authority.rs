@@ -655,8 +655,15 @@ async fn every_loss_of_sight_path_releases_the_claims_it_strands() {
             }
             // Bob stays a member wherever the path leaves the epic.
             t.memberships.insert(6, member(6, WS2, "bob", "member"));
+            // B1: the marks follow the claims.
+            mark_task(&mut t, 10, &["bob", "carol"]);
         }
         carol_loses_sight_by(path, &mut caller).await;
+        assert_eq!(
+            marks_on(&caller, 10),
+            (vec!["bob".to_string()], vec!["bob".to_string()]),
+            "{path}: carol's marks survived, or bob's were dropped"
+        );
         let hosts = claim_hosts(&caller);
         assert!(
             !hosts.contains(&"h-carol".to_string()),
@@ -668,6 +675,100 @@ async fn every_loss_of_sight_path_releases_the_claims_it_strands() {
             "{path}: bob's epic or task claim was released: {hosts:?}"
         );
     }
+}
+
+/// An unseen mark and a bookmark on `task` for each of `people`.
+fn mark_task(t: &mut Tables, task: i64, people: &[&str]) {
+    for who in people {
+        let id = module::unseen_id(who, task);
+        t.unseen_tasks.insert(
+            id.clone(),
+            module::UnseenTask {
+                id,
+                task_id: task,
+                subscriber: (*who).into(),
+            },
+        );
+        let id = module::bookmark_id(who, task);
+        t.bookmarks.insert(
+            id.clone(),
+            module::Bookmark {
+                id,
+                task_id: task,
+                subscriber: (*who).into(),
+            },
+        );
+    }
+}
+
+/// Who holds an (unseen mark, bookmark) on `task`, sorted.
+fn marks_on(caller: &MemoryReducerCaller, task: i64) -> (Vec<String>, Vec<String>) {
+    let t = caller.lock();
+    let mut unseen: Vec<String> = t
+        .unseen_tasks
+        .values()
+        .filter(|u| u.task_id == task)
+        .map(|u| u.subscriber.clone())
+        .collect();
+    let mut bookmarks: Vec<String> = t
+        .bookmarks
+        .values()
+        .filter(|b| b.task_id == task)
+        .map(|b| b.subscriber.clone())
+        .collect();
+    unseen.sort();
+    bookmarks.sort();
+    (unseen, bookmarks)
+}
+
+/// A2/B1/A8: an admin's detach ends bob's claim and marks.
+#[tokio::test]
+async fn a_detach_ends_the_claims_and_marks_it_strands() {
+    let caller = scenario();
+    {
+        let mut t = caller.lock();
+        t.tasks.insert(10, task_in_epic(10, 1));
+        t.poll_owners.insert(3, task_claim(3, 10, "h-bob"));
+        mark_task(&mut t, 10, &["bob"]);
+    }
+    caller
+        .set_task_epic(TaskId(10), None, String::new())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+    assert!(claim_hosts(&caller).is_empty());
+    assert_eq!(marks_on(&caller, 10), (vec![], vec![]));
+}
+
+/// A2 (decided with the user): refused while another person's host runs it.
+#[tokio::test]
+async fn a_detach_is_refused_while_another_persons_host_runs_an_agent_on_it() {
+    let caller = scenario();
+    {
+        let mut t = caller.lock();
+        t.tasks.insert(10, task_in_epic(10, 1));
+        t.poll_owners.insert(3, task_claim(3, 10, "h-bob"));
+        t.agents.insert(
+            1,
+            module::Agent {
+                id: 1,
+                task_id: 10,
+                host: "h-bob".into(),
+                state: module::AGENT_CURRENT.into(),
+                ..module::blank_agent()
+            },
+        );
+    }
+    match caller
+        .set_task_epic(TaskId(10), None, String::new())
+        .await
+        .unwrap()
+    {
+        ReducerOutcome::Refused(why) => assert!(why.contains("another person's host"), "{why}"),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert_eq!(claim_hosts(&caller).len(), 1);
 }
 
 /// The sub-epics of a tree that goes private are covered too.

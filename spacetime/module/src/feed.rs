@@ -462,7 +462,7 @@ fn ensure_role_epic(
         // `ClaimsFollowSight` (M4): the managed root turned private above
         // takes the shared PR Reviews tree from every member but its creator.
         if make_private {
-            crate::config::release_claims_without_sight(
+            crate::config::on_sight_lost(
                 ctx,
                 &crate::tasks_epics::collect_epic_subtree_ids(ctx, id),
             );

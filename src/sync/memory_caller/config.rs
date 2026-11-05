@@ -114,6 +114,68 @@ impl MemoryReducerCaller {
         });
     }
 
+    /// Mirrors the module's `on_sight_lost` (task #98992, B1): the one helper
+    /// an epic-level loss-of-sight path calls. Claims and marks together.
+    pub(super) fn on_sight_lost(
+        &self,
+        tables: &mut Tables,
+        epics: &std::collections::HashSet<i64>,
+    ) {
+        self.release_claims_without_sight(tables, epics);
+        let tasks: std::collections::HashSet<i64> = tables
+            .tasks
+            .values()
+            .filter(|t| epics.contains(&t.epic_id))
+            .map(|t| t.id)
+            .collect();
+        self.drop_marks_of_those_who_cannot_see(tables, &tasks);
+    }
+
+    /// Mirrors the module's `on_task_sight_lost`: a single task whose own
+    /// sight changed (a move into a private epic, a detach).
+    pub(super) fn on_task_sight_lost(&self, tables: &mut Tables, task_id: i64) {
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
+            return;
+        };
+        let stale: Vec<i64> = tables
+            .poll_owners
+            .values()
+            .filter(|p| p.scope == POLL_SCOPE_TASK && p.scope_id == task_id)
+            .filter(|p| {
+                tables
+                    .hosts
+                    .get(&p.host)
+                    .is_some_and(|h| !module::task_visible_to(&*tables, &task, &h.owner))
+            })
+            .map(|p| p.id)
+            .collect();
+        for row_id in stale {
+            tables.poll_owners.remove(&row_id);
+            self.rows.remove_poll_owner(row_id);
+        }
+        self.drop_marks_of_those_who_cannot_see(
+            tables,
+            &std::collections::HashSet::from([task_id]),
+        );
+    }
+
+    fn drop_marks_of_those_who_cannot_see(
+        &self,
+        tables: &mut Tables,
+        tasks: &std::collections::HashSet<i64>,
+    ) {
+        if tasks.is_empty() {
+            return;
+        }
+        self.drop_marks_where(tables, |tables, task_id, subscriber| {
+            tasks.contains(&task_id)
+                && tables
+                    .tasks
+                    .get(&task_id)
+                    .is_some_and(|t| !module::task_visible_to(tables, t, subscriber))
+        });
+    }
+
     pub(super) fn write_repo_path(&self, tables: &mut Tables, mut row: module::RepoPath) -> i64 {
         let id = Self::assign_id(row.id, &mut tables.next_repo_path_id);
         row.id = id;

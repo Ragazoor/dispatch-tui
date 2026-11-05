@@ -3,6 +3,9 @@
 //!
 //! Every path that takes an epic out of someone's sight must release the poll
 //! claims that person's hosts hold on the epic and its tasks, and only those.
+//! The marks (unseen, bookmark) go with them (task #98992, B1); the second
+//! user's own rows are not visible from here, so the module's and the twin's
+//! tests assert the marks and this test pins the claims and the path list.
 //! `spacetime/module-tests/tests/feed_authority.rs` and
 //! `src/sync/memory_caller/tests/feed_authority.rs` each run the same five paths
 //! on their own side and seed a legacy claim straight into a table; this test is
@@ -19,8 +22,9 @@ use super::*;
 
 /// Where the third party's claim must be gone, and the first user's two must
 /// stay, after every path. One name per `carol_loses_sight_by` arm.
-const PATHS: [&str; 4] = [
+const PATHS: [&str; 5] = [
     "set_epic_visibility",
+    "detach_a_task",
     "reparent_under_a_private_epic",
     "move_epic_to_workspace",
     // Last: it takes the second user out of the default workspace for good.
@@ -73,8 +77,13 @@ fn holder(rows: &SharedRows, target: PollScopeId) -> Option<String> {
     rows.poll_owner(target).map(|p| p.host)
 }
 
-async fn carol_loses_sight_by(path: &str, p: &Pair<'_>, epic: i64, elsewhere: i64) {
+async fn carol_loses_sight_by(path: &str, p: &Pair<'_>, epic: i64, elsewhere: i64, theirs: TaskId) {
     match path {
+        "detach_a_task" => {
+            // The first user made the task, so they may detach it onto their
+            // own board; the second user cannot see a task there.
+            both_apply!(p, |c| c.set_task_epic(theirs, None, String::new()));
+        }
         "set_epic_visibility" => {
             both_apply!(p, |c| c.set_epic_visibility(EpicId(epic), "private".into()));
         }
@@ -200,7 +209,7 @@ fn every_loss_of_sight_path_releases_the_claims_it_strands_on_both_stores() {
             p.wait(|r| holder(r, epic_scope).is_some() && holder(r, mine_scope).is_some())
                 .await;
 
-            carol_loses_sight_by(path, &p, epic, elsewhere).await;
+            carol_loses_sight_by(path, &p, epic, elsewhere, theirs).await;
 
             // The real store's rows arrive by subscription; the claim on the
             // second user's task is the one that must go.
