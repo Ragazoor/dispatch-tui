@@ -193,6 +193,9 @@ fn invoke_hook(
     let mut child = Command::new("bash")
         .arg(script_path)
         .env("PATH", path_env)
+        // A dispatched agent's window sets DISPATCH_TASK_ID, which the scripts
+        // prefer over the branch; these tests resolve the id from the branch.
+        .env_remove("DISPATCH_TASK_ID")
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -663,6 +666,7 @@ fn pr_learnings_hook_invokes_gate_only_for_gh_pr_create() {
         let mut child = Command::new("bash")
             .arg(&script_path)
             .env("PATH", &path)
+            .env_remove("DISPATCH_TASK_ID")
             .current_dir(&repo)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
