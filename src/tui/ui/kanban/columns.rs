@@ -122,6 +122,7 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
         width: col_area.width,
         ground: column_bg_color(status, is_focused),
         indent: 0,
+        marks,
     };
     // A flattened group's cards step in with the header above them
     // (board-layout.allium: "Flattening", EpicGroupTree). Every group's cards
@@ -181,7 +182,6 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
                         .map(|p| p.substatus_in(epic, status))
                         .unwrap_or(EpicSubstatus::Unplanned),
                     status,
-                    marks,
                     &ctx,
                 )
             }

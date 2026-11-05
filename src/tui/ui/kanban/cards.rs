@@ -447,7 +447,7 @@ pub(super) fn render_folded_epic_header(
 /// margin cells in the column's own ground rather than let them inherit the card
 /// surface (`board-visuals.allium`: "Task card frame").
 #[derive(Clone, Copy)]
-pub(super) struct ColRenderCtx {
+pub(super) struct ColRenderCtx<'a> {
     pub color: Color,
     /// The card's width: the column's, less `indent`.
     pub width: u16,
@@ -455,6 +455,9 @@ pub(super) struct ColRenderCtx {
     /// Cells of column ground left of the card, beyond its margin: a nested
     /// flattened group's indent (board-layout.allium: "Flattening").
     pub indent: u16,
+    /// Which epic cards carry the new-task or bookmark mark, derived once per
+    /// render pass ([`EpicMarks`]).
+    pub marks: &'a EpicMarks,
 }
 
 /// The marker a phoenix task's title line carries (`♻`, U+267B). See "Phoenix
@@ -806,7 +809,6 @@ pub(super) fn render_epic_item(
     // own placement there, not the epic's board-wide substatus.
     substatus: EpicSubstatus,
     status: TaskStatus,
-    marks: &EpicMarks,
     ctx: &ColRenderCtx,
 ) -> ListItem<'static> {
     let col_width = ctx.width;
@@ -820,8 +822,8 @@ pub(super) fn render_epic_item(
 
     // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + plan_indicator
     let id_len = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
-    let unseen = marks.unseen.contains(&epic.id);
-    let diamond = diamond_color(unseen, marks.bookmarked.contains(&epic.id));
+    let unseen = ctx.marks.unseen.contains(&epic.id);
+    let diamond = diamond_color(unseen, ctx.marks.bookmarked.contains(&epic.id));
     let prefix_width = 2
         + 1
         + 3
