@@ -310,7 +310,7 @@ fn build_quick_dispatch_prompt_includes_the_spec_first_sequence() {
         &PromptContext::default(),
     );
     assert!(
-        prompt.contains("allium:elicit") && prompt.contains("docs/specs/"),
+        prompt.contains("allium:elicit") && prompt.contains("Allium specs"),
         "quick dispatch prompt should send the agent through the spec-first design step"
     );
     assert!(
@@ -413,7 +413,7 @@ fn no_plan_prompts_reference_the_elicit_skill() {
 /// which knows the two wordings; pinning it here would need a literal no path
 /// shares.
 const SHARED_TRAILING_LINES: &[&str] = &[
-    "docs/specs/",      // spec_first_instruction's steps, or allium_instruction
+    "Allium specs",     // spec_first_instruction's steps, or allium_instruction
     "/learnings",       // learning_tools_instruction (names the skill, no MCP tool)
     "dispatch:wrap-up", // wrap_up_instruction (universal)
 ];

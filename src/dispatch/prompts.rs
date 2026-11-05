@@ -305,7 +305,7 @@ unclear, and record what you find."
 pub(super) fn spec_first_instruction() -> &'static str {
     "If the task changes what the system does, design it spec-first: elicit the intended \
 behaviour with `allium:elicit`, \
-capture it in docs/specs/ with `allium:tend`, generate tests with `allium:propagate` and \
+capture it in the repo's Allium specs with `allium:tend`, generate tests with `allium:propagate` and \
 confirm they fail before you write any code, implement the minimum that makes them pass, then \
 check spec and code agree with `allium:weed`.\n\
 \n\
@@ -319,7 +319,7 @@ work before wrapping up."
 }
 
 /// The design instruction for a no-plan task in a repo that keeps **no** Allium
-/// specs (`docs/specs/*.allium` is absent or empty). Sending such an agent to
+/// specs (no `*.allium` file under `docs/`). Sending such an agent to
 /// `allium:elicit` would ask it to tend a garden that does not exist, so the
 /// design step is `superpowers:brainstorming` instead — see
 /// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch-prompt.allium`.
@@ -405,7 +405,7 @@ dispatch:wrap-up skill to commit any remaining changes and finalise the task."
 
 /// Allium spec instruction — shared across all agents that may touch domain behaviour.
 pub(super) fn allium_instruction() -> &'static str {
-    "The Allium specs in `docs/specs/` are the source of truth for domain logic. \
+    "The repo's Allium specs (`*.allium` files under `docs/`) are the source of truth for domain logic. \
 Consult them before changing core behaviour. If your implementation changes domain behaviour, \
 update the spec using the `allium:tend` skill and verify alignment with `allium:weed`."
 }

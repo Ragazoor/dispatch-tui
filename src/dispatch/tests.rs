@@ -70,7 +70,7 @@ fn spec_first_instruction_mentions_docs_plans_and_update_task() {
 #[test]
 fn allium_instruction_mentions_spec_and_skills() {
     let instr = allium_instruction();
-    assert!(instr.contains("docs/specs/"));
+    assert!(instr.contains("*.allium"));
     assert!(instr.contains("allium:tend"));
     assert!(instr.contains("allium:weed"));
 }
@@ -421,7 +421,7 @@ fn build_prompt_without_plan_sends_the_agent_to_elicit_a_spec() {
         "no-plan prompt should name the interview skill"
     );
     assert!(
-        prompt.contains("docs/specs/"),
+        prompt.contains("Allium specs"),
         "no-plan prompt should name the Allium spec as the design artefact"
     );
 }

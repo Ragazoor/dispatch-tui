@@ -502,7 +502,10 @@ rule NameTheDesignStep {
         -- The design step a prompt names depends on whether the task's
         -- repository actually keeps Allium specs. A repository HAS Allium
         -- specs when task.repo_path (tilde-expanded) holds at least one
-        -- `docs/specs/*.allium` file. The check is one directory read per
+        -- `*.allium` file anywhere under `docs/` (found by a recursive walk, so
+        -- a nested specs directory counts as well as docs/specs/; symlinked
+        -- directories are not followed). The prompt never hardcodes
+        -- docs/specs/: it says "the repo's Allium specs". The check is one directory walk per
         -- dispatch, against the parent repo rather than the freshly
         -- provisioned worktree, and it is not persisted: nothing on
         -- core/SavedRepoPath records it, so a repo that gains or loses its
@@ -510,7 +513,7 @@ rule NameTheDesignStep {
         -- setting to update and no migration.
         --
         -- Every failure to see such a file counts as "no specs": a missing
-        -- docs/specs directory, an empty one, one holding no .allium file,
+        -- docs directory, an empty one, one holding no .allium file,
         -- and an unreadable one all take the same branch. There is
         -- deliberately no error arm — one rule, one answer — so the prompt
         -- an agent receives never depends on which way a read failed.
