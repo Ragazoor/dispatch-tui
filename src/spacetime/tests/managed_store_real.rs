@@ -251,14 +251,47 @@ fn ping_server() -> String {
 /// How many free ports [`on_free_address`] tries before giving up.
 pub(crate) const PORT_ATTEMPTS: usize = 5;
 
-/// A free loopback port as `host:port`, for a test that never starts a real
-/// store on it (a fake spawner, or an address nothing should answer on). A
-/// test that hands the address to a real `spacetime start` uses
-/// [`on_free_address`] instead: the port is free when this returns, not when
-/// the child binds it.
-pub(crate) fn free_address() -> String {
+/// An address nothing listens on, for a test whose fake spawner never binds
+/// a port. It is a placeholder, not a pick: port 1 is privileged, so no test's
+/// store can ever take it, and nothing is bound or dropped to get it.
+pub(crate) const UNUSED_ADDRESS: &str = "127.0.0.1:1";
+
+/// A loopback `host:port` the OS had free a moment ago, for [`on_free_address`]
+/// and the async smoke test's own retry loop. This is the one bind-and-drop
+/// left, and it is immune because both callers prove, through [`listener_runs_with_arg`], that the
+/// store answering on it is the one the attempt started, and start over when
+/// it is not.
+pub(crate) fn candidate_address() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.local_addr().unwrap().to_string()
+}
+
+/// Whether the process listening on `address` was started with `arg` on its
+/// command line (a store over `--data-dir=<this test's dir>`), so a store
+/// another test started on a port this one lost is told apart from our own.
+/// The error says "already in use" so [`on_free_address`] retries on a fresh
+/// port.
+pub(crate) fn listener_runs_with_arg(address: &str, arg: &str) -> Result<(), String> {
+    let port = address.rsplit(':').next().unwrap_or_default();
+    let filter = format!("sport = :{port}");
+    let out = Command::new("ss")
+        .args(["-ltnpH", &filter])
+        .output()
+        .map_err(|e| format!("could not run ss to identify the store on {address}: {e}"))?;
+    let pids = parse_ss_pids(&String::from_utf8_lossy(&out.stdout));
+    let ours = pids.iter().any(|pid| {
+        std::fs::read(format!("/proc/{pid}/cmdline"))
+            .map(|raw| raw.split(|b| *b == 0).any(|a| a == arg.as_bytes()))
+            .unwrap_or(false)
+    });
+    if ours {
+        Ok(())
+    } else {
+        Err(format!(
+            "the listener on {address} (pids {pids:?}) is not the store this test \
+             started ({arg}): another test's store holds the port, already in use"
+        ))
+    }
 }
 
 /// Whether `output` (a store's stderr or log) says it lost the race for its
@@ -288,7 +321,7 @@ pub(crate) fn failure_with_log(error: impl std::fmt::Display, log: &Path) -> Str
 pub(crate) fn on_free_address<T>(mut attempt: impl FnMut(String) -> Result<T, String>) -> T {
     let mut last = String::new();
     for _ in 0..PORT_ATTEMPTS {
-        match attempt(free_address()) {
+        match attempt(candidate_address()) {
             Ok(value) => return value,
             Err(error) if is_address_in_use(&error) => last = error,
             Err(error) => panic!("the store failed to start: {error}"),
@@ -342,7 +375,7 @@ fn a_store_that_exits_at_once_fails_the_start_with_its_status() {
     let store = ports(
         Arc::new(KillOnlyRunner),
         Arc::new(ShellSpawner("exit 3")),
-        free_address(),
+        UNUSED_ADDRESS.into(),
         dir.path(),
         TIMEOUT,
     );
@@ -358,7 +391,7 @@ fn a_store_that_never_serves_fails_the_start_at_the_deadline_and_is_still_stoppa
     let store = ports(
         Arc::new(KillOnlyRunner),
         Arc::new(ShellSpawner("exec sleep 300")),
-        free_address(),
+        UNUSED_ADDRESS.into(),
         dir.path(),
         Duration::from_millis(300),
     );
@@ -393,7 +426,7 @@ fn stopping_a_failed_start_signals_only_the_child_never_the_port() {
     let store = ports(
         runner.clone(),
         Arc::new(ShellSpawner("exec sleep 300")),
-        free_address(),
+        UNUSED_ADDRESS.into(),
         dir.path(),
         Duration::from_millis(200),
     );
@@ -414,7 +447,7 @@ fn a_spacetime_that_cannot_run_fails_the_start_with_the_cause() {
     let store = ports(
         Arc::new(KillOnlyRunner),
         Arc::new(FailingSpawner),
-        free_address(),
+        UNUSED_ADDRESS.into(),
         dir.path(),
         TIMEOUT,
     );
@@ -556,6 +589,13 @@ fn a_real_store_is_brought_up_published_to_and_stopped() {
         managed
             .bring_up()
             .map_err(|e| failure_with_log(format!("{e:?}"), &layout.log_path))?;
+        // A store another test started on this port would have been adopted
+        // as ours; only the one over this test's data directory counts.
+        let ours = format!("--data-dir={}", layout.data_dir.display());
+        if let Err(e) = listener_runs_with_arg(&layout.address, &ours) {
+            managed.stop_spawned_on_exit();
+            return Err(e);
+        }
         Ok((real, hashes, managed))
     });
     assert_eq!(
@@ -595,7 +635,7 @@ fn a_failure_line_written_after_the_board_began_is_seen() {
     let store = ports(
         Arc::new(KillOnlyRunner),
         Arc::new(FailingSpawner),
-        free_address(),
+        UNUSED_ADDRESS.into(),
         dir.path(),
         TIMEOUT,
     );
@@ -618,7 +658,7 @@ fn a_failure_line_from_before_the_board_began_is_ignored() {
     let store = ports(
         Arc::new(KillOnlyRunner),
         Arc::new(FailingSpawner),
-        free_address(),
+        UNUSED_ADDRESS.into(),
         dir.path(),
         TIMEOUT,
     );
@@ -688,4 +728,16 @@ fn on_free_address_retries_a_lost_race_and_stops_at_any_other_failure() {
     }));
     assert!(result.is_err());
     assert_eq!(attempts, PORT_ATTEMPTS, "gives up after the cap");
+}
+
+#[test]
+fn a_listener_is_identified_by_an_argument_on_its_command_line() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    // This test process is the listener; its own argv[0] is on its command line.
+    let argv0 = std::fs::read("/proc/self/cmdline").unwrap();
+    let argv0 = String::from_utf8_lossy(argv0.split(|b| *b == 0).next().unwrap()).into_owned();
+    assert_eq!(listener_runs_with_arg(&address, &argv0), Ok(()));
+    let error = listener_runs_with_arg(&address, "--data-dir=/nowhere").unwrap_err();
+    assert!(is_address_in_use(&error), "{error}");
 }

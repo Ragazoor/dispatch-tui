@@ -26,7 +26,7 @@ use crate::spacetime::managed_store::{
     SpacetimeManagedStore, SpacetimeStartSpawner, EMBEDDED_MODULE,
 };
 use crate::spacetime::tests::managed_store_real::{
-    failure_with_log, free_address, is_address_in_use, PORT_ATTEMPTS,
+    candidate_address, failure_with_log, is_address_in_use, listener_runs_with_arg, PORT_ATTEMPTS,
 };
 
 /// How long a write may take to come back through the subscription.
@@ -141,14 +141,27 @@ async fn a_fresh_install_starts_against_a_real_store() {
     // with the store's own log.
     let mut attempts = 0;
     let (address, first_guard, first) = loop {
-        let address = free_address();
+        let address = candidate_address();
         let first_target =
             managed_target(address.clone(), &store_data, dir.path(), &cli_config, &keys);
         // Declared before `first`, so the store outlives the board it serves
         // and is still stopped when an assertion panics.
         let first_guard = ManagedStoreGuard(first_target.managed().cloned());
         match boot(&data_dir, &paths, first_target).await {
-            Ok(first) => break (address, first_guard, first),
+            Ok(first) => {
+                // A store another test started on this port would have been
+                // adopted as ours; only the one over this test's data counts.
+                let ours = format!("--data-dir={}", store_data.display());
+                match listener_runs_with_arg(&address, &ours) {
+                    Ok(()) => break (address, first_guard, first),
+                    Err(said) if attempts + 1 < PORT_ATTEMPTS => {
+                        attempts += 1;
+                        let _ = said;
+                        continue;
+                    }
+                    Err(said) => panic!("fresh-install smoke: {said}"),
+                }
+            }
             Err(e) => {
                 attempts += 1;
                 let said = failure_with_log(e, &dir.path().join("managed-store.log"));
