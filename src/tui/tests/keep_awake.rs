@@ -102,16 +102,35 @@ fn unsupported_platform_shows_an_error_and_stays_off() {
     assert!(err.contains("only supported on Linux"), "got {err:?}");
 }
 
-// IgnoreToggleWhileRequesting
+// CancelKeepAwakeWhileRequesting
 #[test]
-fn toggle_while_requesting_does_nothing() {
+fn toggle_while_requesting_cancels_the_request() {
     let mut app = supported_app();
     toggle(&mut app);
     let cmds = toggle(&mut app);
-    assert!(
-        cmds.iter().all(|c| !matches!(c, Command::KeepAwake(_))),
-        "got {cmds:?}"
-    );
+    assert!(releases(&cmds), "got {cmds:?}");
+    assert_eq!(app.keep_awake.status, KeepAwakeStatus::Off);
+    assert!(app.status.error_popup.is_none());
+}
+
+#[test]
+fn a_late_answer_to_a_cancelled_request_is_ignored() {
+    let mut app = supported_app();
+    let generation = requested_generation(&toggle(&mut app)).expect("a request");
+    toggle(&mut app);
+    answer(&mut app, generation, HoldEvent::Granted);
+    assert_eq!(app.keep_awake.status, KeepAwakeStatus::Off);
+    assert!(!top_row(&mut app).contains("awake"));
+}
+
+#[test]
+fn a_request_after_a_cancel_gets_a_new_generation() {
+    let mut app = supported_app();
+    let first = requested_generation(&toggle(&mut app)).expect("a request");
+    toggle(&mut app);
+    let second = requested_generation(&toggle(&mut app)).expect("a request");
+    assert!(second > first);
+    answer(&mut app, first, HoldEvent::Granted);
     assert_eq!(app.keep_awake.status, KeepAwakeStatus::Requesting);
 }
 

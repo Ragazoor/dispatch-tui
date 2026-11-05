@@ -52,7 +52,7 @@ impl KeepAwakeState {
 
 impl App {
     /// The `W` key: RequestKeepAwake, RefuseKeepAwakeOffLinux,
-    /// IgnoreToggleWhileRequesting and ReleaseKeepAwake.
+    /// CancelKeepAwakeWhileRequesting and ReleaseKeepAwake.
     pub(in crate::tui) fn handle_toggle_keep_awake(&mut self) -> Vec<Command> {
         let state = &mut self.keep_awake;
         match state.status {
@@ -66,7 +66,13 @@ impl App {
                     generation: state.generation,
                 })]
             }
-            KeepAwakeStatus::Requesting => vec![],
+            // The way out of a request that never settles. Bumping the
+            // generation makes any late answer from it stale.
+            KeepAwakeStatus::Requesting => {
+                state.generation += 1;
+                state.status = KeepAwakeStatus::Off;
+                vec![Command::KeepAwake(KeepAwakeCommand::Release)]
+            }
             KeepAwakeStatus::On => {
                 state.status = KeepAwakeStatus::Off;
                 vec![Command::KeepAwake(KeepAwakeCommand::Release)]

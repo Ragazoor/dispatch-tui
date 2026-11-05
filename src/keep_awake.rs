@@ -18,8 +18,8 @@
 
 use std::process::Stdio;
 
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use tokio::process::{ChildStdin, Command};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader, Lines};
+use tokio::process::{ChildStderr, ChildStdin, ChildStdout, Command};
 
 /// The line the inner command prints once the helper has taken the hold.
 const READY: &str = "ready";
@@ -51,11 +51,34 @@ pub struct HoldCommand {
     pub args: Vec<String>,
 }
 
+/// The variables that name the desktop. `XDG_CURRENT_DESKTOP` alone is not
+/// enough: a tmux server started from ssh, a TTY or a user unit lacks it,
+/// while the session variables often survive.
+const DESKTOP_VARS: &[&str] = &[
+    "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_DESKTOP",
+    "DESKTOP_SESSION",
+];
+
+/// The values of [`DESKTOP_VARS`] that `read` finds, in that order.
+fn desktop_vars(read: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    DESKTOP_VARS.iter().filter_map(|name| read(name)).collect()
+}
+
+/// Whether a desktop name such as `ubuntu:GNOME`, `gnome` or `gnome-xorg`
+/// is GNOME.
+fn names_gnome(desktop: &str) -> bool {
+    desktop
+        .split([':', '-'])
+        .any(|p| p.eq_ignore_ascii_case("GNOME"))
+}
+
 /// Choose the helper. The GNOME session manager is preferred on GNOME,
 /// because GNOME honours its inhibitors for screen lock and blanking; the
-/// generic systemd inhibitor is the fallback everywhere else.
-pub fn hold_command(desktop: Option<&str>, gnome_inhibit_on_path: bool) -> HoldCommand {
-    let on_gnome = desktop.is_some_and(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("GNOME")));
+/// generic systemd inhibitor is the fallback everywhere else. `desktops`
+/// holds the values of [`DESKTOP_VARS`] that are set.
+pub fn hold_command<S: AsRef<str>>(desktops: &[S], gnome_inhibit_on_path: bool) -> HoldCommand {
+    let on_gnome = desktops.iter().any(|d| names_gnome(d.as_ref()));
     let (program, flags): (&str, Vec<&str>) = if on_gnome && gnome_inhibit_on_path {
         (
             "gnome-session-inhibit",
@@ -90,9 +113,9 @@ pub fn hold_command(desktop: Option<&str>, gnome_inhibit_on_path: bool) -> HoldC
 pub fn hold_command_for_this_machine() -> &'static HoldCommand {
     static CACHED: std::sync::OnceLock<HoldCommand> = std::sync::OnceLock::new();
     CACHED.get_or_init(|| {
-        let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+        let desktops = desktop_vars(|name| std::env::var(name).ok());
         hold_command(
-            desktop.as_deref(),
+            &desktops,
             crate::process::program_on_path("gnome-session-inhibit"),
         )
     })
@@ -131,30 +154,38 @@ pub fn start(command: &HoldCommand, on_event: impl Fn(HoldEvent) + Send + Sync +
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     tokio::spawn(async move {
-        let read_stdout = async {
-            let mut granted = false;
-            if let Some(out) = stdout {
-                let mut lines = BufReader::new(out).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if !granted && line.trim() == READY {
-                        granted = true;
-                        on_event(HoldEvent::Granted);
-                    }
-                }
+        let mut out_lines = stdout.map(|out| BufReader::new(out).lines());
+        let mut err = stderr;
+        let mut err_text = Vec::new();
+        let mut granted = false;
+        let mut buf = [0u8; 1024];
+        // Read until the helper exits, not until its pipes close: a process
+        // the helper started (the inner command, or a grandchild after the
+        // helper dies alone) can keep the pipes open, and the end of the
+        // hold must not wait for it (keep-awake.allium: BadgeMeansHeld).
+        let status = loop {
+            tokio::select! {
+                line = next_line(&mut out_lines), if out_lines.is_some() => match line {
+                    Some(line) => note_line(&line, &mut granted, &on_event),
+                    None => out_lines = None,
+                },
+                n = read_some(&mut err, &mut buf), if err.is_some() => match n {
+                    Some(n) => err_text.extend_from_slice(&buf[..n]),
+                    None => err = None,
+                },
+                status = child.wait() => break status,
             }
-            granted
         };
-        let read_stderr = async {
-            let mut text = String::new();
-            if let Some(mut err) = stderr {
-                // A read error only loses the reason text, never the event.
-                let _ = err.read_to_string(&mut text).await;
-            }
-            text
-        };
-        let (granted, err_text) = tokio::join!(read_stdout, read_stderr);
-        let status = child.wait().await;
-        let reason = describe_exit(&err_text, status);
+        // Whatever the helper wrote before it exited is already in the
+        // pipes; take it without waiting for an end of file that may never
+        // come.
+        while let Some(line) = now_or_never(next_line(&mut out_lines)).await.flatten() {
+            note_line(&line, &mut granted, &on_event);
+        }
+        while let Some(n) = now_or_never(read_some(&mut err, &mut buf)).await.flatten() {
+            err_text.extend_from_slice(&buf[..n]);
+        }
+        let reason = describe_exit(&String::from_utf8_lossy(&err_text), status);
         on_event(if granted {
             HoldEvent::Ended(reason)
         } else {
@@ -162,6 +193,39 @@ pub fn start(command: &HoldCommand, on_event: impl Fn(HoldEvent) + Send + Sync +
         });
     });
     Hold { _stdin: stdin }
+}
+
+/// The future's value if it is ready on its first poll, else `None`.
+async fn now_or_never<T>(fut: impl std::future::Future<Output = T>) -> Option<T> {
+    tokio::select! {
+        biased;
+        v = fut => Some(v),
+        _ = std::future::ready(()) => None,
+    }
+}
+
+/// The next stdout line, or `None` at the end of the stream, on a read error
+/// or when there is no stream.
+async fn next_line(lines: &mut Option<Lines<BufReader<ChildStdout>>>) -> Option<String> {
+    lines.as_mut()?.next_line().await.ok().flatten()
+}
+
+/// Some stderr bytes, or `None` at the end of the stream, on a read error
+/// or when there is no stream. A read error only loses the reason text,
+/// never the event.
+async fn read_some(err: &mut Option<ChildStderr>, buf: &mut [u8]) -> Option<usize> {
+    match err.as_mut()?.read(buf).await {
+        Ok(0) | Err(_) => None,
+        Ok(n) => Some(n),
+    }
+}
+
+/// Report [`HoldEvent::Granted`] on the first ready line.
+fn note_line(line: &str, granted: &mut bool, on_event: &impl Fn(HoldEvent)) {
+    if !*granted && line.trim() == READY {
+        *granted = true;
+        on_event(HoldEvent::Granted);
+    }
 }
 
 /// The helper's last stderr line if it said anything, else its exit status.
@@ -261,9 +325,64 @@ mod tests {
         }
     }
 
+    // T1: a helper that dies while a grandchild keeps its pipes open.
+    #[tokio::test]
+    async fn the_helper_exiting_ends_the_hold_even_if_a_grandchild_holds_the_pipes() {
+        let (hold, mut rx) =
+            start_with_channel(&sh("echo ready; echo 'helper died' >&2; cat <&0 & exit 0"));
+        let guard = std::time::Duration::from_secs(20);
+        assert_eq!(
+            tokio::time::timeout(guard, rx.recv()).await.ok().flatten(),
+            Some(HoldEvent::Granted)
+        );
+        assert_eq!(
+            tokio::time::timeout(guard, rx.recv()).await.ok().flatten(),
+            Some(HoldEvent::Ended("helper died".to_string())),
+            "the end must not wait for the grandchild to close the pipes"
+        );
+        drop(hold); // closes the grandchild's stdin, so it exits too
+    }
+
+    #[tokio::test]
+    async fn the_helper_exiting_before_ready_is_refused_even_if_a_grandchild_holds_the_pipes() {
+        let (hold, mut rx) = start_with_channel(&sh("cat <&0 & exit 1"));
+        let event = tokio::time::timeout(std::time::Duration::from_secs(20), rx.recv())
+            .await
+            .ok()
+            .flatten();
+        assert!(
+            matches!(event, Some(HoldEvent::Refused(_))),
+            "got {event:?}"
+        );
+        drop(hold);
+    }
+
+    // T2: the desktop is read from every variable that names it.
+    #[test]
+    fn gnome_is_found_in_any_desktop_variable() {
+        assert_eq!(
+            hold_command(&["gnome-xorg"], true).program,
+            "gnome-session-inhibit"
+        );
+        assert_eq!(
+            hold_command(&["KDE", "gnome"], true).program,
+            "gnome-session-inhibit"
+        );
+    }
+
+    #[test]
+    fn the_desktop_variables_are_read_in_order_of_presence() {
+        let vars = desktop_vars(|name| match name {
+            "XDG_SESSION_DESKTOP" => Some("gnome".to_string()),
+            "DESKTOP_SESSION" => Some("gnome-xorg".to_string()),
+            _ => None,
+        });
+        assert_eq!(vars, vec!["gnome".to_string(), "gnome-xorg".to_string()]);
+    }
+
     #[test]
     fn gnome_uses_the_session_manager_for_idle_and_suspend() {
-        let cmd = hold_command(Some("GNOME"), true);
+        let cmd = hold_command(&["GNOME"], true);
         assert_eq!(cmd.program, "gnome-session-inhibit");
         assert!(cmd.args.contains(&"idle:suspend".to_string()), "{cmd:?}");
         assert!(cmd.args.ends_with(&inner()));
@@ -272,28 +391,25 @@ mod tests {
     #[test]
     fn gnome_variants_in_a_desktop_list_count_as_gnome() {
         assert_eq!(
-            hold_command(Some("ubuntu:GNOME"), true).program,
+            hold_command(&["ubuntu:GNOME"], true).program,
             "gnome-session-inhibit"
         );
     }
 
     #[test]
     fn gnome_without_its_helper_falls_back_to_systemd() {
-        assert_eq!(
-            hold_command(Some("GNOME"), false).program,
-            "systemd-inhibit"
-        );
+        assert_eq!(hold_command(&["GNOME"], false).program, "systemd-inhibit");
     }
 
     #[test]
     fn other_desktops_use_systemd_for_idle_and_sleep() {
-        let cmd = hold_command(Some("KDE"), true);
+        let cmd = hold_command(&["KDE"], true);
         assert_eq!(cmd.program, "systemd-inhibit");
         assert!(
             cmd.args.contains(&"--what=idle:sleep".to_string()),
             "{cmd:?}"
         );
         assert!(cmd.args.ends_with(&inner()));
-        assert_eq!(hold_command(None, true).program, "systemd-inhibit");
+        assert_eq!(hold_command::<&str>(&[], true).program, "systemd-inhibit");
     }
 }
