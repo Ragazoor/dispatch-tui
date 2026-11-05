@@ -256,6 +256,23 @@ pub(crate) async fn exec_feed_command(
     })
 }
 
+/// Line prefix a feed script uses for informational stderr that says nothing
+/// about the emission's trustworthiness (e.g. "TEAMS is empty"). See
+/// feeds.allium: FeedStderrNotice.
+pub(crate) const FEED_NOTICE_PREFIX: &str = "notice:";
+
+/// Stderr with the notice lines removed. Only a line that STARTS with
+/// [`FEED_NOTICE_PREFIX`] is dropped; everything else still taints the cycle.
+fn significant_stderr(stderr: &str) -> String {
+    stderr
+        .lines()
+        .filter(|l| !l.starts_with(FEED_NOTICE_PREFIX))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 /// Classify a zero-exit emission that produced no items while writing to
 /// stderr. That combination is the signature of a script which failed
 /// internally and soft-failed to an empty array — syncing it would delete
@@ -270,6 +287,7 @@ pub(crate) async fn exec_feed_command(
 ///
 /// See feeds.allium: DegradedEmptyEmission.
 pub(crate) fn degraded_empty_emission(item_count: usize, stderr: &str) -> Option<String> {
+    let stderr = significant_stderr(stderr);
     if item_count == 0 && !stderr.is_empty() {
         Some(format!(
             "command emitted no items but wrote to stderr: {stderr}"
@@ -295,6 +313,7 @@ pub(crate) fn degraded_empty_emission(item_count: usize, stderr: &str) -> Option
 ///
 /// [`SyncMode::Additive`]: super::SyncMode::Additive
 pub(crate) fn degraded_partial_emission(item_count: usize, stderr: &str) -> Option<String> {
+    let stderr = significant_stderr(stderr);
     if item_count > 0 && !stderr.is_empty() {
         Some(format!(
             "command wrote to stderr, so its omissions are not trusted: {stderr}"

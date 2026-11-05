@@ -375,7 +375,7 @@ search_team_prs() {
   local -a team_owner_flags
 
   if [[ ${#TEAMS[@]} -eq 0 ]]; then
-    echo "fetch-reviews: TEAMS is empty - Team Reviews stays empty. List \"<org>/<team-slug>\" entries in teams.conf to fill it." >&2
+    echo "notice: fetch-reviews: TEAMS is empty - Team Reviews stays empty. List \"<org>/<team-slug>\" entries in teams.conf to fill it." >&2
   fi
   for team in ${TEAMS[@]+"${TEAMS[@]}"}; do
     team_owner_flags=(--owner "${team%%/*}")

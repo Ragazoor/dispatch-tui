@@ -393,3 +393,32 @@ fn the_two_degradation_predicates_are_mutually_exclusive() {
         }
     }
 }
+
+// --- notice lines (feeds.allium: FeedStderrNotice) ---
+
+#[test]
+fn notice_only_stderr_does_not_degrade_a_non_empty_emission() {
+    assert!(degraded_partial_emission(3, "notice: TEAMS is empty").is_none());
+}
+
+#[test]
+fn notice_only_stderr_does_not_degrade_an_empty_emission() {
+    assert!(degraded_empty_emission(0, "notice: a\nnotice: b").is_none());
+}
+
+#[test]
+fn a_real_error_beside_a_notice_still_degrades() {
+    let stderr = "notice: TEAMS is empty\nfetch-reviews: gh search prs failed";
+    let reason = degraded_partial_emission(3, stderr).expect("real stderr must degrade");
+    assert!(reason.contains("gh search prs failed"), "{reason}");
+    assert!(
+        !reason.contains("notice:"),
+        "notice must not be in the reason: {reason}"
+    );
+    assert!(degraded_empty_emission(0, stderr).is_some());
+}
+
+#[test]
+fn the_notice_prefix_must_start_the_line() {
+    assert!(degraded_partial_emission(3, "error: see notice: x").is_some());
+}

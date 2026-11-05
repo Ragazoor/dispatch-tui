@@ -2608,7 +2608,17 @@ rule FeedCommandStderrOnSuccess {
     --
     -- Stderr on a zero-exit run is NEVER merely diagnostic. It TAINTS the
     -- emission, and the two rules below say what a tainted emission is
-    -- allowed to do:
+    -- allowed to do.
+    --
+    -- FeedStderrNotice (the one exemption): a stderr LINE that starts with
+    -- "notice:" is informational and does not taint. The runner drops such
+    -- lines before it classifies (src/feed/exec.rs::significant_stderr), so
+    -- a script can tell the user something (fetch-reviews.sh: "TEAMS is
+    -- empty") without turning every cycle additive. A line that merely
+    -- CONTAINS "notice:" still taints. A script must never put a failure
+    -- behind the prefix.
+    --
+    -- Tainted emissions:
     --
     --   - ZERO items + stderr  -> DegradedEmptyEmission. The command is
     --     treated as failed and NO sync runs at all.

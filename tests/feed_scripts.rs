@@ -319,6 +319,12 @@ fn fetch_reviews_hints_on_stderr_when_teams_conf_lists_no_teams() {
         stderr.contains("teams.conf") && stderr.contains("TEAMS"),
         "must say Team Reviews is empty because TEAMS is: {stderr}"
     );
+    // The hint must not taint the cycle: under the default config the runner
+    // has to reconcile (src/feed/exec/tests.rs pins that notice-only stderr is not degraded), not downgrade to additive or fail.
+    assert!(
+        stderr.lines().all(|l| l.starts_with("notice:")),
+        "every stderr line must carry the notice prefix: {stderr}"
+    );
 }
 
 #[test]

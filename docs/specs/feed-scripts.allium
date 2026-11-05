@@ -235,7 +235,8 @@
 -- still yields direct_request and My Reviews.
 --
 -- An absent teams.conf, or an empty TEAMS, skips the pass, so Team Reviews
--- stays empty. The script says so on stderr ("TEAMS is empty"), which reaches
+-- stays empty. The script says so on stderr ("notice: ... TEAMS is empty"; a
+-- "notice:" line does not taint the cycle, see feeds.allium FeedStderrNotice), which reaches
 -- the feed log, so an upgrade that ships TEAMS=() does not empty Team Reviews
 -- silently. A `gh search prs` that fails (rate limit, outage) fails the WHOLE
 -- emission with a non-zero exit rather than contributing an empty list, so the
