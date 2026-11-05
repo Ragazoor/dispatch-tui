@@ -1130,6 +1130,22 @@ rule PatchTaskNeverAimsAnotherHostsTeardown {
         -- teardown are unaffected. Task #98909.
 }
 
+rule CreateTaskNeverAimsAnotherHostsTeardown {
+    when: TaskCreateRequested(row)
+
+    -- The create twin of PatchTaskNeverAimsAnotherHostsTeardown. A new row
+    -- that names another person's host would be torn down by that host when
+    -- the item leaves its feed, against a worktree the creator chose.
+    requires: row.host = "" or row.host.owner = null or row.host.owner = caller()
+
+    ensures: TaskCreated(row: row)
+
+    @guidance
+        -- create_task and create_task_signalled refuse, naming why, and write
+        -- nothing. A host nobody registered has no owner and is not judged.
+        -- Task #98991.
+}
+
 rule UpdateTaskIsOneTransaction {
     when: TaskUpdateRequested(task, epic?, patch)
 

@@ -264,6 +264,11 @@ impl MemoryReducerCaller {
         tables
             .check_task_may_enter_epic(&scope, "task", row.epic_id)
             .map_err(StoreRefusal)?;
+        // The module's `check_new_task_aim`.
+        module::check_new_task_aim(&row, &self.sender, |host| {
+            tables.hosts.get(host).map(|h| h.owner.clone())
+        })
+        .map_err(StoreRefusal)?;
         // Before routing, which can create a repo sub-epic: the module rolls
         // that back with a refused write, and this double has no rollback.
         Self::validate_task_write(&tables, &row, &self.now()).map_err(StoreRefusal)?;

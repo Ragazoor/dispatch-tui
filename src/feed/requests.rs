@@ -42,6 +42,31 @@ impl ServedRequests {
     }
 }
 
+/// Whether a claim was granted, handing the request back when it was not.
+///
+/// A claim the store refused (a running row inside the module's re-claim grace,
+/// which is where a request lands when its report failed) or never received
+/// leaves the row open there, so the id leaves `served` and a later tick claims
+/// it again.
+pub(super) fn claim_granted(
+    served: &ServedRequests,
+    id: FeedRequestId,
+    claimed: anyhow::Result<bool>,
+) -> bool {
+    match claimed {
+        Ok(true) => true,
+        Ok(false) => {
+            served.forget(id);
+            false
+        }
+        Err(err) => {
+            tracing::warn!(request = id.0, "feed request: claim not sent: {err:#}");
+            served.forget(id);
+            false
+        }
+    }
+}
+
 /// The rows this host must serve now: open, naming a host this board serves,
 /// requested by this host's owner, and not served already by this process.
 /// A row another identity wrote is logged and left alone (the module's check
@@ -87,13 +112,8 @@ pub(super) async fn serve_teardowns(
     let mut by_repo: HashMap<String, Vec<FeedRequest>> = HashMap::new();
     for row in rows {
         debug_assert_eq!(row.kind, FeedRequestKind::Teardown);
-        match db.claim_feed_request(row.id).await {
-            Ok(true) => by_repo.entry(row.repo_path.clone()).or_default().push(row),
-            Ok(false) => {}
-            Err(err) => {
-                tracing::warn!(request = row.id.0, "feed teardown: claim not sent: {err:#}");
-                served.forget(row.id);
-            }
+        if claim_granted(&served, row.id, db.claim_feed_request(row.id).await) {
+            by_repo.entry(row.repo_path.clone()).or_default().push(row);
         }
     }
     let mut handles = Vec::new();

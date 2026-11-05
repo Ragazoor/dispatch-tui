@@ -299,6 +299,7 @@ pub fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
 /// `sync.allium: EveryMutationIsAtomicAndAnswered`.
 #[spacetimedb::reducer]
 pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
+    check_new_task_aim(ctx, &row)?;
     check_task_may_enter_epic(ctx, "task", row.epic_id)?;
     // Into the per-repo sub-epic when the epic named is a grouped root
     // (`epics.allium`'s routing note). Every client gets the same placement.
@@ -319,6 +320,13 @@ pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     )?;
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
+}
+
+/// [`check_new_task_aim`] against the store's hosts.
+fn check_new_task_aim(ctx: &ReducerContext, row: &Task) -> Result<(), String> {
+    crate::rules::check_new_task_aim(row, &caller_identity(ctx), |host| {
+        ctx.db.hosts().id().find(&host.to_string()).map(|h| h.owner)
+    })
 }
 
 /// The `owner` and `created_by` a created task is stored with: the caller's,
@@ -343,6 +351,7 @@ fn stamp_new_task(ctx: &ReducerContext, row: &Task) -> (String, String) {
 /// binding. A task with no epic is created plain: nobody follows it.
 #[spacetimedb::reducer]
 pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), String> {
+    check_new_task_aim(ctx, &row)?;
     check_task_may_enter_epic(ctx, "task", row.epic_id)?;
     let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
     let (owner, created_by) = stamp_new_task(ctx, &row);

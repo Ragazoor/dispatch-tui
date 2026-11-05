@@ -12,6 +12,29 @@ async fn create_task_generates_sequential_ids_starting_at_one() {
     assert_eq!(rows.tasks().len(), 2);
 }
 
+/// A1: a created task may not name another person's host, whose teardown a
+/// stale delete would then run against a worktree the creator picked.
+#[tokio::test]
+async fn create_task_refuses_a_host_that_belongs_to_another_person() {
+    let (caller, rows) = caller();
+    let caller = caller
+        .with_sender("me")
+        .with_registered_host("host-theirs", "someone-else")
+        .with_registered_host("host-mine", "me");
+    let aimed = |host: &str| bindings::Task {
+        host: host.into(),
+        worktree: "/home/them/proj/.worktrees/1-live".into(),
+        ..blank_task()
+    };
+    assert!(caller.create_task(aimed("host-theirs")).await.is_err());
+    assert!(caller
+        .create_task_signalled(aimed("host-theirs"))
+        .await
+        .is_err());
+    assert!(rows.tasks().is_empty());
+    assert!(caller.create_task(aimed("host-mine")).await.is_ok());
+}
+
 #[tokio::test]
 async fn create_task_pushes_the_row_into_shared_rows() {
     let (caller, rows) = caller();

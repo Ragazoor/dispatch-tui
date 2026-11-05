@@ -473,14 +473,8 @@ impl FeedRunner {
         let notify = self.notify.clone();
         let served = self.served_requests.clone();
         let _handle = tokio::task::spawn(async move {
-            match db.claim_feed_request(row.id).await {
-                Ok(true) => {}
-                Ok(false) => return,
-                Err(err) => {
-                    tracing::warn!(request = row.id.0, "feed refresh: claim not sent: {err:#}");
-                    served.forget(row.id);
-                    return;
-                }
+            if !requests::claim_granted(&served, row.id, db.claim_feed_request(row.id).await) {
+                return;
             }
             let Some(epic) = board_reads.get_epic(epic_id).await else {
                 let reported = db

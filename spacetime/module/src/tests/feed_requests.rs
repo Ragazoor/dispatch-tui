@@ -147,3 +147,23 @@ fn naming_a_window_on_another_persons_host_is_refused_and_clearing_one_is_not() 
     assert!(aimed("theirs", window("")).is_ok());
     assert!(aimed("mine", window("dispatch:x")).is_ok());
 }
+
+#[test]
+fn a_created_task_may_not_name_another_persons_host() {
+    let created = |host: &str| {
+        check_new_task_aim(
+            &Task {
+                host: host.into(),
+                worktree: "/wt".into(),
+                ..blank_task()
+            },
+            "me",
+            owner_of,
+        )
+    };
+    assert!(created("theirs").is_err());
+    assert!(created("mine").is_ok());
+    // A host nobody registered owns no teardown to aim.
+    assert!(created("unknown").is_ok());
+    assert!(created("").is_ok());
+}

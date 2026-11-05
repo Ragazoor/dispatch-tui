@@ -2015,6 +2015,44 @@ fn open_row(id: i64, state: crate::models::FeedRequestState) -> crate::models::F
     }
 }
 
+/// A5: a claim the store did not grant (inside the re-claim grace after a
+/// report that never arrived) is handed back like a claim that never reached
+/// it, so the next tick tries again once the grace has passed.
+#[test]
+fn a_refused_claim_hands_the_request_back() {
+    use requests::claim_granted;
+    let served = requests::ServedRequests::default();
+    let rows = vec![open_row(1, crate::models::FeedRequestState::Running)];
+    assert_eq!(
+        requests::rows_to_serve(rows.clone(), "test-host", "me", &served).len(),
+        1
+    );
+    assert!(!claim_granted(
+        &served,
+        crate::models::FeedRequestId(1),
+        Ok(false)
+    ));
+    assert_eq!(
+        requests::rows_to_serve(rows.clone(), "test-host", "me", &served).len(),
+        1
+    );
+    assert!(!claim_granted(
+        &served,
+        crate::models::FeedRequestId(1),
+        Err(anyhow::anyhow!("no"))
+    ));
+    assert_eq!(
+        requests::rows_to_serve(rows.clone(), "test-host", "me", &served).len(),
+        1
+    );
+    assert!(claim_granted(
+        &served,
+        crate::models::FeedRequestId(1),
+        Ok(true)
+    ));
+    assert!(requests::rows_to_serve(rows, "test-host", "me", &served).is_empty());
+}
+
 /// A row handed out once is not handed out again while it is still open ...
 #[test]
 fn a_served_request_is_not_handed_out_twice() {

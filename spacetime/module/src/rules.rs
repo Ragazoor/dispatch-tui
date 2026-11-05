@@ -206,12 +206,13 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 39;
+pub const RULES_VERSION: i64 = 40;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first
-/// connection (`config.rs: release_claims_of_non_setter_hosts`).
-pub const FEED_SETTER_CLAIMS_RULES_VERSION: i64 = 38;
+/// connection (`config.rs: release_claims_of_non_setter_hosts`). Like
+/// [`WORKSPACES_RULES_VERSION`] it never moves: a RULES_VERSION bump leaves it.
+pub const FEED_SETTER_CLAIMS_RULES_VERSION: i64 = 37;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:
@@ -437,6 +438,27 @@ pub fn check_task_aim(
                 "host {new} belongs to another person, so a task cannot be moved onto it"
             ));
         }
+    }
+    Ok(())
+}
+
+/// What `create_task` and `create_task_signalled` check of a new row: it may
+/// not name a host that belongs to another person.
+///
+/// A feed teardown asks the host named in the row to remove the worktree named
+/// in it, so a creator who could name another person's host would aim it at a
+/// live worktree (`store-split.allium: CreateTaskNeverAimsAnotherHostsTeardown`).
+/// A host nobody registered has no owner and is not judged.
+pub fn check_new_task_aim(
+    row: &Task,
+    caller: &str,
+    owner_of: impl Fn(&str) -> Option<String>,
+) -> Result<(), String> {
+    if !row.host.is_empty() && owner_of(&row.host).is_some_and(|owner| owner != caller) {
+        return Err(format!(
+            "host {} belongs to another person, so a task cannot be created on it",
+            row.host
+        ));
     }
     Ok(())
 }

@@ -275,3 +275,12 @@ fn the_rules_version_is_positive() {
     // 0 is what a module that predates the gate reads as.
     assert!(RULES_VERSION > 0);
 }
+
+/// These two name the version that ADDED a one-time migration. They never move:
+/// a mechanical RULES_VERSION bump must not touch them, or every store below
+/// the new value re-runs the migration.
+#[test]
+fn migration_gate_versions_never_move() {
+    assert_eq!(FEED_SETTER_CLAIMS_RULES_VERSION, 37);
+    assert_eq!(WORKSPACES_RULES_VERSION, 17);
+}
