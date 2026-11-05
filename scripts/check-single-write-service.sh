@@ -11,7 +11,20 @@
 # The count is per `fn` at any indent, so free functions are covered too. A
 # call is a READ when its method name starts with get_/list_/find_/is_/has_/
 # count_/my_/query_/read_ or ends in _exists, or is in READS below. Everything
-# else counts as a write. Limit: a single write inside a loop counts once.
+# else counts as a write.
+#
+# Beyond direct calls (G4): a write inside a `for`/`while`/`loop` body counts
+# twice (it runs once per item); a `self.<helper>(` call adds the helper's own
+# write count, once per call (twice inside a loop), one level deep; and
+# `let store = &self.db;` / `let s = self.db.clone();` make `store`/`s` count as
+# the receiver. Every `fn` header form is recognised (`pub(in path)`, `async`,
+# `const`, `unsafe`).
+#
+# Limits, accepted: only `src/service/` is scanned; loops written as iterator
+# closures (`.for_each(|x| {..})`, `.map`) are not loops here; a loop header
+# wrapped over several lines before its `{` is missed; helpers are followed
+# one level and by name within the same file (`self.x(` only, not `Self::x(`
+# or a call through another field); aliases are `let` bindings of `db` only.
 #
 # Sanctioned exceptions go in scripts/single-write-service.allow, one
 # `path::function  N  reason` per line, where N is the exact number of writes
@@ -31,45 +44,138 @@ hits=$(
         # Test files and inline test modules are not service code.
         case "$f" in */tests.rs | */tests/* | */fixtures.rs) continue ;; esac
         awk -v reads="$READS" '
-            function count_writes(body,    m, n, pre) {
+            # Writes in `body` (a joined, comment-free function body with
+            # @LOOP@ / @ENDLOOP@ markers around loop bodies). A write inside a
+            # loop counts twice: it runs once per item. Calls to `self.<name>(`
+            # are recorded in calls[] with the same weight, for the helper pass.
+            function count_writes(body, recvre,    n, seg, mark, level, w, s, m, pre, t, name) {
                 # Join wrapped receivers: `self\n.db\n.m(` -> `self.db.m(`.
                 gsub(/[ \t]*\.[ \t]*/, ".", body)
                 n = 0
-                while (match(body, /(self\.)?db\.[A-Za-z0-9_]+[ \t]*\(/)) {
-                    pre = (RSTART > 1) ? substr(body, RSTART - 1, 1) : " "
-                    m = substr(body, RSTART, RLENGTH)
-                    body = substr(body, RSTART + RLENGTH)
-                    # `my_db.x(` and `a.db.x(` are not this receiver.
-                    if (pre ~ /[A-Za-z0-9_.]/) continue
-                    sub(/^(self\.)?db\./, "", m)
-                    sub(/[ \t]*\($/, "", m)
-                    if (m ~ /^(get|list|find|is|has|count|my|query|read)_/ || m ~ /_exists$/) continue
-                    if (index(reads, " " m " ") > 0) continue
-                    n++
+                level = 0
+                while (length(body) > 0) {
+                    if (match(body, /@(END)?LOOP@/)) {
+                        seg = substr(body, 1, RSTART - 1)
+                        mark = substr(body, RSTART, RLENGTH)
+                        body = substr(body, RSTART + RLENGTH)
+                    } else {
+                        seg = body
+                        mark = ""
+                        body = ""
+                    }
+                    w = (level > 0) ? 2 : 1
+                    s = seg
+                    while (match(s, recvre)) {
+                        pre = (RSTART > 1) ? substr(s, RSTART - 1, 1) : " "
+                        m = substr(s, RSTART, RLENGTH)
+                        s = substr(s, RSTART + RLENGTH)
+                        # `my_db.x(` and `a.db.x(` are not this receiver.
+                        if (pre ~ /[A-Za-z0-9_.]/) continue
+                        sub(/^[A-Za-z0-9_.]*\./, "", m)
+                        sub(/[ \t]*\($/, "", m)
+                        if (m ~ /^(get|list|find|is|has|count|my|query|read)_/ || m ~ /_exists$/) continue
+                        if (index(reads, " " m " ") > 0) continue
+                        n += w
+                    }
+                    t = seg
+                    while (match(t, /self\.[A-Za-z0-9_]+[ \t]*\(/)) {
+                        pre = (RSTART > 1) ? substr(t, RSTART - 1, 1) : " "
+                        name = substr(t, RSTART + 5, RLENGTH - 5)
+                        t = substr(t, RSTART + RLENGTH)
+                        if (pre ~ /[A-Za-z0-9_.]/) continue
+                        sub(/[ \t]*\($/, "", name)
+                        calls[name] += w
+                    }
+                    if (mark == "@LOOP@") level++
+                    else if (mark == "@ENDLOOP@" && level > 0) level--
                 }
                 return n
             }
-            function flush(    n) {
+            # `let store = &self.db;` and `let s = self.db.clone();` rebind the
+            # receiver: the alias writes are the same writes.
+            function receiver_re(body,    alts, t, a) {
+                alts = "db"
+                t = body
+                gsub(/[ \t]*\.[ \t]*/, ".", t)
+                while (match(t, /let[ \t]+(mut[ \t]+)?[A-Za-z0-9_]+[^=;]*=[ \t]*&?(mut[ \t]+)?(self\.)?db(\.clone\(\))?[ \t]*;/)) {
+                    a = substr(t, RSTART, RLENGTH)
+                    t = substr(t, RSTART + RLENGTH)
+                    sub(/^let[ \t]+(mut[ \t]+)?/, "", a)
+                    sub(/[^A-Za-z0-9_].*/, "", a)
+                    if (a != "") alts = alts "|" a
+                }
+                return "(self[.])?(" alts ")[.][A-Za-z0-9_]+[ \t]*[(]"
+            }
+            function flush(    n, k, hs) {
                 if (fn != "") {
-                    n = count_writes(buf)
-                    if (n > 1) printf "%s::%s %d\n", FILENAME, fn, n
+                    delete calls
+                    n = count_writes(buf, receiver_re(buf))
+                    hs = ""
+                    for (k in calls) hs = hs k ":" calls[k] " "
+                    nfn++
+                    fname[nfn] = fn
+                    fown[nfn] = n
+                    fcalls[nfn] = hs
                 }
                 buf = ""
             }
+            BEGIN {
+                FNHEAD = "^[ \t]*(pub([(][^)]*[)])?[ \t]+)?((const|async|unsafe)[ \t]+)*fn[ \t]+[A-Za-z0-9_]+"
+                LOOPHEAD = "^[ \t]*(.[a-z_]+:[ \t]*)?((for|while)[ \t]|loop[ \t]*[{])"
+            }
             /^#\[cfg\(test\)\]/ { flush(); fn = ""; exit }
-            /^[ \t]*(pub(\([a-z]+\))? )?(async )?fn [A-Za-z0-9_]+/ {
+            $0 ~ FNHEAD {
                 flush()
+                depth_loops = 0
                 s = $0
-                sub(/^[ \t]*(pub(\([a-z]+\))? )?(async )?fn /, "", s)
+                match(s, /^[ \t]*(pub([(][^)]*[)])?[ \t]+)?((const|async|unsafe)[ \t]+)*fn[ \t]+/)
+                s = substr(s, RLENGTH + 1)
                 sub(/[^A-Za-z0-9_].*/, "", s)
                 fn = s
+                nloops = 0
             }
             {
                 line = $0
                 sub(/\/\/.*/, "", line)
-                buf = buf " " line
+                tmp = line
+                opens = gsub(/[{]/, "{", tmp)
+                closes = gsub(/[}]/, "}", tmp)
+                lead = ""
+                pre_marks = ""
+                post_marks = ""
+                if (line ~ LOOPHEAD && opens > 0) {
+                    if (opens - closes > 0) {
+                        loopat[++nloops] = depth
+                        pre_marks = " @LOOP@ "
+                    } else {
+                        lead = " @LOOP@ "
+                        post_marks = " @ENDLOOP@ "
+                    }
+                }
+                depth += opens - closes
+                while (nloops > 0 && depth <= loopat[nloops]) {
+                    post_marks = post_marks " @ENDLOOP@ "
+                    nloops--
+                }
+                # The loop marker goes after the header text, so a header that
+                # itself holds a write is not charged to the body.
+                buf = buf " " lead line pre_marks post_marks
             }
-            END { flush() }
+            END {
+                flush()
+                for (i = 1; i <= nfn; i++) {
+                    total = fown[i]
+                    nh = split(fcalls[i], hs, " ")
+                    for (h = 1; h <= nh; h++) {
+                        split(hs[h], kv, ":")
+                        best = 0
+                        for (j = 1; j <= nfn; j++)
+                            if (j != i && fname[j] == kv[1] && fown[j] > best) best = fown[j]
+                        total += kv[2] * best
+                    }
+                    if (total > 1) printf "%s::%s %d\n", FILENAME, fname[i], total
+                }
+            }
         ' "$f"
     done
 )

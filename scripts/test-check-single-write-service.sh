@@ -109,6 +109,162 @@ expect 0 'impl S {
     }
 }' '' 'only a bare db or self.db receiver counts'
 
+# G4: loops, helpers, rebinding and every `fn` header form. Each probe below is
+# a bug the checker used to miss; mutation-test by reverting the matching part
+# of the checker and watching the case fail.
+LOOPED='impl S {
+    pub async fn bulk(&self) {
+        for id in ids {
+            self.db.set_a(id).await?;
+        }
+    }
+}'
+expect 1 "$LOOPED" '' 'a write inside a for loop counts as many'
+expect 0 "$LOOPED" 'src/service/thing.rs::bulk  2  one batch call per id, each independent' 'a looped write passes when listed with count 2'
+expect 1 'impl S {
+    async fn bulk(&self) {
+        while let Some(id) = next() {
+            self.db.set_a(id).await?;
+        }
+    }
+}' '' 'a write inside a while loop counts as many'
+expect 1 'impl S {
+    async fn bulk(&self) {
+        loop {
+            self.db.set_a(1).await?;
+            break;
+        }
+    }
+}' '' 'a write inside a loop block counts as many'
+expect 1 'impl S {
+    async fn bulk(&self) {
+        for id in ids { self.db.set_a(id).await?; }
+    }
+}' '' 'a one-line loop with a write counts as many'
+expect 0 'impl S {
+    async fn bulk(&self) {
+        for id in ids {
+            let t = self.db.get_task(id).await?;
+        }
+        self.db.set_a(1).await?;
+    }
+}' '' 'reads in a loop plus one write after it pass'
+expect 1 'impl S {
+    async fn bulk(&self) {
+        for id in ids {
+            if id > 1 {
+                self.db.set_a(id).await?;
+            }
+        }
+    }
+}' '' 'a write in a nested block inside a loop counts as many'
+expect 0 'impl S {
+    async fn bulk(&self) {
+        for id in ids {
+            noop(id);
+        }
+        self.db.set_a(1).await?;
+    }
+}' '' 'a write after a loop closes counts once'
+
+HELPER='impl S {
+    async fn put(&self, v: i64) {
+        self.db.set_a(v).await?;
+    }
+    pub async fn twice(&self) {
+        self.put(1).await?;
+        self.put(2).await?;
+    }
+}'
+expect 1 "$HELPER" '' 'a helper that writes, called twice, is flagged'
+expect 0 "$HELPER" 'src/service/thing.rs::twice  2  two independent puts' 'a listed helper-driven double write passes'
+expect 1 'impl S {
+    async fn put(&self, v: i64) {
+        self.db.set_a(v).await?;
+    }
+    pub async fn mixed(&self) {
+        self.db.set_b(1).await?;
+        self.put(2).await?;
+    }
+}' '' 'a direct write plus a writing helper is flagged'
+expect 0 'impl S {
+    async fn put(&self, v: i64) {
+        self.db.set_a(v).await?;
+    }
+    pub async fn once(&self) {
+        self.put(1).await?;
+    }
+}' '' 'one call to a one-write helper passes'
+expect 0 'impl S {
+    async fn look(&self) -> i64 {
+        self.db.get_a().await
+    }
+    pub async fn twice(&self) {
+        self.look().await;
+        self.look().await;
+        self.db.set_a(1).await?;
+    }
+}' '' 'a helper that only reads does not count'
+expect 1 'impl S {
+    async fn put(&self, v: i64) {
+        self.db.set_a(v).await?;
+    }
+    pub async fn bulk(&self) {
+        for v in vs {
+            self.put(v).await?;
+        }
+    }
+}' '' 'a writing helper called in a loop counts as many'
+
+expect 1 'impl S {
+    pub async fn rebound(&self) {
+        let store = &self.db;
+        store.set_a(1).await?;
+        store.set_b(2).await?;
+    }
+}' '' 'a rebound db receiver is followed'
+expect 1 'impl S {
+    pub async fn cloned(&self) {
+        let s = self.db.clone();
+        s.set_a(1).await?;
+        self.db.set_b(2).await?;
+    }
+}' '' 'a cloned db receiver is followed'
+expect 0 'impl S {
+    pub async fn rebound(&self) {
+        let store = &self.db;
+        store.get_a().await?;
+        store.set_b(2).await?;
+    }
+}' '' 'a rebound receiver used for one write passes'
+
+expect 1 'impl S {
+    pub(in crate::service) async fn scoped(&self) {
+        self.db.set_a(1).await?;
+        self.db.set_b(2).await?;
+    }
+}' '' 'a pub(in path) fn header is recognised'
+expect 1 'impl S {
+    pub(super) fn sup(&self) {
+        self.db.set_a(1);
+        self.db.set_b(2);
+    }
+}' '' 'a pub(super) fn header is recognised'
+expect 1 'impl S {
+    pub const unsafe fn weird(&self) {
+        self.db.set_a(1);
+        self.db.set_b(2);
+    }
+}' '' 'const/unsafe qualifiers are recognised'
+expect 0 'impl S {
+    pub(in crate::service) async fn first(&self) {
+        self.db.set_a(1).await?;
+    }
+    pub(in crate::service) async fn second(&self) {
+        self.db.set_b(1).await?;
+    }
+}' '' 'two pub(in path) fns with one write each stay separate'
+
 if [[ "$failures" != 0 ]]; then
     echo "$failures check-single-write-service case(s) failed" >&2
     exit 1

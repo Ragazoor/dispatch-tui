@@ -6,6 +6,15 @@ src/service/people.rs::set_member  3  exclusive match arms: remove OR set role
 src/service/tasks/crud.rs::create_task_inner  2  if/else: signalled OR plain create
 src/service/tasks/crud.rs::record_hook_event  4  exclusive match arms per hook kind
 src/service/tasks/crud.rs::record_subagent_event  3  exclusive match arms per event
-src/service/tasks/session.rs::report_rebase_done  2  one idempotent retry of the same report
+src/service/tasks/session.rs::report_rebase_done  3  one idempotent retry of the same report, or else one failure report (exclusive branches)
 src/service/tasks/session.rs::report_session_done  2  one idempotent retry of the same report
 src/service/managed_feeds.rs::write_managed_feed_settings  4  four independent settings rows, each written only when provided; intervals are validated before any write
+# Added when the checker learned loops and `self.<helper>()` calls (G4). Counts are
+# call sites summed through one level of helpers, so they move when a call is added.
+src/service/learnings.rs::query_learnings  2  one best-effort telemetry write per returned learning, in a loop; a failed one only logs
+src/service/tasks/crud.rs::create_task_signalled  2  delegates to create_task_inner (listed above): exclusive branches
+src/service/tasks/crud.rs::create_task_returning  2  delegates to create_task_inner (listed above): exclusive branches
+src/service/tasks/crud.rs::record_peer_message_sent  2  the sender's stamp, then a best-effort target stamp that only logs on failure; no half-change is observable
+src/service/tasks/dispatch.rs::serve_dispatch_request  9  the claim, then exactly one terminal report on exclusive early-return branches; report_provisioned retries once, idempotently
+src/service/tasks/session.rs::serve_rebase  8  exclusive terminal branches: one failure report, or one done report (itself listed above)
+src/service/tasks/session.rs::serve_teardown  4  a done report or a failure report on exclusive branches; the early-return failure paths are exclusive too
