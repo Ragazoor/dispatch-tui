@@ -360,3 +360,29 @@ fn unbind_key_fails_on_nonzero_exit() {
     let err = unbind_key("space", &mock).unwrap_err();
     assert!(err.to_string().contains("unbind-key failed"), "got: {err}");
 }
+
+#[test]
+fn a_commented_out_focus_events_line_does_not_count_as_set() {
+    assert!(!contains_focus_events("# set -g focus-events on\n"));
+    assert!(!contains_focus_events("  #set-option -g focus-events on\n"));
+    assert!(contains_focus_events("set -g focus-events on\n"));
+    assert!(contains_focus_events("set-option -g focus-events on\n"));
+    assert!(contains_focus_events("  set -g  focus-events  on  \n"));
+    assert!(!contains_focus_events("set -g focus-events off\n"));
+}
+
+#[test]
+fn focus_events_write_appends_after_a_commented_line_and_keeps_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".tmux.conf");
+    std::fs::write(&path, "# set -g focus-events on").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+    write_focus_events_to_tmux_conf_at(&path).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "# set -g focus-events on\nset -g focus-events on\n"
+    );
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o640);
+}

@@ -127,22 +127,22 @@ async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
         MockProcessRunner::ok(), // rename_window
     ])
     .with_windows(&[TUI_WINDOW_NAME.as_str()]);
-    teardown_tmux_for_tui("work", Some(&test_tmux_window("my-shell")), &mock);
+    // H6: the rename targets this board's own pane, not a server-wide lookup
+    // of the name `TUI`.
+    let own = test_pane_id("%7");
+    teardown_tmux_for_tui(
+        "work",
+        Some(&own),
+        Some(&test_tmux_window("my-shell")),
+        &mock,
+    );
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 4);
     assert_eq!(calls[0].1, vec!["unbind-key", "space"]);
     assert_eq!(calls[1].1, vec!["unbind-key", AGENT_TREE_TOGGLE_KEY]);
-    // The rename targets the TUI window by its resolved pane ID — see
-    // `tmux::window_target`. Only `my-shell`, the *new* name, stays a name.
-    assert_eq!(
-        calls[3].1,
-        vec![
-            "rename-window",
-            "-t",
-            mock.pane_id_of(TUI_WINDOW_NAME.as_str()).as_str(),
-            "my-shell",
-        ]
-    );
+    // Only `my-shell`, the *new* name, stays a name; the target is the
+    // board's own pane.
+    assert_eq!(calls[3].1, vec!["rename-window", "-t", "%7", "my-shell"]);
 }
 
 #[tokio::test]
@@ -151,11 +151,21 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
         MockProcessRunner::ok(), // unbind_key (space)
         MockProcessRunner::ok(), // unbind_key (agent-tree toggle)
     ]);
-    teardown_tmux_for_tui("work", None, &mock);
+    teardown_tmux_for_tui("work", Some(&test_pane_id("%7")), None, &mock);
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].1, vec!["unbind-key", "space"]);
     assert_eq!(calls[1].1, vec!["unbind-key", AGENT_TREE_TOGGLE_KEY]);
+}
+
+#[tokio::test]
+async fn teardown_tmux_for_tui_without_own_pane_leaves_the_name_alone() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // unbind_key (space)
+        MockProcessRunner::ok(), // unbind_key (agent-tree toggle)
+    ]);
+    teardown_tmux_for_tui("work", None, Some(&test_tmux_window("my-shell")), &mock);
+    assert_eq!(mock.recorded_calls().len(), 2, "no pane, no rename");
 }
 
 /// One in-memory store, shared by every service the fixture builds.
@@ -303,6 +313,7 @@ pub(super) async fn make_runtime(
         // needs the "trusted" branch overrides this with a real tempfile.
         claude_json_path: std::path::PathBuf::from("/nonexistent-test-path/.claude.json"),
         split_restores: std::sync::Mutex::new(Vec::new()),
+        self_pane: None,
         background_tasks: std::sync::Mutex::new(Vec::new()),
         dispatch_observer: Arc::new(std::sync::Mutex::new(
             crate::dispatch::DispatchRequestObserver::new("test-host"),

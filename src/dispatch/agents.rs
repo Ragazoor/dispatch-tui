@@ -866,26 +866,39 @@ pub fn resume_agent_with_message(
     )
     .context("failed to create tmux window for resume")?;
 
-    tmux::set_window_dispatch_dir(&tmux_window, worktree_path, runner)
-        .context("failed to set tmux window dispatch dir")?;
-    tmux::ensure_split_hook(runner).context("failed to ensure tmux split hook")?;
+    // Past this point a failure leaves a bare shell in `task-N`. The next
+    // resume would find it via `has_window`, "reattach", and mark the task
+    // Running with no claude and the message dropped — so kill it first, as the
+    // fresh-dispatch path does via `rollback_failed_provisioning`.
+    let launched = (|| -> Result<()> {
+        tmux::set_window_dispatch_dir(&tmux_window, worktree_path, runner)
+            .context("failed to set tmux window dispatch dir")?;
+        tmux::ensure_split_hook(runner).context("failed to ensure tmux split hook")?;
 
-    let claude = runner.agent_binaries().claude_quoted();
-    // Below the live-window early return above, deliberately: these flags cost
-    // a config write, and a resume that only reattaches launches nothing.
-    let launch_flags = agent_launch_flags(task_id, agent_name, model, worktree_path, runner);
-    let launch = match message {
-        Some(message) => {
-            let prompt_file = format!("{worktree_path}/.claude-prompt");
-            fs::write(&prompt_file, message)
-                .with_context(|| format!("failed to write {prompt_file}"))?;
-            prompt_launch_command_with(&claude, &launch_flags, " --continue")
+        let claude = runner.agent_binaries().claude_quoted();
+        // Below the live-window early return above, deliberately: these flags cost
+        // a config write, and a resume that only reattaches launches nothing.
+        let launch_flags = agent_launch_flags(task_id, agent_name, model, worktree_path, runner);
+        let launch = match message {
+            Some(message) => {
+                let prompt_file = format!("{worktree_path}/.claude-prompt");
+                fs::write(&prompt_file, message)
+                    .with_context(|| format!("failed to write {prompt_file}"))?;
+                prompt_launch_command_with(&claude, &launch_flags, " --continue")
+            }
+            None => format!("{claude} {} --continue", launch_flags.inline()),
+        };
+        let launch = super::in_agent_scope(launch, runner);
+        tmux::send_keys(&tmux_window, &launch, runner)
+            .context("failed to send resume keys to tmux window")?;
+        Ok(())
+    })();
+    if let Err(e) = launched {
+        if let Err(kill_err) = tmux::kill_window_if_present(&tmux_window, runner) {
+            tracing::warn!(%tmux_window, "could not kill the half-resumed window: {kill_err:#}");
         }
-        None => format!("{claude} {} --continue", launch_flags.inline()),
-    };
-    let launch = super::in_agent_scope(launch, runner);
-    tmux::send_keys(&tmux_window, &launch, runner)
-        .context("failed to send resume keys to tmux window")?;
+        return Err(e);
+    }
 
     spawn_agent_tree_pane(&tmux_window, task_id, Some(worktree_path), runner);
 

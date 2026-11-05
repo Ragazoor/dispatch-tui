@@ -263,10 +263,10 @@ async fn exec_jump_to_tmux_calls_select_window() {
         .with_windows(&["my-window"]),
     );
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await;
-    let mut app = App::new(tasks);
 
-    rt.exec_jump_to_tmux(&mut app, test_tmux_window("my-window"));
+    rt.exec_jump_to_tmux(test_tmux_window("my-window"))
+        .await
+        .unwrap();
 
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
@@ -275,7 +275,6 @@ async fn exec_jump_to_tmux_calls_select_window() {
     assert!(calls[0]
         .1
         .contains(&mock.pane_id_of("my-window").to_string()));
-    assert!(app.error_popup().is_none());
 }
 
 #[tokio::test]
@@ -644,17 +643,25 @@ async fn exec_batch_check_windows_stays_silent_when_tmux_cannot_be_spawned() {
 #[tokio::test]
 async fn exec_jump_to_tmux_failure_shows_error() {
     let db = test_db().await;
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no such window"), // simulate tmux failure
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await;
-    let mut app = App::new(tasks);
 
-    rt.exec_jump_to_tmux(&mut app, test_tmux_window("nonexistent-window"));
+    rt.exec_jump_to_tmux(test_tmux_window("nonexistent-window"))
+        .await
+        .unwrap();
 
-    assert!(app.error_popup().is_some());
+    // H4: reported through the message channel, off the drain thread.
+    let msg = rx.recv().await.unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::System(crate::tui::messages::SystemMessage::Error(e)) if e.contains("Jump failed")
+        ),
+        "got {msg:?}"
+    );
 }
 
 /// Seed one Done task that owns `worktree`, and a runtime whose runner

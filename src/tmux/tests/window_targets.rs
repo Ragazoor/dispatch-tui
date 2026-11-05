@@ -234,3 +234,25 @@ fn refuse_duplicate_window_name_surfaces_a_query_failure() {
         "got: {err}"
     );
 }
+
+/// H3: a wedged tmux server must not park a provisioning or UI thread, so every
+/// tmux call goes through the bounded runner.
+#[test]
+fn every_tmux_call_is_bounded() {
+    let mock = queued(vec![
+        MockProcessRunner::ok_with_stdout(b"1 %1 task-4\n"), // window_target
+        MockProcessRunner::ok_with_stdout(b"task-4\n"),      // list_all_window_names
+        MockProcessRunner::ok_with_stdout(b"1 %1 task-4\n"), // send_keys target
+        MockProcessRunner::ok_with_stdout(b""),              // send_keys -l
+        MockProcessRunner::ok_with_stdout(b""),              // send_keys Enter
+    ]);
+    window_target("task-4", &mock).unwrap();
+    list_all_window_names(&mock).unwrap();
+    send_keys(&test_tmux_window("task-4"), "x", &mock).unwrap();
+    let timeouts = mock.recorded_timeouts();
+    assert_eq!(timeouts.len(), 5);
+    assert!(
+        timeouts.iter().all(|t| *t == Some(SUBPROCESS_TIMEOUT)),
+        "unbounded tmux call: {timeouts:?}"
+    );
+}

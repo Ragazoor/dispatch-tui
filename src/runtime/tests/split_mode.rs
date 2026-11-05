@@ -1007,3 +1007,22 @@ mod swap_fails_after_the_exchange {
         unreversed_settles_on_the_incoming_task(FailingStep::Kill).await;
     }
 }
+
+#[tokio::test]
+async fn enter_split_targets_the_boards_own_pane_not_the_active_one() {
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"%2\n"), // split_window_horizontal only
+    ]));
+    let mut rt = make_runtime(db.clone(), tx, mock.clone()).await;
+    rt.self_pane = Some(test_pane_id("%9"));
+
+    rt.exec_enter_split_mode().await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 1, "no display-message lookup: {calls:?}");
+    assert!(calls[0].1.contains(&"split-window".to_string()));
+    assert!(calls[0].1.contains(&"%9".to_string()));
+}

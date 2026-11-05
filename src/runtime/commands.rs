@@ -238,7 +238,7 @@ async fn dispatch_task(
             vec![]
         }
         JumpToTmux { window } => {
-            rt.exec_jump_to_tmux(app, window);
+            rt.exec_jump_to_tmux(window);
             vec![]
         }
         QuickDispatch { draft, epic_id } => {

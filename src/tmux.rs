@@ -36,7 +36,7 @@ fn check_output(output: Output, context: &str) -> Result<Output> {
 /// Run `tmux` with `args`, returning the raw [`Output`] on success and a
 /// consistent checked-run error (see [`checked_error`]) otherwise.
 fn run_checked(runner: &dyn ProcessRunner, args: &[&str], context: &str) -> Result<Output> {
-    check_output(runner.run("tmux", args)?, context)
+    run_checked_timeout(runner, args, context)
 }
 
 /// Like [`run_checked`], but returns trimmed stdout as a `String` instead of
@@ -46,16 +46,15 @@ fn run_checked_stdout(runner: &dyn ProcessRunner, args: &[&str], context: &str) 
     Ok(stdout_str(&output))
 }
 
-/// Like [`run_checked`], but bounds the subprocess with [`SUBPROCESS_TIMEOUT`]
-/// so a hung tmux server cannot park the calling thread forever.
+/// Run `tmux` with `args` under [`SUBPROCESS_TIMEOUT`], so a hung tmux server
+/// cannot park the calling thread forever (#4202).
 ///
-/// Used by [`new_window`], [`set_window_dispatch_dir`] and
-/// [`ensure_split_hook`] — and so by every one of their callers, including
-/// `provision_worktree`'s `post_add` step and `resume_agent`
-/// (`src/dispatch/agents.rs`) — which is what closes #4202. Every other tmux
-/// call in this module still goes through the unbounded [`run_checked`]; if
-/// one of those turns out to need the same treatment it should get its own
-/// pass rather than folding in here.
+/// Every tmux call in this module goes through here — [`run_checked`] is bounded
+/// by default, and the lookups ([`window_target`], `list_all`) use
+/// `run_with_timeout` directly — so no provisioning, resume or UI thread waits
+/// unbounded on a wedged server. This includes `set_window_awaits_pane`,
+/// `rejoin_pane`, [`new_window`], [`set_window_dispatch_dir`] and
+/// [`ensure_split_hook`].
 fn run_checked_timeout(runner: &dyn ProcessRunner, args: &[&str], context: &str) -> Result<Output> {
     check_output(
         runner.run_with_timeout("tmux", args, SUBPROCESS_TIMEOUT)?,
@@ -191,9 +190,10 @@ pub(crate) fn window_target(window: &str, runner: &dyn ProcessRunner) -> Result<
     // inside or outside tmux, and finds windows living in a session other than
     // the current one.
     let filter = window_filter(window);
-    let output = runner.run(
+    let output = runner.run_with_timeout(
         "tmux",
         &["list-panes", "-a", "-f", &filter, "-F", WINDOW_PANE_FORMAT],
+        SUBPROCESS_TIMEOUT,
     )?;
     let listing = if output.status.success() {
         String::from_utf8_lossy(&output.stdout).into_owned()
@@ -399,7 +399,7 @@ pub fn kill_window_if_present(window: &TmuxWindow, runner: &dyn ProcessRunner) -
 /// like a live window had vanished, bypassing the retry and assume-present
 /// paths ([`has_window_or_assume_present`]).
 fn list_all(args: &[&str], runner: &dyn ProcessRunner) -> Result<Vec<String>> {
-    let output = runner.run("tmux", args)?;
+    let output = runner.run_with_timeout("tmux", args, SUBPROCESS_TIMEOUT)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if is_no_server(&stderr) {
@@ -500,7 +500,7 @@ pub fn pane_pid(pane: &PaneId, runner: &dyn ProcessRunner) -> Option<u32> {
 pub fn session_exists(session: &str, runner: &dyn ProcessRunner) -> bool {
     let target = format!("={session}");
     runner
-        .run("tmux", &["has-session", "-t", &target])
+        .run_with_timeout("tmux", &["has-session", "-t", &target], SUBPROCESS_TIMEOUT)
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
@@ -529,9 +529,10 @@ pub fn pane_id_of_window_in_session(
     runner: &dyn ProcessRunner,
 ) -> Result<Option<PaneId>> {
     let target = format!("={session}");
-    let output = runner.run(
+    let output = runner.run_with_timeout(
         "tmux",
         &["list-panes", "-s", "-t", &target, "-F", WINDOW_PANE_FORMAT],
+        SUBPROCESS_TIMEOUT,
     )?;
     if !output.status.success() {
         return Ok(None);
@@ -552,10 +553,14 @@ pub fn pane_id_of_window_in_session(
 /// (startup.allium's `config.board_window_name`, named as the exception in
 /// dispatch.allium's `TmuxWindowNamesAreUnique`).
 ///
-/// A failed lookup reads as "no duplicate" and the caller proceeds, the same
-/// soft-fail the server-wide version gives: a tmux hiccup must not block a
-/// launch, and the operation itself then fails anyway if the server really is
-/// unreachable.
+/// Errors when `session` already has a window under `name` (other than
+/// `except`). Returns `Ok(true)` when the caller should go on to rename, and
+/// `Ok(false)` when the window already carries the name.
+///
+/// [`pane_id_of_window_in_session`] returns `Err` only when its pane id fails to
+/// parse, so the `Err` arm here is mostly unreachable. It reads as "no
+/// duplicate" and proceeds: a tmux hiccup must not block a launch, and the
+/// operation itself then fails anyway if the server really is unreachable.
 fn refuse_duplicate_window_name_in_session(
     session: &str,
     name: &TmuxWindow,
@@ -869,7 +874,11 @@ pub fn window_dispatch_dir(
 /// Returns `false` if the option is off or if the query fails (e.g. not
 /// running inside tmux).
 pub fn focus_events_enabled(runner: &dyn ProcessRunner) -> bool {
-    let Ok(output) = runner.run("tmux", &["show-options", "-gv", "focus-events"]) else {
+    let Ok(output) = runner.run_with_timeout(
+        "tmux",
+        &["show-options", "-gv", "focus-events"],
+        SUBPROCESS_TIMEOUT,
+    ) else {
         return false;
     };
     if !output.status.success() {
@@ -916,8 +925,18 @@ pub(crate) fn tmux_conf_path() -> Result<std::path::PathBuf> {
 const FOCUS_EVENTS_SETTING: &str = "focus-events on";
 
 /// Whether this `~/.tmux.conf` content already carries the focus-events line.
+///
+/// A commented-out line does not count: only an uncommented
+/// `set[-option] -g focus-events on` does.
 fn contains_focus_events(content: &str) -> bool {
-    content.contains(FOCUS_EVENTS_SETTING)
+    content.lines().any(|line| {
+        let mut words = line.split_whitespace();
+        matches!(words.next(), Some("set" | "set-option"))
+            && words.next() == Some("-g")
+            && words.next() == Some("focus-events")
+            && words.next() == Some("on")
+            && words.next().is_none()
+    })
 }
 
 /// Whether `~/.tmux.conf` already carries the focus-events line.
@@ -943,7 +962,16 @@ pub(crate) fn write_focus_events_to_tmux_conf_at(path: &std::path::Path) -> Resu
     } else {
         format!("\n{line}")
     };
-    std::fs::write(path, existing + &addition).context("failed to write .tmux.conf")?;
+    let content = existing + &addition;
+    crate::atomic_write::write_with(
+        path,
+        crate::atomic_write::Mode::KeepOr { default: 0o644 },
+        |w| {
+            w.write_all(content.as_bytes())?;
+            Ok(())
+        },
+    )
+    .context("failed to write .tmux.conf")?;
     Ok(())
 }
 
@@ -1172,8 +1200,9 @@ pub fn split_window_horizontal_running(
 ///   up height while the pane is open — see `SplitAgentTreeDiffPane` in
 ///   docs/specs/agent-tree.allium.
 /// * `-c` is passed explicitly rather than relying on [`ensure_split_hook`]'s
-///   `@dispatch_dir` `cd`: that hook *types* `cd <dir>` into the new pane, which
-///   works for a shell and would land in the diff renderer's own input here.
+///   `@dispatch_dir` handling: that hook restarts the new pane with
+///   `respawn-pane -k -c <dir>`, which would replace the diff renderer this
+///   call just started.
 /// * Focus stays put (`-d`) so the user can keep browsing the tree; reaching
 ///   the diff to scroll it is tmux's own pane navigation.
 pub fn split_window_below_running(

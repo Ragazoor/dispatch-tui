@@ -160,16 +160,22 @@ fn setup_tmux_for_tui(session: &str, self_pane: Option<&PaneId>, runner: &dyn Pr
 /// Tear down tmux TUI state: unbind the keys and restore the original window name.
 fn teardown_tmux_for_tui(
     session: &str,
+    self_pane: Option<&PaneId>,
     original_name: Option<&TmuxWindow>,
     runner: &dyn ProcessRunner,
 ) {
     let _ = tmux::unbind_key(JUMP_BACK_KEY, runner);
     let _ = tmux::unbind_key(AGENT_TREE_TOGGLE_KEY, runner);
     if let Some(name) = original_name {
-        // Session-scoped for the same reason the outbound rename is: resolving
-        // `TUI` server-wide could restore the operator's old window name onto a
-        // board in a session this process does not own.
-        let _ = tmux::rename_window_in_session(session, TUI_WINDOW_NAME.as_str(), name, runner);
+        // Targets this board's own pane, like the outbound rename. A lookup of
+        // the name `TUI` is server-wide: with two boards in two sessions it
+        // fails on the duplicate, or renames the other board's window. Without
+        // `$TMUX_PANE` there is no safe target, so the name is left alone.
+        let Some(pane) = self_pane else {
+            tracing::warn!("no $TMUX_PANE: not restoring this window's name");
+            return;
+        };
+        let _ = tmux::rename_window_in_session(session, pane.as_str(), name, runner);
     }
 }
 
@@ -476,6 +482,7 @@ pub async fn run_tui(
     // Tear down tmux keybinding and restore the original window name.
     teardown_tmux_for_tui(
         &tmux_wiring.session,
+        tmux_wiring.self_pane.as_ref(),
         tmux_wiring.original_window_name.as_ref(),
         &*tmux_runner,
     );
@@ -508,6 +515,7 @@ fn leave_tui_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> 
 /// What `run_tui` needs back from the tmux setup to undo it on exit.
 struct TmuxWiring {
     session: String,
+    self_pane: Option<PaneId>,
     original_window_name: Option<TmuxWindow>,
 }
 
@@ -532,6 +540,7 @@ fn wire_tmux_for_tui(server: &str, port: u16, tmux_runner: &dyn ProcessRunner) -
     publish_board_port(&session, port, tmux_runner);
     TmuxWiring {
         session,
+        self_pane,
         original_window_name,
     }
 }
@@ -724,6 +733,11 @@ struct TuiRuntime {
     /// pane, and keeping only the newest would quit out from under the older
     /// one.
     split_restores: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// This process's own pane (`$TMUX_PANE`), read once at the entry point.
+    /// Split mode targets it rather than the session's active pane, which is
+    /// another window's whenever the board is in the background. `None` outside
+    /// tmux; split entry then falls back to the active pane.
+    self_pane: Option<PaneId>,
     /// Detached tasks that serve this runtime (the row pump, the shared-store
     /// connection loop). Aborted when the runtime drops, so a dropped runtime
     /// cannot keep reconnecting behind a later launch on the same address.
@@ -1006,6 +1020,7 @@ impl TuiRuntime {
             budget_snapshot_path: crate::budget_snapshot_path(),
             claude_json_path: inputs.paths.claude_json_path.clone(),
             split_restores: std::sync::Mutex::new(Vec::new()),
+            self_pane: tmux::self_pane_id(),
             background_tasks: std::sync::Mutex::new(Vec::new()),
             dispatch_observer: Arc::new(std::sync::Mutex::new(
                 crate::dispatch::DispatchRequestObserver::new(host_id),

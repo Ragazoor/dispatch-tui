@@ -152,7 +152,18 @@ async fn dispatch_task_jump_to_tmux_selects_the_window() {
     }))
     .await;
 
-    // Synchronous, not spawned: the call is already recorded on return.
+    // Spawned off the drain thread (H4): wait for the blocking task to finish.
+    let _ = tokio::time::timeout(TEST_TIMEOUT, async {
+        while !h
+            .mock
+            .flattened_calls()
+            .iter()
+            .any(|c| c.contains("select-window"))
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
     let calls = h.mock.flattened_calls();
     assert!(
         calls.iter().any(|c| c.contains("select-window")),
@@ -173,8 +184,13 @@ async fn dispatch_task_jump_to_tmux_surfaces_a_failed_jump() {
     }))
     .await;
 
-    let err = h.app.error_popup().unwrap_or_default();
-    assert!(err.contains("Jump failed"), "got: {err:?}");
+    // The failure arrives as a message, not an inline mutation (H4).
+    match h.next_msg().await {
+        Message::System(crate::tui::messages::SystemMessage::Error(err)) => {
+            assert!(err.contains("Jump failed"), "got: {err:?}")
+        }
+        other => panic!("expected a Jump failed error, got {other:?}"),
+    }
 }
 
 #[tokio::test]

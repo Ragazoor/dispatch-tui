@@ -98,6 +98,37 @@ fn resume_agent_with_message_continues_and_passes_the_message_as_the_prompt() {
     assert_eq!(written, "rebase on main");
 }
 
+/// H2: a resume that fails after creating the window must not leave a bare
+/// shell behind — the next resume would find it via `has_window`, "reattach"
+/// and mark the task Running with no claude in it.
+#[test]
+fn resume_agent_kills_the_window_it_created_when_a_later_step_fails() {
+    let (_dir, worktree_path) = make_test_repo();
+    let script = DispatchScript::resume().fails_at(Step::SendKeysLiteral);
+    let mut responses = script.responses();
+    // kill_window_if_present: has_window sees the window, then kill-window.
+    responses.push((None, MockProcessRunner::ok_with_stdout(b"task-42\n")));
+    responses.push((None, MockProcessRunner::ok()));
+    let mock = MockProcessRunner::new_with_delays(responses);
+
+    let result = resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    );
+
+    assert!(result.is_err());
+    let calls = mock.recorded_calls();
+    let last = calls.last().unwrap();
+    assert_eq!(last.0, "tmux");
+    assert!(
+        last.1.contains(&"kill-window".to_string()),
+        "the half-provisioned window must be killed, got: {calls:?}"
+    );
+}
+
 #[test]
 fn resume_agent_without_message_writes_no_prompt_file() {
     let (_dir, worktree_path) = make_test_repo();

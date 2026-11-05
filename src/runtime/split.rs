@@ -27,12 +27,19 @@ impl TuiRuntime {
         std::mem::take(&mut *slot)
     }
 
-    pub(super) fn exec_jump_to_tmux(&self, app: &mut App, window: TmuxWindow) {
-        if let Err(e) = tmux::select_window(&window, &*self.runner) {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                format!("Jump failed: {e:#}"),
-            )));
-        }
+    /// Select `window`. Off the command-drain thread: a wedged tmux server
+    /// would otherwise freeze input and rendering with it. A failure comes back
+    /// as an error message.
+    pub(super) fn exec_jump_to_tmux(&self, window: TmuxWindow) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        let runner = Arc::clone(&self.runner);
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = tmux::select_window(&window, &*runner) {
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Jump failed: {e:#}"),
+                )));
+            }
+        })
     }
 
     /// Open a split pane.
@@ -46,8 +53,9 @@ impl TuiRuntime {
     pub(super) fn exec_enter_split_mode(&self) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
+        let self_pane = self.self_pane.clone();
         tokio::task::spawn_blocking(move || {
-            let msg = enter_split_outcome(&*runner);
+            let msg = enter_split_outcome(&*runner, self_pane.as_ref());
             let _ = tx.send(Message::Split(msg));
         })
     }
@@ -60,8 +68,9 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
         let window = window.clone();
+        let self_pane = self.self_pane.clone();
         tokio::task::spawn_blocking(move || {
-            let msg = enter_split_with_task_outcome(&*runner, task_id, &window);
+            let msg = enter_split_with_task_outcome(&*runner, self_pane.as_ref(), task_id, &window);
             let _ = tx.send(Message::Split(msg));
         })
     }
@@ -191,10 +200,19 @@ impl TuiRuntime {
     }
 }
 
+/// The pane to split: the board's own (`$TMUX_PANE`, read at the entry point),
+/// falling back to the session's active pane only when it is unknown.
+fn board_pane(self_pane: Option<&PaneId>, runner: &dyn ProcessRunner) -> anyhow::Result<PaneId> {
+    match self_pane {
+        Some(pane) => Ok(pane.clone()),
+        None => tmux::current_pane_id(runner),
+    }
+}
+
 /// The one message an entry into split mode settles with: the pane's id, or why
 /// there is none (`SplitPaneEntrySettles`).
-fn enter_split_outcome(runner: &dyn ProcessRunner) -> SplitMessage {
-    let dispatch_pane = match tmux::current_pane_id(runner) {
+fn enter_split_outcome(runner: &dyn ProcessRunner, self_pane: Option<&PaneId>) -> SplitMessage {
+    let dispatch_pane = match board_pane(self_pane, runner) {
         Ok(id) => id,
         Err(_) => {
             return SplitMessage::EnterFailed {
@@ -216,10 +234,11 @@ fn enter_split_outcome(runner: &dyn ProcessRunner) -> SplitMessage {
 /// [`enter_split_outcome`] for an entry that pins `task_id`'s window.
 fn enter_split_with_task_outcome(
     runner: &dyn ProcessRunner,
+    self_pane: Option<&PaneId>,
     task_id: TaskId,
     window: &TmuxWindow,
 ) -> SplitMessage {
-    let dispatch_pane = match tmux::current_pane_id(runner) {
+    let dispatch_pane = match board_pane(self_pane, runner) {
         Ok(id) => id,
         Err(_) => {
             return SplitMessage::EnterFailed {
