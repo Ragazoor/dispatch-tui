@@ -28,6 +28,12 @@ fn repo_file(rel: &str) -> String {
 /// order. Deliberately textual: it reads the hook the same way a human does, so
 /// a script added to the hook in any invocation style is picked up.
 fn gate_scripts(body: &str) -> Vec<String> {
+    // Comment lines describe the gates; only a line that runs one counts.
+    let body: String = body
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut found: Vec<String> = Vec::new();
     for (idx, _) in body.match_indices("scripts/") {
         let token: String = body[idx..]
