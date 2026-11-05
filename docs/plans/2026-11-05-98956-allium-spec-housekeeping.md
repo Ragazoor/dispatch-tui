@@ -118,37 +118,37 @@ the agent asks the user before changing that behaviour.
 
 ## Work packages
 
-Wave 0 runs first, alone. Wave 1 packages touch mostly their own files and can
+Epic: #69688. Wave 0 runs first, alone. Wave 1 packages touch mostly their own files and can
 run in parallel after wave 0; where a remedy edits another cluster's file, the
 package says so — rebase on `main` before wrap-up. The gate runs last.
 
-| # | Package | Files | Findings (appendix) |
-|---|---|---|---|
-| 0a | Foundation: shared actors, lifecycle events, board clock, core self-alias errors | core, startup (+ the duplicate `actor Operator`s in cli, sync, seed; `McpAgent` in keybindings) | Decisions 1–3; A core 1; E startup X1/X2 |
-| 0b | File upstream issue for the checker gaps on juxt/allium-tools | none | "Checker facts" |
-| 1 | core model clean-up | core (+ agent-health:621, learnings, board-layout, mcp-task-tools, store-split for shared derivations) | A core 2–16 |
-| 2 | storage, settings, host | storage, settings, host (+ store-split settings rules, startup trim guard) | A storage/settings/host |
-| 3 | agent-tree | agent-tree | B agent-tree |
-| 4 | split-pane | split-pane | B split-pane |
-| 5 | agents + agent-health | agents, agent-health (+ store-split ReleaseClaimOfFailedRequest) | B agents/agent-health, X5 |
-| 6 | feeds: mechanical, entry points, stale prose | feeds (+ cli provides, startup artefact emission, store-split patch_epic) | C feeds M, E3–E7, D1–D3, D6, B1–B7 |
-| 7 | feeds: rewire the feed-cycle chain | feeds | C feeds E1, E2, Q1–Q4, D4, D5 |
-| 8 | feed-scripts + schedules | feed-scripts, schedules (+ store-split, pr-workflow emissions) | C feed-scripts, schedules |
-| 9 | pr-workflow | pr-workflow (+ `src/dispatch/mod.rs` comment) | C pr-workflow |
-| 10 | store-split: collapse the migration log, re-home rules | store-split (+ domain specs if re-homed, CLAUDE.md if renamed) | D store-split history + question 1 |
-| 11 | store-split: module reducer boundary and prune drift | store-split (+ emitters in dispatch, pr-workflow, epics, mcp-task-tools, feeds) | D store-split E1–E5, drift, mechanical |
-| 12 | sync | sync (+ seed emission) | D sync |
-| 13 | spacetime-seed, -snapshot, -memory-store | the three files | D seed/snapshot/memory-store |
-| 14 | startup + cli | startup, cli (+ seed snapshot outcome triggers) | E startup, cli |
-| 15 | dispatch + dispatch-prompt | dispatch, dispatch-prompt | E dispatch, dispatch-prompt |
-| 16 | keep-awake, onboarding-guide, observability | the three files (+ keybindings `KeyActionRun` seam) | E keep-awake, onboarding-guide, observability |
-| 17 | tasks | tasks | F tasks |
-| 18 | epics + work-packages | epics, work-packages | F epics, work-packages |
-| 19 | mcp-task-tools + learnings | mcp-task-tools, learnings (+ possible code bug in `src/dispatch/agents.rs`) | F mcp-task-tools, learnings |
-| 20 | workspaces + admin-surfaces | workspaces, admin-surfaces (+ epics/work-packages MCP params) | G workspaces, admin-surfaces |
-| 21 | board-layout restructure + board-visuals | board-layout, board-visuals (+ tasks, work-packages consumers) | G board-layout, board-visuals |
-| 22 | keybindings | keybindings (+ observability listener) | G keybindings |
-| 23 | Gate: `allium check` in `scripts/gates.sh` with a warning baseline | scripts, docs/testing.md | Decision 6 |
+| # | Task | Package | Files | Findings (appendix) |
+|---|---|---|---|---|
+| 0a | #98958 | Foundation: shared actors, lifecycle events, board clock, core self-alias errors | core, startup (+ the duplicate `actor Operator`s in cli, sync, seed; `McpAgent` in keybindings) | Decisions 1–3; A core 1; E startup X1/X2 |
+| 0b | #98959 | File upstream issue for the checker gaps on juxt/allium-tools | none | "Checker facts" |
+| 1 | #98960 | core model clean-up | core (+ agent-health:621, learnings, board-layout, mcp-task-tools, store-split for shared derivations) | A core 2–16 |
+| 2 | #98961 | storage, settings, host | storage, settings, host (+ store-split settings rules, startup trim guard) | A storage/settings/host |
+| 3 | #98962 | agent-tree | agent-tree | B agent-tree |
+| 4 | #98963 | split-pane | split-pane | B split-pane |
+| 5 | #98964 | agents + agent-health | agents, agent-health (+ store-split ReleaseClaimOfFailedRequest) | B agents/agent-health, X5 |
+| 6 | #98965 | feeds: mechanical, entry points, stale prose | feeds (+ cli provides, startup artefact emission, store-split patch_epic) | C feeds M, E3–E7, D1–D3, D6, B1–B7 |
+| 7 | #98966 | feeds: rewire the feed-cycle chain | feeds | C feeds E1, E2, Q1–Q4, D4, D5 |
+| 8 | #98967 | feed-scripts + schedules | feed-scripts, schedules (+ store-split, pr-workflow emissions) | C feed-scripts, schedules |
+| 9 | #98968 | pr-workflow | pr-workflow (+ `src/dispatch/mod.rs` comment) | C pr-workflow |
+| 10 | #98969 | store-split: collapse the migration log, re-home rules | store-split (+ domain specs if re-homed, CLAUDE.md if renamed) | D store-split history + question 1 |
+| 11 | #98970 | store-split: module reducer boundary and prune drift | store-split (+ emitters in dispatch, pr-workflow, epics, mcp-task-tools, feeds) | D store-split E1–E5, drift, mechanical |
+| 12 | #98971 | sync | sync (+ seed emission) | D sync |
+| 13 | #98972 | spacetime-seed, -snapshot, -memory-store | the three files | D seed/snapshot/memory-store |
+| 14 | #98973 | startup + cli | startup, cli (+ seed snapshot outcome triggers) | E startup, cli |
+| 15 | #98974 | dispatch + dispatch-prompt | dispatch, dispatch-prompt | E dispatch, dispatch-prompt |
+| 16 | #98975 | keep-awake, onboarding-guide, observability | the three files (+ startup receives the StatusLineDecorator path guarantees) | E keep-awake, onboarding-guide, observability |
+| 17 | #98976 | tasks | tasks | F tasks |
+| 18 | #98977 | epics + work-packages | epics, work-packages | F epics, work-packages |
+| 19 | #98978 | mcp-task-tools + learnings | mcp-task-tools, learnings (+ possible code bug in `src/dispatch/agents.rs`) | F mcp-task-tools, learnings |
+| 20 | #98979 | workspaces + admin-surfaces | workspaces, admin-surfaces (+ epics/work-packages MCP params) | G workspaces, admin-surfaces |
+| 21 | #98980 | board-layout restructure + board-visuals | board-layout, board-visuals (+ tasks, work-packages consumers) | G board-layout, board-visuals |
+| 22 | #98981 | keybindings | keybindings (+ observability listener) | G keybindings |
+| 23 | #98982 | Gate: `allium check` in `scripts/gates.sh` with a warning baseline | scripts, docs/testing.md | Decision 6 |
 
 Shared remedies that cross packages, so do not duplicate them:
 
