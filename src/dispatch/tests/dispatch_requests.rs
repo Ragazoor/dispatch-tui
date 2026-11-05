@@ -187,3 +187,54 @@ fn a_passed_deadline_starts_no_scope_and_no_sccache_server() {
     runner.start_sccache_server();
     assert_eq!(mock.sccache_server_starts(), 1, "no second start past it");
 }
+
+#[test]
+fn the_first_scope_probe_is_skipped_when_it_cannot_fit_before_the_deadline() {
+    use crate::clock::FixedClock;
+    use crate::dispatch::DeadlineRunner;
+    use crate::process::{AgentScope, ProcessRunner};
+    use std::sync::Arc;
+
+    /// Inert runner whose scope is not decided yet, so asking would probe.
+    struct Undecided(Arc<crate::process::MockProcessRunner>);
+    impl ProcessRunner for Undecided {
+        fn run(&self, p: &str, a: &[&str]) -> anyhow::Result<std::process::Output> {
+            self.0.run(p, a)
+        }
+        fn agent_scope(&self) -> Option<AgentScope> {
+            Some(AgentScope::new("dispatch-agents.slice"))
+        }
+        fn agent_scope_cached(&self) -> Option<Option<AgentScope>> {
+            None
+        }
+        fn start_sccache_server_within(&self, limit: std::time::Duration) {
+            self.0.start_sccache_server_within(limit);
+        }
+    }
+
+    let start = Utc.with_ymd_and_hms(2026, 11, 3, 12, 0, 0).unwrap();
+    let mock = Arc::new(crate::process::MockProcessRunner::new(vec![]));
+    let short = DeadlineRunner::new(
+        Arc::new(Undecided(mock.clone())),
+        Arc::new(FixedClock::new(start)),
+        start + chrono::Duration::seconds(12),
+    );
+    assert_eq!(
+        short.agent_scope(),
+        None,
+        "12 s left: no probe that can run 30 s"
+    );
+    short.start_sccache_server();
+    assert_eq!(
+        mock.sccache_start_limit(),
+        Some(std::time::Duration::from_secs(12)),
+        "the sccache start is bounded by the time left"
+    );
+
+    let long = DeadlineRunner::new(
+        Arc::new(Undecided(mock)),
+        Arc::new(FixedClock::new(start)),
+        start + chrono::Duration::seconds(60),
+    );
+    assert!(long.agent_scope().is_some(), "60 s left: the probe fits");
+}

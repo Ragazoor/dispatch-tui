@@ -588,7 +588,13 @@ fn mock_timeouts_stay_aligned_across_an_out_of_band_window_lookup() {
 #[test]
 fn non_interactive_env_sets_no_ssh_command_when_the_caller_has_none() {
     let env = non_interactive_env(None);
-    assert_eq!(env, vec![("GIT_TERMINAL_PROMPT", "0".to_string())]);
+    assert_eq!(
+        env,
+        vec![
+            ("GIT_TERMINAL_PROMPT", "0".to_string()),
+            ("SSH_ASKPASS_REQUIRE", "never".to_string())
+        ]
+    );
 }
 
 #[test]
@@ -600,7 +606,7 @@ fn non_interactive_env_appends_batch_mode_to_the_callers_ssh_command() {
 
 #[test]
 fn non_interactive_env_ignores_an_empty_ssh_command() {
-    assert_eq!(non_interactive_env(Some("  ")).len(), 1);
+    assert_eq!(non_interactive_env(Some("  ")).len(), 2);
 }
 
 #[test]

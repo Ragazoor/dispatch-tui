@@ -16,6 +16,10 @@ use super::ProcessRunner;
 /// local service manager answers in milliseconds.
 const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The longest `prepare_agent_scope` can run: the probe, the cap read and the
+/// cap write.
+pub const PREPARE_SCOPE_WORST_CASE: Duration = Duration::from_secs(30);
+
 /// `dispatch.allium: config.agent_slice`.
 pub const AGENT_SLICE: &str = "dispatch-agents.slice";
 

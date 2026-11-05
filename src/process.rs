@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 mod agent_scope;
-pub use agent_scope::{prepare_agent_scope, AgentScope, AGENT_SLICE};
+pub use agent_scope::{prepare_agent_scope, AgentScope, AGENT_SLICE, PREPARE_SCOPE_WORST_CASE};
 
 /// Canonical timeout for long-running subprocesses (git fetch, worktree add).
 /// A dispatch's provisioning is bounded tighter still, by its request row's
@@ -193,12 +193,17 @@ pub(crate) fn kill_process_group(pgid: u32, signal: &str) {
 }
 
 /// The environment every non-interactive child gets, shared by [`run_bounded`]
-/// and the feed runner. `GIT_TERMINAL_PROMPT=0` always. `GIT_SSH_COMMAND` is set
+/// and the feed runner. `GIT_TERMINAL_PROMPT=0` and `SSH_ASKPASS_REQUIRE=never` always. `GIT_SSH_COMMAND` is set
 /// only when the caller already set one, with `BatchMode=yes` appended: git
 /// ranks it above `core.sshCommand`, so inventing one would override the user's
 /// ssh config. Without one, [`detach_from_terminal`] stops ssh prompting.
 pub(crate) fn non_interactive_env(existing_ssh: Option<&str>) -> Vec<(&'static str, String)> {
-    let mut env = vec![("GIT_TERMINAL_PROMPT", "0".to_string())];
+    // Without a tty ssh falls back to a GUI askpass when a display is set;
+    // `never` stops that dialog. Child-only: the user's ssh config is untouched.
+    let mut env = vec![
+        ("GIT_TERMINAL_PROMPT", "0".to_string()),
+        ("SSH_ASKPASS_REQUIRE", "never".to_string()),
+    ];
     if let Some(command) = existing_ssh.map(str::trim).filter(|c| !c.is_empty()) {
         env.push(("GIT_SSH_COMMAND", format!("{command} -o BatchMode=yes")));
     }
@@ -487,6 +492,19 @@ pub trait ProcessRunner: Send + Sync {
     /// in docs/specs/dispatch.allium. Best-effort and inert by default, for the
     /// same reason as [`Self::agent_scope`].
     fn start_sccache_server(&self) {}
+
+    /// [`Self::start_sccache_server`], waiting at most `limit` (and never more
+    /// than the runner's own cap). Inert by default.
+    fn start_sccache_server_within(&self, _limit: Duration) {
+        self.start_sccache_server();
+    }
+
+    /// The scope answer already decided, if any, without probing: `None` means
+    /// the first [`Self::agent_scope`] call would still have to ask systemd.
+    /// A runner with no probe has always decided.
+    fn agent_scope_cached(&self) -> Option<Option<AgentScope>> {
+        Some(self.agent_scope())
+    }
 }
 
 /// Whether an executable named `sccache` exists in some `PATH` entry — the
@@ -599,11 +617,20 @@ impl ProcessRunner for RealProcessRunner {
         // subprocesses, and the answer does not change while the board runs.
         // A static, not a field: callers build `RealProcessRunner::default()`
         // freely, and each would otherwise ask again.
-        static SCOPE: std::sync::OnceLock<Option<AgentScope>> = std::sync::OnceLock::new();
-        SCOPE.get_or_init(|| prepare_agent_scope(self)).clone()
+        AGENT_SCOPE_DECIDED
+            .get_or_init(|| prepare_agent_scope(self))
+            .clone()
+    }
+
+    fn agent_scope_cached(&self) -> Option<Option<AgentScope>> {
+        AGENT_SCOPE_DECIDED.get().cloned()
     }
 
     fn start_sccache_server(&self) {
+        self.start_sccache_server_within(SCCACHE_START_TIMEOUT);
+    }
+
+    fn start_sccache_server_within(&self, limit: Duration) {
         // Spawned directly rather than through `run_bounded`: the server it
         // starts outlives this call, and `run_bounded` drains the child's pipes
         // to EOF, which an inheriting daemon would hold open until the timeout.
@@ -615,7 +642,7 @@ impl ProcessRunner for RealProcessRunner {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
-            .and_then(|child| wait_bounded(child, SCCACHE_START_TIMEOUT));
+            .and_then(|child| wait_bounded(child, limit.min(SCCACHE_START_TIMEOUT)));
         match status {
             Ok(s) if s.success() => tracing::info!("started the sccache server"),
             // sccache exits non-zero with "Address in use" when a server is
@@ -627,6 +654,9 @@ impl ProcessRunner for RealProcessRunner {
         }
     }
 }
+
+/// The board's scope answer, decided by the first launch that asks.
+static AGENT_SCOPE_DECIDED: std::sync::OnceLock<Option<AgentScope>> = std::sync::OnceLock::new();
 
 /// How long `sccache --start-server` may take. It forks the server and
 /// returns, so a call that outlasts this is stuck, and the launch goes on
@@ -725,6 +755,7 @@ pub struct MockProcessRunner {
     agent_scope: Option<AgentScope>,
     /// How many times [`ProcessRunner::start_sccache_server`] was called.
     sccache_server_starts: std::sync::atomic::AtomicUsize,
+    sccache_start_limit: Mutex<Option<Duration>>,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -752,6 +783,7 @@ impl MockProcessRunner {
             cores: 8,
             agent_scope: None,
             sccache_server_starts: std::sync::atomic::AtomicUsize::new(0),
+            sccache_start_limit: Mutex::new(None),
         }
     }
 
@@ -780,6 +812,14 @@ impl MockProcessRunner {
     }
 
     /// How many times a launch asked this runner to start the sccache server.
+    /// The `limit` of the last `start_sccache_server_within` call.
+    pub fn sccache_start_limit(&self) -> Option<Duration> {
+        *self
+            .sccache_start_limit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn sccache_server_starts(&self) -> usize {
         self.sccache_server_starts
             .load(std::sync::atomic::Ordering::SeqCst)
@@ -1068,6 +1108,14 @@ impl ProcessRunner for MockProcessRunner {
     fn start_sccache_server(&self) {
         self.sccache_server_starts
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn start_sccache_server_within(&self, limit: Duration) {
+        *self
+            .sccache_start_limit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(limit);
+        self.start_sccache_server();
     }
 }
 

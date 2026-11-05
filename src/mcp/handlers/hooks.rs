@@ -130,7 +130,7 @@ pub async fn handle_pane_view(
                 // Root first, the epic itself left off; an ancestor the board
                 // does not hold is skipped (agent-tree.allium:
                 // AgentListGroupsByEpic).
-                ancestors: crate::models::epics::epic_path(id, &epics)
+                ancestors: crate::models::epics::epic_path_with(id, &by_id)
                     .into_iter()
                     .filter(|&a| a != id)
                     .filter_map(|a| by_id.get(&a))

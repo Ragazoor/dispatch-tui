@@ -18,7 +18,7 @@ pub(super) fn default_build_jobs(cores: usize) -> usize {
 }
 
 /// Whether cargo config `text` sets `build.jobs`, as `[build]` with `jobs`, or
-/// as the dotted `build.jobs` key. A line scan, not a TOML parse: the only
+/// as the dotted `build.jobs` key. A line scan, not a TOML parse (also the inline `build = { jobs = 2 }`): the only
 /// question is whether the key is there, and a miss costs one extra variable.
 pub(super) fn config_sets_build_jobs(text: &str) -> bool {
     let mut in_build = false;
@@ -28,15 +28,34 @@ pub(super) fn config_sets_build_jobs(text: &str) -> bool {
             in_build = header.trim_end_matches(']').trim() == "build";
             continue;
         }
-        let Some((key, _)) = line.split_once('=') else {
+        let Some((key, value)) = line.split_once('=') else {
             continue;
         };
         let key = key.trim();
+        if key == "build" && inline_table_sets_jobs(value) {
+            return true;
+        }
         if (in_build && key == "jobs") || key.replace(' ', "") == "build.jobs" {
             return true;
         }
     }
     false
+}
+
+/// Whether the inline table `value` of a `build = { ... }` key has a `jobs`
+/// key. The workspace has no TOML parser, so this scans the braces.
+fn inline_table_sets_jobs(value: &str) -> bool {
+    let Some(inner) = value
+        .trim()
+        .strip_prefix('{')
+        .and_then(|v| v.strip_suffix('}'))
+    else {
+        return false;
+    };
+    inner.split(',').any(|pair| {
+        pair.split_once('=')
+            .is_some_and(|(k, _)| k.trim() == "jobs")
+    })
 }
 
 /// Whether a cargo config file under `dir/.cargo/`, or in any parent of `dir`,
@@ -77,6 +96,15 @@ mod tests {
     #[test]
     fn a_dotted_key_counts() {
         assert!(config_sets_build_jobs("build.jobs = 2\n"));
+    }
+
+    #[test]
+    fn an_inline_build_table_counts() {
+        assert!(config_sets_build_jobs("build = { jobs = 2 }\n"));
+        assert!(config_sets_build_jobs(
+            "build = { rustflags = [], jobs = 2 }\n"
+        ));
+        assert!(!config_sets_build_jobs("build = { rustflags = [] }\n"));
     }
 
     #[test]

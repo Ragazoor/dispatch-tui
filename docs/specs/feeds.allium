@@ -1239,7 +1239,7 @@ rule FeedCommandRunsOnSettersHost {
         --      claim on a feed epic by a host whose owner is not the setter
         --      (store-split.allium: ClaimPollOwner), so a stranger's host
         --      cannot hold the claim.
-        --   2. FeedTick: src/models/poll_action.rs::decide_poll_action skips
+        --   2. FeedTick: src/models/poll_action.rs::decide_feed_poll_action skips
         --      an epic this host's owner did not set, claimed or not.
         --   3. ManualFeedTrigger: the "r" key refuses with the status line
         --      "Feed for '<title>' runs only on its author's host".

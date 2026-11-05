@@ -240,12 +240,18 @@ pub fn render_agents(
         .iter()
         .position(|line| *line == DrawnLine::Agent(section.cursor))
     {
-        // On a group's first agent, its header (or the rule) comes into view
-        // with it (AgentListGroupsByEpic).
-        let top_line = match cursor_line.checked_sub(1).map(|above| drawn[above]) {
-            Some(DrawnLine::EpicHeader { .. } | DrawnLine::EndOfEpics) => cursor_line - 1,
-            _ => cursor_line,
-        };
+        // On a group's first agent, every header line above it (a nested
+        // group's ancestors too) or the rule comes into view with it
+        // (AgentListGroupsByEpic).
+        let mut top_line = cursor_line;
+        while top_line > 0
+            && matches!(
+                drawn[top_line - 1],
+                DrawnLine::EpicHeader { .. } | DrawnLine::EndOfEpics
+            )
+        {
+            top_line -= 1;
+        }
         if top_line < section.offset {
             section.offset = top_line;
         }
@@ -685,6 +691,32 @@ mod tests {
         let out = rendered(&mut section, true, 10);
         assert!(out.contains("#20 task 20"), "{out}");
         assert!(!out.contains("#1 task 1 "), "{out}");
+    }
+
+    #[test]
+    fn scrolling_up_to_a_nested_groups_first_agent_shows_every_header_above_it() {
+        let mut nested = test_pane_epic(30, &["Thirty"]);
+        nested.ancestors = vec![crate::hooks::wire::PaneEpicRef {
+            id: crate::models::EpicId(10),
+            title: "Ten".into(),
+        }];
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![
+            in_epic(1, 5, &["Five"]),
+            in_epic(2, 5, &["Five"]),
+            in_epic(3, 5, &["Five"]),
+            AgentRow {
+                epic: Some(nested),
+                ..row(4, false)
+            },
+        ]);
+        section.bottom();
+        // Scrolled past the nested group's headers: lines 0..=5 are above.
+        section.offset = 6;
+        let out = rendered(&mut section, true, 6);
+        assert!(out.contains("#10 Ten"), "root header hidden:\n{out}");
+        assert!(out.contains("#30 Thirty"), "{out}");
+        assert!(out.contains("#4 task 4"), "{out}");
     }
 
     #[test]

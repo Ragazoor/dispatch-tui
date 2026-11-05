@@ -354,6 +354,12 @@ pub trait ManagedStorePorts: Send + Sync {
     /// cannot say.
     fn cli_identity(&self) -> Option<String>;
     fn publish_embedded_module(&self) -> ModulePublishOutcome;
+    /// Record the CLI login as the store's publisher, as
+    /// [`SpacetimeCliPublisher::claim_store_owner`] does; a store that already
+    /// has one counts as done. Best-effort: a failure is logged, not returned.
+    /// Run on a bring-up that did not publish, so a claim that failed after
+    /// the publish is retried (`spacetime-seed.allium`).
+    fn claim_store_owner(&self);
     /// True when it stopped within the stop timeout.
     fn stop_managed_store(&self) -> bool;
     /// Like [`Self::stop_managed_store`] but for the store this board spawned
@@ -781,6 +787,18 @@ pub fn parse_lsof_pids(output: &str) -> Vec<u32> {
     pids
 }
 
+impl SpacetimeManagedStore {
+    /// The CLI publisher aimed at this store, with the operator's config path.
+    fn cli_publisher(&self, wasm_path: std::path::PathBuf) -> SpacetimeCliPublisher {
+        let mut publisher = SpacetimeCliPublisher::new(self.runner.clone(), wasm_path)
+            .with_server(format!("http://{}", self.layout.address));
+        if let Some(config) = &self.config_path {
+            publisher = publisher.with_config_path(config);
+        }
+        publisher
+    }
+}
+
 impl ManagedStorePorts for SpacetimeManagedStore {
     fn managed_address(&self) -> String {
         self.layout.address.clone()
@@ -859,6 +877,13 @@ impl ManagedStorePorts for SpacetimeManagedStore {
         parse_login_identity(&String::from_utf8_lossy(&output.stdout))
     }
 
+    fn claim_store_owner(&self) {
+        let wasm_path = self.layout.data_dir.join(EXTRACTED_MODULE_FILE);
+        if let Err(e) = self.cli_publisher(wasm_path).claim_store_owner() {
+            tracing::warn!("could not record the store's publisher: {e}");
+        }
+    }
+
     fn publish_embedded_module(&self) -> ModulePublishOutcome {
         let wasm_path = self.layout.data_dir.join(EXTRACTED_MODULE_FILE);
         let written = std::fs::create_dir_all(&self.layout.data_dir)
@@ -868,11 +893,7 @@ impl ManagedStorePorts for SpacetimeManagedStore {
                 error: format!("could not write the module to {}: {e}", wasm_path.display()),
             };
         }
-        let mut publisher = SpacetimeCliPublisher::new(self.runner.clone(), wasm_path)
-            .with_server(format!("http://{}", self.layout.address));
-        if let Some(config) = &self.config_path {
-            publisher = publisher.with_config_path(config);
-        }
+        let publisher = self.cli_publisher(wasm_path);
         let outcome = publisher.publish();
         if outcome == ModulePublishOutcome::Published {
             // A store published before the module recorded its publisher has
@@ -1076,6 +1097,11 @@ impl ManagedStore {
             if !self.hashes.record_module_hash(&self.embedded_hash) {
                 tracing::warn!("the managed module hash could not be recorded");
             }
+        } else {
+            // No publish this launch, so nothing claimed: a claim that failed
+            // after an earlier publish is retried here. Idempotent: "already
+            // recorded" is success.
+            self.ports.claim_store_owner();
         }
         Ok(ManagedStoreReady {
             server: format!("http://{address}"),

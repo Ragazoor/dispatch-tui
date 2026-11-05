@@ -853,9 +853,10 @@ invariant OneSequencePerTable {
 -- publisher is recorded by `claim_store_owner`, a reducer with no arguments:
 -- the caller becomes the publisher, but ONLY while no row exists, and the call
 -- is refused once one does. The managed bring-up runs it as the CLI login
--- straight after every `spacetime publish` it makes, and treats "already has a
--- recorded publisher" as success, so a store that predates the row is fixed on
--- the board's next start. A store the board did not publish (a named
+-- straight after every `spacetime publish` it makes, and on every start that
+-- publishes nothing, and treats "already has a recorded publisher" as
+-- success, so a store that predates the row, or whose claim failed after the
+-- publish, is fixed on the board's next start. A store the board did not publish (a named
 -- `--spacetime-server`) is claimed by hand, as the login that owns the
 -- database: `spacetime call <db> claim_store_owner`. The import's refusal
 -- names this fix.

@@ -40,6 +40,7 @@ enum Call {
     Start,
     DatabaseExists,
     Publish,
+    Claim,
     Stop,
     StopSpawned,
     FailedToSave,
@@ -112,6 +113,9 @@ impl ManagedStorePorts for FakePorts {
     fn publish_embedded_module(&self) -> ModulePublishOutcome {
         self.log(Call::Publish);
         self.publish.clone()
+    }
+    fn claim_store_owner(&self) {
+        self.log(Call::Claim);
     }
     fn stop_managed_store(&self) -> bool {
         self.log(Call::Stop);
@@ -493,6 +497,23 @@ fn a_current_module_is_not_published() {
     let hashes = Arc::new(FakeHashes::new(Some(EMBEDDED)));
     store(&ports, &hashes).bring_up().unwrap();
     assert_eq!(ports.count(Call::Publish), 0);
+}
+
+#[test]
+fn a_current_module_still_claims_the_store_owner() {
+    // A claim that failed after the publish is retried on the next start.
+    let ports = Arc::new(FakePorts::new(ManagedAddressState::StoreAnswering));
+    let hashes = Arc::new(FakeHashes::new(Some(EMBEDDED)));
+    store(&ports, &hashes).bring_up().unwrap();
+    assert_eq!(ports.count(Call::Claim), 1);
+}
+
+#[test]
+fn a_publishing_bring_up_leaves_the_claim_to_the_publish() {
+    let ports = Arc::new(FakePorts::new(ManagedAddressState::StoreAnswering));
+    let hashes = Arc::new(FakeHashes::new(Some(OLDER)));
+    store(&ports, &hashes).bring_up().unwrap();
+    assert_eq!(ports.count(Call::Claim), 0);
 }
 
 #[test]

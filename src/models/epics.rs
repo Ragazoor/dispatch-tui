@@ -322,7 +322,15 @@ pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
 /// Walks `parent_epic_id` upward; a visited set guards against malformed
 /// cycles (which the service layer prevents, but a caller must not hang on).
 pub fn epic_path(target: EpicId, epics: &[Epic]) -> Vec<EpicId> {
-    let by_id = epic_id_lookup(epics);
+    epic_path_with(target, &epic_id_lookup(epics))
+}
+
+/// [`epic_path`] over a lookup the caller built once with [`epic_id_lookup`],
+/// for a loop that would otherwise rebuild it per epic.
+pub fn epic_path_with(
+    target: EpicId,
+    by_id: &std::collections::HashMap<EpicId, &Epic>,
+) -> Vec<EpicId> {
     let mut seen: HashSet<EpicId> = HashSet::new();
     let mut chain = Vec::new();
     let mut cursor = Some(target);

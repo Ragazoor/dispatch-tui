@@ -157,13 +157,22 @@ impl ProcessRunner for DeadlineRunner {
     fn agent_scope(&self) -> Option<crate::process::AgentScope> {
         // Past the deadline the launch goes unwrapped rather than spend the
         // probe and the cap read outside it.
-        self.left("systemd-run").ok()?;
+        let left = self.left("systemd-run").ok()?;
+        // A decided answer costs nothing. The first probe can run three
+        // subprocesses of 10 s each; with less time than that left it is
+        // skipped, so it never runs past the deadline.
+        if let Some(decided) = self.inner.agent_scope_cached() {
+            return decided;
+        }
+        if left < crate::process::PREPARE_SCOPE_WORST_CASE {
+            return None;
+        }
         self.inner.agent_scope()
     }
 
     fn start_sccache_server(&self) {
-        if self.left("sccache").is_ok() {
-            self.inner.start_sccache_server();
+        if let Ok(left) = self.left("sccache") {
+            self.inner.start_sccache_server_within(left);
         }
     }
 }

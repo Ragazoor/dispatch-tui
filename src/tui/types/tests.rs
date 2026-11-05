@@ -439,3 +439,21 @@ fn reopen_link_picker_clears_buffer_and_points_past_the_last_package() {
     assert_eq!(input.buffer, "");
     assert_eq!(input.mode, InputMode::LinkWorkPackage { item, cursor: 3 });
 }
+
+// -- EpicTree --
+
+#[test]
+fn an_epic_on_a_parent_cycle_ranks_after_every_placed_epic() {
+    // Epic 1 is its own parent, so the walk from the roots never reaches it.
+    let epics = vec![
+        make_test_epic(1, Some(1)),
+        make_test_epic(2, None),
+        make_test_epic(3, None),
+    ];
+    let tree = EpicTree::build(&epics, None);
+
+    let rank = |id| tree.place(EpicId(id)).map(|p| p.rank);
+    assert_eq!(rank(2), Some(0));
+    assert_eq!(rank(3), Some(1));
+    assert_eq!(rank(1), Some(2), "unplaced: after every placed epic");
+}

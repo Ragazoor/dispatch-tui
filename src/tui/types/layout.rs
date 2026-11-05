@@ -503,6 +503,23 @@ impl EpicTree {
             let rank = places.len();
             places.insert(epic.id, TreePlace { rank, path });
         }
+        // An epic on a parent cycle is never reached from a root. Rank it after
+        // every placed epic, in card order, so it cannot collide with them.
+        let mut unplaced: Vec<&Epic> = epics
+            .iter()
+            .filter(|e| !places.contains_key(&e.id))
+            .collect();
+        unplaced.sort_by_key(|e| (e.sort_key(), e.id.0));
+        for epic in unplaced {
+            let rank = places.len();
+            places.insert(
+                epic.id,
+                TreePlace {
+                    rank,
+                    path: vec![epic.id],
+                },
+            );
+        }
         Self { places }
     }
 
@@ -525,11 +542,12 @@ impl FlattenedGroupKeys {
     ) -> CardOrderKey {
         let epic = task.epic_id.and_then(|eid| epic_lookup.get(&eid));
         match (epic, &self.done) {
-            // Outside Done a group sorts by its epic's place in the tree.
-            (Some(epic), None) => CardOrderKey::Generic(
-                tree.place(epic.id)
-                    .map_or(epic.sort_key(), |p| p.rank as i64),
-            ),
+            // Outside Done a group sorts by its epic's place in the tree. Every
+            // epic on the board has one (`EpicTree::build` ranks the unplaced
+            // last); the fallback only covers a tree built from other epics.
+            (Some(epic), None) => {
+                CardOrderKey::Generic(tree.place(epic.id).map_or(i64::MAX - 1, |p| p.rank as i64))
+            }
             // In Done a group takes its newest member's completion. The epic's
             // OWN completed_at is deliberately not consulted here, unlike
             // `EpicPlacement::sort_key`: a flattened group stands for the
