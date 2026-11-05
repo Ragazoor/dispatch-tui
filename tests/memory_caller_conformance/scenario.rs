@@ -239,11 +239,11 @@ fn memory_caller_matches_the_real_reducers() {
         compare_owner(task_id_real.0);
 
         // -- repo configuration ---------------------------------------------------
-        real.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"), "h".into())
+        real.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"), "h".into(), "org/repo".into())
             .await
             .unwrap();
         wait_for!(!rows_real.repo_paths().is_empty());
-        mem.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"), "h".into())
+        mem.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"), "h".into(), "org/repo".into())
             .await
             .unwrap();
         assert_eq!(rows_real.repo_paths(), rows_mem.repo_paths(), "repo_paths");
@@ -283,75 +283,73 @@ fn memory_caller_matches_the_real_reducers() {
             "base_branches"
         );
 
-        // K2: a save never takes over a host's row, adopt stamps only an
-        // unowned row, delete only removes a row the named host owns.
-        real.save_repo_path(
-            "/repo".into(),
-            ts("2026-01-03 00:00:00.000"),
-            "other-host".into(),
-        )
-        .await
-        .unwrap();
-        real.save_repo_path(
-            "/legacy".into(),
-            ts("2026-01-03 00:00:00.000"),
-            String::new(),
-        )
-        .await
-        .unwrap();
-        real.adopt_repo_path("/legacy".into(), "adopter".into())
-            .await
-            .unwrap();
-        real.adopt_repo_path("/repo".into(), "adopter".into())
-            .await
-            .unwrap();
-        real.delete_repo_path("/repo".into(), "adopter".into())
-            .await
-            .unwrap();
-        wait_for!(rows_real.repo_paths_saved_by("adopter") == vec!["/legacy".to_string()]);
-        mem.save_repo_path(
-            "/repo".into(),
-            ts("2026-01-03 00:00:00.000"),
-            "other-host".into(),
-        )
-        .await
-        .unwrap();
-        mem.save_repo_path(
-            "/legacy".into(),
-            ts("2026-01-03 00:00:00.000"),
-            String::new(),
-        )
-        .await
-        .unwrap();
-        mem.adopt_repo_path("/legacy".into(), "adopter".into())
-            .await
-            .unwrap();
-        mem.adopt_repo_path("/repo".into(), "adopter".into())
-            .await
-            .unwrap();
-        mem.delete_repo_path("/repo".into(), "adopter".into())
-            .await
-            .unwrap();
+        // N3/N2: a path is one row per (path, host); adopt stamps only an
+        // unowned row; delete removes the caller's or an unowned row and
+        // refuses a path only another host has.
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .save_repo_path(
+                    "/repo".into(),
+                    ts("2026-01-03 00:00:00.000"),
+                    "other-host".into(),
+                    "org/repo".into(),
+                )
+                .await
+                .unwrap();
+            caller
+                .save_repo_path(
+                    "/legacy".into(),
+                    ts("2026-01-03 00:00:00.000"),
+                    String::new(),
+                    String::new(),
+                )
+                .await
+                .unwrap();
+            caller
+                .adopt_repo_path("/legacy".into(), "adopter".into())
+                .await
+                .unwrap();
+            caller
+                .adopt_repo_path("/repo".into(), "adopter".into())
+                .await
+                .unwrap();
+            let refused = caller
+                .delete_repo_path("/repo".into(), "adopter".into())
+                .await
+                .unwrap();
+            assert!(
+                matches!(refused, ReducerOutcome::Refused(ref m) if m.contains("other-host") || m.contains("host h")),
+                "another host's path is refused, naming it: {refused:?}"
+            );
+        }
+        wait_for!(rows_real.repo_paths_saved_by("other-host") == vec!["/repo".to_string()]);
         assert_eq!(
             rows_real.repo_paths_saved_by("adopter"),
             rows_mem.repo_paths_saved_by("adopter"),
-            "adopt and host-guarded delete"
+            "adopt and refused delete"
+        );
+        assert_eq!(
+            rows_real.repo_paths_saved_by("other-host"),
+            rows_mem.repo_paths_saved_by("other-host"),
+            "a second host owns its own row of the path"
         );
         assert_eq!(rows_real.repo_paths(), rows_mem.repo_paths(), "repo_paths");
 
-        real.delete_repo_path("/repo".into(), "h".into())
-            .await
-            .unwrap();
-        real.delete_repo_path("/legacy".into(), "adopter".into())
-            .await
-            .unwrap();
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .delete_repo_path("/repo".into(), "h".into())
+                .await
+                .unwrap();
+            caller
+                .delete_repo_path("/repo".into(), "other-host".into())
+                .await
+                .unwrap();
+            caller
+                .delete_repo_path("/legacy".into(), "adopter".into())
+                .await
+                .unwrap();
+        }
         wait_for!(rows_real.repo_paths().is_empty());
-        mem.delete_repo_path("/repo".into(), "h".into())
-            .await
-            .unwrap();
-        mem.delete_repo_path("/legacy".into(), "adopter".into())
-            .await
-            .unwrap();
         assert!(rows_mem.repo_paths().is_empty());
 
         // -- subscriptions ----------------------------------------------------------

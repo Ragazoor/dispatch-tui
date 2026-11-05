@@ -118,8 +118,23 @@ fn normalised_verify_command(command: Option<&str>) -> String {
 #[async_trait::async_trait]
 impl super::super::RepoConfigStore for Store {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
+        // The repository's GitHub path comes from this host's clone; `""` when
+        // it has no GitHub origin (or the path is not a clone).
+        let owned = path.to_string();
+        let github_path = tokio::task::spawn_blocking(move || {
+            crate::git::origin_github_repo(&owned, &crate::process::RealProcessRunner::default())
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
         self.caller
-            .save_repo_path(path.to_string(), self.clock.now(), self.host.clone())
+            .save_repo_path(
+                path.to_string(),
+                self.clock.now(),
+                self.host.clone(),
+                github_path,
+            )
             .await?
             .applied()
     }

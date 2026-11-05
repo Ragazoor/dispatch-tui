@@ -469,6 +469,7 @@ impl ReducerCaller for RecordingCaller {
         path: String,
         last_used: DateTime<Utc>,
         host: String,
+        _github_path: String,
     ) -> anyhow::Result<ReducerOutcome> {
         let last_used = encode::stamp(last_used);
         self.answer(Sent::SaveRepoPath(path, last_used, host))

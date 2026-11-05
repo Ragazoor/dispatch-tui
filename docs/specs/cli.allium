@@ -344,7 +344,9 @@ rule PruneRepoPathsViaCli {
         -- `dispatch prune-repo-paths`. Existence is judged on THIS machine's
         -- filesystem, after tilde expansion. A row another host saved is
         -- never judged and never removed: its path says nothing about this
-        -- disk, and its verify command goes with the row. A row saved before
+        -- disk. Rows are one per (path, host), so a path both hosts have is
+        -- two rows and this host's prune touches only its own; the verify
+        -- command is the repository's and survives on the other rows. A row saved before
         -- rows carried a host (host = null) belongs to no one, so every
         -- host's prune may adopt it: where the path exists on this disk the
         -- host adopts it (stamps itself, keeping the verify command). Where

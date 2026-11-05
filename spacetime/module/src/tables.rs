@@ -325,6 +325,12 @@ pub struct RepoPath {
     /// so the store can automigrate the table.
     #[default("")]
     pub host: String,
+    /// The repository's GitHub path (`org/repo`, read from the saving host's
+    /// `origin` remote), `""` when unknown. Rows that share a non-empty value
+    /// are one repository on several machines and share a verify command and
+    /// base-branch history (`core.allium: SavedRepoPath.github_path`).
+    #[default("")]
+    pub github_path: String,
 }
 
 #[spacetimedb::table(accessor = repo_base_branches, public)]

@@ -578,8 +578,9 @@ impl ReducerCaller for MemoryReducerCaller {
         path: String,
         last_used: DateTime<Utc>,
         host: String,
+        github_path: String,
     ) -> Result<ReducerOutcome> {
-        self.apply_save_repo_path(path, last_used, host)
+        self.apply_save_repo_path(path, last_used, host, github_path)
     }
 
     async fn adopt_repo_path(&self, path: String, host: String) -> Result<ReducerOutcome> {

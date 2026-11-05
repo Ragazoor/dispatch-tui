@@ -58,6 +58,11 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 38: repo paths are one row per `(path, host)` and carry the repository's
+///    GitHub path — `save_repo_path` takes it as a new argument, a verify
+///    command is shared by every row of one repository, `delete_repo_path`
+///    refuses a path only another host has (`config.rs`;
+///    `core.allium: SavedRepoPath`). Board and module move together.
 /// 37: poll claims and held tasks — a feed epic's claim held by a host whose
 ///    owner did not set the command, from before the setter rule, is released
 ///    once when a store moves onto this version
@@ -197,12 +202,12 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 37;
+pub const RULES_VERSION: i64 = 38;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first
 /// connection (`config.rs: release_claims_of_non_setter_hosts`).
-pub const FEED_SETTER_CLAIMS_RULES_VERSION: i64 = 37;
+pub const FEED_SETTER_CLAIMS_RULES_VERSION: i64 = 38;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

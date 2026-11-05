@@ -794,7 +794,7 @@ async fn seed_repo_path_saved_by(
 ) {
     use dispatch_tui::sync::ReducerCaller;
     memory
-        .save_repo_path(path.into(), chrono::Utc::now(), host.into())
+        .save_repo_path(path.into(), chrono::Utc::now(), host.into(), String::new())
         .await
         .unwrap();
     memory

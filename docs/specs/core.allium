@@ -1177,17 +1177,26 @@ entity Epic {
 }
 
 entity SavedRepoPath {
-    path: String             -- filesystem path, unique across all saved paths
+    path: String             -- filesystem path; one row per (path, host), so two machines that both have
+                             -- the same path each own a row and each one's feeds resolve it
     last_used: Timestamp     -- updated on each use; drives recency ordering
     verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
-    host: Host?              -- the install that last saved this path; null on a row saved before the stamp existed.
+                             -- Belongs to the REPOSITORY, not to the row: every row of one repository (see
+                             -- github_path) holds the same value. Setting it through any row updates all of them,
+                             -- and a row that starts without one takes its repository's.
+    github_path: String?     -- the repository's GitHub path ("org/repo"), read by the saving host from its clone's
+                             -- origin remote; null when unknown (no origin, not GitHub). Rows with the same
+                             -- non-null github_path are one repository on several machines, so they share
+                             -- verify_command and base-branch history (SavedRepoBranch) even though their paths
+                             -- differ. A row without one is its own repository, identified by path alone.
+    host: Host?              -- the install that owns this row; null on a row saved before the stamp existed.
                              -- A path is a place on ONE machine's disk, so only that host can say it is gone:
                              -- prune-repo-paths (cli.allium: PruneRepoPathsViaCli) touches only its own host's rows.
-                             -- Identity stays the path alone (verify_command is keyed by it); host is a stamp
-                             -- set once: a save never changes a non-null host (it only stamps a null one), so a
-                             -- path two hosts both use stays with the host that saved it first. Only the
-                             -- adopt-repo-path rule stamps a null host deliberately, and a delete names the
-                             -- host it expects, removing the row only if that host still owns it.
+                             -- A save by a host takes the row it owns, else adopts a null-host row of the path,
+                             -- else inserts its own. Only the adopt-repo-path rule stamps a null host deliberately.
+                             -- A delete names the calling host and removes that host's row or a null-host row;
+                             -- a path only ANOTHER host has is refused with the owning host named (the TUI shows
+                             -- it), and a path nobody has is not an error (a stale view).
 
     invariant VerifyCommandSingleLine {
         verify_command = null or not (verify_command.contains("\n") or verify_command.contains("\r"))  -- short-circuits: rhs only evaluated when verify_command != null
@@ -1199,8 +1208,9 @@ entity SavedRepoPath {
 -- fuzzy picker during manual task creation (see dispatch.allium:
 -- RecordBaseBranch, BaseBranchPicker). This is a dedicated settings-style
 -- table (repo_base_branches), a sibling of SavedRepoPath's repo_paths table —
--- and, like the per-repo verify_command setting, a per-repo setting keyed by
--- repo_path.
+-- and, like the per-repo verify_command setting, a per-repo setting: the
+-- history recorded through one clone is offered for every clone of the same
+-- repository (rows of SavedRepoPath sharing a github_path).
 --
 -- It is deliberately NOT derived from Task.base_branch, so that:
 --   (a) only branches entered through the manual new-task form are

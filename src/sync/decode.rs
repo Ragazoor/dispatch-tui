@@ -354,6 +354,7 @@ pub fn repo_path(row: &bindings::RepoPath) -> RepoPathRow {
         last_used: row.last_used.clone(),
         verify_command: text(&row.verify_command).map(str::to_owned),
         host: row.host.clone(),
+        github_path: row.github_path.clone(),
     }
 }
 

@@ -139,38 +139,58 @@ impl MemoryReducerCaller {
         path: String,
         last_used: DateTime<Utc>,
         host: String,
+        github_path: String,
     ) -> Result<ReducerOutcome> {
         let last_used = encode::stamp(last_used);
         if path.trim().is_empty() {
             return Ok(ReducerOutcome::Refused("repo path is empty".into()));
         }
         let mut tables = self.lock();
-        let existing = tables.repo_paths.values().find(|r| r.path == path).cloned();
-        match existing {
+        let own = tables
+            .repo_paths
+            .values()
+            .find(|r| r.path == path && r.host == host)
+            .or_else(|| {
+                tables
+                    .repo_paths
+                    .values()
+                    .find(|r| r.path == path && r.host.is_empty())
+            })
+            .cloned();
+        match own {
             Some(row) => {
-                let host = if row.host.is_empty() {
-                    host
+                let github_path = if github_path.is_empty() {
+                    row.github_path.clone()
                 } else {
-                    row.host.clone()
+                    github_path
+                };
+                let verify_command = if row.verify_command.is_empty() {
+                    sibling_verify_command(&tables, &path, &github_path)
+                } else {
+                    row.verify_command.clone()
                 };
                 self.write_repo_path(
                     &mut tables,
                     module::RepoPath {
                         last_used,
                         host,
+                        github_path,
+                        verify_command,
                         ..row
                     },
                 );
             }
             None => {
+                let verify_command = sibling_verify_command(&tables, &path, &github_path);
                 self.write_repo_path(
                     &mut tables,
                     module::RepoPath {
                         id: 0,
                         path,
                         last_used,
-                        verify_command: String::new(),
+                        verify_command,
                         host,
+                        github_path,
                     },
                 );
             }
@@ -187,13 +207,23 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused("host is empty".into()));
         }
         let mut tables = self.lock();
+        let owns = tables
+            .repo_paths
+            .values()
+            .any(|r| r.path == path && r.host == host);
         let existing = tables
             .repo_paths
             .values()
             .find(|r| r.path == path && r.host.is_empty())
             .cloned();
         if let Some(row) = existing {
-            self.write_repo_path(&mut tables, module::RepoPath { host, ..row });
+            if owns {
+                if tables.repo_paths.remove(&row.id).is_some() {
+                    self.rows.remove_repo_path(row.id);
+                }
+            } else {
+                self.write_repo_path(&mut tables, module::RepoPath { host, ..row });
+            }
         }
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -204,13 +234,27 @@ impl MemoryReducerCaller {
         host: String,
     ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
-        let ids: Vec<i64> = tables
+        let rows: Vec<module::RepoPath> = tables
             .repo_paths
             .values()
-            .filter(|r| r.path == path && r.host == host)
+            .filter(|r| r.path == path)
+            .cloned()
+            .collect();
+        let mine: Vec<i64> = rows
+            .iter()
+            .filter(|r| r.host == host || r.host.is_empty())
             .map(|r| r.id)
             .collect();
-        for id in ids {
+        if mine.is_empty() {
+            return Ok(match rows.first() {
+                Some(other) => ReducerOutcome::Refused(format!(
+                    "repo path {path} is owned by host {}",
+                    other.host
+                )),
+                None => ReducerOutcome::Applied(vec![]),
+            });
+        }
+        for id in mine {
             if tables.repo_paths.remove(&id).is_some() {
                 self.rows.remove_repo_path(id);
             }
@@ -229,16 +273,24 @@ impl MemoryReducerCaller {
             ));
         }
         let mut tables = self.lock();
-        let Some(existing) = tables.repo_paths.values().find(|r| r.path == path).cloned() else {
+        let Some(named) = tables.repo_paths.values().find(|r| r.path == path).cloned() else {
             return Ok(ReducerOutcome::Refused(format!("no repo path {path}")));
         };
-        self.write_repo_path(
-            &mut tables,
-            module::RepoPath {
-                verify_command: command,
-                ..existing
-            },
-        );
+        let siblings: Vec<module::RepoPath> = tables
+            .repo_paths
+            .values()
+            .filter(|r| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path))
+            .cloned()
+            .collect();
+        for row in siblings {
+            self.write_repo_path(
+                &mut tables,
+                module::RepoPath {
+                    verify_command: command.clone(),
+                    ..row
+                },
+            );
+        }
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
@@ -461,5 +513,25 @@ impl MemoryReducerCaller {
             }
         }
         Ok(ReducerOutcome::Applied(vec![]))
+    }
+}
+
+/// Mirror of `spacetime/module/src/config.rs::sibling_verify_command`.
+fn sibling_verify_command(tables: &Tables, path: &str, github_path: &str) -> String {
+    tables
+        .repo_paths
+        .values()
+        .filter(|r| !r.verify_command.is_empty())
+        .find(|r| is_sibling(&r.path, &r.github_path, path, github_path))
+        .map(|r| r.verify_command.clone())
+        .unwrap_or_default()
+}
+
+/// Mirror of `spacetime/module/src/config.rs::is_sibling`.
+fn is_sibling(path_a: &str, gh_a: &str, path_b: &str, gh_b: &str) -> bool {
+    if !gh_a.is_empty() && !gh_b.is_empty() {
+        gh_a == gh_b
+    } else {
+        path_a == path_b
     }
 }

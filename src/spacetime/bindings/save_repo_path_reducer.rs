@@ -10,6 +10,7 @@ pub(super) struct SaveRepoPathArgs {
     pub path: String,
     pub last_used: String,
     pub host: String,
+    pub github_path: String,
 }
 
 impl From<SaveRepoPathArgs> for super::Reducer {
@@ -18,6 +19,7 @@ impl From<SaveRepoPathArgs> for super::Reducer {
             path: args.path,
             last_used: args.last_used,
             host: args.host,
+            github_path: args.github_path,
         }
     }
 }
@@ -37,8 +39,14 @@ pub trait save_repo_path {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`save_repo_path:save_repo_path_then`] to run a callback after the reducer completes.
-    fn save_repo_path(&self, path: String, last_used: String, host: String) -> __sdk::Result<()> {
-        self.save_repo_path_then(path, last_used, host, |_, _| {})
+    fn save_repo_path(
+        &self,
+        path: String,
+        last_used: String,
+        host: String,
+        github_path: String,
+    ) -> __sdk::Result<()> {
+        self.save_repo_path_then(path, last_used, host, github_path, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `save_repo_path` to run as soon as possible,
@@ -52,6 +60,7 @@ pub trait save_repo_path {
         path: String,
         last_used: String,
         host: String,
+        github_path: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -65,6 +74,7 @@ impl save_repo_path for super::RemoteReducers {
         path: String,
         last_used: String,
         host: String,
+        github_path: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -75,6 +85,7 @@ impl save_repo_path for super::RemoteReducers {
                 path,
                 last_used,
                 host,
+                github_path,
             },
             callback,
         )

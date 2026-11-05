@@ -4,46 +4,93 @@ use super::*;
 
 // -- Repo configuration -----------------------------------------------------
 
-/// Record a repo path, or touch the one already there.
+/// The verify command a new or newly identified row for `path` starts with:
+/// the one its repository already has, found on a sibling row (same non-empty
+/// `github_path`, or the same `path` when either side has no `github_path`).
+fn sibling_verify_command(ctx: &ReducerContext, path: &str, github_path: &str) -> String {
+    ctx.db
+        .repo_paths()
+        .iter()
+        .filter(|r| !r.verify_command.is_empty() && is_sibling(&r.path, &r.github_path, path, github_path))
+        .map(|r| r.verify_command)
+        .next()
+        .unwrap_or_default()
+}
+
+/// Two rows are one repository when they share a non-empty GitHub path, or
+/// share a local path and at least one of them has no GitHub path to say
+/// otherwise.
+fn is_sibling(path_a: &str, gh_a: &str, path_b: &str, gh_b: &str) -> bool {
+    if !gh_a.is_empty() && !gh_b.is_empty() {
+        gh_a == gh_b
+    } else {
+        path_a == path_b
+    }
+}
+
+/// Record a repo path for `host`, or touch the row it already has.
 ///
-/// Upsert by path rather than by id, because the path is what the domain calls
-/// the same repo. Two rows for one path would give the verify command two
-/// answers.
-///
-/// `host` is stamped on a new row. On an existing row it is stamped only when
-/// the row has none (saved before hosts were recorded): a save never takes
-/// over a row another host owns. `adopt_repo_path` is the deliberate way to
-/// claim an unowned row without touching `last_used`.
+/// A path is one row per `(path, host)`: two machines that both have
+/// `~/Code/api` each own a row, so each one's feed resolves it. `host` takes
+/// the row it already owns; failing that it adopts an unowned row of the path
+/// (saved before hosts were recorded); failing that it inserts. `github_path`
+/// (`org/repo`, `""` when unknown) is stamped when non-empty. A row that has
+/// no verify command starts with its repository's (see `sibling_verify_command`).
+/// `adopt_repo_path` is the way to claim an unowned row without touching
+/// `last_used`.
 #[spacetimedb::reducer]
 pub fn save_repo_path(
     ctx: &ReducerContext,
     path: String,
     last_used: String,
     host: String,
+    github_path: String,
 ) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("repo path is empty".into());
     }
-    match ctx.db.repo_paths().iter().find(|r| r.path == path) {
+    let own = ctx
+        .db
+        .repo_paths()
+        .iter()
+        .find(|r| r.path == path && r.host == host)
+        .or_else(|| {
+            ctx.db
+                .repo_paths()
+                .iter()
+                .find(|r| r.path == path && r.host.is_empty())
+        });
+    match own {
         Some(existing) => {
-            let host = if existing.host.is_empty() {
-                host
+            let github_path = if github_path.is_empty() {
+                existing.github_path.clone()
             } else {
-                existing.host.clone()
+                github_path
+            };
+            let verify_command = if existing.verify_command.is_empty() {
+                sibling_verify_command(ctx, &path, &github_path)
+            } else {
+                existing.verify_command.clone()
             };
             ctx.db.repo_paths().id().update(RepoPath {
                 last_used,
                 host,
+                github_path,
+                verify_command,
                 ..existing
             })
         }
-        None => ctx.db.repo_paths().insert(RepoPath {
-            id: 0,
-            path,
-            last_used,
-            verify_command: String::new(),
-            host,
-        }),
+        None => {
+            let verify_command = sibling_verify_command(ctx, &path, &github_path);
+            ctx.db.repo_paths().insert(RepoPath {
+                id: 0,
+                path,
+                last_used,
+                verify_command,
+                host,
+                github_path,
+            })
+        }
     };
     Ok(())
 }
@@ -59,33 +106,56 @@ pub fn adopt_repo_path(ctx: &ReducerContext, path: String, host: String) -> Resu
     if host.is_empty() {
         return Err("host is empty".into());
     }
+    // `host` may already own a row of this path; a second would break the
+    // one-row-per-(path, host) rule, so that case drops the unowned row.
+    let owns = ctx
+        .db
+        .repo_paths()
+        .iter()
+        .any(|r| r.path == path && r.host == host);
     if let Some(existing) = ctx
         .db
         .repo_paths()
         .iter()
         .find(|r| r.path == path && r.host.is_empty())
     {
-        ctx.db
-            .repo_paths()
-            .id()
-            .update(RepoPath { host, ..existing });
+        if owns {
+            ctx.db.repo_paths().id().delete(existing.id);
+        } else {
+            ctx.db
+                .repo_paths()
+                .id()
+                .update(RepoPath { host, ..existing });
+        }
     }
     Ok(())
 }
 
-/// Remove a repo path, but only the row `host` owns.
+/// Remove `host`'s row of a repo path, or an unowned one.
 ///
-/// A row another host owns, or one nobody owns, stays: the caller judged it
-/// from a view that may be stale, and the row's verify command goes with it.
+/// A path only another host has is refused, naming that host: the caller asked
+/// to forget something this host does not own, and silently doing nothing made
+/// the row come back on reload. A path nobody has is not an error (a stale
+/// view). The row's verify command goes with it; sibling rows keep theirs.
 #[spacetimedb::reducer]
 pub fn delete_repo_path(ctx: &ReducerContext, path: String, host: String) -> Result<(), String> {
-    for row in ctx
+    let rows: Vec<RepoPath> = ctx
         .db
         .repo_paths()
         .iter()
-        .filter(|r| r.path == path && r.host == host)
-        .collect::<Vec<_>>()
-    {
+        .filter(|r| r.path == path)
+        .collect();
+    let mine: Vec<&RepoPath> = rows
+        .iter()
+        .filter(|r| r.host == host || r.host.is_empty())
+        .collect();
+    if mine.is_empty() {
+        return match rows.first() {
+            Some(other) => Err(format!("repo path {path} is owned by host {}", other.host)),
+            None => Ok(()),
+        };
+    }
+    for row in mine {
         ctx.db.repo_paths().id().delete(row.id);
     }
     Ok(())
@@ -105,13 +175,20 @@ pub fn set_verify_command(
     if command.contains('\n') || command.contains('\r') {
         return Err("verify command must be a single line; chain steps with && or ;".into());
     }
-    let Some(existing) = ctx.db.repo_paths().iter().find(|r| r.path == path) else {
+    let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
+    let Some(named) = rows.iter().find(|r| r.path == path) else {
         return Err(format!("no repo path {path}"));
     };
-    ctx.db.repo_paths().id().update(RepoPath {
-        verify_command: command,
-        ..existing
-    });
+    // The command belongs to the repository: every row that is the same one.
+    for row in rows
+        .iter()
+        .filter(|r| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path))
+    {
+        ctx.db.repo_paths().id().update(RepoPath {
+            verify_command: command.clone(),
+            ..row.clone()
+        });
+    }
     Ok(())
 }
 

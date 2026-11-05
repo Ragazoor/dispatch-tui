@@ -181,7 +181,8 @@ mirror!(
         path,
         last_used,
         verify_command,
-        host
+        host,
+        github_path
     }
 );
 

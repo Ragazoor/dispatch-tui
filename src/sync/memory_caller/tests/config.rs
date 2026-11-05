@@ -3,14 +3,24 @@ use super::*;
 // -- Repo configuration -----------------------------------------------------
 
 #[tokio::test]
-async fn save_repo_path_upserts_by_path_not_by_call_count() {
+async fn save_repo_path_upserts_by_path_and_host_not_by_call_count() {
     let (caller, rows) = caller();
     caller
-        .save_repo_path("/repo".into(), at("2026-01-01 00:00:00.000"), "h".into())
+        .save_repo_path(
+            "/repo".into(),
+            at("2026-01-01 00:00:00.000"),
+            "h".into(),
+            String::new(),
+        )
         .await
         .unwrap();
     caller
-        .save_repo_path("/repo".into(), at("2026-01-02 00:00:00.000"), "h".into())
+        .save_repo_path(
+            "/repo".into(),
+            at("2026-01-02 00:00:00.000"),
+            "h".into(),
+            String::new(),
+        )
         .await
         .unwrap();
     let paths = rows.repo_paths();
@@ -25,6 +35,7 @@ async fn save_repo_path_stamps_the_saving_host_and_adopts_a_row_with_none() {
             "/legacy".into(),
             at("2026-01-01 00:00:00.000"),
             String::new(),
+            String::new(),
         )
         .await
         .unwrap();
@@ -35,6 +46,7 @@ async fn save_repo_path_stamps_the_saving_host_and_adopts_a_row_with_none() {
             "/legacy".into(),
             at("2026-01-02 00:00:00.000"),
             "laptop".into(),
+            String::new(),
         )
         .await
         .unwrap();
@@ -43,6 +55,7 @@ async fn save_repo_path_stamps_the_saving_host_and_adopts_a_row_with_none() {
             "/fresh".into(),
             at("2026-01-02 00:00:00.000"),
             "desk".into(),
+            String::new(),
         )
         .await
         .unwrap();
@@ -62,7 +75,7 @@ async fn save_repo_path_stamps_the_saving_host_and_adopts_a_row_with_none() {
 async fn save_repo_path_refuses_an_empty_path() {
     let (caller, _rows) = caller();
     let outcome = caller
-        .save_repo_path("   ".into(), at(TEST_STAMP), "h".into())
+        .save_repo_path("   ".into(), at(TEST_STAMP), "h".into(), String::new())
         .await
         .unwrap();
     assert!(matches!(outcome, ReducerOutcome::Refused(_)));
@@ -72,7 +85,7 @@ async fn save_repo_path_refuses_an_empty_path() {
 async fn set_verify_command_refuses_a_multi_line_command() {
     let (caller, _rows) = caller();
     caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into())
+        .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into(), String::new())
         .await
         .unwrap();
     let outcome = caller
@@ -113,7 +126,7 @@ async fn record_base_branch_upserts_by_repo_and_branch() {
 async fn delete_repo_path_removes_every_row_for_that_path() {
     let (caller, rows) = caller();
     caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into())
+        .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into(), String::new())
         .await
         .unwrap();
     caller
@@ -124,51 +137,110 @@ async fn delete_repo_path_removes_every_row_for_that_path() {
 }
 
 #[tokio::test]
-async fn delete_repo_path_keeps_a_row_another_host_owns() {
+async fn delete_repo_path_refuses_a_path_only_another_host_has_and_removes_an_unowned_one() {
     let (caller, rows) = caller();
     caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP), "a".into())
+        .save_repo_path("/repo".into(), at(TEST_STAMP), "a".into(), String::new())
         .await
         .unwrap();
     caller
-        .save_repo_path("/legacy".into(), at(TEST_STAMP), String::new())
+        .save_repo_path(
+            "/legacy".into(),
+            at(TEST_STAMP),
+            String::new(),
+            String::new(),
+        )
         .await
         .unwrap();
-    caller
+    let refused = caller
         .delete_repo_path("/repo".into(), "b".into())
         .await
         .unwrap();
+    assert!(
+        matches!(refused, ReducerOutcome::Refused(ref m) if m.contains('a')),
+        "{refused:?}"
+    );
     caller
         .delete_repo_path("/legacy".into(), "b".into())
         .await
         .unwrap();
-    assert_eq!(rows.repo_paths().len(), 2);
+    assert_eq!(rows.repo_paths(), vec!["/repo".to_string()]);
 }
 
 #[tokio::test]
-async fn save_repo_path_never_takes_over_another_hosts_row() {
+async fn two_hosts_each_own_a_row_of_one_path_and_the_picker_lists_it_once() {
+    let (caller, rows) = caller();
+    for host in ["a", "b"] {
+        caller
+            .save_repo_path(
+                "/repo".into(),
+                at(TEST_STAMP),
+                host.into(),
+                "org/repo".into(),
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(rows.repo_paths_saved_by("a"), vec!["/repo".to_string()]);
+    assert_eq!(rows.repo_paths_saved_by("b"), vec!["/repo".to_string()]);
+    assert_eq!(rows.repo_paths(), vec!["/repo".to_string()], "listed once");
+}
+
+#[tokio::test]
+async fn the_verify_command_and_base_branches_follow_the_github_path() {
     let (caller, rows) = caller();
     caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP), "a".into())
+        .save_repo_path(
+            "/home/a/api".into(),
+            at(TEST_STAMP),
+            "a".into(),
+            "org/api".into(),
+        )
         .await
         .unwrap();
     caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP), "b".into())
+        .save_repo_path(
+            "/home/b/api".into(),
+            at(TEST_STAMP),
+            "b".into(),
+            "org/api".into(),
+        )
         .await
         .unwrap();
-    assert_eq!(rows.repo_paths_saved_by("a"), vec!["/repo".to_string()]);
-    assert!(rows.repo_paths_saved_by("b").is_empty());
+    caller
+        .set_verify_command("/home/a/api".into(), "make ci".into())
+        .await
+        .unwrap();
+    caller
+        .record_base_branch("/home/a/api".into(), "dev".into(), at(TEST_STAMP))
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.verify_command("/home/b/api").as_deref(),
+        Some("make ci")
+    );
+    assert!(
+        rows.base_branches()
+            .contains(&("/home/b/api".to_string(), "dev".to_string())),
+        "the other host's path sees the branch: {:?}",
+        rows.base_branches()
+    );
 }
 
 #[tokio::test]
 async fn adopt_repo_path_stamps_only_an_unowned_row() {
     let (caller, rows) = caller();
     caller
-        .save_repo_path("/legacy".into(), at(TEST_STAMP), String::new())
+        .save_repo_path(
+            "/legacy".into(),
+            at(TEST_STAMP),
+            String::new(),
+            String::new(),
+        )
         .await
         .unwrap();
     caller
-        .save_repo_path("/owned".into(), at(TEST_STAMP), "a".into())
+        .save_repo_path("/owned".into(), at(TEST_STAMP), "a".into(), String::new())
         .await
         .unwrap();
     caller

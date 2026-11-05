@@ -150,6 +150,7 @@ pub(crate) fn blank_repo_path() -> RepoPath {
         last_used: String::new(),
         verify_command: String::new(),
         host: String::new(),
+        github_path: String::new(),
     }
 }
 

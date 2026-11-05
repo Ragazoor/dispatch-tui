@@ -473,11 +473,12 @@ impl ReducerCaller for SdkReducerCaller {
         path: String,
         last_used: DateTime<Utc>,
         host: String,
+        github_path: String,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the repo path",
-            save_repo_path_then(path, encode::stamp(last_used), host)
+            save_repo_path_then(path, encode::stamp(last_used), host, github_path)
         )
     }
 

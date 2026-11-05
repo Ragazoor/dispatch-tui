@@ -239,17 +239,20 @@ pub trait ReducerCaller: Send + Sync {
         epic_ids: Vec<EpicId>,
     ) -> Result<ReducerOutcome>;
 
-    /// Record `path`, stamped with `host` — the install saving it, which alone
-    /// may later judge the path gone (`core.allium: SavedRepoPath.host`).
+    /// Record `path` for `host` — the install saving it, which alone may later
+    /// judge the path gone — with the repository's `github_path` (`""` when
+    /// unknown). One row per `(path, host)` (`core.allium: SavedRepoPath`).
     async fn save_repo_path(
         &self,
         path: String,
         last_used: DateTime<Utc>,
         host: String,
+        github_path: String,
     ) -> Result<ReducerOutcome>;
     /// Stamp `host` on the row for `path` only if no host owns it yet.
     async fn adopt_repo_path(&self, path: String, host: String) -> Result<ReducerOutcome>;
-    /// Remove the row for `path` only if `host` owns it.
+    /// Remove `host`'s row for `path`, or an unowned one; refused when only
+    /// another host has the path.
     async fn delete_repo_path(&self, path: String, host: String) -> Result<ReducerOutcome>;
     async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome>;
     async fn record_base_branch(

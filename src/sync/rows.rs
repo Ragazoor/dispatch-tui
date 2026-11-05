@@ -56,6 +56,8 @@ pub struct RepoPathRow {
     /// The host that last saved the path; `""` for a row saved before hosts
     /// were recorded.
     pub host: String,
+    /// The repository's GitHub path (`org/repo`); `""` when unknown.
+    pub github_path: String,
 }
 
 /// One `repo_base_branches` row: a repo's recently-used base branch.
@@ -1235,7 +1237,12 @@ impl SharedRows {
         self.read(|rows| {
             let mut out: Vec<&RepoPathRow> = rows.repo_paths.values().collect();
             out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(a.id.cmp(&b.id)));
-            out.into_iter().map(|row| row.path.clone()).collect()
+            // One row per (path, host): a path several hosts saved is listed once.
+            let mut seen = std::collections::HashSet::new();
+            out.into_iter()
+                .filter(|row| seen.insert(row.path.as_str()))
+                .map(|row| row.path.clone())
+                .collect()
         })
     }
 
@@ -1273,9 +1280,32 @@ impl SharedRows {
         self.read(|rows| {
             let mut out: Vec<&RepoBaseBranchRow> = rows.repo_base_branches.values().collect();
             out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(b.id.cmp(&a.id)));
-            out.into_iter()
-                .map(|row| (row.repo_path.clone(), row.branch.clone()))
-                .collect()
+            // A branch recorded through one clone is offered for every clone
+            // of the same repository (shared non-empty github_path).
+            let mut pairs: Vec<(String, String)> = Vec::new();
+            for row in out {
+                let gh = rows
+                    .repo_paths
+                    .values()
+                    .find(|p| p.path == row.repo_path && !p.github_path.is_empty())
+                    .map(|p| p.github_path.as_str());
+                let mut targets = vec![row.repo_path.as_str()];
+                if let Some(gh) = gh {
+                    targets.extend(
+                        rows.repo_paths
+                            .values()
+                            .filter(|p| p.github_path == gh)
+                            .map(|p| p.path.as_str()),
+                    );
+                }
+                for path in targets {
+                    let pair = (path.to_string(), row.branch.clone());
+                    if !pairs.contains(&pair) {
+                        pairs.push(pair);
+                    }
+                }
+            }
+            pairs
         })
     }
 

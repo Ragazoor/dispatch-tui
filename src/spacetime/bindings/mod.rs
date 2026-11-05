@@ -692,6 +692,7 @@ pub enum Reducer {
         path: String,
         last_used: String,
         host: String,
+        github_path: String,
     },
     SaveSetting {
         host: String,
@@ -1491,10 +1492,12 @@ Reducer::RecordBaseBranch{
                 path,
                 last_used,
                 host,
+                github_path,
 }             => __sats::bsatn::to_vec(&save_repo_path_reducer::SaveRepoPathArgs {
                 path: path.clone(),
                 last_used: last_used.clone(),
                 host: host.clone(),
+                github_path: github_path.clone(),
 }),
             Reducer::SaveSetting{
                 host,
