@@ -7,7 +7,7 @@ Task #98918. Follows `docs/plans/2026-11-04-codebase-review.md` (task #98864).
 **How.** Fourth run of `.claude/skills/repo-health-review`. Four read-only reviewers: (1) status and regression audit of the module and sync fix commits; (2) status and regression audit of the tmux, hooks, feed, keep-awake and gate fix commits, with mutation tests of the graduated checks; (3) a defect hunt over the bookmarks feature; (4) the fresh area, `src/runtime/`. I re-read the code for C3, A1, A3, B1, W1, G6, P1 and P3 and the rules-version history, and ran the gates.
 
 **Gates (on `513f89df`, `./scripts/verify.sh`, the repo's verify command).**
-- `scripts/gates.sh --check` (toolchain, fmt, clippy `-D warnings`, every `check-*.sh` and its self-test): **green**. rustc is Fedora's 1.99.1, which now matches `rust-toolchain.toml` (513f89df moved the pin).
+- `scripts/gates.sh --check` (toolchain, fmt, clippy `-D warnings`, every `check-*.sh` and its self-test, including the module's own tests in `spacetime/module-tests`, which failed to link here on 2026-11-04): **green**. rustc is Fedora's 1.99.1, which now matches `rust-toolchain.toml` (513f89df moved the pin).
 - `cargo test --no-fail-fast`: **red** — 13 failures, all in `src/setup/hooks/tests.rs` (C3). Fixed in this task (`fix(tests): hook script tests ignore the agent's DISPATCH_TASK_ID`); the 32 `setup::hooks` tests pass after it. Everything else: 7,839 passed, 2 ignored, no `skipping:` lines.
 - Coverage not re-measured.
 
@@ -138,7 +138,7 @@ Also read, not filed: `SessionRequestObserver::open_exits` (`src/dispatch/reques
 
 **P1. Low-Medium — fix for H3 → `tmux::pane_pid` is still unbounded.** `src/tmux.rs::pane_pid` uses `runner.run`; called from `src/startup/retire.rs` on relaunch. `run_checked_timeout`'s doc now says every tmux call goes through it. *Verified.* Fix: bound it.
 
-**P2. Medium (plausible) — T2 sibling: `store_import` picks a port by bind-and-drop.** `src/cli/store_import.rs::spawn_on_free_port`; `wait_until_answering` accepts any store answering on the port, so a lost race dumps another store's data instead of the copy. Test-only siblings: `managed_store.rs::a_port_nothing_listens_on_probes_as_nothing_listening`, `store_pin_tests.rs::nothing_listening_reads_as_none`. *Verified by the reviewer.* Fix: check the listener's data directory, as `managed_store_real.rs` now does.
+**P2. Medium (plausible) — T2 sibling: `store_import` picks a port by bind-and-drop.** `src/cli/store_import.rs::spawn_on_free_port`; `wait_until_answering` accepts any store answering on the port, so a lost race dumps another store's data instead of the copy. Test-only siblings: `managed_store.rs::a_port_nothing_listens_on_probes_as_nothing_listening`, `store_pin_tests.rs::nothing_listening_reads_as_none`. The code path is verified by the reviewer; the race outcome is plausible. Fix: check the listener's data directory, as `managed_store_real.rs` now does.
 
 **P3. Low — fix for N4 → the user's `SSH_ASKPASS_REQUIRE` is overridden.** `src/process.rs::non_interactive_env` sets `never` always; the same function keeps an existing `GIT_SSH_COMMAND` for exactly this reason. A user with `force` and a keyring askpass can no longer unlock keys in bounded children. *Verified.* Fix: set it only when unset.
 
@@ -200,8 +200,10 @@ Claims checked against code: `serve_dispatch_request` is called only from `src/r
 - **`apply_update_epic` discards outcomes** — `src/sync/memory_caller/tasks_epics.rs`. Raised 11-04, now. Safe while the dry run matches.
 - **P5** — rustup vs a distro-pinned toolchain. A machine-setup decision for the user.
 
+Filed: all findings are in epic #69690 (tasks #98990–#98999, plans in `docs/plans/review-2026-11-05/`). The user chose its own package for the three carried feed-runner items (task #98998). Decision items: A2 and B1 (#98992), A4 (#98993), B5 (#98995), W7 (#98990), P5 (#98999).
+
 **Graduate to a check.**
-- "A sibling path forgets the rule its fix added" appeared a fourth run running: A1 (create vs patch), A2 (task move vs epic sight), B1 (marks vs claims), C3 (old hook test harness vs new), P6 (other feed scripts). The deliverable is structural: one `on_sight_lost(ctx, tasks)` in the module that releases claims and drops marks, so a new loss-of-sight path cannot do half; and one helper for spawning plugin scripts in tests that starts from `env_clear()`.
+- "A sibling path forgets the rule its fix added" appeared a fourth run running: A1 (create vs patch), A2 (task move vs epic sight), B1 (marks vs claims), C3 (old hook test harness vs new), P6 (other feed scripts). The deliverable is structural: one `on_sight_lost(ctx, tasks)` in the module that releases claims and drops marks, so a new loss-of-sight path cannot do half; and one shared helper for spawning plugin scripts in tests that strips the agent's `DISPATCH_*` variables (or starts from `env_clear()` with an explicit allow-list, keeping `PATH` and `HOME`).
 - "A test passes in one agent's environment and fails in another's" (C3) is new; the harness helper above is its check.
 - The graduated guards keep missing cases (G6–G8); each fix adds a self-test case for the miss it closes.
 
