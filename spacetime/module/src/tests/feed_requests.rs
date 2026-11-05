@@ -136,3 +136,14 @@ fn a_task_cannot_be_moved_onto_another_persons_host() {
     assert!(aimed("mine", to("theirs")).is_err());
     assert!(aimed("mine", to("")).is_ok());
 }
+
+#[test]
+fn naming_a_window_on_another_persons_host_is_refused_and_clearing_one_is_not() {
+    let window = |w: &str| TaskPatch {
+        tmux_window: Some(w.into()),
+        ..TaskPatch::default()
+    };
+    assert!(aimed("theirs", window("dispatch:x")).is_err());
+    assert!(aimed("theirs", window("")).is_ok());
+    assert!(aimed("mine", window("dispatch:x")).is_ok());
+}

@@ -371,7 +371,7 @@ pub fn check_task_patch(row: &Task, patch: &TaskPatch) -> Result<(), String> {
 }
 
 /// `PatchTaskNeverAimsAnotherHostsTeardown`: a patch that CHANGES a task's
-/// `host`, `repo_path` or `worktree` is refused while the host that holds the
+/// `host`, `repo_path` or `worktree`, or names a `tmux_window`, is refused while the host that holds the
 /// task now belongs to another person, and a patch that names a new `host` is
 /// refused when that host belongs to another person. A feed teardown snapshots
 /// exactly these three columns and asks that host to remove the worktree, so
@@ -392,7 +392,11 @@ pub fn check_task_aim(
 ) -> Result<(), String> {
     let changes = |new: &Option<String>, old: &str| new.as_deref().is_some_and(|v| v != old);
     let host_changes = changes(&patch.host, &row.host);
+    // The window lives on the current agent, not the row, and a teardown kills
+    // the window it names: naming one is a change; clearing one is not.
+    let names_a_window = patch.tmux_window.as_deref().is_some_and(|w| !w.is_empty());
     if !(host_changes
+        || names_a_window
         || changes(&patch.repo_path, &row.repo_path)
         || changes(&patch.worktree, &row.worktree))
     {
