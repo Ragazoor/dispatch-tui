@@ -1113,6 +1113,12 @@ impl ManagedStore {
     /// hold is never looked at. Blocks for up to the stop and start timeouts
     /// when it restarts, so call it off the async threads.
     pub fn check_health(&self) -> HealthOutcome {
+        // A store the exit has already stopped is no longer this board's to
+        // check: the health watcher can run once more after the stop, and a
+        // restart then would leave a store nobody holds.
+        if self.stopped.get().is_some() {
+            return HealthOutcome::Healthy;
+        }
         if !self.held_by_this_board() || !self.ports.managed_store_failed_to_save() {
             return HealthOutcome::Healthy;
         }

@@ -1285,6 +1285,23 @@ fn a_store_this_board_does_not_hold_is_never_checked() {
 }
 
 #[test]
+fn a_store_stopped_at_exit_is_never_restarted_by_a_late_health_check() {
+    // The health watcher can outlive the exit's stop: a check that ran after
+    // it would start a store nobody holds any more.
+    let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
+    fake.failed_to_save = true;
+    let ports = Arc::new(fake);
+    let store = held_store(&ports);
+    assert!(store.stop_on_exit());
+    let starts = ports.count(Call::Start);
+    let stops = ports.count(Call::Stop);
+
+    assert_eq!(store.check_health(), HealthOutcome::Healthy);
+    assert_eq!(ports.count(Call::Start), starts);
+    assert_eq!(ports.count(Call::Stop), stops);
+}
+
+#[test]
 fn a_restarted_store_is_still_stopped_when_the_board_exits() {
     let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
     fake.failed_to_save = true;

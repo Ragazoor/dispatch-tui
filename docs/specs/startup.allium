@@ -725,7 +725,7 @@ enum StartupAbortReason {
 -- which it needs. The checker reports it unused: its only uses are literals
 -- of a provided trigger's parameter, which it does not credit.
 enum BoardExitCause {
-    quit               -- the operator confirmed a quit (split-pane.allium: QuitExitsSplitMode and the rules after it)
+    quit               -- the board left its run loop: the operator confirmed a quit (split-pane.allium: QuitExitsSplitMode and the rules after it), or the loop failed, which exits the same way
     | signalled        -- SIGHUP or SIGTERM: a later launch retired the board's window (RetireTheBoardWindow), or something killed it
     | startup_aborted  -- the launch aborted before the board drew (StartupAborted)
 }
@@ -1667,7 +1667,9 @@ rule RestartTheManagedStoreWhenItStopsSaving {
         -- the one at launch.
         --
         -- ONLY A STORE THIS BOARD HOLDS. A named store is never checked,
-        -- stopped or restarted (ANamedStoreIsNeverManaged).
+        -- stopped or restarted (ANamedStoreIsNeverManaged). Nor is one the
+        -- board's exit has already stopped: a check due after that stop finds
+        -- nothing to restart, or it would start a store nobody holds.
         --
         -- A RESTART, NOT A REPAIR. The data the store saved before the failure
         -- is replayed on start; writes made after it were never saved and are
@@ -1973,7 +1975,8 @@ rule AStartupAbortIsAnExit {
         -- An abort is an exit like any other, so whatever is held for the
         -- life of the board goes with it (ForgetTheStoreRecordWhenTheBoardExits,
         -- StopTheManagedStoreWhenStartupAborts). An abort always comes before
-        -- the board draws, so nothing bound at BoardDrawn is held yet.
+        -- the board takes the screen, so nothing the board sets up there (its
+        -- tmux bindings, keep-awake) exists yet.
 }
 
 rule StopTheManagedStoreWhenStartupAborts {
