@@ -160,8 +160,12 @@ fn space_on_freshly_claimed_task_outside_dispatching_map_does_not_offer_retry() 
 #[test]
 fn action_hints_hide_retry_while_dispatch_in_flight() {
     let task = make_unprovisioned_task(4, TaskStatus::Running);
-    let hints =
-        crate::tui::ui::action_hints(Some(&task), true, ratatui::style::Color::Rgb(122, 162, 247));
+    let hints = crate::tui::ui::action_hints(
+        Some(&task),
+        true,
+        false,
+        ratatui::style::Color::Rgb(122, 162, 247),
+    );
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(!text.contains("retry"), "got {text:?}");
 }

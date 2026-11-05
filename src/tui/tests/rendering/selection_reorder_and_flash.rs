@@ -100,7 +100,7 @@ async fn render_shows_unchecked_toggle_when_not_all_selected() {
 async fn action_hints_include_select_all() {
     let app = make_app();
     let task = app.selected_task();
-    let spans = ui::action_hints(task, false, Color::Blue);
+    let spans = ui::action_hints(task, false, false, Color::Blue);
     let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         text.contains("select all"),

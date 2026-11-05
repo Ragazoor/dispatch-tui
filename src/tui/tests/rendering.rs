@@ -13,7 +13,7 @@ use std::time::Instant;
 #[tokio::test]
 async fn action_hints_backlog_task() {
     let task = make_task(1, TaskStatus::Backlog);
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -43,7 +43,7 @@ async fn action_hints_backlog_task() {
 async fn action_hints_backlog_task_with_plan() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -61,7 +61,7 @@ async fn action_hints_backlog_task_with_plan() {
 async fn action_hints_running_with_window() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some(test_tmux_window("win-4"));
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -79,7 +79,7 @@ async fn action_hints_running_with_worktree_no_window() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/tmp/wt".to_string());
     task.tmux_window = None;
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -99,7 +99,7 @@ async fn action_hints_running_no_worktree_no_window() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = None;
     task.tmux_window = None;
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -122,7 +122,7 @@ async fn action_hints_running_no_worktree_no_window() {
 async fn action_hints_review_with_window() {
     let mut task = make_task(6, TaskStatus::Review);
     task.tmux_window = Some(test_tmux_window("win-6"));
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -137,7 +137,7 @@ async fn action_hints_review_with_window() {
 #[tokio::test]
 async fn action_hints_done_task() {
     let task = make_task(5, TaskStatus::Done);
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -152,7 +152,7 @@ async fn action_hints_done_task() {
 
 #[tokio::test]
 async fn action_hints_no_task() {
-    let hints = ui::action_hints(None, false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(None, false, false, Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -168,7 +168,7 @@ async fn action_hints_no_task() {
 /// not advertise a key that no longer has a handler.
 #[tokio::test]
 async fn action_hints_no_longer_advertises_learnings_key() {
-    let hints = ui::action_hints(None, false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(None, false, false, Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
     assert!(
         !keys.contains(&"[I]"),
@@ -179,7 +179,7 @@ async fn action_hints_no_longer_advertises_learnings_key() {
 #[tokio::test]
 async fn action_hints_backlog_shows_enter_detail() {
     let task = make_task(1, TaskStatus::Backlog);
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
     assert!(keys.contains(&"[Enter]"), "should show Enter/detail hint");
 }
@@ -187,7 +187,7 @@ async fn action_hints_backlog_shows_enter_detail() {
 #[tokio::test]
 async fn action_hints_shows_filter_help() {
     let task = make_task(1, TaskStatus::Backlog);
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
     assert!(keys.contains(&"[f]"), "should show filter hint");
     assert!(keys.contains(&"[?]"), "should show help hint");
@@ -196,7 +196,7 @@ async fn action_hints_shows_filter_help() {
 #[tokio::test]
 async fn action_hints_shows_copy_and_split() {
     let task = make_task(1, TaskStatus::Backlog);
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
     assert!(keys.contains(&"[c]"), "should show copy hint");
     assert!(keys.contains(&"[s]"), "should show split hint");

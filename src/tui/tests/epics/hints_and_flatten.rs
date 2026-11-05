@@ -68,11 +68,104 @@ fn epic_action_hints_done() {
 #[test]
 fn action_hints_no_ctrl_g_outside_epic() {
     let task = make_task(1, TaskStatus::Backlog);
-    let hints = ui::action_hints(Some(&task), false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
     assert!(
         !keys.contains(&"[^g]"),
         "should not show ^g back outside epic view"
+    );
+}
+
+/// Every key a board hint bar advertises is a key of `board.normal` in the
+/// table (`HelpOverlayIsTheTable`: no second list of keys). The hint bars are
+/// hand-written beside the table, so this is what catches one that kept
+/// advertising a removed key (`F`, once the lens moved to Tab).
+#[test]
+fn hint_bar_keys_are_all_in_the_keybinding_table() {
+    use crate::keybindings::{KeyNamespace, KEY_BINDINGS};
+    use crate::models::{test_tmux_window, Epic};
+
+    let color = Color::Rgb(122, 162, 247);
+    let mut bars: Vec<Vec<ratatui::text::Span<'static>>> = Vec::new();
+    for status in [
+        TaskStatus::Backlog,
+        TaskStatus::Running,
+        TaskStatus::Review,
+        TaskStatus::Done,
+    ] {
+        for (window, worktree, url) in [
+            (false, false, false),
+            (true, true, true),
+            (false, true, false),
+        ] {
+            for flattened in [false, true] {
+                let mut task = make_task(1, status);
+                task.tmux_window = window.then(|| test_tmux_window("win-1"));
+                task.worktree = worktree.then(|| "/tmp/wt".to_string());
+                task.url = url.then(|| {
+                    crate::models::TaskUrl::new(
+                        "https://example.com",
+                        crate::models::UrlType::Other,
+                    )
+                });
+                task.epic_id = Some(crate::models::EpicId(1));
+                bars.push(ui::action_hints(Some(&task), false, flattened, color));
+            }
+        }
+    }
+    bars.push(ui::action_hints(None, false, false, color));
+    let mut feed_epic: Epic = make_epic(1);
+    feed_epic.feed_command = Some("true".to_string());
+    bars.push(ui::epic_action_hints(&feed_epic, color));
+    bars.push(ui::epic_action_hints(&make_epic(1), color));
+    bars.push(ui::package_action_hints(color));
+    bars.push(ui::batch_action_hints(2, color, true));
+    bars.push(ui::batch_action_hints(2, color, false));
+
+    for hints in &bars {
+        // The batch bar's "N selected" count is bold too; only `[key]` spans
+        // are keys.
+        for key in hint_keys(hints).into_iter().filter(|k| k.starts_with('[')) {
+            let key = key.trim_start_matches('[').trim_end_matches(']');
+            assert!(
+                KEY_BINDINGS
+                    .iter()
+                    .any(|b| { b.namespace == KeyNamespace::BoardNormal && b.keys.contains(&key) }),
+                "a hint bar advertises `{key}`, which is not a board.normal key"
+            );
+        }
+    }
+}
+
+/// `Enter` does three different things on three kinds of card; its hint names
+/// the one that holds (`jump_to_deepest_epic`, `jump_to_task_epic`,
+/// `open_task_detail` in the table).
+#[test]
+fn enter_hint_names_what_enter_does() {
+    let color = Color::Rgb(122, 162, 247);
+    let label_after_enter = |hints: &[ratatui::text::Span<'static>]| -> Option<String> {
+        let i = hints.iter().position(|s| s.content == "[Enter]")?;
+        Some(hints.get(i + 1)?.content.trim().to_string())
+    };
+    let mut task = make_task(1, TaskStatus::Running);
+    task.epic_id = Some(crate::models::EpicId(1));
+    assert_eq!(
+        label_after_enter(&ui::action_hints(Some(&task), false, false, color)).as_deref(),
+        Some("detail")
+    );
+    assert_eq!(
+        label_after_enter(&ui::action_hints(Some(&task), false, true, color)).as_deref(),
+        Some("epic")
+    );
+    task.epic_id = None;
+    assert_eq!(
+        label_after_enter(&ui::action_hints(Some(&task), false, true, color)),
+        None,
+        "a flattened task with no epic has nowhere to jump"
+    );
+    assert_eq!(
+        label_after_enter(&ui::epic_action_hints(&make_epic(1), color)).as_deref(),
+        Some("deepest")
     );
 }
 

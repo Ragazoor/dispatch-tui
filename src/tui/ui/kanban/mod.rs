@@ -42,6 +42,8 @@ use popups::{
     render_move_task_overlay, render_reparent_epic_overlay, render_task_detail_overlay,
     render_work_package_picker_overlay, render_work_package_rename_overlay,
 };
+#[cfg(test)]
+pub(in crate::tui) use status_bar::batch_action_hints;
 use status_bar::render_status_bar;
 
 /// A column's identity colour — the single source of truth for it.
@@ -598,6 +600,7 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
 pub(in crate::tui) fn action_hints(
     task: Option<&Task>,
     dispatch_in_flight: bool,
+    enter_jumps_to_epic: bool,
     key_color: Color,
 ) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
@@ -660,8 +663,15 @@ pub(in crate::tui) fn action_hints(
         }
     }
 
-    if task.is_some() {
-        push_hint("Enter", "detail");
+    if let Some(task) = task {
+        // `Enter` on a task card in a flattened column jumps to the task's
+        // epic (and does nothing for a task with no epic); elsewhere it opens
+        // the detail (`jump_to_task_epic` / `open_task_detail`).
+        match (enter_jumps_to_epic, task.epic_id) {
+            (false, _) => push_hint("Enter", "detail"),
+            (true, Some(_)) => push_hint("Enter", "epic"),
+            (true, None) => {}
+        }
         push_hint("c", "copy");
     }
     push_hint("a", "select all");
@@ -669,7 +679,7 @@ pub(in crate::tui) fn action_hints(
     push_hint("E", "epic");
     push_hint("D", "quick");
     push_hint("s", "split");
-    push_hint("F", "flat");
+    push_hint("Tab", "lens");
     push_hint("f", "filter");
     push_hint("/", "search");
     push_hint("?", "help");
@@ -709,7 +719,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     // absent: it needs `current_epic_id()`, so it only works from inside the epic view,
     // where the header badge advertises it instead.
     push_hint("Space", "enter");
-    push_hint("Enter", "detail");
+    push_hint("Enter", "deepest");
     push_hint("e", "edit");
     if epic.feed_command.is_some() {
         push_hint("r", "refresh");
@@ -722,7 +732,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("n", "new");
     push_hint("E", "epic");
     push_hint("D", "quick");
-    push_hint("F", "flat");
+    push_hint("Tab", "lens");
     push_hint("f", "filter");
     push_hint("/", "search");
     push_hint("?", "help");

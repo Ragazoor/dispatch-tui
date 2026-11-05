@@ -187,7 +187,7 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
                 };
                 let now = chrono::Utc::now();
                 let in_flight = task.is_some_and(|t| app.dispatch_may_be_in_flight(t, now));
-                action_hints(task, in_flight, key_color)
+                action_hints(task, in_flight, app.cursor_in_flattened_column(), key_color)
             }
         }
     };
@@ -260,7 +260,11 @@ fn hidden_badge(epics: usize, packages: usize) -> Option<String> {
 }
 
 /// Build status bar hints when tasks are batch-selected.
-fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Span<'static>> {
+pub(in crate::tui) fn batch_action_hints(
+    count: usize,
+    key_color: Color,
+    has_tasks: bool,
+) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
     let count_style = Style::default().fg(YELLOW).add_modifier(Modifier::BOLD);
 
@@ -280,7 +284,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
     // selection always deletes.
     push_hint("x", if has_tasks { "done/delete" } else { "delete" });
     push_hint("a", "select all");
-    push_hint("F", "flat");
+    push_hint("Tab", "lens");
     push_hint("v", "toggle");
     push_hint("Esc", "clear");
     spans
