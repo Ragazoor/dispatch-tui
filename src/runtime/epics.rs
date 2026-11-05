@@ -320,6 +320,7 @@ impl TuiRuntime {
         // uses the write-capable `feed_db` handle (mirrors `FeedRunner`).
         let cycle = crate::feed::FeedCycle {
             db: self.feed_db.clone(),
+            board_reads: self.board_reads.clone(),
             runner: self.runner.clone(),
             guard: self.feed_sync_guard.clone(),
             epic_id,

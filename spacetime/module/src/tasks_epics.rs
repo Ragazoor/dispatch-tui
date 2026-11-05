@@ -391,6 +391,9 @@ fn patch_task_row(
     };
     // Before anything is applied: a refused patch leaves the row untouched.
     check_task_patch(&row, &patch)?;
+    check_task_aim(&row, &patch, &caller_identity(ctx), |host| {
+        ctx.db.hosts().id().find(&host.to_string()).map(|h| h.owner)
+    })?;
     check_session_patch(current_agent(&AgentTables(ctx), id).is_some(), &patch)?;
     let was_in_epic = row.epic_id;
     let prior_status = row.status.clone();

@@ -53,6 +53,14 @@ pub(crate) enum FeedCycleOutcome {
     Failed(String),
 }
 
+/// Whether the module wrote a teardown request for a removed task held by a
+/// host whose owner is `holder_owner`, as seen by the board whose identity is
+/// `own`. It writes one only when the caller owns the holding host; an owner or
+/// identity not known yet is not proof of a row.
+pub(crate) fn teardown_request_was_written(holder_owner: Option<&str>, own: Option<&str>) -> bool {
+    matches!((holder_owner, own), (Some(holder), Some(own)) if holder == own)
+}
+
 /// One feed cycle for one epic.
 ///
 /// `feed_command` and `feed_append_only` are deliberately NOT fields: they are
@@ -62,6 +70,8 @@ pub(crate) enum FeedCycleOutcome {
 /// in this struct.
 pub(crate) struct FeedCycle {
     pub(crate) db: Arc<dyn TaskStore>,
+    /// Host rows, to tell whether a foreign task's teardown request was written.
+    pub(crate) board_reads: Arc<dyn crate::store::BoardReads>,
     pub(crate) runner: Arc<dyn ProcessRunner>,
     pub(crate) guard: Arc<FeedSyncGuard>,
     pub(crate) epic_id: EpicId,
@@ -141,15 +151,29 @@ impl FeedCycle {
         // RoleRoutedFeedSync, teardown-vs-notification.
         let (local, foreign) = super::split_removed_by_host(outcome.removed, self.db.host_id());
         for task in &foreign {
-            // The module wrote a teardown request for the holding host in the
-            // same transaction as the delete (store-split.allium:
-            // StaleDeleteRequestsTeardownOnTheHoldingHost); that host's feed
-            // runner serves it.
-            tracing::debug!(
-                task_id = task.id.0,
-                host = task.host.as_deref().unwrap_or_default(),
-                "feed cleanup: task was dispatched on another host; a teardown request was written for it"
-            );
+            let host = task.host.as_deref().unwrap_or_default();
+            let holder_owner = self.board_reads.host_owner(host).await;
+            let own = self.db.own_identity().await;
+            if teardown_request_was_written(holder_owner.as_deref(), own.as_deref()) {
+                // The module wrote a teardown request for the holding host in
+                // the same transaction as the delete (store-split.allium:
+                // StaleDeleteRequestsTeardownOnTheHoldingHost); that host's
+                // feed runner serves it.
+                tracing::debug!(
+                    task_id = task.id.0,
+                    host,
+                    "feed cleanup: task was dispatched on another host; a teardown request was written for it"
+                );
+            } else {
+                // KNOWN GAP (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost):
+                // the module writes no row for a host of another person, so
+                // nobody tears this task's worktree and window down.
+                tracing::warn!(
+                    task_id = task.id.0,
+                    host,
+                    "feed cleanup: task was dispatched on a host of another person; no teardown request was written, so its worktree and window stay on that host"
+                );
+            }
         }
         super::cleanup_removed_feed_tasks(self.runner.clone(), local).await;
 

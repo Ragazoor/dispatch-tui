@@ -308,6 +308,9 @@ impl MemoryReducerCaller {
         if let Err(why) = module::check_task_patch(&row, &patch) {
             return Ok(ReducerOutcome::Refused(why));
         }
+        if let Err(why) = self.check_task_aim(&tables, &row, &patch) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let has_agent = module::current_agent(&self.agent_store(&mut tables), id.0).is_some();
         if let Err(why) = module::check_session_patch(has_agent, &patch) {
             return Ok(ReducerOutcome::Refused(why));
@@ -457,6 +460,18 @@ impl MemoryReducerCaller {
         }
     }
 
+    /// Mirrors the module's `check_task_aim` call in `patch_task_row`.
+    fn check_task_aim(
+        &self,
+        tables: &Tables,
+        row: &module::Task,
+        patch: &module::TaskPatch,
+    ) -> Result<(), String> {
+        module::check_task_aim(row, patch, &self.sender, |host| {
+            tables.hosts.get(host).map(|h| h.owner.clone())
+        })
+    }
+
     /// The refusals `apply_patch_task` can make, read off a copy of `row`:
     /// the same checks in the same order, with no write.
     fn check_patch_would_apply(
@@ -467,6 +482,7 @@ impl MemoryReducerCaller {
         patch: module::TaskPatch,
     ) -> Result<(), String> {
         module::check_task_patch(&row, &patch)?;
+        self.check_task_aim(tables, &row, &patch)?;
         let has_agent = module::current_agent(&self.agent_store(tables), id.0).is_some();
         module::check_session_patch(has_agent, &patch)?;
         let prior_status = row.status.clone();

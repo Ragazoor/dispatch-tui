@@ -1993,3 +1993,77 @@ async fn cleanup_serialises_same_repo_removals() {
         "pr-1's git calls must all precede pr-2's, got: {calls:?}"
     );
 }
+
+// --- Serving feed requests: the served set (review Q3) ---
+
+fn open_row(id: i64, state: crate::models::FeedRequestState) -> crate::models::FeedRequest {
+    crate::models::FeedRequest {
+        id: crate::models::FeedRequestId(id),
+        kind: crate::models::FeedRequestKind::Teardown,
+        host: "test-host".into(),
+        epic_id: None,
+        task_id: None,
+        repo_path: "/repo".into(),
+        worktree: None,
+        tmux_window: None,
+        requested_by: "me".into(),
+        state,
+        requested_at: chrono::Utc::now(),
+        claimed_at: None,
+        finished_at: None,
+        reason: None,
+    }
+}
+
+/// A row handed out once is not handed out again while it is still open ...
+#[test]
+fn a_served_request_is_not_handed_out_twice() {
+    use crate::models::FeedRequestState::Requested;
+    let served = requests::ServedRequests::default();
+    let rows = vec![open_row(1, Requested)];
+    assert_eq!(
+        requests::rows_to_serve(rows.clone(), "test-host", "me", &served).len(),
+        1
+    );
+    assert!(requests::rows_to_serve(rows, "test-host", "me", &served).is_empty());
+}
+
+/// ... but a claim or report that never reached the store hands it back: the
+/// row is still open there, and a teardown row has no other backstop.
+#[test]
+fn a_request_whose_claim_failed_is_handed_out_again() {
+    use crate::models::{FeedRequestId, FeedRequestState::Requested};
+    let served = requests::ServedRequests::default();
+    let rows = vec![open_row(1, Requested)];
+    assert_eq!(
+        requests::rows_to_serve(rows.clone(), "test-host", "me", &served).len(),
+        1
+    );
+
+    served.forget(FeedRequestId(1));
+
+    assert_eq!(
+        requests::rows_to_serve(rows, "test-host", "me", &served).len(),
+        1
+    );
+}
+
+/// The set does not grow for the life of the board: an id whose row is no
+/// longer open (finished, pruned) is dropped.
+#[test]
+fn the_served_set_drops_ids_whose_rows_are_no_longer_open() {
+    use crate::models::FeedRequestState::{Done, Requested};
+    let served = requests::ServedRequests::default();
+    let _ = requests::rows_to_serve(
+        vec![open_row(1, Requested), open_row(2, Requested)],
+        "test-host",
+        "me",
+        &served,
+    );
+    assert_eq!(served.len(), 2);
+
+    // Row 1 finished, row 2 was pruned.
+    let _ = requests::rows_to_serve(vec![open_row(1, Done)], "test-host", "me", &served);
+
+    assert_eq!(served.len(), 0);
+}

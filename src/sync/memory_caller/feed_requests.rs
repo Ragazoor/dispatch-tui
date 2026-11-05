@@ -57,15 +57,16 @@ impl MemoryReducerCaller {
         &self,
         tables: &mut Tables,
         task: &module::Task,
+        window: &str,
         ingest_host: &str,
     ) {
         let holder_is_ours = tables
             .hosts
             .get(&task.host)
             .is_some_and(|h| h.owner == self.sender);
-        if holder_is_ours && module::teardown_request_owed(task, ingest_host) {
+        if holder_is_ours && module::teardown_request_owed(task, window, ingest_host) {
             self.prune_feed_requests(tables);
-            let row = module::new_teardown_request(task, &self.sender, &self.now());
+            let row = module::new_teardown_request(task, window, &self.sender, &self.now());
             self.write_feed_request(tables, row);
         }
     }
@@ -81,7 +82,8 @@ impl MemoryReducerCaller {
     fn request_feed_refresh_body(&self, epic_id: i64, host: &str) -> Result<(), String> {
         let mut tables = self.lock();
         self.acting_for(&tables, host)?;
-        let epic = tables.epics.get(&epic_id).cloned();
+        // The module's `visible_epic`: an epic the caller cannot see is not there.
+        let epic = tables.visible_epic(&self.scope(), epic_id);
         let owner_row = tables
             .poll_owners
             .values()
@@ -91,12 +93,12 @@ impl MemoryReducerCaller {
             .as_ref()
             .and_then(|p| tables.hosts.get(&p.host))
             .map(|h| h.owner.clone());
-        let open_for_epic = owner_row.as_ref().is_some_and(|p| {
+        let requested_for_epic = owner_row.as_ref().is_some_and(|p| {
             tables.feed_requests.values().any(|r| {
                 r.host == p.host
                     && r.kind == module::FEED_REQUEST_REFRESH
                     && r.epic_id == epic_id
-                    && module::feed_request_is_open(&r.state)
+                    && r.state == module::FEED_REQUESTED
             })
         });
         let decision = module::decide_feed_refresh(
@@ -105,7 +107,7 @@ impl MemoryReducerCaller {
             owner_row.as_ref().map(|p| p.host.as_str()),
             owner_host_owner.as_deref(),
             &self.sender,
-            open_for_epic,
+            requested_for_epic,
         )?;
         if decision == module::RefreshDecision::Write {
             self.prune_feed_requests(&mut tables);
@@ -124,7 +126,11 @@ impl MemoryReducerCaller {
         outcome((|| {
             let mut tables = self.lock();
             let row = find_feed(&tables, id.0)?;
-            module::validate_feed_request_claim(&row, &host)?;
+            module::validate_feed_request_claim(
+                &row,
+                &host,
+                &module::reclaim_running_cutoff(self.clock.now().timestamp_micros()),
+            )?;
             self.acting_for(&tables, &host)?;
             self.write_feed_request(
                 &mut tables,

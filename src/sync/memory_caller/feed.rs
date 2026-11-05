@@ -226,10 +226,11 @@ impl MemoryReducerCaller {
             .cloned()
             .collect();
         for task in stale {
+            let window = module::session_window(&self.agent_store(tables), task.id);
             self.delete_task_row(tables, task.id);
             self.delete_task_side_effects(tables, task.id);
             // StaleDeleteRequestsTeardownOnTheHoldingHost, as the module.
-            self.write_teardown_request_if_owed(tables, &task, ingest_host);
+            self.write_teardown_request_if_owed(tables, &task, &window, ingest_host);
         }
     }
 
@@ -276,6 +277,15 @@ impl MemoryReducerCaller {
             .collect();
         let mut tables = self.lock();
         if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        // Mirrors the module's `check_ingest_claim` call in `ingest_feed`.
+        let claim = tables
+            .poll_owners
+            .values()
+            .find(|p| p.scope == "epic" && p.scope_id == epic_id.0)
+            .map(|p| p.host.clone());
+        if let Err(why) = module::check_ingest_claim(claim.as_deref(), &host, epic_id.0) {
             return Ok(ReducerOutcome::Refused(why));
         }
         let mut store = TablesIngest {

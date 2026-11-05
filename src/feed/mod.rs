@@ -223,7 +223,7 @@ pub struct FeedRunner {
     host_id: String,
     /// Feed request rows this process has already handed out, so a row is
     /// served once however many ticks see it open.
-    served_requests: std::collections::HashSet<i64>,
+    served_requests: requests::ServedRequests,
     /// Test-only join handles for the jobs spawned by `tick`. Production keeps
     /// firing-and-forgetting: the field, and the push that fills it, exist only
     /// under `cfg(test)`. Tests need it because some feed-cycle outcomes
@@ -299,7 +299,7 @@ impl FeedRunner {
             warned_below_floor: HashMap::new(),
             board_reads,
             host_id,
-            served_requests: std::collections::HashSet::new(),
+            served_requests: requests::ServedRequests::default(),
             #[cfg(test)]
             spawned: Vec::new(),
         }
@@ -437,14 +437,19 @@ impl FeedRunner {
             // settles hands them out.
             return;
         };
-        let work = requests::rows_to_serve(rows, &self.host_id, &owner, &mut self.served_requests);
+        let work = requests::rows_to_serve(rows, &self.host_id, &owner, &self.served_requests);
         let (refreshes, teardowns): (Vec<_>, Vec<_>) = work
             .into_iter()
             .partition(|r| r.kind == crate::models::FeedRequestKind::Refresh);
         if !teardowns.is_empty() {
             let db = Arc::clone(&self.db);
             let runner = Arc::clone(&self.runner);
-            let _handle = tokio::task::spawn(requests::serve_teardowns(db, runner, teardowns));
+            let _handle = tokio::task::spawn(requests::serve_teardowns(
+                db,
+                runner,
+                teardowns,
+                self.served_requests.clone(),
+            ));
             #[cfg(test)]
             self.spawned.push(_handle);
         }
@@ -466,25 +471,29 @@ impl FeedRunner {
         let board_reads = Arc::clone(&self.board_reads);
         let host_id = self.host_id.clone();
         let notify = self.notify.clone();
+        let served = self.served_requests.clone();
         let _handle = tokio::task::spawn(async move {
             match db.claim_feed_request(row.id).await {
                 Ok(true) => {}
                 Ok(false) => return,
                 Err(err) => {
                     tracing::warn!(request = row.id.0, "feed refresh: claim not sent: {err:#}");
+                    served.forget(row.id);
                     return;
                 }
             }
             let Some(epic) = board_reads.get_epic(epic_id).await else {
-                let _ = db
+                let reported = db
                     .report_feed_request_failed(row.id, "epic no longer exists")
                     .await;
+                report_outcome(&served, row.id, reported);
                 return;
             };
             if !host_may_run_feed(&*board_reads, &host_id, &epic).await {
-                let _ = db
+                let reported = db
                     .report_feed_request_failed(row.id, "this host's owner did not set the command")
                     .await;
+                report_outcome(&served, row.id, reported);
                 return;
             }
             // Only the poll owner reconciles: if the poll moved after the
@@ -493,13 +502,15 @@ impl FeedRunner {
                 .poll_owner(crate::models::PollScopeId::Epic(epic_id))
                 .await;
             if owner.as_deref() != Some(host_id.as_str()) {
-                let _ = db
+                let reported = db
                     .report_feed_request_failed(row.id, "this host no longer owns the poll")
                     .await;
+                report_outcome(&served, row.id, reported);
                 return;
             }
             let cycle = cycle::FeedCycle {
                 db: Arc::clone(&db),
+                board_reads: Arc::clone(&board_reads),
                 runner,
                 guard,
                 epic_id,
@@ -519,9 +530,7 @@ impl FeedRunner {
                     db.report_feed_request_failed(row.id, &reason).await
                 }
             };
-            if let Err(err) = reported {
-                tracing::warn!(request = row.id.0, "feed refresh: report not sent: {err:#}");
-            }
+            report_outcome(&served, row.id, reported);
         });
         #[cfg(test)]
         self.spawned.push(_handle);
@@ -593,6 +602,7 @@ impl FeedRunner {
     ) {
         let cycle = cycle::FeedCycle {
             db: self.db.clone(),
+            board_reads: Arc::clone(&self.board_reads),
             runner: self.runner.clone(),
             guard: Arc::clone(&self.guard),
             epic_id,
@@ -626,6 +636,20 @@ impl FeedRunner {
         });
         #[cfg(test)]
         self.spawned.push(_handle);
+    }
+}
+
+/// Log a refresh report that never reached the store and hand the row back, so
+/// the next tick sees it again (a `running` row is claimable once the module's
+/// grace period has passed).
+fn report_outcome(
+    served: &requests::ServedRequests,
+    id: crate::models::FeedRequestId,
+    reported: anyhow::Result<bool>,
+) {
+    if let Err(err) = reported {
+        tracing::warn!(request = id.0, "feed refresh: report not sent: {err:#}");
+        served.forget(id);
     }
 }
 

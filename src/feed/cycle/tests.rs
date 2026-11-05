@@ -32,6 +32,7 @@ async fn reviews_parent_with_sentinel_command(db: &Store, sentinel: &Path) -> Ep
 
 fn cycle(db: Arc<Store>, epic_id: EpicId) -> FeedCycle {
     FeedCycle {
+        board_reads: db.clone(),
         db,
         runner: Arc::new(AlwaysFailRunner),
         guard: Arc::new(FeedSyncGuard::default()),
@@ -134,6 +135,7 @@ async fn a_hung_command_times_out_and_the_epic_recovers_on_the_next_cycle() {
 
     let guard = Arc::new(FeedSyncGuard::default());
     let hung_cycle = FeedCycle {
+        board_reads: db.clone(),
         db: db.clone(),
         runner: Arc::new(AlwaysFailRunner),
         guard: guard.clone(),
@@ -162,6 +164,7 @@ async fn a_hung_command_times_out_and_the_epic_recovers_on_the_next_cycle() {
         .await
         .unwrap();
     let recovered_cycle = FeedCycle {
+        board_reads: db.clone(),
         db,
         runner: Arc::new(AlwaysFailRunner),
         guard,
@@ -306,4 +309,14 @@ async fn an_append_only_epic_still_reports_a_degraded_emission() {
         ),
         _ => panic!("a non-empty emission must sync even with stderr"),
     }
+}
+
+/// Review Q6: a foreign task's teardown request exists only when the board's
+/// own person owns the holding host; anything else is stranded, not "written".
+#[test]
+fn a_teardown_request_was_written_only_for_a_host_the_board_owner_owns() {
+    assert!(teardown_request_was_written(Some("me"), Some("me")));
+    assert!(!teardown_request_was_written(Some("you"), Some("me")));
+    assert!(!teardown_request_was_written(None, Some("me")));
+    assert!(!teardown_request_was_written(Some("me"), None));
 }

@@ -1429,6 +1429,16 @@ rule IngestFeedEmission {
     -- it to decide who tears the task down
     -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost).
     requires: host.owner != null and host.owner = caller()
+    -- Task #98909 (IngestRefusesAHostThatLostTheClaim): when the epic's poll
+    -- is claimed, it is claimed by this host. A cycle that began before its
+    -- host's claim was overridden must not reconcile over the new owner's, so
+    -- ingest_feed refuses and writes nothing. An epic with no claim row at all
+    -- is accepted: the board claims before it runs, but a seed or a CLI import
+    -- has nothing to claim. The claim is read on the epic the call names; a
+    -- reviews parent's role sub-epics are reconciled through it, under its
+    -- claim.
+    requires: not exists core/PollOwner{scope: epic, scope_id: epic.id}
+        or core/PollOwner{scope: epic, scope_id: epic.id}.host = host
 
     -- THE SPLIT (store-split.allium S1, S2). The TUI process keeps what needs
     -- the operator's machine: it claims the poll-owner row (FeedTick), runs

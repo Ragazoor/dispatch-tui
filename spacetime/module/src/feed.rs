@@ -224,12 +224,15 @@ pub(crate) fn delete_stale_feed_tasks_in_epic(
         .filter(|t| !t.external_id.is_empty() && !keep.contains(t.external_id.as_str()))
         .collect();
     for task in stale {
+        // The window lives on the current agent row, which the side effects
+        // delete: read it first.
+        let window = session_window(&AgentTables(ctx), task.id);
         ctx.db.tasks().id().delete(task.id);
         delete_task_side_effects(ctx, task.id);
         // feeds.allium / store-split.allium:
         // StaleDeleteRequestsTeardownOnTheHoldingHost. After the side effects,
         // so the new row is not swept with the task's own request rows.
-        write_teardown_request_if_owed(ctx, &task, ingest_host);
+        write_teardown_request_if_owed(ctx, &task, &window, ingest_host);
     }
 }
 

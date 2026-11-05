@@ -879,7 +879,8 @@ entity FeedRequest {
     state: FeedRequestState
     requested_at: Timestamp
     -- Set by HostClaimsFeedRequest, and set again when a running row left by
-    -- a board that died mid-serve is claimed again.
+    -- a board that died mid-serve is claimed again, after
+    -- config.feed_request_reclaim_grace.
     claimed_at: Timestamp?
     finished_at: Timestamp when state = done | failed
     reason: String when state = failed
@@ -919,10 +920,12 @@ entity FeedRequest {
 
     @invariant OnlyTheClaimedFeedRequestIsServed
         -- As OnlyTheClaimedSessionRequestIsServed, with one difference: a
-        -- running row may be claimed again (HostClaimsFeedRequest), because
-        -- both kinds of work are idempotent and a board that died mid-serve
-        -- must not strand its row. A finished row cannot be claimed or
-        -- reported on again.
+        -- running row may be claimed again once config.feed_request_reclaim_grace
+        -- has passed since its claim (HostClaimsFeedRequest), because both
+        -- kinds of work are idempotent and a board that died mid-serve must
+        -- not strand its row. Within the grace the claim is refused, so two
+        -- boards sharing a host id do not both serve one row. A finished row
+        -- cannot be claimed or reported on again.
 }
 
 ------------------------------------------------------------
@@ -980,6 +983,15 @@ config {
     -- fresh data then, not whenever the owner returns. The module's
     -- STALE_REFRESH_REQUEST_SECS. A teardown row has no such window.
     stale_refresh_request_window: Duration = 1.hours
+
+    -- How long a FeedRequest must have been running, measured from its
+    -- claimed_at, before its host may claim it again (HostClaimsFeedRequest).
+    -- A feed command is capped at two minutes and a teardown takes seconds, so
+    -- this is past any live serve: a row still running before it is most
+    -- likely being served, possibly by a second board on the same host id,
+    -- and a row older than it was left by a board that died. The module's
+    -- RECLAIM_RUNNING_FEED_REQUEST_SECS.
+    feed_request_reclaim_grace: Duration = 10.minutes
 }
 
 ------------------------------------------------------------
@@ -1083,6 +1095,39 @@ rule PatchTaskNeverMovesAnEpic {
         --
         -- The repo-group sweep deletes a sub-epic only when it holds no task and
         -- no child, so validate_epic_deletable has nothing to refuse there.
+}
+
+rule PatchTaskNeverAimsAnotherHostsTeardown {
+    when: TaskPatchRequested(task, patch)
+
+    -- A feed teardown asks the host named in the task row to remove the
+    -- worktree named in it, in the repo named in it
+    -- (StaleDeleteRequestsTeardownOnTheHoldingHost). A patch that could set
+    -- those three would let anyone who sees the task aim another person's host
+    -- at a live worktree: patch a feed task in somebody's epic to
+    -- host = their-laptop, worktree = a worktree they are working in, and wait
+    -- for the item to leave the feed.
+    -- A host nobody registered has no owner and is never the target of a
+    -- teardown row, so it is not judged.
+    requires: patch.host = null or patch.host = task.host
+        or ((task.host = null or task.host.owner = null or task.host.owner = caller())
+            and (patch.host = "" or patch.host.owner = null
+                 or patch.host.owner = caller()))
+    requires: ((patch.repo_path = null or patch.repo_path = task.repo_path)
+               and (patch.worktree = null or patch.worktree = task.worktree))
+        or task.host = null or task.host.owner = null or task.host.owner = caller()
+
+    ensures: TaskPatchAccepted(task: task, patch: patch)
+
+    @guidance
+        -- patch_task refuses, naming why, and writes nothing. Only a CHANGE is
+        -- judged: the editor sends repo_path on every save, and a repeated
+        -- value is no change. A task no host holds keeps its repo editable by
+        -- anyone who sees it, and may be handed to a host the caller owns or
+        -- to one nobody registered.
+        -- Writes the module makes itself (the dispatch reports, the close, the
+        -- stale delete) do not go through this check, so provisioning and
+        -- teardown are unaffected. Task #98909.
 }
 
 rule UpdateTaskIsOneTransaction {
@@ -2046,11 +2091,11 @@ rule RequestRowsArePruned {
         -- and an open teardown row is kept for as long as its host stays
         -- away, because the worktree it names is still on that machine.
         --
-        -- RequestFeedRefresh emits this too, before its row is written. A
-        -- teardown row is written by an ingest, which prunes nothing. Whether
-        -- the module's dispatch and wrap-up writes also sweep feed_requests
-        -- (this rule says one prune sweeps every table) is an open question
-        -- below.
+        -- RequestFeedRefresh emits this too, before its row is written, and so
+        -- does the stale delete when it writes a teardown row
+        -- (StaleDeleteRequestsTeardownOnTheHoldingHost). Whether the module's
+        -- dispatch and wrap-up writes also sweep feed_requests (this rule says
+        -- one prune sweeps every table) is an open question below.
         --
         -- THE PRUNE NEVER CHANGES A TOKEN'S VALIDITY. Every row
         -- SessionRequest.is_valid_token reads for a live token is kept: the
@@ -2084,11 +2129,12 @@ rule RequestFeedRefresh {
     -- person's feed command on that person's host.
     requires: owner.host.owner != null and owner.host.owner = caller()
 
-    let already_open = FeedRequests.any(r =>
-        r.kind = refresh and r.epic = epic and r.host = owner.host and r.is_open)
+    let already_requested = FeedRequests.any(r =>
+        r.kind = refresh and r.epic = epic and r.host = owner.host
+            and r.state = requested)
 
     ensures:
-        if not already_open:
+        if not already_requested:
             PruneRequestRows(at: now)
             FeedRequest.created(
                 kind: refresh,
@@ -2104,11 +2150,13 @@ rule RequestFeedRefresh {
         -- "r" on a host that is not the epic's poll owner (feeds.allium:
         -- ManualFeedTrigger). A refusal names why and writes nothing.
         --
-        -- IDEMPOTENT. An open refresh row for the epic on the owner's host
-        -- already exists: nothing is written and the call succeeds, so a
-        -- second "r" (from this host or another of the same person's) adds
-        -- nothing the owner's next cycle would not already cover
-        -- (OneOpenRefreshRequestPerEpic).
+        -- IDEMPOTENT while the row waits. A refresh row for the epic on the
+        -- owner's host is still requested: nothing is written and the call
+        -- succeeds, so a second "r" (from this host or another of the same
+        -- person's) adds nothing the owner's next cycle would not already
+        -- cover (OneRequestedRefreshRequestPerEpic). Once the owner has
+        -- claimed that row it read the feed before this ask, so the ask
+        -- writes a new row of its own (task #98909).
         --
         -- No deadline and no timer (FeedRequest). The poll owner serves the
         -- row on its next poll tick (feeds.allium: ServeFeedRefreshRequest);
@@ -2123,8 +2171,14 @@ rule HostClaimsFeedRequest {
     requires: host.owner != null and host.owner = caller()
     -- requested, or running: a running row was left by a board that died
     -- mid-serve, and both kinds of work are idempotent, so it is served
-    -- again rather than failed.
+    -- again rather than failed. But only once config.feed_request_reclaim_grace
+    -- has passed since its claim: a younger running row is most likely being
+    -- served now, perhaps by a second board on the same host id, and serving
+    -- it twice would run a teardown twice and end the row failed though it
+    -- succeeded (task #98909).
     requires: request.is_open
+    requires: request.state = requested
+        or request.claimed_at < now - config.feed_request_reclaim_grace
 
     ensures: request.state = running
     ensures: request.claimed_at = now
@@ -2145,7 +2199,11 @@ rule HostClaimsFeedRequest {
         -- its worktree for good.
         --
         -- Only an accepted claim lets the board serve the row (feeds.allium:
-        -- ServeFeedRefreshRequest, ServeFeedTeardownRequest).
+        -- ServeFeedRefreshRequest, ServeFeedTeardownRequest). A board whose
+        -- claim was refused or never reached the store hands the row back, and
+        -- offers it again on its next tick, so a transport error does not
+        -- drop a request for the life of the board; a running row inside the
+        -- grace is offered again every tick until the grace passes.
 }
 
 rule HostReportsFeedRequestDone {
@@ -2224,6 +2282,17 @@ rule StaleDeleteRequestsTeardownOnTheHoldingHost {
         -- the caller gets none either (KNOWN GAP: a task another person
         -- dispatched under this feed and the setter's ingest then removes
         -- leaves that person's worktree and window behind).
+        --
+        -- THE WINDOW is the current agent's, read BEFORE the delete: the task
+        -- row's own window column is always blank (agents.allium: the session
+        -- facts live on the agent), and the delete removes the agent rows.
+        -- A task holding a window but no worktree owes a row too (task
+        -- #98909).
+        --
+        -- NOBODY AIMS THE ROW. The snapshot is taken from the task's host,
+        -- repo_path and worktree columns, so PatchTaskNeverAimsAnotherHostsTeardown
+        -- lets a patch change those only from the owner of the host holding
+        -- the task.
         --
         -- Writing the row also sweeps the finished feed_requests rows
         -- (RequestRowsArePruned), as RequestFeedRefresh does.
@@ -2575,17 +2644,20 @@ invariant EveryExitSessionHadAWrapUp {
             and r.wrap_up_request.task = r.task)
 }
 
--- Task #98873: an epic holds at most one open refresh request per serving
--- host. RequestFeedRefresh writes nothing while one is open. Scoped to the
--- host because the coalescing check reads the current poll owner's rows: a
--- row left open on a host the poll has since moved away from does not block a
--- new one for the new owner (see the open question below).
-invariant OneOpenRefreshRequestPerEpic {
+-- Task #98873, narrowed by task #98909: an epic holds at most one REQUESTED
+-- refresh request per serving host. RequestFeedRefresh writes nothing while one
+-- waits to be claimed, because the owner reads the feed after that ask. A
+-- running row does not count: its owner read the feed before this ask, so the
+-- ask needs a cycle of its own. Scoped to the host because the coalescing check
+-- reads the current poll owner's rows: a row left requested on a host the poll
+-- has since moved away from does not block a new one for the new owner (see
+-- the open question below).
+invariant OneRequestedRefreshRequestPerEpic {
     for a in FeedRequests:
         for b in FeedRequests:
             a != b and a.kind = refresh and b.kind = refresh
                 and a.epic = b.epic and a.host = b.host
-                implies not (a.is_open and b.is_open)
+                implies not (a.state = requested and b.state = requested)
 }
 
 -- X1: a close row consumed no token and ran no chain, and its action is
@@ -2625,9 +2697,9 @@ open question "Window left alive (W5, W7, W8; deferred past M7, and so beyond th
 
 open question "Seeing other machines' requests (deferred past M7, and so beyond the store-split epic): a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
 
-open question "Feed teardown rows a board never serves (task #98873, found while specifying, not decided): StaleDeleteRequestsTeardownOnTheHoldingHost writes a row for ANY holding host, stamped requested_by = the ingesting caller (the feed command's setter), but a board serves only rows its own owner requested, and an open teardown row is never pruned. A feed task dispatched by another person (identity B, host B1) and then removed by the setter's ingest therefore yields a row B1's board can see but never serves and the prune never removes: open forever, and B1's worktree and window survive. RequestCloseTask guards the same situation with may_tear_down (D11: no row unless the caller owns the teardown host). Should the stale delete write a teardown row only when task.host.owner = caller(), should a board serve a teardown row naming its own host whatever requested_by says, or should such a row be pruned after some window?"
+-- Resolved (task #98909): "Feed teardown rows a board never serves". The stale delete writes a teardown row only when the holding host's owner is the caller (StaleDeleteRequestsTeardownOnTheHoldingHost), the first of the three options the question named. The gap that remains, a task another person dispatched, is a KNOWN GAP in that rule; the board warns in its log when it hits one (src/feed/cycle.rs).
 
-open question "Feed request prune emitters (task #98873): RequestRowsArePruned sweeps feed_requests, but the module today runs that sweep only from request_feed_refresh, not from request_dispatch or request_wrap_up, and the ingest that writes teardown rows prunes nothing. A person who never presses 'r' on a non-owner host therefore never prunes finished teardown rows. Should every request write sweep all three tables, or is the refresh-only sweep acceptable?"
+open question "Feed request prune emitters (task #98873): RequestRowsArePruned sweeps feed_requests, and the module runs that sweep from request_feed_refresh and from the stale delete that writes a teardown row (task #98909), but not from request_dispatch or request_wrap_up. A person who dispatches and wraps up but whose feed epics only run on one host therefore prunes finished teardown rows only when a stale delete writes the next one. Should every request write sweep all three tables, or is the sweep at the two feed writers acceptable?"
 
 open question "A refresh row left on a former poll owner (task #98873): when the poll moves (OverrideFeedOwner, or FeedCommandAuthority dropping a claim), a refresh row still requested on the old owner's host stays open, and that host's board still serves it (it re-checks only FeedCommandRunsOnSettersHost, not ownership), so for that one cycle two hosts may reconcile the epic. Should serving a refresh row also require that the serving host is still the epic's poll owner, failing the row otherwise, or should moving the poll fail the open refresh rows on the old host?"
 

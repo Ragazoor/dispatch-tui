@@ -1214,16 +1214,9 @@ async fn close_task_writes_no_row_for_a_host_the_caller_does_not_own() {
     let (caller, rows) = caller();
     let caller = caller.with_registered_host("host-teammate", "someone-else");
     let task = dispatched_task(&caller).await;
-    caller
-        .patch_task(
-            task,
-            bindings::TaskPatch {
-                host: Some("host-teammate".into()),
-                ..blank_task_patch()
-            },
-        )
-        .await
-        .unwrap();
+    // A dispatch from the teammate's board put it there; a patch cannot
+    // (`check_task_aim`), so the row is written directly.
+    caller.lock().tasks.get_mut(&task.0).unwrap().host = "host-teammate".into();
 
     assert!(close(&caller, task).await.won());
 

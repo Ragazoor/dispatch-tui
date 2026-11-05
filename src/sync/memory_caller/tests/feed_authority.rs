@@ -667,3 +667,28 @@ async fn a_visibility_flip_also_releases_claims_on_the_sub_epics() {
         .unwrap();
     assert!(claim_hosts(&caller).is_empty());
 }
+
+// -- Review Q7: a refresh request follows sight -------------------------------
+
+#[tokio::test]
+async fn a_refresh_request_on_an_epic_the_caller_cannot_see_is_refused() {
+    let mut caller = scenario();
+    {
+        let mut t = caller.lock();
+        // Epic 1 is bob's, in workspace 1; the poll belongs to bob's host and
+        // `h-me` is `me`'s. carol sees epic 1; a stranger outside workspace 1
+        // does not.
+        let p = claim(1, 1, "h-bob");
+        t.poll_owners.insert(p.id, p);
+        t.hosts.insert("h-eve".into(), host("h-eve", "eve"));
+    }
+    act_as(&mut caller, "eve");
+    let refused = caller
+        .request_feed_refresh(crate::models::EpicId(1), "h-eve".into())
+        .await
+        .unwrap();
+    match refused {
+        ReducerOutcome::Refused(why) => assert!(why.contains("does not exist"), "{why}"),
+        other => panic!("an unseen epic must read as absent, got {other:?}"),
+    }
+}

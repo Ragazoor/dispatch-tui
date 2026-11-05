@@ -347,5 +347,115 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
             rows_mem.feed_requests()[0].state,
             dispatch_tui::models::FeedRequestState::Done
         );
+
+        // -- review Q8: an ask after the first finished is a new row -------------------
+        assert!(both!(request_feed_refresh(root_id, host_b)));
+        wait_for!(rows_real.feed_requests().len() == 2);
+        assert_eq!(rows_mem.feed_requests().len(), 2);
+        let second = rows_real
+            .feed_requests()
+            .into_iter()
+            .map(|r| r.id)
+            .max()
+            .unwrap();
+        // -- review Q4: a running row is not claimed again inside the grace ------------
+        assert!(both!(claim_feed_request(second, host_a)));
+        assert!(!both!(claim_feed_request(second, host_a)));
+        // -- review Q8: an ask while the owner runs the second is a third row ----------
+        assert!(both!(request_feed_refresh(root_id, host_b)));
+        wait_for!(rows_real.feed_requests().len() == 3);
+        assert_eq!(rows_mem.feed_requests().len(), 3);
+
+        // -- review Q9: an ingest from a host that does not hold the claim -------------
+        let refused_real = real
+            .ingest_feed(root_id, vec![], false, identity.clone(), host_b.clone())
+            .await
+            .unwrap();
+        let refused_mem = mem
+            .ingest_feed(root_id, vec![], false, identity.clone(), host_b.clone())
+            .await
+            .unwrap();
+        match (refused_real, refused_mem) {
+            (ReducerOutcome::Refused(r), ReducerOutcome::Refused(m)) => {
+                assert_eq!(r, m);
+                assert!(m.contains("claimed by host-a"), "{m}");
+            }
+            other => panic!("both sides must refuse a host without the claim, got {other:?}"),
+        }
+
+        // -- review Q1: a teardown row names the agent's window --------------------
+        let (r, m) = ingest(vec![ingest_item("pr-9", &pr(9), &["team-request"])], false).await;
+        r.applied().unwrap();
+        m.applied().unwrap();
+        let task_of = |rows: &SharedRows| {
+            rows.tasks()
+                .into_iter()
+                .find(|t| t.external_id.as_deref() == Some("pr-9"))
+                .map(|t| t.id)
+        };
+        wait_for!(task_of(&rows_real).is_some());
+        let id9 = task_of(&rows_mem).unwrap();
+        assert_eq!(task_of(&rows_real), Some(id9), "task id");
+        // Hand the task to host-b (the caller's own), running; the window is the
+        // current agent's, so back-fill the agent, then give it the window.
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .patch_task(
+                    id9,
+                    bindings::TaskPatch {
+                        status: Some("running".into()),
+                        sub_status: Some("active".into()),
+                        worktree: Some("/repo/.worktrees/9-pr".into()),
+                        host: Some("host-b".into()),
+                        ..blank_task_patch()
+                    },
+                )
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        let backfilled = instance.call("backfill_agents", &[]);
+        assert!(backfilled.status.success(), "{}", describe(&backfilled));
+        mem.backfill_agents().unwrap().applied().unwrap();
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .patch_task(
+                    id9,
+                    bindings::TaskPatch {
+                        tmux_window: Some("task-9".into()),
+                        ..blank_task_patch()
+                    },
+                )
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        // The item leaves the feed on host-a's ingest: host-b owes a teardown.
+        let (r, m) = ingest(vec![], false).await;
+        r.applied().unwrap();
+        m.applied().unwrap();
+        // The row is for host-b, so host-a's subscription does not deliver it:
+        // the real side is read with SQL, the twin from its rows.
+        let t_mem = rows_mem
+            .feed_requests()
+            .into_iter()
+            .find(|r| r.kind == dispatch_tui::models::FeedRequestKind::Teardown)
+            .expect("the twin writes a teardown row");
+        assert_eq!(t_mem.host, "host-b");
+        assert_eq!(t_mem.worktree.as_deref(), Some("/repo/.worktrees/9-pr"));
+        assert_eq!(
+            t_mem.tmux_window.as_ref().map(|w| w.as_str()),
+            Some("task-9")
+        );
+        let t_real = instance
+            .sql("SELECT host, worktree, tmux_window FROM feed_requests WHERE kind = 'teardown'");
+        for expected in ["host-b", "/repo/.worktrees/9-pr", "task-9"] {
+            assert!(
+                t_real.contains(expected),
+                "the real module's teardown row must name {expected}: {t_real}"
+            );
+        }
     });
 }

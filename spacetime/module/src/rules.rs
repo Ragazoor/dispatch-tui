@@ -370,6 +370,52 @@ pub fn check_task_patch(row: &Task, patch: &TaskPatch) -> Result<(), String> {
     Ok(())
 }
 
+/// `PatchTaskNeverAimsAnotherHostsTeardown`: a patch that CHANGES a task's
+/// `host`, `repo_path` or `worktree` is refused while the host that holds the
+/// task now belongs to another person, and a patch that names a new `host` is
+/// refused when that host belongs to another person. A feed teardown snapshots
+/// exactly these three columns and asks that host to remove the worktree, so
+/// letting anyone who sees the task rewrite them would let them aim another
+/// person's host at a live worktree.
+///
+/// A host nobody registered has no owner, and no teardown request is ever
+/// written for it (the module writes one only for a host the ingesting caller
+/// owns), so it is not a target and is not judged. A value the patch repeats is
+/// no change (the editor sends the repo on every save), and the repo of a task
+/// no host holds stays editable by anyone who sees it. `owner_of` answers a
+/// host id's owning identity, `None` for an unregistered host.
+pub fn check_task_aim(
+    row: &Task,
+    patch: &TaskPatch,
+    caller: &str,
+    owner_of: impl Fn(&str) -> Option<String>,
+) -> Result<(), String> {
+    let changes = |new: &Option<String>, old: &str| new.as_deref().is_some_and(|v| v != old);
+    let host_changes = changes(&patch.host, &row.host);
+    if !(host_changes
+        || changes(&patch.repo_path, &row.repo_path)
+        || changes(&patch.worktree, &row.worktree))
+    {
+        return Ok(());
+    }
+    let someone_elses = |host: &str| owner_of(host).is_some_and(|owner| owner != caller);
+    if !row.host.is_empty() && someone_elses(&row.host) {
+        return Err(format!(
+            "task {} is held by host {}, which belongs to another person, so its host, repo and worktree cannot be changed",
+            row.id, row.host
+        ));
+    }
+    if host_changes {
+        let new = patch.host.as_deref().unwrap_or_default();
+        if someone_elses(new) {
+            return Err(format!(
+                "host {new} belongs to another person, so a task cannot be moved onto it"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The legality check [`write_task`] runs on every write: a row whose
 /// `sub_status` MOVES must hold one that is legal for its status.
 ///

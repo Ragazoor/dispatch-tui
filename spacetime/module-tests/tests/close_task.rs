@@ -229,21 +229,23 @@ fn close_task_with_a_pr_url_and_no_host_writes_a_row_on_the_argument_host() {
     assert_eq!(row.tmux_window, "");
 }
 
+/// Hand the task to bob's host, as a dispatch from bob's board would have: a
+/// patch cannot (`check_task_aim`), so the row is written directly.
+fn hand_to_their_host(store: &Store, id: i64) {
+    let row = store.task(id);
+    store.db().tasks().id().update(Task {
+        host: "their-host".into(),
+        ..row
+    });
+}
+
 /// D11: a teammate's host is not the caller's to tear down. The task still closes.
 #[test]
 fn close_task_on_a_teammates_host_closes_without_a_row() {
     let (store, _, ids) = wrappable(false, &["running"]);
     let id = ids[0];
     store.register_host_for("their-host", "bob");
-    patch(
-        &store,
-        id,
-        TaskPatch {
-            host: Some("their-host".into()),
-            ..TaskPatch::default()
-        },
-    )
-    .expect("hand the task to their host");
+    hand_to_their_host(&store, id);
 
     close(&store, id, HOST_A).expect("close_task");
     assert_eq!(store.task(id).status, "done");
@@ -537,15 +539,8 @@ fn update_task_into_done_on_a_teammates_host_writes_no_row() {
     let (store, _, ids) = wrappable(false, &["review"]);
     let id = ids[0];
     store.register_host_for("their-host", "bob");
-    patch(
-        &store,
-        id,
-        TaskPatch {
-            host: Some("their-host".into()),
-            ..pr_patch()
-        },
-    )
-    .expect("hand the task to their host");
+    patch(&store, id, pr_patch()).expect("pr patch");
+    hand_to_their_host(&store, id);
     update_to(&store, id, status_patch("done")).expect("update_task");
     assert_eq!(store.task(id).status, "done");
     assert_eq!(session_rows(&store, id, SESSION_KIND_CLOSE).len(), 0);

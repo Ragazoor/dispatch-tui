@@ -168,6 +168,17 @@ pub fn ingest_feed(
     host: String,
 ) -> Result<(), String> {
     require_acting_for(ctx, &host)?;
+    // feeds.allium: IngestRefusesAHostThatLostTheClaim. A cycle that began
+    // before its host's claim was overridden must not reconcile over the new
+    // owner's. No claim row at all is accepted: the first cycle claims first,
+    // but a seed or a CLI import has nothing to claim.
+    let claim = ctx
+        .db
+        .poll_owners()
+        .scope_id()
+        .filter(&epic_id)
+        .find(|p| p.scope == POLL_SCOPE_EPIC);
+    check_ingest_claim(claim.as_ref().map(|p| p.host.as_str()), &host, epic_id)?;
     ingest_into(
         &mut ReducerStore(ctx, host),
         epic_id,
@@ -175,6 +186,21 @@ pub fn ingest_feed(
         additive,
         &created_by,
     )
+}
+
+/// `IngestRefusesAHostThatLostTheClaim`: a host may ingest into an epic whose
+/// poll is claimed by no one, or by itself.
+pub fn check_ingest_claim(
+    claim_host: Option<&str>,
+    host: &str,
+    epic_id: i64,
+) -> Result<(), String> {
+    match claim_host {
+        Some(holder) if holder != host => Err(format!(
+            "epic {epic_id}'s poll is claimed by {holder}, so {host} may not ingest into it"
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// The body of [`ingest_feed`], over any [`IngestStore`]: pick the strategy
