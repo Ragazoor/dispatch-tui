@@ -591,7 +591,11 @@ rule ClaimsFollowSight {
     -- sight, every epic-scoped core/PollOwner on the epic or its sub-epics
     -- held by a host whose owner no longer sees that epic is released, so
     -- another host can claim the feed instead of it stalling. One helper
-    -- serves every path, and one conformance test runs each of them.
+    -- serves every path, and one conformance test (tests/memory_caller_conformance/
+    -- loss_of_sight.rs) runs each path reachable by a reducer call against the
+    -- module and the twin with the same steps. The managed-root private flip needs a
+    -- row written outside any reducer, so the module's and the twin's own tests
+    -- keep it.
     --
     -- Task #98911 (M10): the same holds for TASK-scoped claims. A task claim
     -- is made under sight of the task (ClaimPollOwner), which is sight of

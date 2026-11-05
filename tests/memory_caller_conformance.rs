@@ -524,6 +524,8 @@ mod feeds;
 mod identity_stamping;
 #[path = "memory_caller_conformance/learning_placement.rs"]
 mod learning_placement;
+#[path = "memory_caller_conformance/loss_of_sight.rs"]
+mod loss_of_sight;
 #[path = "memory_caller_conformance/move_epic.rs"]
 mod move_epic;
 #[path = "memory_caller_conformance/move_paths.rs"]

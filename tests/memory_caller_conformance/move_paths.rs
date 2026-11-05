@@ -59,18 +59,137 @@ const COVERED_ELSEWHERE: &[&str] = &[
 ];
 
 /// Both stores plus the helpers every move path needs.
-struct Pair<'a> {
-    real: &'a SdkReducerCaller,
-    mem: &'a MemoryReducerCaller,
-    rows_real: &'a Arc<SharedRows>,
-    rows_mem: &'a Arc<SharedRows>,
-    identity: String,
+pub(super) struct Pair<'a> {
+    pub(super) real: &'a SdkReducerCaller,
+    pub(super) mem: &'a MemoryReducerCaller,
+    pub(super) rows_real: &'a Arc<SharedRows>,
+    pub(super) rows_mem: &'a Arc<SharedRows>,
+    pub(super) identity: String,
     /// A second user, a member of the same workspace: owner of the private
     /// epic the first user must not be able to move a task into.
-    other_real: &'a SdkReducerCaller,
-    other_mem: &'a MemoryReducerCaller,
+    pub(super) other_real: &'a SdkReducerCaller,
+    pub(super) other_mem: &'a MemoryReducerCaller,
+    pub(super) other_identity: String,
     /// The highest id given to an epic the first caller cannot see.
     hidden_max: std::cell::Cell<i64>,
+}
+
+/// A published module, two connected users (the first a super-admin, the
+/// second a member of the default workspace) and the twin of each, owned so a
+/// test can borrow a [`Pair`] from it.
+pub(super) struct World {
+    _instance: Instance,
+    real: SdkReducerCaller,
+    mem: MemoryReducerCaller,
+    rows_real: Arc<SharedRows>,
+    rows_mem: Arc<SharedRows>,
+    identity: String,
+    other_real: SdkReducerCaller,
+    other_mem: MemoryReducerCaller,
+    other_identity: String,
+}
+
+impl World {
+    /// Publish the module into `instance` and connect both users on both
+    /// stores.
+    pub(super) async fn start(instance: Instance) -> World {
+        let rows_real = Arc::new(SharedRows::new());
+        let rows_mem = Arc::new(SharedRows::new());
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let connector = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows_real.clone(),
+        ));
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
+            .with_sender(accepted.identity.clone())
+            .with_workspace_rules();
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                "host-a",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        join_default_workspace(&real, &mem, &accepted.identity).await;
+        // The second user.
+        let rows_other = Arc::new(SharedRows::new());
+        let connector2 = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows_other.clone(),
+        ));
+        let accepted2 = connector2
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        connector2
+            .subscribe(&SubscriptionRequest::new(
+                accepted2.identity.clone(),
+                "host-b",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        let other_real = SdkReducerCaller::new(connector2, Arc::new(SettledIdentity::default()));
+        let other_mem = mem.as_user(accepted2.identity.clone());
+        // The second user's profile arrives with their subscription; retry
+        // until the store knows the person.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let out = real
+                    .add_member(
+                        DEFAULT_WORKSPACE,
+                        accepted2.identity.clone(),
+                        "member".to_string(),
+                    )
+                    .await;
+                match out {
+                    Ok(ReducerOutcome::Applied(_)) => break,
+                    _ => tokio::task::yield_now().await,
+                }
+            }
+        })
+        .await
+        .expect("the store knows the second user");
+        other_mem.register_user_profile();
+        mem.add_member(
+            DEFAULT_WORKSPACE,
+            accepted2.identity.clone(),
+            "member".to_string(),
+        )
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+        World {
+            _instance: instance,
+            real,
+            mem,
+            rows_real,
+            rows_mem,
+            identity: accepted.identity,
+            other_real,
+            other_mem,
+            other_identity: accepted2.identity,
+        }
+    }
+
+    pub(super) fn pair(&self) -> Pair<'_> {
+        Pair {
+            other_real: &self.other_real,
+            other_mem: &self.other_mem,
+            other_identity: self.other_identity.clone(),
+            hidden_max: std::cell::Cell::new(0),
+            real: &self.real,
+            mem: &self.mem,
+            rows_real: &self.rows_real,
+            rows_mem: &self.rows_mem,
+            identity: self.identity.clone(),
+        }
+    }
 }
 
 /// Run one call, written once with `$c` as the caller, on both sides, and
@@ -89,7 +208,7 @@ macro_rules! both_apply {
 }
 
 impl Pair<'_> {
-    async fn wait(&self, cond: impl Fn(&SharedRows) -> bool) {
+    pub(super) async fn wait(&self, cond: impl Fn(&SharedRows) -> bool) {
         let mut woken = self.rows_real.changed();
         tokio::time::timeout(Duration::from_secs(10), async {
             while !cond(self.rows_real) {
@@ -101,7 +220,7 @@ impl Pair<'_> {
     }
 
     /// An epic another user holds privately: unseen to this caller.
-    async fn private_epic_of_another(&self) -> i64 {
+    pub(super) async fn private_epic_of_another(&self) -> i64 {
         let row = bindings::Epic {
             visibility: "private".into(),
             ..blank_epic()
@@ -128,7 +247,7 @@ impl Pair<'_> {
         id
     }
 
-    async fn epic(&self, grouped: bool) -> i64 {
+    pub(super) async fn epic(&self, grouped: bool) -> i64 {
         let row = bindings::Epic {
             group_by_repo: grouped,
             created_by: self.identity.clone(),
@@ -299,90 +418,10 @@ fn every_task_move_path_meets_the_same_rules_on_both_stores() {
     let published = instance.publish(&module_path(), None);
     assert!(published.status.success(), "{}", describe(&published));
 
-    let rows_real = Arc::new(SharedRows::new());
-    let rows_mem = Arc::new(SharedRows::new());
-    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     runtime.block_on(async move {
-        let connector = Arc::new(SpacetimeSdkConnector::new(
-            instance.database(),
-            rows_real.clone(),
-        ));
-        let accepted = connector
-            .connect(&instance.host(), None)
-            .await
-            .unwrap_or_else(|e| panic!("connect: {e}"));
-        let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
-            .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
-        connector
-            .subscribe(&SubscriptionRequest::new(
-                accepted.identity.clone(),
-                "host-a",
-            ))
-            .await
-            .unwrap_or_else(|e| panic!("subscribe: {e}"));
-        let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
-        // The second user.
-        let rows_other = Arc::new(SharedRows::new());
-        let connector2 = Arc::new(SpacetimeSdkConnector::new(
-            instance.database(),
-            rows_other.clone(),
-        ));
-        let accepted2 = connector2
-            .connect(&instance.host(), None)
-            .await
-            .unwrap_or_else(|e| panic!("connect: {e}"));
-        connector2
-            .subscribe(&SubscriptionRequest::new(
-                accepted2.identity.clone(),
-                "host-b",
-            ))
-            .await
-            .unwrap_or_else(|e| panic!("subscribe: {e}"));
-        let other_real = SdkReducerCaller::new(connector2, Arc::new(SettledIdentity::default()));
-        let other_mem = mem.as_user(accepted2.identity.clone());
-        // The second user's profile arrives with their subscription; retry
-        // until the store knows the person.
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let out = real
-                    .add_member(
-                        DEFAULT_WORKSPACE,
-                        accepted2.identity.clone(),
-                        "member".to_string(),
-                    )
-                    .await;
-                match out {
-                    Ok(ReducerOutcome::Applied(_)) => break,
-                    _ => tokio::task::yield_now().await,
-                }
-            }
-        })
-        .await
-        .expect("the store knows the second user");
-        other_mem.register_user_profile();
-        mem.add_member(
-            DEFAULT_WORKSPACE,
-            accepted2.identity.clone(),
-            "member".to_string(),
-        )
-        .await
-        .unwrap()
-        .applied()
-        .unwrap();
-        let pair = Pair {
-            other_real: &other_real,
-            other_mem: &other_mem,
-            hidden_max: std::cell::Cell::new(0),
-            real: &real,
-            mem: &mem,
-            rows_real: &rows_real,
-            rows_mem: &rows_mem,
-            identity: accepted.identity.clone(),
-        };
+        let world = World::start(instance).await;
+        let pair = world.pair();
         for (path, _) in MOVE_PATHS {
             run_path(&pair, *path).await;
         }
