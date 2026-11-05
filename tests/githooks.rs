@@ -16,6 +16,76 @@ fn pre_push_path() -> PathBuf {
         .join("pre-push")
 }
 
+fn gates_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("gates.sh")
+}
+
+fn script(name: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join(name);
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+}
+
+/// The hook and the verify command must run one shared gate, so a rebase
+/// wrap-up (which never pushes) is held to what the hook holds a push to.
+#[test]
+fn hook_and_verify_share_one_gate_script() {
+    let hook = std::fs::read_to_string(pre_push_path()).unwrap();
+    assert!(
+        hook.contains("scripts/gates.sh"),
+        "pre-push hook does not call scripts/gates.sh; body:\n{hook}"
+    );
+    let verify = script("verify.sh");
+    assert!(
+        verify.contains("scripts/gates.sh"),
+        "verify.sh does not call scripts/gates.sh; body:\n{verify}"
+    );
+    assert!(
+        verify.contains("cargo test --no-fail-fast"),
+        "verify.sh does not run the suite; body:\n{verify}"
+    );
+}
+
+/// Verify checks; the hook may reformat. `cargo fmt` without `--check` in the
+/// verify path would rewrite the tree during a wrap-up instead of failing.
+#[test]
+fn gates_script_checks_formatting_unless_asked_to_fix() {
+    let gates = script("gates.sh");
+    assert!(
+        gates.contains("cargo fmt --check"),
+        "gates.sh has no check-mode `cargo fmt --check`; body:\n{gates}"
+    );
+    let hook = std::fs::read_to_string(pre_push_path()).unwrap();
+    assert!(
+        hook.contains("--fix"),
+        "pre-push hook must ask gates.sh to fix formatting; body:\n{hook}"
+    );
+    assert!(
+        !script("verify.sh").contains("--fix"),
+        "verify.sh must never reformat the tree"
+    );
+}
+
+/// Every argument-less `scripts/check-*.sh` must be in the shared gate.
+/// (`check-commit-msg.sh` needs a file, so it is exercised by its self-test.)
+#[test]
+fn gates_script_runs_every_argumentless_check() {
+    let gates = script("gates.sh");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+        if name.starts_with("check-") && name.ends_with(".sh") && name != "check-commit-msg.sh" {
+            assert!(
+                gates.contains(&format!("scripts/{name}")),
+                "scripts/{name} is not run by scripts/gates.sh"
+            );
+        }
+    }
+}
+
 #[test]
 fn pre_push_hook_is_tracked() {
     let path = pre_push_path();
@@ -40,7 +110,8 @@ fn pre_push_hook_is_executable() {
 
 #[test]
 fn pre_push_hook_runs_full_check_sequence() {
-    let body = std::fs::read_to_string(pre_push_path()).unwrap();
+    // The sequence lives in `scripts/gates.sh`, shared with `scripts/verify.sh`.
+    let body = std::fs::read_to_string(gates_path()).unwrap();
     for needle in [
         "scripts/check-toolchain.sh",
         "scripts/test-check-toolchain.sh",

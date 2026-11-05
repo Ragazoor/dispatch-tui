@@ -43,7 +43,8 @@ fn gate_scripts(body: &str) -> Vec<String> {
 
 #[test]
 fn ci_workflow_mirrors_every_pre_push_gate_script() {
-    let hook = repo_file(".githooks/pre-push");
+    // The hook delegates to `scripts/gates.sh`; that file holds the sequence.
+    let hook = repo_file("scripts/gates.sh");
     let ci = repo_file(".github/workflows/ci.yml");
 
     // A floor on the extractor itself: if the scan silently matched nothing,
@@ -58,7 +59,7 @@ fn ci_workflow_mirrors_every_pre_push_gate_script() {
     for script in &scripts {
         assert!(
             ci.contains(script.as_str()),
-            "`{script}` runs in .githooks/pre-push but not in .github/workflows/ci.yml — \
+            "`{script}` runs in scripts/gates.sh (the pre-push hook) but not in .github/workflows/ci.yml — \
              a hook-only gate is inert for any clone that has not set core.hooksPath"
         );
     }
