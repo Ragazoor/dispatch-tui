@@ -451,6 +451,55 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
+    /// Mirrors the module's `set_managed_feed_settings`: judges every write
+    /// first, then applies them all.
+    pub(super) fn apply_set_managed_feed_settings(
+        &self,
+        host: String,
+        writes: Vec<bindings::SettingWrite>,
+    ) -> Result<ReducerOutcome> {
+        if host.trim().is_empty() {
+            return Ok(ReducerOutcome::Refused(
+                "a host id must not be empty".into(),
+            ));
+        }
+        let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        let writes: Vec<module::SettingWrite> = writes
+            .into_iter()
+            .map(|w| module::SettingWrite {
+                key: w.key,
+                value: w.value,
+            })
+            .collect();
+        if let Err(why) = module::check_managed_feed_writes(&writes) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        for write in writes {
+            let id = module::host_scoped_id(&host, &write.key);
+            match write.value {
+                Some(value) => {
+                    let row = module::Setting {
+                        id: id.clone(),
+                        host: host.clone(),
+                        key: write.key,
+                        value,
+                    };
+                    tables.settings.insert(id, row.clone());
+                    self.rows.upsert_setting(&row.into());
+                }
+                None => {
+                    if tables.settings.remove(&id).is_some() {
+                        self.rows.remove_setting(id);
+                    }
+                }
+            }
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
     /// Mirrors the module's `own_usage_summary` procedure: this caller's
     /// events, grouped.
     pub(super) fn apply_own_usage_summary(

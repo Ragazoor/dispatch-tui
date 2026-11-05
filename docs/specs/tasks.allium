@@ -1120,7 +1120,10 @@ rule MoveTaskToEpic {
     when: MoveTaskToEpic(task, new_epic?)
 
     -- When a target epic is chosen it must exist. A null new_epic
-    -- detaches the task into a standalone (board-level) task.
+    -- detaches the task into a standalone (board-level) task on the
+    -- caller's board, which the store allows only to the task's creator, an
+    -- admin of its workspace or a super-admin (workspaces.allium:
+    -- TaskMovesStayInTheWorkspace); anyone else is refused.
     requires:
         if new_epic != null: core/Epic.exists(new_epic)
 

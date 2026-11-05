@@ -78,6 +78,38 @@ impl super::super::SettingsStore for Store {
         )
         .await
     }
+
+    async fn set_managed_feed_settings(
+        &self,
+        patch: super::super::ManagedFeedSettingsPatch,
+    ) -> Result<()> {
+        let mut writes = Vec::new();
+        let mut add = |key: &str, value: Option<String>| {
+            writes.push(crate::spacetime::bindings::SettingWrite {
+                key: key.to_string(),
+                value,
+            });
+        };
+        if let Some(v) = patch.reviews_command {
+            add(REVIEWS_FEED_COMMAND_KEY, v);
+        }
+        if let Some(v) = patch.reviews_interval_secs {
+            add(REVIEWS_FEED_INTERVAL_SECS_KEY, v.map(|n| n.to_string()));
+        }
+        if let Some(v) = patch.cve_command {
+            add(CVE_FEED_COMMAND_KEY, v);
+        }
+        if let Some(v) = patch.cve_interval_secs {
+            add(CVE_FEED_INTERVAL_SECS_KEY, v.map(|n| n.to_string()));
+        }
+        if writes.is_empty() {
+            return Ok(());
+        }
+        self.caller
+            .set_managed_feed_settings(self.host.clone(), writes)
+            .await?
+            .applied()
+    }
 }
 
 // ---------------------------------------------------------------------------

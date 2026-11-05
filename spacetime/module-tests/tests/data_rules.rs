@@ -124,13 +124,7 @@ fn repo_rows(store: &Store, path: &str) -> Vec<(String, String, String)> {
 fn save(store: &Store, path: &str, host: &str, github: &str) {
     store
         .call("u", |ctx| {
-            save_repo_path(
-                ctx,
-                path.into(),
-                "t".into(),
-                host.into(),
-                github.into(),
-            )
+            save_repo_path(ctx, path.into(), "t".into(), host.into(), github.into())
         })
         .expect("save");
 }
@@ -142,7 +136,10 @@ fn two_hosts_saving_one_path_each_own_a_row() {
     let store = Store::new();
     save(&store, "/repo", "host-a", "org/api");
     save(&store, "/repo", "host-b", "org/api");
-    let hosts: Vec<String> = repo_rows(&store, "/repo").into_iter().map(|r| r.0).collect();
+    let hosts: Vec<String> = repo_rows(&store, "/repo")
+        .into_iter()
+        .map(|r| r.0)
+        .collect();
     assert_eq!(hosts, vec!["host-a", "host-b"]);
 }
 

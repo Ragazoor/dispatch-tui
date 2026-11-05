@@ -286,6 +286,13 @@ pub trait ReducerCaller: Send + Sync {
         value: String,
     ) -> Result<ReducerOutcome>;
     async fn clear_setting(&self, host: String, key: String) -> Result<ReducerOutcome>;
+    /// The managed-feed settings as one change: each write sets its key, or
+    /// clears it when its value is `None`. All land or none does.
+    async fn set_managed_feed_settings(
+        &self,
+        host: String,
+        writes: Vec<bindings::SettingWrite>,
+    ) -> Result<ReducerOutcome>;
 
     // -- Learnings and retrievals (Phase 10, task #4914) ----------------------
     //

@@ -98,6 +98,33 @@ rule SaveSetting {
         -- caller.
 }
 
+rule SetManagedFeedSettings {
+    when: SetManagedFeedSettings(writes)    -- each write sets a key or, with no value, clears it
+
+    -- Task #98916 (N5). The four managed-feed settings (a command and an
+    -- interval for each of the reviews and CVE feeds) are written as ONE
+    -- change, because a command and its interval are coupled: a failure
+    -- between two SaveSetting calls would leave a feed with a command and the
+    -- wrong cadence.
+    requires: writes.all(w => w.key in managed_feed_setting_keys)
+    requires: writes.map(w => w.key).count() = writes.map(w => w.key).distinct().count()
+    requires: writes.all(w => w.value = null or w.key not in managed_feed_interval_keys or w.value.is_whole_number)
+
+    ensures:
+        for write in writes:
+            if write.value != null:
+                core/Setting.created_or_updated(
+                    host: core/local_host(), key: write.key, value: write.value)
+            else:
+                not exists core/Setting{host: core/local_host(), key: write.key}
+
+    @guidance
+        -- A refused write leaves every setting as it was: all of the writes
+        -- are judged before any lands. The board checks the feed-interval
+        -- floor (epics.allium: SetManagedFeedConfig) before it calls. Module:
+        -- set_managed_feed_settings; twin: apply_set_managed_feed_settings.
+}
+
 rule ClearSetting {
     when: ClearSetting(key)
 

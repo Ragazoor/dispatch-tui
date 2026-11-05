@@ -648,12 +648,8 @@ rule ReParentingKeepsTheHolder {
     -- holder's, and epic-less it is private to its owner (D2).
     let task_holder_before =
         if task.epic != null: task.epic.private_holder else: task.owner
-    let task_holder_after =
-        if destination != null: destination.private_holder else: owner
-    let task_workspace =
-        if destination != null: destination.workspace
-        else if task.epic != null: task.epic.workspace
-        else: null
+    let task_holder_after = destination.private_holder
+    let task_workspace = destination.workspace
 
     requires:
         epic_holder_after = epic.private_holder
@@ -661,9 +657,12 @@ rule ReParentingKeepsTheHolder {
         or epic.workspace.is_admin(caller())
         or is_super_admin(caller())
     requires:
-        task_holder_after = task_holder_before
+        -- A detach (destination null) is judged by TaskMovesStayInTheWorkspace
+        -- alone: its authority is the task's creator, not the holder.
+        destination = null
+        or task_holder_after = task_holder_before
         or caller() = task_holder_before
-        or (task_workspace != null and task_workspace.is_admin(caller()))
+        or task_workspace.is_admin(caller())
         or is_super_admin(caller())
 
     ensures: MoveAllowed()
@@ -683,13 +682,13 @@ rule ReParentingKeepsTheHolder {
         -- with it. Refusal: "only the creator or an admin may move an epic
         -- into or out of a private epic". Module: check_epic_move,
         -- epic_move_changes_holder (shared with MemoryReducerCaller).
-        -- A task has no creator, so the authority is the person it is
-        -- private to now (their own work is theirs to expose or keep), an
+        -- The authority is the person the task is private to now (their own
+        -- work is theirs to expose or keep), an
         -- admin of the workspace it moves into (or out of, for a move onto
         -- a user board), or a super-admin. The destination is the epic the
         -- task lands in after repo-group routing (route_target), which
         -- shares its grouped root's holder. A move onto a user board, or
-        -- into another workspace's epic, is refused first
+        -- into another workspace's epic, is judged first
         -- (TaskMovesStayInTheWorkspace), so the authority above only
         -- ever judges a move inside one workspace, or an epic-less task
         -- joining an epic. Refusal: "task N: only the person it is private
@@ -783,21 +782,36 @@ rule TaskMovesStayInTheWorkspace {
     requires:
         task.epic = null
         or (destination != null and destination.workspace = task.epic.workspace)
+        or (destination = null and (
+                caller() = task.created_by
+                or task.epic.workspace.is_admin(caller())
+                or is_super_admin(caller())))
 
     @guidance
-        -- A task in an epic belongs to that epic's workspace and never
-        -- leaves it: not onto a user board (that would hide it from the
-        -- team that was working on it, task #98852) and not into another
-        -- workspace's epic. Nobody is exempt but the store itself (the
-        -- operator). A task on a user board has no workspace, so it may
-        -- join any epic the caller sees (TaskEntersAnEpicTheCallerCanSee).
+        -- A task in an epic belongs to that epic's workspace and does not
+        -- leave it for another workspace's epic. It leaves for a user board
+        -- (a DETACH) only by the person who created it, an admin of its
+        -- workspace or a super-admin, because that hides it from the team
+        -- that was working on it (task #98852; the detach authority was
+        -- confirmed with the user, task #98916, M11). The task lands on the
+        -- CALLER's board. A teammate who is none of those is refused: "task
+        -- N: only its creator or an admin may detach it from its epic". The
+        -- detach is judged by this rule alone, not also by
+        -- ReParentingKeepsTheHolder, whose holder arithmetic would ask a
+        -- creator in a public epic for admin authority on top. The store
+        -- itself (the operator) is exempt. A task on a user board has no
+        -- workspace, so it may join any epic the caller sees
+        -- (TaskEntersAnEpicTheCallerCanSee).
         -- Only the store itself can still move a task across workspaces; it
         -- drops the task's package links and re-homes its task-scoped
         -- learnings (LinkedItemsShareThePackagesWorkspace, D8), in
         -- move_task_row.
-        -- Refusal: "task N: a task stays in its workspace; it cannot move
-        -- onto a board or into another workspace". Module: check_task_move,
-        -- task_move_leaves_workspace (shared with MemoryReducerCaller).
+        -- Refusals: "task N: a task stays in its workspace; it cannot move
+        -- into another workspace", and for a detach by someone with no
+        -- authority "task N: only its creator or an admin may detach it from
+        -- its epic". Module: check_task_move, task_move_leaves_workspace,
+        -- task_move_is_detach, task_detach_permitted (shared with
+        -- MemoryReducerCaller).
 }
 
 -- Work packages ----------------------------------------------

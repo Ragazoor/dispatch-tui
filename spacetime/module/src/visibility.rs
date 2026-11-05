@@ -354,9 +354,10 @@ pub fn task_move_permitted(r: &impl StoreReads, task: &Task, epic_id: i64, calle
 }
 
 /// `TaskMovesStayInTheWorkspace`: a task in an epic moves only to another epic
-/// of the same workspace. A move onto a board (`epic_id == 0`) leaves it, and
-/// so does a move into an epic of another workspace. An epic-less task joins
-/// any epic its caller sees. Shared with `MemoryReducerCaller`.
+/// of the same workspace, or onto a board as a detach (see
+/// [`task_detach_permitted`]). A move into an epic of another workspace leaves
+/// it. An epic-less task joins any epic its caller sees. Shared with
+/// `MemoryReducerCaller`.
 pub fn task_move_leaves_workspace(r: &impl StoreReads, task: &Task, epic_id: i64) -> bool {
     if task.epic_id == 0 {
         return false;
@@ -366,17 +367,44 @@ pub fn task_move_leaves_workspace(r: &impl StoreReads, task: &Task, epic_id: i64
     };
     match r.epic(epic_id) {
         Some(destination) => destination.workspace_id != source.workspace_id,
-        None => epic_id == 0,
+        None => false,
     }
+}
+
+/// Whether a move is a detach: a task in an epic onto a user board.
+pub fn task_move_is_detach(task: &Task, epic_id: i64) -> bool {
+    task.epic_id != 0 && epic_id == 0
+}
+
+/// `TaskMovesStayInTheWorkspace`, for a detach: the task's creator, an admin of
+/// its workspace or a super-admin. Shared with `MemoryReducerCaller`.
+pub fn task_detach_permitted(r: &impl StoreReads, task: &Task, caller: &str) -> bool {
+    (!task.created_by.is_empty() && task.created_by == caller)
+        || r.epic(task.epic_id)
+            .is_some_and(|e| workspace_has_admin(r, e.workspace_id, caller))
+        || is_super_admin(r, caller)
+}
+
+/// The refusal for a detach by someone with no authority over it.
+pub fn task_detach_refusal(task_id: i64) -> String {
+    format!("task {task_id}: only its creator or an admin may detach it from its epic")
 }
 
 pub fn check_task_move(ctx: &ReducerContext, task: &Task, epic_id: i64) -> Result<(), String> {
     if is_operator(ctx) {
         return Ok(());
     }
+    // A detach is judged by its own authority, not the holder arithmetic below.
+    if task_move_is_detach(task, epic_id) {
+        return if task_detach_permitted(ctx, task, &caller_identity(ctx)) {
+            Ok(())
+        } else {
+            Err(task_detach_refusal(task.id))
+        };
+    }
     if task_move_leaves_workspace(ctx, task, epic_id) {
         return Err(format!(
-            "task {}: a task stays in its workspace; it cannot move onto a board or into another workspace",
+            "task {}: a task stays in its workspace; it cannot move into another workspace",
             task.id
         ));
     }

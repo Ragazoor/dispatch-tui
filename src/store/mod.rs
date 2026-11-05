@@ -753,6 +753,23 @@ pub trait SettingsStore: Send + Sync {
     async fn set_cve_feed_command(&self, value: Option<&str>) -> Result<()>;
     async fn get_cve_feed_interval_secs(&self) -> Result<Option<i64>>;
     async fn set_cve_feed_interval_secs(&self, value: Option<i64>) -> Result<()>;
+    /// The provided managed-feed settings as ONE change: all land or none does
+    /// (the module's `set_managed_feed_settings`). Absent fields stay as they
+    /// are.
+    async fn set_managed_feed_settings(&self, patch: ManagedFeedSettingsPatch) -> Result<()>;
+}
+
+/// Partial update for the four managed-feed settings: absent (`None`) leaves
+/// a field unchanged, `Some(None)` clears it, `Some(Some(v))` sets it. A named
+/// struct (rather than four positional double-Option params) so the two
+/// `(command, interval)` pairs can't be transposed at a call site — mirrors
+/// the read-side `ManagedFeedSettings` (service).
+#[derive(Debug, Clone, Default)]
+pub struct ManagedFeedSettingsPatch {
+    pub reviews_command: Option<Option<String>>,
+    pub reviews_interval_secs: Option<Option<i64>>,
+    pub cve_command: Option<Option<String>>,
+    pub cve_interval_secs: Option<Option<i64>>,
 }
 
 // ---------------------------------------------------------------------------

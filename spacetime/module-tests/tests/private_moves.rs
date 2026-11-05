@@ -177,15 +177,18 @@ fn a_task_leaves_your_private_epic_for_a_public_one() {
 }
 
 #[test]
-fn a_task_cannot_leave_its_workspace_for_a_board() {
+fn only_a_tasks_creator_or_an_admin_may_detach_it_onto_a_board() {
     let (store, a, _) = world();
     let shared = make_epic(&store, "bob", a, 0, "public");
     let task = store.create("bob", epic_task("t", shared, "backlog"));
-    for who in ["alice", "bob"] {
-        let why = move_task(&store, who, task, 0).unwrap_err();
-        assert!(why.contains("workspace"), "{why}");
-    }
+    let why = move_task(&store, "alice", task, 0).unwrap_err();
+    assert!(
+        why.contains("only its creator or an admin may detach"),
+        "{why}"
+    );
     assert_eq!(store.task(task).epic_id, shared);
+    move_task(&store, "bob", task, 0).expect("the creator detaches");
+    assert_eq!(store.task(task).epic_id, 0);
 }
 
 #[test]
@@ -474,4 +477,32 @@ fn the_hatch_deletes_a_private_epic_once_its_creator_has_left() {
         })
         .expect("hatch");
     assert!(store.db().epics().id().find(epic).is_none());
+}
+
+#[test]
+fn a_workspace_admin_may_detach_a_task_they_did_not_create() {
+    let (store, a, _) = world();
+    let membership = store
+        .db()
+        .memberships()
+        .iter()
+        .find(|m| m.workspace_id == a && m.user == identity_of("alice"))
+        .expect("membership")
+        .id;
+    store
+        .call("root", |ctx| {
+            set_member_role(ctx, membership, "admin".into())
+        })
+        .expect("promote");
+    let shared = make_epic(&store, "bob", a, 0, "public");
+    let task = store.create("bob", epic_task("t", shared, "backlog"));
+
+    store
+        .call("bob", |ctx| set_task_epic(ctx, task, 0, "bob".into()))
+        .expect("the creator detaches");
+    let task = store.create("bob", epic_task("t2", shared, "backlog"));
+    store
+        .call("alice", |ctx| set_task_epic(ctx, task, 0, "alice".into()))
+        .expect("an admin detaches");
+    assert_eq!(store.task(task).owner, identity_of("alice"));
 }

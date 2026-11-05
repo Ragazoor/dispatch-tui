@@ -11,7 +11,9 @@ fn sibling_verify_command(ctx: &ReducerContext, path: &str, github_path: &str) -
     ctx.db
         .repo_paths()
         .iter()
-        .filter(|r| !r.verify_command.is_empty() && is_sibling(&r.path, &r.github_path, path, github_path))
+        .filter(|r| {
+            !r.verify_command.is_empty() && is_sibling(&r.path, &r.github_path, path, github_path)
+        })
         .map(|r| r.verify_command)
         .next()
         .unwrap_or_default()
@@ -260,6 +262,82 @@ pub fn clear_setting(ctx: &ReducerContext, host: String, key: String) -> Result<
     require_acting_for(ctx, &host)?;
     let id = host_scoped_id(&host, &key);
     ctx.db.settings().id().delete(&id);
+    Ok(())
+}
+
+/// The four managed-feed setting keys (`epics.allium: SetManagedFeedConfig`).
+/// Must agree with the board's `store/queries/settings.rs` constants.
+pub const MANAGED_FEED_SETTING_KEYS: [&str; 4] = [
+    "reviews_feed_command",
+    "reviews_feed_interval_secs",
+    "cve_feed_command",
+    "cve_feed_interval_secs",
+];
+
+/// One write of [`set_managed_feed_settings`]: set `key` to `value`, or clear it
+/// when `value` is `None`.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug)]
+pub struct SettingWrite {
+    pub key: String,
+    pub value: Option<String>,
+}
+
+/// Judge every write of [`set_managed_feed_settings`] before any is applied: a
+/// managed-feed key, named once, and an interval that is a whole number.
+pub fn check_managed_feed_writes(writes: &[SettingWrite]) -> Result<(), String> {
+    let mut seen: Vec<&str> = Vec::new();
+    for write in writes {
+        if !MANAGED_FEED_SETTING_KEYS.contains(&write.key.as_str()) {
+            return Err(format!("{:?} is not a managed-feed setting", write.key));
+        }
+        if seen.contains(&write.key.as_str()) {
+            return Err(format!("{:?} is named twice", write.key));
+        }
+        seen.push(&write.key);
+        if write.key.ends_with("_interval_secs") {
+            if let Some(v) = &write.value {
+                if v.parse::<i64>().is_err() {
+                    return Err(format!("{:?} is not a whole number: {v:?}", write.key));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Write the managed-feed settings as ONE change (task #98916, N5): the command
+/// and interval of a feed are coupled, so a failure between two `save_setting`
+/// calls must not leave one without the other. Every write is judged first
+/// ([`check_managed_feed_writes`]); none lands unless all pass.
+#[spacetimedb::reducer]
+pub fn set_managed_feed_settings(
+    ctx: &ReducerContext,
+    host: String,
+    writes: Vec<SettingWrite>,
+) -> Result<(), String> {
+    if host.trim().is_empty() {
+        return Err("a host id must not be empty".to_string());
+    }
+    require_acting_for(ctx, &host)?;
+    check_managed_feed_writes(&writes)?;
+    for SettingWrite { key, value } in writes {
+        let id = host_scoped_id(&host, &key);
+        match value {
+            Some(value) => match ctx.db.settings().id().find(&id) {
+                Some(existing) => ctx.db.settings().id().update(Setting { value, ..existing }),
+                None => ctx.db.settings().insert(Setting {
+                    id,
+                    host: host.clone(),
+                    key,
+                    value,
+                }),
+            },
+            None => {
+                ctx.db.settings().id().delete(&id);
+                continue;
+            }
+        };
+    }
     Ok(())
 }
 

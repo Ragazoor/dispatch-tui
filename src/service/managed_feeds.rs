@@ -43,18 +43,7 @@ pub async fn read_managed_feed_settings(
     })
 }
 
-/// Partial update for the four managed-feed settings: absent (`None`) leaves
-/// a field unchanged, `Some(None)` clears it, `Some(Some(v))` sets it. A named
-/// struct (rather than four positional double-Option params) so the two
-/// `(command, interval)` pairs can't be transposed at a call site — mirrors
-/// the read-side [`ManagedFeedSettings`].
-#[derive(Debug, Clone, Default)]
-pub struct ManagedFeedSettingsPatch {
-    pub reviews_command: Option<Option<String>>,
-    pub reviews_interval_secs: Option<Option<i64>>,
-    pub cve_command: Option<Option<String>>,
-    pub cve_interval_secs: Option<Option<i64>>,
-}
+pub use crate::store::ManagedFeedSettingsPatch;
 
 /// Persist only the provided managed-feed settings fields, leaving any absent
 /// field unchanged. Mirrors [`read_managed_feed_settings`] for the write side.
@@ -75,18 +64,10 @@ pub async fn write_managed_feed_settings(
     )?;
     crate::service::validate_feed_interval("cve_interval_secs", patch.cve_interval_secs.flatten())?;
 
-    if let Some(v) = patch.reviews_command {
-        db.set_reviews_feed_command(v.as_deref()).await?;
-    }
-    if let Some(v) = patch.reviews_interval_secs {
-        db.set_reviews_feed_interval_secs(v).await?;
-    }
-    if let Some(v) = patch.cve_command {
-        db.set_cve_feed_command(v.as_deref()).await?;
-    }
-    if let Some(v) = patch.cve_interval_secs {
-        db.set_cve_feed_interval_secs(v).await?;
-    }
+    // ONE store write: the settings land together or not at all (the command
+    // and interval of a feed are coupled), by the module's
+    // `set_managed_feed_settings` reducer.
+    db.set_managed_feed_settings(patch).await?;
     Ok(())
 }
 

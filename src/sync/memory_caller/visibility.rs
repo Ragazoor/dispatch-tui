@@ -404,9 +404,17 @@ impl Tables {
         if !scope.on {
             return Ok(());
         }
+        // A detach is judged by its own authority, as the module does.
+        if module::task_move_is_detach(task, epic_id) {
+            return if module::task_detach_permitted(self, task, &scope.who) {
+                Ok(())
+            } else {
+                Err(module::task_detach_refusal(task.id))
+            };
+        }
         if module::task_move_leaves_workspace(self, task, epic_id) {
             return Err(format!(
-                "task {}: a task stays in its workspace; it cannot move onto a board or into another workspace",
+                "task {}: a task stays in its workspace; it cannot move into another workspace",
                 task.id
             ));
         }

@@ -114,6 +114,7 @@ enum Sent {
     FailInterruptedSessionRequests(String),
     SaveSetting(String, String, String),
     ClearSetting(String, String),
+    SetManagedFeedSettings(String, Vec<(String, Option<String>)>),
     CreateLearning(Box<bindings::Learning>),
     PatchLearning(i64, Box<bindings::LearningPatch>),
     DeleteLearning(i64),
@@ -530,6 +531,15 @@ impl ReducerCaller for RecordingCaller {
 
     async fn clear_setting(&self, host: String, key: String) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::ClearSetting(host, key))
+    }
+
+    async fn set_managed_feed_settings(
+        &self,
+        host: String,
+        writes: Vec<bindings::SettingWrite>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let writes = writes.into_iter().map(|w| (w.key, w.value)).collect();
+        self.answer(Sent::SetManagedFeedSettings(host, writes))
     }
 
     async fn create_learning(&self, row: bindings::Learning) -> anyhow::Result<LearningId> {

@@ -733,6 +733,79 @@ fn memory_caller_matches_the_real_reducers() {
             "setting after refused save"
         );
 
+        // -- managed-feed settings: one change (`SetManagedFeedSettings`) --------
+        let write = |key: &str, value: Option<&str>| bindings::SettingWrite {
+            key: key.into(),
+            value: value.map(String::from),
+        };
+        let good = vec![
+            write("reviews_feed_command", Some("echo one")),
+            write("reviews_feed_interval_secs", Some("600")),
+        ];
+        real.set_managed_feed_settings("host-a".into(), good.clone())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        wait_for!(rows_real.setting("reviews_feed_interval_secs").as_deref() == Some("600"));
+        mem.set_managed_feed_settings("host-a".into(), good)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        for key in ["reviews_feed_command", "reviews_feed_interval_secs"] {
+            assert_eq!(rows_real.setting(key), rows_mem.setting(key), "{key}");
+        }
+
+        // A later write that is refused leaves the earlier ones unwritten.
+        for bad in [
+            vec![
+                write("reviews_feed_command", Some("echo two")),
+                write("reviews_feed_interval_secs", Some("soon")),
+            ],
+            vec![
+                write("reviews_feed_command", Some("echo two")),
+                write("theme", Some("dark")),
+            ],
+        ] {
+            assert!(!real
+                .set_managed_feed_settings("host-a".into(), bad.clone())
+                .await
+                .unwrap()
+                .won());
+            assert!(!mem
+                .set_managed_feed_settings("host-a".into(), bad)
+                .await
+                .unwrap()
+                .won());
+            for rows in [&rows_real, &rows_mem] {
+                assert_eq!(
+                    rows.setting("reviews_feed_command").as_deref(),
+                    Some("echo one"),
+                    "a refused batch writes nothing"
+                );
+            }
+        }
+
+        // A write with no value clears its key.
+        let clear = vec![write("reviews_feed_command", None)];
+        real.set_managed_feed_settings("host-a".into(), clear.clone())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        wait_for!(rows_real.setting("reviews_feed_command").is_none());
+        mem.set_managed_feed_settings("host-a".into(), clear)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        assert!(rows_mem.setting("reviews_feed_command").is_none());
+        assert_eq!(
+            rows_real.setting("reviews_feed_interval_secs"),
+            rows_mem.setting("reviews_feed_interval_secs")
+        );
+
         // A host this connection does not own is refused the same way, for a
         // save, a clear and both poll-owner reducers (D11, store-split.allium).
         let real_foreign = [

@@ -86,7 +86,7 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
             "twin must hold the stamped task"
         );
 
-        // -- detach: refused, and so is a patch that names an owner -------------
+        // -- detach: the creator may, and a patch that names an owner is refused -------------
         let epic = bindings::Epic {
             created_by: identity.clone(),
             ..blank_epic()
@@ -103,22 +103,26 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
         wait_for!(rows_real.task(d).is_some());
         mem.align_next_task_id(d.0);
         assert_eq!(mem.create_task(inside).await.unwrap(), d);
-        // A task in an epic cannot leave its workspace for a board
-        // (`TaskMovesStayInTheWorkspace`, task #98852).
-        let why = refused(
+        // The task's creator may detach it onto their own board
+        // (`TaskMovesStayInTheWorkspace`, tasks #98852 and #98916); the
+        // refusal of everyone else is the module tests' and the twin's shared
+        // `task_detach_permitted`.
+        let applied = |out: ReducerOutcome| matches!(out, ReducerOutcome::Applied(_));
+        assert!(applied(
             real.set_task_epic(d, None, "someone-else".into())
                 .await
-                .unwrap(),
+                .unwrap()
+        ));
+        assert!(applied(
             mem.set_task_epic(d, None, "someone-else".into())
                 .await
-                .unwrap(),
-        );
-        assert!(why.contains("stays in its workspace"), "{why}");
+                .unwrap()
+        ));
+        wait_for!(rows_real.task(d).is_some_and(|t| t.epic_id.is_none()));
         assert_eq!(
             rows_real.task(d).map(|t| t.epic_id),
             rows_mem.task(d).map(|t| t.epic_id)
         );
-        assert!(rows_real.task(d).is_some_and(|t| t.epic_id.is_some()));
 
         // The store owns `owner`: a patch that names one is refused.
         let name_owner = bindings::TaskPatch {

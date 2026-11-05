@@ -61,38 +61,60 @@ fn a_created_task_is_stamped_with_its_creator() {
 }
 
 #[test]
-fn a_member_cannot_detach_a_task_from_its_workspace_whatever_owner_is_named() {
+fn a_tasks_creator_detaches_it_onto_their_own_board_whatever_owner_is_named() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let id = store.create("alice", epic_task("T", epic, "backlog"));
+
+    store
+        .call("alice", |ctx| set_task_epic(ctx, id, 0, "nobody".into()))
+        .expect("the creator may detach");
+    assert_eq!(store.task(id).epic_id, 0);
+    assert_eq!(store.task(id).owner, identity_of("alice"));
+}
+
+#[test]
+fn a_teammate_who_did_not_create_a_task_cannot_detach_it() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
     let id = store.create("alice", epic_task("T", epic, "backlog"));
 
     let why = store
-        .call("alice", |ctx| set_task_epic(ctx, id, 0, "nobody".into()))
+        .call("bob", |ctx| set_task_epic(ctx, id, 0, "bob".into()))
         .unwrap_err();
-    assert!(why.contains("stays in its workspace"), "{why}");
+    assert!(
+        why.contains("only its creator or an admin may detach"),
+        "{why}"
+    );
     assert_eq!(store.task(id).epic_id, epic);
 }
 
 #[test]
-fn update_task_cannot_detach_a_task_from_its_workspace() {
+fn update_task_detaches_under_the_same_authority() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
     let id = store.create("alice", epic_task("T", epic, "backlog"));
-
-    let why = store
-        .call("alice", |ctx| {
+    let detach = |who: &'static str| {
+        store.call(who, |ctx| {
             update_task(
                 ctx,
                 id,
                 Some(0),
-                identity_of("bob"),
+                identity_of(who),
                 String::new(),
                 TaskPatch::default(),
             )
         })
-        .unwrap_err();
-    assert!(why.contains("stays in its workspace"), "{why}");
+    };
+
+    let why = detach("bob").unwrap_err();
+    assert!(
+        why.contains("only its creator or an admin may detach"),
+        "{why}"
+    );
     assert_eq!(store.task(id).epic_id, epic);
+    detach("alice").expect("the creator may detach");
+    assert_eq!(store.task(id).epic_id, 0);
 }
 
 #[test]

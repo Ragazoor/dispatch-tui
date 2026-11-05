@@ -42,14 +42,15 @@ use crate::spacetime::bindings::{
     request_exit_session as _, request_feed_refresh as _, request_wrap_up as _,
     rescope_epic_learnings as _, respawn_phoenix_successor as _, revoke_super_admin as _,
     save_repo_path as _, save_setting as _, set_bookmark as _, set_display_name as _,
-    set_epic_visibility as _, set_member_role as _, set_task_epic as _, set_verify_command as _,
-    set_work_package_visibility as _, subagent_clear as _,
-    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, super_admin_delete_unseen_item as _, try_record_stop as _,
-    unlink_work_package_item as _, unsubscribe_from_epic as _, update_epic as _, update_task as _,
-    update_work_package_with_links as _, DbConnection, OwnEpicsTableAccess as _,
-    OwnPackagesTableAccess as _, OwnTasksTableAccess as _, VisibleDispatchRequestsTableAccess as _,
-    VisibleLearningsTableAccess as _, VisibleSessionRequestsTableAccess as _,
+    set_epic_visibility as _, set_managed_feed_settings as _, set_member_role as _,
+    set_task_epic as _, set_verify_command as _, set_work_package_visibility as _,
+    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
+    subagent_stop as _, subscribe_to_epic as _, super_admin_delete_unseen_item as _,
+    try_record_stop as _, unlink_work_package_item as _, unsubscribe_from_epic as _,
+    update_epic as _, update_task as _, update_work_package_with_links as _, DbConnection,
+    OwnEpicsTableAccess as _, OwnPackagesTableAccess as _, OwnTasksTableAccess as _,
+    VisibleDispatchRequestsTableAccess as _, VisibleLearningsTableAccess as _,
+    VisibleSessionRequestsTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -558,6 +559,18 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn clear_setting(&self, host: String, key: String) -> anyhow::Result<ReducerOutcome> {
         answered_call!(self, "the setting clear", clear_setting_then(host, key))
+    }
+
+    async fn set_managed_feed_settings(
+        &self,
+        host: String,
+        writes: Vec<bindings::SettingWrite>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the managed-feed settings",
+            set_managed_feed_settings_then(host, writes)
+        )
     }
 
     // -- Learnings and retrievals (Phase 10, task #4914) ----------------------

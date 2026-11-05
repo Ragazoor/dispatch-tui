@@ -148,12 +148,14 @@ pub mod session_request_type;
 pub mod set_bookmark_reducer;
 pub mod set_display_name_reducer;
 pub mod set_epic_visibility_reducer;
+pub mod set_managed_feed_settings_reducer;
 pub mod set_member_role_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
 pub mod set_work_package_visibility_reducer;
 pub mod setting_type;
+pub mod setting_write_type;
 pub mod store_owner_type;
 pub mod sub_status_update_type;
 pub mod subagent_clear_and_void_pending_stop_reducer;
@@ -346,12 +348,14 @@ pub use session_request_type::SessionRequest;
 pub use set_bookmark_reducer::set_bookmark;
 pub use set_display_name_reducer::set_display_name;
 pub use set_epic_visibility_reducer::set_epic_visibility;
+pub use set_managed_feed_settings_reducer::set_managed_feed_settings;
 pub use set_member_role_reducer::set_member_role;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
 pub use set_work_package_visibility_reducer::set_work_package_visibility;
 pub use setting_type::Setting;
+pub use setting_write_type::SettingWrite;
 pub use store_owner_type::StoreOwner;
 pub use sub_status_update_type::SubStatusUpdate;
 pub use subagent_clear_and_void_pending_stop_reducer::subagent_clear_and_void_pending_stop;
@@ -786,6 +790,10 @@ pub enum Reducer {
         epic_id: i64,
         visibility: String,
     },
+    SetManagedFeedSettings {
+        host: String,
+        writes: Vec<SettingWrite>,
+    },
     SetMemberRole {
         membership_id: i64,
         role: String,
@@ -973,6 +981,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetBookmark { .. } => "set_bookmark",
             Reducer::SetDisplayName { .. } => "set_display_name",
             Reducer::SetEpicVisibility { .. } => "set_epic_visibility",
+            Reducer::SetManagedFeedSettings { .. } => "set_managed_feed_settings",
             Reducer::SetMemberRole { .. } => "set_member_role",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
@@ -1653,6 +1662,13 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&set_epic_visibility_reducer::SetEpicVisibilityArgs {
                 epic_id: epic_id.clone(),
                 visibility: visibility.clone(),
+}),
+            Reducer::SetManagedFeedSettings{
+                host,
+                writes,
+}             => __sats::bsatn::to_vec(&set_managed_feed_settings_reducer::SetManagedFeedSettingsArgs {
+                host: host.clone(),
+                writes: writes.clone(),
 }),
             Reducer::SetMemberRole{
                 membership_id,

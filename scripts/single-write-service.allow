@@ -8,7 +8,6 @@ src/service/tasks/crud.rs::record_hook_event  4  exclusive match arms per hook k
 src/service/tasks/crud.rs::record_subagent_event  3  exclusive match arms per event
 src/service/tasks/session.rs::report_rebase_done  3  one idempotent retry of the same report, or else one failure report (exclusive branches)
 src/service/tasks/session.rs::report_session_done  2  one idempotent retry of the same report
-src/service/managed_feeds.rs::write_managed_feed_settings  4  four independent settings rows, each written only when provided; intervals are validated before any write
 # Added when the checker learned loops and `self.<helper>()` calls (G4). Counts are
 # call sites summed through one level of helpers, so they move when a call is added.
 src/service/learnings.rs::query_learnings  2  one best-effort telemetry write per returned learning, in a loop; a failed one only logs

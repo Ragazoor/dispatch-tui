@@ -633,6 +633,14 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_clear_setting(host, key)
     }
 
+    async fn set_managed_feed_settings(
+        &self,
+        host: String,
+        writes: Vec<bindings::SettingWrite>,
+    ) -> Result<ReducerOutcome> {
+        self.apply_set_managed_feed_settings(host, writes)
+    }
+
     async fn create_learning(&self, row: bindings::Learning) -> Result<LearningId> {
         self.apply_create_learning(row)
     }
