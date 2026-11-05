@@ -161,6 +161,9 @@ struct Rows {
     work_packages: BTreeMap<i64, WorkPackage>,
     /// Keyed by the store's derived link id.
     work_package_links: BTreeMap<String, WorkPackageLink>,
+    /// The raw rows behind `work_package_links`: `retire_work_package_link`
+    /// compares these, because the decoded link drops `created_at` and `id`.
+    raw_work_package_links: BTreeMap<String, bindings::WorkPackageLink>,
     /// store-split M4. Arrive scoped to THIS host by the subscription's
     /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsDispatchRequests`),
     /// in every state, so nothing here filters by host or state.
@@ -231,6 +234,7 @@ impl Rows {
             && self.settings.is_empty()
             && self.work_packages.is_empty()
             && self.work_package_links.is_empty()
+            && self.raw_work_package_links.is_empty()
             && self.dispatch_requests.is_empty()
             && self.session_requests.is_empty()
             && self.feed_requests.is_empty()
@@ -737,17 +741,25 @@ impl SharedRows {
         match decode::work_package_link(row) {
             Ok(link) => self.write(|rows| {
                 rows.work_package_links.insert(row.id.clone(), link);
+                rows.raw_work_package_links
+                    .insert(row.id.clone(), row.clone());
                 true
             }),
             Err(e) => {
                 super::drop_undecodable("work package link", &e);
-                self.write(|rows| rows.work_package_links.remove(&row.id).is_some());
+                self.write(|rows| {
+                    rows.raw_work_package_links.remove(&row.id);
+                    rows.work_package_links.remove(&row.id).is_some()
+                });
             }
         }
     }
 
     pub fn remove_work_package_link(&self, id: String) {
-        self.write(|rows| rows.work_package_links.remove(&id).is_some());
+        self.write(|rows| {
+            rows.raw_work_package_links.remove(&id);
+            rows.work_package_links.remove(&id).is_some()
+        });
     }
 
     /// A dispatch request row (store-split M4). An undecodable one is dropped,
@@ -874,11 +886,19 @@ impl SharedRows {
         self.write(|rows| remove_if_held(&mut rows.work_packages, &old.id.0, &old));
     }
 
+    /// Compared RAW: the decoded link drops `created_at`, so rows that differ
+    /// only there decode equal and a decoded compare erased the update.
     pub fn retire_work_package_link(&self, old: &bindings::WorkPackageLink) {
-        let Ok(old_link) = decode::work_package_link(old) else {
+        if decode::work_package_link(old).is_err() {
             return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.work_package_links, &old.id, &old_link));
+        }
+        self.write(|rows| {
+            let removed = remove_if_held(&mut rows.raw_work_package_links, &old.id, old);
+            if removed {
+                rows.work_package_links.remove(&old.id);
+            }
+            removed
+        });
     }
 
     pub fn retire_poll_owner(&self, old: &bindings::PollOwner) {

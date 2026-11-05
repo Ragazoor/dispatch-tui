@@ -478,3 +478,264 @@ fn a_work_package_link_that_stops_decoding_is_removed() {
     rows.upsert_work_package_link(&link("teleported"));
     assert!(rows.work_package_links().is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// G5: an update in a column the decoder drops, for every table behind a view
+// ---------------------------------------------------------------------------
+//
+// `retire_*` must compare the RAW row that left, not its decoded form: two rows
+// that differ only in a dropped column decode equal, so a decoded compare lets
+// the delete half of the update pair erase the row the insert just stored
+// (task 98793; Y2; and `work_package_links.created_at` before this table).
+// One case per table; `every_view_backed_table_has_an_ignored_column_case`
+// fails when `rows.rs` gains a `retire_*` that is in neither list below.
+
+/// An update pair `old` -> `new` that differs only in a column the table's
+/// decoder drops: the row must survive in either arrival order.
+fn survives_in_either_order<R>(
+    table: &str,
+    old: R,
+    new: R,
+    upsert: impl Fn(&SharedRows, &R),
+    retire: impl Fn(&SharedRows, &R),
+    present: impl Fn(&SharedRows) -> bool,
+) {
+    let rows = SharedRows::new();
+    upsert(&rows, &old);
+    upsert(&rows, &new);
+    retire(&rows, &old);
+    assert!(present(&rows), "{table}: the row was erased, insert first");
+
+    let rows = SharedRows::new();
+    upsert(&rows, &old);
+    retire(&rows, &old);
+    upsert(&rows, &new);
+    assert!(present(&rows), "{table}: the row was erased, delete first");
+}
+
+/// Table name (the `retire_<name>` suffix) and its case.
+const IGNORED_COLUMN_CASES: &[(&str, fn())] = &[
+    ("task", || {
+        let old = task("same");
+        let mut new = task("same");
+        new.pr_learnings_gate_shown_at = "2026-11-02 08:40:00".into();
+        survives_in_either_order(
+            "task",
+            old,
+            new,
+            |r, x| r.upsert_task(x),
+            |r, x| r.retire_task(x),
+            |r| r.task(TaskId(7)).is_some(),
+        );
+    }),
+    ("epic", || {
+        let old = epic("same");
+        let mut new = epic("same");
+        new.created_by = "someone-else".into();
+        survives_in_either_order(
+            "epic",
+            old,
+            new,
+            |r, x| r.upsert_epic(x),
+            |r, x| r.retire_epic(x),
+            |r| r.epic(EpicId(7)).is_some(),
+        );
+    }),
+    ("agent", || {
+        let agent = |stop_pending_at: &str| bindings::Agent {
+            id: 4,
+            task_id: 9,
+            name: "a".into(),
+            host: "host-a".into(),
+            start_mode: "research".into(),
+            state: "current".into(),
+            started_at: "2026-10-16 10:00:00.000".into(),
+            stop_pending_at: stop_pending_at.into(),
+            ..dispatch_spacetime_module::blank_agent().into()
+        };
+        survives_in_either_order(
+            "agent",
+            agent(""),
+            agent("2026-11-03 10:00:00.000"),
+            |r, x| r.upsert_agent(x),
+            |r, x| r.retire_agent(x),
+            |r| r.agents().len() == 1,
+        );
+    }),
+    ("poll_owner", || {
+        let claim = |claimed_at: &str| bindings::PollOwner {
+            id: 3,
+            scope: "epic".into(),
+            scope_id: 5,
+            host: "host-a".into(),
+            claimed_at: claimed_at.into(),
+        };
+        survives_in_either_order(
+            "poll_owner",
+            claim("2026-11-03 09:00:00"),
+            claim("2026-11-03 10:00:00"),
+            |r, x| r.upsert_poll_owner(x),
+            |r, x| r.retire_poll_owner(x),
+            |r| {
+                r.poll_owner(crate::models::PollScopeId::Epic(EpicId(5)))
+                    .is_some()
+            },
+        );
+    }),
+    ("learning", || {
+        // `embedding` is not on the decoded `Learning`.
+        let mut new = learning("same");
+        new.embedding = Some(vec![1, 2, 3, 4]);
+        survives_in_either_order(
+            "learning",
+            learning("same"),
+            new,
+            |r, x| r.upsert_learning(x),
+            |r, x| r.retire_learning(x),
+            |r| r.learning(crate::models::LearningId(7)).is_some(),
+        );
+    }),
+    ("work_package_link", || {
+        // `created_at` is not on the decoded link.
+        let at = |created_at: &str| bindings::WorkPackageLink {
+            created_at: created_at.into(),
+            ..link("task")
+        };
+        survives_in_either_order(
+            "work_package_link",
+            at("2026-09-18 10:00:00"),
+            at("2026-09-18 11:00:00"),
+            |r, x| r.upsert_work_package_link(x),
+            |r, x| r.retire_work_package_link(x),
+            |r| r.work_package_links().len() == 1,
+        );
+    }),
+    ("unseen_item", || {
+        let item = |creator: &str| bindings::UnseenItem {
+            kind: "epic".into(),
+            item_id: 7,
+            workspace_id: 1,
+            creator: creator.into(),
+            created_at: "2026-09-18 10:00:00".into(),
+        };
+        survives_in_either_order(
+            "unseen_item",
+            item("old"),
+            item("new"),
+            |r, x| r.upsert_unseen_item(x),
+            |r, x| r.retire_unseen_item(x),
+            |r| r.unseen_items().len() == 1,
+        );
+    }),
+    ("unseen_task", || {
+        let row = |subscriber: &str| bindings::UnseenTask {
+            id: "7:me".into(),
+            task_id: 7,
+            subscriber: subscriber.into(),
+        };
+        survives_in_either_order(
+            "unseen_task",
+            row("a"),
+            row("b"),
+            |r, x| r.upsert_unseen_task(x),
+            |r, x| r.retire_unseen_task(x),
+            |r| r.unseen_task_ids() == vec![TaskId(7)],
+        );
+    }),
+    ("bookmark", || {
+        let row = |subscriber: &str| bindings::Bookmark {
+            id: "7:me".into(),
+            task_id: 7,
+            subscriber: subscriber.into(),
+        };
+        survives_in_either_order(
+            "bookmark",
+            row("a"),
+            row("b"),
+            |r, x| r.upsert_bookmark(x),
+            |r, x| r.retire_bookmark(x),
+            |r| r.bookmarked_task_ids() == vec![TaskId(7)],
+        );
+    }),
+    ("subscription", || {
+        let row = |epic_id: i64| bindings::Subscription {
+            id: "me:3".into(),
+            epic_id,
+            subscriber: "me".into(),
+        };
+        survives_in_either_order(
+            "subscription",
+            row(3),
+            row(4),
+            |r, x| r.upsert_subscription(x),
+            |r, x| r.retire_subscription(x),
+            |r| r.subscribed_epics("me").len() == 1,
+        );
+    }),
+];
+
+/// Tables whose decoder reads every column, or that have no decoder: there is
+/// no dropped column to vary. `pins_view_updates!` above covers their update
+/// pair. If a decoder starts dropping a column, move the table into
+/// `IGNORED_COLUMN_CASES`.
+const DECODES_EVERY_COLUMN: &[(&str, &str)] = &[
+    ("work_package", "decode::work_package reads every column"),
+    (
+        "learning_retrieval",
+        "decode::learning_retrieval reads every column",
+    ),
+    (
+        "dispatch_request",
+        "decode::dispatch_request reads every column",
+    ),
+    (
+        "session_request",
+        "decode::session_request reads every column",
+    ),
+    ("feed_request", "decode::feed_request reads every column"),
+    ("workspace", "stored raw: no decoder"),
+    ("membership", "stored raw: no decoder"),
+    ("setting", "stored raw: no decoder"),
+];
+
+#[test]
+fn an_update_in_a_dropped_column_keeps_the_row_in_every_view_backed_table() {
+    let mut failed = Vec::new();
+    for (table, case) in IGNORED_COLUMN_CASES {
+        if std::panic::catch_unwind(case).is_err() {
+            failed.push(*table);
+        }
+    }
+    assert!(
+        failed.is_empty(),
+        "an update in a dropped column erased the row for: {failed:?}"
+    );
+}
+
+/// Every table behind a view has a `retire_*` in `rows.rs`. One that is in
+/// neither list has no dropped-column test: add a case.
+#[test]
+fn every_view_backed_table_has_an_ignored_column_case() {
+    let src = include_str!("../rows.rs");
+    let mut tables: Vec<&str> = src
+        .match_indices("pub fn retire_")
+        .map(|(at, _)| {
+            let rest = &src[at + "pub fn retire_".len()..];
+            &rest[..rest.find('(').unwrap_or(rest.len())]
+        })
+        .collect();
+    tables.sort_unstable();
+    tables.dedup();
+    assert!(
+        tables.len() >= 15,
+        "the scan found too few tables: {tables:?}"
+    );
+    for table in tables {
+        let covered = IGNORED_COLUMN_CASES.iter().any(|(t, _)| *t == table)
+            || DECODES_EVERY_COLUMN.iter().any(|(t, _)| *t == table);
+        assert!(
+            covered,
+            "rows.rs has retire_{table} but view_updates.rs has no dropped-column case for it"
+        );
+    }
+}
