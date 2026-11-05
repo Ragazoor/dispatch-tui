@@ -7,6 +7,10 @@ use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 /// alike, including `spacetime/module`'s separate wasm32 workspace, which picks
 /// up a plain environment variable with no config of its own.
 ///
+/// - `DISPATCH_TASK_ID`, the task this window was launched for. The hook
+///   scripts act on it rather than on the cwd's branch, so an agent that
+///   checks out another task's branch cannot move that task (`HookDelivery`
+///   in docs/specs/agent-health.allium).
 /// - `RUSTC_WRAPPER=sccache`, so every `cargo build`/`cargo test` goes through
 ///   sccache's shared compiler-object cache instead of paying full
 ///   per-worktree compile cost (`DispatchedAgentsShareASccacheNotATargetDir`
@@ -22,9 +26,10 @@ use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 ///   (`AgentBuildsRunFewerParallelJobs`).
 fn agent_launch_env(
     runner: &dyn ProcessRunner,
+    task_id: crate::models::TaskId,
     worktree_path: &str,
 ) -> Vec<(&'static str, String)> {
-    let mut env = Vec::new();
+    let mut env = vec![("DISPATCH_TASK_ID", task_id.0.to_string())];
     if runner.sccache_available() {
         runner.start_sccache_server();
         env.push(("RUSTC_WRAPPER", "sccache".to_string()));

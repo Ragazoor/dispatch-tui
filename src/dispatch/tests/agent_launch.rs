@@ -2624,3 +2624,39 @@ fn resume_agent_errors_when_the_liveness_check_fails() {
         "no window may be created after a failed check, got: {calls:?}"
     );
 }
+
+// --- DISPATCH_TASK_ID (HookDelivery in docs/specs/agent-health.allium) ---
+
+#[test]
+fn dispatch_agent_names_the_launch_task_in_the_window_env() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let script = DispatchScript::dispatch();
+    let mock = script.runner();
+
+    dispatch_with(&mock, &repo_path);
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert_eq!(
+        window_env(new_window_args, "DISPATCH_TASK_ID").as_deref(),
+        Some("42"),
+        "got: {new_window_args:?}"
+    );
+}
+
+#[test]
+fn resume_agent_names_the_launch_task_in_the_window_env() {
+    let (_dir, worktree_path) = make_test_repo();
+    let script = DispatchScript::resume();
+    let mock = script.runner();
+
+    resume_with(&mock, &worktree_path, None);
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert_eq!(
+        window_env(new_window_args, "DISPATCH_TASK_ID").as_deref(),
+        Some("42"),
+        "got: {new_window_args:?}"
+    );
+}

@@ -31,9 +31,12 @@ esac
 
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
-# Extract task ID from the git branch ({id}-{slug}); fall back to walking the
+# Task ID: DISPATCH_TASK_ID (the launch task), else the git branch ({id}-{slug}); fall back to walking the
 # cwd for a "<digits>-" path segment (mirrors task-status-hook).
-ID=$(git -C "${CWD:-.}" branch --show-current 2>/dev/null | grep -oP '^\d+' || true)
+ID="${DISPATCH_TASK_ID:-}"
+case "$ID" in *[!0-9]*) ID="" ;; esac
+if [ -z "$ID" ]; then
+ID=$(git -C "${CWD:-.}" branch --show-current 2>/dev/null | grep -oE '^[0-9]+' || true)
 if [ -z "$ID" ]; then
     path="${CWD:-}"
     while [ -n "$path" ] && [ "$path" != "/" ]; do
@@ -44,6 +47,7 @@ if [ -z "$ID" ]; then
         fi
         path=$(dirname "$path")
     done
+fi
 fi
 [ -z "$ID" ] && exit 0
 

@@ -832,6 +832,10 @@ rule HookPeerMessageSent {
         -- tool call completes. A send that fails also reaches PostToolUse;
         -- that is UndeliveredPeerMessage below, not this rule, so a message
         -- nobody received never flashes a card as having received one.
+    -- The trajectory entry for the send is best-effort: it is appended off
+    -- the response path, and a failed append is logged, not reported. The
+    -- hook answers as applied either way, because the stamps above are the
+    -- observation and the trajectory is only an audit trail.
 }
 
 rule UndeliveredPeerMessage {
@@ -935,8 +939,16 @@ surface HookDelivery {
     -- SubagentStop, and the PostToolUse observer for SendMessage) in the
     -- agent's own session; the hook script
     -- `dispatch tui`'s startup configuration check installs (see
-    -- startup.allium) resolves the task from the session's worktree and
-    -- forwards the event to the board.
+    -- startup.allium) resolves the task and forwards the event to the board.
+    --
+    -- The task is the one the agent was launched for: dispatch sets
+    -- DISPATCH_TASK_ID in the agent's window environment on every launch,
+    -- fresh or resumed, and the script uses it. Only when it is absent (a
+    -- session not started by dispatch, or one started before this variable)
+    -- does the script fall back to the task id at the front of the worktree's
+    -- branch name, then to a `<id>-` segment of the cwd. An agent that
+    -- checks out another task's branch therefore cannot stamp, stop or
+    -- gate that task.
     --
     -- Each firing is its own short-lived process, and there are many of them:
     -- a hook runs on every tool call of every live session. What that process

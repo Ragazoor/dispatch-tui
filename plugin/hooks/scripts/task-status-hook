@@ -3,7 +3,8 @@
 #
 # Installed alongside dispatch (or symlinked into PATH).
 # Called by Claude Code PreToolUse, Stop, and Notification hooks with JSON on stdin.
-# Extracts the task ID from the worktree directory name and forwards the event
+# Takes the task ID from DISPATCH_TASK_ID (set when dispatch launched the
+# window), falling back to the branch/worktree name, and forwards the event
 # to `dispatch hook <id> <event>` which records the timestamp and applies the
 # appropriate side effects.
 
@@ -13,11 +14,16 @@ INPUT=$(cat)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
 
-# Extract task ID from the git branch name ({id}-{slug}). Branch lookup is
+# DISPATCH_TASK_ID names the task this window was launched for; an agent that
+# checks out another task's branch must not act on that task. Otherwise
+# extract the ID from the git branch name ({id}-{slug}). Branch lookup is
 # more reliable than basename($CWD) because agents commonly cd into
 # subdirectories of the worktree, which makes basename return something
 # like "models" instead of "567-foo" and silently skips every hook.
-ID=$(git -C "${CWD:-.}" branch --show-current 2>/dev/null | grep -oP '^\d+' || true)
+ID="${DISPATCH_TASK_ID:-}"
+case "$ID" in *[!0-9]*) ID="" ;; esac
+if [ -z "$ID" ]; then
+ID=$(git -C "${CWD:-.}" branch --show-current 2>/dev/null | grep -oE '^[0-9]+' || true)
 if [ -z "$ID" ]; then
     # Fallback: walk up the cwd looking for a path segment that starts
     # with "<digits>-" (the standard dispatch worktree directory naming).
@@ -31,6 +37,7 @@ if [ -z "$ID" ]; then
         path=$(dirname "$path")
     done
 fi
+fi
 [ -z "$ID" ] && exit 0
 
 case "$EVENT" in
@@ -39,7 +46,9 @@ case "$EVENT" in
         # Skip dispatch MCP calls — management operations, not implementation work.
         # Without this, the wrap-up skill's get_task and wrap_up calls clobber review status.
         [[ "$TOOL" == mcp__dispatch__* ]] && exit 0
-        dispatch hook "$ID" pre_tool_use
+        # A slow or down board must not abort the steps below (set -e).
+        dispatch hook "$ID" pre_tool_use \
+            || echo "task-status-hook: board call failed (pre_tool_use)" >&2
 
         # An agent that opens the AskUserQuestion dialog is blocked on a human,
         # but Claude Code fires no Notification hook for it — so the activity
@@ -51,7 +60,8 @@ case "$EVENT" in
         # PostToolUse deliberately does not raise: that is the answer arriving,
         # and its activity stamp is what clears the block.
         if [[ "$EVENT" == "PreToolUse" && "$TOOL" == "AskUserQuestion" ]]; then
-            dispatch hook "$ID" notification --kind elicitation_dialog
+            dispatch hook "$ID" notification --kind elicitation_dialog \
+                || echo "task-status-hook: board call failed (notification)" >&2
         fi
 
         # Additive: PostToolUse-only observers. None of these gates, reorders or

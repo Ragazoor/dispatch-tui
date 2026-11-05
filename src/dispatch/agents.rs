@@ -857,7 +857,7 @@ pub fn resume_agent_with_message(
         return Ok(ResumeResult { tmux_window });
     }
 
-    let launch_env = super::agent_launch_env(runner, worktree_path);
+    let launch_env = super::agent_launch_env(runner, task_id, worktree_path);
     tmux::new_window(
         &tmux_window,
         worktree_path,
