@@ -389,66 +389,153 @@ fn every_task_move_path_meets_the_same_rules_on_both_stores() {
     });
 }
 
-/// Whether the struct literal that contains the next line is a `Task`: walk
-/// back over closed literals to the line that opened this one.
-fn opens_task_literal(before: &[&str]) -> bool {
-    let mut depth = 0;
-    for line in before.iter().rev() {
-        let t = line.trim_end();
-        if t.ends_with('}') || t.ends_with("},") {
-            depth += 1;
-        } else if t.ends_with('{') {
-            if depth == 0 {
-                let head = t.trim_end_matches('{').trim_end();
-                return head.ends_with("Task");
-            }
-            depth -= 1;
+/// The name a line declares, if it is a `fn` header in any form: `fn`,
+/// `pub fn`, `pub(crate) fn`, `pub(super) fn`, `pub(in path) fn`, with
+/// `const`/`async`/`unsafe` in front (G3: a `pub(super) fn` or `async fn` used
+/// to be missed, so its writes were charged to the previous function).
+fn fn_name(line: &str) -> Option<String> {
+    let mut rest = line.trim_start();
+    if let Some(after) = rest.strip_prefix("pub") {
+        rest = after;
+        if rest.starts_with('(') {
+            rest = rest[rest.find(')')? + 1..].trim_start();
+        } else if rest.starts_with(char::is_whitespace) {
+            rest = rest.trim_start();
+        } else {
+            return None;
         }
     }
-    false
+    while let Some(after) = ["const ", "async ", "unsafe "]
+        .iter()
+        .find_map(|q| rest.strip_prefix(q))
+    {
+        rest = after.trim_start();
+    }
+    let name: String = rest
+        .strip_prefix("fn ")?
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    (!name.is_empty()).then_some(name)
 }
 
-/// The `module/src` functions that write a task's `epic_id`: a `Task { epic_id,
-/// .. }` literal or an `.epic_id =` assignment. A move path that forgot the
-/// unseen mark would not call `clear_unseen_for_task` at all, so the scan keys
-/// on the write, not on the clear (G1; N1 and R2 were exactly that).
-fn epic_id_writers(file: &str, body: &str) -> Vec<String> {
-    let mut sites = Vec::new();
-    let mut current = String::new();
-    let lines: Vec<&str> = body.lines().collect();
-    for (at, line) in lines.iter().enumerate() {
-        let t = line.trim_start();
-        if let Some(rest) = t
-            .strip_prefix("pub(crate) fn ")
-            .or_else(|| t.strip_prefix("pub fn "))
-            .or_else(|| t.strip_prefix("fn "))
-        {
-            current = rest
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_')
-                .collect();
-        }
-        let field = t.strip_prefix("epic_id").is_some_and(|rest| {
-            let rest = rest.trim_start();
-            // `epic_id,` (shorthand) or `epic_id: <value>`, never a parameter
-            // or struct field declaration (`epic_id: i64,`, `Patch<i64>`).
+fn is_ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Byte offsets (into `body`) of an `epic_id` field in a `Task { .. }` literal
+/// span: `epic_id,` / `epic_id }` shorthand or `epic_id: <value>`, never a
+/// read (`t.epic_id`) or a declaration (`epic_id: i64`, `Patch<i64>`).
+fn epic_id_fields(span: &str) -> Vec<usize> {
+    span.match_indices("epic_id")
+        .filter(|(at, _)| {
+            let before = span[..*at].chars().next_back();
+            if before.is_some_and(|c| is_ident_char(c) || c == '.') {
+                return false;
+            }
+            let rest = span[at + "epic_id".len()..].trim_start();
             rest.starts_with(',')
+                || rest.starts_with('}')
                 || rest.strip_prefix(':').is_some_and(|v| {
                     let v = v.trim_start();
-                    !(v.starts_with("i64")
+                    !(v.starts_with(':')
+                        || v.starts_with("i64")
                         || v.starts_with("Option")
                         || v.starts_with("Patch")
                         || v.starts_with("pub"))
                 })
-        });
-        let assigned = t.contains(".epic_id =") && !t.contains(".epic_id ==");
-        if (field && opens_task_literal(&lines[..at])) || assigned {
-            sites.push(format!("{file}::{current}"));
+        })
+        .map(|(at, _)| at)
+        .collect()
+}
+
+/// The `module/src` functions that write a task's `epic_id`: an `epic_id` field
+/// anywhere in a `Task { .. }` literal (one line or many) or an `.epic_id =`
+/// assignment. A move path that forgot the unseen mark would not call
+/// `clear_unseen_for_task` at all, so the scan keys on the write, not on the
+/// clear (G1; N1 and R2 were exactly that).
+fn epic_id_writers(file: &str, body: &str) -> Vec<String> {
+    let mut headers: Vec<(usize, String)> = Vec::new();
+    let mut offset = 0;
+    for line in body.split_inclusive('\n') {
+        if let Some(name) = fn_name(line) {
+            headers.push((offset, name));
+        }
+        offset += line.len();
+    }
+    let owner = |at: usize| {
+        headers
+            .iter()
+            .rev()
+            .find(|(start, _)| *start <= at)
+            .map(|(_, name)| name.clone())
+            .unwrap_or_default()
+    };
+    let mut sites = Vec::new();
+    for (at, _) in body.match_indices("Task {") {
+        let head = body[..at].trim_end();
+        if body[..at].chars().next_back().is_some_and(is_ident_char)
+            || matches!(
+                head.rsplit(|c: char| !is_ident_char(c)).next(),
+                Some("impl" | "struct" | "for" | "enum" | "type")
+            )
+        {
+            continue;
+        }
+        let open = at + "Task {".len();
+        let mut depth = 1;
+        let mut close = body.len();
+        for (i, c) in body[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // The closing brace is part of the span: `Task { epic_id }`.
+        let span = &body[open..(close + 1).min(body.len())];
+        if let Some(first) = epic_id_fields(span).first() {
+            sites.push(format!("{file}::{}", owner(open + first)));
+        }
+    }
+    for (at, line) in body.match_indices(".epic_id =") {
+        if !body[at..].starts_with(".epic_id ==") && !line.is_empty() {
+            sites.push(format!("{file}::{}", owner(at)));
         }
     }
     sites.sort();
     sites.dedup();
     sites
+}
+
+/// Every `.rs` file under `dir`, recursively (G3: `read_dir` alone missed a
+/// module split into a subdirectory), as `(path relative to dir, source)`.
+fn module_sources(dir: &std::path::Path) -> Vec<(String, String)> {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                out.push((rel, std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out
 }
 
 /// Writers that are not moves of an existing task, each with why.
@@ -486,28 +573,110 @@ fn the_epic_id_scan_finds_a_writer_that_never_clears_the_mark() {
     );
 }
 
+/// G3 blind spot 1: a one-line literal.
+#[test]
+fn the_epic_id_scan_finds_a_one_line_task_literal() {
+    for body in [
+        "fn mv(t: Task, e: i64) -> Task {\n    Task { epic_id: Some(e), ..t }\n}",
+        "fn mv(t: Task, epic_id: Option<i64>) -> Task {\n    Task { epic_id, ..t }\n}",
+        "fn mv(t: Task, e: i64) -> Task {\n    write(Task { title: x, epic_id: e, ..t });\n}",
+        "fn mv(t: Task, epic_id: i64) -> Task {\n    Task { ..t, epic_id }\n}",
+    ] {
+        assert_eq!(
+            epic_id_writers("g.rs", body),
+            vec!["g.rs::mv".to_string()],
+            "{body}"
+        );
+    }
+}
+
+/// G3 blind spot 2: every header form owns the writes under it.
+#[test]
+fn the_epic_id_scan_attributes_a_write_to_any_fn_header_form() {
+    for header in [
+        "pub(super) fn mv",
+        "pub(crate) fn mv",
+        "pub(in crate::a) fn mv",
+        "async fn mv",
+        "pub async fn mv",
+        "pub(super) async fn mv",
+        "pub const fn mv",
+        "unsafe fn mv",
+    ] {
+        let body = format!(
+            "fn first() {{}}\n{header}(t: Task) {{\n    Task {{\n        epic_id: None,\n        ..t\n    }};\n}}"
+        );
+        assert_eq!(
+            epic_id_writers("g.rs", &body),
+            vec!["g.rs::mv".to_string()],
+            "{header}"
+        );
+    }
+}
+
+/// What a Task-shaped line is not: a type, an impl, a read, a parameter.
+#[test]
+fn the_epic_id_scan_ignores_declarations_and_reads() {
+    let body = "pub struct Task {\n    pub epic_id: Option<i64>,\n}\nimpl Task {\n    fn epic(&self) -> Option<i64> { self.epic_id }\n}\nfn read(t: Task) -> bool {\n    t.epic_id == Some(1)\n}\nfn other(t: Task) -> Task {\n    Task { title: t.epic_id.map(|e| e.to_string()), ..t }\n}";
+    assert_eq!(epic_id_writers("g.rs", body), Vec::<String>::new());
+}
+
+/// G3 blind spot 3: module files in subdirectories.
+#[test]
+fn module_sources_recurses_into_subdirectories() {
+    let dir = std::env::temp_dir().join(format!("dispatch-move-scan-{}", std::process::id()));
+    let nested = dir.join("a").join("b");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(dir.join("top.rs"), "fn x() {}").unwrap();
+    std::fs::write(nested.join("deep.rs"), "fn y() {}").unwrap();
+    std::fs::write(nested.join("notes.txt"), "no").unwrap();
+    let mut names: Vec<String> = module_sources(&dir).into_iter().map(|(n, _)| n).collect();
+    names.sort();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(
+        names,
+        vec![
+            std::path::Path::new("a")
+                .join("b")
+                .join("deep.rs")
+                .to_string_lossy()
+                .into_owned(),
+            "top.rs".to_string()
+        ]
+    );
+}
+
+/// Every writer in `spacetime/module/src`, recursively, minus fixtures and
+/// tests (they build tasks, they do not move them).
+fn module_sites() -> Vec<String> {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spacetime/module/src");
+    let mut sites = Vec::new();
+    for (rel, body) in module_sources(&src) {
+        let name = std::path::Path::new(&rel)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let in_tests_dir = std::path::Path::new(&rel)
+            .components()
+            .any(|c| c.as_os_str() == "tests");
+        if in_tests_dir || matches!(name.as_str(), "blanks.rs" | "tests.rs") {
+            continue;
+        }
+        // Subdirectory files keep their path so two `mod.rs` do not collide.
+        sites.extend(epic_id_writers(&rel, &body));
+    }
+    sites.sort();
+    sites.dedup();
+    sites
+}
+
 /// A move path nobody added to the table. Needs no store: it reads the module
 /// source for every function that writes a task's `epic_id` and requires each
 /// to be named by a table row, by `COVERED_ELSEWHERE` or by `NOT_A_MOVE`.
 #[test]
 fn every_task_move_site_in_the_module_is_in_the_table() {
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spacetime/module/src");
-    let mut sites = Vec::new();
-    for entry in std::fs::read_dir(&src).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        // Fixtures and tests build tasks, they do not move them.
-        if matches!(name.as_str(), "blanks.rs" | "tests.rs") {
-            continue;
-        }
-        let body = std::fs::read_to_string(&path).unwrap();
-        sites.extend(epic_id_writers(&name, &body));
-    }
-    sites.sort();
-    sites.dedup();
+    let sites = module_sites();
     assert!(
         !sites.is_empty(),
         "the scan found no site: update this test"
@@ -523,5 +692,36 @@ fn every_task_move_site_in_the_module_is_in_the_table() {
             "{site} writes a task's epic_id but no MOVE_PATHS row covers it: \
              add the path to tests/memory_caller_conformance/move_paths.rs"
         );
+    }
+}
+
+/// G3 blind spot 4: a site added to an existing row is not exercised by a new
+/// path. Each row names exactly one site, so a second writer needs its own
+/// `MovePath` (and its own `run_path` arm), not a ride on a sibling's row.
+#[test]
+fn every_move_path_row_names_exactly_one_site() {
+    for (path, sites) in MOVE_PATHS {
+        assert_eq!(
+            sites.len(),
+            1,
+            "{path:?} names {} sites: give each site its own MovePath so \
+             run_path exercises it",
+            sites.len()
+        );
+    }
+}
+
+/// A row that names a site the scan no longer finds is a stale claim: the
+/// path would pass while covering nothing.
+#[test]
+fn every_site_a_row_names_still_writes_epic_id() {
+    let found = module_sites();
+    for (path, sites) in MOVE_PATHS {
+        for site in *sites {
+            assert!(
+                found.iter().any(|f| f == site),
+                "{path:?} names {site}, which no longer writes a task's epic_id"
+            );
+        }
     }
 }
