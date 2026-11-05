@@ -682,8 +682,17 @@ rule SplitPaneRespawnOnWindowCleared {
         -- (it was absorbed into the pane via join-pane), so the kill is a
         -- no-op. The respawn handles the actual cleanup.
         --
-        -- If the pane was already closed externally, the respawn
-        -- degrades gracefully to SplitPaneClosed (full reset).
+        -- If the pane was already closed externally (a failed respawn
+        -- followed by a pane listing that no longer holds it), the respawn
+        -- degrades gracefully to SplitPaneClosed (full reset). A respawn
+        -- failure with the pane still listed, or with the listing itself
+        -- failing, changes nothing.
+        --
+        -- The same holds for the poll that checks the pinned pane still
+        -- exists: only a successful listing that lacks the pane reports
+        -- SplitPaneClosed. A failed or timed-out tmux query says nothing about
+        -- the pane and changes nothing, so a pane that is still joined is not
+        -- reset (which would let the window checks mark its task crashed).
 }
 
 -- == Split Pane Focus Border ==

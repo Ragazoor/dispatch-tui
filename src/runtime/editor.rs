@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use tempfile::Builder as TempfileBuilder;
 
-use super::{TuiRuntime, TUI_WINDOW_NAME};
+use super::TuiRuntime;
 use crate::editor::{
     apply_epic_editor_fields, apply_task_editor_fields, format_description_for_editor,
     format_editor_content, format_epic_for_editor, parse_editor_content, parse_epic_editor_output,
@@ -246,6 +246,7 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         let msg_tx = self.msg_tx.clone();
         let session = self.editor_session.clone();
+        let self_pane = self.self_pane.clone();
         let window = window_name;
         let path = temp_path;
         let kind_for_result = kind;
@@ -276,8 +277,15 @@ impl TuiRuntime {
                 || std::fs::read_to_string(&path),
             );
 
-            // Restore focus to the TUI window. Best-effort.
-            let _ = tmux::select_window(&TUI_WINDOW_NAME, &*runner);
+            // Restore focus to this board's own window, by pane id: the name
+            // `TUI` is server-wide and ambiguous with two boards. Without
+            // `$TMUX_PANE` there is no safe target. Best-effort.
+            match self_pane.as_ref() {
+                Some(pane) => {
+                    let _ = tmux::select_window_of_pane(pane, &*runner);
+                }
+                None => tracing::warn!("no $TMUX_PANE: not restoring focus to the board"),
+            }
 
             clear_session_slot(&session);
             // Clean up the tempfile explicitly now that we have the contents;

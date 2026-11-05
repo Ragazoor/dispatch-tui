@@ -17,6 +17,17 @@ impl App {
         if self.board.split.active && self.board.split.pinned_task_id == Some(id) {
             return vec![];
         }
+        // A foreign-hosted task's window lives on its own machine, never in
+        // this tmux server: a miss here says nothing about it
+        // (`agent-health.allium: DetectCrashedAgent`).
+        let local_host_id = self.local_host_id().map(str::to_owned);
+        if self
+            .board
+            .find_task(id)
+            .is_some_and(|t| !t.is_locally_owned(local_host_id.as_deref()))
+        {
+            return vec![];
+        }
         if let Some(task) = self.board.find_task(id) {
             if task.status == TaskStatus::Running {
                 // Running task lost its window — likely crashed
@@ -314,11 +325,13 @@ impl App {
             .pinned_task_id
             .filter(|_| self.board.split.active);
 
+        let local_host_id = self.local_host_id().map(str::to_owned);
         let windows_to_check: Vec<(crate::models::TaskId, TmuxWindow)> = self
             .board
             .tasks
             .iter()
             .filter(|t| t.tmux_window.is_some())
+            .filter(|t| t.is_locally_owned(local_host_id.as_deref()))
             .filter(|t| Some(t.id) != split_pinned)
             .filter_map(|t| t.tmux_window.clone().map(|w| (t.id, w)))
             .collect();
@@ -339,11 +352,13 @@ impl App {
     /// rather than one Persist per task.
     fn tick_sub_status(&mut self) -> Vec<Command> {
         let now = chrono::Utc::now();
+        let local_host_id = self.local_host_id().map(str::to_owned);
         let updates: Vec<(TaskId, SubStatus)> = self
             .board
             .tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Running && t.tmux_window.is_some())
+            .filter(|t| t.is_locally_owned(local_host_id.as_deref()))
             .filter(|t| !matches!(t.sub_status, SubStatus::Crashed | SubStatus::Conflict))
             .filter_map(|t| {
                 let activity = crate::models::classify_agent_activity(
@@ -911,5 +926,65 @@ mod tick_tests {
             "a host-less task must defer to the ownership-checked command, got {:?}",
             cmds[0]
         );
+    }
+    /// `agent-health.allium: DetectCrashedAgent` — a Running task hosted on
+    /// another machine has a window there, never here, so this board must not
+    /// check it (a miss would mark it Crashed).
+    #[test]
+    fn window_checks_skip_a_task_hosted_on_another_machine() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        let mut foreign = make_task(60, TaskStatus::Running);
+        foreign.host = Some("other-host".into());
+        foreign.tmux_window = Some(crate::models::test_tmux_window("task-60"));
+        let mut local = make_task(61, TaskStatus::Running);
+        local.host = Some("this-host".into());
+        local.tmux_window = Some(crate::models::test_tmux_window("task-61"));
+        app.board.tasks.push(foreign);
+        app.board.tasks.push(local);
+
+        let cmds = app.tick_window_checks();
+        assert_eq!(cmds.len(), 1);
+        match &cmds[0] {
+            Command::Task(crate::tui::commands::TaskCommand::BatchCheckWindows { windows }) => {
+                let ids: Vec<_> = windows.iter().map(|(id, _)| *id).collect();
+                assert!(ids.contains(&TaskId(61)));
+                assert!(!ids.contains(&TaskId(60)), "foreign task checked: {ids:?}");
+            }
+            other => panic!("expected BatchCheckWindows, got {other:?}"),
+        }
+    }
+
+    /// Sub-status reclassification is also this host's tasks only.
+    #[test]
+    fn sub_status_tick_skips_a_task_hosted_on_another_machine() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        let mut foreign = make_task(62, TaskStatus::Running);
+        foreign.host = Some("other-host".into());
+        foreign.tmux_window = Some(crate::models::test_tmux_window("task-62"));
+        foreign.sub_status = SubStatus::Active;
+        foreign.last_pre_tool_use_at = Some(chrono::Utc::now() - chrono::Duration::days(1));
+        app.board.tasks.push(foreign);
+
+        app.tick_sub_status();
+        let t = app.board.find_task(TaskId(62)).unwrap();
+        assert_eq!(t.sub_status, SubStatus::Active);
+    }
+
+    /// Second line of defence: a stray WindowGone for a foreign task does nothing.
+    #[test]
+    fn window_gone_ignores_a_task_hosted_on_another_machine() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        let mut foreign = make_task(63, TaskStatus::Running);
+        foreign.host = Some("other-host".into());
+        foreign.tmux_window = Some(crate::models::test_tmux_window("task-63"));
+        app.board.tasks.push(foreign);
+
+        assert!(app.handle_window_gone(TaskId(63)).is_empty());
+        let t = app.board.find_task(TaskId(63)).unwrap();
+        assert!(t.tmux_window.is_some());
+        assert_ne!(t.sub_status, SubStatus::Crashed);
     }
 }

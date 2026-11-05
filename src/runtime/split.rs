@@ -151,10 +151,15 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         let pane_id = pane_id.clone();
         tokio::task::spawn_blocking(move || {
-            if !tmux::pane_exists(&pane_id, &*runner) {
-                let _ = tx.send(Message::Split(
-                    crate::tui::messages::SplitMessage::PaneClosed,
-                ));
+            match tmux::pane_exists(&pane_id, &*runner) {
+                Ok(true) => {}
+                Ok(false) => {
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::PaneClosed,
+                    ));
+                }
+                // A failed query says nothing about the pane: change nothing.
+                Err(e) => tracing::warn!("pane query failed, leaving split as is: {e:#}"),
             }
         })
     }
@@ -166,9 +171,13 @@ impl TuiRuntime {
         tokio::task::spawn_blocking(move || {
             if let Err(e) = tmux::respawn_pane(&pane_id, &*runner) {
                 tracing::warn!("respawn-pane failed: {e:#}");
-                let _ = tx.send(Message::Split(
-                    crate::tui::messages::SplitMessage::PaneClosed,
-                ));
+                // Reset only when the pane is confirmed gone; any other
+                // failure leaves the split as it is.
+                if matches!(tmux::pane_exists(&pane_id, &*runner), Ok(false)) {
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::PaneClosed,
+                    ));
+                }
             }
         })
     }

@@ -199,9 +199,10 @@ async fn dispatch_split_check_pane_exists_reports_a_pane_that_is_gone() {
 
 #[tokio::test]
 async fn dispatch_split_respawn_pane_reports_one_it_could_not_revive() {
-    let mut h = harness(MockProcessRunner::new(vec![MockProcessRunner::fail(
-        "no such pane",
-    )]))
+    let mut h = harness(MockProcessRunner::new(vec![
+        MockProcessRunner::fail("no such pane"),
+        MockProcessRunner::ok_with_stdout(b"%1\n"), // pane_exists: %2 not listed
+    ]))
     .await;
 
     h.dispatch(Command::Split(SplitCommand::RespawnPane {

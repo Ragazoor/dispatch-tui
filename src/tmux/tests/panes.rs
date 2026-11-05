@@ -684,7 +684,7 @@ fn pane_pid_is_none_when_tmux_cannot_say() {
 #[test]
 fn pane_exists_finds_the_pane_in_the_listing() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%1\n%42\n%7\n")]);
-    assert!(pane_exists(&test_pane_id("%42"), &mock));
+    assert!(pane_exists(&test_pane_id("%42"), &mock).unwrap());
     assert_eq!(
         mock.recorded_calls()[0].1,
         vec!["list-panes", "-a", "-F", "#{pane_id}"],
@@ -697,28 +697,28 @@ fn pane_exists_is_false_when_the_pane_is_absent_from_the_listing() {
     // The case the old implementation could never detect: tmux exits 0 for an
     // unknown pane target, so only a membership test sees a closed pane.
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%1\n%7\n")]);
-    assert!(!pane_exists(&test_pane_id("%42"), &mock));
+    assert!(!pane_exists(&test_pane_id("%42"), &mock).unwrap());
 }
 
 #[test]
 fn pane_exists_does_not_match_a_pane_id_prefix() {
     // `%4` must not satisfy a query for `%42`, nor the reverse.
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%4\n")]);
-    assert!(!pane_exists(&test_pane_id("%42"), &mock));
+    assert!(!pane_exists(&test_pane_id("%42"), &mock).unwrap());
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%42\n")]);
-    assert!(!pane_exists(&test_pane_id("%4"), &mock));
+    assert!(!pane_exists(&test_pane_id("%4"), &mock).unwrap());
 }
 
 #[test]
 fn pane_exists_returns_false_when_no_server_is_running() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
-    assert!(!pane_exists(&test_pane_id("%42"), &mock));
+    assert!(!pane_exists(&test_pane_id("%42"), &mock).unwrap());
 }
 
 #[test]
-fn pane_exists_returns_false_on_runner_error() {
+fn pane_exists_returns_an_error_on_runner_error() {
     let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("binary not found"))]);
-    assert!(!pane_exists(&test_pane_id("%42"), &mock));
+    assert!(pane_exists(&test_pane_id("%42"), &mock).is_err());
 }
 
 // --- select_pane failure ---
@@ -795,4 +795,10 @@ fn rejoin_pane_fails_when_join_pane_fails() {
         1,
         "no tag clear after a failed join"
     );
+}
+
+#[test]
+fn pane_exists_reports_a_failed_query_as_an_error_not_as_gone() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("timed out")]);
+    assert!(pane_exists(&test_pane_id("%42"), &mock).is_err());
 }

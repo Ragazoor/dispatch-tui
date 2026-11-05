@@ -147,6 +147,13 @@ rule DetectCrashedAgent {
             )
 
     @guidance
+        -- This host's tasks only. A task hosted on another machine has its
+        -- window there, never in this tmux server, so a board neither checks
+        -- its window (no BatchCheckWindows entry) nor reclassifies its
+        -- sub_status, and a stray WindowGone for it is ignored. The owning
+        -- host's board is the only one that may mark it crashed. A task with
+        -- no host counts as local, as core/Task.host says.
+        --
         -- Clears every SubagentEntry for the task and resets live_subagents
         -- to 0, but does NOT run the HookSubagentStop drain path even if
         -- stop_pending was set. This rule already assigns sub_status =

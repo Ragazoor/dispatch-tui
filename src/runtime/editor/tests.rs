@@ -379,6 +379,33 @@ async fn exec_pop_out_editor_launches_the_resolved_editor_argv() {
     );
 }
 
+/// Focus returns to the board by its own pane id, never by the server-wide
+/// window name `TUI` (ambiguous with two boards).
+#[tokio::test]
+async fn exec_pop_out_editor_restores_focus_by_the_boards_own_pane() {
+    let mock = Arc::new(
+        MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate check)
+            MockProcessRunner::ok(), // new-window
+            MockProcessRunner::ok(), // select-window (focus the editor)
+            MockProcessRunner::ok(), // watcher: list-windows -> none, so it exits
+            MockProcessRunner::ok(), // select-window (focus back)
+        ])
+        .with_windows(&[]),
+    );
+    let (mut rt, mut app) = runtime_with_runner(mock.clone()).await;
+    rt.self_pane = Some(crate::models::test_pane_id("%7"));
+
+    rt.exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false })
+        .unwrap()
+        .await
+        .unwrap();
+
+    let calls = mock.recorded_calls();
+    let last = calls.last().unwrap();
+    assert_eq!(last.1, vec!["select-window", "-t", "%7"], "{calls:?}");
+}
+
 /// The create now runs on the blocking task, so its failure reaches the board
 /// as a message and must still release the one-editor-at-a-time slot.
 #[tokio::test]

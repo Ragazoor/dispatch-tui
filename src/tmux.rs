@@ -724,6 +724,18 @@ pub fn select_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<
     Ok(())
 }
 
+/// Make the window holding `pane_id` the current window. A pane id is unique
+/// server-wide, so unlike [`select_window`]'s name lookup it cannot be
+/// ambiguous when two boards share a server.
+pub fn select_window_of_pane(pane_id: &PaneId, runner: &dyn ProcessRunner) -> Result<()> {
+    run_checked(
+        runner,
+        &["select-window", "-t", pane_id.as_str()],
+        "select-window",
+    )?;
+    Ok(())
+}
+
 /// Store the worktree path as a per-window user option so the session-level
 /// `after-split-window` hook (installed by [`ensure_split_hook`]) can look it
 /// up when a split happens in this window.
@@ -1698,15 +1710,13 @@ fn list_all_pane_ids(runner: &dyn ProcessRunner) -> Result<Vec<String>> {
 /// and in fact pinned the broken behaviour by asserting a non-zero exit that
 /// real tmux never returns (the same trap as task #3781).
 ///
-/// A query failure maps to "gone", which is the pre-existing behaviour and the
-/// conservative choice for the polling caller: it exits split mode rather than
-/// leaving a pane pinned that may no longer be there. Contrast
-/// [`has_window_or_assume_present`], where the gated action is destructive and
-/// the default therefore goes the other way.
-pub fn pane_exists(pane_id: &PaneId, runner: &dyn ProcessRunner) -> bool {
-    list_all_pane_ids(runner)
-        .map(|ids| ids.iter().any(|id| id == pane_id.as_str()))
-        .unwrap_or(false)
+/// A query failure is an `Err`, never "gone": a timed-out listing says nothing
+/// about the pane, and reading it as closed would reset split mode while the
+/// pane is still joined. Callers that poll do nothing on `Err`, as
+/// `exec_check_window` does. Contrast [`has_window_or_assume_present`], which
+/// folds the failure into "present" for the same reason.
+pub fn pane_exists(pane_id: &PaneId, runner: &dyn ProcessRunner) -> Result<bool> {
+    list_all_pane_ids(runner).map(|ids| ids.iter().any(|id| id == pane_id.as_str()))
 }
 
 // ---------------------------------------------------------------------------

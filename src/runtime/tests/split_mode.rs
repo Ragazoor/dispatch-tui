@@ -293,6 +293,38 @@ async fn exec_check_split_pane_existing_pane_no_message() {
 }
 
 #[tokio::test]
+async fn exec_check_split_pane_failed_query_sends_nothing() {
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "timed out",
+    )]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_check_split_pane(&test_pane_id("%2")).await.unwrap();
+    assert!(
+        rx.try_recv().is_err(),
+        "a failed pane query must not read as a closed pane"
+    );
+}
+
+#[tokio::test]
+async fn exec_respawn_split_pane_failure_with_pane_still_listed_sends_nothing() {
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail("respawn refused"),
+        MockProcessRunner::ok_with_stdout(b"%2\n"), // pane still listed
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_respawn_split_pane(&test_pane_id("%2"))
+        .await
+        .unwrap();
+    assert!(rx.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn exec_check_split_pane_gone_sends_closed() {
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -324,6 +356,7 @@ async fn exec_respawn_split_pane_gone_sends_closed() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no pane"), // respawn_pane fails when pane is gone
+        MockProcessRunner::ok_with_stdout(b"%1\n"), // pane_exists: %2 not listed
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
 
@@ -349,6 +382,7 @@ async fn exec_respawn_split_pane_respawn_fails_sends_closed() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("respawn err"), // respawn_pane fails
+        MockProcessRunner::ok_with_stdout(b"%1\n"), // pane_exists: %2 not listed
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
 

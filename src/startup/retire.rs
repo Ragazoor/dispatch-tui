@@ -172,7 +172,7 @@ fn await_pane_gone(
     // later polls wait on the process alone and spawn no tmux command.
     let mut pane_listed = true;
     loop {
-        pane_listed = pane_listed && tmux::pane_exists(pane, runner);
+        pane_listed = pane_listed && tmux::pane_exists(pane, runner).unwrap_or(true);
         if !pane_listed && !pid.is_some_and(alive) {
             return;
         }
