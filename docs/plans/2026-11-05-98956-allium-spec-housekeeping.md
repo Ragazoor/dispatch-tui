@@ -64,6 +64,16 @@ the agent asks the user before changing that behaviour.
 
 ## Checker facts (verified on scratch copies)
 
+Each checker gap below is filed upstream on juxt/allium-tools (task #98959):
+field reads across files [#107](https://github.com/juxt/allium-tools/issues/107)
+(the rest is in open PR #95), qualified collection receivers
+[#108](https://github.com/juxt/allium-tools/issues/108), contract return types
+[#106](https://github.com/juxt/allium-tools/issues/106), qualified emissions
+[#109](https://github.com/juxt/allium-tools/issues/109), dot-methods
+[#110](https://github.com/juxt/allium-tools/issues/110), plural-only entities
+[#111](https://github.com/juxt/allium-tools/issues/111). Until they are fixed,
+work around them as below.
+
 - Check the whole set. A single-file check reports `use.unresolvedPath` on every
   `use`.
 - **Cross-spec triggers:** a rule that listens for a trigger raised in another
@@ -88,10 +98,15 @@ the agent asks the user before changing that behaviour.
   only by another spec stays `field.unused` (≈80 such). Acceptance checks say
   "no *new* `field.unused`", not "none".
 - **Entities referenced only by their plural collection** (`IdSequences`,
-  `SentinelColumns`) are `entity.unused`; bind the type once (`for s: IdSequence
-  in IdSequences`, or a typed trigger parameter).
-- **Types used only in a contract signature** are `definition.unused`
-  (`PaneView`, startup's six outcome enums, `Bump`, `Preceding`). Comment them.
+  `SentinelColumns`) are `entity.unused`; name the singular type once (a surface
+  `context s: IdSequence`, or a rule `when: s: IdSequence.created`). A typed loop
+  binding (`for s: IdSequence in IdSequences`) and a typed trigger parameter
+  (`when: T(s: IdSequence)`) do not parse.
+- **Types used only as a bare contract return type** (`-> PaneView`, also
+  optional `-> T?`) are `definition.unused` (`PaneView`, five of startup's
+  outcome enums, `Bump`, `Preceding`). Parameter types and `List<T>` returns are
+  credited. Comment them. `StartupConfigOutcome` is not a contract type: no
+  contract or rule names it, so its warning is real.
 - **Non-built-in collection methods are not flagged but are invalid**: only
   `.count .any() .all() .first .last .unique .add() .remove()` exist. Seen:
   `.where(…) .exists(…) .contains(…) .is_empty() .max(…) .map(…) .filter(…)
