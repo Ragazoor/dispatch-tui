@@ -1446,7 +1446,7 @@ rule RetryFresh {
 -- TextInputField — every bare mention of it in this section names that one.
 
 surface RepoPathPicker {
-    facing user: User
+    facing user: core/Operator
 
     let saved = core/SavedRepoPaths
     let query = ""
@@ -1546,7 +1546,7 @@ surface RepoPathPicker {
 }
 
 surface BaseBranchPicker {
-    facing user: User
+    facing user: core/Operator
 
     -- The base-branch field of the manual "new task" form (InputBaseBranch
     -- step). It mirrors RepoPathPicker, but its candidate list is the
@@ -1704,7 +1704,7 @@ surface BaseBranchPicker {
 }
 
 surface DispatchingFeedback {
-    facing user: User
+    facing user: core/Operator
 
     -- This surface tracks tasks that are mid-dispatch, and since store-split
     -- M4 it is driven by the dispatch request row (store-split.allium:
@@ -1824,7 +1824,7 @@ surface DispatchingFeedback {
 }
 
 surface UnprovisionedIndicator {
-    facing user: User
+    facing user: core/Operator
 
     -- The card line-2 indicator for a task that looks live but has nothing
     -- behind it: running or review, with neither a worktree nor a tmux
@@ -1928,7 +1928,7 @@ surface UnprovisionedIndicator {
 }
 
 surface TokenBudgetIndicator {
-    facing user: User
+    facing user: core/Operator
     -- prose: passive readout of the Claude subscription rate-limit windows in
     -- the top indicator row. Sourced from the statusLine hook payload of every
     -- dispatch-spawned session, recorded to a snapshot file, polled by the TUI.
@@ -1982,7 +1982,7 @@ surface TokenBudgetIndicator {
 }
 
 surface ActiveModelIndicator {
-    facing user: User
+    facing user: core/Operator
     -- prose: passive readout of the Claude model in use, in the top indicator
     -- row beside TokenBudgetIndicator. Sourced from the same statusLine hook
     -- payload and the same snapshot file (see observability.allium:
@@ -2028,7 +2028,7 @@ surface ActiveModelIndicator {
 }
 
 surface SandboxedAgentExecution {
-    facing operator: User
+    facing operator: core/Operator
     -- prose: The same dispatch-owned settings file that carries the
     -- statusLine decorator (see observability.allium: StatusLineDecorator)
     -- used to also enable

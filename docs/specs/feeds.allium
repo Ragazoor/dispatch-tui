@@ -961,7 +961,7 @@ rule ReportShippedFeedScripts {
 -- == Polling ==
 
 rule FeedTick {
-    when: TickInterval()
+    when: core/FeedPollTick()
 
     -- The FeedRunner walks every Epic with feed_command != null. For each
     -- such epic, if the elapsed time since its last successful or attempted
@@ -1067,7 +1067,7 @@ rule FeedTick {
         -- key events and MCP notifications remain responsive during fetch.
         -- FeedRunner runs in its own loop at FEED_POLL_INTERVAL (2s,
         -- src/feed/mod.rs::FEED_POLL_INTERVAL), independent from the TUI's
-        -- TickInterval / TICK_INTERVAL. Both are 2s today, but the constants
+        -- Tick / TICK_INTERVAL (core.allium: BoardClockTicks). Both are 2s today, but the constants
         -- are kept separate so the two concerns can evolve independently.
         -- Implementation: src/feed/mod.rs::FeedRunner (struct and
         -- src/feed/mod.rs::FeedRunner::tick).

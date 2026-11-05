@@ -500,7 +500,7 @@ invariant TrajectoryEntryReferencesRealTask {
 ------------------------------------------------------------
 
 surface StatusLineDecorator {
-    facing operator: User
+    facing operator: core/Operator
     -- prose: `dispatch statusline --snapshot <path> [--chain <command>]`, the
     -- process that produces the data dispatch.allium's TokenBudgetIndicator reads. It is wired as
     -- the statusLine command of every dispatch-spawned Claude session, so it

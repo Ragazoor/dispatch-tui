@@ -3,7 +3,8 @@
 --
 -- Scope: Shared domain model for the dispatch system
 -- Includes: External entities, enumerations, storage-boundary validation,
---           core entities, and config
+--           core entities, config, the actors every spec faces, and the
+--           board clock
 -- Excludes: Rules (see tasks.allium, dispatch.allium, agent-health.allium,
 --           pr-workflow.allium, split-pane.allium, mcp-task-tools.allium,
 --           epics.allium, learnings.allium); the board's structural layout —
@@ -930,9 +931,9 @@ enum AgentEndReason { replaced | worktree_gone | launch_failed }
 enum AgentStartMode { dispatch | research | quick }
 
 entity Agent {
-    task: core/Task
+    task: Task
     name: String              -- picked by the store when the agent starts; never changes (A5)
-    host: core/Host           -- the machine its session runs on; the task's host when it started
+    host: Host           -- the machine its session runs on; the task's host when it started
     start_mode: AgentStartMode
     state: AgentState
     started_at: Timestamp
@@ -1054,7 +1055,7 @@ entity Epic {
     status: TaskStatus
     plan_path: String?    -- filesystem path to the implementation plan file
     sort_order: Integer?
-    completed_at: Timestamp?  -- when this epic last entered done, on the same terms as core/Task.completed_at, manual reorder of the card in the Done column included (board-layout.allium, "Done Column Ordering"). Unlike the task field, an override written here is not permanent: EpicStatusRecalculation rewrites it when the epic itself transitions into done
+    completed_at: Timestamp?  -- when this epic last entered done, on the same terms as Task.completed_at, manual reorder of the card in the Done column included (board-layout.allium, "Done Column Ordering"). Unlike the task field, an override written here is not permanent: EpicStatusRecalculation rewrites it when the epic itself transitions into done
     auto_dispatch: Boolean = false
     parent: Epic?         -- null for root epics; set for nested sub-epics
     feed_command: String?           -- shell command that emits FeedItem JSON (see feeds.allium); null for non-feed epics
@@ -1562,7 +1563,7 @@ entity PrPollState {
     -- computed from can only drift from it or duplicate it. Also means
     -- "reset the counter to 0" and "clear gave_up" cannot fall out of step —
     -- there is only one write to make.
-    gave_up: consecutive_permanent_failures >= core/config.pr_poll_permanent_failure_threshold
+    gave_up: consecutive_permanent_failures >= config.pr_poll_permanent_failure_threshold
 
     @guidance
         -- Conceptually one exists per polled task; the fields' defaults are the
@@ -1900,3 +1901,81 @@ config {
 -- though "10m" was accepted on the way in. No surface renders a humanised
 -- cadence today; if one is added, it should show the largest whole unit that
 -- divides the value exactly, else seconds ("600" -> "10m", "650" -> "650s").
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+-- Every party a surface faces is declared here, once, and each spec faces it
+-- qualified (`facing operator: core/Operator`). A spec keeps its own surfaces:
+-- a surface's `provides` reaches only the rules of the spec it sits in.
+
+-- The person at the keyboard: driving the board, answering a startup prompt or
+-- typing a `dispatch` command. Identified by the machine they work on.
+actor Operator {
+    identified_by: Host where id != ""
+}
+
+-- Any client of the dispatch MCP server: a dispatched agent (caller_identity
+-- Task(t)) or a session (caller_identity Session). Code, not a person.
+actor McpClient {
+    identified_by: McpCaller where connected = true
+}
+
+-- The system parties. Each is code or the machine, not a person, so each is
+-- identified minimally, by the entity it acts for.
+
+-- The board's own process: it reports its own exit, whatever caused it
+-- (startup.allium: BoardLifecycle).
+actor BoardProcess {
+    identified_by: Host where this = local_host()
+}
+
+-- The board's timers (BoardClockTicks below).
+actor BoardClock {
+    identified_by: Host where this = local_host()
+}
+
+-- The machine's operating system: power management and process signals.
+actor OperatingSystem {
+    identified_by: Host where this = local_host()
+}
+
+-- The tmux server the board and its agent windows run in.
+actor Tmux {
+    identified_by: TmuxWindow where name != ""
+}
+
+-- Claude Code's hook runner inside an agent's session, which reports the
+-- agent's activity to the board.
+actor HookRunner {
+    identified_by: Agent where state = current
+}
+
+-- The far side of the board's connection to the shared store, as seen from
+-- this machine (sync.allium: StoreBoundary).
+actor SharedStore {
+    identified_by: Host where this = local_host()
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- The board's timers. Each fires on its own fixed interval while the board
+-- runs and never while it does not; none waits for a rule it starts to finish.
+-- Consumers listen qualified: `when: core/Tick()`.
+surface BoardClockTicks {
+    facing _: BoardClock
+
+    provides:
+        -- Every config.tick_interval: the board's own refresh (agent-health.allium:
+        -- ClassifyAgentActivity, pr-workflow.allium: PollPrStatus).
+        Tick()
+        -- The feed runner's own interval, kept apart from Tick so the two can
+        -- change independently (feeds.allium: FeedTick).
+        FeedPollTick()
+        -- Every startup.allium config.managed_store_health_interval
+        -- (startup.allium: RestartTheManagedStoreWhenItStopsSaving).
+        ManagedStoreHealthDue()
+}

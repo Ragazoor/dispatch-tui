@@ -720,6 +720,16 @@ enum StartupAbortReason {
     | store_switched              -- the store holds a different database from the one this install's boards last used, and the operator did not pass --accept-store-switch
 }
 
+-- Why the board exited. Every exit is one BoardExited, whatever caused it
+-- (BoardLifecycle below); a consumer that does not apply to every cause says
+-- which it needs. The checker reports it unused: its only uses are literals
+-- of a provided trigger's parameter, which it does not credit.
+enum BoardExitCause {
+    quit               -- the operator confirmed a quit (split-pane.allium: QuitExitsSplitMode and the rules after it)
+    | signalled        -- SIGHUP or SIGTERM: a later launch retired the board's window (RetireTheBoardWindow), or something killed it
+    | startup_aborted  -- the launch aborted before the board drew (StartupAborted)
+}
+
 -- Why there is no longer a store_unconfigured. It was a launch that never said
 -- where the store is, and its remedy — a flag or an environment variable, plus
 -- two `spacetime` commands run by hand — was a precondition the board can
@@ -1640,7 +1650,7 @@ rule StartTheManagedStoreWhenNothingAnswers {
 
 rule RestartTheManagedStoreWhenItStopsSaving {
     -- Fires every config.managed_store_health_interval while the board runs.
-    when: ManagedStoreHealthDue(operator)
+    when: core/ManagedStoreHealthDue()
     requires:
         managed_store_held_by_this_board()
         managed_store_failed_to_save()
@@ -1648,7 +1658,7 @@ rule RestartTheManagedStoreWhenItStopsSaving {
     ensures:
         stop_managed_store()
         start_managed_store()
-        BoardWarned(operator)
+        BoardWarned(core/local_host())
 
     @guidance
         -- Found on Oct 5: the disk filled for a moment, the store stopped
@@ -1917,7 +1927,10 @@ rule PinTheStoreOnceItAnswers {
 }
 
 rule StopTheManagedStoreWhenTheBoardExits {
-    when: BoardExited(operator)
+    when: BoardExited(cause)
+    -- An abort stops it in StopTheManagedStoreWhenStartupAborts, which keeps
+    -- the abort's reason.
+    requires: cause != startup_aborted
     requires: managed_store_held_by_this_board()
 
     ensures: ManagedStoreStopped()
@@ -1926,15 +1939,15 @@ rule StopTheManagedStoreWhenTheBoardExits {
         -- THE MANAGED STORE LIVES AS LONG AS THE BOARD, whether this board
         -- started it or adopted it (AdoptAStoreAlreadyOnTheManagedAddress).
         -- Its data stays on disk, and the next launch starts it again over the
-        -- same data. BoardExited is the board's normal exit — a confirmed quit
-        -- — and also its exit when a later launch retires its window
-        -- (RetireTheBoardWindow), which signals it.
+        -- same data. It stops on a confirmed quit and also when a later launch
+        -- retires the board's window (RetireTheBoardWindow), which signals it.
         --
         -- A RETIRED BOARD IS SIGNALLED, NOT ASKED: kill-window sends SIGHUP,
         -- whose default disposition ends the process without running an exit.
         -- The board therefore catches SIGHUP and SIGTERM and runs this rule's
-        -- stop before it goes, which is what makes "retired" an exit that
-        -- stops the store rather than another way to orphan it.
+        -- stop before it goes (BoardExited with cause signalled), which is
+        -- what makes "retired" an exit that stops the store rather than
+        -- another way to orphan it.
         --
         -- AGENT WINDOWS ARE NOT WAITED FOR. They outlive the board
         -- (RestartingCostsOnlyTheBoard) and lose the store with it; what they
@@ -1949,6 +1962,18 @@ rule StopTheManagedStoreWhenTheBoardExits {
         -- adopting one mid-shutdown. A stop that runs out its timeout leaves
         -- that race open, and its worst case is the new board's first
         -- connection failing with store_unavailable — the next launch works.
+}
+
+rule AStartupAbortIsAnExit {
+    when: StartupAborted(reason)
+
+    ensures: BoardExited(cause: startup_aborted)
+
+    @guidance
+        -- An abort is an exit like any other, so whatever is held for the
+        -- life of the board goes with it (ForgetTheStoreRecordWhenTheBoardExits,
+        -- StopTheManagedStoreWhenStartupAborts). An abort always comes before
+        -- the board draws, so nothing bound at BoardDrawn is held yet.
 }
 
 rule StopTheManagedStoreWhenStartupAborts {
@@ -2074,10 +2099,10 @@ rule PublishTheBoardsStoreOnItsSession {
 }
 
 rule ForgetTheStoreRecordWhenTheBoardExits {
-    when: BoardExited(operator) or StartupAborted(reason)
+    when: BoardExited(cause)
     requires: explicit_store_server() != null
 
-    ensures: StoreAddressForgotten(operator, done: forget_store_server())
+    ensures: StoreAddressForgotten(core/local_host(), done: forget_store_server())
 
     @guidance
         -- The record says "a board on this database is using this store", so
@@ -2358,7 +2383,7 @@ rule AbortWhenTheAgentPortIsTaken {
 ------------------------------------------------------------
 
 surface BoardLaunchCommand {
-    facing operator: User
+    facing operator: core/Operator
 
     -- `dispatch tui [--spacetime-server <url>] [--data-dir <path>] [--port <n>]` —
     -- the one command that starts dispatch. The store may instead be named by
@@ -2438,7 +2463,7 @@ surface BoardLaunchCommand {
 }
 
 surface ConfigUpdatePrompt {
-    facing operator: User
+    facing operator: core/Operator
 
     -- Shown in the terminal before the board takes the screen, on the one
     -- launch where something is stale.
@@ -2465,7 +2490,7 @@ surface ConfigUpdatePrompt {
 }
 
 surface StartupConfigReport {
-    facing operator: User
+    facing operator: core/Operator
 
     -- The non-interactive counterpart of the prompt: what a script sees.
 
@@ -2482,7 +2507,7 @@ surface StartupConfigReport {
 }
 
 surface HostLabelPrompt {
-    facing operator: User
+    facing operator: core/Operator
 
     -- Shown in the terminal before the board takes the screen, on the one
     -- launch where this machine has no name yet. The only surface in the system
@@ -2521,6 +2546,27 @@ surface HostLabelPrompt {
         -- worktrees that other people's boards will attribute to it — rather
         -- than presenting an unexplained text field on the one launch the
         -- operator has least context for.
+}
+
+-- The board's life, as one start and one exit. The start is BoardDrawn,
+-- emitted by DrawBoardAfterTheHostIsNamed. The exit is BoardExited, one event
+-- for every cause: a confirmed quit (split-pane.allium emits it once a quit's
+-- pane restores have settled), a signal, and a startup abort
+-- (AStartupAbortIsAnExit). Other specs listen qualified: startup/BoardDrawn(),
+-- startup/BoardExited(cause).
+surface BoardLifecycle {
+    facing _: core/BoardProcess
+
+    provides:
+        BoardExited(cause)
+
+    @guarantee ASignalledBoardRunsItsExit
+        -- The board catches SIGHUP (a later launch retiring its window sends
+        -- it through kill-window) and SIGTERM, and exits with cause
+        -- signalled. Signal delivery's default would end the process without
+        -- an exit, and leave the managed store and the store record behind.
+        -- An exit the process cannot run (SIGKILL, a crash, power loss)
+        -- raises no BoardExited; see the first open question.
 }
 
 ------------------------------------------------------------

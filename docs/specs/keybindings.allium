@@ -36,6 +36,7 @@
 -- docs/reference.md, and the three could disagree. One table, read by all of
 -- them, makes disagreement impossible rather than merely discouraged.
 
+use "./core.allium" as core
 use "./observability.allium" as observability
 
 ------------------------------------------------------------
@@ -692,11 +693,8 @@ invariant LastRowKeyWarnsItDoesNotEnterAnEpic {
 -- Actor Declarations
 ------------------------------------------------------------
 
--- A dispatched agent calling MCP tools. Declared here because the catalogue
--- below is a boundary with a code party, not a person.
-actor McpAgent {
-    identified_by: McpCaller where name != ""
-}
+-- The parties are core.allium's: the operator at the keyboard and the MCP
+-- client reading the catalogue.
 
 ------------------------------------------------------------
 -- Surfaces
@@ -706,7 +704,7 @@ actor McpAgent {
 -- the namespace is the mode the key arrived in, decided by which pane has
 -- focus and which mode it is in, not chosen by the user.
 surface KeyInput {
-    facing user: User
+    facing user: core/Operator
 
     provides:
         KeyPressed(user, namespace, key)
@@ -779,7 +777,7 @@ surface KeyInput {
 }
 
 surface KeybindingCatalogue {
-    facing agent: McpAgent
+    facing agent: core/McpClient
 
     exposes:
         for binding in KeyBindings:
@@ -807,7 +805,7 @@ surface KeybindingCatalogue {
 }
 
 surface HelpOverlay {
-    facing user: User
+    facing user: core/Operator
 
     exposes:
         for binding in KeyBindings:

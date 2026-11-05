@@ -377,7 +377,7 @@ rule AgentNameResolvesToTask {
 -- What a person or an agent sees of a task's agent. `state` shows as live,
 -- paused or ended.
 surface AgentIdentity {
-    facing viewer: User
+    facing viewer: core/Operator
 
     context task: core/Task
 

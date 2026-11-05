@@ -1405,7 +1405,7 @@ rule ToggleHiddenWorkPackage {
 ------------------------------------------------------------
 
 surface TextInputField {
-    facing user: User
+    facing user: core/Operator
 
     -- The shared single-line text buffer used by every InputMode that
     -- types free text into the app's shared input field: task title,

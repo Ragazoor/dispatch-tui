@@ -7,6 +7,7 @@
 --           PR/wrap-up (see pr-workflow.allium).
 
 use "./core.allium" as core
+use "./startup.allium" as startup
 
 given {
     split_pane: core/SplitPane
@@ -475,7 +476,7 @@ rule QuitCompletesWithNothingToRestore {
 
     requires: split_pane.restores_in_flight = 0
 
-    ensures: ApplicationExits()
+    ensures: startup/BoardExited(cause: quit)
 
     @guidance
         -- The ordinary case, and much the commonest: no exit was issued at all,
@@ -528,7 +529,7 @@ rule QuitCompletesWhenRestoreSettles {
     requires: split_pane.restores_in_flight = 0
 
     ensures: split_pane.quit_restore_deadline = null
-    ensures: ApplicationExits()
+    ensures: startup/BoardExited(cause: quit)
 
     @guidance
         -- The restore reported back, and the process may go. Settled covers
@@ -560,7 +561,7 @@ rule QuitCompletesOnRestoreTimeout {
     requires: split_pane.quit_restore_deadline != null
 
     ensures: split_pane.quit_restore_deadline = null
-    ensures: ApplicationExits()
+    ensures: startup/BoardExited(cause: quit)
 
     @guidance
         -- The bound. A restore that has not reported back by its deadline is

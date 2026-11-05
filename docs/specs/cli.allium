@@ -566,16 +566,14 @@ invariant PrGateRunsAsAHook {
 -- Actor Declarations
 ------------------------------------------------------------
 
-actor Operator {
-    identified_by: core/Host where id != ""
-}
+-- The operator is core.allium's Operator.
 
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
 
 surface DispatchCommandLine {
-    facing operator: Operator
+    facing operator: core/Operator
 
     exposes:
         for invocation in CliInvocations:

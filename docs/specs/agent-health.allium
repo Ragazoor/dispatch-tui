@@ -24,7 +24,7 @@ config {
 
 rule ClassifyAgentActivity {
     -- Derives sub_status for running tasks from hook event timestamps.
-    when: Tick()
+    when: core/Tick()
     for task in core/Tasks where status = running and current_window != null and sub_status not in {crashed, conflict}:
         ensures:
             if current_agent(task).last_notification_at != null and (current_agent(task).last_pre_tool_use_at = null or current_agent(task).last_notification_at > current_agent(task).last_pre_tool_use_at):
@@ -932,7 +932,7 @@ rule UndeliveredPeerMessage {
 ------------------------------------------------------------
 
 surface HookDelivery {
-    facing operator: User
+    facing operator: core/Operator
     -- prose: The bridge every rule in this file is triggered through. Claude
     -- Code fires its lifecycle hooks (PreToolUse, PostToolUse, Stop,
     -- Notification, UserPromptSubmit, SessionStart, SubagentStart,

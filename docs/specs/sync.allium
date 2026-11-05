@@ -85,6 +85,7 @@
 -- BoardWritesThroughTheStore and NoWriteIsEverQueued.
 
 use "./core.allium" as core
+use "./startup.allium" as startup
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -1179,7 +1180,7 @@ rule CreatesRequireASettledIdentity {
 }
 
 rule RefuseToStartWhereOnlySomeChangesReachTheStore {
-    when: BoardDrawn()
+    when: startup/BoardDrawn()
 
     requires:
         configured_store_server() != null
@@ -1682,28 +1683,24 @@ invariant NothingIsSubscribedBeforeAnIdentityExists {
 -- Actor Declarations
 ------------------------------------------------------------
 
--- Connecting, subscribing and reading the indicator are all operator actions.
--- There is deliberately no agent-facing route to any of them: a dispatched
--- agent works inside one task, and changing which epics its operator follows —
--- or taking the board's connection down — is not within that.
-actor Operator {
-    identified_by: core/Host where id != ""
-}
-
--- The far side of the connection. An actor rather than an unnamed outside,
--- because the three events it delivers are a contract this board depends on
--- and a store that delivers only two of them leaves the board in a state with
--- no way out — see StoreAnnouncesEveryTransition on the surface below.
-actor SharedStore {
-    identified_by: BoardConnection where server != ""
-}
+-- Connecting, subscribing and reading the indicator are all operator actions
+-- (core.allium: Operator). There is deliberately no agent-facing route to any
+-- of them: a dispatched agent works inside one task, and changing which epics
+-- its operator follows — or taking the board's connection down — is not within
+-- that.
+--
+-- The far side of the connection is core.allium's SharedStore. It is an actor
+-- rather than an unnamed outside, because the three events it delivers are a
+-- contract this board depends on and a store that delivers only two of them
+-- leaves the board in a state with no way out — see
+-- StoreAnnouncesEveryTransition on the surface below.
 
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
 
 surface StoreBoundary {
-    facing _: SharedStore
+    facing _: core/SharedStore
 
     context connection: BoardConnection
 
@@ -1822,7 +1819,7 @@ surface StoreBoundary {
 }
 
 surface ConnectionIndicator {
-    facing operator: Operator
+    facing operator: core/Operator
 
     context connection: BoardConnection
 
@@ -1867,7 +1864,7 @@ surface ConnectionIndicator {
 }
 
 surface EpicSubscriptionToggle {
-    facing operator: Operator
+    facing operator: core/Operator
 
     context epic: core/Epic
 

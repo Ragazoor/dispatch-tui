@@ -1528,7 +1528,7 @@ value ColumnHeaderGeometry {
 ------------------------------------------------------------
 
 surface ColumnHeaderBar {
-    facing user: User
+    facing user: core/Operator
 
     -- One instance per navigation column. The bar is the board's identity
     -- row: the whole hue channel on a column header is its label, and the
@@ -1593,7 +1593,7 @@ surface ColumnHeaderBar {
 }
 
 surface ColumnGround {
-    facing user: User
+    facing user: core/Operator
 
     -- The board's flat areas: the ground a column is drawn on, and the card
     -- surface every card is raised onto. Both neutral, both uniform across
@@ -1640,7 +1640,7 @@ surface ColumnGround {
 }
 
 surface ColumnFocusHairlines {
-    facing user: User
+    facing user: core/Operator
 
     -- The thin rule above a column's card list, and that column's scroll
     -- indicators (▲/▼). They are grouped as one surface because they behave
@@ -1681,7 +1681,7 @@ surface ColumnFocusHairlines {
 }
 
 surface TaskCard {
-    facing user: User
+    facing user: core/Operator
 
     -- A discrete framed box, inset from its column, carrying the column's
     -- identity on a two-pixel stripe and its own condition on its frame.
@@ -1784,7 +1784,7 @@ surface TaskCard {
 }
 
 surface EpicCard {
-    facing user: User
+    facing user: core/Operator
 
     -- An epic card is not a member of its column's identity. It is its own
     -- identity object, and it carries purple in every column.
@@ -1844,7 +1844,7 @@ surface EpicCard {
 -- A work package card (work-packages.allium: PackageCardPlacement) is a
 -- second kind of container: shaped like an epic card, coloured apart from it.
 surface WorkPackageCard {
-    facing user: User
+    facing user: core/Operator
 
     context package: WorkPackage
     context card: RenderedCard

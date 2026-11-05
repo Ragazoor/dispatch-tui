@@ -2235,11 +2235,7 @@ rule RejectUnresolvedContextUri {
 -- Actor Declarations
 ------------------------------------------------------------
 
--- Any client of the dispatch MCP server: a dispatched agent (caller_identity
--- Task(t)) or a session (caller_identity Session). Code, not a person.
-actor McpClient {
-    identified_by: McpCaller where connected = true
-}
+-- The MCP client is core.allium's McpClient.
 
 ------------------------------------------------------------
 -- Surfaces
@@ -2247,7 +2243,7 @@ actor McpClient {
 
 -- The context resources boundary. See "MCP context resources" in Rules.
 surface McpContextResources {
-    facing client: McpClient
+    facing client: core/McpClient
 
     provides:
         McpInitialize(client)

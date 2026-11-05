@@ -412,7 +412,7 @@ invariant SortOrderHasNoSentinel {
 ------------------------------------------------------------
 
 surface SnapshotTargets {
-    facing operator: seed/Operator
+    facing operator: seed/StorePublisher
 
     exposes:
         for selection in StoreSelections:

@@ -102,7 +102,7 @@ rule PrLearningsGate {
 }
 
 rule PollPrStatus {
-    when: Tick()
+    when: core/Tick()
 
     -- `pr_poll_due` reads this task's core/PrPollState and answers false in
     -- exactly two cases: polling gave up on the task (gave_up), or its

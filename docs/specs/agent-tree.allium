@@ -75,6 +75,7 @@
 -- never by the repository (AgentTreeSourceIsOneSelection).
 
 use "./core.allium" as core
+use "./startup.allium" as startup
 
 ------------------------------------------------------------
 -- Enumerations
@@ -737,7 +738,7 @@ config {
 -- to toggle it goes away.
 
 rule BindAgentTreeToggle {
-    when: AppStarts()
+    when: startup/BoardDrawn()
 
     ensures: AgentTreeToggleBound(key: config.agent_tree_toggle_key)
 
@@ -777,7 +778,13 @@ rule BindAgentTreeToggle {
 }
 
 rule UnbindAgentTreeToggle {
-    when: AppExits()
+    when: startup/BoardExited(cause)
+
+    -- Only a quit runs the board's tmux teardown. A signalled board stops its
+    -- store and goes (startup.allium: BoardLifecycle), leaving the binding;
+    -- the board that retired it binds it again as it starts. An abort comes
+    -- before the binding exists.
+    requires: cause = quit
 
     ensures: AgentTreeToggleUnbound(key: config.agent_tree_toggle_key)
 
@@ -2887,7 +2894,7 @@ invariant OnlyFilesCarryBadges {
 ------------------------------------------------------------
 
 surface AgentTreeCompanionPane {
-    facing user: User
+    facing user: core/Operator
 
     -- One surface instance per companion pane. The user reading it is looking
     -- at the agent's own tmux window, not at the kanban board.
@@ -3634,7 +3641,7 @@ surface AgentTreeCompanionPane {
 }
 
 surface AgentTreeDiffPane {
-    facing user: User
+    facing user: core/Operator
 
     -- One surface instance per diff pane. The user reading it is looking at
     -- the pane beneath the tree, in the agent's own tmux window.

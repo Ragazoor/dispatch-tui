@@ -24,6 +24,9 @@
 --     message. There is no automatic retry.
 --   - Linux only; keyboard only; no MCP tool.
 
+use "./core.allium" as core
+use "./startup.allium" as startup
+
 ------------------------------------------------------------
 -- Entities
 ------------------------------------------------------------
@@ -56,7 +59,7 @@ given {
 ------------------------------------------------------------
 
 rule KeepAwakeStartsOff {
-    when: BoardStarted()
+    when: startup/BoardDrawn()
 
     ensures: KeepAwake.created(status: off)
 
@@ -169,7 +172,7 @@ rule ReleaseKeepAwake {
 }
 
 rule ReleaseKeepAwakeOnExit {
-    when: BoardExiting()
+    when: startup/BoardExited(_)
 
     requires: keep_awake.status in {requesting, on}
 
@@ -188,7 +191,7 @@ rule ReleaseKeepAwakeOnExit {
 ------------------------------------------------------------
 
 surface KeepAwakeToggle {
-    facing operator: User
+    facing operator: core/Operator
 
     exposes:
         keep_awake.shows_badge
@@ -224,7 +227,7 @@ surface KeepAwakeToggle {
 }
 
 surface KeepAwakeHold {
-    facing system: OperatingSystem
+    facing system: core/OperatingSystem
 
     -- The operating system's side of the hold. The board asks
     -- (KeepAwakeRequested) and lets go (KeepAwakeReleased); the system

@@ -2023,7 +2023,7 @@ rule ExitAllEpics {
 ------------------------------------------------------------
 
 surface AutoDispatchFailureIndicator {
-    facing user: User
+    facing user: core/Operator
 
     -- What ChainStallMarked (see SurfaceAutoDispatchFailure) looks like on the
     -- board: a subtask whose chained dispatch failed and was released back to
@@ -2081,7 +2081,7 @@ surface AutoDispatchFailureIndicator {
 }
 
 surface AppendOnlyEpicIndicator {
-    facing user: User
+    facing user: core/Operator
 
     -- What core/Epic.feed_append_only looks like on the epic header: the
     -- literal text `append-only`, in green, in the top indicator row.

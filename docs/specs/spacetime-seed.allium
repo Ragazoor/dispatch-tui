@@ -875,7 +875,10 @@ invariant OneSequencePerTable {
 -- or its publisher: `burn_id_sequence` (a large ceiling stalls the
 -- transaction), `probe_generated_task_id` and `set_schema_version`. Any other
 -- caller is refused before anything is written.
-actor Operator {
+--
+-- So the operator these commands face is narrower than core.allium's
+-- Operator: the store's publisher.
+actor StorePublisher {
     identified_by: core/Host where id != "" and owner = store_publisher()
 }
 
@@ -1077,7 +1080,7 @@ rule OrphansLeaveTheirDroppedEpic {
 ------------------------------------------------------------
 
 surface SnapshotCommandLine {
-    facing operator: Operator
+    facing operator: StorePublisher
 
     exposes:
         for sequence in IdSequences:
