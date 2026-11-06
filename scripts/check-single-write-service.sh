@@ -115,6 +115,7 @@ hits=$(
             # The line without its `//` comment. A `//` inside a string literal
             # ("http://x") is not a comment.
             function strip_comment(l,    i, c, out, instr) {
+                if (index(l, "//") == 0) return l
                 out = ""
                 instr = 0
                 for (i = 1; i <= length(l); i++) {
@@ -162,6 +163,14 @@ hits=$(
             }
             # `#[cfg(test)]` skips the one item it marks (a braced block, or a
             # statement ending in `;`), not the rest of the file (G6).
+            # A line after the attribute starts the skipped item: fall into the
+            # `skipping` rule below with fresh counters.
+            sk_armed && !/^[ \t]*(#\[.*)?$/ && !/^[ \t]*#\[cfg\(test\)\]/ {
+                sk_armed = 0
+                skipping = 1
+                sk_depth = 0
+                sk_brace = 0
+            }
             skipping {
                 code = blank_strings(strip_comment($0))
                 tmp = code
@@ -173,21 +182,7 @@ hits=$(
                 next
             }
             /^[ \t]*#\[cfg\(test\)\]/ { sk_armed = 1; next }
-            sk_armed && /^[ \t]*(#\[.*)?$/ { next }
-            sk_armed {
-                sk_armed = 0
-                skipping = 1
-                sk_depth = 0
-                sk_brace = 0
-                code = blank_strings(strip_comment($0))
-                tmp = code
-                o = gsub(/[{]/, "{", tmp)
-                c = gsub(/[}]/, "}", tmp)
-                if (o > 0) sk_brace = 1
-                sk_depth = o - c
-                if (sk_depth <= 0 && (sk_brace || code ~ /;[ \t]*$/)) skipping = 0
-                next
-            }
+            sk_armed { next }
             $0 ~ FNHEAD {
                 flush()
                 depth_loops = 0
