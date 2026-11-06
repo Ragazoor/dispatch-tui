@@ -540,5 +540,128 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         assert!(why.contains("levels deep"), "{why}");
         same_epic(deep_root);
         same_epic(parent);
+
+        // -- a status move with no sub_status resets it (SubStatusAutoreset) ---
+        let lone = bindings::Task {
+            title: "status only".into(),
+            created_by: identity.clone(),
+            ..blank_task_in_epic(deep_root)
+        };
+        let lone_task = real.create_task(lone.clone()).await.unwrap();
+        wait_for!(rows_real.task(lone_task).is_some());
+        mem.align_next_task_id(lone_task.0);
+        assert_eq!(mem.create_task(lone).await.unwrap(), lone_task);
+        for (status, sub_status) in [("running", "active"), ("review", "awaiting_review")] {
+            let move_only = bindings::TaskPatch {
+                status: Some(status.into()),
+                ..blank_task_patch()
+            };
+            real.patch_task(lone_task, move_only.clone()).await.unwrap();
+            wait_for!(rows_real
+                .task(lone_task)
+                .is_some_and(|t| t.status.as_str() == status));
+            mem.patch_task(lone_task, move_only).await.unwrap();
+            assert_eq!(
+                rows_real.task(lone_task).unwrap().sub_status.as_str(),
+                sub_status
+            );
+            same_task(lone_task.0);
+        }
+
+        // -- UniqueFeedRolePerParent / UniqueRepoGroupPerParent -----------------
+        let role_epic = |feed_role: &str| bindings::Epic {
+            parent_epic_id: deep_root,
+            feed_role: feed_role.into(),
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let first = real
+            .create_epic(role_epic(dispatch_spacetime_module::ROLE_MY_REVIEWS))
+            .await
+            .unwrap()
+            .0;
+        wait_for!(rows_real.epic(EpicId(first)).is_some());
+        mem.align_next_epic_id(first);
+        assert_eq!(
+            mem.create_epic(role_epic(dispatch_spacetime_module::ROLE_MY_REVIEWS))
+                .await
+                .unwrap()
+                .0,
+            first
+        );
+        let second = real.create_epic(role_epic("none")).await.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(second)).is_some());
+        mem.align_next_epic_id(second);
+        assert_eq!(mem.create_epic(role_epic("none")).await.unwrap().0, second);
+        let same_role = bindings::EpicPatch {
+            feed_role: Some(dispatch_spacetime_module::ROLE_MY_REVIEWS.into()),
+            ..blank_epic_patch()
+        };
+        let why = refused(
+            real.patch_epic(EpicId(second), same_role.clone())
+                .await
+                .unwrap(),
+            mem.patch_epic(EpicId(second), same_role).await.unwrap(),
+        );
+        assert!(why.contains("already exists"), "{why}");
+        same_epic(second);
+        let real_why = real
+            .create_epic(role_epic(dispatch_spacetime_module::ROLE_MY_REVIEWS))
+            .await
+            .unwrap_err()
+            .to_string();
+        let mem_why = mem
+            .create_epic(role_epic(dispatch_spacetime_module::ROLE_MY_REVIEWS))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            real_why.contains("already exists") && mem_why.contains("already exists"),
+            "real {real_why:?} vs memory {mem_why:?}"
+        );
+
+        // -- a repository shares one verify command (VerifyCommandIsPerRepository)
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .save_repo_path(
+                    "/home/a/api".into(),
+                    ts("2026-01-05 00:00:00.000"),
+                    "a".into(),
+                    "org/api".into(),
+                )
+                .await
+                .unwrap();
+            caller
+                .set_verify_command("/home/a/api".into(), "make ci".into())
+                .await
+                .unwrap();
+            caller
+                .save_repo_path(
+                    "/home/b/api".into(),
+                    ts("2026-01-05 00:00:00.000"),
+                    "b".into(),
+                    String::new(),
+                )
+                .await
+                .unwrap();
+            caller
+                .set_verify_command("/home/b/api".into(), "cargo test".into())
+                .await
+                .unwrap();
+            caller
+                .save_repo_path(
+                    "/home/b/api".into(),
+                    ts("2026-01-05 00:00:00.000"),
+                    "b".into(),
+                    "org/api".into(),
+                )
+                .await
+                .unwrap();
+        }
+        wait_for!(rows_real.verify_command("/home/b/api").as_deref() == Some("make ci"));
+        assert_eq!(
+            rows_mem.verify_command("/home/b/api").as_deref(),
+            Some("make ci")
+        );
     });
 }

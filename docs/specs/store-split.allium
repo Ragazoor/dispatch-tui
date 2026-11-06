@@ -502,7 +502,7 @@
 --             open -> the review sub_status, unreadable -> pr_unreachable.
 --           - P3, counters stay on the host. The consecutive-failure counters
 --             and the backoff are pacing of this machine's gh calls and are
---             session-scoped on purpose (core.allium: PrPollState). No new
+--             session-scoped on purpose (pr-workflow.allium: PrPollState). No new
 --             table. The give-up THRESHOLD stays a host constant; the module
 --             decides only what a give-up report does to the task.
 --           - P4, effects after a merge. The module sets the task Done
@@ -1001,8 +1001,8 @@ config {
 -- == Task data rules at the write seam (M2 follow-up, task #94222) ==
 
 -- sub_status_valid_for(sub_status, status) is the black box mcp-task-tools.allium
--- (UpdateTaskViaMcp) names: the store's legality table, the pairs listed in
--- core.allium under "Valid SubStatus values per parent status".
+-- (UpdateTaskViaMcp) names: the store's legality table, core.allium's
+-- Task.SubStatusFitsStatus.
 
 rule SubStatusMovesMustBeLegal {
     when: TaskWriteRequested(task, written)
@@ -1035,7 +1035,7 @@ rule SubStatusMovesMustBeLegal {
         --
         -- AN INSERT IS NOT JUDGED (there is no prior row to move from): a seed
         -- carries whatever the old store held, and every creating rule writes
-        -- core/SubStatus.default_for its status anyway.
+        -- default_sub_status of its status anyway.
 }
 
 rule BatchSubStatusPatchSkipsIllegalEntries {
@@ -1341,7 +1341,7 @@ rule RequestDispatch {
 
     -- The claim, as today: one write, conditional on the checks above.
     ensures: task.status = running
-    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.sub_status = default_sub_status(running)
     ensures: current_agent(task).last_pre_tool_use_at = now
     -- The dispatch-claim subagent clear point (agent-health.allium), moved
     -- into the same transaction as the claim.
@@ -1619,7 +1619,7 @@ rule ReleaseClaimOfFailedRequest {
     ensures:
         if still_claimed:
             task.status = backlog
-            task.sub_status = core/SubStatus.default_for(backlog)
+            task.sub_status = default_sub_status(backlog)
             current_agent(task).last_pre_tool_use_at = null
     -- The epic status rollup for the task's epic chain, in the same reducer,
     -- whether or not the release applied. Every failure reaches it: a
@@ -1660,7 +1660,7 @@ rule RequestWrapUp {
     -- are core/TaskTag's values; the store spells them "pr-review" and
     -- "release-please", as every tag column does. The module keeps its own
     -- copy of the review set, so a new review tag is added there too.
-    requires: task.tag not in {pr_review, dependabot, release_please}
+    requires: not task.is_review_tagged
     -- The rebase runs where the worktree is, so the row names the task's own
     -- host, and only that host may ask (the MCP endpoint an agent reaches is
     -- its own machine's board).
@@ -1743,7 +1743,7 @@ rule HostClaimsSessionRequest {
     -- the conflict while the rebase runs (pr-workflow.allium: WrapUpRebase).
     ensures:
         if was_conflict:
-            task.sub_status = core/SubStatus.default_for(task.status)
+            task.sub_status = default_sub_status(task.status)
             task.updated_at = now
     ensures: SessionRequestClaimed(request: request)
 
@@ -2360,7 +2360,7 @@ rule RequestCloseTask {
     -- (pr-workflow.allium), with the done -> done exception for completed_at.
     ensures:
         task.status = done
-        task.sub_status = core/SubStatus.default_for(done)
+        task.sub_status = default_sub_status(done)
         current_agent(task).tmux_window = null
         task.updated_at = now
         if not was_already_done:
@@ -2481,7 +2481,7 @@ rule ReportPrStatus {
         if task.status = review and task.url.url_type = pr:
             if state.upper = "MERGED":
                 task.status = done
-                task.sub_status = core/SubStatus.default_for(done)
+                task.sub_status = default_sub_status(done)
                 current_agent(task).tmux_window = null
                 task.completed_at = now
                 task.updated_at = now

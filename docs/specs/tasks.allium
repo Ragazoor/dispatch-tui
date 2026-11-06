@@ -17,7 +17,7 @@ use "./board-layout.allium" as board_layout
 -- The one board-wide multi-selection every batch rule in this file
 -- consumes. See "Multi-Selection".
 given {
-    selection: core/BoardSelection
+    selection: BoardSelection
 
     -- The one set of folded sub-status sections, consumed by
     -- ToggleSectionCollapse. See board-layout.allium: "Collapsed Sections".
@@ -26,6 +26,33 @@ given {
     -- The one set of folded epic groups, consumed by ToggleEpicFold. See
     -- board-layout.allium: "Epic Folding".
     folded_epics: board_layout/FoldedEpics
+}
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- BoardSelection is a runtime-only UI concept (not persisted): the set of
+-- tasks and epics the user has multi-selected. The batch rules in this file
+-- consume it.
+--
+-- There is exactly one BoardSelection. It is board-wide, not per-column:
+-- selecting items in one column and then another leaves both sets
+-- selected, and the selection outlives moving the cursor between columns.
+--
+-- The action that fills it, and the two independent things called
+-- "select all", are specified in "Multi-Selection" below.
+entity BoardSelection {
+    selected_tasks: Set<core/Task>
+    selected_epics: Set<core/Epic>
+
+    is_empty: selected_tasks.count = 0 and selected_epics.count = 0
+
+    @guidance
+        -- Session-scoped and never persisted: it does not survive an app
+        -- restart, and nothing in the database records it.
+        -- A card in either set renders with a leading `*` and a bold title
+        -- (board-visuals.allium: "Selection").
 }
 
 ------------------------------------------------------------
@@ -42,7 +69,7 @@ rule CreateTask {
         description: description,
         repo_path: repo_path,
         status: backlog,
-        sub_status: core/SubStatus.default_for(backlog),
+        sub_status: default_sub_status(backlog),
         plan_path: plan,
         epic: epic,
         tag: tag,
@@ -295,7 +322,7 @@ rule CreateQuickTask {
             description: "",
             repo_path: repo_path,
             status: backlog,
-            sub_status: core/SubStatus.default_for(backlog),
+            sub_status: default_sub_status(backlog),
             epic: if epic_id != null: core/Epic{id: epic_id} else: null,
             base_branch: detect_default_branch(repo_path),
             created_at: now,
@@ -366,7 +393,7 @@ rule MoveTaskForward {
     requires: next != done
 
     ensures: task.status = next
-    ensures: task.sub_status = core/SubStatus.default_for(next)
+    ensures: task.sub_status = default_sub_status(next)
     ensures: task.updated_at = now
     ensures:
         if was_running:
@@ -408,7 +435,7 @@ rule MoveTaskBackward {
 
     -- Kill tmux window when moving backward, but preserve worktree for resume
     ensures: task.status = prev
-    ensures: task.sub_status = core/SubStatus.default_for(prev)
+    ensures: task.sub_status = default_sub_status(prev)
     ensures: current_agent(task).tmux_window = null
     ensures: task.updated_at = now
     ensures:
@@ -449,7 +476,7 @@ rule ConfirmDone {
     let was_running = task.status = running
 
     ensures: task.status = done
-    ensures: task.sub_status = core/SubStatus.default_for(done)
+    ensures: task.sub_status = default_sub_status(done)
     ensures: current_agent(task).tmux_window = null
     ensures: task.updated_at = now
     ensures: task.completed_at = now
@@ -578,7 +605,7 @@ rule PhoenixRespawn {
                 description: task.description,
                 repo_path: task.repo_path,
                 status: backlog,
-                sub_status: core/SubStatus.default_for(backlog),
+                sub_status: default_sub_status(backlog),
                 plan_path: task.plan_path,
                 auto_run_plan: task.auto_run_plan,
                 epic: task.epic,
@@ -2003,7 +2030,7 @@ rule CopyTask {
         description: source.description,
         repo_path: confirmed_repo_path,  -- user confirms or edits before creation
         status: backlog,
-        sub_status: core/SubStatus.default_for(backlog),
+        sub_status: default_sub_status(backlog),
         tag: confirmed_tag,              -- source.tag seeds it; user re-confirms
         phoenix: armed_phoenix,          -- false unless armed at InputTag
         wrap_up_mode: source.wrap_up_mode,
@@ -2133,7 +2160,7 @@ rule EditTask {
         if edited.repo_path != "": task.repo_path = edited.repo_path
         if edited.status != null:
             task.status = edited.status
-            task.sub_status = core/SubStatus.default_for(edited.status)
+            task.sub_status = default_sub_status(edited.status)
             -- Entering done via the STATUS field carries the same
             -- completion stamp as ConfirmDone, and UpdateEpicViaMcp's mirror
             -- of it on the epic side (epics.allium): the editor is a freeform
@@ -2255,34 +2282,34 @@ rule EditTask {
 -- wrap_up handler accepts any running or review task with a worktree.
 
 -- SubStatusConsistency: A task's sub_status must always be valid for
--- its parent status: the pair is one listed in core.allium under "Valid
--- SubStatus values per parent status". This is
+-- its parent status (core.allium: SubStatusFitsStatus). This is
 -- enforced at every status transition: when status changes, sub_status
--- is reset to SubStatus.default_for(new_status) before being persisted.
+-- is reset to default_sub_status(new_status) before being persisted.
 -- Individual handlers may then set a more specific sub_status (e.g.,
 -- DetectStaleAgent sets stale, HookNotification sets needs_input) only
 -- after the reset.
 
 -- SubStatusAutoreset: Whenever task.status changes, task.sub_status is
--- reset to SubStatus.default_for(new_status). This ensures no invalid
+-- reset to default_sub_status(new_status). This ensures no invalid
 -- (status, sub_status) combinations are ever persisted.
 -- This is a single centrally-enforced invariant, not an obligation on each
--- individual rule: the write path derives the effective sub_status for
--- every task write as "the explicitly supplied sub_status, else
--- SubStatus.default_for(the supplied status)". A rule that changes status
+-- individual rule: the store's patch applies it (apply_task_patch), so the
+-- effective sub_status of a write that changes status is "the explicitly
+-- supplied sub_status, else default_sub_status(the new status)". A write that
+-- repeats the current status is no change and keeps the sub_status (the
+-- editor sends the status on every save). A rule that changes status
 -- without mentioning sub_status therefore gets the reset for free, and the
 -- sub_status assertions written out in the rules above document the
 -- resulting state rather than adding a per-rule duty. A write supplying an
 -- explicit (status, sub_status) pair that is invalid is refused by the
 -- store's patch_task reducer before anything is applied (mcp-task-tools.allium:
--- UpdateTaskViaMcp). Since task #94222 the store also holds every OTHER writer
--- to it at its one task write: a write that moves a task's sub_status must
+-- UpdateTaskViaMcp). The store also holds every OTHER writer to it at its
+-- one task write: a write that moves a task's sub_status must
 -- leave one legal for the status (store-split.allium:
 -- SubStatusMovesMustBeLegal), and the batch sub_status patch skips an entry
 -- that would not (BatchSubStatusPatchSkipsIllegalEntries). Only a move is
 -- judged, so a row already holding an odd pair stays writable for its other
--- fields, and an insert is not judged. The SQLite CHECK constraint that once
--- backed the invariant went with SQLite (task #36865).
+-- fields, and an insert is not judged.
 -- Exception: writes that set a specific sub_status override the default
 -- (e.g., HookNotification keeps status=running and sets
 -- sub_status=needs_input; FinishTaskConflict keeps the parent status and

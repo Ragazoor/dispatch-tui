@@ -1317,8 +1317,8 @@ enum CardFrameColour {
 
 -- One per card currently drawn on the board — task cards and epic cards
 -- alike, because the border rule is uniform across card kinds ("Epic cards").
--- Runtime-only and never persisted, on the same terms as BoardSelection and
--- SplitPane in core.allium. It is modelled for two reasons: the board-wide
+-- Runtime-only and never persisted, on the same terms as tasks.allium's BoardSelection and
+-- split-pane.allium's SplitPane. It is modelled for two reasons: the board-wide
 -- claim below has to quantify over something, and a precedence rule is easier
 -- to get wrong in prose than in a type.
 --

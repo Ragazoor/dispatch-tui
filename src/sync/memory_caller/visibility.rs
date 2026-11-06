@@ -625,6 +625,14 @@ impl MemoryReducerCaller {
         if !privileged && !admin_of_both {
             return refused("only a super-admin, or an admin of both workspaces, may move an epic");
         }
+        // The module's `UniqueFeedRolePerParent` check: the root as it would land.
+        let landed = module::Epic {
+            workspace_id,
+            ..epic.clone()
+        };
+        if let Err(why) = Self::check_epic_unique(&tables, &landed) {
+            return refused(why);
+        }
 
         let tree = Self::collect_epic_subtree_ids(&tables, id.0);
         let someone_elses = tree.iter().any(|node_id| {

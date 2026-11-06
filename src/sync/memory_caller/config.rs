@@ -208,54 +208,55 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused("repo path is empty".into()));
         }
         let mut tables = self.lock();
-        let own = tables
-            .repo_paths
-            .values()
+        // The module's single read of the table.
+        let rows: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
+        let own = rows
+            .iter()
             .find(|r| r.path == path && r.host == host)
-            .or_else(|| {
-                tables
-                    .repo_paths
-                    .values()
-                    .find(|r| r.path == path && r.host.is_empty())
-            })
+            .or_else(|| rows.iter().find(|r| r.path == path && r.host.is_empty()))
             .cloned();
-        match own {
+        let row = match own {
             Some(row) => {
                 let github_path = if github_path.is_empty() {
                     row.github_path.clone()
                 } else {
                     github_path
                 };
-                let verify_command = if row.verify_command.is_empty() {
-                    sibling_verify_command(&tables, &path, &github_path)
-                } else {
-                    row.verify_command.clone()
-                };
-                self.write_repo_path(
-                    &mut tables,
-                    module::RepoPath {
-                        last_used,
-                        host,
-                        github_path,
-                        verify_command,
-                        ..row
-                    },
-                );
+                let repository =
+                    module::repository_verify_command(&rows, row.id, &path, &github_path);
+                let verify_command =
+                    module::resaved_verify_command(&row, &github_path, &repository);
+                module::RepoPath {
+                    last_used,
+                    host,
+                    github_path,
+                    verify_command,
+                    ..row
+                }
             }
             None => {
-                let verify_command = sibling_verify_command(&tables, &path, &github_path);
-                self.write_repo_path(
-                    &mut tables,
-                    module::RepoPath {
-                        id: 0,
-                        path,
-                        last_used,
-                        verify_command,
-                        host,
-                        github_path,
-                    },
-                );
+                let verify_command =
+                    module::repository_verify_command(&rows, 0, &path, &github_path);
+                module::RepoPath {
+                    id: 0,
+                    path,
+                    last_used,
+                    verify_command,
+                    host,
+                    github_path,
+                }
             }
+        };
+        let id = self.write_repo_path(&mut tables, row.clone());
+        let row = module::RepoPath { id, ..row };
+        for sibling in module::rows_without_the_repository_command(&rows, &row) {
+            self.write_repo_path(
+                &mut tables,
+                module::RepoPath {
+                    verify_command: row.verify_command.clone(),
+                    ..sibling.clone()
+                },
+            );
         }
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -335,21 +336,17 @@ impl MemoryReducerCaller {
             ));
         }
         let mut tables = self.lock();
-        let Some(named) = tables.repo_paths.values().find(|r| r.path == path).cloned() else {
+        let rows: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
+        let repository = module::rows_of_the_repository_at(&rows, &path);
+        if repository.is_empty() {
             return Ok(ReducerOutcome::Refused(format!("no repo path {path}")));
-        };
-        let siblings: Vec<module::RepoPath> = tables
-            .repo_paths
-            .values()
-            .filter(|r| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path))
-            .cloned()
-            .collect();
-        for row in siblings {
+        }
+        for row in repository {
             self.write_repo_path(
                 &mut tables,
                 module::RepoPath {
                     verify_command: command.clone(),
-                    ..row
+                    ..row.clone()
                 },
             );
         }
@@ -624,25 +621,5 @@ impl MemoryReducerCaller {
             }
         }
         Ok(ReducerOutcome::Applied(vec![]))
-    }
-}
-
-/// Mirror of `spacetime/module/src/config.rs::sibling_verify_command`.
-fn sibling_verify_command(tables: &Tables, path: &str, github_path: &str) -> String {
-    tables
-        .repo_paths
-        .values()
-        .filter(|r| !r.verify_command.is_empty())
-        .find(|r| is_sibling(&r.path, &r.github_path, path, github_path))
-        .map(|r| r.verify_command.clone())
-        .unwrap_or_default()
-}
-
-/// Mirror of `spacetime/module/src/config.rs::is_sibling`.
-fn is_sibling(path_a: &str, gh_a: &str, path_b: &str, gh_b: &str) -> bool {
-    if !gh_a.is_empty() && !gh_b.is_empty() {
-        gh_a == gh_b
-    } else {
-        path_a == path_b
     }
 }

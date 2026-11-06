@@ -265,7 +265,7 @@ rule HookPreToolUse {
 
     requires: task.status = running
 
-    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.sub_status = default_sub_status(running)
     ensures: agent.last_pre_tool_use_at = now
 
     @guidance
@@ -332,7 +332,7 @@ rule HookStop {
             agent.stop_pending_at = now
         else:
             task.status = review
-            task.sub_status = core/SubStatus.default_for(review)
+            task.sub_status = default_sub_status(review)
             agent.last_pre_tool_use_at = null
             agent.last_notification_at = null
             agent.stop_pending = false
@@ -412,7 +412,7 @@ rule HookSubagentStop {
         agent.live_subagents = live.count
         if agent.live_subagents = 0 and agent.stop_pending and task.status = running:
             task.status = review
-            task.sub_status = core/SubStatus.default_for(review)
+            task.sub_status = default_sub_status(review)
             agent.last_pre_tool_use_at = null
             agent.last_notification_at = null
             agent.stop_pending = false
@@ -556,7 +556,7 @@ rule HookUserPromptSubmit {
     requires: task.status in {running, review}
 
     ensures: task.status = running
-    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.sub_status = default_sub_status(running)
     ensures: agent.last_pre_tool_use_at = now
     ensures:
         if agent.stop_pending_at = null or agent.stop_pending_at < now:
@@ -647,7 +647,7 @@ rule HookNotification {
             -- the HookPreToolUse resume path — return to active and drop the
             -- notification timestamp — so the card flips back the instant the
             -- user answers, without waiting for the next PreToolUse.
-            task.sub_status = core/SubStatus.default_for(running)
+            task.sub_status = default_sub_status(running)
             agent.last_notification_at = null
         -- Ignore: no branch matches, so sub_status and last_notification_at are
         -- left untouched (no-op). Two cases land here: kind = auth_success,
@@ -939,7 +939,7 @@ rule UndeliveredPeerMessage {
 ------------------------------------------------------------
 
 surface HookDelivery {
-    facing operator: core/Operator
+    facing _: core/Operator
     -- prose: The bridge every rule in this file is triggered through. Claude
     -- Code fires its lifecycle hooks (PreToolUse, PostToolUse, Stop,
     -- Notification, UserPromptSubmit, SessionStart, SubagentStart,
@@ -986,6 +986,11 @@ surface HookDelivery {
     exposes:
         board_reachable
         task_still_exists
+
+    provides:
+        -- `kind` is the hook payload's notification_type, absent on Claude
+        -- Code versions that predate it (HookNotification).
+        Notification(task: core/Task, kind: core/NotificationKind?)
 
     @guarantee HooksWriteThroughTheBoard
         -- A hook delivers its event to the running board and never to the

@@ -18,7 +18,7 @@
 --           single-line text buffer the input panel edits (TextInputField).
 -- Excludes: The board's visual language — identity hue, the focus channel,
 --           header-bar and card chrome, the neutral ground ramp (see
---           core.allium, "Column Identity and Focus"); the domain model the
+--           board-visuals.allium, "Column Identity and Focus"); the domain model the
 --           layout is keyed on — TaskStatus, SubStatus, ColumnSection (see
 --           core.allium); the rule that folds a section or an epic group
 --           (see tasks.allium: ToggleSectionCollapse, ToggleEpicFold); epic
@@ -672,9 +672,9 @@ value ColumnSectionLayout {
         if task.status = review and task.worktree != null
             and current_agent(task).tmux_window = null
             and not (task.url != null and task.url.url_type = pr): parked
-        else if task.tag in {pr_review, dependabot, release_please}
+        else if task.is_review_tagged
             and task.sub_status = changes_requested: changes_requested_by_me
-        else if task.tag in {pr_review, dependabot, release_please}
+        else if task.is_review_tagged
             and task.sub_status = approved: approved_by_me
         else if task.sub_status = none: null
         else: task.sub_status

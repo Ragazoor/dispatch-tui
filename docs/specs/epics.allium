@@ -1618,12 +1618,10 @@ rule ProvisionManagedEpics {
         -- Idempotency & race-safety, and its limit. Re-running creates no
         -- duplicates AS LONG AS the managed epics still sit where
         -- provisioning expects them: each role is looked up as
-        -- (feed_role, expected parent), and the
-        -- core/Epic.UniqueFeedRolePerParent invariant (a partial unique
-        -- index on (parent, feed_role) WHERE feed_role != none, keyed as
-        -- COALESCE(parent, -1) so root-level roles collide too — see that
-        -- invariant in core.allium for why) makes a duplicate AT THAT SAME
-        -- PARENT physically impossible. Two boards starting up concurrently
+        -- (feed_role, expected parent), and the store refuses a second
+        -- epic with one role AT THAT SAME PARENT (core.allium:
+        -- UniqueFeedRolePerParent; a root's role is unique per creator and
+        -- workspace). Two boards starting up concurrently
         -- therefore cannot both insert the same managed epic: since
         -- store-split M7 each board's run is one ensure_managed_epics
         -- transaction, the store runs the two one after the other, and the
@@ -1697,7 +1695,7 @@ rule ArchivedStatusMigration {
         for task in core/Tasks where was_archived(task):
             if task.worktree != null:
                 task.status = done
-                task.sub_status = core/SubStatus.default_for(done)
+                task.sub_status = default_sub_status(done)
             else:
                 not exists task
 

@@ -58,6 +58,15 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 42: three data rules move into the module. A patch that moves `status` and
+///    names no `sub_status` resets it to the new status's default
+///    (`apply_task_patch`); a create or patch that would give a parent a second
+///    epic with one feed role, or a second repo group with one title, is
+///    refused (`check_epic_unique_among`, also on a root's move to another
+///    workspace, and provisioning reuses a role sub-epic it cannot see); a repo path that learns its GitHub
+///    path joins its repository's verify command, and `set_verify_command`
+///    reaches every row of the repository (`resaved_verify_command`,
+///    `rows_of_the_repository_at`).
 /// 41: loss of sight ends claims and marks together — `on_sight_lost` and
 ///    `on_task_sight_lost` (`config.rs`) release the poll claims and end the
 ///    unseen marks and bookmarks of whoever no longer sees a task, on every
@@ -65,6 +74,9 @@ use super::*;
 ///    another person's host runs the task, and leaves the workspace for the
 ///    package links and task learnings (`visibility.rs`, `tasks_epics.rs`;
 ///    `workspaces.allium: ClaimsFollowSight`, `core.allium: Bookmark`).
+/// 40: `create_task` and `create_task_signalled` refuse a row naming a host
+///    another person owns (`check_new_task_aim`;
+///    `store-split.allium: CreateTaskNeverAimsAnotherHostsTeardown`).
 /// 39: a task in an epic is detached onto a board by its creator, an admin of
 ///    its workspace or a super-admin (`task_detach_permitted`), no longer by
 ///    nobody; the managed-feed settings are written as one change by
@@ -213,7 +225,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 41;
+pub const RULES_VERSION: i64 = 42;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first
@@ -350,6 +362,56 @@ pub const REPO_GROUP_REPARENT_REFUSED: &str = "Cannot reparent an auto-created r
 
 /// The `origin` of an auto-created per-repo sub-epic.
 pub const REPO_GROUP_ORIGIN: &str = "repo-group";
+
+/// `core.allium: UniqueFeedRolePerParent` and `UniqueRepoGroupPerParent`:
+/// refuse `candidate` (an epic as it would be stored) when one of `siblings`
+/// (the epics under the same parent; `candidate` itself may be among them)
+/// already holds its feed role, or is a repo group with its title.
+///
+/// Siblings are the candidate's own workspace's: a ROOT's role is unique per
+/// creator and workspace, since each person's board provisions its own
+/// managed roots. Called on a create and on a patch that changes the
+/// parent, role, origin or title, so a row that already holds a duplicate
+/// stays writable for its other fields.
+pub fn check_epic_unique_among(candidate: &Epic, siblings: &[Epic]) -> Result<(), String> {
+    // Roots of every workspace share parent 0; only the candidate's own
+    // workspace counts (a sub-epic's siblings share it already).
+    let others = siblings
+        .iter()
+        .filter(|e| e.id != candidate.id || candidate.id == 0)
+        .filter(|e| e.workspace_id == candidate.workspace_id);
+    for other in others {
+        if candidate.feed_role != "none"
+            && !candidate.feed_role.is_empty()
+            && other.feed_role == candidate.feed_role
+            && (candidate.parent_epic_id != 0 || other.created_by == candidate.created_by)
+        {
+            return Err(format!(
+                "an epic with feed role '{}' already exists under this parent",
+                candidate.feed_role
+            ));
+        }
+        if candidate.origin == REPO_GROUP_ORIGIN
+            && other.origin == REPO_GROUP_ORIGIN
+            && other.title == candidate.title
+        {
+            return Err(format!(
+                "a repo-group epic titled '{}' already exists under this parent",
+                candidate.title
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether a patch moved one of the inputs of [`check_epic_unique_among`].
+pub fn epic_uniqueness_inputs_changed(before: &Epic, after: &Epic) -> bool {
+    before.parent_epic_id != after.parent_epic_id
+        || before.workspace_id != after.workspace_id
+        || before.feed_role != after.feed_role
+        || before.origin != after.origin
+        || before.title != after.title
+}
 
 /// Whether an epic takes part in MANUAL repo grouping: grouped and not a feed.
 /// Feed epics group through ingestion instead.

@@ -598,6 +598,13 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
+    /// The module's uniqueness check over the epics under `row`'s parent,
+    /// visible or not (`core.allium: UniqueFeedRolePerParent`).
+    pub(super) fn check_epic_unique(tables: &Tables, row: &module::Epic) -> Result<(), String> {
+        use module::StoreReads;
+        module::check_epic_unique_among(row, &tables.epics_under(row.parent_epic_id))
+    }
+
     pub(super) fn apply_create_epic(&self, row: bindings::Epic) -> Result<EpicId> {
         let scope = self.scope();
         let mut tables = self.lock();
@@ -608,7 +615,9 @@ impl MemoryReducerCaller {
             .settle_new_epic(&scope, module::Epic::from(row))
             .map_err(StoreRefusal)?;
         let parent = row.parent_epic_id;
-        let id = self.write_epic(&mut tables, module::Epic { id: 0, ..row });
+        let row = module::Epic { id: 0, ..row };
+        Self::check_epic_unique(&tables, &row).map_err(StoreRefusal)?;
+        let id = self.write_epic(&mut tables, row);
         self.recalculate_epic_chain(&mut tables, parent);
         Ok(EpicId(id))
     }
@@ -755,7 +764,13 @@ impl MemoryReducerCaller {
             .as_ref()
             .is_some_and(|c| *c != row.feed_command);
         let reparented = patch.parent_epic_id.is_some_and(|p| p != was_child_of);
+        let before = row.clone();
         module::apply_epic_patch(&mut row, patch);
+        if module::epic_uniqueness_inputs_changed(&before, &row) {
+            if let Err(why) = Self::check_epic_unique(&tables, &row) {
+                return Ok(ReducerOutcome::Refused(why));
+            }
+        }
         if command_changed {
             row.feed_command_set_by = self.sender.clone();
         }

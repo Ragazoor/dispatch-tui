@@ -2,21 +2,37 @@
 -- core.allium
 --
 -- Scope: Shared domain model for the dispatch system
--- Includes: External entities, enumerations, storage-boundary validation,
---           core entities, config, the actors every spec faces, and the
---           board clock
--- Excludes: Rules (see tasks.allium, dispatch.allium, agent-health.allium,
---           pr-workflow.allium, split-pane.allium, mcp-task-tools.allium,
---           epics.allium, learnings.allium); the board's structural layout —
+-- Includes: External entities, enumerations, the shared entities, config,
+--           interval literals, storage-boundary validation, the invariants
+--           over the shared collections, the actors every spec faces, and
+--           the board clock
+-- Excludes: Rules: each domain spec owns its own (`ls docs/specs/`).
+--           Runtime UI state, which lives with the one spec that reads and
+--           writes it: BoardSelection (tasks.allium), SplitPane and
+--           Rearrangement (split-pane.allium), PrPollState
+--           (pr-workflow.allium). The board's structural layout —
 --           navigation columns, sections, flattening, the board's vertical
---           bands and the board-wide filters (see board-layout.allium); the
---           board's visual language — column identity hue, the focus channel,
---           header-bar and card chrome, the neutral ground ramp (see
---           board-visuals.allium)
+--           bands and the board-wide filters (board-layout.allium). The
+--           board's visual language — column identity hue, the focus
+--           channel, header-bar and card chrome, the neutral ground ramp
+--           (board-visuals.allium).
 --
--- Invariants: this file carries the ones that belong to an entity's own
---           fields, nested in the entity that owns them. Board-wide and
---           rendering invariants live with the specs that state them.
+-- Invariants: one about a row's own fields sits in its entity; one over a
+--           whole collection (uniqueness, agreement between rows) sits in the
+--           Invariants section. Board-wide and rendering invariants live with
+--           the specs that state them.
+--
+-- Derived values: a derived value is declared here when some spec reads it or
+--           when it carries a rule of its own (Task.pr_number). A one-line
+--           test of a single field (`sub_status = stale`) is written inline
+--           by its reader, not named here.
+--
+-- Expected checker warnings: most fields here are read only by other specs,
+--           and `allium check` does not credit a field read from another
+--           file, so those fields report `field.unused`. Each external entity
+--           reports `externalEntity.missingSourceHint`: it is governed by a
+--           system outside the specs, named in its comment, which no `use`
+--           can point at.
 
 ------------------------------------------------------------
 -- External Entities
@@ -25,6 +41,8 @@
 -- The git worktree and tmux window are provisioned externally.
 -- The spec treats them as opaque handles.
 
+-- Governed by git. The host that dispatches a task creates it
+-- (dispatch.allium: DispatchTask).
 external entity Worktree {
     path: String
     branch: String
@@ -36,33 +54,42 @@ external entity Worktree {
 -- already-resolved targets, bypassing name lookup entirely (see
 -- dispatch.allium: TmuxWindowTargetedExactly). Every other non-empty string
 -- is a name, including the board's own window and legacy names.
+-- Governed by tmux.
 external entity TmuxWindow {
     name: String
 }
 
+-- Governed by tmux.
 external entity TmuxPane {
     id: String       -- tmux pane identifier (e.g., "%42")
 }
 
--- UserIdentity is the PERSON, as distinct from the machine. Minted by the
--- shared store on first connection and opaque to dispatch, which is why it is
--- external: nothing here generates it, validates its shape, or can recover it
--- if it is lost.
+-- UserIdentity is the PERSON, as distinct from the machine. Governed by the
+-- shared store, which mints it on first connection (sync.allium); opaque to
+-- dispatch, which is why it is external: nothing here generates it,
+-- validates its shape, or can recover it if it is lost.
 --
--- It is NOT Host by another name, and the two must not be collapsed. One
--- person routinely works from several machines, so a laptop and a desktop are
--- two Hosts under one UserIdentity. The two answer different questions and
--- neither answer substitutes for the other:
+-- It is NOT Host by another name: a laptop and a desktop are two Hosts under
+-- one UserIdentity (Host.owner). The two answer different questions:
 --
---   Host       -- "which disk holds this worktree?"  (Task.host)
+--   Host         -- "which disk holds this worktree?"  (Task.host)
 --   UserIdentity -- "whose board does this task sit on?"  (Task.owner)
 --
--- A task can be owned by a person whose machine is not the one holding it, and
--- a task with no owner at all still has a host. Reading either as the other
--- puts a teammate's card on your board, or sends a dispatch at a worktree on
--- someone else's disk.
+-- Why the two lifetimes differ is host.allium's header.
 external entity UserIdentity {
     id: String       -- opaque and generated by the store; stable across machines, restarts and renames
+}
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- TaskUrl is the single typed URL attached to a Task. The url_type is stored
+-- explicitly (not inferred from the string at render time), so the system
+-- knows whether the URL is a PR, security alert, issue, or something else.
+value TaskUrl {
+    url: String
+    url_type: UrlType
 }
 
 ------------------------------------------------------------
@@ -75,8 +102,8 @@ external entity UserIdentity {
 -- label: bug "bug", feature "feat", chore "chore", pr_review "pr-rev",
 -- research "research", fix "fix", dependabot "dep", release_please "rel".
 --
--- THE REVIEW SET is {pr_review, dependabot, release_please} (the code's
--- TaskTag::is_review).
+-- THE REVIEW SET is {pr_review, dependabot, release_please}, read through
+-- Task.is_review_tagged (the code's TaskTag::is_review).
 -- A review tag means the task reviews a PR someone else authored: it routes
 -- to a review runbook (dispatch-prompt.allium), bases its worktree on the
 -- PR's head branch (dispatch.allium), is never wrapped up
@@ -128,13 +155,13 @@ enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
 -- an origin to or from repo_group (workspaces.allium: RepoGroupsStayPublic).
 enum EpicOrigin { manual | repo_group }
 
--- Legacy alias: "ready" maps to backlog
+-- A stored or typed "ready" reads as backlog.
 enum TaskStatus { backlog | running | review | done }
 
--- SubStatus refines the parent status into a more precise state.
--- Valid combinations are the pairs listed under "Valid SubStatus values per
--- parent status" below.
--- When status changes, sub_status resets to SubStatus.default_for(new_status).
+-- SubStatus refines the parent status into a more precise state. The valid
+-- pairs are Task's SubStatusFitsStatus invariant. A status write that names no
+-- sub_status resets it to default_sub_status(new_status), whose table is the
+-- DefaultSubStatusPerStatus invariant.
 enum SubStatus {
     -- backlog / done
     none
@@ -176,8 +203,8 @@ enum SubStatus {
 -- A section has an identity of its own, ColumnSection, rather than being
 -- whatever the first card in the group happens to be called. Two things that
 -- identity buys: a section's header label never changes as cards come and go
--- inside it, and the user's choice to collapse a section (see "Collapsed
--- Sections") survives its contents changing entirely.
+-- inside it, and the user's choice to collapse a section (board-layout.allium:
+-- "Collapsed Sections") survives its contents changing entirely.
 --
 -- ColumnSection is deliberately NOT the same set as SubStatus. Three of its
 -- values are computed from the task row at render time rather than read off a
@@ -185,7 +212,7 @@ enum SubStatus {
 --
 -- "Not stored" here means no task row records which section its card is in.
 -- The section *names* are a persisted vocabulary: the folded-section list
--- writes them (see "Collapsed Sections"), so renaming a value is a
+-- writes them (board-layout.allium: "Collapsed Sections"), so renaming a value is a
 -- data-compatibility change.
 
 -- Declaration order is render order: the value declared first sits at the top
@@ -228,15 +255,14 @@ enum ColumnSection {
 --                             dominates any decision recorded without one.
 --
 --   changes_requested_by_me   sub_status = changes_requested and
---                             tag in {pr_review, dependabot, release_please}
+--                             is_review_tagged
 --
 --                             Those tags mean the task reviews someone else's PR
 --                             rather than authoring one, so the changes were
 --                             requested BY the user and the ball is with the
 --                             other author.
 --
---   approved_by_me            sub_status = approved and
---                             tag in {pr_review, dependabot, release_please}
+--   approved_by_me            sub_status = approved and is_review_tagged
 --
 --                             The same tags, the same direction: the user
 --                             approved someone else's PR. Unlike an approval on
@@ -249,30 +275,6 @@ enum ColumnSection {
 -- to write back. Detach state alone does NOT create a section — a detached task
 -- that has a PR renders under plain awaiting_review, because once a PR exists
 -- only the review decision matters.
-
--- Valid SubStatus values per parent status (enforced by the store: its
--- patch_task reducer refuses an explicit sub_status outside this table for the
--- status the row will hold, before applying anything — see mcp-task-tools.allium:
--- UpdateTaskViaMcp — and its one task write refuses any other writer's move of
--- sub_status to a value outside it — see store-split.allium:
--- SubStatusMovesMustBeLegal):
---   backlog   : none
---   running   : active | needs_input | stale | crashed | conflict
---   review    : awaiting_review | changes_requested | approved | conflict | pr_closed | pr_unreachable
---   done      : none
---
--- Note: HookNotification only fires when task.status = running, setting
--- sub_status = needs_input. The resulting (running, needs_input) state
--- renders under the "needs input" section header in the Running column.
--- Legacy (review, needs_input)
--- rows from older hook behaviour were normalised to (review, awaiting_review)
--- by migration v16.
-
--- Default sub_status when transitioning to a new status:
---   backlog   -> none
---   running   -> active
---   review    -> awaiting_review
---   done      -> none
 
 -- NotificationKind is the `notification_type` field on Claude Code's Notification
 -- hook payload, forwarded by the task-status-hook as the `--kind` argument to
@@ -312,32 +314,29 @@ enum LearningKind {
 -- New entries land as approved; there is no human approval gate and no human
 -- curation surface. A background job archives stale, unvalued entries (see
 -- learnings.allium: ArchiveStaleLearning), which is the only status change any
--- behaviour produces. rejected is legacy: nothing produces it any more, but
--- existing rows still hold it. Entries in rejected or archived are excluded from
+-- behaviour produces. Nothing produces rejected, but stored rows may still
+-- hold it. Entries in rejected or archived are excluded from
 -- prompt injection and query_learnings results.
 enum LearningStatus { approved | rejected | archived }
 
--- VerdictKind captures an agent's evaluation of a retrieved learning, submitted
--- via the rate_learning MCP tool at any point during a task. helped and wrong
--- adjust the learning's net score; not_applicable does not. None changes its
--- status.
---   helped         — the learning applied and was useful (an upvote:
---                    upvote_count + 1)
+-- VerdictKind is an agent's evaluation of a retrieved learning, submitted via
+-- the rate_learning MCP tool at any point during a task and kept as a
+-- LearningVerdict. helped and wrong adjust the learning's net score;
+-- not_applicable does not. None changes its status.
+--   helped         — the learning applied and was useful (counts +1)
 --   wrong          — the learning misled the agent or is no longer accurate
---                    (a downvote: upvote_count - 1, may go negative)
+--                    (counts -1; the score may go negative)
 --   not_applicable — the agent read the learning and it did not fit this task.
---                    A signal only: it counts 0 toward upvote_count and leaves
---                    the learning row untouched. It exists so "read, did not
---                    fit" is told apart from "never rated" when measuring the
---                    store (docs/plans/2026-10-29-98645-learnings-iteration-8.md).
+--                    Counts 0 and leaves the learning row untouched. It tells
+--                    "read, did not fit" apart from "never rated".
 enum VerdictKind { helped | wrong | not_applicable }
 
 -- RetrievalSource records how a learning was surfaced to a task's agent.
 --   prompt_injection — included in the single RAG-ranked "Validated knowledge"
 --                      block prepended to the dispatch prompt
---   procedural       — legacy; no longer produced. Procedural learnings are now
---                      injected as part of the unified prompt_injection block
---                      (see learnings.allium). Retained for existing DB records.
+--   procedural       — never produced: procedural learnings are recorded as
+--                      prompt_injection like every other kind (learnings.allium).
+--                      Stored rows may still hold it.
 --   query_learnings  — returned by an explicit query_learnings MCP call
 enum RetrievalSource { prompt_injection | procedural | query_learnings }
 
@@ -371,52 +370,32 @@ enum TaskModel { haiku | sonnet | opus | fable }
 -- owner (Task.visible_to).
 enum Visibility { public | private }
 
-------------------------------------------------------------
--- Storage Boundary Validation
-------------------------------------------------------------
+-- == Agents (agents.allium) ==
 
--- Any entity read from storage whose enum fields contain an unrecognised
--- string value must fail the read operation with an error rather than
--- silently defaulting to a fallback variant.
---
--- Rationale: silent defaults mask data-integrity bugs (corrupt migrations,
--- manual DB edits, schema drift) and produce subtly wrong in-memory state
--- that is hard to trace back to the real cause. A hard read error surfaces
--- the problem immediately. The TUI and MCP error-display paths already
--- handle DB errors gracefully, so a hard error is safe.
---
--- This applies to all enum columns: TaskStatus, SubStatus, TaskTag,
--- WrapUpMode, TaskModel, LearningKind, LearningScope and LearningStatus.
--- It also applies to JSON-encoded columns (e.g. labels, tags): malformed
--- JSON must return an error rather than an empty list.
---
--- Exception: FeedRole and EpicOrigin soft-fail instead. An unrecognised
--- value in either column logs a warning and defaults to FeedRole.none /
--- EpicOrigin.manual rather than failing the read.
---
--- Rationale: these two are additive, system-assigned routing/provenance
--- tags. New roles/origins are appended over time, and a newer binary may
--- write a value an older binary has never heard of. Hard-failing would
--- make an older binary reject rows it could otherwise display perfectly
--- well, so it degrades gracefully to the default tag instead. The default
--- is the safe, neutral choice in both cases: `none` (ordinary epic, no feed
--- routing) and `manual` (no special provenance). Because the value is
--- system-assigned and never user-supplied, an unknown value signals a
--- forward-compatibility gap, not the data-integrity bug the hard-fail rule
--- guards against.
---
--- Exception: tmux_window soft-fails too, for a different reason — corruption
--- tolerance, not forward compatibility. A stored value that is not a window
--- name (see TmuxWindow) logs a warning and reads back as no window at all,
--- which is exactly what a task whose agent is gone looks like, so the board
--- still renders it; failing the row would drop the card from every bulk read.
---
--- Not covered at all: the stored list of folded sub-status sections (see
--- "Collapsed Sections"). It is a settings row rather than an enum column on an
--- entity, and an unrecognised entry in it is skipped rather than failing the
--- read — a fold naming a section this binary does not know about is a display
--- preference that cannot be honoured, not a corrupt task. Read that section
--- before adding ColumnSection to the hard-fail list above.
+-- Whether an agent's session can still be resumed.
+--   current -- it can: the worktree is there and no fresh launch has
+--              replaced it. Whether it is running right now is a separate,
+--              derived fact (is_live, below): a current agent without a
+--              window is paused, and a resume brings it back.
+--   ended   -- it never can again. Terminal.
+enum AgentState { current | ended }
+
+-- Why an agent ended. Recorded once, when it ends.
+--   replaced       -- a fresh launch started a new agent for the same task.
+--   worktree_gone  -- RetryFresh released the worktree its session lived in.
+--   launch_failed  -- its dispatch request failed before the host recorded a
+--                     worktree, and the claim was released (A12).
+enum AgentEndReason { replaced | worktree_gone | launch_failed }
+
+-- What kind of launch started an agent. A resume never starts one.
+enum AgentStartMode { dispatch | research | quick }
+
+-- == Workspaces (workspaces.allium) ==
+
+-- A workspace role. A super-admin is not a workspace role: it is a flag on
+-- the person (workspaces.allium: UserProfile.is_super_admin) and holds across
+-- every workspace without being a member of any.
+enum WorkspaceRole { admin | member }
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -424,80 +403,45 @@ enum Visibility { public | private }
 
 -- Host identifies a machine a copy of dispatch runs on. Exactly one row is
 -- THIS machine, minted on first run and stable thereafter (see
--- ExactlyOneLocalHost below); once a shared store is in play the rest of the
--- rows are other people's machines, and the local one is not distinguished by
--- anything in the row itself.
+-- ExactlyOneLocalHost in the Invariants section); once a shared store is in
+-- play the rest of the rows are other people's machines, and the local one is
+-- not distinguished by anything in the row itself.
 --
--- Identity and display name are two fields rather than one because they are
--- asked different questions. `id` answers "is this the machine that holds that
--- worktree?", and that answer must survive a machine being renamed, must not
--- collide between two machines that happen to share a name, and must not
--- disclose anything about the machine to whoever else can read the board.
--- `label` answers "whose machine is this?" for a human reading a card, and
--- wants to be editable, pretty and freely duplicable — every property `id`
--- must not have.
+-- `id` answers "is this the machine that holds that worktree?"; `label`
+-- answers "whose machine is this?" for a human reading a card. The id is never
+-- shown and the label is never compared, which is why the hostname is only the
+-- label's suggested starting value and never the identity: hostnames collide,
+-- change, and carry personal names. host.allium's header gives the full
+-- reasoning.
 --
--- So the hostname is the LABEL's suggested starting value and never the
--- identity. Hostnames collide (two laptops both called "mbp"), hostnames
--- change (a renamed machine still holds the same worktrees on the same disk),
--- and a hostname routinely carries a person's name, a team name or an asset
--- tag into a field whose only job is to tell machines apart. An opaque
--- generated id has none of those properties, and separating the two keeps both
--- jobs simple: the id is never shown, the label is never compared.
+-- The label is null from the moment the row is minted until a human names this
+-- machine; the startup gate that asks them (startup.allium:
+-- PromptForHostLabelWhenUnnamed) offers the hostname pre-filled. No board is
+-- drawn while it is null, so no reader of a card ever renders one.
 --
--- The label is NOT seeded from the hostname behind the operator's back. It is
--- null from the moment the row is minted until a human names this machine, and
--- the startup gate that asks them (startup.allium:
--- PromptForHostLabelWhenUnnamed) offers the hostname pre-filled so accepting it
--- is one keypress. Null therefore means "nobody has named this machine yet",
--- which is a state the board refuses to draw in — not a state a reader has to
--- render.
+-- The local row (id, label, owner, with the credential beside them) is kept in
+-- the host file (host.allium: IdentityLivesInHostFile), not in the shared
+-- store, which holds a mirror of it for other machines to read.
 --
--- Nothing here READS a remote host's row, and that is still true now that
--- remote rows can exist. Task.is_locally_owned below remains the only
--- consumer of this entity, and it resolves the local row and compares against
--- it; no rule anywhere navigates from a Task to another machine's label, count
--- or owner. Which rows arrive, and from where, is sync.allium's question.
--- What is in scope here is that the ownership question has a name and an
--- answer, and that the answer does not change shape when the registry fills.
+-- Task.is_locally_owned is the only reader that resolves the local row, and no
+-- rule navigates from a Task to another machine's label, count or owner. Which
+-- rows arrive, and from where, is sync.allium's question.
 entity Host {
     id: String       -- opaque and generated; not derived from anything about the machine. Minted once on first run and stable across restarts, upgrades and renames
     label: String?   -- human-readable name for the machine. Null until a human names it: minting does not seed it, and the startup gate asks for it before the board draws (startup.allium: PromptForHostLabelWhenUnnamed) with the machine's hostname pre-filled. Editable afterwards through host.allium: RenameHost. This is the string a card would display
     owner: UserIdentity?  -- the person this machine belongs to. Null until this install has connected once and learned who it is: the id above is minted offline on first run, and no identity exists at that moment. Written once, by host.allium: AdoptUserIdentity, and never rewritten — see LocalHostOwnerIsWrittenOnce below
 
-    -- ONE PERSON, SEVERAL MACHINES, AND THE FIELD THAT SAYS SO. `owner` is
-    -- what makes the two-level identity real rather than a claim in a design
-    -- document: a laptop and a desktop are two Host rows carrying the same
-    -- UserIdentity, and that is the ONLY place the "several machines" half of
-    -- external entity UserIdentity above is written down.
+    -- `owner` is what makes one person on several machines real: a laptop and
+    -- a desktop are two Host rows carrying the same UserIdentity. It changes no
+    -- locality gate: Task.is_locally_owned still compares Task.host against
+    -- local_host(), machine against machine, because a worktree is on one
+    -- disk whoever owns the machine.
     --
-    -- It does not change a single locality gate. `Task.is_locally_owned`
-    -- below, and every precondition built on it, still compare `Task.host`
-    -- against `local_host()` — machine against machine. Adding an owner to the
-    -- machine does not make a worktree on the desktop reachable from the
-    -- laptop, because the worktree is on the desktop's disk, and no amount of
-    -- shared ownership moves a directory. Reading `owner` where `host` is
-    -- meant is precisely the mistake UserIdentity's own commentary warns
-    -- about, and it now has a field to be made with.
-    --
-    -- NULL IS A REAL AND LASTING STATE, not a bounded window like `label`'s.
-    -- An install that never reaches a shared store never learns an identity,
-    -- and that install is a supported way to run dispatch rather than a broken
-    -- one. So no startup gate fills this, no board refuses to draw over it,
-    -- and every reader handles its absence.
-    --
-    -- THIS FIELD ON THE LOCAL ROW IS ALSO WHERE THE IDENTITY IS KEPT. There is
-    -- no second place an install remembers who it is; `local_host().owner` is
-    -- the stored answer, and host.allium's rules read and write it as such.
-    -- One field rather than two, because two would be two things to keep in
-    -- step and one silent way for a machine to be owned by a person the
-    -- install no longer believes it is.
-    --
-    -- THE LOCAL ROW IS PERSISTED IN THE HOST FILE (host.allium: HostFile,
-    -- IdentityLivesInHostFile) — id, label and owner, with the credential
-    -- beside them — not in the shared store, which holds only a mirror of it
-    -- for other machines to read, and not in SQLite, where it lived until
-    -- task #16755.
+    -- Null is a lasting, supported state: an install that never reaches a
+    -- shared store never learns an identity, so no startup gate fills it and
+    -- every reader handles its absence. On the local row this field is the
+    -- install's only stored answer to "who am I?" (host.allium).
+
     @invariant LocalHostOwnerIsWrittenOnce
         -- The local row's owner goes null -> some identity, once, and never
         -- moves again. host.allium: AdoptUserIdentity is the only writer, and
@@ -516,60 +460,17 @@ entity Host {
         -- that id as its own, and a teammate could take a new machine's host
         -- before its own board did. That is also why the board registers only
         -- after AdoptUserIdentity has settled the owner (sync.allium:
-        -- RegisterHostOnConnect), never before. A legacy row written ownerless
-        -- before this was enforced may still be adopted, once, by the first
-        -- caller naming itself.
+        -- RegisterHostOnConnect), never before. A row already stored without
+        -- an owner may still be adopted, once, by the first caller naming
+        -- itself.
         --
         -- Not stated as an expression because the claim is about the field's
-        -- HISTORY, and an invariant is evaluated against a single state. A
-        -- state in which the owner is wrong is indistinguishable from one in
-        -- which it is right; what is checkable is that no rule writes it twice,
-        -- which is a property of the rule set rather than of the store.
+        -- HISTORY, and an invariant is evaluated against a single state. What
+        -- is checkable is that no rule writes it twice, which is a property of
+        -- the rule set rather than of the store.
         --
         -- It binds the LOCAL row only. A remote row's owner is somebody else's
         -- identity, arrives already written, and is never written from here.
-
-    -- One install, one LOCAL Host row, and it is this machine. The row is
-    -- created on first run, before anything can read it, so no reader has to
-    -- handle its absence — see host.allium: MintHostIdentity for the rule that
-    -- mints it, and host.allium: RenameHost for the only operation that
-    -- changes its label.
-    --
-    -- THIS USED TO SAY `Hosts.count = 1`, AND SAYING SO IS NOW FALSE. Hosts
-    -- is a registry the moment a second machine shares a store: your
-    -- colleague's laptop is a row in it, and so is your own desktop. What
-    -- never changes, and what every consumer below actually depends on, is
-    -- that exactly one of those rows is THIS machine — which is what keeps
-    -- `local_host()` a total function and `Task.is_locally_owned` an answer
-    -- rather than a guess.
-    --
-    -- The distinction matters in exactly one direction. A rule that counted
-    -- hosts to decide anything would now be wrong; a rule that resolves the
-    -- local one is unaffected. There is no rule of the first kind, and this
-    -- invariant is the statement that there must not be.
-    --
-    -- The ROW's existence and the LABEL's presence are separate guarantees.
-    -- This invariant gives the first unconditionally; the second is a startup
-    -- gate rather than an invariant, because there is one bounded window —
-    -- between minting and the operator answering the prompt — in which a
-    -- labelless Host legitimately exists. No board is drawn in that window (see
-    -- startup.allium: AbortWhenTheHostIsUnnamedAndNoOneCanAnswer and
-    -- DrawBoardAfterTheHostIsNamed), so no reader of a card ever meets one.
-    --
-    -- "Unconditionally" is a statement about the domain, not about every store
-    -- that might hold it. A host file that cannot be read or written at all
-    -- yields
-    -- no answer about this row rather than an answer of zero, and that is not
-    -- a second arm on this invariant — it is a substrate failure, and the
-    -- launch stops on it before any rule here can be evaluated (startup.allium:
-    -- AbortWhenTheHostIdentityStoreIsUnusable — the same abort reason also
-    -- covers the store refusing a label write, ensured by a separate rule; see
-    -- that rule's guidance). So readers below still do not have to
-    -- handle a missing local host: either the row is there, or nothing is
-    -- running.
-    invariant ExactlyOneLocalHost {
-        Hosts.where(h => h = local_host()).count = 1
-    }
 }
 
 -- A Subscription is one person's standing interest in one epic: the epic's
@@ -596,14 +497,6 @@ entity Host {
 entity Subscription {
     subscriber: UserIdentity
     epic: Epic
-
-    -- One person, one epic, one subscription. Stated as an invariant rather
-    -- than left to the writer because the operation that creates these is
-    -- re-run on every reconnect: a second row would not be visibly wrong, it
-    -- would just quietly double whatever a reader counts.
-    invariant SubscriptionIsUniquePerSubscriberAndEpic {
-        Subscriptions.where(s => s.subscriber = subscriber and s.epic = epic).count = 1
-    }
 }
 
 -- UnseenTask records that one person has not yet looked at one task that was
@@ -628,14 +521,10 @@ entity Subscription {
 entity UnseenTask {
     subscriber: UserIdentity
     task: Task
-
-    invariant UnseenTaskIsUniquePerSubscriberAndTask {
-        UnseenTasks.where(u => u.subscriber = subscriber and u.task = task).count = 1
-    }
 }
 
--- Bookmark records that one person has asked to come back to one task
--- (task #98906). It is the whole of the bookmark's stored state. Only the
+-- Bookmark records that one person has asked to come back to one task.
+-- It is the whole of the bookmark's stored state. Only the
 -- person themselves sets or clears it, from the board (tasks.allium:
 -- ToggleBookmarkFromBoard) or over MCP (mcp-task-tools.allium:
 -- UpdateTasksViaMcp's `bookmarked`).
@@ -666,21 +555,9 @@ entity Bookmark {
     subscriber: UserIdentity
     task: Task
 
-    invariant BookmarkIsUniquePerSubscriberAndTask {
-        Bookmarks.where(b => b.subscriber = subscriber and b.task = task).count = 1
-    }
-
     invariant BookmarkedTaskIsNotDone {
         task.status != done
     }
-}
-
--- TaskUrl is the single typed URL attached to a Task. The url_type is stored
--- explicitly (not inferred from the string at render time), so the system
--- knows whether the URL is a PR, security alert, issue, or something else.
-value TaskUrl {
-    url: String
-    url_type: UrlType
 }
 
 entity Task {
@@ -695,23 +572,22 @@ entity Task {
     created_by: UserIdentity?  -- who created this task; stamped once and never rewritten, regardless of epic membership. NOT the same question as `owner`: `owner` tracks which board the task sits on and is blanked the moment the task joins an epic, so it cannot answer "who made this?" for an epic task. `created_by` exists so sync.allium can subscribe a creator to their own creations, epic or not — see sync.allium's own-creations subscription. Null for a task created before this field existed, and never backfilled: unlike `owner`, there is no derivation that recovers a forgotten creator.
     plan_path: String?    -- filesystem path to the implementation plan file
     epic: Epic?
-    url: TaskUrl?    -- subsumes the former pr_url: the single typed URL attached to this task
+    url: TaskUrl?    -- the single typed URL attached to this task
     tag: TaskTag?
-    sort_order: Integer?  -- manual and feed-driven ordering, and nothing else; lower sorts first via COALESCE(sort_order, id) ASC. No status transition reads or writes it — see completed_at
+    sort_order: Integer?  -- manual and feed-driven ordering, and nothing else; lower sorts first, and a null sorts as if it were the row's id (Task::sort_key). No status transition reads or writes it — see completed_at
     completed_at: Timestamp?  -- when this task last entered done; null until it first does. The Done column's ordering key (board-layout.allium, "Done Column Ordering"), stamped by every transition into done and by creation directly into done. Survives a move back out of done: it records the last completion, not the current status. Also writable without a status transition, by a manual reorder of this task's card in the Done column (tasks.allium: ReorderItem) -- the same override the Epic twin below carries
-    labels: List<String> = []  -- free-form badges rendered on the card's second line; set by feed scripts via FeedItem.labels or by future TUI editors.
+    labels: List<String> = []  -- free-form badges rendered on the card's second line; set by feed scripts via FeedItem.labels.
                                -- Ordered, and the order is load-bearing: badges render in
                                -- declaration order so a feed script controls which label
                                -- appears first on the card. Duplicates are retained.
                                -- Presentation, including the three CI-status texts that
                                -- take a state colour, is "Card label badges" in
                                -- board-visuals.allium.
-    base_branch: String = "main" -- the branch this task rebases onto / targets for PRs
+    base_branch: String = config.default_branch -- the branch this task rebases onto / targets for PRs
     external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
-    -- The six live-session facts (the window, the two hook timestamps, the live
-    -- subagent count, the deferred Stop and its time) sit on the task's current
-    -- Agent since agents.allium step A4, not here. The stored Task row keeps
-    -- their six columns, never written: the store cannot drop a column.
+    -- The live-session facts (the window, the two hook timestamps, the live
+    -- subagent count, the deferred Stop and its time) sit on the task's
+    -- current Agent, not here.
     pr_learnings_gate_shown_at: Timestamp?  -- set once when the PrLearningsGate fires; null means the gate has never fired for this task
     wrap_up_mode: WrapUpMode?  -- preferred wrap-up path; null means decide at wrap-up time
     model: TaskModel?          -- the model the task's agent launches on; null means sonnet
@@ -758,9 +634,8 @@ entity Task {
     }
     -- There is no terminal status. A task leaves the board by being
     -- deleted outright (tasks.allium: DeleteTask, BatchDelete), which
-    -- removes the row rather than moving it into a status. The former
-    -- `archived` status was retired by ArchivedStatusMigration
-    -- (epics.allium); a finished task now either stays in done or is gone.
+    -- removes the row rather than moving it into a status: a finished task
+    -- either stays in done or is gone.
     --
     -- This graph governs the move-based status changes only (MoveTask,
     -- ConfirmDone, dispatch/PR-driven transitions). Two operator paths
@@ -787,8 +662,11 @@ entity Task {
     visible_to(user): if epic != null: epic.visible_to(user) else: owner = user
 
     has_plan: plan_path != null
-    is_stale: sub_status = stale
-    is_crashed: sub_status = crashed
+
+    -- The review set (see TaskTag): the task reviews a PR someone else
+    -- authored. Every reader of the set reads it through this.
+    is_review_tagged: tag in {pr_review, dependabot, release_please}
+
     -- The window of the task's current agent, null when it has none or the
     -- agent holds no window (the task's session is not running).
     current_window: current_agent(this).tmux_window
@@ -838,8 +716,19 @@ entity Task {
     -- by "Schedule marker" in board-visuals.allium.
     schedule_failed: schedule_error != null and status = backlog
 
-    -- LiveSubagentCountMatchesEntries and PendingStopOnlyWhileRunning moved
-    -- to Agent with the fields they constrain (agents.allium step A4).
+    -- Which sub_status values each status admits. The store holds it: its
+    -- patch_task reducer refuses an explicit sub_status outside it for the
+    -- status the row will hold, before applying anything (mcp-task-tools.allium:
+    -- UpdateTaskViaMcp), and its one task write refuses any other writer's move
+    -- of sub_status outside it (store-split.allium: SubStatusMovesMustBeLegal).
+    invariant SubStatusFitsStatus {
+        (status in {backlog, done} implies sub_status = none)
+        and (status = running implies
+                sub_status in {active, needs_input, stale, crashed, conflict})
+        and (status = review implies
+                sub_status in {awaiting_review, changes_requested, approved,
+                               conflict, pr_closed, pr_unreachable})
+    }
 
     -- A task has a host if and only if it has a worktree.
     --
@@ -867,12 +756,10 @@ entity Task {
     -- tasks are unowned only because most of them have never been dispatched,
     -- which is a fact about the population and not a rule about the status.
     --
-    -- The is_detached derivation above excludes `status = backlog` from its
-    -- condition, so until now the domain model has never had to name the
-    -- backlog-with-worktree state: the one derivation that looks at
-    -- worktree-without-window declares that combination uninteresting in
-    -- backlog. It is not uninteresting to ownership, and this invariant is
-    -- where it is named.
+    -- The is_detached derivation above excludes `status = backlog`, so it
+    -- declares a backlog task with a worktree and no window uninteresting.
+    -- It is not uninteresting to ownership, and this invariant is where that
+    -- state is named.
     invariant HostTracksWorktree {
         (worktree != null implies host != null)
         and (host != null implies worktree != null)
@@ -909,30 +796,10 @@ entity Task {
     }
 }
 
-------------------------------------------------------------
--- Agents (agents.allium)
-------------------------------------------------------------
--- Moved here from agents.allium in step A4: SubagentEntry.agent and the Task
--- derivations (is_detached, is_unprovisioned) refer to it, and agents.allium
--- already depends on this file. The rules stay in agents.allium.
-
--- Whether an agent's session can still be resumed.
---   current -- it can: the worktree is there and no fresh launch has
---              replaced it. Whether it is running right now is a separate,
---              derived fact (is_live, below): a current agent without a
---              window is paused, and a resume brings it back.
---   ended   -- it never can again. Terminal.
-enum AgentState { current | ended }
-
--- Why an agent ended. Recorded once, when it ends.
---   replaced       -- a fresh launch started a new agent for the same task.
---   worktree_gone  -- RetryFresh released the worktree its session lived in.
---   launch_failed  -- its dispatch request failed before the host recorded a
---                     worktree, and the claim was released (A12).
-enum AgentEndReason { replaced | worktree_gone | launch_failed }
-
--- What kind of launch started an agent. A resume never starts one.
-enum AgentStartMode { dispatch | research | quick }
+-- == Agents (agents.allium) ==
+--
+-- Agent and SubagentEntry live here because Task's derivations (is_detached,
+-- is_unprovisioned) read them. Their rules are in agents.allium.
 
 entity Agent {
     task: Task
@@ -944,8 +811,7 @@ entity Agent {
     ended_at: Timestamp when state = ended
     end_reason: AgentEndReason when state = ended
 
-    -- The live-session facts, moved off Task by step A4. Each keeps the
-    -- meaning it had on Task, now read of the task's current agent.
+    -- The live-session facts of the task's current agent.
     tmux_window: TmuxWindow?
     last_pre_tool_use_at: Timestamp?  -- wallclock of the most recent PreToolUse hook; null when the agent has never tooled (or after Stop)
     last_notification_at: Timestamp?  -- wallclock of the most recent Notification hook; null when no notification is pending (or after Stop)
@@ -966,7 +832,6 @@ entity Agent {
     -- resume that re-records a window still open in tmux (dispatch.allium:
     -- ResumeTask with window_alive) needs no second write to say so.
     is_live: is_current and tmux_window != null
-    is_paused: is_current and tmux_window = null
 
     -- live_subagents is a denormalised count of this agent's SubagentEntry
     -- rows; every mutation and clear point rewrites both in the same write,
@@ -1014,6 +879,9 @@ entity SubagentEntry {
     session_id: String
     started_at: Timestamp
 }
+
+-- == Workspaces (workspaces.allium) ==
+
 -- A Workspace is a space where people collaborate: every epic and work
 -- package lives in exactly one, and a person sees only the workspaces they
 -- are a member of. One person may belong to many. Created, renamed and
@@ -1034,23 +902,12 @@ entity Workspace {
     is_admin(user): memberships.any(m => m.user = user and m.role = admin)
 }
 
--- A workspace role. A super-admin is not a workspace role: it is a flag on
--- the person (workspaces.allium: UserProfile.is_super_admin) and holds across
--- every workspace without being a member of any.
-enum WorkspaceRole { admin | member }
-
 -- One person's membership of one workspace, with their role there.
 entity Membership {
     workspace: Workspace
     user: UserIdentity
     role: WorkspaceRole
     created_at: Timestamp
-
-    invariant OneMembershipPerUserAndWorkspace {
-        for a in Memberships:
-            for b in Memberships:
-                a != b implies (a.workspace != b.workspace or a.user != b.user)
-    }
 }
 
 entity Epic {
@@ -1069,19 +926,18 @@ entity Epic {
     feed_role: FeedRole = none      -- routing role within a feed hierarchy; `none` for ordinary epics (see feeds.allium: Signal)
     origin: EpicOrigin = manual    -- system-assigned; never settable via MCP
     created_by: UserIdentity?  -- who created this epic; stamped once and never rewritten. The epic twin of Task.created_by — an epic has no `owner` field to begin with (nobody's user board holds an epic), so this is the only way sync.allium can subscribe a creator to an epic they just made, before anyone (including them) follows it. Null for an epic created before this field existed, or created by an unidentified process (e.g. a feed), and never backfilled.
-    feed_command_set_by: UserIdentity?  -- who last set feed_command (task #98851, M2). A host runs the command only when its own owner is the one who set it (feeds.allium: FeedCommandRunsOnSettersHost). Stamped by the store with the caller whenever feed_command is created or changed; null for an epic whose command predates the column, which then counts as set by created_by. Never client-named.
-    workspace: Workspace     -- the workspace this epic lives in; chosen at creation for a root epic, inherited from the parent for a sub-epic, and never moved (workspaces.allium: EpicStaysInItsWorkspace). Every epic has one: the migration put every existing epic in the default workspace (workspaces.allium: MigrateStoreToWorkspaces)
+    feed_command_set_by: UserIdentity?  -- who last set feed_command. A host runs the command only when its own owner is the one who set it (feeds.allium: FeedCommandRunsOnSettersHost). Stamped by the store with the caller whenever feed_command is created or changed; null for an epic whose command predates the column, which then counts as set by created_by. Never client-named.
+    workspace: Workspace     -- the workspace this epic lives in; chosen at creation for a root epic, inherited from the parent for a sub-epic, and never moved (workspaces.allium: EpicStaysInItsWorkspace). Every epic has one (workspaces.allium: MigrateStoreToWorkspaces)
     visibility: Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetEpicVisibility)
     created_at: Timestamp
     updated_at: Timestamp
 
     has_plan: plan_path != null
-    is_root: parent = null
     is_feed: feed_command != null
 
     -- The one person who may see this epic when it is private, or null when
     -- it is public all the way up. The NEAREST private epic at or above this
-    -- one decides (workspaces.allium: "Decisions", D5, task #98744): a public
+    -- one decides (workspaces.allium: "Decisions", D5): a public
     -- sub-epic of a private epic is hidden by that ancestor and private to
     -- the ancestor's creator, and a private sub-epic is its own creator's whatever sits
     -- above it, a public epic included. A move that changes this value needs
@@ -1101,56 +957,14 @@ entity Epic {
     visible_to(user): workspace.has_member(user)
                       and (not is_effectively_private or private_holder = user)
 
-    -- DB-level invariant: at most one epic per (parent, feed_role) when
-    -- feed_role != none. Ordinary epics (feed_role = none) are exempt — any
-    -- number may share a parent. Enforced in the DB by a partial unique index
-    -- on (parent_id, feed_role) WHERE feed_role != 'none', indexed as
-    -- COALESCE(parent_id, -1) rather than raw parent_id (migration v93).
-    --
-    -- v65 built the index on raw parent_id and it never actually protected
-    -- root-level epics (reviews_parent, cve): SQLite treats every NULL in a
-    -- unique index as distinct from every other NULL, so two root epics with
-    -- the same feed_role and parent_id = null did not collide. v93 rebuilds
-    -- the index over COALESCE(parent_id, -1) so root epics collide too; -1 is
-    -- never a real epic id. A database that already held duplicate root-level
-    -- managed epics before v93 ran keeps them and runs without this index
-    -- (see ProvisionManagedEpics' race-safety note in epics.allium) — v93
-    -- warns rather than deleting or merging data it did not create.
-    --
-    -- Task #98746 (V9). A managed ROOT (parent = null) is one per CREATOR:
-    -- each person's board provisions its own private "PR Reviews" and "CVE"
-    -- roots (epics.allium: ProvisionManagedEpics), so two roots may share a
-    -- feed_role when their creators differ. The module enforces no index for
-    -- this; provisioning finds a root by (feed_role, creator).
-    invariant UniqueFeedRolePerParent {
-        for a in Epics:
-            for b in Epics:
-                a != b and a.feed_role != none and a.parent = b.parent
-                    and (a.parent != null or a.created_by = b.created_by)
-                    implies (a.feed_role != b.feed_role or b.feed_role = none)
-    }
-
-    -- DB-level invariant: at most one sub-epic per (parent, title) when
-    -- origin = repo_group. Enforced by a partial unique index on
-    -- (parent_id, title) WHERE origin = 'repo-group'. Ordinary epics
-    -- (origin = manual) are exempt — any number may share a title.
-    invariant UniqueRepoGroupPerParent {
-        for a in Epics:
-            for b in Epics:
-                a != b and a.origin = repo_group and a.parent = b.parent and a.title = b.title
-                    implies b.origin != repo_group
-    }
-
     subtasks: Task with epic = this
-    subtask_statuses: subtasks -> status
 
     sub_epics: Epic with parent = this
 
     -- Heterogeneous set used for status recalculation and dispatch ordering.
     -- Combines the epic's tasks and sub-epics; each element contributes its
     -- .status value to the parent's recalculated status. Every child counts:
-    -- with the archived status gone there is no status that takes a row out
-    -- of the recalculation short of deleting it.
+    -- no status takes a row out of the recalculation short of deleting it.
     children: subtasks + sub_epics
 
     -- Every task anywhere in the subtree, at any depth: this epic's own
@@ -1186,14 +1000,13 @@ entity SavedRepoPath {
                              -- the same path each own a row and each one's feeds resolve it
     last_used: Timestamp     -- updated on each use; drives recency ordering
     verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
-                             -- Belongs to the REPOSITORY, not to the row: every row of one repository (see
-                             -- github_path) holds the same value. Setting it through any row updates all of them,
-                             -- and a row that starts without one takes its repository's.
+                             -- Belongs to the REPOSITORY, not to the row (VerifyCommandIsPerRepository).
     github_path: String?     -- the repository's GitHub path ("org/repo"), read by the saving host from its clone's
                              -- origin remote; null when unknown (no origin, not GitHub). Rows with the same
                              -- non-null github_path are one repository on several machines, so they share
                              -- verify_command and base-branch history (SavedRepoBranch) even though their paths
-                             -- differ. A row without one is its own repository, identified by path alone.
+                             -- differ. A row without one shares a repository with every row at its path,
+                             -- and so bridges their groups (a verify command shared through it reaches each).
     host: Host?              -- the install that owns this row; null on a row saved before the stamp existed.
                              -- A path is a place on ONE machine's disk, so only that host can say it is gone:
                              -- prune-repo-paths (cli.allium: PruneRepoPathsViaCli) touches only its own host's rows.
@@ -1211,11 +1024,10 @@ entity SavedRepoPath {
 -- SavedRepoBranch records a base_branch that was used for a given repo_path,
 -- forming a per-repo most-recently-used history that feeds the base-branch
 -- fuzzy picker during manual task creation (see dispatch.allium:
--- RecordBaseBranch, BaseBranchPicker). This is a dedicated settings-style
--- table (repo_base_branches), a sibling of SavedRepoPath's repo_paths table —
--- and, like the per-repo verify_command setting, a per-repo setting: the
--- history recorded through one clone is offered for every clone of the same
--- repository (rows of SavedRepoPath sharing a github_path).
+-- RecordBaseBranch, BaseBranchPicker). Like verify_command, it is a
+-- per-repository setting: the history recorded through one clone is offered
+-- for every clone of the same repository (rows of SavedRepoPath sharing a
+-- github_path).
 --
 -- It is deliberately NOT derived from Task.base_branch, so that:
 --   (a) only branches entered through the manual new-task form are
@@ -1224,55 +1036,24 @@ entity SavedRepoPath {
 --   (b) a remembered branch does not vanish when the task that used it is
 --       later deleted.
 --
--- Identity is the (repo_path, branch) pair: at most one row per branch per
--- repo. Recency ordering (most-recent-first) and the per-repo cap are
+-- Identity is the (repo_path, branch) pair (UniqueBranchPerRepo). Recency
+-- ordering (most-recent-first) and the per-repo cap are
 -- governed by the write operation (see dispatch.allium: RecordBaseBranch and
 -- the BranchHistoryCapped invariant).
 entity SavedRepoBranch {
     repo_path: String        -- the repo this branch history belongs to
     branch: String           -- a base_branch value used for repo_path
     last_used: Timestamp     -- updated on each use; drives recency ordering
-
-    invariant UniqueBranchPerRepo {
-        for a in SavedRepoBranches:
-            for b in SavedRepoBranches:
-                a != b implies (a.repo_path != b.repo_path or a.branch != b.branch)
-    }
 }
 
--- Setting is a general-purpose named value: everything an install used to keep
--- in a local key/value table (a feed's command, its poll interval, which board
--- sections are collapsed, and so on), except the identity settings.allium's
--- header names as staying local for good — that lives in the host file
--- (host.allium: IdentityLivesInHostFile). Every Setting row is in the shared
--- store, keyed by host (settings.allium: SettingsAreStoredPerHost); none is
--- kept locally.
---
--- SCOPED BY HOST, NOT BY UserIdentity, and that is a deliberate choice rather
--- than an oversight. `host` is minted offline on
--- first run and is never null (host.allium: MintHostIdentity); `owner` is null
--- until a first connection settles one, and may stay null forever on an
--- install that never connects. Scoping by owner would make an install's own
--- settings invisible to itself until it first reaches a store — a regression
--- for the ordinary single-machine case a setting must not regress. Scoping by
--- host still delivers the thing settings.allium's design calls for: a
--- teammate's machine never sees this one's settings, because no two hosts
--- share a `host` value.
---
--- host_id AND host_label ARE NOT SETTINGS, DESPITE HAVING BEEN STORED
--- ALONGSIDE THEM. Both are already fields of Host itself, and a Setting row
--- naming either would be a second copy of a fact this file already states
--- once. See settings.allium's Excludes for the full reasoning.
+-- Setting is a general-purpose named value: a feed's command, its poll
+-- interval, which board sections are collapsed, and so on. Every row is in the
+-- shared store, keyed by host. Why host and not UserIdentity, and which values
+-- stay out of this table, is settings.allium's header (SettingsAreStoredPerHost).
 entity Setting {
     host: Host
     key: String
     value: String
-
-    invariant SettingIsUniquePerHostAndKey {
-        for a in Settings:
-            for b in Settings:
-                a != b implies (a.host != b.host or a.key != b.key)
-    }
 }
 
 -- Learning captures knowledge a dispatched agent discovered. Entries land as
@@ -1312,13 +1093,9 @@ entity Learning {
                                  -- threshold (ArchiveStaleLearning)
         terminal: rejected, archived
     }
-    -- rejected is terminal but has no inbound edge: it was only ever produced by
-    -- the human reject action on the (now removed) TUI knowledge-base overlay.
-    -- The value is retained because existing rows still hold it and must stay
-    -- parseable; like archived, those rows are excluded from retrieval.
-
-    -- Derived
-    is_active: status = approved
+    -- rejected is terminal and has no inbound edge: no behaviour produces it.
+    -- Stored rows may hold it and must stay parseable; like archived, those
+    -- rows are excluded from retrieval.
 
     -- True when this learning is relevant to the given task's dispatch.
     -- task-scoped learnings are excluded from auto-injection; they surface
@@ -1339,9 +1116,10 @@ entity Learning {
 
 -- Retrieval records a single occasion on which a Learning was surfaced for a
 -- task. One row is inserted per surfacing event, so repeated exposure
--- accumulates as separate rows. Used to drive rate_learning verdict validation
--- (a verdict's learning_id must have a matching retrieval row for the same
--- task) and to support telemetry on which entries actually fire.
+-- accumulates as separate rows (learnings.allium:
+-- AugmentDispatchPromptWithLearnings, QueryLearningsViaMcp). A verdict's
+-- learning must have a matching retrieval row for the same task
+-- (learnings.allium: RateLearningViaMcp).
 entity Retrieval {
     task: Task
     learning: Learning
@@ -1349,243 +1127,17 @@ entity Retrieval {
     retrieved_at: Timestamp
 }
 
--- A rate_learning call evaluates a retrieved learning. The verdict is kept, one
--- per (task, learning): a repeat from the same task replaces the earlier one
--- (latest wins) and moves upvote_count by the difference, so one task moves a
--- learning's score by at most one in either direction. The VerdictKind enum
--- describes the effect of the standing verdict:
---   helped → counts +1 toward learning.upvote_count and updates last_upvoted_at
---   wrong  → counts -1 toward learning.upvote_count (a downvote; may go negative);
---            no status change
---   not_applicable → counts 0; the learning row is not written
--- See learnings.allium for the rule that applies these effects.
-
--- BoardSelection is a runtime-only UI concept (not persisted): the set of
--- tasks and epics the user has multi-selected. It is modelled here, on the
--- same terms as SplitPane below, because the batch rules in tasks.allium
--- and epics.allium all consume it.
---
--- There is exactly one BoardSelection. It is board-wide, not per-column:
--- selecting items in one column and then another leaves both sets
--- selected, and the selection outlives moving the cursor between columns.
---
--- The action that fills it, and the two independent things called
--- "select all", are specified in tasks.allium ("Multi-Selection").
-
-entity BoardSelection {
-    selected_tasks: Set<Task>
-    selected_epics: Set<Epic>
-
-    is_empty: selected_tasks.count = 0 and selected_epics.count = 0
-
-    @guidance
-        -- Session-scoped and never persisted: it does not survive an app
-        -- restart, and nothing in the database records it.
-        -- A card in either set renders with a leading `*` and a bold title
-        -- (board-visuals.allium: "Selection").
-}
-
--- A split-pane rearrangement that has been started and has not yet settled.
---
--- There is one concept here, not four flags: live tmux work is under way
--- against the pane, and requests that arrived while it ran are held for it.
--- Modelled as an entity referenced optionally from SplitPane below, so that
--- "nothing in flight" and "something in flight, holding these" are the only
--- two shapes. Parallel booleans admitted three states the rules forbid: both
--- rearrangements at once, a hold with nothing to settle it, and a held swap
--- outside a swap.
---
--- Neither entry nor swap is instantaneous. Both rearrange live tmux panes and
--- windows, and SplitPane's active, pane and pinned_task only take their new
--- values once the rearrangement reports back (see ToggleSplitMode,
--- SwapSplitPane, SplitPaneEntrySettles and SplitPaneSwapSettles in
--- split-pane.allium). Until then SplitPane still describes the state BEFORE
--- the rearrangement, so a second one started against it acts on the wrong
--- pane and the wrong task.
---
--- At most one exists at a time, and that is enforced rather than assumed: no
--- [s] press may start a rearrangement while one is in flight, so an entry can
--- never begin beside a live swap (split-pane.allium:
--- HoldToggleWhileRearrangementInFlight). The single pending_toggle and single
--- pending_quit below rest on that premise.
-entity Rearrangement {
-    kind: EntryInFlight | SwapInFlight
-
-    -- Whether a toggle press arrived while this rearrangement was in flight,
-    -- held until it settles. A flag rather than a count: a further press
-    -- replaces the held one instead of accumulating, so any burst of presses
-    -- during one rearrangement settles as a single held toggle.
-    --
-    -- It belongs to the rearrangement, not to either variant. A press is held
-    -- during a swap just as during an entry, and both settles replay it the
-    -- same way: as an EXIT, never as a fresh press. A toggle is relative to
-    -- what the board was showing when it was pressed, and a press held during
-    -- a rearrangement was made with a pane open, so it meant "close this
-    -- split" (see split-pane.allium:
-    -- HoldToggleWhileRearrangementInFlight, SplitPaneSwapSettles and
-    -- SplitPaneEntrySettles).
-    pending_toggle: Boolean = false
-
-    -- Whether a confirmed quit arrived while this rearrangement was in flight,
-    -- held until it settles. Each variant has its own hazard. Mid-entry there
-    -- is nothing to restore from yet: the agent's window is being joined into
-    -- the board's own window, and exit is gated on active, which is still
-    -- false, so a quit acted on there issues no restore at all. Mid-swap the
-    -- rearrangement is half finished: a quit landing between the pane exchange
-    -- and the rename leaves the outgoing task's window carrying the incoming
-    -- task's name, the duplicate dispatch.allium's TmuxWindowNamesAreUnique
-    -- forbids.
-    --
-    -- One field covers both variants for the same reason pending_toggle does.
-    pending_quit: Boolean = false
-
-    @guidance
-        -- Both holds are set while SplitPane.active is false throughout an
-        -- entry, and both may be set while a pane close has already cleared
-        -- active mid-swap. Neither may be folded in with the rearrangement's
-        -- own existence, and an implementation that tied either to the entry
-        -- variant alone would drop a press or a quit held during a swap: a
-        -- dropped press makes [s] depend on how fast the user typed, and a
-        -- dropped quit is one the user cannot notice, having already asked the
-        -- application to close.
-        --
-        -- This entity survives a pane close (split-pane.allium:
-        -- SplitPaneClosedResets), holds and all. A close says a pane went away,
-        -- not that the tmux rearrangement already under way will not report
-        -- back, and it is that report which ends this rearrangement and
-        -- performs anything held for it. Only SwapInFlight's pending_swap is
-        -- cleared by a close, because it is not work in flight.
-}
-
--- Split-mode entry: the gap between asking for a pane and having one.
---
--- Lives while SplitPane.active is false, which is what distinguishes it from a
--- swap. It must end whether the entry succeeded or failed, or [s] would stop
--- working for the rest of the session.
-variant EntryInFlight : Rearrangement {}
-
--- A swap: exchanging which task's tmux window the existing pane shows.
---
--- Requires SplitPane.active, which is what distinguishes it from an entry.
-variant SwapInFlight : Rearrangement {
-    -- The swap requested while this one was still in flight, held until it
-    -- settles. At most one is held: a further request replaces it rather than
-    -- queueing behind it, because each is the same instruction — "show me this
-    -- task" — and only the newest one still reflects what the user wants.
-    --
-    -- Specific to this variant, not shared with EntryInFlight: a swap request
-    -- can only arrive while split mode is active, and an entry runs while it
-    -- is not, so a swap held during an entry is a state the rules never
-    -- produce (split-pane.allium: SwapSplitPane requires active).
-    pending_swap: Task?
-}
-
--- SplitPane is a runtime-only UI concept (not persisted) that tracks
--- whether the TUI is displaying a task's tmux window as a side pane.
--- It is modelled here because task lifecycle events (finish, PR creation)
--- must coordinate with split pane state.
-
-entity SplitPane {
-    active: Boolean = false
-    focused: Boolean = true
-    pane: TmuxPane?
-    pinned_task: Task?
-
-    -- The rearrangement in flight, if any. Null means the pane is at rest:
-    -- active, pane and pinned_task describe what is actually there, and a
-    -- fresh [s] press or swap request may start work against them. Non-null
-    -- means they describe the PREVIOUS state and nothing new may be started
-    -- (see Rearrangement above).
-    in_flight: Rearrangement?
-
-    -- How many split-mode exits have issued tmux work that has not yet
-    -- reported back. Exit is no more instantaneous than entry or a swap:
-    -- breaking the pinned pane back out under its own name is a live tmux
-    -- rearrangement, and the agent is not in its standalone window until that
-    -- finishes. Issuing the exit and completing it are therefore two different
-    -- moments, and quitting reads this to know whether any of them is still
-    -- outstanding (see split-pane.allium: QuitAwaitsSplitPaneRestore).
-    --
-    -- A count and not part of in_flight above, because exits can genuinely
-    -- overlap. Entry and swap are serialised by in_flight, but exit is
-    -- deliberately NOT gated -- a press during an exit is the remedy for a
-    -- refusal (split-pane.allium: HoldToggleWhileRearrangementInFlight) -- and
-    -- split mode stays active until the close is confirmed, so a second exit
-    -- can be issued while the first is still moving a pane. A flag, or a slot
-    -- holding one exit, would be cleared by whichever settled first and would
-    -- report the other as finished.
-    restores_in_flight: Integer = 0
-
-    -- When a quit that is waiting on such a restore stops waiting. Non-null
-    -- only between ApplicationQuits and the process going away, and only when
-    -- a restore was still in flight at that moment. The deadline exists so the
-    -- wait is bounded: a tmux that never answers must not keep dispatch open
-    -- (see split-pane.allium: QuitCompletesOnRestoreTimeout).
-    quit_restore_deadline: Timestamp?
-
-    @guidance
-        -- At most one task can be pinned at a time.
-        -- When active is true, pane must be non-null.
-        -- pinned_task may be null (empty shell in the pane).
-        -- focused tracks whether the TUI pane has tmux focus.
-        -- Driven by crossterm FocusGained/FocusLost events
-        -- (requires tmux `focus-events on`). Defaults to true.
-        -- Reset to true on split entry and exit.
-        --
-        -- in_flight does NOT reset with the rest of this entity when split
-        -- mode ends (split-pane.allium: SplitPaneClosedResets): it names tmux
-        -- work that outlives the state the close cleared, and only that work's
-        -- own report ends it. SwapInFlight's pending_swap is the one part of it
-        -- that a close does clear, because it describes an occupant the user
-        -- asked for and there is no occupant.
-        --
-        -- restores_in_flight is the exit-side counterpart and does NOT reset
-        -- either. That is the whole point of it: it counts up as split mode
-        -- ends and describes work that outlives the state the exit cleared.
-        -- Resetting it there would zero it for exactly the window it exists to
-        -- name.
-}
-
--- Per-task PR-poll bookkeeping: how many times in a row reading this task's PR
--- failed permanently, when the next attempt is allowed, and whether polling has
--- given up altogether.
---
--- Runtime-only and never persisted, like BoardSelection and SplitPane above. It
--- is modelled rather than left as an implementation detail because giving up is
--- a state change the user sees, so it must be expressible.
-entity PrPollState {
+-- LearningVerdict is the standing verdict one task's agent gave one learning.
+-- There is at most one per (task, learning) (OneVerdictPerTaskAndLearning): a
+-- repeat rate_learning call from the same task replaces it, and the learning's
+-- upvote_count moves by the difference, so one task moves a learning's score by
+-- at most one in either direction (learnings.allium: RateLearningViaMcp; the
+-- store's apply_learning_verdicts reducer). A task's verdicts go with it when
+-- it is deleted.
+entity LearningVerdict {
     task: Task
-    consecutive_permanent_failures: Integer = 0
-    -- Counted separately from the permanent failures above, which is the whole
-    -- mechanism keeping a GitHub outage from stranding the board: this one
-    -- widens the backoff, and only the other one can reach the give-up
-    -- threshold.
-    consecutive_transient_failures: Integer = 0
-    next_poll_at: Timestamp?
-
-    -- Derived, not stored: a field that merely mirrors the counter it is
-    -- computed from can only drift from it or duplicate it. Also means
-    -- "reset the counter to 0" and "clear gave_up" cannot fall out of step —
-    -- there is only one write to make.
-    gave_up: consecutive_permanent_failures >= config.pr_poll_permanent_failure_threshold
-
-    @guidance
-        -- Conceptually one exists per polled task; the fields' defaults are the
-        -- state of a task that has never failed, so a task with no row yet reads
-        -- as zero failures, no backoff and not given up.
-        --
-        -- gave_up is the in-memory gate that stops polling. Task.sub_status =
-        -- pr_unreachable is its persisted, user-visible shadow: the two change
-        -- together, but only sub_status survives a restart.
-        --
-        -- Because this state is session-scoped, an app restart polls a
-        -- pr_unreachable task once more. That is deliberate, not an oversight.
-        -- The failure it exists for — a repository the gh account cannot read —
-        -- is fixed on GitHub, not on the task, so there is nothing the user
-        -- could edit to earn a retry. A restart is the retry.
-        --
-        -- next_poll_at carries the transient backoff. Null means "eligible on
-        -- the next tick that clears pr_poll_interval", the unthrottled default.
+    learning: Learning
+    verdict: VerdictKind
 }
 
 -- PollOwner names the single host allowed to run recurring background
@@ -1596,8 +1148,8 @@ entity PrPollState {
 -- HostTracksWorktree above — a feed-created review task never has a
 -- worktree, so it never has a host either).
 --
--- UNLIKE PrPollState above, this IS persisted and shared: it must be
--- comparable across hosts for "am I the owner?" to have one answer
+-- Unlike PrPollState (pr-workflow.allium), this IS persisted and shared: it
+-- must be comparable across hosts for "am I the owner?" to have one answer
 -- everywhere, not one answer per process.
 --
 -- A row is claimed once and, deliberately, never expires and never
@@ -1606,8 +1158,7 @@ entity PrPollState {
 -- infrastructure a watchdog needs to route around, so a claim stays valid
 -- for as long as it is useful. Only an epic-scope row can be moved, and only
 -- by an explicit human action — see feeds.allium: OverrideFeedOwner. A
--- task-scope row has no override (the override_poll_owner MCP tool that
--- carried one was removed). A task WITH a worktree never gets a row
+-- task-scope row has no override. A task WITH a worktree never gets a row
 -- here: `task.host` already answers "who owns this?" unambiguously and for
 -- free, and duplicating that answer in a second table is a second place for
 -- it to disagree.
@@ -1617,16 +1168,7 @@ entity PollOwner {
                             -- key: the id is stored rather than referencing
                             -- Task or Epic directly.
     host: Host
-    claimed_at: Timestamp  -- audit only; no rule reads this to decide
-                           -- anything, unlike PrPollState's next_poll_at
-
-    -- At most one owner per (scope, scope_id) pair.
-    invariant UniquePollOwnerPerScope {
-        for a in PollOwners:
-            for b in PollOwners:
-                a != b and a.scope = b.scope
-                    implies a.scope_id != b.scope_id
-    }
+    claimed_at: Timestamp  -- audit only; no rule reads this to decide anything
 
     @guidance
         -- Claiming (first host to see an eligible scope with no row) and
@@ -1673,15 +1215,6 @@ entity RetiredFeedItem {
     external_id: String     -- FeedItem.id, the same key feed ingest upserts on
     retired_at: Timestamp   -- audit only; no rule reads this to decide anything
 
-    -- At most one record per (feed_epic, external_id). A second delete of
-    -- the same id under the same feed is a no-op on this table.
-    invariant UniqueRetiredFeedItemPerFeed {
-        for a in RetiredFeedItems:
-            for b in RetiredFeedItems:
-                a != b and a.feed_epic = b.feed_epic
-                    implies a.external_id != b.external_id
-    }
-
     @guidance
         -- Written by tasks.allium: DeleteTask and BatchDelete, and
         -- epics.allium: DeleteEpic; read and dropped by feeds.allium:
@@ -1706,8 +1239,8 @@ config {
     -- a few seconds does not clear that bar. This is the single source of the
     -- duration: both the expiry sweep that clears the tracking state and the
     -- render check that decides whether to draw the flash read it, so they
-    -- cannot disagree. See "Message flash" in the Column Identity and Focus
-    -- section for the appearance, and mcp-task-tools.allium (SendMessageToTask)
+    -- cannot disagree. See "Message flash" in board-visuals.allium for the
+    -- appearance, and mcp-task-tools.allium (SendMessageToTask)
     -- for what triggers it.
     message_flash_ttl: Duration = 30.seconds
     notifications_enabled: Boolean = false
@@ -1730,10 +1263,9 @@ config {
     -- for why it lives there and not in the string grammar.
     min_feed_interval: Duration = 60.seconds
     -- Cadence for a feed epic with no explicit feed_interval_secs (see
-    -- feeds.allium). Equal to min_feed_interval today, and MUST NOT fall below
-    -- it: an unset field that polled faster than the fastest value a user is
-    -- permitted to enter would make the floor a lie.
-    default_feed_interval: Duration = 60.seconds
+    -- feeds.allium). It is the floor itself: an unset field that polled faster
+    -- than the fastest value a user may enter would make the floor a lie.
+    default_feed_interval: Duration = min_feed_interval
     -- Upper bound on ONE feed command's execution. The per-epic feed-cycle
     -- claim (feeds.allium: SerialisedFeedCycle) spans the whole exec, so
     -- without this bound a command that never exits would hold its epic's
@@ -1756,7 +1288,7 @@ config {
     -- Task and an empty form draft both start on this literal, because at that
     -- moment there is no repository to ask -- the repo path is chosen later in
     -- the same flow, or never. What the rule forbids is letting such a value
-    -- survive to creation unexamined, which is what it was doing.
+    -- survive to creation unexamined.
     default_branch: String = "main"
 
     -- Editor of last resort, when the environment names none. Not a
@@ -1773,13 +1305,9 @@ config {
     --
     -- This governs EVERY surface that launches the user's editor: the pop-out
     -- task and epic editors (tasks.allium: EditTask, epics.allium: EditEpic).
-    -- One user setting must not mean two things in one application.
-    --
-    -- The agent-tree companion pane used to be a third such surface, opening
-    -- the selected file in an editor pane beside itself. It no longer launches
-    -- an editor at all: the same keys now open the file's DIFF, which the pane
-    -- renders itself from git (agent-tree.allium: OpenAgentTreeFileDiff). So
-    -- nothing under agent-tree.allium reads this setting any more.
+    -- One user setting must not mean two things in one application. The
+    -- agent-tree panes launch no editor: they render a file's diff themselves
+    -- (agent-tree.allium: OpenAgentTreeFileDiff).
     editor_fallback: String = "vi"
 
     -- Staleness thresholds used by card age rendering and Staleness::from_age.
@@ -1846,11 +1374,8 @@ config {
 -- than treated as "off" because every surface already spells "off" as the
 -- empty value, and a zero-second cadence would busy-loop the feed runner.
 --
--- A bare integer is seconds, and NOT because seconds are the friendly unit —
--- because that is what the stored column holds (Epic.feed_interval_secs) and
--- what the pre-suffix surface already accepted.
--- Keeping the bare form meaning seconds is what makes suffix support purely
--- additive: no value a user typed before changes meaning.
+-- A bare integer is seconds because that is what the stored column holds
+-- (Epic.feed_interval_secs).
 --
 -- Surfaces bound by this grammar:
 --   - epics.allium: EditEpic's FEED_INTERVAL_SECS section
@@ -1863,7 +1388,7 @@ config {
 -- == Two separate claims: spelling and floor ==
 --
 -- The grammar above and the floor below are DIFFERENT rules with different
--- scopes, and conflating them is what left a gap here for as long as it did.
+-- scopes.
 --
 -- CLAIM 1 -- the grammar is human-surface-only, and it only parses. Its job is
 -- to turn a typed string into a seconds count, and its strict positivity is a
@@ -1883,20 +1408,11 @@ config {
 -- rather than clamped: feeds.allium's FeedTick skips that epic and warns, on
 -- the grounds that a misconfigured feed should not run at all.
 --
--- Rows that predate the floor were brought into line once, by migration v91:
--- every stored cadence below min_feed_interval was CLAMPED UP to it, both on
--- epics.feed_interval_secs and on the two managed-feed settings rows
--- (reviews_feed_interval_secs, cve_feed_interval_secs). Clamped rather than
--- nulled so the value stays explicit -- a later change to
--- default_feed_interval must not silently retarget an epic whose cadence
--- somebody once chose. This is a one-time data fix, not a second enforcement
--- point: it does not relieve any write path of validating.
---
 -- The floor exists because a feed command is a shell command on a timer.
 -- Below the floor the poll loop spawns it faster than a person could plausibly
 -- want, which is a busy loop against the user's own machine; and a negative
--- value, before this rule existed, read as an effectively infinite interval
--- and silenced the feed with no trace. Neither failure announced itself.
+-- value would read as an effectively infinite interval and silence the feed
+-- with no trace. Neither failure would announce itself.
 --
 -- == How an interval is displayed back ==
 --
@@ -1905,6 +1421,211 @@ config {
 -- though "10m" was accepted on the way in. No surface renders a humanised
 -- cadence today; if one is added, it should show the largest whole unit that
 -- divides the value exactly, else seconds ("600" -> "10m", "650" -> "650s").
+
+------------------------------------------------------------
+-- Storage Boundary Validation
+------------------------------------------------------------
+
+-- Any entity read from storage whose enum fields contain an unrecognised
+-- string value must fail the read operation with an error rather than
+-- silently defaulting to a fallback variant.
+--
+-- Rationale: silent defaults mask data-integrity bugs (corrupt migrations,
+-- manual DB edits, schema drift) and produce subtly wrong in-memory state
+-- that is hard to trace back to the real cause. A hard read error surfaces
+-- the problem immediately. The TUI and MCP error-display paths already
+-- handle DB errors gracefully, so a hard error is safe.
+--
+-- This applies to all enum columns: TaskStatus, SubStatus, TaskTag,
+-- WrapUpMode, TaskModel, LearningKind, LearningScope and LearningStatus.
+-- It also applies to JSON-encoded columns (e.g. labels, tags): malformed
+-- JSON must return an error rather than an empty list.
+--
+-- Exception: FeedRole and EpicOrigin soft-fail instead. An unrecognised
+-- value in either column logs a warning and defaults to FeedRole.none /
+-- EpicOrigin.manual rather than failing the read.
+--
+-- Rationale: these two are additive, system-assigned routing/provenance
+-- tags. New roles/origins are appended over time, and a newer binary may
+-- write a value an older binary has never heard of. Hard-failing would
+-- make an older binary reject rows it could otherwise display perfectly
+-- well, so it degrades gracefully to the default tag instead. The default
+-- is the safe, neutral choice in both cases: `none` (ordinary epic, no feed
+-- routing) and `manual` (no special provenance). Because the value is
+-- system-assigned and never user-supplied, an unknown value signals a
+-- forward-compatibility gap, not the data-integrity bug the hard-fail rule
+-- guards against.
+--
+-- Exception: tmux_window soft-fails too, for a different reason — corruption
+-- tolerance, not forward compatibility. A stored value that is not a window
+-- name (see TmuxWindow) logs a warning and reads back as no window at all,
+-- which is exactly what a task whose agent is gone looks like, so the board
+-- still renders it; failing the row would drop the card from every bulk read.
+--
+-- Not covered at all: the stored list of folded sub-status sections
+-- (board-layout.allium: "Collapsed Sections"). It is a settings row rather than an enum column on an
+-- entity, and an unrecognised entry in it is skipped rather than failing the
+-- read — a fold naming a section this binary does not know about is a display
+-- preference that cannot be honoured, not a corrupt task. Read that section
+-- before adding ColumnSection to the hard-fail list above.
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- The sub_status a task takes on entering each status. default_sub_status is
+-- the function every status write that names no sub_status applies; this is
+-- its whole table.
+invariant DefaultSubStatusPerStatus {
+    default_sub_status(backlog) = none
+        and default_sub_status(running) = active
+        and default_sub_status(review) = awaiting_review
+        and default_sub_status(done) = none
+}
+
+-- One install, one LOCAL Host row, and it is this machine. The row is
+-- created on first run, before anything can read it (host.allium:
+-- MintHostIdentity), so no reader has to handle its absence; host.allium:
+-- RenameHost is the only operation that changes its label.
+--
+-- Hosts is a registry once a second machine shares a store, so the claim is
+-- not that there is one row but that exactly one row is THIS machine, which
+-- keeps local_host() a total function and Task.is_locally_owned an answer
+-- rather than a guess. A rule that counted hosts to decide anything would be
+-- wrong; no rule does.
+--
+-- The row's existence and the label's presence are separate guarantees. This
+-- invariant gives the first unconditionally; the second is a startup gate,
+-- because between minting and the operator answering the prompt a labelless
+-- Host legitimately exists. No board is drawn in that window (startup.allium:
+-- AbortWhenTheHostIsUnnamedAndNoOneCanAnswer, DrawBoardAfterTheHostIsNamed).
+--
+-- A host file that cannot be read or written at all is a substrate failure,
+-- not a second arm of this invariant: the launch stops on it before any rule
+-- here can be evaluated (startup.allium:
+-- AbortWhenTheHostIdentityStoreIsUnusable). Either the row is there, or
+-- nothing is running.
+invariant ExactlyOneLocalHost {
+    (Hosts where id = local_host().id).count = 1
+}
+
+-- One person, one epic, one subscription. Stated as an invariant rather than
+-- left to the writer because the operation that creates these is re-run on
+-- every reconnect: a second row would not be visibly wrong, it would just
+-- quietly double whatever a reader counts.
+invariant SubscriptionIsUniquePerSubscriberAndEpic {
+    for a in Subscriptions:
+        for b in Subscriptions:
+            a != b implies (a.subscriber != b.subscriber or a.epic != b.epic)
+}
+
+invariant UnseenTaskIsUniquePerSubscriberAndTask {
+    for a in UnseenTasks:
+        for b in UnseenTasks:
+            a != b implies (a.subscriber != b.subscriber or a.task != b.task)
+}
+
+invariant BookmarkIsUniquePerSubscriberAndTask {
+    for a in Bookmarks:
+        for b in Bookmarks:
+            a != b implies (a.subscriber != b.subscriber or a.task != b.task)
+}
+
+invariant OneMembershipPerUserAndWorkspace {
+    for a in Memberships:
+        for b in Memberships:
+            a != b implies (a.workspace != b.workspace or a.user != b.user)
+}
+
+-- At most one epic per (parent, feed_role) when feed_role != none; ordinary
+-- epics (feed_role = none) are exempt. A managed ROOT (parent = null) is one
+-- per creator and workspace: each person's board provisions its own private
+-- "PR Reviews" and "CVE" roots (epics.allium: ProvisionManagedEpics), so two
+-- roots may share a feed_role when their creators or workspaces differ. A
+-- sub-epic shares its parent's workspace, so its siblings always do.
+--
+-- The store's module holds it. The reducers that provision role epics find
+-- one by (feed_role, parent), and a root also by creator, before inserting
+-- (spacetime/module/src/feed.rs::ensure_role_epic,
+-- spacetime/module/src/feed_ingest.rs::ensure_role_sub_epic), and create_epic,
+-- patch_epic and a root's move to another workspace refuse a row that would
+-- duplicate one
+-- (spacetime/module/src/rules.rs::check_epic_unique_among). A patch that
+-- leaves the parent, role, origin and title alone is not judged, so a row
+-- already holding a duplicate stays writable for its other fields.
+invariant UniqueFeedRolePerParent {
+    for a in Epics:
+        for b in Epics:
+            a != b and a.feed_role != none and a.parent = b.parent
+                and a.workspace = b.workspace
+                and (a.parent != null or a.created_by = b.created_by)
+                implies (a.feed_role != b.feed_role or b.feed_role = none)
+}
+
+-- At most one repo-group sub-epic per (parent, title); ordinary epics
+-- (origin = manual) may share a title. Held the same way: the creators of
+-- repo groups look the title up under the parent first
+-- (spacetime/module/src/grouping.rs::find_or_create_repo_group,
+-- spacetime/module/src/feed_ingest.rs::ingest_grouped), and a create
+-- or a patch of the parent, origin or title that would duplicate one is
+-- refused (check_epic_unique_among).
+invariant UniqueRepoGroupPerParent {
+    for a in Epics:
+        for b in Epics:
+            a != b and a.origin = repo_group and a.parent = b.parent
+                and a.workspace = b.workspace and a.title = b.title
+                implies b.origin != repo_group
+}
+
+-- Rows of one repository share its verify command: rows with the same
+-- non-null github_path are one repository on several machines. The store
+-- holds it: setting a command through a path sets it on every row of that
+-- path and every sibling of them
+-- (spacetime/module/src/config.rs::rows_of_the_repository_at), and a row
+-- that learns its github_path takes its repository's command, or gives its
+-- own to a repository whose rows have none
+-- (spacetime/module/src/config.rs::resaved_verify_command).
+invariant VerifyCommandIsPerRepository {
+    for a in SavedRepoPaths:
+        for b in SavedRepoPaths:
+            (a.github_path != null and a.github_path = b.github_path)
+                implies a.verify_command = b.verify_command
+}
+
+invariant UniqueBranchPerRepo {
+    for a in SavedRepoBranches:
+        for b in SavedRepoBranches:
+            a != b implies (a.repo_path != b.repo_path or a.branch != b.branch)
+}
+
+invariant SettingIsUniquePerHostAndKey {
+    for a in Settings:
+        for b in Settings:
+            a != b implies (a.host != b.host or a.key != b.key)
+}
+
+invariant OneVerdictPerTaskAndLearning {
+    for a in LearningVerdicts:
+        for b in LearningVerdicts:
+            a != b implies (a.task != b.task or a.learning != b.learning)
+}
+
+-- At most one owner per (scope, scope_id) pair.
+invariant UniquePollOwnerPerScope {
+    for a in PollOwners:
+        for b in PollOwners:
+            a != b and a.scope = b.scope
+                implies a.scope_id != b.scope_id
+}
+
+-- At most one record per (feed_epic, external_id). A second delete of the
+-- same id under the same feed is a no-op on this table.
+invariant UniqueRetiredFeedItemPerFeed {
+    for a in RetiredFeedItems:
+        for b in RetiredFeedItems:
+            a != b and a.feed_epic = b.feed_epic
+                implies a.external_id != b.external_id
+}
 
 ------------------------------------------------------------
 -- Actor Declarations

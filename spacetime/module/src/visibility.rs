@@ -610,6 +610,12 @@ pub(crate) fn move_epic_row(
     if !privileged && !admin_of_both {
         return Err("only a super-admin, or an admin of both workspaces, may move an epic".into());
     }
+    // `core.allium: UniqueFeedRolePerParent`: the root as it would land.
+    let landed = Epic {
+        workspace_id,
+        ..epic.clone()
+    };
+    check_epic_unique_among(&landed, &ctx.epics_under(0))?;
 
     let tree = crate::tasks_epics::collect_epic_subtree_ids(ctx, epic_id);
     // A private sub-epic is its creator's: the move must not carry it off,

@@ -270,8 +270,7 @@ rule UpdateTaskViaMcp {
     -- The same table now binds every store writer that moves a sub_status,
     -- not only this patch (store-split.allium: SubStatusMovesMustBeLegal).
     -- `sub_status_valid_for(sub_status, status)` is a black box naming the
-    -- store's legality table, the pairs listed in core.allium under "Valid
-    -- SubStatus values per parent status".
+    -- store's legality table, core.allium's Task.SubStatusFitsStatus.
     requires:
         if sub_status != null:
             let effective_status = if status != null: status else: task.status
@@ -290,7 +289,8 @@ rule UpdateTaskViaMcp {
         if status != null: task.status = status
     ensures:
         if sub_status != null: task.sub_status = sub_status
-        else if status != null: task.sub_status = core/SubStatus.default_for(status)
+        else if status != null and status != prior_status:
+            task.sub_status = default_sub_status(status)
     ensures:
         if plan != null: task.plan_path = plan
     ensures:
@@ -844,7 +844,7 @@ rule CreateTaskViaMcp {
         description: description ?? "",
         repo_path: repo_path,
         status: backlog,
-        sub_status: core/SubStatus.default_for(backlog),
+        sub_status: default_sub_status(backlog),
         plan_path: plan,
         epic: route_target(epic_id, repo_path),
         tag: tag,
@@ -1504,12 +1504,8 @@ rule WrapUpViaMcp {
     requires: task.status = running or task.status = review
     requires: task.worktree != null
     -- A review task does not end by being wrapped up (ReviewTasksAreNotWrappedUp).
-    -- The code gates on the core/TaskTag::is_review predicate rather than on
-    -- these three literals, so the clause below is the narrower statement.
-    -- What keeps them in step is a test, not this comment: the TaskTag model
-    -- test that derives the review set from TaskTag::ALL fails on a new review
-    -- tag and sends whoever added it here (core.allium: "THE REVIEW SET").
-    requires: task.tag not in {pr_review, dependabot, release_please}
+    -- core/Task.is_review_tagged is the code's TaskTag::is_review.
+    requires: not task.is_review_tagged
     -- WrapUpRefusesUnfinishedWork, below: the worktree is committed. Checked
     -- before the action runs, and before any request is written, so a refusal
     -- has no side effect and issues no token. It is an observation of the

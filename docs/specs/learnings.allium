@@ -12,7 +12,7 @@
 --           rule implementations, invariants.
 -- Excludes: Core entity/enum definitions (see core.allium — Learning,
 --           LearningScope, LearningKind, LearningStatus, Retrieval,
---           VerdictKind, RetrievalSource).
+--           LearningVerdict, VerdictKind, RetrievalSource).
 --           Any interactive browsing or curation surface: the knowledge base has
 --           no TUI presence. It is written and read exclusively through the MCP
 --           tools below (record_learning, query_learnings, rate_learning,
@@ -29,6 +29,7 @@ use "./core.allium" as core
 --   core/VerdictKind      — helped | wrong | not_applicable
 --   core/RetrievalSource  — prompt_injection | procedural | query_learnings
 --   core/Retrieval        — one row per surfacing event of a learning to a task
+--   core/LearningVerdict  — the standing verdict one task gave one learning
 
 ------------------------------------------------------------
 -- Storage Backend
@@ -413,6 +414,8 @@ rule AugmentDispatchPromptWithLearnings {
     let relevant = core/Learnings where applies_to_dispatch(task)
 
     ensures:
+        for l in relevant:
+            core/Retrieval.created(task: task, learning: l, source: prompt_injection, retrieved_at: now)
         if relevant.count > 0:
             DispatchPromptAugmented(task: task, learnings: relevant)
 
@@ -626,7 +629,14 @@ rule RecordLearningViaMcp {
 rule QueryLearningsViaMcp {
     when: McpQueryLearnings(task, query?, tag_filter?, limit?)
 
-    ensures: LearningsQueried(task: task, query: query, tag_filter: tag_filter, limit: limit)
+    -- The ranked entries the call returns (the guidance below gives the
+    -- ranking).
+    let returned = ranked_learnings(task, query, tag_filter, limit)
+
+    ensures:
+        for l in returned:
+            core/Retrieval.created(task: task, learning: l, source: query_learnings, retrieved_at: now)
+        LearningsQueried(task: task, query: query, tag_filter: tag_filter, limit: limit)
 
     @guidance
         -- BREAKING CHANGE: tag_filter is no longer a hard AND filter. It was
@@ -672,11 +682,18 @@ rule RateLearningViaMcp {
 
     requires: core/Retrievals.any(r => r.task = task and r.learning = learning)
 
+    -- The verdict this task already gave this learning, if any.
+    let standing = core/LearningVerdict{task, learning}
+    let previous = if standing != null: standing.verdict else: null
+
     ensures:
-        -- previous is the verdict this task already gave this learning, if any.
         -- The standing verdict is now `verdict`; the score moves by the
         -- difference between the two (helped = +1, wrong = -1,
         -- not_applicable = 0, none = 0).
+        if standing = null:
+            core/LearningVerdict.created(task: task, learning: learning, verdict: verdict)
+        else:
+            standing.verdict = verdict
         learning.upvote_count = learning.upvote_count + weight(verdict) - weight(previous)
         if verdict = helped and previous != helped:
             learning.last_upvoted_at = now
@@ -698,8 +715,8 @@ rule RateLearningViaMcp {
         -- downvoted entry stays active but ranks lower and becomes eligible for
         -- ArchiveStaleLearning once its score is non-positive and it goes
         -- untouched for config.stale_learning_threshold.
-        -- One verdict stands per (task, learning), kept in the learning_verdicts
-        -- table: a repeat replaces it and applies the difference, so the task
+        -- One verdict stands per (task, learning), kept as a
+        -- core/LearningVerdict: a repeat replaces it and applies the difference, so the task
         -- prompt's "rate when you act" and the wrap-up /learnings step cannot
         -- count one use twice. The same verdict again is a no-op.
         -- The retrieval guard ensures agents only rate learnings actually

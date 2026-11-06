@@ -454,3 +454,64 @@ fn the_blank_task_the_burn_throws_away_satisfies_the_invariant() {
     let blank = blank_task();
     assert!(validate_task_ownership(blank.epic_id, &blank.owner).is_ok());
 }
+
+/// `core.allium: DefaultSubStatusPerStatus`, `tasks.allium: SubStatusAutoreset`:
+/// a patch that moves `status` and names no `sub_status` resets it to the new
+/// status's default, so an MCP `update_tasks(status = review)` on a running
+/// task cannot leave the illegal pair (review, active).
+#[test]
+fn a_status_move_without_a_sub_status_resets_it_to_the_default() {
+    for (from, from_sub, to, expected) in [
+        ("running", "active", "review", "awaiting_review"),
+        ("review", "approved", "running", "active"),
+        ("running", "needs_input", "backlog", "none"),
+        ("review", "conflict", "done", "none"),
+        ("backlog", "none", "running", "active"),
+    ] {
+        let mut row = Task {
+            status: from.into(),
+            sub_status: from_sub.into(),
+            ..blank_task()
+        };
+        let patch = TaskPatch {
+            status: Some(to.into()),
+            ..TaskPatch::default()
+        };
+        apply_task_patch(&mut row, patch);
+        assert_eq!(row.sub_status, expected, "{from}/{from_sub} -> {to}");
+    }
+}
+
+/// A named sub-status wins over the reset.
+#[test]
+fn a_named_sub_status_wins_over_the_reset() {
+    let mut row = Task {
+        status: "running".into(),
+        sub_status: "active".into(),
+        ..blank_task()
+    };
+    let patch = TaskPatch {
+        status: Some("review".into()),
+        sub_status: Some("changes_requested".into()),
+        ..TaskPatch::default()
+    };
+    apply_task_patch(&mut row, patch);
+    assert_eq!(row.sub_status, "changes_requested");
+}
+
+/// A patch that repeats the current status is no move: the editor sends the
+/// status on every save, and that must not clear a `needs_input`.
+#[test]
+fn a_repeated_status_keeps_the_sub_status() {
+    let mut row = Task {
+        status: "running".into(),
+        sub_status: "needs_input".into(),
+        ..blank_task()
+    };
+    let patch = TaskPatch {
+        status: Some("running".into()),
+        ..TaskPatch::default()
+    };
+    apply_task_patch(&mut row, patch);
+    assert_eq!(row.sub_status, "needs_input");
+}

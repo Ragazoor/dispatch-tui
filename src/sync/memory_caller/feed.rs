@@ -351,12 +351,14 @@ impl MemoryReducerCaller {
         let existing = tables
             .epics
             .values()
-            // A root is its creator's own (V9); see the module's twin.
+            // A root is its creator's own and visible (V9); a sub-epic's
+            // slot is filled by any child with the role. See the module's twin.
             .find(|e| {
                 e.parent_epic_id == parent_epic_id
                     && e.feed_role == role
-                    && (parent_epic_id != 0 || e.created_by == self.sender)
-                    && tables.visible_epic(&scope, e.id).is_some()
+                    && (parent_epic_id != 0
+                        || (e.created_by == self.sender
+                            && tables.visible_epic(&scope, e.id).is_some()))
             })
             .cloned();
         if let Some(epic) = existing {

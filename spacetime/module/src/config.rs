@@ -4,25 +4,93 @@ use super::*;
 
 // -- Repo configuration -----------------------------------------------------
 
-/// The verify command a new or newly identified row for `path` starts with:
-/// the one its repository already has, found on a sibling row (same non-empty
-/// `github_path`, or the same `path` when either side has no `github_path`).
-fn sibling_verify_command(ctx: &ReducerContext, path: &str, github_path: &str) -> String {
-    ctx.db
-        .repo_paths()
-        .iter()
+/// The verify command of the repository `path`/`github_path` belongs to, read
+/// off its rows other than `except` (`0` for a row not stored yet). A row with
+/// the same non-empty `github_path` wins, because that is the repository
+/// itself; failing one, a sibling by local path (either side has no
+/// `github_path`); else empty.
+pub fn repository_verify_command<'a>(
+    rows: impl IntoIterator<Item = &'a RepoPath>,
+    except: i64,
+    path: &str,
+    github_path: &str,
+) -> String {
+    let mut by_path = None;
+    for r in rows {
+        if r.id == except || r.verify_command.is_empty() {
+            continue;
+        }
+        if !github_path.is_empty() && r.github_path == github_path {
+            return r.verify_command.clone();
+        }
+        if by_path.is_none() && is_sibling(&r.path, &r.github_path, path, github_path) {
+            by_path = Some(r.verify_command.clone());
+        }
+    }
+    by_path.unwrap_or_default()
+}
+
+/// `core.allium: VerifyCommandIsPerRepository`: the command a re-saved row
+/// holds. A row that learns (or changes) its GitHub path, or has no command,
+/// takes its repository's when the repository has one; any other re-save keeps
+/// the row's own. Every save then gives the row's command to its repository's
+/// rows that have none (`rows_without_the_repository_command`).
+pub fn resaved_verify_command(existing: &RepoPath, github_path: &str, repository: &str) -> String {
+    let joins = github_path != existing.github_path || existing.verify_command.is_empty();
+    if joins && !repository.is_empty() {
+        repository.to_string()
+    } else {
+        existing.verify_command.clone()
+    }
+}
+
+/// Every row of the repository at `path`: each row of that path, and each
+/// sibling of any of them. Every row of the path is asked, not the first one
+/// found, so a row of the path with no GitHub path cannot hide the
+/// repository's other machines. Empty exactly when no row has `path`.
+pub fn rows_of_the_repository_at<'a>(rows: &'a [RepoPath], path: &str) -> Vec<&'a RepoPath> {
+    let named: Vec<&RepoPath> = rows.iter().filter(|r| r.path == path).collect();
+    rows.iter()
         .filter(|r| {
-            !r.verify_command.is_empty() && is_sibling(&r.path, &r.github_path, path, github_path)
+            named
+                .iter()
+                .any(|n| is_sibling(&r.path, &r.github_path, &n.path, &n.github_path))
         })
-        .map(|r| r.verify_command)
-        .next()
-        .unwrap_or_default()
+        .collect()
+}
+
+/// The rows of `row`'s repository that hold no verify command and must take
+/// `row`'s, so every row of one repository agrees.
+///
+/// The repository is `row`'s siblings and the WHOLE GitHub group of each of
+/// them: a row with no GitHub path is a sibling of every row at its local
+/// path, and stopping at those rows would leave the rest of their groups
+/// behind (`core.allium: VerifyCommandIsPerRepository`).
+pub fn rows_without_the_repository_command<'a>(
+    rows: &'a [RepoPath],
+    row: &RepoPath,
+) -> Vec<&'a RepoPath> {
+    if row.verify_command.is_empty() {
+        return Vec::new();
+    }
+    let sibling = |r: &RepoPath| is_sibling(&r.path, &r.github_path, &row.path, &row.github_path);
+    let groups: Vec<&str> = rows
+        .iter()
+        .filter(|r| sibling(r))
+        .map(|r| r.github_path.as_str())
+        .chain(std::iter::once(row.github_path.as_str()))
+        .filter(|g| !g.is_empty())
+        .collect();
+    rows.iter()
+        .filter(|r| r.id != row.id && r.verify_command.is_empty())
+        .filter(|r| sibling(r) || groups.contains(&r.github_path.as_str()))
+        .collect()
 }
 
 /// Two rows are one repository when they share a non-empty GitHub path, or
 /// share a local path and at least one of them has no GitHub path to say
 /// otherwise.
-fn is_sibling(path_a: &str, gh_a: &str, path_b: &str, gh_b: &str) -> bool {
+pub fn is_sibling(path_a: &str, gh_a: &str, path_b: &str, gh_b: &str) -> bool {
     if !gh_a.is_empty() && !gh_b.is_empty() {
         gh_a == gh_b
     } else {
@@ -37,7 +105,8 @@ fn is_sibling(path_a: &str, gh_a: &str, path_b: &str, gh_b: &str) -> bool {
 /// the row it already owns; failing that it adopts an unowned row of the path
 /// (saved before hosts were recorded); failing that it inserts. `github_path`
 /// (`org/repo`, `""` when unknown) is stamped when non-empty. A row that has
-/// no verify command starts with its repository's (see `sibling_verify_command`).
+/// no verify command, or learns its GitHub path, joins its repository's (see
+/// `resaved_verify_command`).
 /// `adopt_repo_path` is the way to claim an unowned row without touching
 /// `last_used`.
 #[spacetimedb::reducer]
@@ -51,29 +120,22 @@ pub fn save_repo_path(
     if path.trim().is_empty() {
         return Err("repo path is empty".into());
     }
-    let own = ctx
-        .db
-        .repo_paths()
+    // One read of the table serves the lookup, the join and the share.
+    let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
+    let own = rows
         .iter()
         .find(|r| r.path == path && r.host == host)
-        .or_else(|| {
-            ctx.db
-                .repo_paths()
-                .iter()
-                .find(|r| r.path == path && r.host.is_empty())
-        });
-    match own {
+        .or_else(|| rows.iter().find(|r| r.path == path && r.host.is_empty()))
+        .cloned();
+    let row = match own {
         Some(existing) => {
             let github_path = if github_path.is_empty() {
                 existing.github_path.clone()
             } else {
                 github_path
             };
-            let verify_command = if existing.verify_command.is_empty() {
-                sibling_verify_command(ctx, &path, &github_path)
-            } else {
-                existing.verify_command.clone()
-            };
+            let repository = repository_verify_command(&rows, existing.id, &path, &github_path);
+            let verify_command = resaved_verify_command(&existing, &github_path, &repository);
             ctx.db.repo_paths().id().update(RepoPath {
                 last_used,
                 host,
@@ -83,7 +145,7 @@ pub fn save_repo_path(
             })
         }
         None => {
-            let verify_command = sibling_verify_command(ctx, &path, &github_path);
+            let verify_command = repository_verify_command(&rows, 0, &path, &github_path);
             ctx.db.repo_paths().insert(RepoPath {
                 id: 0,
                 path,
@@ -94,6 +156,13 @@ pub fn save_repo_path(
             })
         }
     };
+    // Give the row's command to the rows of its repository that have none.
+    for sibling in rows_without_the_repository_command(&rows, &row) {
+        ctx.db.repo_paths().id().update(RepoPath {
+            verify_command: row.verify_command.clone(),
+            ..sibling.clone()
+        });
+    }
     Ok(())
 }
 
@@ -178,14 +247,12 @@ pub fn set_verify_command(
         return Err("verify command must be a single line; chain steps with && or ;".into());
     }
     let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
-    let Some(named) = rows.iter().find(|r| r.path == path) else {
-        return Err(format!("no repo path {path}"));
-    };
     // The command belongs to the repository: every row that is the same one.
-    for row in rows
-        .iter()
-        .filter(|r| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path))
-    {
+    let repository = rows_of_the_repository_at(&rows, &path);
+    if repository.is_empty() {
+        return Err(format!("no repo path {path}"));
+    }
+    for row in repository {
         ctx.db.repo_paths().id().update(RepoPath {
             verify_command: command.clone(),
             ..row.clone()

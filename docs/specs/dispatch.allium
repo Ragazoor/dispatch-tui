@@ -1220,7 +1220,7 @@ rule ResumeTask {
 
     ensures: current_agent(task).tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
     ensures: task.status = running
-    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.sub_status = default_sub_status(running)
     ensures: current_agent(task).last_pre_tool_use_at = now
     ensures:
         if not window_alive:
@@ -1393,7 +1393,7 @@ rule RetryFresh {
     ensures: task.host = null
     ensures: current_agent(task).tmux_window = null
     ensures: task.status = backlog
-    ensures: task.sub_status = core/SubStatus.default_for(backlog)
+    ensures: task.sub_status = default_sub_status(backlog)
     -- Leaving running voids any deferred Stop. Reachable here more than
     -- anywhere else: a crashed agent's task is still running, and retry-fresh
     -- is what a human does about it. See core/Task's

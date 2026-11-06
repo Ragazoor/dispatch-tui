@@ -235,7 +235,21 @@ pub struct EpicPatch {
 
 /// Apply a task patch. Extracted from the reducer so it is testable without a
 /// store — see the macro's note about what it does not guarantee.
+///
+/// A patch that MOVES `status` and names no `sub_status` resets the sub-status
+/// to the new status's default (`tasks.allium: SubStatusAutoreset`,
+/// `core.allium: DefaultSubStatusPerStatus`), so no caller has to remember it.
+/// A repeated status is no move: the editor sends it on every save.
 pub fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
+    let prior_status = row.status.clone();
+    let names_sub_status = patch.sub_status.is_some();
+    apply_task_patch_fields(row, patch);
+    if !names_sub_status && row.status != prior_status {
+        row.sub_status = default_sub_status(&row.status).to_string();
+    }
+}
+
+fn apply_task_patch_fields(row: &mut Task, patch: TaskPatch) {
     apply_patch!(
         row,
         patch,
@@ -797,7 +811,9 @@ pub fn create_epic(ctx: &ReducerContext, row: Epic) -> Result<(), String> {
     validate_status("epic", row.id, &row.status)?;
     let row = settle_new_epic(ctx, row)?;
     let parent = row.parent_epic_id;
-    ctx.db.epics().insert(Epic { id: 0, ..row });
+    let row = Epic { id: 0, ..row };
+    check_epic_unique_among(&row, &ctx.epics_under(parent))?;
+    ctx.db.epics().insert(row);
     // The new epic is a child of its parent and a parent has no children rule
     // it can break by gaining a backlog one — but the parent may have been
     // done, in which case it is not any more.
@@ -877,7 +893,12 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
         .is_some_and(|c| *c != row.feed_command);
     let reparented = patch.parent_epic_id.is_some_and(|p| p != was_child_of);
 
+    let before = row.clone();
     apply_epic_patch(&mut row, patch);
+    // Before any write, so a refusal leaves the epic as it was.
+    if epic_uniqueness_inputs_changed(&before, &row) {
+        check_epic_unique_among(&row, &ctx.epics_under(row.parent_epic_id))?;
+    }
     if command_changed {
         row.feed_command_set_by = caller_identity(ctx);
     }

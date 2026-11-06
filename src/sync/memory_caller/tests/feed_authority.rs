@@ -819,3 +819,77 @@ async fn a_refresh_request_on_an_epic_the_caller_cannot_see_is_refused() {
         other => panic!("an unseen epic must read as absent, got {other:?}"),
     }
 }
+
+/// `core.allium: UniqueFeedRolePerParent`: moving a managed root into a
+/// workspace where its creator already has a root with that role is refused.
+#[test]
+fn moving_a_root_onto_a_twin_of_its_role_is_refused() {
+    let caller = scenario();
+    {
+        let mut t = caller.lock();
+        for (id, ws) in [(5, WS1), (6, WS2)] {
+            t.epics.insert(
+                id,
+                module::Epic {
+                    feed_role: module::ROLE_REVIEWS_PARENT.into(),
+                    ..epic(id, ws, "bob")
+                },
+            );
+        }
+    }
+    let outcome = caller.apply_move_epic_to_workspace(EpicId(5), WS2).unwrap();
+    match outcome {
+        ReducerOutcome::Refused(why) => assert!(why.contains("already exists"), "{why}"),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// `core.allium: UniqueFeedRolePerParent`: provisioning finds a role sub-epic
+/// under its own root even when someone else's private epic holds the slot,
+/// rather than inserting a second one beside it.
+#[test]
+fn provisioning_does_not_duplicate_a_role_sub_epic_it_cannot_see() {
+    let caller = scenario();
+    {
+        let mut t = caller.lock();
+        t.epics.insert(
+            10,
+            module::Epic {
+                feed_role: module::ROLE_REVIEWS_PARENT.into(),
+                feed_command: "reviews.sh".into(),
+                feed_interval_secs: 600,
+                visibility: module::VISIBILITY_PRIVATE.into(),
+                ..epic(10, WS1, "me")
+            },
+        );
+        t.epics.insert(
+            11,
+            module::Epic {
+                parent_epic_id: 10,
+                feed_role: module::ROLE_MY_REVIEWS.into(),
+                visibility: module::VISIBILITY_PRIVATE.into(),
+                ..epic(11, WS1, "bob")
+            },
+        );
+    }
+    caller.align_next_epic_id(20);
+    caller
+        .apply_ensure_managed_epics("reviews.sh".into(), 600, String::new(), 0)
+        .unwrap()
+        .applied()
+        .unwrap();
+    let t = caller.lock();
+    let roots: Vec<i64> = t
+        .epics
+        .values()
+        .filter(|e| e.parent_epic_id == 0 && e.feed_role == module::ROLE_REVIEWS_PARENT)
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(roots, [10], "the root is reused");
+    let my_reviews = t
+        .epics
+        .values()
+        .filter(|e| e.parent_epic_id == 10 && e.feed_role == module::ROLE_MY_REVIEWS)
+        .count();
+    assert_eq!(my_reviews, 1);
+}

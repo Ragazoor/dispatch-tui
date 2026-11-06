@@ -485,7 +485,7 @@ pub struct LearningVerdict {
     pub task_id: i64,
     #[index(btree)]
     pub learning_id: i64,
-    /// `helped` | `wrong`, an opaque string like every enum-typed column.
+    /// `helped` | `wrong` | `not_applicable`, an opaque string like every enum-typed column.
     pub verdict: String,
 }
 

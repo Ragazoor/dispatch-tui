@@ -37,9 +37,10 @@ pub(crate) fn route_to_repo_group(ctx: &ReducerContext, epic_id: i64, repo_path:
 
 /// The `repo-group` sub-epic of `root` titled `title`, created when absent.
 ///
-/// The one find-or-create for repo groups: manual routing here and feed
-/// ingestion both come through it, so the two
-/// kinds of grouping cannot disagree about which sub-epic is "the" one.
+/// The find-or-create for repo groups that manual routing and role-routed feed
+/// ingestion share, so the two cannot disagree about which sub-epic is "the"
+/// one. A grouped feed without roles (`feed_ingest.rs::ingest_grouped`) finds
+/// its sub-epic by title under the feed epic the same way before inserting.
 /// `created_by` is written only on a genuine insert.
 pub(crate) fn find_or_create_repo_group(
     ctx: &ReducerContext,

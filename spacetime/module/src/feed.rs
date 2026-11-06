@@ -423,15 +423,17 @@ fn ensure_role_epic(
         .epics()
         .parent_epic_id()
         .filter(&parent_epic_id)
-        // Only an epic the caller can see counts: a managed root in a
-        // workspace they are not in must not be reused or rewritten. A ROOT
-        // is also the caller's own (`epics.allium: ProvisionManagedEpics`,
-        // V9): another person's root is never reused or rewritten, though the
-        // caller sees it.
+        // A ROOT counts only when the caller can see it and made it: a managed
+        // root in a workspace they are not in must not be reused or rewritten,
+        // and another person's root is never theirs (`epics.allium:
+        // ProvisionManagedEpics`, V9). A SUB-EPIC's parent is already the
+        // caller's own root, so any child holding the role fills the slot,
+        // seen or not (`core.allium: UniqueFeedRolePerParent`): inserting
+        // beside a private one would duplicate it.
         .find(|e| {
             e.feed_role == role
-                && (parent_epic_id != 0 || e.created_by == created_by)
-                && visible_epic(ctx, e.id).is_some()
+                && (parent_epic_id != 0
+                    || (e.created_by == created_by && visible_epic(ctx, e.id).is_some()))
         });
     if let Some(epic) = existing {
         // A root its creator finds still public is the one members used to

@@ -19,6 +19,52 @@ use "./core.allium" as core
 use "./store-split.allium" as split
 
 ------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- Per-task PR-poll bookkeeping: how many times in a row reading this task's PR
+-- failed permanently, when the next attempt is allowed, and whether polling has
+-- given up altogether.
+--
+-- Runtime-only and never persisted, like tasks.allium's BoardSelection and
+-- split-pane.allium's SplitPane. It is modelled rather than left as an implementation detail because giving up is
+-- a state change the user sees, so it must be expressible.
+entity PrPollState {
+    task: core/Task
+    consecutive_permanent_failures: Integer = 0
+    -- Counted separately from the permanent failures above, which is the whole
+    -- mechanism keeping a GitHub outage from stranding the board: this one
+    -- widens the backoff, and only the other one can reach the give-up
+    -- threshold.
+    consecutive_transient_failures: Integer = 0
+    next_poll_at: Timestamp?
+
+    -- Derived, not stored: a field that merely mirrors the counter it is
+    -- computed from can only drift from it or duplicate it. Also means
+    -- "reset the counter to 0" and "clear gave_up" cannot fall out of step —
+    -- there is only one write to make.
+    gave_up: consecutive_permanent_failures >= core/config.pr_poll_permanent_failure_threshold
+
+    @guidance
+        -- Conceptually one exists per polled task; the fields' defaults are the
+        -- state of a task that has never failed, so a task with no row yet reads
+        -- as zero failures, no backoff and not given up.
+        --
+        -- gave_up is the in-memory gate that stops polling. Task.sub_status =
+        -- pr_unreachable is its persisted, user-visible shadow: the two change
+        -- together, but only sub_status survives a restart.
+        --
+        -- Because this state is session-scoped, an app restart polls a
+        -- pr_unreachable task once more. That is deliberate, not an oversight.
+        -- The failure it exists for — a repository the gh account cannot read —
+        -- is fixed on GitHub, not on the task, so there is nothing the user
+        -- could edit to earn a retry. A restart is the retry.
+        --
+        -- next_poll_at carries the transient backoff. Null means "eligible on
+        -- the next tick that clears pr_poll_interval", the unthrottled default.
+}
+
+------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
@@ -32,7 +78,7 @@ rule CreatePr {
 
     ensures: task.url != null and task.url.url_type = pr
     ensures: task.status = review
-    ensures: task.sub_status = core/SubStatus.default_for(review)
+    ensures: task.sub_status = default_sub_status(review)
     ensures: task.updated_at = now
     ensures: PrCreated(base: task.base_branch, head: task.worktree.branch)
 
@@ -104,7 +150,7 @@ rule PrLearningsGate {
 rule PollPrStatus {
     when: core/Tick()
 
-    -- `pr_poll_due` reads this task's core/PrPollState and answers false in
+    -- `pr_poll_due` reads this task's PrPollState and answers false in
     -- exactly two cases: polling gave up on the task (gave_up), or its
     -- transient backoff deadline has not passed yet (next_poll_at > now). A
     -- task with no poll state has never failed, so it is always due.
@@ -166,7 +212,7 @@ rule PollPrStatus {
                     )
 
                 let outcome = check_pr_status(task.url.url)
-                let poll = core/PrPollState{task}
+                let poll = PrPollState{task}
 
                 if outcome.kind = core/PrCheckOutcome.succeeded:
                     -- Reaching GitHub retires every earlier failure, including a
@@ -199,7 +245,7 @@ rule PollPrStatus {
                     if exists poll:
                         poll.consecutive_permanent_failures = failures
                     else:
-                        core/PrPollState.created(
+                        PrPollState.created(
                             task: task,
                             consecutive_permanent_failures: failures,
                             consecutive_transient_failures: 0,
@@ -223,7 +269,7 @@ rule PollPrStatus {
                         poll.consecutive_transient_failures = transients
                         poll.next_poll_at = deadline
                     else:
-                        core/PrPollState.created(
+                        PrPollState.created(
                             task: task,
                             consecutive_permanent_failures: 0,
                             consecutive_transient_failures: 1,
@@ -267,7 +313,7 @@ rule PollPrStatus {
         --
         -- Recovery needs no user action on the task, because usually there is
         -- none available: the fix for "no account has access" happens on
-        -- GitHub. Give-up state is session-scoped (core/PrPollState), so a
+        -- GitHub. Give-up state is session-scoped (PrPollState), so a
         -- restart retries; and any poll that reaches GitHub clears
         -- pr_unreachable through the succeeded branch.
         --
@@ -332,7 +378,7 @@ rule PrPollGaveUp {
         -- user-facing message can name it — "Could not resolve to a Repository"
         -- is far more useful to the user than "PR unreachable".
         --
-        -- Not terminal: the task stays in review. See core/PrPollState for why
+        -- Not terminal: the task stays in review. See PrPollState for why
         -- an app restart retries, and PollPrStatus's succeeded branch for the
         -- clearing path.
         --
@@ -348,7 +394,7 @@ rule PrMerged {
     requires: task.status = review
 
     ensures: task.status = done
-    ensures: task.sub_status = core/SubStatus.default_for(done)
+    ensures: task.sub_status = default_sub_status(done)
     ensures: current_agent(task).tmux_window = null
     ensures: task.updated_at = now
     ensures: task.completed_at = now
@@ -749,11 +795,11 @@ rule ExitSession {
         current_agent(task).tmux_window = null
         if action = pr:
             task.status = review
-            task.sub_status = core/SubStatus.default_for(review)
+            task.sub_status = default_sub_status(review)
             task.url = core/TaskUrl{url: pr_url, url_type: pr}
         else:
             task.status = done
-            task.sub_status = core/SubStatus.default_for(done)
+            task.sub_status = default_sub_status(done)
             task.completed_at = now
         if was_running:
             current_agent(task).stop_pending = false

@@ -276,6 +276,77 @@ fn the_rules_version_is_positive() {
     assert!(RULES_VERSION > 0);
 }
 
+fn epic(id: i64, parent: i64, title: &str, feed_role: &str, origin: &str, creator: &str) -> Epic {
+    Epic {
+        id,
+        parent_epic_id: parent,
+        title: title.into(),
+        feed_role: feed_role.into(),
+        origin: origin.into(),
+        created_by: creator.into(),
+        ..blank_epic()
+    }
+}
+
+/// `core.allium: UniqueFeedRolePerParent`: a second epic with a role its
+/// parent already has is refused; ordinary epics are exempt.
+#[test]
+fn a_second_feed_role_under_one_parent_is_refused() {
+    let siblings = [epic(1, 7, "Reviews", "my_reviews", "manual", "a")];
+    let dup = epic(2, 7, "Mine", "my_reviews", "manual", "b");
+    assert_eq!(
+        check_epic_unique_among(&dup, &siblings).unwrap_err(),
+        "an epic with feed role 'my_reviews' already exists under this parent"
+    );
+    let other_role = epic(2, 7, "Team", "team_reviews", "manual", "b");
+    assert!(check_epic_unique_among(&other_role, &siblings).is_ok());
+    let ordinary = [epic(1, 7, "A", "none", "manual", "a")];
+    assert!(check_epic_unique_among(&epic(2, 7, "B", "none", "manual", "a"), &ordinary).is_ok());
+}
+
+/// A managed ROOT is one per creator: two people's roots may share a role.
+#[test]
+fn root_feed_roles_are_unique_per_creator() {
+    let roots = [epic(1, 0, "PR Reviews", "reviews_parent", "manual", "a")];
+    assert!(check_epic_unique_among(&epic(2, 0, "PR Reviews", "reviews_parent", "manual", "b"), &roots).is_ok());
+    assert!(check_epic_unique_among(&epic(2, 0, "PR Reviews", "reviews_parent", "manual", "a"), &roots).is_err());
+}
+
+/// The candidate itself is not its own duplicate (a patch re-checks the row).
+#[test]
+fn an_epic_is_not_its_own_duplicate() {
+    let row = epic(1, 7, "Reviews", "my_reviews", "repo-group", "a");
+    assert!(check_epic_unique_among(&row, std::slice::from_ref(&row)).is_ok());
+}
+
+/// `core.allium: UniqueRepoGroupPerParent`: a second repo group with a title
+/// its parent already has is refused; manual epics may share a title.
+#[test]
+fn a_second_repo_group_with_one_title_is_refused() {
+    let siblings = [epic(1, 7, "dispatch", "none", "repo-group", "a")];
+    assert_eq!(
+        check_epic_unique_among(&epic(2, 7, "dispatch", "none", "repo-group", "a"), &siblings).unwrap_err(),
+        "a repo-group epic titled 'dispatch' already exists under this parent"
+    );
+    assert!(check_epic_unique_among(&epic(2, 7, "dispatch", "none", "manual", "a"), &siblings).is_ok());
+    assert!(check_epic_unique_among(&epic(2, 7, "other", "none", "repo-group", "a"), &siblings).is_ok());
+}
+
+/// Uniqueness is per workspace: a person's root in a workspace they have
+/// left (and can no longer see) does not block a root in another one.
+#[test]
+fn root_uniqueness_is_per_workspace() {
+    let old = Epic {
+        workspace_id: 1,
+        ..epic(1, 0, "PR Reviews", "reviews_parent", "manual", "a")
+    };
+    let new = Epic {
+        workspace_id: 2,
+        ..epic(2, 0, "PR Reviews", "reviews_parent", "manual", "a")
+    };
+    assert!(check_epic_unique_among(&new, &[old]).is_ok());
+}
+
 /// These two name the version that ADDED a one-time migration. They never move:
 /// a mechanical RULES_VERSION bump must not touch them, or every store below
 /// the new value re-runs the migration.

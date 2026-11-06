@@ -451,3 +451,277 @@ async fn clear_setting_on_a_never_set_key_is_a_no_op() {
         .unwrap();
     assert!(outcome.won());
 }
+
+/// `core.allium: VerifyCommandIsPerRepository`: a row that first learns its
+/// GitHub path joins that repository's verify command, rather than keeping
+/// its own and splitting the repository in two.
+#[tokio::test]
+async fn a_row_that_learns_its_github_path_takes_the_repositorys_verify_command() {
+    let (caller, rows) = caller();
+    caller
+        .save_repo_path(
+            "/home/a/api".into(),
+            at(TEST_STAMP),
+            "a".into(),
+            "org/api".into(),
+        )
+        .await
+        .unwrap();
+    caller
+        .set_verify_command("/home/a/api".into(), "make ci".into())
+        .await
+        .unwrap();
+    // b's clone is saved before its origin is known, with a command of its own.
+    caller
+        .save_repo_path(
+            "/home/b/api".into(),
+            at(TEST_STAMP),
+            "b".into(),
+            String::new(),
+        )
+        .await
+        .unwrap();
+    caller
+        .set_verify_command("/home/b/api".into(), "cargo test".into())
+        .await
+        .unwrap();
+    caller
+        .save_repo_path(
+            "/home/b/api".into(),
+            at(TEST_STAMP),
+            "b".into(),
+            "org/api".into(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.verify_command("/home/b/api").as_deref(),
+        Some("make ci")
+    );
+    assert_eq!(
+        rows.verify_command("/home/a/api").as_deref(),
+        Some("make ci")
+    );
+}
+
+/// The other direction: a row that brings a command into a repository whose
+/// rows have none gives it to them, so the rows still agree.
+#[tokio::test]
+async fn a_row_that_brings_a_command_to_a_repository_without_one_shares_it() {
+    let (caller, rows) = caller();
+    caller
+        .save_repo_path(
+            "/home/a/api".into(),
+            at(TEST_STAMP),
+            "a".into(),
+            "org/api".into(),
+        )
+        .await
+        .unwrap();
+    caller
+        .save_repo_path(
+            "/home/b/api".into(),
+            at(TEST_STAMP),
+            "b".into(),
+            String::new(),
+        )
+        .await
+        .unwrap();
+    caller
+        .set_verify_command("/home/b/api".into(), "cargo test".into())
+        .await
+        .unwrap();
+    caller
+        .save_repo_path(
+            "/home/b/api".into(),
+            at(TEST_STAMP),
+            "b".into(),
+            "org/api".into(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.verify_command("/home/a/api").as_deref(),
+        Some("cargo test")
+    );
+    assert_eq!(
+        rows.verify_command("/home/b/api").as_deref(),
+        Some("cargo test")
+    );
+}
+
+/// Setting a command through a path reaches every row of the repository,
+/// even when the first row of that path has no GitHub path of its own.
+#[tokio::test]
+async fn a_verify_command_set_through_a_path_reaches_the_whole_repository() {
+    let (caller, rows) = caller();
+    for (host, github) in [("c", ""), ("a", "org/api")] {
+        caller
+            .save_repo_path(
+                "/home/a/api".into(),
+                at(TEST_STAMP),
+                host.into(),
+                github.into(),
+            )
+            .await
+            .unwrap();
+    }
+    caller
+        .save_repo_path(
+            "/home/b/api".into(),
+            at(TEST_STAMP),
+            "b".into(),
+            "org/api".into(),
+        )
+        .await
+        .unwrap();
+    caller
+        .set_verify_command("/home/a/api".into(), "make ci".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.verify_command("/home/b/api").as_deref(),
+        Some("make ci")
+    );
+}
+
+/// A row that already belongs to its repository keeps its command on a plain
+/// re-save: only learning a GitHub path joins a repository.
+#[tokio::test]
+async fn a_plain_resave_keeps_the_rows_own_command() {
+    let (caller, rows) = caller();
+    caller
+        .save_repo_path(
+            "/home/a/api".into(),
+            at(TEST_STAMP),
+            "a".into(),
+            "org/api".into(),
+        )
+        .await
+        .unwrap();
+    caller
+        .set_verify_command("/home/a/api".into(), "make ci".into())
+        .await
+        .unwrap();
+    caller
+        .save_repo_path(
+            "/home/a/api".into(),
+            at(TEST_STAMP),
+            "a".into(),
+            "org/api".into(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.verify_command("/home/a/api").as_deref(),
+        Some("make ci")
+    );
+}
+
+/// A new row of a known repository takes that repository's command, not the
+/// command of an unrelated-looking row that merely shares its local path.
+#[tokio::test]
+async fn a_new_row_prefers_its_github_siblings_command() {
+    let (caller, rows) = caller();
+    // A: path P on host 1, origin unknown, command x.
+    caller
+        .save_repo_path("/p".into(), at(TEST_STAMP), "h1".into(), String::new())
+        .await
+        .unwrap();
+    caller
+        .set_verify_command("/p".into(), "x".into())
+        .await
+        .unwrap();
+    // B: path Q on host 3, repository G, command y.
+    caller
+        .save_repo_path("/q".into(), at(TEST_STAMP), "h3".into(), "org/g".into())
+        .await
+        .unwrap();
+    caller
+        .set_verify_command("/q".into(), "y".into())
+        .await
+        .unwrap();
+    // C: path P on host 2, repository G.
+    caller
+        .save_repo_path("/p".into(), at(TEST_STAMP), "h2".into(), "org/g".into())
+        .await
+        .unwrap();
+    let t = caller.lock();
+    let of_g: Vec<String> = t
+        .repo_paths
+        .values()
+        .filter(|r| r.github_path == "org/g")
+        .map(|r| r.verify_command.clone())
+        .collect();
+    assert_eq!(of_g, ["y", "y"], "both rows of org/g agree");
+    drop(t);
+    assert_eq!(rows.verify_command("/q").as_deref(), Some("y"));
+}
+
+/// A new row whose repository has no command yet gives its own nothing to
+/// lose, and a row of that repository that later gets one shares it.
+#[tokio::test]
+async fn a_new_row_with_a_path_command_shares_it_with_its_repository() {
+    let (caller, _rows) = caller();
+    caller
+        .save_repo_path("/p".into(), at(TEST_STAMP), "h1".into(), String::new())
+        .await
+        .unwrap();
+    caller
+        .set_verify_command("/p".into(), "x".into())
+        .await
+        .unwrap();
+    caller
+        .save_repo_path("/q".into(), at(TEST_STAMP), "h3".into(), "org/g".into())
+        .await
+        .unwrap();
+    // C joins org/g carrying x from its path sibling; B has none and takes it.
+    caller
+        .save_repo_path("/p".into(), at(TEST_STAMP), "h2".into(), "org/g".into())
+        .await
+        .unwrap();
+    let t = caller.lock();
+    let of_g: Vec<String> = t
+        .repo_paths
+        .values()
+        .filter(|r| r.github_path == "org/g")
+        .map(|r| r.verify_command.clone())
+        .collect();
+    assert_eq!(of_g, ["x", "x"]);
+}
+
+/// A command shared from a row with no GitHub path reaches the whole
+/// repository of every row at its path, not only the rows at that path.
+#[tokio::test]
+async fn a_command_shared_from_a_path_row_reaches_whole_repositories() {
+    let (caller, _rows) = caller();
+    for (path, host, github) in [
+        ("/x", "h1", "org/a"),
+        ("/y", "h2", "org/a"),
+        ("/w", "h6", "org/b"),
+    ] {
+        caller
+            .save_repo_path(path.into(), at(TEST_STAMP), host.into(), github.into())
+            .await
+            .unwrap();
+    }
+    caller
+        .set_verify_command("/w".into(), "c".into())
+        .await
+        .unwrap();
+    for (host, github) in [("h5", "org/b"), ("h3", "")] {
+        caller
+            .save_repo_path("/x".into(), at(TEST_STAMP), host.into(), github.into())
+            .await
+            .unwrap();
+    }
+    let t = caller.lock();
+    let of_a: Vec<String> = t
+        .repo_paths
+        .values()
+        .filter(|r| r.github_path == "org/a")
+        .map(|r| r.verify_command.clone())
+        .collect();
+    assert_eq!(of_a.len(), 2);
+    assert!(of_a[0] == of_a[1], "org/a rows disagree: {of_a:?}");
+}
