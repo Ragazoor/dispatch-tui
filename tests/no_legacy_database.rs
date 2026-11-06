@@ -2,7 +2,7 @@
 //! Task #16755: no production path opens SQLite, nothing touches a leftover
 //! `tasks.db`, and the one-shot commands need a host file they never write.
 //!
-//! Spec: `storage.allium` (`StoreInUseNeverOpensSqlite`,
+//! Spec: `storage.allium` (`NoSqlite`,
 //! `CodeNeverTouchesLegacyDatabase`), `cli.allium`
 //! (`CliCommandsNeedAHostFile`, `CliCommandsReachTheStoreWithoutManagingIt`,
 //! `NoSubcommandOpensSqlite`, the removal of `spacetime dump` and
@@ -149,7 +149,7 @@ fn one_shot_commands_without_a_host_file_fail_and_create_nothing() {
         );
         assert!(
             !dir.path().join("tasks.db").exists(),
-            "{args:?} must not create a database (StoreInUseNeverOpensSqlite)"
+            "{args:?} must not create a database (NoSqlite)"
         );
     }
 }
@@ -304,7 +304,7 @@ async fn purge_states_no_task_count_and_never_opens_the_legacy_database() {
 }
 
 // ---------------------------------------------------------------------------
-// StoreInUseNeverOpensSqlite / CodeNeverTouchesLegacyDatabase, at the code
+// NoSqlite / CodeNeverTouchesLegacyDatabase, at the code
 // ---------------------------------------------------------------------------
 
 /// Production source under `src/`: every `.rs` file except generated
@@ -376,7 +376,7 @@ fn strip_tests_and_comments(text: &str) -> String {
 }
 
 /// Dispatch links no SQLite at all: not in `Cargo.toml`, not in a source file
-/// (`storage.allium: StoreInUseNeverOpensSqlite`). The store is the shared
+/// (`storage.allium: NoSqlite`). The store is the shared
 /// store, real or the in-memory fake, and nothing else.
 #[test]
 fn dispatch_links_no_sqlite() {
@@ -436,7 +436,7 @@ fn no_production_code_opens_a_sqlite_database() {
     assert!(
         hits.is_empty(),
         "production code must open no SQLite database (storage.allium: \
-         StoreInUseNeverOpensSqlite); found:\n{}",
+         NoSqlite); found:\n{}",
         hits.join("\n")
     );
 }

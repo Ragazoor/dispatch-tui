@@ -13,6 +13,7 @@
 
 use "./core.allium" as core
 use "./board-layout.allium" as board_layout
+use "./settings.allium" as settings
 
 -- The one board-wide multi-selection every batch rule in this file
 -- consumes. See "Multi-Selection".
@@ -923,6 +924,8 @@ rule ToggleSectionCollapse {
             collapsed_sections.collapsed.remove(ref)
         else:
             collapsed_sections.collapsed.add(ref)
+        settings/SaveSetting(key: "collapsed_sections",
+            value: serialised(with_toggled(collapsed_sections.collapsed, ref)))
 
     @guidance
         -- Bound to `z` on a card, which folds the section that card is in;
@@ -946,8 +949,16 @@ rule ToggleSectionCollapse {
         -- decides what is drawn, never what is selected — see SelectAllColumn
         -- for the other half, which reaches only the cards a column renders.
         --
-        -- Persisted, so it survives a restart. This is the one board display
-        -- toggle that does; the flat view and the repo filter do not.
+        -- Persisted, so it survives a restart: every toggle saves the whole
+        -- folded set as this host's "collapsed_sections" setting, read back
+        -- at startup. The epic folds, the repo filter and the hide-lists
+        -- persist too (ToggleEpicFold; board-layout.allium:
+        -- SaveBoardFilterOnClose); the flat view and the lens do not.
+        --
+        -- == Black boxes ==
+        -- with_toggled(set, ref) is `set` with `ref` removed if it is in it,
+        -- else added: the set this toggle leaves. serialised(set) is that set
+        -- as the setting's stored text.
 }
 
 -- == Epic Fold ==
@@ -978,6 +989,8 @@ rule ToggleEpicFold {
             folded_epics.folded.remove(ref)
         else:
             folded_epics.folded.add(ref)
+        settings/SaveSetting(key: "collapsed_epics",
+            value: serialised(with_toggled(folded_epics.folded, ref)))
 
     @guidance
         -- Bound to `Z` (shift-z) on a card, which folds the epic group that
@@ -1007,8 +1020,9 @@ rule ToggleEpicFold {
         -- folding the section it sits in are two separate toggles over two
         -- separate recorded sets, and neither rule consults the other.
         --
-        -- Persisted, so it survives a restart, on the same reasoning as
-        -- ToggleSectionCollapse.
+        -- Persisted, so it survives a restart: every toggle saves the whole
+        -- folded set as this host's "collapsed_epics" setting, as
+        -- ToggleSectionCollapse does for sections.
 }
 
 -- == Batch Status Movement ==

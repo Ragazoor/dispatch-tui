@@ -64,7 +64,7 @@
 --
 -- AND NO BOARD HAS A LOCAL DATABASE (task #16755). The board's old SQLite
 -- file is not opened by the board, by MCP or by any subcommand
--- (storage.allium: StoreInUseNeverOpensSqlite), and nothing is migrated out
+-- (storage.allium: NoSqlite), and nothing is migrated out
 -- of a leftover copy (storage.allium: CodeNeverTouchesLegacyDatabase).
 --
 -- THE ONE PLACE A BOARD IS REALLY WORSE OFF THAN BEFORE. A board reads only
@@ -86,6 +86,7 @@
 
 use "./core.allium" as core
 use "./startup.allium" as startup
+use "./host.allium" as host
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -471,7 +472,7 @@ rule FirstConnectionFailureAbortsStartup {
 }
 
 rule IdentityConflictAtStartupAbortsIt {
-    when: UserIdentityConflict(stored, offered)
+    when: host/UserIdentityConflict(stored, offered)
 
     let connection = the_board_connection()
 
@@ -516,7 +517,7 @@ rule ConnectionAccepted {
 }
 
 rule SubscribeOnceIdentityIsSettled {
-    when: UserIdentitySettled(identity)
+    when: host/UserIdentitySettled(identity)
 
     let connection = the_board_connection()
 
@@ -599,7 +600,7 @@ rule SubscribeOnceIdentityIsSettled {
 }
 
 rule SubscribeToThisHostsSettings {
-    when: UserIdentitySettled(identity)
+    when: host/UserIdentitySettled(identity)
 
     let connection = the_board_connection()
 
@@ -633,7 +634,7 @@ rule SubscribeToThisHostsSettings {
 }
 
 rule SubscribeToThisHostsDispatchRequests {
-    when: UserIdentitySettled(identity)
+    when: host/UserIdentitySettled(identity)
 
     let connection = the_board_connection()
 
@@ -663,7 +664,7 @@ rule SubscribeToThisHostsDispatchRequests {
 }
 
 rule SubscribeToThisHostsSessionRequests {
-    when: UserIdentitySettled(identity)
+    when: host/UserIdentitySettled(identity)
 
     let connection = the_board_connection()
 
@@ -702,7 +703,7 @@ rule SubscribeToThisHostsSessionRequests {
 }
 
 rule SubscribeToThisHostsFeedRequests {
-    when: UserIdentitySettled(identity)
+    when: host/UserIdentitySettled(identity)
 
     let connection = the_board_connection()
 
@@ -739,7 +740,7 @@ rule SubscribeToThisHostsFeedRequests {
 }
 
 rule SubscribeToUserProfiles {
-    when: UserIdentitySettled(identity)
+    when: host/UserIdentitySettled(identity)
 
     let connection = the_board_connection()
 
@@ -758,7 +759,7 @@ rule SubscribeToUserProfiles {
 }
 
 rule SubscribeToAgents {
-    when: UserIdentitySettled(identity)
+    when: host/UserIdentitySettled(identity)
 
     let connection = the_board_connection()
 
@@ -827,7 +828,7 @@ rule AViewUpdateNeverErasesTheRow {
 }
 
 rule RegisterHostOnConnect {
-    when: UserIdentitySettled(identity)
+    when: host/UserIdentitySettled(identity)
 
     let connection = the_board_connection()
 
@@ -886,7 +887,7 @@ rule RegisterHostOnConnect {
 }
 
 rule RegisterHostOnRename {
-    when: HostRenamed()
+    when: host/HostRenamed()
 
     let connection = the_board_connection()
 
@@ -1480,7 +1481,7 @@ rule RetryAfterBackoff {
 -- == Stopping ==
 
 rule StopOnAUserIdentityConflict {
-    when: UserIdentityConflict(stored, offered)
+    when: host/UserIdentityConflict(stored, offered)
 
     let connection = the_board_connection()
 

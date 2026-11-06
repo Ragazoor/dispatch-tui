@@ -29,6 +29,7 @@
 
 use "./core.allium" as core
 use "./work-packages.allium" as wp
+use "./settings.allium" as settings
 
 -- The board's one lens and one pair of hide-lists. See "Board Lens" and
 -- "Hidden Epics and Work Packages".
@@ -1135,8 +1136,8 @@ rule CycleLensBackward {
 --
 -- State model:
 --   - Persisted, like the repo selection and its include/exclude mode: both
---     hide-lists are saved as this host's settings (settings.allium:
---     SaveSetting) when the overlay closes, and read back at startup. The
+--     hide-lists are saved as this host's settings when the overlay closes
+--     (SaveBoardFilterOnClose), and read back at startup. The
 --     whole board filter therefore survives a restart; only the lens does
 --     not. Re-hiding the same epics after every restart would be the cost of
 --     the alternative, and the badge below keeps a forgotten hide visible.
@@ -1219,6 +1220,24 @@ rule ToggleHiddenWorkPackage {
 
     @guidance
         -- Space on a package row in the overlay's Work packages tab.
+}
+
+rule SaveBoardFilterOnClose {
+    when: CloseBoardFilter()
+    ensures:
+        settings/SaveSetting(key: "hidden_epics", value: id_list(board_hides.hidden_epics))
+        settings/SaveSetting(key: "hidden_packages", value: id_list(board_hides.hidden_packages))
+
+    @guidance
+        -- Closing the [f] overlay saves the whole board filter, once, rather
+        -- than one write per Space. The same close saves the repo selection
+        -- (key "repo_filter") and its include/exclude mode
+        -- ("repo_filter_mode"); this spec does not model those as state, so
+        -- they are named here rather than in the ensures.
+        --
+        -- == Black boxes ==
+        -- id_list(set) is the ids in the set, sorted, as the setting's
+        -- stored text.
 }
 
 -- == Board Filter Overlay Layout ==

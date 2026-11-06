@@ -1470,7 +1470,7 @@ rule AttachPlanViaCli {
 --     launch mints a new one, and tasks stamped with the old host id stop
 --     being this machine's — and states no task count: tasks live in the
 --     store, which a purge does not touch, and counting them would mean
---     opening a database (storage.allium: StoreInUseNeverOpensSqlite). It
+--     opening a database (storage.allium: NoSqlite). It
 --     never opens, reads or deletes a leftover `tasks.db`, `-wal` or `-shm`
 --     (storage.allium: CodeNeverTouchesLegacyDatabase); those are the
 --     operator's to delete by hand.

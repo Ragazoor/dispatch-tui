@@ -976,7 +976,7 @@ rule FeedTick {
     -- tick would log ~43k lines a day per epic): a different bad value warns
     -- again, and a valid value forgets the warning so a later bad one warns
     -- again. The skip itself holds on every tick. Write-time validation
-    -- (epics.allium: CreateEpic, UpdateEpicViaMcp, SetManagedFeedConfig) is
+    -- (epics.allium: CreateEpic, UpdateEpicViaMcp, ManagedFeedConfigViaMcp) is
     -- what normally keeps such a row from existing, so reaching this branch
     -- means the value arrived by a path that bypassed the service -- a
     -- hand-edited database, or a bug -- and the runner must not make it

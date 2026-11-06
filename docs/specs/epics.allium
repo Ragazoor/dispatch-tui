@@ -6,6 +6,7 @@
 
 use "./core.allium" as core
 use "./store-split.allium" as split
+use "./settings.allium" as settings
 
 ------------------------------------------------------------
 -- Config
@@ -845,14 +846,15 @@ rule ManagedFeedConfigViaMcp {
         if cve_interval_secs != omitted and cve_interval_secs != null:
             seconds(cve_interval_secs) >= core/config.min_feed_interval
 
+    -- One write per field the call names, all sent as one change: a command
+    -- and its interval are never stored out of step (settings.allium:
+    -- SetManagedFeedSettings). The stored rows are what this file's config
+    -- block reads back.
+    let writes = managed_feed_writes(reviews_command, reviews_interval_secs,
+                                     cve_command, cve_interval_secs)
     ensures:
-        if reviews_command != omitted: config.reviews_feed_command = reviews_command
-    ensures:
-        if reviews_interval_secs != omitted: config.reviews_feed_interval_secs = reviews_interval_secs
-    ensures:
-        if cve_command != omitted: config.cve_feed_command = cve_command
-    ensures:
-        if cve_interval_secs != omitted: config.cve_feed_interval_secs = cve_interval_secs
+        if writes.count > 0:
+            settings/SetManagedFeedSettings(writes: writes)
 
     -- After persisting a write, re-materialise the managed epic tree from the
     -- new config. A pure read skips this.
@@ -880,6 +882,12 @@ rule ManagedFeedConfigViaMcp {
         -- state). Declaring read_only would be wrong for the write path, which
         -- is the riskier error. The description says plainly that a call with
         -- no arguments only reads.
+        --
+        -- == Black boxes ==
+        -- managed_feed_writes(...) is one write per field that is not
+        -- omitted, keyed by that field's setting (reviews_feed_command,
+        -- reviews_feed_interval_secs, cve_feed_command,
+        -- cve_feed_interval_secs); an explicit null clears the key.
 }
 
 rule ReparentEpicFromTui {
@@ -1793,7 +1801,7 @@ rule ArchivedStatusMigration {
         --
         -- SINCE TASK #16755 THIS RULE NEVER RUNS IN PRODUCTION. No launch
         -- opens a board database any more (storage.allium:
-        -- StoreInUseNeverOpensSqlite, CodeNeverTouchesLegacyDatabase), and
+        -- NoSqlite, CodeNeverTouchesLegacyDatabase), and
         -- `dispatch spacetime seed` and
         -- `dispatch spacetime dump`, which used to open their SQLite source
         -- through `Store::open` and so run v106 first, are removed. v106

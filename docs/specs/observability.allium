@@ -34,7 +34,7 @@
 --           owning that behaviour (core, tasks, epics, split-pane, …), not
 --           here.
 --           Dispatch has no local database to time (storage.allium:
---           StoreInUseNeverOpensSqlite), so there is no slow-DB-call warning.
+--           NoSqlite), so there is no slow-DB-call warning.
 
 use "./core.allium" as core
 

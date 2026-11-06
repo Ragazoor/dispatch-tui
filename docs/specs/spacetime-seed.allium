@@ -789,7 +789,7 @@ rule RefuseImplausibleCeiling {
 --
 -- Why they are gone rather than kept as an escape hatch: they read SQLite,
 -- and no production path does any more (storage.allium:
--- StoreInUseNeverOpensSqlite). Every board has been on the store since task
+-- NoSqlite). Every board has been on the store since task
 -- #4916, so there is no board left whose rows exist only in its local file —
 -- a leftover tasks.db is a stale copy of what the store already holds
 -- (storage.allium: CodeNeverTouchesLegacyDatabase), and seeding from it would

@@ -159,7 +159,7 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
         -- The connection is the board's first-connection path: this
         -- install's identity is read from the host file (host.allium:
         -- IdentityLivesInHostFile) — no database is opened
-        -- (storage.allium: StoreInUseNeverOpensSqlite) — the store is
+        -- (storage.allium: NoSqlite) — the store is
         -- connected and the identity settled, and the first subscription
         -- applied. A store that cannot be reached ends the command with
         -- failure, naming the reason (startup.allium:
@@ -608,7 +608,7 @@ surface DispatchCommandLine {
         -- `uninstall` (whose `--purge` neither reads nor deletes a leftover
         -- tasks.db — mcp-task-tools.allium, "Other CLI subcommands") nor any
         -- other, and the board does not either (storage.allium:
-        -- StoreInUseNeverOpensSqlite, CodeNeverTouchesLegacyDatabase).
+        -- NoSqlite, CodeNeverTouchesLegacyDatabase).
 
     @guarantee NoTaskListOrStatusCommand
         -- There is no subcommand that lists tasks or changes a task's status.

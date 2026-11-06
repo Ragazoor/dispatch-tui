@@ -1269,7 +1269,6 @@ rule PromptForHostLabelWhenUnnamed {
 
 rule NameHostFromStartupPrompt {
     when: HostLabelSubmitted(operator, label)
-    requires: trim(label) != ""
 
     ensures:
         RenameHost(label: label)
@@ -1286,10 +1285,10 @@ rule NameHostFromStartupPrompt {
         -- disagree, and the disagreement would be silent in the direction that
         -- matters: a startup path accepting what a later rename refuses.
         --
-        -- The requires clause is the same predicate RenameHost applies, stated
-        -- here so a submission that cannot be honoured is rejected at the
-        -- prompt and the prompt stays up, rather than resolving the gate
-        -- against a write that did not happen.
+        -- A blank answer never reaches this rule: HostLabelPrompt provides
+        -- HostLabelSubmitted only when trim(label) != "", the same predicate
+        -- RenameHost applies, so the prompt stays up rather than resolving
+        -- the gate against a write that did not happen.
         --
         -- IT RESOLVES THE GATE ONLY IF THE LABEL IS ACTUALLY THERE AFTERWARDS.
         -- The branch reads the state RenameHost leaves behind, so the two
@@ -2312,7 +2311,7 @@ rule AbortWhenTheAgentPortIsTaken {
 -- the board's own substrate rather than a step on the way to it. Both precede
 -- any question this spec answers. (A database that will not open is no longer
 -- among them: no launch opens one — storage.allium:
--- StoreInUseNeverOpensSqlite.)
+-- NoSqlite.)
 
 -- TheBoardNeverDrawsForAnUnnamedHost: BoardDrawn() is reachable only through
 -- HostLabelResolved, and both rules that emit it hold core/local_host().label

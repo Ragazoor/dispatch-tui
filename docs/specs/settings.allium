@@ -4,75 +4,51 @@
 -- Scope: Saving and clearing this install's own preferences: named settings
 --        (core/Setting). The entity lives in core.allium, alongside
 --        SavedRepoPath and SavedRepoBranch, which it follows structurally;
---        this file owns the write operations on it.
--- Includes: SaveSetting, ClearSetting — an upsert and a delete, scoped to
---           this install's own Host; WHERE settings live (the shared store,
---           per host — SettingsAreStoredPerHost).
--- Excludes: host_id, host_label, the stored UserIdentity and its credential
---           (see host.allium) — none of these is a Setting, despite having
---           been stored alongside them in the same key/value table before this
---           spec existed. host_id and host_label are fields of core/Host
---           itself; naming either in a Setting row would be a second place to
---           keep the same fact in step, which core/Host's own commentary
---           already argues against. The stored UserIdentity is core/Host.owner
---           for the same reason. Its credential is narrower still: it is what
---           PROVES that identity, never appears in a shared table at all, and
---           has no counterpart here. All four live in the host file
---           (host.allium: IdentityLivesInHostFile), never in the store's
---           settings table. Also excluded: which rows a board is sent and how
+--        this file owns the board's requests to change it.
+-- Includes: SaveSetting, ClearSetting, SetManagedFeedSettings — the board's
+--           requests, each for this install's own Host; SettingWrites, the
+--           surface every feature that keeps a preference reaches them
+--           through; WHERE settings live (the shared store, per host —
+--           SettingsAreStoredPerHost).
+-- Excludes: the store's judgement and write of the row (store-split.allium:
+--           SaveSettingForHost, ClearSettingForHost,
+--           SetManagedFeedSettingsForHost). host_id, host_label, the stored
+--           UserIdentity and its credential (see host.allium): none of these
+--           is a Setting. host_id and host_label are fields of core/Host
+--           itself, and naming either in a Setting row would be a second
+--           place to keep the same fact in step. The stored UserIdentity is
+--           core/Host.owner for the same reason. Its credential is narrower
+--           still: it is what PROVES that identity and never appears in a
+--           shared table at all. All four live in the host file (host.allium:
+--           IdentityLivesInHostFile), and the board refuses a setting write
+--           that names one. Also excluded: which rows a board is sent and how
 --           they get there (see sync.allium: SubscribeToThisHostsSettings) —
 --           this file says whose a setting is, not how that fact is
---           transported. Also excluded: the board's LIVE repo
---           filter (board-layout.allium: active_repo_filter).
+--           transported.
 --
--- REMOVED: saved repo-filter presets. This file once also owned
--- SaveFilterPreset and DeleteFilterPreset over a core/FilterPreset entity —
--- named, per-host combinations of the repo filter, saved and re-applied from
--- the [f] overlay. Task #4972 removed the feature end to end (entity, rules,
--- overlay keys, SQLite table and SpacetimeDB table) after keybinding
--- telemetry recorded one cancelled save and zero loads or deletes. There is
--- no replacement: the live repo filter is set directly in the overlay.
---
--- WHY HOST, NOT UserIdentity. host.allium draws this distinction for Host
--- itself and it applies here unchanged: `core/Host.id` is minted offline on
--- first run and is never null, while `core/Host.owner` is null until a first
--- connection settles one and may never settle at all. A setting cannot wait
--- out that gap: it is read
--- back the moment it is written, on the same board that just wrote it, and an
--- install that has never connected must not lose access to its own
--- preferences while it waits for a connection that may never come. Scoping by
--- host_id instead still delivers the isolation the design calls for — no two
--- hosts ever share an id, so a teammate's board never sees this one's settings
--- — without that gap.
+-- WHY HOST, NOT UserIdentity. `core/Host.id` is minted offline on first run
+-- and is never null, while `core/Host.owner` is null until a first connection
+-- settles one and may never settle at all (core.allium: Host.owner). A setting
+-- cannot wait out that gap: it is read back the moment it is written, on the
+-- same board that just wrote it, and an install that has never connected must
+-- not lose access to its own preferences while it waits for a connection that
+-- may never come. Scoping by host id still delivers the isolation the design
+-- calls for — no two hosts ever share an id, so a teammate's board never sees
+-- this one's settings — without that gap.
 
 use "./core.allium" as core
 
--- SettingsAreStoredPerHost. Every setting — the repo filter and its mode,
--- notifications, collapsed sections, the GitHub queries, the dependabot
--- config, the reviews and CVE feed commands and intervals, the last project,
--- the main session's window, learning reflection, and any key added later —
--- is a core/Setting row in the SHARED STORE, keyed by (this host's id, key).
--- It is written through the store (SaveSetting, ClearSetting below, routed by
--- sync.allium: BoardWritesThroughTheStore), read back from this host's
--- settings subscription (sync.allium: SubscribeToThisHostsSettings), and kept
--- nowhere else: not in the host file, which holds identity only, and not in
--- any local database, since dispatch has none (storage.allium:
--- StoreInUseNeverOpensSqlite). There is no local fallback for a store that is
--- down: a setting write then fails like every other shared write
--- (sync.allium: AWriteWithNoConnectionIsRefused).
---
--- NOTHING IS COPIED IN FROM THE OLD LOCAL TABLE. Settings rows have been
--- routed to the store since Phase 9; whatever a leftover tasks.db still holds
--- is not read (storage.allium: CodeNeverTouchesLegacyDatabase), and a host
--- with no rows in the store starts from the defaults.
---
--- PER HOST, NOT PER STORE. Two machines on one store each see only their own
--- rows, because the host id is part of the key and the subscription asks for
--- this host's rows alone. One machine's repo filter, or a feed command naming
--- a script path on its own disk, never reaches a colleague's board — nor the
--- same person's other machine. core/Setting's SettingIsUniquePerHostAndKey is
--- the expression form of the key; this paragraph is the claim about where the
--- rows are.
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- The four managed-feed settings (epics.allium: ManagedFeedConfigViaMcp):
+    -- a command and a poll interval for each of the reviews and CVE feeds.
+    managed_feed_setting_keys: Set<String> = {"reviews_feed_command", "reviews_feed_interval_secs", "cve_feed_command", "cve_feed_interval_secs"}
+    -- The two of them whose value is a whole number of seconds.
+    managed_feed_interval_keys: Set<String> = {"reviews_feed_interval_secs", "cve_feed_interval_secs"}
+}
 
 ------------------------------------------------------------
 -- Rules
@@ -81,82 +57,90 @@ use "./core.allium" as core
 rule SaveSetting {
     when: SaveSetting(key, value)
 
-    ensures: core/Setting.created_or_updated(
-        host: core/local_host(),
-        key: key,
-        value: value
-    )
+    ensures: SettingSaved(host: core/local_host(), key: key, value: value)
 
     @guidance
-        -- Upsert on (host, key): a second save of the same key on the same
-        -- host replaces the value rather than adding a row, which is what
-        -- SettingIsUniquePerHostAndKey requires. A save from a different host
-        -- is a different row and never touches this one's.
-        --
-        -- D11 (store-split.allium: SaveSettingForHost): the store refuses the
-        -- write unless the host is registered with an owner equal to the
-        -- caller.
-}
-
-rule SetManagedFeedSettings {
-    when: SetManagedFeedSettings(writes)    -- each write sets a key or, with no value, clears it
-
-    -- Task #98916 (N5). The four managed-feed settings (a command and an
-    -- interval for each of the reviews and CVE feeds) are written as ONE
-    -- change, because a command and its interval are coupled: a failure
-    -- between two SaveSetting calls would leave a feed with a command and the
-    -- wrong cadence.
-    requires: writes.all(w => w.key in managed_feed_setting_keys)
-    requires: writes.map(w => w.key).count() = writes.map(w => w.key).distinct().count()
-    requires: writes.all(w => w.value = null or w.key not in managed_feed_interval_keys or w.value.is_whole_number)
-
-    ensures:
-        for write in writes:
-            if write.value != null:
-                core/Setting.created_or_updated(
-                    host: core/local_host(), key: write.key, value: write.value)
-            else:
-                not exists core/Setting{host: core/local_host(), key: write.key}
-
-    @guidance
-        -- A refused write leaves every setting as it was: all of the writes
-        -- are judged before any lands. The board checks the feed-interval
-        -- floor (epics.allium: SetManagedFeedConfig) before it calls. Module:
-        -- set_managed_feed_settings; twin: apply_set_managed_feed_settings.
+        -- The board asks the store to set this host's `key` to `value`. The
+        -- store judges and writes it (store-split.allium: SaveSettingForHost):
+        -- an upsert on (host, key), so a second save of the same key on the
+        -- same host replaces the value rather than adding a row, and a save
+        -- from a different host is a different row. The board never names
+        -- another host: every request here is for core/local_host().
 }
 
 rule ClearSetting {
     when: ClearSetting(key)
 
-    let setting = core/Setting{host: core/local_host(), key: key}
-
-    requires: setting != null
-
-    ensures: not exists setting
+    ensures: SettingCleared(host: core/local_host(), key: key)
 
     @guidance
-        -- Clearing a key that was never set is a no-op rather than a refusal,
-        -- unlike RepoBaseBranch's UnsubscribeFromEpic-style asymmetry: a
-        -- caller here is typically restoring a default (e.g. clearing a feed
-        -- command), and finding the default already in effect is not a
-        -- mistake worth reporting. `requires: setting != null` is what makes
-        -- this a no-op rather than an error — no `ensures` fires when it is
-        -- already absent, and nothing else needs to say so.
+        -- Clearing a key that was never set is a no-op rather than a
+        -- refusal: a caller here is typically restoring a default (e.g.
+        -- clearing a feed command), and finding the default already in
+        -- effect is not a mistake worth reporting. The store judges the
+        -- request and deletes the row if there is one (store-split.allium:
+        -- ClearSettingForHost).
+}
+
+rule SetManagedFeedSettings {
+    -- Each write names a key and a value; a null value clears the key.
+    when: SetManagedFeedSettings(writes)
+
+    ensures: ManagedFeedSettingsWritten(host: core/local_host(), writes: writes)
+
+    @guidance
+        -- The managed-feed settings are written as ONE change, because a
+        -- command and its interval are coupled: a failure between two
+        -- SaveSetting requests would leave a feed with a command and the
+        -- wrong cadence. The store judges every write before any lands
+        -- (store-split.allium: SetManagedFeedSettingsForHost). The board
+        -- checks the feed-interval floor (epics.allium:
+        -- ManagedFeedConfigViaMcp) before it asks.
 }
 
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
 
--- This spec declares no surface of its own. SaveSetting/ClearSetting are
--- reached from several unrelated places (the managed-feed config forms, the
--- section-collapse toggle, the repo-filter mode toggle) that each belong to
--- the feature they configure, not to the storage underneath it. Duplicating
--- that list here would be a second copy of a fact that changes whenever a
--- feature gains or loses a setting, kept in step with nothing.
+-- The board's way into this file. Each feature that keeps a preference emits
+-- one of these requests from its own rule, qualified
+-- (`settings/SaveSetting(key: …, value: …)`): tasks.allium's section and epic
+-- folds, board-layout.allium's repo filter and hide-lists, the notifications
+-- toggle, and epics.allium's managed-feed configuration. This surface does not
+-- list them; the feature that owns a preference owns the decision to keep it.
+surface SettingWrites {
+    facing _: core/BoardProcess
 
-------------------------------------------------------------
--- Open Questions
-------------------------------------------------------------
+    provides:
+        SaveSetting(key, value)
+        ClearSetting(key)
+        SetManagedFeedSettings(writes)
 
--- None yet.
+    @guarantee SettingsAreStoredPerHost
+        -- Every setting — the repo filter and its mode, notifications,
+        -- collapsed sections and epic folds, the hidden epics and packages,
+        -- the managed-feed commands and intervals, learning reflection
+        -- (core.allium: config.learning_reflection_enabled, which no surface
+        -- sets), and any key added later —
+        -- is a core/Setting row in the SHARED STORE, keyed by (this host's
+        -- id, key). It is written through the store (the rules above, routed
+        -- by sync.allium: BoardWritesThroughTheStore), read back from this
+        -- host's settings subscription (sync.allium:
+        -- SubscribeToThisHostsSettings), and kept nowhere else: not in the
+        -- host file, which holds identity only, and not in any local
+        -- database, since dispatch has none (storage.allium: NoSqlite). There
+        -- is no local fallback for a store that is down: a setting write then
+        -- fails like every other shared write (sync.allium:
+        -- AWriteWithNoConnectionIsRefused). A host with no rows in the store
+        -- starts from the defaults; a leftover local database is never read
+        -- (storage.allium: CodeNeverTouchesLegacyDatabase).
+        --
+        -- PER HOST, NOT PER STORE. Two machines on one store each see only
+        -- their own rows, because the host id is part of the key and the
+        -- subscription asks for this host's rows alone. One machine's repo
+        -- filter, or a feed command naming a script path on its own disk,
+        -- never reaches a colleague's board — nor the same person's other
+        -- machine. core/Setting's SettingIsUniquePerHostAndKey is the
+        -- expression form of the key; this guarantee is the claim about
+        -- where the rows are.
+}

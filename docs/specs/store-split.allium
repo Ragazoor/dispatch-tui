@@ -636,6 +636,7 @@
 -- specs directory (a dated snapshot; this spec is the record).
 
 use "./core.allium" as core
+use "./settings.allium" as settings
 
 ------------------------------------------------------------
 -- Enumerations
@@ -2586,7 +2587,7 @@ rule OverridePollOwner {
 }
 
 rule SaveSettingForHost {
-    when: SettingSaved(host, key, value)
+    when: settings/SettingSaved(host, key, value)
 
     -- D11: a host's settings are written only by its owner. A setting
     -- can name a script path the host's board runs (the feed commands).
@@ -2595,11 +2596,13 @@ rule SaveSettingForHost {
     ensures: core/Setting.created_or_updated(host: host, key: key, value: value)
 
     @guidance
-        -- save_setting. Unchanged otherwise (settings.allium: SaveSetting).
+        -- save_setting. An upsert on (host, key) (settings.allium:
+        -- SaveSetting). The only rule that creates or changes a setting row:
+        -- SetManagedFeedSettingsForHost writes through it.
 }
 
 rule ClearSettingForHost {
-    when: SettingCleared(host, key)
+    when: settings/SettingCleared(host, key)
 
     -- D11: as SaveSettingForHost. An unowned or unregistered host is
     -- refused even when the key was never set.
@@ -2608,7 +2611,35 @@ rule ClearSettingForHost {
     ensures: not exists core/Setting{host: host, key: key}
 
     @guidance
-        -- clear_setting. Unchanged otherwise (settings.allium: ClearSetting).
+        -- clear_setting. A key that was never set is a no-op for an owner,
+        -- not a refusal (settings.allium: ClearSetting).
+}
+
+rule SetManagedFeedSettingsForHost {
+    when: settings/ManagedFeedSettingsWritten(host, writes)
+
+    -- D11: as SaveSettingForHost.
+    requires: host.owner != null and host.owner = caller()
+    -- Every write is judged before any lands: a managed-feed key, named
+    -- once, and an interval that is a whole number.
+    requires: writes.all(w => w.key in settings/config.managed_feed_setting_keys)
+    requires: writes.all(w => (writes where key = w.key).count = 1)
+    requires: writes.all(w => w.value = null
+        or w.key not in settings/config.managed_feed_interval_keys
+        or is_whole_number(w.value))
+
+    ensures:
+        for write in writes:
+            if write.value != null:
+                settings/SettingSaved(host: host, key: write.key, value: write.value)
+            else:
+                settings/SettingCleared(host: host, key: write.key)
+
+    @guidance
+        -- set_managed_feed_settings; twin: apply_set_managed_feed_settings.
+        -- One reducer call, so every write lands or none does: a command and
+        -- its interval are never left out of step (settings.allium:
+        -- SetManagedFeedSettings).
 }
 
 -- claim_backlog_task and release_backlog_claim are removed, not checked.

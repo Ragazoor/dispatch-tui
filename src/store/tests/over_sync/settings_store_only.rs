@@ -1,7 +1,7 @@
-//! Task #16755, settings.allium: SettingsAreStoredPerHost — "NOTHING IS
-//! COPIED IN FROM THE OLD LOCAL TABLE ... a host with no rows in the store
-//! starts from the defaults", and settings are read "from these rows and from
-//! nowhere else" (sync.allium: SubscribeToThisHostsSettings).
+//! settings.allium: SettingsAreStoredPerHost — "A host with no rows in the
+//! store starts from the defaults; a leftover local database is never read",
+//! and settings are read "from these rows and from nowhere else" (sync.allium:
+//! SubscribeToThisHostsSettings).
 
 use crate::store::{SettingsStore, Store};
 

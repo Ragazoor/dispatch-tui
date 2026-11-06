@@ -39,10 +39,9 @@
 --
 -- Why this exists as its own file: core.allium's scope excludes rules, and
 -- dispatch.allium's covers dispatching an agent, so neither is the right home
--- for a rule that fires once at installation and never again. The pattern
--- this follows is the one core.allium already uses for Worktree and
--- TmuxWindow: the entity is shared domain model and lives there, while the
--- rules that create and act on it live in the spec that owns that behaviour.
+-- for a rule that fires once at installation and never again. Host is shared
+-- domain model and stays in core.allium; the rules that create it and change
+-- it live here, in the spec that owns that behaviour.
 --
 -- NO RULE HERE READS OR WRITES ANOTHER MACHINE'S ROW, and that is the line to
 -- keep. Hosts is a registry now — a shared store puts your colleague's laptop
@@ -62,6 +61,8 @@
 -- offline.
 
 use "./core.allium" as core
+use "./startup.allium" as startup
+use "./sync.allium" as sync
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -91,12 +92,10 @@ entity HostFile {
         -- else. Not the store: the store holds a MIRROR of the host row
         -- (sync.allium: RegisterHostOnConnect) and never the credential, which
         -- is what the install presents to the store and so cannot live in it.
-        -- Not SQLite: that is where these four used to sit, as rows of the old
-        -- settings table, and since task #16755 nothing reads them there
-        -- (storage.allium: CodeNeverTouchesLegacyDatabase). Nothing is carried
-        -- over from it either: an install upgrading past #16755 has no host
-        -- file, so its first launch is a first run and mints a fresh identity
-        -- (MintHostIdentity).
+        -- Not a local database: dispatch has none, and a leftover one is
+        -- never read (storage.allium: CodeNeverTouchesLegacyDatabase). An
+        -- install with no host file mints a fresh identity on its first
+        -- launch (MintHostIdentity).
         --
         -- The host file is what core/local_host() resolves. Every reader and
         -- every writer of the local Host row in this file — MintHostIdentity,
@@ -138,9 +137,8 @@ config {
 -- == Installation ==
 
 rule MintHostIdentity {
-    when: FirstRun()
+    when: startup/FirstRun()
 
-    requires: core/Hosts.count = 0
     requires: not host_file_present()
 
     ensures:
@@ -158,10 +156,9 @@ rule MintHostIdentity {
         -- A BOARD LAUNCH WITH NO HOST FILE IS A FIRST RUN. A fresh id is
         -- minted, the label is left null, and host.json is written (with the
         -- private mode, as a whole-file replacement) before anything reads
-        -- the host. That includes an install upgrading past task #16755: its
-        -- old identity sat in the legacy database, which nothing reads
-        -- (storage.allium: CodeNeverTouchesLegacyDatabase), so it is a first
-        -- run like any other.
+        -- the host. A leftover legacy database changes nothing: nothing reads
+        -- it (storage.allium: CodeNeverTouchesLegacyDatabase), so the launch
+        -- is a first run like any other.
         --
         -- A HOST FILE THAT EXISTS BUT CANNOT BE READ MINTS NOTHING. The
         -- `not host_file_present()` guard is what keeps a damaged or
@@ -218,10 +215,13 @@ rule MintHostIdentity {
         -- any other answer. It is a suggestion, not an identity — the id is
         -- untouched by whatever is chosen, and no rule ever compares labels.
         --
-        -- Mint is not re-run. The requires clause makes this explicit rather
-        -- than relying on FirstRun firing once: an install whose Host row
-        -- already exists must keep the id it has, because task rows already
-        -- name it. A second mint would orphan every one of them.
+        -- Mint is not re-run. The `not host_file_present()` guard makes this
+        -- explicit rather than relying on FirstRun firing once: an install
+        -- whose host file exists keeps the id it holds, because task rows
+        -- already name it. A second mint would orphan every one of them.
+        -- The guard is the file, not a count of core/Hosts: the store's host
+        -- registry holds other machines' rows (core.allium:
+        -- ExactlyOneLocalHost), so no count says whether this one has an id.
         --
         -- == Black boxes ==
         -- host_file_present() asks whether a host file exists in the data
@@ -232,7 +232,7 @@ rule MintHostIdentity {
 -- == Naming ==
 
 rule RenameHost {
-    when: RenameHost(label)
+    when: startup/RenameHost(label)
 
     requires: trim(label) != ""
 
@@ -271,7 +271,7 @@ rule RenameHost {
         -- never back.
         --
         -- WHAT HAPPENS WHEN THE WRITE ITSELF DOES NOT TAKE is not this rule's
-        -- to say, and is no longer unsaid. On the first write the caller is
+        -- to say; the caller says it. On the first write the caller is
         -- startup.allium's NameHostFromStartupPrompt, and a store that will not
         -- accept the label leaves the machine exactly as unnamed as it was:
         -- that caller treats the failure as its own substrate failing and
@@ -298,25 +298,14 @@ rule RenameHost {
         -- and nothing in it should be written as though the label were
         -- private: in particular, no rule may start branching on a label,
         -- because a value other installs can change is not one to make
-        -- decisions from.
-        --
-        -- Two consequences of the label being shared are deliberately left
-        -- open rather than decided here, and the registry existing does not
-        -- settle either of them on its own. Whether two hosts may hold the
-        -- same label: still unconstrained, because nothing compares labels
-        -- and a uniqueness rule with a handful of rows in it has barely been
-        -- tested against the case it exists for. What a stale label should
-        -- look like to a reader: still undefined, because that needs a
-        -- staleness clock this rule and its mirror do not add — sending a row
-        -- is not the same as timestamping how old a colleague's copy of it
-        -- is. See the follow-up list at the end of
-        -- docs/superpowers/specs/2026-09-13-distributed-dispatch-design.md.
+        -- decisions from. Two consequences of the label being shared are
+        -- open (see Open Questions).
 }
 
 -- == The person ==
 
 rule AdoptUserIdentity {
-    when: UserIdentityOffered(identity)
+    when: sync/UserIdentityOffered(identity)
 
     requires: core/local_host().owner = null
 
@@ -366,7 +355,7 @@ rule AdoptUserIdentity {
 }
 
 rule ConfirmUnchangedUserIdentity {
-    when: UserIdentityOffered(identity)
+    when: sync/UserIdentityOffered(identity)
 
     requires: core/local_host().owner = identity
 
@@ -393,7 +382,7 @@ rule ConfirmUnchangedUserIdentity {
 }
 
 rule RefuseAChangedUserIdentity {
-    when: UserIdentityOffered(identity)
+    when: sync/UserIdentityOffered(identity)
 
     requires:
         core/local_host().owner != null
@@ -439,11 +428,8 @@ rule RefuseAChangedUserIdentity {
 ------------------------------------------------------------
 
 -- This spec declares no surface of its own, and that is a decision rather than
--- a gap. There used to be a HostLabelEditor here — a "rename this machine"
--- editor facing the user — and nothing in the system ever reached it: no key,
--- no command and no MCP tool produced its trigger. A specified surface nobody
--- can open is the same defect as a label seeded where nobody can see it, so it
--- was removed rather than left standing as a description of something that
+-- a gap: no key, command or MCP tool renames this machine after its first
+-- launch, and a specified surface nobody can open describes something that
 -- does not exist.
 --
 -- The only surface that sets a label today is the mandatory startup prompt, and
@@ -458,4 +444,6 @@ rule RefuseAChangedUserIdentity {
 -- Open Questions
 ------------------------------------------------------------
 
+open question "Whether two hosts may hold the same label. It is unconstrained today: nothing compares labels, and a uniqueness rule over a registry of a handful of rows has barely been tested against the case it exists for. Should the registry refuse a label another host already holds?"
 
+open question "What a stale label should look like to a reader. RenameHost and its mirror (sync.allium: RegisterHostOnRename) send the row but record no time, so a colleague's board cannot tell how old its copy of this machine's label is. Does a reader need a staleness clock, and where would it live?"

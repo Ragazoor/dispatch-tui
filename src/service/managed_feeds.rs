@@ -56,7 +56,7 @@ pub async fn write_managed_feed_settings(
     // persisted against an interval that was refused. They are also not a
     // separate kind of cadence: provisioning copies them onto the managed
     // epics' `feed_interval_secs`, so the floor that binds an epic must bind
-    // them (epics.allium: SetManagedFeedConfig). `0` was blessed here as "poll
+    // them (epics.allium: ManagedFeedConfigViaMcp). `0` was blessed here as "poll
     // every tick" before the floor existed.
     crate::service::validate_feed_interval(
         "reviews_interval_secs",

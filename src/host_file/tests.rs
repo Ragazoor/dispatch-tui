@@ -201,7 +201,7 @@ fn host_identity_unavailable_names_the_host_file_not_a_database() {
     assert!(
         !message.contains("database"),
         "no launch opens a database any more (storage.allium: \
-         StoreInUseNeverOpensSqlite), so the message must not send the \
+         NoSqlite), so the message must not send the \
          operator to one: {message}"
     );
 }

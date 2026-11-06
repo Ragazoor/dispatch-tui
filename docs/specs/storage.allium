@@ -2,15 +2,15 @@
 -- storage.allium
 --
 -- Scope: Where this install keeps the few files that are not in the shared
---        store, and the fact that dispatch has no SQLite at all (task
---        #36865). Every task, epic, setting and the rest of the shared domain
---        is in the store (sync.allium, core.allium); this install's identity
+--        store, and the fact that dispatch has no SQLite at all. Every task,
+--        epic, setting and the rest of the shared domain is in the store
+--        (sync.allium, core.allium); this install's identity
 --        is in the host file (host.allium). There is no local database to
 --        open, migrate or fall back to, in production or in tests: a test's
 --        store is the in-memory SpacetimeDB fake
 --        (spacetime-memory-store.allium).
 -- Includes: the data directory and the files dispatch keeps in it;
---           StoreInUseNeverOpensSqlite; CodeNeverTouchesLegacyDatabase.
+--           NoSqlite; CodeNeverTouchesLegacyDatabase.
 -- Excludes: What the stored rows mean (see core.allium and the per-domain
 --           specs); which rows a board is sent and how they travel (see
 --           sync.allium); the host file's contents and permissions
@@ -30,19 +30,21 @@
 
 -- The directory this install keeps its own files in: the one `--data-dir` /
 -- DISPATCH_DATA_DIR names, defaulting to `$XDG_DATA_HOME/dispatch`, else
--- `~/.local/share/dispatch`. The option names the directory itself. The old
--- `--db` / DISPATCH_DB option, which named a database FILE nothing opened, is
--- gone: passing `--db` is an unknown-argument error.
+-- `~/.local/share/dispatch`. The option names the directory itself; there is
+-- no option naming a database file, and `--db` is an unknown-argument error.
 --
 -- What lives here: the host file (host.allium: HostFile), app.log, the store
 -- address record (startup.allium: StoreAddressRecord), the store pin file
--- `store-identity` (startup.allium: store pin), trajectories
--- (observability.allium) and the shipped feed scripts (feeds.allium). On an
--- install that predates task #16755 the old `tasks.db` (with `-wal` and
--- `-shm`) may still be here too, as an inert leftover. The managed store's
+-- `store-identity` (startup.allium: StoreIdentityPin), trajectories
+-- (observability.allium) and the shipped feed scripts (feeds.allium). An older
+-- install may also hold a `tasks.db` (with `-wal` and `-shm`), an inert
+-- leftover nothing opens (CodeNeverTouchesLegacyDatabase). The managed store's
 -- own data is NOT here when --data-dir is overridden: it is always under the
 -- default data directory (spacetime-snapshot.allium:
 -- ManagedStoreDataIgnoresTheBoardDatabase).
+--
+-- No rule names DataDirectory, so the checker reports it unused: it is the
+-- anchor the two invariants below and other specs' path citations hang on.
 entity DataDirectory {
     path: String
 
@@ -50,13 +52,13 @@ entity DataDirectory {
         -- No path in dispatch opens, reads, writes, deletes, truncates,
         -- renames or moves a leftover `tasks.db` or its `-wal` / `-shm`
         -- companions: not a board launch, not a subcommand, not `uninstall
-        -- --purge`. Its rows are a stale copy of what the store has held
-        -- since the move to it, and nothing is migrated out of it — a
-        -- launch with no host file is a first run and mints a fresh identity
-        -- (host.allium: MintHostIdentity). Deleting the files is the
+        -- --purge`. Its rows are a stale copy of what the store holds, and
+        -- nothing is migrated out of it — a launch with no host file is a
+        -- first run and mints a fresh identity (host.allium:
+        -- MintHostIdentity). Deleting the files is the
         -- operator's, by hand.
 
-    @invariant StoreInUseNeverOpensSqlite
+    @invariant NoSqlite
         -- Dispatch contains no SQLite: no binding is linked, no schema is
         -- built, no migration runs and no connection is opened, for any
         -- purpose, in production or in a test. Not for the board, not for
@@ -70,7 +72,3 @@ entity DataDirectory {
         -- Stated as a property of the CODE rather than of a state, like
         -- sync.allium's AConnectedBoardDrawsOnlyDeliveredRows.
 }
-
-------------------------------------------------------------
--- Open Questions
-------------------------------------------------------------

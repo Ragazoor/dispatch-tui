@@ -5,7 +5,7 @@
 //! `AdoptUserIdentity`), `startup.allium`
 //! (`CheckHostLabelAfterStartupConfigResolves`,
 //! `AbortWhenTheHostIdentityStoreIsUnusable`), `storage.allium`
-//! (`StoreInUseNeverOpensSqlite`, `CodeNeverTouchesLegacyDatabase`).
+//! (`NoSqlite`, `CodeNeverTouchesLegacyDatabase`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -1402,7 +1402,7 @@ config {
 -- config.min_feed_interval, whatever surface wrote it and however it was
 -- spelled. This is a domain invariant of the field, not a property of any one
 -- entry point, so it is enforced ONCE in the epic service (epics.allium:
--- CreateEpic, UpdateEpic, SetManagedFeedConfig) where every write path
+-- CreateEpic, UpdateEpic, ManagedFeedConfigViaMcp) where every write path
 -- inherits it. A value that reaches the poll loop below the floor anyway -- a
 -- hand-edited row, a writer that bypassed the service -- is refused at read
 -- rather than clamped: feeds.allium's FeedTick skips that epic and warns, on
