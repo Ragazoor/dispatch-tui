@@ -742,7 +742,7 @@ rule ClearBuildOutputOfDoneTask {
 
     @guidance
         -- == What counts as build output ==
-        -- build_output_dirs(worktree) is every TOP-LEVEL directory of the
+        -- build_output_dirs(worktree) is every directory AT ANY DEPTH of the
         -- worktree that holds a CACHEDIR.TAG file whose content starts with
         -- the standard signature line
         -- "Signature: 8a477f597d28d172789f06886806bc55"
@@ -750,8 +750,19 @@ rule ClearBuildOutputOfDoneTask {
         -- writes one into .venv/. The rule is repo-agnostic: it names no
         -- directory. A file called CACHEDIR.TAG without the signature does
         -- not count. A symlink is never followed and never removed, so the
-        -- cleanup cannot reach outside the worktree. Nothing below the top
-        -- level is examined. Only a LINKED git worktree is touched: its .git
+        -- cleanup cannot reach outside the worktree.
+        --
+        -- The search walks the whole tree, because nested crates build into
+        -- their own target/: this repo's spacetime/module-tests/target held
+        -- ~23 GB per worktree, and a top-level-only search left 1.3 TB of it
+        -- behind across Done worktrees and filled the disk (task #99034).
+        -- The walk does not descend into a tagged directory (it is removed
+        -- whole, so a tag below it is not listed separately), into .git, or
+        -- into any directory holding its own .git entry (file or directory):
+        -- that is another repository or worktree, not this one's output.
+        -- There is no depth limit. An unreadable directory is skipped.
+        --
+        -- Only a LINKED git worktree is touched: its .git
         -- must be a regular file. A stored worktree path that is a home
         -- directory, or a repository's own checkout (.git is a directory), is
         -- refused and logged, because ~/.cache carries a CACHEDIR.TAG too.
@@ -795,7 +806,7 @@ rule ClearBuildOutputOfDoneTask {
         -- removed is logged at info with the task id.
         --
         -- A task re-dispatched from Done in the moment the cleanup runs may
-        -- see its target/ disappear under a starting build. That costs a
+        -- see a target/ disappear under a starting build. That costs a
         -- rebuild, nothing more, and is accepted.
         --
         -- Out of scope (decided with the user): merging tests/*.rs into one

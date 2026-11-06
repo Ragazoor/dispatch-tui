@@ -13,20 +13,32 @@ pub struct BuildOutputCleared {
     pub failed: Vec<(PathBuf, String)>,
 }
 
-/// Every top-level directory of `worktree` holding a `CACHEDIR.TAG` that starts
-/// with [`CACHEDIR_TAG_SIGNATURE`]. A symlink is never a candidate, and nothing
-/// below the top level is examined. A worktree that cannot be read has none.
+/// Every directory at any depth of `worktree` holding a `CACHEDIR.TAG` that
+/// starts with [`CACHEDIR_TAG_SIGNATURE`]. The walk never follows a symlink,
+/// and does not descend into a tagged directory, into `.git`, or into a
+/// directory with its own `.git` entry (another repository or worktree). An
+/// unreadable directory, including the worktree itself, contributes none.
 pub fn build_output_dirs(worktree: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(worktree) else {
-        return vec![];
-    };
-    entries
-        .flatten()
-        // `DirEntry::file_type` does not follow symlinks.
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .map(|e| e.path())
-        .filter(|dir| has_signed_cachedir_tag(dir))
-        .collect()
+    let mut found = Vec::new();
+    let mut pending = vec![worktree.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            // `DirEntry::file_type` does not follow symlinks.
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) || entry.file_name() == ".git" {
+                continue;
+            }
+            let path = entry.path();
+            if has_signed_cachedir_tag(&path) {
+                found.push(path);
+            } else if std::fs::symlink_metadata(path.join(".git")).is_err() {
+                pending.push(path);
+            }
+        }
+    }
+    found
 }
 
 fn has_signed_cachedir_tag(dir: &Path) -> bool {

@@ -48,12 +48,89 @@ fn a_cachedir_tag_without_the_signature_does_not_count() {
 }
 
 #[test]
-fn a_nested_tagged_dir_is_not_examined() {
+fn a_nested_tagged_dir_is_build_output() {
+    // spacetime/module-tests/target is the case that filled the disk.
     let wt = tempfile::tempdir().unwrap();
-    fs::create_dir(wt.path().join("crates")).unwrap();
-    tagged_dir(&wt.path().join("crates"), "target");
+    fs::create_dir_all(wt.path().join("spacetime/module-tests")).unwrap();
+    tagged_dir(&wt.path().join("spacetime/module-tests"), "target");
+    tagged_dir(&wt.path().join("spacetime"), "module/target");
+    tagged_dir(wt.path(), "target");
+
+    let mut dirs = build_output_dirs(wt.path());
+    dirs.sort();
+    assert_eq!(
+        dirs,
+        vec![
+            wt.path().join("spacetime/module/target"),
+            wt.path().join("spacetime/module-tests/target"),
+            wt.path().join("target"),
+        ]
+    );
+}
+
+#[test]
+fn a_tag_inside_a_tagged_dir_is_not_listed_separately() {
+    let wt = tempfile::tempdir().unwrap();
+    tagged_dir(wt.path(), "target");
+    tagged_dir(&wt.path().join("target"), "nested");
+
+    assert_eq!(build_output_dirs(wt.path()), vec![wt.path().join("target")]);
+}
+
+#[test]
+fn the_walk_does_not_enter_git_or_another_repository() {
+    let wt = tempfile::tempdir().unwrap();
+    linked(wt.path());
+    // Something tagged under a `.git` directory.
+    fs::create_dir(wt.path().join("sub")).unwrap();
+    fs::create_dir(wt.path().join("sub/.git")).unwrap();
+    tagged_dir(&wt.path().join("sub/.git"), "cache");
+    // A nested repository (own `.git` directory) and a nested worktree (own
+    // `.git` file): their build output is theirs, not this worktree's.
+    let repo = wt.path().join("vendor/other-repo");
+    fs::create_dir_all(repo.join(".git")).unwrap();
+    tagged_dir(&repo, "target");
+    let nested_wt = wt.path().join(".worktrees/1-x");
+    fs::create_dir_all(&nested_wt).unwrap();
+    linked(&nested_wt);
+    tagged_dir(&nested_wt, "target");
 
     assert!(build_output_dirs(wt.path()).is_empty());
+    assert!(clear_build_output(wt.path()).removed.is_empty());
+    assert!(repo.join("target").exists());
+    assert!(nested_wt.join("target").exists());
+}
+
+#[test]
+fn a_nested_symlink_is_not_followed() {
+    let outside = tempfile::tempdir().unwrap();
+    tagged_dir(outside.path(), "target");
+    fs::create_dir(outside.path().join("deeper")).unwrap();
+    tagged_dir(&outside.path().join("deeper"), "target");
+    let wt = tempfile::tempdir().unwrap();
+    linked(wt.path());
+    fs::create_dir(wt.path().join("crates")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), wt.path().join("crates/link")).unwrap();
+
+    assert!(build_output_dirs(wt.path()).is_empty());
+    assert!(clear_build_output(wt.path()).removed.is_empty());
+    assert!(outside.path().join("deeper/target").exists());
+}
+
+#[test]
+fn clearing_removes_nested_build_output_and_keeps_the_source() {
+    let wt = tempfile::tempdir().unwrap();
+    linked(wt.path());
+    let krate = wt.path().join("spacetime/module-tests");
+    fs::create_dir_all(krate.join("src")).unwrap();
+    fs::write(krate.join("src/lib.rs"), b"").unwrap();
+    tagged_dir(&krate, "target");
+
+    let cleared = clear_build_output(wt.path());
+
+    assert_eq!(cleared.removed, vec![krate.join("target")]);
+    assert!(!krate.join("target").exists());
+    assert!(krate.join("src/lib.rs").exists());
 }
 
 #[test]
