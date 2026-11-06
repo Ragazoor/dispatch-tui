@@ -55,16 +55,12 @@ impl App {
             self.sync_board_selection();
 
             let mut cmds = Vec::new();
-            let released_window = detach.is_some();
             if let Some(c) = detach {
                 cmds.push(c);
             }
             cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
                 fields,
             )));
-            if released_window {
-                cmds.extend(self.maybe_respawn_split_pane(id));
-            }
             if let Some(at) = seed_at {
                 cmds.push(Command::Task(
                     crate::tui::commands::TaskCommand::SeedActivity { id, at },

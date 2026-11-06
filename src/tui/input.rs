@@ -101,7 +101,8 @@ impl App {
         // TEMPORARY: debugging a copy-task overlay that reportedly appears
         // without a 'c' keypress. Remove once root-caused.
         tracing::debug!(code = ?key.code, modifiers = ?key.modifiers, mode = ?self.input.mode, "handle_key");
-        let cmds = self.dispatch_key(key);
+        let mut cmds = self.dispatch_key(key);
+        cmds.extend(self.respawn_split_pane_if_pinned_window_gone());
 
         self.dirty = true;
         cmds

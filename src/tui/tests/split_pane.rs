@@ -1580,7 +1580,12 @@ fn epic_done_respawns_split_pane_for_pinned_subtask() {
     epic.status = TaskStatus::Review;
     app.board.epics = vec![epic];
 
-    let cmds = app.handle_move_epic_status(crate::models::EpicId(7), MoveDirection::Forward);
+    let cmds = app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::MoveStatus(
+            crate::models::EpicId(7),
+            MoveDirection::Forward,
+        ),
+    ));
 
     assert!(
         respawns_pinned_pane(&cmds),

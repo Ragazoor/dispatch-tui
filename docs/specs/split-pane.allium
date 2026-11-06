@@ -839,12 +839,11 @@ rule SplitPaneRespawnOnWindowCleared {
     --   - DetachTmux (the agent is ended; its pane is respawned too)
     --   - a move back a column, and an epic moved to Done (its subtasks'
     --     windows are released)
-    -- A path the board runs clears the window and respawns in one step. A
-    -- path served elsewhere (ExitSession runs in the host reactor) reaches
-    -- the board as a task row that is present and has no window, and the
-    -- board respawns on adopting that row. A row merely missing from the
-    -- board's list respawns nothing: a respawn ends whatever runs in the
-    -- pane.
+    -- The board checks the pinned task after every message and key, so a
+    -- path it runs and a path served elsewhere (ExitSession runs in the host
+    -- reactor, and reaches the board as a task row with no window) both
+    -- respawn. A row merely missing from the board's list respawns nothing:
+    -- a respawn ends whatever runs in the pane.
     --
     -- NOT triggered by WrapUpPr — the tmux window stays alive after PR
     -- creation so the agent can continue working (e.g., self-review).

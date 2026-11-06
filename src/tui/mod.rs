@@ -856,6 +856,7 @@ impl App {
     pub fn update(&mut self, msg: Message) -> Vec<Command> {
         let mut cmds = dispatcher::dispatch(self, msg);
         cmds.extend(self.see_selected_task());
+        cmds.extend(self.respawn_split_pane_if_pinned_window_gone());
         cmds
     }
 
@@ -903,8 +904,8 @@ impl App {
         let mut cmds = Vec::new();
         for id in ids {
             self.clear_agent_tracking(id);
-            let mut released_window = false;
             if let Some(task) = self.find_task_mut(id) {
+                let mut released_window = false;
                 if let Some(window) = task.tmux_window.take() {
                     released_window = true;
                     cmds.push(Command::Task(
@@ -922,9 +923,6 @@ impl App {
                 cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
                     fields,
                 )));
-            }
-            if released_window {
-                cmds.extend(self.maybe_respawn_split_pane(id));
             }
             // Drain: the agent genuinely finished its turn, so a pending Stop
             // should land as the Review flip.
