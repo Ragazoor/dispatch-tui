@@ -743,7 +743,7 @@ fn handle_key_normal_activate_running_task_with_window_jumps() {
     );
 }
 
-/// `JumpToAgentWindow`'s priority-0 branch (docs/specs/split-pane.allium):
+/// `ActivateTask`'s priority-0 branch (docs/specs/split-pane.allium):
 /// a task another machine owns must refuse every other priority, including
 /// the tmux-window jump — the window name is meaningless on this machine's
 /// tmux server.

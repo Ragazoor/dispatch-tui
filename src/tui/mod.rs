@@ -399,7 +399,7 @@ impl App {
 
     /// Set this install's local Host id, read from `settings` once at
     /// startup (see `TuiRuntime::bootstrap`). Board handlers that gate on
-    /// `Task::is_locally_owned` (RetryResume, RetryFresh, JumpToAgentWindow's
+    /// `Task::is_locally_owned` (RetryResume, RetryFresh, split-pane.allium ActivateTask's
     /// priority-0 branch) read it back via [`Self::local_host_id`].
     pub fn set_local_host_id(&mut self, id: String) {
         self.local_host_id = Some(id);

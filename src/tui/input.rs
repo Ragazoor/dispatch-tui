@@ -108,7 +108,7 @@ impl App {
     }
 
     /// `Space` on a task card — the unified "activate task" action (see
-    /// docs/specs/split-pane.allium: JumpToAgentWindow). Which rung of the
+    /// docs/specs/split-pane.allium: ActivateTask). Which rung of the
     /// ladder applies is the row's context (`task_on_other_machine` …
     /// `task_without_worktree`, evaluated by `App::context_holds`); this runs
     /// the rung's action. Split mode overrides only the jump, so a windowless

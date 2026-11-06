@@ -1309,7 +1309,7 @@ rule ResumeTask {
         -- spawned. current_agent(task).tmux_window is still (re)pointed at the window so the
         -- task stops looking detached; reattachment itself then happens the
         -- normal way, through the existing "has a window" branch of Space (see
-        -- split-pane.allium JumpToAgentWindow, priority 3) on the next
+        -- split-pane.allium ActivateTask, priority 3) on the next
         -- keypress. Before this check existed, the stale-field case above
         -- caused AgentLaunched to unconditionally spawn a second window
         -- sharing the live one's name, and the next targeted tmux operation

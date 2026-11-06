@@ -2,7 +2,7 @@ use super::*;
 
 // ---------------------------------------------------------------------------
 // Unified Space "activate task" behavior (docs/specs/split-pane.allium:
-// JumpToAgentWindow). Space jumps to a live window when one exists; otherwise
+// ActivateTask). Space jumps to a live window when one exists; otherwise
 // it dispatches / resumes / opens the retry dialog. `d` is no longer bound.
 // The window-present cases already jump under the pre-existing Space handler,
 // so the behavioral change is confined to the no-window branches below.
