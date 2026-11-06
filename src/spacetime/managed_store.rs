@@ -557,6 +557,32 @@ impl SpacetimeCliPublisher {
 /// paths run against a stand-in process.
 pub trait StoreSpawner: Send + Sync {
     fn spawn(&self, address: &str, data_dir: &Path, log_path: &Path) -> std::io::Result<Child>;
+
+    /// Whether the process listening on `address` is the store `spawn` started
+    /// over `data_dir`. A port picked by bind-and-drop can be taken by another
+    /// store before the child binds it, and that store would answer in its
+    /// place. The default is `true`: a stand-in spawner has no real port.
+    fn listener_is_ours(&self, _address: &str, _data_dir: &Path) -> bool {
+        true
+    }
+}
+
+/// Whether a process listening on `address` has `arg` as one of its command
+/// line arguments (`ss` names the listeners, `/proc/<pid>/cmdline` their argv).
+/// False when it cannot tell.
+pub fn listener_has_arg(address: &str, arg: &str) -> bool {
+    let port = address.rsplit(':').next().unwrap_or_default();
+    let filter = format!("sport = :{port}");
+    let Ok(out) = Command::new("ss").args(["-ltnpH", &filter]).output() else {
+        return false;
+    };
+    parse_ss_pids(&String::from_utf8_lossy(&out.stdout))
+        .iter()
+        .any(|pid| {
+            std::fs::read(format!("/proc/{pid}/cmdline"))
+                .map(|raw| raw.split(|b| *b == 0).any(|a| a == arg.as_bytes()))
+                .unwrap_or(false)
+        })
 }
 
 /// `spacetime start --listen-addr=<address> --data-dir=<dir> --non-interactive`,
@@ -642,6 +668,10 @@ impl StoreSpawner for SpacetimeStartSpawner {
             .stderr(log)
             .process_group(0);
         command.spawn()
+    }
+
+    fn listener_is_ours(&self, address: &str, data_dir: &Path) -> bool {
+        listener_has_arg(address, &format!("--data-dir={}", data_dir.display()))
     }
 }
 

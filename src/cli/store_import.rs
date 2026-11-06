@@ -200,17 +200,8 @@ async fn read_data_dir_with(
         .context("could not copy the data folder")?;
 
     let log = scratch.path().join("store.log");
-    let (address, child) = spawn_on_free_port(spawner, &copy, &log)?;
+    let result = dump_from_own_copy(spawner, &copy, &log, start_timeout, store_at).await;
 
-    let result = async {
-        wait_until_answering(&address, start_timeout).await?;
-        store_at(&format!("http://{address}")).dump().await
-    }
-    .await;
-
-    // Stopped and reaped before the scratch folder goes, so nothing writes to
-    // it while it is deleted.
-    let _ = tokio::task::spawn_blocking(move || stop_store(child, STOP_GRACE)).await;
     if let Err(e) = result {
         // The store's log is the only account of why it failed; keep it
         // alone, not the whole copy.
@@ -223,13 +214,50 @@ async fn read_data_dir_with(
     result
 }
 
+/// How many ports the import tries when another store keeps taking the one it
+/// picked.
+const PORT_ATTEMPTS: usize = 3;
+
+/// Start a store over `copy`, wait for it, and dump it. The port is picked by
+/// bind-and-drop, so another store can win it; an answer is only trusted from
+/// the process this start made, and any other listener is stopped over and the
+/// start repeated on a fresh port.
+async fn dump_from_own_copy(
+    spawner: &dyn StoreSpawner,
+    copy: &Path,
+    log: &Path,
+    start_timeout: Duration,
+    store_at: &dyn Fn(&str) -> Arc<dyn SnapshotTarget>,
+) -> Result<Snapshot> {
+    for attempt in 1..=PORT_ATTEMPTS {
+        let (address, child) = spawn_on_free_port(spawner, copy, log)?;
+        let answered = wait_until_answering(&address, start_timeout).await;
+        let foreign = answered.is_ok() && !spawner.listener_is_ours(&address, copy);
+        let result = match answered {
+            Err(e) => Err(e),
+            Ok(()) if !foreign => store_at(&format!("http://{address}")).dump().await,
+            Ok(()) => Err(anyhow::anyhow!(
+                "the store answering on {address} is not the copy this import started \
+                 (another store took the port)"
+            )),
+        };
+        // Stopped and reaped before the next start or the scratch folder goes.
+        let _ = tokio::task::spawn_blocking(move || stop_store(child, STOP_GRACE)).await;
+        if foreign && attempt < PORT_ATTEMPTS {
+            continue;
+        }
+        return result;
+    }
+    unreachable!("the loop returns on its last attempt")
+}
+
 /// Start a store over `copy` on a free local port, returning its address and
 /// process.
 ///
 /// The port is free when picked, not when the store starts: another process
 /// can take it in between. The start only spawns the process, and the child
-/// binds later, so a lost race is not seen here; it shows up as the copy never
-/// answering, which `wait_until_answering` reports after its timeout.
+/// binds later, so a lost race is not seen here; [`dump_from_own_copy`] checks
+/// that the listener is the process it started.
 fn spawn_on_free_port(
     spawner: &dyn StoreSpawner,
     copy: &Path,

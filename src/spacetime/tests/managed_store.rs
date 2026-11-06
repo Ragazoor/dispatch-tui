@@ -1071,12 +1071,9 @@ fn serve(reply: Option<&'static [u8]>) -> String {
 
 #[test]
 fn a_port_nothing_listens_on_probes_as_nothing_listening() {
-    let address = {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap().to_string()
-    };
+    // Port 1 is privileged: no test's listener can take it.
     assert_eq!(
-        probe_address(&address, PROBE),
+        probe_address("127.0.0.1:1", PROBE),
         ManagedAddressState::NothingListening
     );
 }

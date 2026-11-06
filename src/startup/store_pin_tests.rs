@@ -210,9 +210,8 @@ fn a_store_without_the_database_reads_as_none() {
 
 #[test]
 fn nothing_listening_reads_as_none() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = format!("http://{}", listener.local_addr().unwrap());
-    drop(listener);
+    // Port 1 is privileged: no test's listener can take it.
+    let address = "http://127.0.0.1:1".to_string();
     assert_eq!(
         fetch_store_database_identity(&address, "dispatch", Duration::from_secs(1)),
         None

@@ -272,23 +272,12 @@ pub(crate) fn candidate_address() -> String {
 /// The error says "already in use" so [`on_free_address`] retries on a fresh
 /// port.
 pub(crate) fn listener_runs_with_arg(address: &str, arg: &str) -> Result<(), String> {
-    let port = address.rsplit(':').next().unwrap_or_default();
-    let filter = format!("sport = :{port}");
-    let out = Command::new("ss")
-        .args(["-ltnpH", &filter])
-        .output()
-        .map_err(|e| format!("could not run ss to identify the store on {address}: {e}"))?;
-    let pids = parse_ss_pids(&String::from_utf8_lossy(&out.stdout));
-    let ours = pids.iter().any(|pid| {
-        std::fs::read(format!("/proc/{pid}/cmdline"))
-            .map(|raw| raw.split(|b| *b == 0).any(|a| a == arg.as_bytes()))
-            .unwrap_or(false)
-    });
+    let ours = crate::spacetime::managed_store::listener_has_arg(address, arg);
     if ours {
         Ok(())
     } else {
         Err(format!(
-            "the listener on {address} (pids {pids:?}) is not the store this test \
+            "the listener on {address} is not the store this test \
              started ({arg}): another test's store holds the port, already in use"
         ))
     }

@@ -17,6 +17,9 @@ struct FakeSpawner {
     output: Mutex<Option<std::process::ChildStdout>>,
     fail: bool,
     answer_on_start: bool,
+    /// How many starts report that another process holds the port.
+    foreign_listeners: std::sync::atomic::AtomicUsize,
+    starts: std::sync::atomic::AtomicUsize,
 }
 
 /// A process group stopped when dropped: a backstop for a test that fails
@@ -32,6 +35,13 @@ impl Drop for ProcessGroup {
 }
 
 impl StoreSpawner for FakeSpawner {
+    fn listener_is_ours(&self, _: &str, _: &Path) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.foreign_listeners
+            .try_update(SeqCst, SeqCst, |n| n.checked_sub(1))
+            .is_err()
+    }
+
     fn spawn(&self, address: &str, data_dir: &Path, log: &Path) -> std::io::Result<Child> {
         use std::os::unix::process::CommandExt;
         if self.fail {
@@ -40,6 +50,8 @@ impl StoreSpawner for FakeSpawner {
                 "no spacetime",
             ));
         }
+        self.starts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         std::fs::write(log, "store output")?;
         *self.seen.lock().unwrap() = Some((address.to_string(), data_dir.to_path_buf()));
         if self.answer_on_start {
@@ -168,6 +180,56 @@ async fn an_answering_copy_is_dumped_from_a_copy_not_the_original() {
         std::fs::read_to_string(dir.path().join("sub/a.txt")).unwrap(),
         "x"
     );
+}
+
+/// Another store won the port between the pick and the start: it answers, but
+/// it is not the copy. Its rows must not be dumped; the import starts over.
+#[tokio::test]
+async fn a_foreign_store_on_the_port_is_not_dumped_and_the_start_is_retried() {
+    let dir = data_folder();
+    let scratch = tempfile::tempdir().unwrap();
+    let spawner = FakeSpawner {
+        answer_on_start: true,
+        foreign_listeners: std::sync::atomic::AtomicUsize::new(1),
+        ..Default::default()
+    };
+    let dumped = std::sync::atomic::AtomicUsize::new(0);
+    let counting = |_: &str| -> Arc<dyn SnapshotTarget> {
+        dumped.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Arc::new(MemoryStore::new())
+    };
+    read_data_dir_with(
+        dir.path(),
+        scratch.path(),
+        &spawner,
+        Duration::from_secs(10),
+        &counting,
+    )
+    .await
+    .unwrap();
+    assert_eq!(spawner.starts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(dumped.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_port_always_held_by_a_foreign_store_fails_without_dumping() {
+    let dir = data_folder();
+    let scratch = tempfile::tempdir().unwrap();
+    let spawner = FakeSpawner {
+        answer_on_start: true,
+        foreign_listeners: std::sync::atomic::AtomicUsize::new(usize::MAX),
+        ..Default::default()
+    };
+    let err = read_data_dir_with(
+        dir.path(),
+        scratch.path(),
+        &spawner,
+        Duration::from_secs(10),
+        &|_| panic!("a foreign store must never be read"),
+    )
+    .await
+    .unwrap_err();
+    assert!(format!("{err:#}").contains("not the copy"), "{err:#}");
 }
 
 #[tokio::test]
