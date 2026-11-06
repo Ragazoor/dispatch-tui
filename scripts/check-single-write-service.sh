@@ -16,9 +16,15 @@
 # Beyond direct calls (G4): a write inside a `for`/`while`/`loop` body counts
 # twice (it runs once per item); a `self.<helper>(` call adds the helper's own
 # write count, once per call (twice inside a loop), one level deep; and
-# `let store = &self.db;` / `let s = self.db.clone();` make `store`/`s` count as
-# the receiver. Every `fn` header form is recognised (`pub(in path)`, `async`,
-# `const`, `unsafe`).
+# `let store = &self.db;` / `let s = self.db.clone();` / `let s =
+# Arc::clone(&self.db);` make `store`/`s` count as the receiver. Every `fn`
+# header form is recognised (`pub(in path)`, `async`, `const`, `unsafe`).
+#
+# `#[cfg(test)]` skips only the item it marks (a braced block, or a statement
+# up to its `;`), never the rest of the file (G6). A `//` inside a string is not
+# a comment, and a brace inside a string is not counted (G7). A helper is looked
+# up only among the `fn`s of the same `impl` block, so a same-named helper in
+# another block is not charged (G7).
 #
 # Limits, accepted: only `src/service/` is scanned; loops written as iterator
 # closures (`.for_each(|x| {..})`, `.map`) are not loops here; a loop header
@@ -97,7 +103,7 @@ hits=$(
                 alts = "db"
                 t = body
                 gsub(/[ \t]*\.[ \t]*/, ".", t)
-                while (match(t, /let[ \t]+(mut[ \t]+)?[A-Za-z0-9_]+[^=;]*=[ \t]*&?(mut[ \t]+)?(self\.)?db(\.clone\(\))?[ \t]*;/)) {
+                while (match(t, /let[ \t]+(mut[ \t]+)?[A-Za-z0-9_]+[^=;]*=[ \t]*(([A-Za-z0-9_]+::)*clone\()?&?(mut[ \t]+)?(self\.)?db(\.clone\(\))?\)?[ \t]*;/)) {
                     a = substr(t, RSTART, RLENGTH)
                     t = substr(t, RSTART + RLENGTH)
                     sub(/^let[ \t]+(mut[ \t]+)?/, "", a)
@@ -105,6 +111,36 @@ hits=$(
                     if (a != "") alts = alts "|" a
                 }
                 return "(self[.])?(" alts ")[.][A-Za-z0-9_]+[ \t]*[(]"
+            }
+            # The line without its `//` comment. A `//` inside a string literal
+            # ("http://x") is not a comment.
+            function strip_comment(l,    i, c, out, instr) {
+                out = ""
+                instr = 0
+                for (i = 1; i <= length(l); i++) {
+                    c = substr(l, i, 1)
+                    if (instr) {
+                        out = out c
+                        if (c == "\\") { i++; out = out substr(l, i, 1) }
+                        else if (c == "\"") instr = 0
+                    } else if (c == "\"") {
+                        instr = 1
+                        out = out c
+                    } else if (c == "/" && substr(l, i + 1, 1) == "/") {
+                        break
+                    } else if (c == "\047" && substr(l, i + 2, 1) == "\047") {
+                        out = out substr(l, i, 3)
+                        i += 2
+                    } else {
+                        out = out c
+                    }
+                }
+                return out
+            }
+            # String contents blanked, so a brace inside a literal is not counted.
+            function blank_strings(l) {
+                gsub(/"([^"\\]|\\.)*"/, "\"\"", l)
+                return l
             }
             function flush(    n, k, hs) {
                 if (fn != "") {
@@ -116,6 +152,7 @@ hits=$(
                     fname[nfn] = fn
                     fown[nfn] = n
                     fcalls[nfn] = hs
+                    fimpl[nfn] = fn_impl
                 }
                 buf = ""
             }
@@ -123,7 +160,34 @@ hits=$(
                 FNHEAD = "^[ \t]*(pub([(][^)]*[)])?[ \t]+)?((const|async|unsafe)[ \t]+)*fn[ \t]+[A-Za-z0-9_]+"
                 LOOPHEAD = "^[ \t]*(.[a-z_]+:[ \t]*)?((for|while)[ \t]|loop[ \t]*[{])"
             }
-            /^#\[cfg\(test\)\]/ { flush(); fn = ""; exit }
+            # `#[cfg(test)]` skips the one item it marks (a braced block, or a
+            # statement ending in `;`), not the rest of the file (G6).
+            skipping {
+                code = blank_strings(strip_comment($0))
+                tmp = code
+                o = gsub(/[{]/, "{", tmp)
+                c = gsub(/[}]/, "}", tmp)
+                if (o > 0) sk_brace = 1
+                sk_depth += o - c
+                if (sk_depth <= 0 && (sk_brace || code ~ /;[ \t]*$/)) skipping = 0
+                next
+            }
+            /^[ \t]*#\[cfg\(test\)\]/ { sk_armed = 1; next }
+            sk_armed && /^[ \t]*(#\[.*)?$/ { next }
+            sk_armed {
+                sk_armed = 0
+                skipping = 1
+                sk_depth = 0
+                sk_brace = 0
+                code = blank_strings(strip_comment($0))
+                tmp = code
+                o = gsub(/[{]/, "{", tmp)
+                c = gsub(/[}]/, "}", tmp)
+                if (o > 0) sk_brace = 1
+                sk_depth = o - c
+                if (sk_depth <= 0 && (sk_brace || code ~ /;[ \t]*$/)) skipping = 0
+                next
+            }
             $0 ~ FNHEAD {
                 flush()
                 depth_loops = 0
@@ -132,12 +196,12 @@ hits=$(
                 s = substr(s, RLENGTH + 1)
                 sub(/[^A-Za-z0-9_].*/, "", s)
                 fn = s
+                fn_impl = cur_impl
                 nloops = 0
             }
             {
-                line = $0
-                sub(/\/\/.*/, "", line)
-                tmp = line
+                line = strip_comment($0)
+                tmp = blank_strings(line)
                 opens = gsub(/[{]/, "{", tmp)
                 closes = gsub(/[}]/, "}", tmp)
                 lead = ""
@@ -152,7 +216,16 @@ hits=$(
                         post_marks = " @ENDLOOP@ "
                     }
                 }
+                if (line ~ /^[ \t]*(unsafe[ \t]+)?impl[ \t<]/ && !cur_impl) {
+                    cur_impl = ++nimpl
+                    impl_depth = depth
+                    impl_open = 0
+                }
                 depth += opens - closes
+                if (cur_impl) {
+                    if (depth > impl_depth) impl_open = 1
+                    else if (impl_open) cur_impl = 0
+                }
                 while (nloops > 0 && depth <= loopat[nloops]) {
                     post_marks = post_marks " @ENDLOOP@ "
                     nloops--
@@ -170,7 +243,7 @@ hits=$(
                         split(hs[h], kv, ":")
                         best = 0
                         for (j = 1; j <= nfn; j++)
-                            if (j != i && fname[j] == kv[1] && fown[j] > best) best = fown[j]
+                            if (j != i && fimpl[j] == fimpl[i] && fname[j] == kv[1] && fown[j] > best) best = fown[j]
                         total += kv[2] * best
                     }
                     if (total > 1) printf "%s::%s %d\n", FILENAME, fname[i], total

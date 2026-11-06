@@ -265,6 +265,77 @@ expect 0 'impl S {
     }
 }' '' 'two pub(in path) fns with one write each stay separate'
 
+# G6: `#[cfg(test)]` skips only the item it marks, not the rest of the file.
+expect 1 'use a::b;
+#[cfg(test)]
+pub use crate::fixtures::Fx;
+impl S {
+    pub async fn update_thing(&self) {
+        self.db.set_a(1).await?;
+        self.db.set_b(2).await?;
+    }
+}' '' 'a cfg(test) use above a double write does not hide it'
+expect 1 'impl S {
+    async fn ok(&self) { self.db.set_a(1).await?; }
+}
+#[cfg(test)]
+mod tests {
+    fn t() { let s = "{"; self.db.set_a(1); self.db.set_b(1); }
+}
+impl T {
+    pub async fn update_thing(&self) {
+        self.db.set_a(1).await?;
+        self.db.set_b(2).await?;
+    }
+}' '' 'a function after a cfg(test) mod is still checked'
+expect 0 'impl S {
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn only_in_tests(&self) {
+        self.db.set_a(1);
+        self.db.set_b(2);
+    }
+    pub async fn real(&self) { self.db.set_a(1).await?; }
+}' '' 'a cfg(test) fn is skipped'
+expect 1 '#[cfg(test)]
+pub use crate::fixtures::{
+    A,
+    B,
+};
+pub async fn two(db: &dyn Store) {
+    db.set_a(1).await?;
+    db.set_b(2).await?;
+}' '' 'a multi-line cfg(test) use ends at its semicolon'
+
+# G7: an Arc::clone rebinding, a `//` inside a string, same-named helpers in
+# two impl blocks.
+expect 1 'impl S {
+    pub async fn arced(&self) {
+        let store = Arc::clone(&self.db);
+        store.set_a(1).await?;
+        store.set_b(2).await?;
+    }
+}' '' 'an Arc::clone rebound receiver is followed'
+expect 1 'impl S {
+    pub async fn url(&self) {
+        self.db.set_a("http://x").await?; self.db.set_b(1).await?;
+    }
+}' '' 'a // inside a string does not hide the writes after it'
+expect 0 'impl A {
+    async fn put(&self) -> i64 {
+        self.db.get_a().await
+    }
+    pub async fn once(&self) {
+        self.put().await;
+        self.db.set_a(1).await?;
+    }
+}
+impl B {
+    async fn put(&self) {
+        self.db.set_b(1).await?;
+    }
+}' '' 'a same-named helper in another impl block is not charged'
+
 if [[ "$failures" != 0 ]]; then
     echo "$failures check-single-write-service case(s) failed" >&2
     exit 1

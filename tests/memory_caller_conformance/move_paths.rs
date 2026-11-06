@@ -439,9 +439,13 @@ fn every_task_move_path_meets_the_same_rules_on_both_stores() {
 /// The name a line declares, if it is a `fn` header in any form: `fn`,
 /// `pub fn`, `pub(crate) fn`, `pub(super) fn`, `pub(in path) fn`, with
 /// `const`/`async`/`unsafe` in front (G3: a `pub(super) fn` or `async fn` used
-/// to be missed, so its writes were charged to the previous function).
+/// to be missed, so its writes were charged to the previous function), and
+/// with attributes in front on the same line (G8: `#[reducer] pub fn mv`).
 fn fn_name(line: &str) -> Option<String> {
     let mut rest = line.trim_start();
+    while rest.starts_with("#[") {
+        rest = rest[rest.find(']')? + 1..].trim_start();
+    }
     if let Some(after) = rest.strip_prefix("pub") {
         rest = after;
         if rest.starts_with('(') {
@@ -471,9 +475,164 @@ fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Byte offsets (into `body`) of an `epic_id` field in a `Task { .. }` literal
+/// `src` with the inside of every comment, string and char literal replaced by
+/// spaces. Byte offsets and newlines are kept, so an offset found in the result
+/// is the same offset in `src`. Brace counting and the scans below run on this
+/// (G8: a `"}"` in a string ended a span).
+fn blank_literals(src: &str) -> String {
+    let chars: Vec<char> = src.chars().collect();
+    let mut out = String::with_capacity(src.len());
+    let blank = |out: &mut String, c: char| {
+        if c == '\n' {
+            out.push('\n');
+        } else {
+            out.extend(std::iter::repeat_n(' ', c.len_utf8()));
+        }
+    };
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        if c == '/' && next == Some('/') {
+            while i < chars.len() && chars[i] != '\n' {
+                blank(&mut out, chars[i]);
+                i += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            let mut depth = 0;
+            while i < chars.len() {
+                if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+                    depth += 1;
+                    blank(&mut out, chars[i]);
+                    blank(&mut out, chars[i + 1]);
+                    i += 2;
+                } else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                    depth -= 1;
+                    blank(&mut out, chars[i]);
+                    blank(&mut out, chars[i + 1]);
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    blank(&mut out, chars[i]);
+                    i += 1;
+                }
+            }
+        } else if c == '"' || (c == 'r' && raw_string_start(&chars, i).is_some()) {
+            // A normal string, or a raw string `r#"..."#`.
+            let (hashes, body_at) = if c == '"' {
+                (None, i + 1)
+            } else {
+                let (h, at) = raw_string_start(&chars, i).unwrap_or((0, i + 1));
+                (Some(h), at)
+            };
+            for ch in &chars[i..body_at] {
+                out.push(*ch);
+            }
+            i = body_at;
+            while i < chars.len() {
+                let ch = chars[i];
+                let closes = match hashes {
+                    None => ch == '"',
+                    Some(h) => {
+                        ch == '"'
+                            && chars[i + 1..].iter().take(h).filter(|c| **c == '#').count() == h
+                    }
+                };
+                if closes {
+                    out.push('"');
+                    i += 1;
+                    for _ in 0..hashes.unwrap_or(0) {
+                        out.push('#');
+                        i += 1;
+                    }
+                    break;
+                }
+                if hashes.is_none() && ch == '\\' {
+                    blank(&mut out, ch);
+                    i += 1;
+                    if let Some(esc) = chars.get(i) {
+                        blank(&mut out, *esc);
+                        i += 1;
+                    }
+                    continue;
+                }
+                blank(&mut out, ch);
+                i += 1;
+            }
+        } else if c == '\'' {
+            // A char literal (`'x'`, `'\n'`) is blanked; a lifetime is not.
+            let close = if next == Some('\\') {
+                chars[i + 2..]
+                    .iter()
+                    .position(|c| *c == '\'')
+                    .map(|p| i + 2 + p)
+            } else if chars.get(i + 2) == Some(&'\'') {
+                Some(i + 2)
+            } else {
+                None
+            };
+            match close {
+                Some(end) => {
+                    out.push('\'');
+                    for ch in &chars[i + 1..end] {
+                        blank(&mut out, *ch);
+                    }
+                    out.push('\'');
+                    i = end + 1;
+                }
+                None => {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// `(number of #, index just after the opening quote)` when `chars[at]` starts a
+/// raw string (`r"`, `r#"`), and is not the tail of an identifier.
+fn raw_string_start(chars: &[char], at: usize) -> Option<(usize, usize)> {
+    if at > 0 && is_ident_char(chars[at - 1]) {
+        return None;
+    }
+    let mut j = at + 1;
+    let mut hashes = 0;
+    while chars.get(j) == Some(&'#') {
+        hashes += 1;
+        j += 1;
+    }
+    (chars.get(j) == Some(&'"')).then_some((hashes, j + 1))
+}
+
+/// Offset of the `}` that closes the `{` just before `open`, or the end.
+fn matching_close(body: &str, open: usize) -> usize {
+    let mut depth = 1;
+    for (i, c) in body[open..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return open + i;
+                }
+            }
+            _ => {}
+        }
+    }
+    body.len()
+}
+
+/// Byte offsets (into `span`) of an `epic_id` field in a `Task { .. }` literal
 /// span: `epic_id,` / `epic_id }` shorthand or `epic_id: <value>`, never a
-/// read (`t.epic_id`) or a declaration (`epic_id: i64`, `Patch<i64>`).
+/// read (`t.epic_id`). A literal holds no declarations (a `struct Task {` is
+/// skipped by the caller), so any `epic_id:` value is a write, however it
+/// starts (G8: `Option::from(e)` and `public_epic` were filtered as types).
 fn epic_id_fields(span: &str) -> Vec<usize> {
     span.match_indices("epic_id")
         .filter(|(at, _)| {
@@ -484,25 +643,45 @@ fn epic_id_fields(span: &str) -> Vec<usize> {
             let rest = span[at + "epic_id".len()..].trim_start();
             rest.starts_with(',')
                 || rest.starts_with('}')
-                || rest.strip_prefix(':').is_some_and(|v| {
-                    let v = v.trim_start();
-                    !(v.starts_with(':')
-                        || v.starts_with("i64")
-                        || v.starts_with("Option")
-                        || v.starts_with("Patch")
-                        || v.starts_with("pub"))
-                })
+                || rest
+                    .strip_prefix(':')
+                    .is_some_and(|v| !v.trim_start().starts_with(':'))
         })
         .map(|(at, _)| at)
         .collect()
 }
 
-/// The `module/src` functions that write a task's `epic_id`: an `epic_id` field
-/// anywhere in a `Task { .. }` literal (one line or many) or an `.epic_id =`
-/// assignment. A move path that forgot the unseen mark would not call
-/// `clear_unseen_for_task` at all, so the scan keys on the write, not on the
-/// clear (G1; N1 and R2 were exactly that).
-fn epic_id_writers(file: &str, body: &str) -> Vec<String> {
+/// Byte ranges of the bodies of `impl .. Task` blocks (`impl Task`,
+/// `impl Trait for Task`), where `Self { .. }` builds a `Task`.
+fn impl_task_spans(body: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    for (at, _) in body.match_indices("impl") {
+        let word_before = body[..at].chars().next_back().is_some_and(is_ident_char);
+        let after = body[at + 4..].chars().next();
+        if word_before || !after.is_some_and(|c| c.is_whitespace() || c == '<') {
+            continue;
+        }
+        let Some(brace) = body[at..].find('{') else {
+            continue;
+        };
+        let mut header = body[at..at + brace].trim_end();
+        if let Some(h) = header.strip_suffix('>') {
+            header = h.rsplit_once('<').map_or(h, |(l, _)| l).trim_end();
+        }
+        if header.rsplit(|c: char| !is_ident_char(c)).next() == Some("Task") {
+            let open = at + brace + 1;
+            spans.push((open, matching_close(body, open)));
+        }
+    }
+    spans
+}
+
+/// Where the first `epic_id` write of every write in `body` sits, as
+/// `(offset, function)` pairs, one per write: a field in a `Task { .. }` (or,
+/// inside `impl Task`, a `Self { .. }`) literal, an `.epic_id =` assignment, an
+/// `.epic_id.replace(` style call, or a `&mut ..epic_id` borrow.
+fn epic_id_write_sites(body: &str) -> Vec<(usize, String)> {
+    let body = &blank_literals(body);
     let mut headers: Vec<(usize, String)> = Vec::new();
     let mut offset = 0;
     for line in body.split_inclusive('\n') {
@@ -519,47 +698,85 @@ fn epic_id_writers(file: &str, body: &str) -> Vec<String> {
             .map(|(_, name)| name.clone())
             .unwrap_or_default()
     };
+    let impl_task = impl_task_spans(body);
     let mut sites = Vec::new();
-    for (at, _) in body.match_indices("Task {") {
-        let head = body[..at].trim_end();
-        if body[..at].chars().next_back().is_some_and(is_ident_char)
-            || matches!(
-                head.rsplit(|c: char| !is_ident_char(c)).next(),
-                Some("impl" | "struct" | "for" | "enum" | "type")
-            )
+    for pattern in ["Task {", "Self {"] {
+        for (at, _) in body.match_indices(pattern) {
+            if pattern == "Self {" && !impl_task.iter().any(|(s, e)| *s <= at && at < *e) {
+                continue;
+            }
+            let head = body[..at].trim_end();
+            // `-> Task {` opens a function body, not a literal.
+            if head.ends_with("->") {
+                continue;
+            }
+            if body[..at].chars().next_back().is_some_and(is_ident_char)
+                || matches!(
+                    head.rsplit(|c: char| !is_ident_char(c)).next(),
+                    Some("impl" | "struct" | "for" | "enum" | "type")
+                )
+            {
+                continue;
+            }
+            let open = at + pattern.len();
+            let close = matching_close(body, open);
+            // The closing brace is part of the span: `Task { epic_id }`.
+            let span = &body[open..(close + 1).min(body.len())];
+            if let Some(first) = epic_id_fields(span).first() {
+                sites.push((open + first, owner(open + first)));
+            }
+        }
+    }
+    for (at, _) in body.match_indices(".epic_id") {
+        let rest = body[at + ".epic_id".len()..].trim_start();
+        if body[at + ".epic_id".len()..]
+            .chars()
+            .next()
+            .is_some_and(is_ident_char)
         {
             continue;
         }
-        let open = at + "Task {".len();
-        let mut depth = 1;
-        let mut close = body.len();
-        for (i, c) in body[open..].char_indices() {
-            match c {
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        close = open + i;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        // The closing brace is part of the span: `Task { epic_id }`.
-        let span = &body[open..(close + 1).min(body.len())];
-        if let Some(first) = epic_id_fields(span).first() {
-            sites.push(format!("{file}::{}", owner(open + first)));
+        let assigns = rest.starts_with('=') && !rest.starts_with("==") && !rest.starts_with("=>");
+        let mutates = [".replace(", ".take(", ".insert(", ".get_or_insert", ".set("]
+            .iter()
+            .any(|m| rest.starts_with(m));
+        if assigns || mutates {
+            sites.push((at, owner(at)));
         }
     }
-    for (at, _) in body.match_indices(".epic_id =") {
-        if !body[at..].starts_with(".epic_id ==") {
-            sites.push(format!("{file}::{}", owner(at)));
+    for (at, _) in body.match_indices("&mut") {
+        let rest = body[at + 4..].trim_start();
+        let path: String = rest
+            .chars()
+            .take_while(|c| is_ident_char(*c) || *c == '.')
+            .collect();
+        if path.ends_with(".epic_id") || path == "epic_id" {
+            sites.push((at, owner(at)));
         }
     }
     sites.sort();
-    sites.dedup();
     sites
+}
+
+/// Each function in `file` that writes a task's `epic_id`, with how many
+/// writes it makes. A move path that forgot the unseen mark would not call
+/// `clear_unseen_for_task` at all, so the scan keys on the write, not on the
+/// clear (G1; N1 and R2 were exactly that). The count is kept (G8): a second
+/// write in a function already covered by a row is a new path to review.
+fn epic_id_write_count(file: &str, body: &str) -> Vec<(String, usize)> {
+    let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
+    for (_, name) in epic_id_write_sites(body) {
+        *counts.entry(format!("{file}::{name}")).or_default() += 1;
+    }
+    counts.into_iter().collect()
+}
+
+/// The `module/src` functions that write a task's `epic_id`, once each.
+fn epic_id_writers(file: &str, body: &str) -> Vec<String> {
+    epic_id_write_count(file, body)
+        .into_iter()
+        .map(|(site, _)| site)
+        .collect()
 }
 
 /// Every `.rs` file under `dir`, recursively (G3: `read_dir` alone missed a
@@ -668,6 +885,95 @@ fn the_epic_id_scan_ignores_declarations_and_reads() {
     assert_eq!(epic_id_writers("g.rs", body), Vec::<String>::new());
 }
 
+/// G8: values that merely start like a type name are still writes.
+#[test]
+fn the_epic_id_scan_finds_a_value_that_starts_like_a_type() {
+    for value in [
+        "Option::from(e)",
+        "public_epic",
+        "i64::from(e)",
+        "Patch::set(e)",
+    ] {
+        let body =
+            format!("fn mv(t: Task, e: i64) -> Task {{\n    Task {{ epic_id: {value}, ..t }}\n}}");
+        assert_eq!(
+            epic_id_writers("g.rs", &body),
+            vec!["g.rs::mv".to_string()],
+            "{value}"
+        );
+    }
+}
+
+/// G8: `Self { epic_id, ..self }` inside `impl Task`, and only there.
+#[test]
+fn the_epic_id_scan_finds_a_self_literal_in_impl_task() {
+    let body = "impl Task {\n    fn moved(self, epic_id: i64) -> Self {\n        Self { epic_id: Some(epic_id), ..self }\n    }\n}";
+    assert_eq!(
+        epic_id_writers("g.rs", body),
+        vec!["g.rs::moved".to_string()]
+    );
+    let other = "impl Other {\n    fn moved(self, epic_id: i64) -> Self {\n        Self { epic_id, ..self }\n    }\n}";
+    assert_eq!(epic_id_writers("g.rs", other), Vec::<String>::new());
+}
+
+/// G8: a write through a method or a mutable borrow.
+#[test]
+fn the_epic_id_scan_finds_replace_and_mut_borrow_writes() {
+    for write in [
+        "t.epic_id.replace(Some(e));",
+        "let old = std::mem::replace(&mut t.epic_id, Some(e));",
+        "let slot = &mut t.epic_id;",
+        "let slot = &mut   t.epic_id;",
+        "t.epic_id=Some(e);",
+    ] {
+        let body = format!("fn mv(t: &mut Task, e: i64) {{\n    {write}\n}}");
+        assert_eq!(
+            epic_id_writers("g.rs", &body),
+            vec!["g.rs::mv".to_string()],
+            "{write}"
+        );
+    }
+    let reads = "fn rd(t: &Task) -> bool {\n    t.epic_id == Some(1) && t.epic_id.is_some() && f(&t.epic_id)\n}";
+    assert_eq!(epic_id_writers("g.rs", reads), Vec::<String>::new());
+}
+
+/// G8: a brace inside a string or a comment does not end a span.
+#[test]
+fn the_epic_id_scan_ignores_braces_in_strings_and_comments() {
+    let body = "fn mv(t: Task, e: i64) -> Task {\n    Task {\n        title: \"}\".into(),\n        // } stray\n        epic_id: Some(e),\n        ..t\n    }\n}";
+    assert_eq!(epic_id_writers("g.rs", body), vec!["g.rs::mv".to_string()]);
+    let quoted = "fn msg() -> &'static str {\n    \"Task { epic_id: 1 }\"\n}";
+    assert_eq!(epic_id_writers("g.rs", quoted), Vec::<String>::new());
+}
+
+/// G8: an attribute on the `fn` line still names the function.
+#[test]
+fn the_epic_id_scan_attributes_a_write_under_an_attributed_fn_line() {
+    let body =
+        "fn first() {}\n#[reducer] pub fn mv(t: Task) {\n    Task { epic_id: None, ..t };\n}";
+    assert_eq!(epic_id_writers("g.rs", body), vec!["g.rs::mv".to_string()]);
+}
+
+/// A return type is not a literal: the function body is not a `Task { .. }`.
+#[test]
+fn the_epic_id_scan_does_not_read_a_return_type_as_a_literal() {
+    let body = "fn make(epic_id: i64) -> Task {\n    Task { epic_id, ..blank() }\n}";
+    assert_eq!(
+        epic_id_write_count("g.rs", body),
+        vec![("g.rs::make".to_string(), 1)]
+    );
+}
+
+/// G8: a second write in one function is counted, not folded into the first.
+#[test]
+fn the_epic_id_scan_counts_each_write_in_a_function() {
+    let body = "fn mv(t: &mut Task, e: i64) {\n    t.epic_id = Some(e);\n    t.epic_id = None;\n}";
+    assert_eq!(
+        epic_id_write_count("g.rs", body),
+        vec![("g.rs::mv".to_string(), 2)]
+    );
+}
+
 /// G3 blind spot 3: module files in subdirectories.
 #[test]
 fn module_sources_recurses_into_subdirectories() {
@@ -693,12 +999,11 @@ fn module_sources_recurses_into_subdirectories() {
     );
 }
 
-/// Every writer in `spacetime/module/src`, recursively, minus fixtures and
-/// tests (they build tasks, they do not move them).
-fn module_sites() -> Vec<String> {
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spacetime/module/src");
+/// Every writer under `dir` (recursively), minus fixtures and tests (they
+/// build tasks, they do not move them), with its write count.
+fn sites_under(dir: &std::path::Path) -> Vec<(String, usize)> {
     let mut sites = Vec::new();
-    for (rel, body) in module_sources(&src) {
+    for (rel, body) in module_sources(dir) {
         let name = std::path::Path::new(&rel)
             .file_name()
             .unwrap()
@@ -711,11 +1016,96 @@ fn module_sites() -> Vec<String> {
             continue;
         }
         // Subdirectory files keep their path so two `mod.rs` do not collide.
-        sites.extend(epic_id_writers(&rel, &body));
+        sites.extend(epic_id_write_count(&rel, &body));
     }
     sites.sort();
-    sites.dedup();
     sites
+}
+
+fn module_write_counts() -> Vec<(String, usize)> {
+    sites_under(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spacetime/module/src"))
+}
+
+fn module_sites() -> Vec<String> {
+    module_write_counts().into_iter().map(|(s, _)| s).collect()
+}
+
+/// The twin's move functions: `src/sync/memory_caller/` (G8: it was not
+/// scanned, so a move the twin made and the module did not went unseen).
+fn twin_write_counts() -> Vec<(String, usize)> {
+    sites_under(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/sync/memory_caller"))
+}
+
+/// Writers the module makes more than once, with the count. A function that
+/// gains a write fails `every_module_site_makes_the_writes_the_table_expects`:
+/// the new write is a path the row does not exercise.
+const MORE_THAN_ONE_WRITE: &[(&str, usize)] = &[];
+
+/// Every twin function that writes a task's `epic_id`, with the module site it
+/// mirrors (or why none). A twin write absent from this list is a move only
+/// the twin makes, so no module path pins it.
+const TWIN_SITES: &[(&str, &str)] = &[
+    (
+        "agent_state.rs::apply_respawn_phoenix_successor",
+        "mirrors tasks_epics.rs::respawn_phoenix_successor: inserts the successor, no prior mark",
+    ),
+    (
+        "convert.rs::from",
+        "a row type conversion between the module and binding Task, not a move",
+    ),
+    (
+        "feed.rs::upsert_feed_item",
+        "mirrors feed.rs::upsert_feed_item: stays in its epic",
+    ),
+    (
+        "grouping.rs::relink_task",
+        "mirrors grouping.rs::relink_task (MOVE_PATHS)",
+    ),
+    (
+        "tasks_epics.rs::apply_create_task",
+        "mirrors tasks_epics.rs::create_task: an insert, no prior mark",
+    ),
+    (
+        "tasks_epics.rs::apply_set_task_epic",
+        "mirrors tasks_epics.rs::move_task_row (MOVE_PATHS)",
+    ),
+];
+
+#[test]
+fn every_module_site_makes_the_writes_the_table_expects() {
+    for (site, n) in module_write_counts() {
+        let want = MORE_THAN_ONE_WRITE
+            .iter()
+            .find(|(s, _)| *s == site)
+            .map_or(1, |(_, n)| *n);
+        assert_eq!(
+            n, want,
+            "{site} writes a task's epic_id {n} time(s), expected {want}: a new write \
+             is a new move path; add it to the table or update MORE_THAN_ONE_WRITE"
+        );
+    }
+}
+
+#[test]
+fn every_twin_move_function_is_listed() {
+    let twin = twin_write_counts();
+    assert!(
+        !twin.is_empty(),
+        "the twin scan found no site: update this test"
+    );
+    for (site, _) in &twin {
+        assert!(
+            TWIN_SITES.iter().any(|(s, _)| s == site),
+            "{site} writes a task's epic_id on the twin but is not in TWIN_SITES: a move \
+             only the twin makes is untested; list it with the module site it mirrors"
+        );
+    }
+    for (site, _) in TWIN_SITES {
+        assert!(
+            twin.iter().any(|(s, _)| s == site),
+            "TWIN_SITES lists {site}, which no longer writes a task's epic_id"
+        );
+    }
 }
 
 /// A move path nobody added to the table. Needs no store: it reads the module
