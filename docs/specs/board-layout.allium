@@ -495,16 +495,31 @@ value EpicCardPlacement {
 --     #98901). With own-title-only headers sorted by epic id, a sub-epic's
 --     group could sit far from its parent's and the two read as unrelated.
 --     So, within each substatus section, the epic groups are laid out as
---     the epic tree (EpicGroupTree below):
---       - Groups come in tree order: an epic's group, then each of its
---         child epics' subtrees in the epics' own card order (sort_order,
---         else id — the key top-level groups already sorted by). Inside one
---         epic's group its own tasks come first, then its children's
---         groups. Top-level groups are in the same order.
---       - A header is drawn for every epic on the path between a group and
---         the tree's top, even when that epic has no task of its own in the
---         section: an empty parent header is what shows the child is
---         nested. Such a header is followed directly by its children.
+--     the epic tree (EpicGroupTree below), built from that section's tasks
+--     alone: two groups in different sections never share a header.
+--   - The tree is compact (task #99033). It shows where groups meet, not
+--     the whole path to the root: the full path to the top was noise when
+--     only one group sat under it, and indent for a group with no sibling
+--     says nothing.
+--       - A header is drawn for an epic that owns a task in the section,
+--         and for an epic where two or more drawn branches meet: the
+--         nearest parent two groups share. Every other epic is skipped —
+--         one above the topmost meeting point, and one that only a single
+--         branch passes through. A skipped epic draws no header and adds
+--         no indent.
+--       - So a section with one epic group, or with groups that share no
+--         parent, draws each group's own header flush at depth 0. The
+--         header still names the epic its tasks belong to.
+--       - An epic drawn only because branches meet has no task of its own
+--         in the section. Its header is followed directly by its children.
+--       - Groups come in tree order: an epic's group, then the subtrees of
+--         the drawn epics directly under it. Inside one epic's group its
+--         own tasks come first. Then come the drawn children that have no
+--         drawn child of their own, then the drawn children that do: a
+--         flush block never sits below a deeper one under the same parent.
+--         Each of those two runs keeps the epics' card order (sort_order,
+--         else id — the key top-level groups already sorted by). Top-level
+--         groups are ordered the same way.
 --       - The tree's top: on the main board and in a work-package view,
 --         epics with no parent; in an epic view, the viewed epic's direct
 --         sub-epics. The viewed epic itself is already named by the border
@@ -513,14 +528,13 @@ value EpicCardPlacement {
 --         after it, not under it.
 --       - Only epics the column can draw count as ancestors. An ancestor
 --         that is out of the view — above the viewed epic, or not on the
---         board at all — is skipped, and its nearest drawn descendant takes
---         its place in the tree, at its depth. A child whose parent is out
---         of view is therefore depth 0, never indented under a header that
---         is not there. (A hidden epic never arises here: hiding an epic
---         hides its whole subtree.)
+--         board at all — is skipped like any other skipped epic, even where
+--         branches meet at it. (A hidden epic never arises here: hiding an
+--         epic hides its whole subtree.)
 --       - Each row of a group — its header and its task cards alike — is
 --         indented by `config.epic_indent_step` columns per level of depth,
---         depth counted from 0 at the tree's top. The indent stops growing
+--         depth counted from 0 at the tree's top and one more per drawn
+--         header above the group. The indent stops growing
 --         at `config.epic_indent_max_depth`: deeper groups draw at that
 --         depth's indent, so a narrow column keeps room for its titles. A
 --         card's width shrinks by its indent; the card renders otherwise
@@ -608,22 +622,44 @@ config {
     epic_indent_max_depth: Integer = 3
 }
 
--- The epic tree one flattened section (or the agent-tree pane's agents
--- section) lays its groups out as. `drawn` is the set of epics that count
--- as ancestors: the epics on the board, and — in an epic view — only those
--- strictly below the viewed epic. The viewed epic's own group is
--- still drawn, at depth 0; it is only never an ancestor.
+-- The compact epic tree one flattened section (or the agent-tree pane's
+-- agents section) lays its groups out as (task #99033). `in_view` is the
+-- set of epics that may count as ancestors: the epics on the board, and —
+-- in an epic view — only those strictly below the viewed epic. `owners` is
+-- the set of epics that own a task in the section (an agent in the pane).
+-- The viewed epic's own group is still drawn, at depth 0; it is only never
+-- an ancestor.
 value EpicGroupTree {
-    drawn: Set<core/Epic>
+    in_view: Set<core/Epic>
+    owners: Set<core/Epic>
 
     -- parent_chain(epic): epic.parent, then its parent, and so on up to a
     -- root epic, nearest first.
+    --
+    -- branches(a): how many of a's child epics are an owner or have an
+    -- owner below them. Counted over a's children in the full epic tree, so
+    -- an epic only one branch passes through counts 1 however wide the
+    -- subtree beneath that branch is.
 
-    -- The nearest ancestor the view draws, skipping any it does not.
-    drawn_parent(epic): parent_chain(epic).first(a => a in drawn)
+    -- An epic draws a header when it owns a task here, or when two or more
+    -- branches meet at it in view. Every other epic is skipped. An owner
+    -- out of view (only ever the viewed epic) still draws its header.
+    shown(epic):
+        epic in owners or (epic in in_view and branches(epic) >= 2)
 
-    -- 0 at the tree's top; one more per drawn ancestor.
-    depth(epic): parent_chain(epic).count(a => a in drawn)
+    -- Whether a drawn epic counts as an ancestor: only one in view.
+    counts(epic): epic in in_view and shown(epic)
+
+    -- The nearest ancestor drawn, skipping every one that does not count.
+    drawn_parent(epic): parent_chain(epic).first(a => counts(a))
+
+    -- 0 at the tree's top; one more per counted ancestor.
+    depth(epic): parent_chain(epic).count(a => counts(a))
+
+    -- A drawn epic with no drawn epic directly under it. Under one parent
+    -- these come before the drawn children that are not leaves.
+    is_leaf(epic):
+        not in_view.any(e => counts(e) and drawn_parent(e) = epic)
 
     indent(epic):
         min(depth(epic), config.epic_indent_max_depth) * config.epic_indent_step
@@ -925,11 +961,32 @@ entity CollapsedSections {
 --     descendant's recorded fold: when the parent unfolds, each descendant
 --     draws folded or open exactly as it was recorded before. A folded
 --     header directly under its parent's open header draws no blank line
---     above it: the two belong together. A folded
---     parent with no task of its own keeps its header while any descendant
---     has a task in the section. An open parent header with no task of its
---     own in the column cannot be folded: no card there belongs to it, and
---     the open header is decoration (tasks.allium: ToggleEpicFold).
+--     above it: the two belong together. An open parent header with no
+--     task of its own in the column cannot be folded: no card there
+--     belongs to it, and the open header is decoration (tasks.allium:
+--     ToggleEpicFold).
+--   - The compact tree (EpicGroupTree) is built from every task in the
+--     section, folded or not: folding changes what a drawn header hides,
+--     never which headers are drawn. A folded epic with no task of its own
+--     keeps its header while branches still meet at it.
+--   - A fold never hides a task without a header above it. In a section
+--     where a folded epic is skipped, its fold hides nothing there: the
+--     tasks below it draw under their own headers.
+--   - When a folded epic is drawn in no section of its column while the
+--     column still holds tasks below it, the fold moves down
+--     (tasks.allium: FoldMovesToDrawnDescendant). Each drawn epic that
+--     takes its place — the drawn epic nearest below it, in each section
+--     where it is skipped — is folded, and its own fold is cleared. The
+--     user folded it to hide what sits under it, and what still sits there
+--     is now headed by those epics. When the skipped epic is drawn again
+--     later, it draws open.
+--   - The move judges the column unfiltered: every task the column holds
+--     on the main board, as if no search, lens narrowing, hidden epic,
+--     hidden work package or repo filter were on. Those narrow the drawn
+--     tree for a moment and can skip an epic only while they last; a fold
+--     the user recorded must not move, and be saved moved, because of
+--     one. While they last, a folded epic they skip hides nothing, as in
+--     any section that skips it.
 --
 -- Toggling is specified in tasks.allium: ToggleEpicFold.
 --

@@ -2451,11 +2451,13 @@ rule RefreshAgentTreeAgentList {
         -- tasks inside a group in ascending task id, and the tasks with no
         -- epic last, also by task id. A task's group is its own epic, never
         -- an ancestor's, so a sub-epic's tasks form a group of their own. The
-        -- groups are laid out as the epic tree, the shape a flattened board
-        -- section lays out its own in (board-layout.allium, "Flattening",
-        -- EpicGroupTree): an epic's group, then its child epics' subtrees in
-        -- ascending epic id, the top-level groups in ascending epic id. (The
-        -- board orders siblings by card order; the pane is sent ids only.)
+        -- groups are laid out as the compact epic tree, the shape a flattened
+        -- board section lays out its own in (board-layout.allium,
+        -- "Flattening", EpicGroupTree): an epic's group, then the subtrees of
+        -- the drawn epics directly under it — first those with no drawn
+        -- child of their own, then the rest, each run in ascending epic id —
+        -- and the top-level groups ordered the same way. (The board orders
+        -- each run by card order; the pane is sent ids only.)
         -- How the groups are drawn is AgentListGroupsByEpic. The order
         -- therefore never changes under the cursor except when an agent
         -- starts or finishes, or a task moves to another epic.
@@ -3189,17 +3191,26 @@ surface AgentTreeCompanionPane {
         -- sit in directly. The title is truncated with an ellipsis when the
         -- pane is narrow.
         --
-        -- Nesting is shown by order and indent, as on the board. The groups come in tree order (see "Order" in
-        -- RefreshAgentTreeAgentList). Every ancestor of a group draws its
-        -- header above it even when no agent sits in that ancestor
-        -- directly, so a sub-epic never reads as unrelated to its parent.
+        -- Nesting is shown by order and indent, as on the board, in the
+        -- same compact tree (board-layout.allium: EpicGroupTree; task
+        -- #99033), built from every agent the section lists. A header is
+        -- drawn for an epic an agent sits in directly, and for an epic
+        -- where two or more drawn branches meet: the nearest parent two
+        -- groups share. Every other epic is skipped: an ancestor above the
+        -- topmost meeting point, and one a single branch passes through. So
+        -- a list whose groups share no parent draws every header flush,
+        -- each naming the epic its agents sit in. The groups come in tree
+        -- order (see "Order" in RefreshAgentTreeAgentList): under one
+        -- parent, its own agents, then the drawn children with no drawn
+        -- child of their own, then the rest, each run in ascending epic id.
         -- Each header and each agent row of a group is indented by
         -- board-layout's EpicGroupTree.indent: config.epic_indent_step
-        -- columns per level, growing no further past
-        -- config.epic_indent_max_depth. Every ancestor counts, and the tree's
-        -- top is the root epics: the board's filter never hides an ancestor
-        -- of a shown epic, since hiding an epic hides its whole subtree.
-        -- The epicless agents below the dashed rule are not indented.
+        -- columns per drawn header above it, growing no further past
+        -- config.epic_indent_max_depth. Every epic on the board is in view:
+        -- the board's filter never hides an ancestor of a shown epic, since
+        -- hiding an epic hides its whole subtree. The pane has no epic
+        -- folds. The epicless agents below the dashed rule are not
+        -- indented.
         --
         -- The agents with no epic come last, under the board's dashed rule
         -- (`╌╌ · ╌╌╌`, muted). The rule is drawn only where the epic groups
