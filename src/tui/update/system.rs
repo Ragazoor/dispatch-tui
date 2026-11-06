@@ -147,15 +147,17 @@ impl App {
             Some(id) => id,
             None => return vec![],
         };
-        let restore_window = self
+        let pinned = self
             .board
             .split
             .pinned_task_id
-            .and_then(|id| self.board.find_task(id))
-            .and_then(|t| t.tmux_window.clone());
+            .and_then(|id| self.board.find_task(id));
+        let restore_window = pinned.and_then(|t| t.tmux_window.clone());
+        let restore_dir = pinned.and_then(|t| t.worktree.clone());
         vec![Command::Split(crate::tui::commands::SplitCommand::Exit {
             pane_id,
             restore_window,
+            restore_dir,
         })]
     }
 

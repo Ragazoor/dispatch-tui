@@ -56,7 +56,7 @@ fn toggle_split_mode_emits_exit_command() {
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, restore_window }) if pane_id == "%42" && restore_window.is_none())
+        matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, restore_window, .. }) if pane_id == "%42" && restore_window.is_none())
     );
 }
 
@@ -69,7 +69,7 @@ fn toggle_split_exit_restores_pinned_task_window() {
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, restore_window }) if pane_id == "%42" && restore_window.as_ref().map(|w| w.as_str()) == Some("task-3"))
+        matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, restore_window, .. }) if pane_id == "%42" && restore_window.as_ref().map(|w| w.as_str()) == Some("task-3"))
     );
 }
 
@@ -485,6 +485,7 @@ fn confirm_quit_with_active_split_emits_exit_split_mode() {
             Command::Split(crate::tui::commands::SplitCommand::Exit {
                 pane_id,
                 restore_window: Some(w),
+                ..
             }) if pane_id == "%42" && w == "task-3"
         )),
         "should emit Split(Exit) to restore task window before quitting"
@@ -693,6 +694,7 @@ fn confirm_quit_with_split_no_pinned_task_kills_pane() {
             Command::Split(crate::tui::commands::SplitCommand::Exit {
                 pane_id,
                 restore_window: None,
+                ..
             }) if pane_id == "%99"
         )),
         "should emit Split(Exit) with no restore_window for empty split"
@@ -1655,4 +1657,24 @@ fn refresh_without_the_pinned_row_does_not_respawn() {
 
     assert!(!respawns_pinned_pane(&cmds));
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(1)));
+}
+
+#[test]
+fn toggle_split_exit_carries_the_pinned_task_worktree() {
+    // The break-out makes a new window, so the exit must carry the worktree
+    // the restored window's @dispatch_dir is written from.
+    let mut task = make_task(3, TaskStatus::Running);
+    task.worktree = Some("/work/task-3".into());
+    let mut app = App::new(vec![task]);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
+    app.board.split.pinned_task_id = Some(TaskId(3));
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
+
+    assert!(matches!(
+        &cmds[0],
+        Command::Split(crate::tui::commands::SplitCommand::Exit { restore_dir: Some(d), .. })
+            if d == "/work/task-3"
+    ));
 }

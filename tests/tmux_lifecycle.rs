@@ -945,7 +945,7 @@ fn exit_rejoins_the_pinned_pane_into_the_window_awaiting_it() {
     let users_pane = fx.split_unmarked_pane(&window);
     let pinned = fx.pin(&window);
 
-    dispatch::restore_pinned_pane(&pinned, &window, &fx.server.runner())
+    dispatch::restore_pinned_pane(&pinned, &window, None, &fx.server.runner())
         .expect("the window the pane came from is not a duplicate");
 
     assert_eq!(fx.server.count_windows_named(window.as_str()), 1);
@@ -965,7 +965,7 @@ fn exit_without_a_leftover_window_breaks_the_pane_out() {
     let window = fx.bare_agent_window(TASK_ID);
     let pinned = fx.pin(&window);
 
-    dispatch::restore_pinned_pane(&pinned, &window, &fx.server.runner()).expect("unpin");
+    dispatch::restore_pinned_pane(&pinned, &window, None, &fx.server.runner()).expect("unpin");
 
     assert_eq!(
         fx.server.pane_ids(window.as_str()),
@@ -975,13 +975,34 @@ fn exit_without_a_leftover_window_breaks_the_pane_out() {
 }
 
 #[test]
+fn exit_break_out_carries_the_worktree_dir_to_the_new_window() {
+    // break-pane -n makes a new window, and window options stay with the old
+    // one, so the restored window has no @dispatch_dir unless the exit writes
+    // it (split-pane.allium: AgentWindowSplitStartsInTaskWorktree).
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    tmux::set_window_dispatch_dir(&window, "/work/tree", &fx.server.runner())
+        .expect("seed @dispatch_dir");
+    let pinned = fx.pin(&window);
+
+    dispatch::restore_pinned_pane(&pinned, &window, Some("/work/tree"), &fx.server.runner())
+        .expect("unpin");
+
+    assert_eq!(
+        fx.server.window_option(window.as_str(), "@dispatch_dir"),
+        "/work/tree",
+        "the restored window must keep the split hook's precondition"
+    );
+}
+
+#[test]
 fn exit_still_refuses_a_window_that_does_not_await_the_pane() {
     let Some(fx) = setup_or_skip() else { return };
     let window = fx.bare_agent_window(TASK_ID);
     let pinned = fx.pin(&window);
     let _squatter = fx.bare_agent_window(TASK_ID);
 
-    let err = dispatch::restore_pinned_pane(&pinned, &window, &fx.server.runner())
+    let err = dispatch::restore_pinned_pane(&pinned, &window, None, &fx.server.runner())
         .expect_err("a window from anywhere else is a duplicate");
     assert!(
         format!("{err:#}").contains("already exists"),

@@ -15,6 +15,10 @@ pub enum SplitCommand {
     Exit {
         pane_id: PaneId,
         restore_window: Option<TmuxWindow>,
+        /// The pinned task's worktree, written back as the restored window's
+        /// `@dispatch_dir`: a break-out makes a new window, and window options
+        /// do not travel with the pane.
+        restore_dir: Option<String>,
     },
     Swap {
         task_id: TaskId,

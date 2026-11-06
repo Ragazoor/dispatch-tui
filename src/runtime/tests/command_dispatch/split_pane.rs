@@ -75,6 +75,7 @@ async fn dispatch_split_exit_with_a_window_to_restore_breaks_the_pane_out() {
     h.dispatch(Command::Split(SplitCommand::Exit {
         pane_id: test_pane_id("%2"),
         restore_window: Some(test_tmux_window("task-1")),
+        restore_dir: None,
     }))
     .await;
 
@@ -106,6 +107,7 @@ async fn dispatch_split_exit_without_a_window_kills_the_pane() {
     h.dispatch(Command::Split(SplitCommand::Exit {
         pane_id: test_pane_id("%2"),
         restore_window: None,
+        restore_dir: None,
     }))
     .await;
 

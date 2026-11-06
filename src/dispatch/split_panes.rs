@@ -126,13 +126,25 @@ fn awaits_pane(window: &TmuxWindow, pane_id: &PaneId, runner: &dyn ProcessRunner
 /// was pinned from (tagged by `drain_pinned_from_window`); any other window under
 /// the name is a duplicate and the break's refusal is returned unchanged. See
 /// ExitSplitMode and RefuseExitSplitModeOntoLiveWindow in
-/// docs/specs/split-pane.allium.
+/// docs/specs/split-pane.allium. A break-out writes `worktree` as the new
+/// window's `@dispatch_dir`; a rejoined window kept its own.
 pub fn restore_pinned_pane(
     pane_id: &PaneId,
     window: &TmuxWindow,
+    worktree: Option<&str>,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
     let Err(refused) = tmux::break_pane_to_window(pane_id, window, runner) else {
+        // break-pane -n makes a new window, and window options stay behind
+        // with the old one, so the split hook's @dispatch_dir must be written
+        // again (AgentWindowSplitStartsInTaskWorktree in
+        // docs/specs/split-pane.allium). Best-effort: the pane is already
+        // home, and a missing option only leaves later user splits uncorrected.
+        if let Some(dir) = worktree {
+            if let Err(e) = tmux::set_window_dispatch_dir(window, dir, runner) {
+                tracing::warn!(%window, error = %e, "failed to restore @dispatch_dir after break-out");
+            }
+        }
         return Ok(());
     };
     if awaits_pane(window, pane_id, runner) {

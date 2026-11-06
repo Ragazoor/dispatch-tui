@@ -1588,7 +1588,11 @@ rule AgentWindowSplitStartsInTaskWorktree {
         -- in a per-window tmux user option, @dispatch_dir, set when the window
         -- is created. A rename alone never changes it, which is why
         -- SwapSplitPane's "@dispatch_dir rewrite" guidance above rewrites it,
-        -- so this keeps holding across a swap's rename too.
+        -- so this keeps holding across a swap's rename too. An exit that
+        -- breaks the pinned pane out makes a new window, which carries no
+        -- window options, so the exit writes @dispatch_dir on it again
+        -- (src/dispatch/split_panes.rs::restore_pinned_pane); a pane that
+        -- rejoins its leftover window finds the option already there.
         --
         --   1. Splits dispatch makes itself (the agent-tree companion pane) pass
         --      `split-window -c <worktree>`, so those panes are correct by

@@ -231,7 +231,7 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-    rt.exec_exit_split_mode(&test_pane_id("%2"), Some(&test_tmux_window("task-1")))
+    rt.exec_exit_split_mode(&test_pane_id("%2"), Some(&test_tmux_window("task-1")), None)
         .await
         .unwrap();
     let calls = mock.recorded_calls();
@@ -258,7 +258,7 @@ async fn exec_exit_split_mode_without_restore_kills_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-    rt.exec_exit_split_mode(&test_pane_id("%2"), None)
+    rt.exec_exit_split_mode(&test_pane_id("%2"), None, None)
         .await
         .unwrap();
     let calls = mock.recorded_calls();
@@ -659,7 +659,7 @@ mod split_mode_via_msg_tx {
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-        rt.exec_exit_split_mode(&test_pane_id("%2"), Some(&test_tmux_window("task-1")))
+        rt.exec_exit_split_mode(&test_pane_id("%2"), Some(&test_tmux_window("task-1")), None)
             .await
             .unwrap();
 
@@ -687,7 +687,7 @@ mod split_mode_via_msg_tx {
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-        rt.exec_exit_split_mode(&test_pane_id("%2"), None)
+        rt.exec_exit_split_mode(&test_pane_id("%2"), None, None)
             .await
             .unwrap();
 
@@ -851,6 +851,7 @@ mod quit_awaits_split_restore {
             Command::Split(crate::tui::commands::SplitCommand::Exit {
                 pane_id: test_pane_id("%2"),
                 restore_window: Some(test_tmux_window("task-1")),
+                restore_dir: None,
             }),
             &mut app,
             &rt,

@@ -79,18 +79,25 @@ impl TuiRuntime {
         &self,
         pane_id: &PaneId,
         restore_window: Option<&TmuxWindow>,
+        restore_dir: Option<&str>,
     ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
         let pane_id = pane_id.clone();
         let restore_window = restore_window.cloned();
+        let restore_dir = restore_dir.map(str::to_owned);
         tokio::task::spawn_blocking(move || {
             // Logged as well as reported on `msg_tx`, because on the quit path
             // the event loop has already returned and nothing drains `msg_rx` —
             // the error would vanish, leaving the user with a pinned agent's
             // pane still inside the board's window and no trace of why.
             if let Some(window_name) = restore_window {
-                if let Err(e) = dispatch::restore_pinned_pane(&pane_id, &window_name, &*runner) {
+                if let Err(e) = dispatch::restore_pinned_pane(
+                    &pane_id,
+                    &window_name,
+                    restore_dir.as_deref(),
+                    &*runner,
+                ) {
                     let error = format!("Break pane failed: {e:#}");
                     tracing::warn!(pane_id = %pane_id, window = %window_name, "{error}");
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(

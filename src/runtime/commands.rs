@@ -120,7 +120,12 @@ fn dispatch_split(
         Exit {
             pane_id,
             restore_window,
-        } => rt.track_split_restore(rt.exec_exit_split_mode(&pane_id, restore_window.as_ref())),
+            restore_dir,
+        } => rt.track_split_restore(rt.exec_exit_split_mode(
+            &pane_id,
+            restore_window.as_ref(),
+            restore_dir.as_deref(),
+        )),
         Swap {
             task_id,
             new_window,
