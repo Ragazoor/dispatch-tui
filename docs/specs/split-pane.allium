@@ -395,10 +395,10 @@ rule ExitSplitMode {
 
     let pinned = split_pane.pinned_task
 
-    ensures: split_pane.active = false
-    ensures: split_pane.pane = null
-    ensures: split_pane.pinned_task = null
-    ensures: split_pane.focused = true
+    -- Issuing the exit changes no split_pane field. active, pane, pinned_task
+    -- and focused reset only when tmux confirms the pane is gone
+    -- (SplitPaneClosedResets), so a refused or unanswered exit leaves a pane
+    -- that a later [s] can still act on.
     ensures:
         if pinned != null:
             -- The pinned agent is returned to a standalone tmux window
@@ -406,6 +406,8 @@ rule ExitSplitMode {
             -- back into the window it was pinned from when that window is
             -- still there awaiting it. Its session is preserved.
             TaskWindowRestored(task: pinned, window: current_agent(pinned).tmux_window)
+        else:
+            SplitPaneKilled(pane: split_pane.pane)
 
     @guidance
         -- Exit destroys the split-pane UI, not the agent. With a task pinned,
@@ -438,11 +440,17 @@ rule ExitSplitMode {
 rule SplitPaneExitStarted {
     when: ExitSplitMode()
 
+    -- The same guard ExitSplitMode and RefuseExitSplitModeOntoLiveWindow
+    -- share: an exit with no open pane issues no tmux work, so it counts
+    -- nothing and no settle follows it.
+    requires: split_pane.active = true
+    requires: split_pane.pane != null
+
     ensures: split_pane.restores_in_flight = split_pane.restores_in_flight + 1
 
     @guidance
-        -- Deliberately unguarded, and therefore the one rule on this trigger
-        -- that fires for BOTH outcomes below. The tmux work is issued before
+        -- Guarded on an open pane only, not on the outcome, and therefore the
+        -- one rule on this trigger that fires for BOTH outcomes below. The tmux work is issued before
         -- anyone knows which outcome it has: whether the pinned task's window
         -- name is free is a question only tmux can answer, and it answers it
         -- while the rearrangement is already under way. Attaching the count to
@@ -470,15 +478,12 @@ rule RefuseExitSplitModeOntoLiveWindow {
                   pane: split_pane.pane)
 
     let pinned = split_pane.pinned_task
-    let pane = split_pane.pane
 
     -- Nothing about the pane changes. Split mode stays active, the task stays
     -- pinned, and the pane keeps its contents. The tmux attempt still happened
     -- and is still counted by SplitPaneExitStarted above -- what is refused is
-    -- the break, not the asking.
-    ensures: split_pane.active = true
-    ensures: split_pane.pinned_task = pinned
-    ensures: split_pane.pane = pane
+    -- the break, not the asking. The operator is told why.
+    ensures: UserInformed(about: window_name_taken, task: pinned)
 
     @guidance
         -- Breaking the pane out would give tmux a second window under the
@@ -519,8 +524,8 @@ rule RefuseExitSplitModeOntoLiveWindow {
         -- once they have closed whichever of the two duplicates they don't
         -- want. Quitting is not allowed to block on resolving the conflict,
         -- and the alternatives available at that moment are the same two this
-        -- rule already rejects for the toggle. That re-attempt is what `split_pane.pane = pane`
-        -- above is load-bearing for — the board keeps the pane id until
+        -- rule already rejects for the toggle. That re-attempt is why no exit
+        -- clears split_pane.pane (ExitSplitMode) — the board keeps the pane id until
         -- SplitPaneClosed confirms tmux really moved the pane, never on the
         -- optimistic assumption that issuing the exit was the same as
         -- completing it. Clearing it early leaves split mode active with no
