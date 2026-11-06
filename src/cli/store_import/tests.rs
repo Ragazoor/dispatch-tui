@@ -65,6 +65,7 @@ impl StoreSpawner for FakeSpawner {
                 }
             });
         }
+        self.starts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         // Prints only if nothing stops it, so a test that reads its
         // output to the end learns both that it exited and how.
         let mut child = Command::new("sh")
