@@ -1622,6 +1622,9 @@ rule ReleaseClaimOfFailedRequest {
             task.status = backlog
             task.sub_status = default_sub_status(backlog)
             current_agent(task).last_pre_tool_use_at = null
+            -- agents.allium: EndAgentWhenLaunchFails ends the task's current
+            -- agent as launch_failed in this same write.
+            FailedDispatchReleasedClaim(task: task)
     -- The epic status rollup for the task's epic chain, in the same reducer,
     -- whether or not the release applied. Every failure reaches it: a
     -- reported one, the backstop, a host restart. A deleted task has no chain
@@ -1631,9 +1634,6 @@ rule ReleaseClaimOfFailedRequest {
             RecalculateEpicStatus(task.epic)
 
     @guidance
-        -- When the release applies, the same write ends the task's current
-        -- agent as launch_failed (agents.allium: EndAgentWhenLaunchFails).
-        --
         -- The old release_backlog_claim, applied by the module to every
         -- failure: a reported one, a timeout, a host restart, a delete, a
         -- close (CloseFailsOpenRequests; the task is already Done by then, so

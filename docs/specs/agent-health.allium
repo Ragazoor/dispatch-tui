@@ -3,8 +3,12 @@
 --
 -- Scope: Classification of tmux pane activity, crashed-agent detection,
 --        notifications (needs-input, review), and Claude Code hook handlers.
+-- Includes: the tmux liveness surface that provides WindowGone, which
+--           agent-tree.allium and pr-workflow.allium consume qualified
+--           (`agent_health/WindowGone`); the hook delivery surface.
 -- Excludes: Task lifecycle (see tasks.allium); MCP tools (see mcp-task-tools.allium);
---           dispatch and retry (see dispatch.allium).
+--           dispatch and retry (see dispatch.allium); ending an agent
+--           (agents.allium).
 
 use "./core.allium" as core
 use "./settings.allium" as settings
@@ -14,6 +18,8 @@ use "./settings.allium" as settings
 ------------------------------------------------------------
 
 config {
+    -- How long after the last PreToolUse hook a running task still reads
+    -- as active (ClassifyAgentActivity).
     active_threshold: Duration = 10.minutes
 }
 
@@ -38,8 +44,8 @@ rule ClassifyAgentActivity {
                 task.sub_status = stale
 
     @guidance
-        -- config.active_threshold (default 10 minutes) is the window after
-        -- the last PreToolUse hook before a task is considered Stale.
+        -- config.active_threshold is the window after the last PreToolUse
+        -- hook before a task is considered Stale.
         -- Crashed and Conflict are orthogonal — set by DetectCrashedAgent
         -- and conflict detectors respectively, never overridden here.
         -- The wallclock Staleness enum (Fresh/Aging/Stale at 3d/7d) is
@@ -53,7 +59,7 @@ rule ClassifyAgentActivity {
         -- unconditional on the source status: a manual Backlog→Running move
         -- provisions no worktree, so the stamp has no observable effect there
         -- (both this classifier and DetectCrashedAgent only consider tasks
-        -- with a tmux_window). Without seeding on the manual Review→
+        -- with a window). Without seeding on the manual Review→
         -- Running path, a task whose Stop hook cleared the timestamp would
         -- be classified Stale on the very next tick — and because the card
         -- derives its minute label from the same timestamp, it would render
@@ -80,15 +86,15 @@ rule ClassifyAgentActivity {
         -- of the task, never re-impose the snapshot it submitted. Re-imposing
         -- the snapshot would carry its stale last_pre_tool_use_at along and
         -- produce the same Stale flick in memory that omitting the column
-        -- from the write prevents in the database. Such a write-back is also
+        -- from the write prevents in the store. Such a write-back is also
         -- a no-op for a task no longer on the board, so it cannot resurrect
         -- one that was deleted while the write was in flight.
         -- Card label: when sub_status = stale, the card renders the idle
         -- time as "stale · Xm" where X = now - last_pre_tool_use_at. If
-        -- last_pre_tool_use_at is null (legacy pre-v50 rows, or a transient
-        -- window before the seed write commits), the card renders just
-        -- "stale" with no minute suffix rather than "stale · 0m".
-        -- Only tasks with a live tmux_window are classified (tasks without
+        -- last_pre_tool_use_at is null (an agent that has never tooled, or a
+        -- transient window before the seed write commits), the card renders
+        -- just "stale" with no minute suffix rather than "stale · 0m".
+        -- Only tasks with a live window are classified (tasks without
         -- one have no running agent to observe).
         -- Live subagents outrank the staleness threshold but lose to
         -- needs_input: a permission prompt genuinely needs a human even
@@ -105,20 +111,13 @@ rule ClassifyAgentActivity {
         -- HookNotification's guidance for the full argument.
         --
         -- Backgrounded shells (Bash tool with run_in_background = true) are
-        -- deliberately NOT tracked here or anywhere else in this spec. #4187
-        -- added live_shells/ShellEntry/stale_shell for exactly this purpose;
-        -- #4965 removed all of it after finding the tracking was built on an
-        -- assumption that doesn't hold: Claude Code fires a hook for a
-        -- backgrounded shell only when the agent explicitly polls it
-        -- (BashOutput/TaskOutput) or kills it (KillBash/TaskStop), never when
-        -- the shell exits on its own. A task whose agent starts a background
-        -- shell and never checks on it again keeps an inflated count
-        -- forever — confirmed live on task #4913, where the recorded count
-        -- was 5 while every one of those shells had already exited. There is
-        -- no reliable signal available to a hook-driven design to fix this,
-        -- so the feature was dropped rather than patched again. See
-        -- docs/superpowers/specs/2026-08-15-shell-visibility-design.md for
-        -- the original (now-retired) design.
+        -- deliberately NOT tracked here or anywhere else in this spec. Claude
+        -- Code fires a hook for a backgrounded shell only when the agent
+        -- explicitly polls it (BashOutput/TaskOutput) or kills it
+        -- (KillBash/TaskStop), never when the shell exits on its own. A count
+        -- kept from those hooks inflates forever for a task whose agent starts
+        -- a background shell and never checks on it again, and no hook-driven
+        -- signal can correct it.
         -- Card label: an Active running task with live_subagents = 0 renders
         -- just "running". A positive count appends the subagent count:
         -- "running · 1 agent" (singular) or "running · N agents" for N > 1
@@ -131,16 +130,15 @@ rule DetectCrashedAgent {
     let agent = current_agent(task)
 
     requires: task.status = running
+    requires: task.is_locally_owned
 
     ensures: task.sub_status = crashed
-    ensures: agent.tmux_window = null
     ensures:
-        for entry in core/SubagentEntries where agent = agent:
-            not exists entry
-    ensures: agent.live_subagents = 0
-    ensures: agent.stop_pending = false
+        if exists agent:
+            agent.tmux_window = null
+    ensures: SubagentsVoided(task: task)
     ensures:
-        if notifications_enabled:
+        if notifications_enabled():
             DesktopNotification(
                 task: task,
                 urgency: urgent,
@@ -155,45 +153,79 @@ rule DetectCrashedAgent {
         -- host's board is the only one that may mark it crashed. A task with
         -- no host counts as local, as core/Task.host says.
         --
-        -- Clears every SubagentEntry for the task and resets live_subagents
-        -- to 0, but does NOT run the HookSubagentStop drain path even if
-        -- stop_pending was set. This rule already assigns sub_status =
-        -- crashed; draining to Review in the same write would leave the
+        -- Clears every SubagentEntry for the agent and resets live_subagents
+        -- to 0 without the drain path, even if stop_pending was set
+        -- (VoidSubagentsAndPendingStop). This rule already assigns sub_status
+        -- = crashed; draining to Review in the same write would leave the
         -- task Crashed-and-in-Review. Crashed is the more informative
         -- state and wins. stop_pending is still cleared, so the bit cannot
         -- survive into the next session and fire a spurious flip later.
-        -- Keeping the crash out of Review does not depend on that clear,
-        -- nor on the order in which anything evaluates. A deferred Stop is
-        -- applied only inside the write that drains the count to zero (see
-        -- HookSubagentStop), and this rule's clear is the non-draining kind,
-        -- which never assigns status. So there is no separate step that
-        -- could observe a crashed task carrying the bit and flip it.
-        -- Triggered by the WindowGone message, which is sent when the
-        -- runtime detects that the task's tmux window no longer exists.
-        -- The tmux_window reference is cleared by the same write that sets
+        -- A deferred Stop is applied only inside the write that drains the
+        -- count to zero (see HookSubagentStop), and this clear is the
+        -- non-draining kind, which never assigns status. So there is no
+        -- separate step that could observe a crashed task carrying the bit
+        -- and flip it.
+        -- The crash pauses the agent, it does not end it (agents.allium, A7):
+        -- RetryResume brings the same agent back.
+        -- The window reference is cleared by the same write that sets
         -- crashed: the window it named is gone by definition, and keeping the
         -- reference would only make the next tick re-check (and re-report) a
         -- window that cannot come back. Nothing downstream needs the name — the
         -- ConfirmRetry prompt labels itself from sub_status (crashed vs stale),
         -- and RetryResume kills an old window only when one is still referenced.
-        -- Recovery from Crashed happens via RetryResume, which dispatches a
-        -- fresh agent and resets sub_status to active.
+        -- Recovery from Crashed happens via RetryResume, which resumes the
+        -- agent and resets sub_status to active.
         -- ClassifyAgentActivity intentionally skips Crashed and
         -- Conflict so the human-actionable state is not silently masked
         -- by stale hook timestamps.
-        -- For non-running tasks (e.g. review tasks), window closure
-        -- silently clears agent.tmux_window = null without changing
-        -- sub_status or sending notifications. This is the normal exit
-        -- path for review agents and detached sessions.
-        -- A tmux query failure (e.g. a transient error checking whether the
-        -- window exists) is never treated as the window being gone: WindowGone
-        -- is only emitted on a definitive absence, so a tmux hiccup can never
-        -- trigger DetectCrashedAgent.
-        -- The split-pinned task is exempt: while the split pane is active
-        -- its window has been absorbed into the pane by join-pane, so it
-        -- is no longer a standalone window. Both the tick that collects
-        -- windows to check and this rule's entry point skip that task, so
-        -- pinning never produces a spurious crash (see split-pane.allium).
+        -- A task that is not running is ForgetWindowOfStoppedAgent's.
+}
+
+-- A window that closes under a task that is not running is the normal end of
+-- a review agent's or a detached session's window. The board forgets the
+-- window and nothing else: no sub_status change, no notification, no
+-- subagent clear.
+rule ForgetWindowOfStoppedAgent {
+    when: WindowGone(task)
+    let agent = current_agent(task)
+
+    requires: task.status != running
+    requires: task.is_locally_owned
+    requires: exists agent
+
+    ensures: agent.tmux_window = null
+
+    @guidance
+        -- src/tui/update/agent.rs::handle_window_gone persists the task with
+        -- its window released. A stopped task holds no deferred Stop
+        -- (core.allium: PendingStopOnlyWhileRunning), so there is none to
+        -- clear.
+}
+
+-- The non-draining subagent clear: every entry of the task's current agent
+-- goes, the count reads zero, and a deferred Stop is voided rather than
+-- applied. Used where the caller owns the resulting status, or where the turn
+-- that deferred the Stop is over: DetectCrashedAgent and
+-- ClearSubagentsOnSessionStart. With no current agent there is nothing to
+-- clear (A15).
+rule VoidSubagentsAndPendingStop {
+    when: SubagentsVoided(task)
+    let agent = current_agent(task)
+
+    requires: exists agent
+
+    ensures:
+        for entry in core/SubagentEntries where agent = agent:
+            not exists entry
+        agent.live_subagents = 0
+        agent.stop_pending = false
+
+    @guidance
+        -- spacetime/module/src/agent_state.rs::subagent_clear_and_void_pending_stop,
+        -- reached from the board through
+        -- src/service/tasks/crud.rs::clear_subagents_no_drain. The dispatch
+        -- claim makes the same clear inside its own transaction
+        -- (store-split.allium: RequestDispatch).
 }
 
 -- == Notifications ==
@@ -204,7 +236,7 @@ rule NotifyNeedsInput {
     requires: task.status = running
 
     ensures:
-        if notifications_enabled:
+        if notifications_enabled():
             DesktopNotification(
                 task: task,
                 urgency: urgent,
@@ -234,7 +266,7 @@ rule NotifyReview {
     when: task: core/Task.status transitions_to review
 
     ensures:
-        if notifications_enabled:
+        if notifications_enabled():
             DesktopNotification(
                 task: task,
                 urgency: normal,
@@ -255,23 +287,26 @@ rule ToggleNotifications {
     when: ToggleNotifications()
 
     ensures:
-        notifications_enabled = not notifications_enabled
         settings/SaveSetting(key: "notifications_enabled",
-            value: bool_text(not notifications_enabled))
+            value: bool_text(not notifications_enabled()))
 
     @guidance
-        -- The N key on the board. The flag flips at once, the status bar
-        -- names the new state, and the new value is saved as this host's
-        -- "notifications_enabled" setting, read back at startup.
+        -- The N key on the board (NotificationKeys). The flag flips at once,
+        -- the status bar names the new state, and the new value is saved as
+        -- this host's "notifications_enabled" setting, read back at startup.
         --
         -- == Black boxes ==
+        -- notifications_enabled() is this host's "notifications_enabled"
+        -- setting, or core/config.notifications_enabled when the host has
+        -- none. The board holds it in memory and flips its copy at once.
         -- bool_text(b) is the setting's stored text for b: "1" or "0".
 }
 
 -- == Hook-Based Status Transitions ==
 -- A hook's writes to `agent` below happen only when the task has a current
--- agent (agents.allium, decision A15): with none, the agent facts are skipped
--- and the task-side writes (status, sub_status) happen as before.
+-- agent (agents.allium, decision A15). Each rule says so with
+-- `if exists agent` or `requires: exists agent`: with none, the agent facts
+-- are skipped and the task-side writes (status, sub_status) still happen.
 -- Claude Code hooks (PreToolUse, Stop, Notification) bridge the agent
 -- session lifecycle to task status. These rules describe the CLI hook
 -- script `dispatch tui`'s startup configuration check installs (see
@@ -284,13 +319,15 @@ rule HookPreToolUse {
     requires: task.status = running
 
     ensures: task.sub_status = default_sub_status(running)
-    ensures: agent.last_pre_tool_use_at = now
+    ensures:
+        if exists agent:
+            agent.last_pre_tool_use_at = now
 
     @guidance
         -- Fires on every non-dispatch tool use, for both PreToolUse and
         -- PostToolUse events. Both events are handled identically: they
-        -- stamp last_pre_tool_use_at so the task stays Active through the
-        -- 10-minute threshold.
+        -- stamp last_pre_tool_use_at so the task stays Active through
+        -- config.active_threshold.
         --
         -- PostToolUse is registered in addition to PreToolUse so that the
         -- activity timestamp is refreshed after every tool call completes.
@@ -298,7 +335,7 @@ rule HookPreToolUse {
         -- sub-agent call fires PreToolUse at the start and PostToolUse
         -- when the call returns, keeping the parent task's timestamp fresh
         -- between invocations even if a single sub-agent runs longer than
-        -- ACTIVE_THRESHOLD.
+        -- config.active_threshold.
         --
         -- This rule never writes task.status. It is gated to tasks that
         -- are already Running, and is a complete no-op for a task in any
@@ -345,31 +382,31 @@ rule HookStop {
     requires: task.status = running
 
     ensures:
-        if agent.live_subagents > 0:
+        if exists agent and agent.live_subagents > 0:
             agent.stop_pending = true
             agent.stop_pending_at = now
         else:
             task.status = review
             task.sub_status = default_sub_status(review)
-            agent.last_pre_tool_use_at = null
-            agent.last_notification_at = null
-            agent.stop_pending = false
+            if exists agent:
+                agent.last_pre_tool_use_at = null
+                agent.last_notification_at = null
+                agent.stop_pending = false
 
     @guidance
         -- Stop does not fire inside subagents (Claude Code fires
         -- SubagentStop there instead), so a Stop arriving with live
         -- subagents is legitimate — it means the main agent finished its
         -- turn while background subagents keep working. Flipping to Review
-        -- there is what put tasks in Review with work still in flight.
+        -- there would put the task in Review with work still in flight.
         -- Suppressing it here just defers the same effect: HookSubagentStop
         -- (or one of the other drain points) applies it once the last
-        -- subagent drains.
+        -- subagent drains. A task with no current agent holds no subagents,
+        -- so its Stop flips at once (A15).
         --
-        -- The real implementation is two separate conditional UPDATE
-        -- statements in one transaction (src/store/queries/tasks.rs::
-        -- try_record_stop), not a single if/else: a "flip" statement gated
-        -- on live_subagents = 0, and a "defer" statement gated on
-        -- live_subagents > 0.
+        -- The store decides the branch inside one reducer
+        -- (spacetime/module/src/agent_state.rs::try_record_stop): it reads the
+        -- agent's committed count and either flips the task or defers.
         --
         -- The branch is evaluated against the task's committed state as part
         -- of the same atomic write, not against a value read beforehand.
@@ -402,6 +439,8 @@ rule HookSubagentStart {
     when: SubagentStart(task, agent_id, session_id)
     let agent = current_agent(task)
 
+    requires: exists agent
+
     ensures:
         let existing = core/SubagentEntry{agent, agent_id}
         if exists existing:
@@ -424,11 +463,13 @@ rule HookSubagentStop {
     when: SubagentStop(task, agent_id, session_id)
     let agent = current_agent(task)
 
+    requires: exists agent
+
     ensures:
         not exists core/SubagentEntry{agent, agent_id}
         let live = core/SubagentEntries where agent = agent
         agent.live_subagents = live.count
-        if agent.live_subagents = 0 and agent.stop_pending and task.status = running:
+        if live.count = 0 and agent.stop_pending and task.status = running:
             task.status = review
             task.sub_status = default_sub_status(review)
             agent.last_pre_tool_use_at = null
@@ -505,18 +546,16 @@ rule HookSubagentStop {
         --     the prompt). Clearing moves away from the state, and leaving
         --     it alone cannot enter one it was not already in.
         -- No write therefore commits into it, regardless of how many hook
-        -- processes participate or in what order they commit.
-        --
-        -- The argument holds going forward, not retroactively: it is an
-        -- invariant over the writes as they are now, and an earlier revision
-        -- decided the same branches from a prior read rather than at write
-        -- time, which could strand a task. Rows written before the invariant
-        -- held are resolved once, on upgrade.
+        -- processes participate or in what order they commit. The argument
+        -- rests on every branch being decided at write time; a branch decided
+        -- from a prior read could strand a task.
 }
 
 rule SubagentSessionFence {
     when: SubagentStart(task, _, incoming_session_id) or SubagentStop(task, _, incoming_session_id)
     let agent = current_agent(task)
+
+    requires: exists agent
 
     ensures:
         for entry in core/SubagentEntries where agent = agent and session_id != incoming_session_id:
@@ -532,13 +571,8 @@ rule SubagentSessionFence {
 
 rule ClearSubagentsOnSessionStart {
     when: SessionStart(task)
-    let agent = current_agent(task)
 
-    ensures:
-        for entry in core/SubagentEntries where agent = agent:
-            not exists entry
-        agent.live_subagents = 0
-    ensures: agent.stop_pending = false
+    ensures: SubagentsVoided(task: task)
 
     @guidance
         -- Fires when a fresh claude process starts, a session is resumed,
@@ -547,7 +581,8 @@ rule ClearSubagentsOnSessionStart {
         -- SessionStart payload carries no previous session to compare
         -- against, unlike SubagentStart/SubagentStop.
         --
-        -- Does NOT run the drain path. A new, resumed or cleared session
+        -- Does NOT run the drain path (VoidSubagentsAndPendingStop). A new,
+        -- resumed or cleared session
         -- means the previous turn is over, so a Stop that turn deferred is
         -- stale: it is voided, not applied. Resume makes this concrete —
         -- RetryResume (dispatch.allium) deliberately keeps the task Running
@@ -575,10 +610,11 @@ rule HookUserPromptSubmit {
 
     ensures: task.status = running
     ensures: task.sub_status = default_sub_status(running)
-    ensures: agent.last_pre_tool_use_at = now
     ensures:
-        if agent.stop_pending_at = null or agent.stop_pending_at < now:
-            agent.stop_pending = false
+        if exists agent:
+            agent.last_pre_tool_use_at = now
+            if agent.stop_pending_at = null or agent.stop_pending_at < now:
+                agent.stop_pending = false
 
     @guidance
         -- A human resuming the conversation voids the Stop deferred by the
@@ -654,19 +690,21 @@ rule HookNotification {
 
     ensures:
         if (kind = null or kind in {permission_prompt, elicitation_dialog})
-            or (kind = idle_prompt and agent.live_subagents = 0):
-            -- Raise: agent is genuinely blocked (or the payload predates the
-            -- notification_type field, in which case we preserve the historical
-            -- "always needs_input" behaviour as a safe default).
+            or (kind = idle_prompt and (not exists agent or agent.live_subagents = 0)):
+            -- Raise: agent is genuinely blocked (or the payload carries no
+            -- notification_type, which reads as "needs input" as a safe
+            -- default).
             task.sub_status = needs_input
-            agent.last_notification_at = now
+            if exists agent:
+                agent.last_notification_at = now
         else if kind in {elicitation_complete, elicitation_response}:
             -- Clear: an elicitation just resolved, so the block is over. Mirror
             -- the HookPreToolUse resume path — return to active and drop the
             -- notification timestamp — so the card flips back the instant the
             -- user answers, without waiting for the next PreToolUse.
             task.sub_status = default_sub_status(running)
-            agent.last_notification_at = null
+            if exists agent:
+                agent.last_notification_at = null
         -- Ignore: no branch matches, so sub_status and last_notification_at are
         -- left untouched (no-op). Two cases land here: kind = auth_success,
         -- which is informational only, and an idle_prompt raised while the
@@ -677,11 +715,14 @@ rule HookNotification {
         -- shell hook (task-status-hook) reads the payload's `notification_type`
         -- and forwards it as an optional `--kind` argument:
         --   dispatch hook <id> notification [--kind <notification_type>]
-        -- `NotificationWrite::from_kind` (models/agent_events.rs) resolves the kind
-        -- alone into the write to apply; record_hook_event hands that straight
-        -- to `record_notification` (db/queries/tasks.rs), which applies it as
-        -- one conditional statement. See the branches above. `kind` is
-        -- core/NotificationKind.
+        -- `NotificationWrite::from_kind` (src/models/agent_events.rs) resolves
+        -- the kind alone into the write to apply; the board hands that
+        -- straight to the store
+        -- (src/store/queries/tasks.rs::record_notification), whose reducer
+        -- (spacetime/module/src/agent_state.rs::record_notification) applies
+        -- it in one write. See the branches above. `kind` is
+        -- core/NotificationKind. A task with no current agent holds no
+        -- subagents, so its idle_prompt raises (A15).
         --
         -- Evaluation time. The idle_prompt branch is the only one that reads
         -- task state, and it is evaluated against the task's committed state as
@@ -726,17 +767,12 @@ rule HookNotification {
         -- waiting on its own subagents -- so raising needs_input there
         -- reports a block that does not exist.
         --
-        -- #4187 widened this same suppression to cover live_shells too
-        -- (backgrounded Bash shells), fixing an identical false-Blocked report
-        -- observed on tasks #4608 and #4478. #4965 removed live_shells
-        -- entirely -- see ClassifyAgentActivity's guidance -- which reopens
-        -- that false-Blocked case for a task whose only live background work
-        -- is a shell, not a subagent. There is no fix available here: the
-        -- same missing signal that makes live_shells an unreliable count
-        -- (Claude Code never says when a backgrounded shell ends on its own)
-        -- makes "is a shell still running" equally unanswerable at
-        -- notification time, so this rule cannot condition on it without
-        -- reintroducing the bug #4965 removed it for.
+        -- A backgrounded Bash shell is live background work too, but this rule
+        -- does not suppress for it, so a task whose only live background work
+        -- is a shell can read a false Blocked. There is no fix available here:
+        -- Claude Code never says when a backgrounded shell ends on its own
+        -- (see ClassifyAgentActivity's guidance), so "is a shell still
+        -- running" is unanswerable at notification time.
         --
         -- Not stamping last_notification_at is the load-bearing half of the
         -- suppression, not an incidental one. ClassifyAgentActivity reads only
@@ -776,7 +812,7 @@ rule HookNotification {
         --
         -- Backward compatibility: `--kind` is optional. Hook scripts (or older
         -- Claude Code payloads) that omit it fall into the raise branch via the
-        -- `kind = null` guard, preserving the pre-existing behaviour exactly.
+        -- `kind = null` guard and raise.
         --
         -- CLI surface note: `dispatch hook <id> notification [--kind K]` is a
         -- non-MCP, hook-driven entry point implemented by cmd_hook. Unlike the
@@ -787,26 +823,23 @@ rule HookNotification {
 
 rule HookPeerMessageSent {
     -- Fires when a task's agent calls Claude Code's native `SendMessage`
-    -- tool (task #4098). Dispatch never performs this delivery itself —
+    -- tool. Dispatch never performs this delivery itself —
     -- agents message each other directly, addressed by the agent name
     -- dispatch gives the session at launch (agents.allium:
     -- AgentSessionIsNamedAfterTheAgent; `task-<id>` for a session started
     -- before agents and not resumed since) — this rule only observes the
     -- call, via the same Claude Code hook pipeline as HookPreToolUse /
     -- HookNotification, to drive the TUI flash and reconstruct an audit
-    -- trail. See mcp-task-tools.allium's note on why `send_message` (the
-    -- former MCP tool) was replaced by this.
+    -- trail.
     -- SendMessageObserved is PostToolUse already filtered to tool = "SendMessage"
     -- — a named, pre-filtered trigger rather than a raw PostToolUse annotated
     -- with a literal tool name (which isn't valid trigger syntax for a
     -- listening rule; literal annotations are only for trigger *emissions*).
-    -- It is now the only trigger of that shape: agent-tree.allium had one, but
-    -- retired it when its pane stopped reading tool calls and started asking
-    -- git instead.
+    -- It is the only trigger of that shape.
     when: SendMessageObserved(sender, to, message)
 
     -- `to` is an agent name (current or ended), or a `task-<id>` name.
-    let target = core/Task.find_by_session_name(to)
+    let target = task_for_session_name(to)
 
     ensures: sender.last_peer_message_sent_at = now
     ensures:
@@ -820,7 +853,7 @@ rule HookPeerMessageSent {
         -- payload shape). It may carry a disambiguating `" [ref]"` suffix
         -- per `ListAgents`' listing format.
         -- `TaskService::resolve_peer_message_target` (src/service/tasks/crud.rs
-        -- — the `core/Task.find_by_session_name` of the rule body above)
+        -- — the black box `task_for_session_name` of the rule body above)
         -- strips it, matches the agent names first, and falls back to
         -- `parse_peer_message_target_name`, which delegates to
         -- `TmuxWindow::task_id` (src/models/tmux_window.rs), the same
@@ -865,7 +898,7 @@ rule HookPeerMessageSent {
 
 rule UndeliveredPeerMessage {
     -- Fires when a task's agent calls `SendMessage` and the send fails
-    -- because nothing answers to the name (task #98782). A dispatch agent
+    -- because nothing answers to the name. A dispatch agent
     -- whose session is not running is not reachable, so the send fails; the
     -- sender is then told how to wake it, or why it cannot be woken. Dispatch
     -- does not resume the target itself: the sender chooses to, by calling
@@ -876,7 +909,7 @@ rule UndeliveredPeerMessage {
     -- `to` is an agent name (current or ended), or a `task-<id>` name. An
     -- ended agent's name resolves to its task, and the task's CURRENT agent
     -- is the one a resume wakes; the hint names it.
-    let target = core/Task.find_by_session_name(to)
+    let target = task_for_session_name(to)
 
     ensures: sender.last_peer_message_sent_at = now
     ensures:
@@ -956,44 +989,44 @@ rule UndeliveredPeerMessage {
 -- Surfaces
 ------------------------------------------------------------
 
+-- The bridge every rule in this file is triggered through. Claude
+-- Code fires its lifecycle hooks (PreToolUse, PostToolUse, Stop,
+-- Notification, UserPromptSubmit, SessionStart, SubagentStart,
+-- SubagentStop, and the PostToolUse observer for SendMessage) in the
+-- agent's own session; the hook script
+-- `dispatch tui`'s startup configuration check installs (see
+-- startup.allium) resolves the task and forwards the event to the board.
+--
+-- The task is the one the agent was launched for: dispatch sets
+-- DISPATCH_TASK_ID in the agent's window environment on every launch,
+-- fresh or resumed, and the script uses it. Only when it is absent (a
+-- session not started by dispatch, or one started before this variable)
+-- does the script fall back to the task id at the front of the worktree's
+-- branch name, then to a `<id>-` segment of the cwd. An agent that
+-- checks out another task's branch therefore cannot stamp, stop or
+-- gate that task.
+--
+-- Each firing is its own short-lived process, and there are many of them:
+-- a hook runs on every tool call of every live session. What that process
+-- is allowed to touch is therefore the whole subject of this surface.
+--
+-- Two further commands travel this way as questions rather than
+-- observations: the PR gate (pr-workflow.allium: PrLearningsGate), and
+-- `hook-peer-message --undelivered` (UndeliveredPeerMessage), whose
+-- answer is printed as the PostToolUse hook's additionalContext for the
+-- sender to read. HookNeverOpensTheDatabase covers both; the outcome
+-- guarantees below do not, because an event they could merely drop is
+-- not what they have.
+--
+-- A second travels this way from the agent-tree companion and diff
+-- panes rather than from a hook: ObservedEvent::PaneKey, one per
+-- keypress that takes effect in a pane, which the board records as
+-- keybinding usage (keybindings.allium: PanesRecordUsageLikeTheBoard).
+-- It is not a task change, so HookEventsPushALiveRefresh does not apply
+-- to it; an unreachable board drops it as it drops a hook event, with a
+-- warning from the pane rather than a failed hook.
 surface HookDelivery {
-    facing _: core/Operator
-    -- prose: The bridge every rule in this file is triggered through. Claude
-    -- Code fires its lifecycle hooks (PreToolUse, PostToolUse, Stop,
-    -- Notification, UserPromptSubmit, SessionStart, SubagentStart,
-    -- SubagentStop, and the PostToolUse observer for SendMessage) in the
-    -- agent's own session; the hook script
-    -- `dispatch tui`'s startup configuration check installs (see
-    -- startup.allium) resolves the task and forwards the event to the board.
-    --
-    -- The task is the one the agent was launched for: dispatch sets
-    -- DISPATCH_TASK_ID in the agent's window environment on every launch,
-    -- fresh or resumed, and the script uses it. Only when it is absent (a
-    -- session not started by dispatch, or one started before this variable)
-    -- does the script fall back to the task id at the front of the worktree's
-    -- branch name, then to a `<id>-` segment of the cwd. An agent that
-    -- checks out another task's branch therefore cannot stamp, stop or
-    -- gate that task.
-    --
-    -- Each firing is its own short-lived process, and there are many of them:
-    -- a hook runs on every tool call of every live session. What that process
-    -- is allowed to touch is therefore the whole subject of this surface.
-    --
-    -- Two further commands travel this way as questions rather than
-    -- observations: the PR gate (pr-workflow.allium: PrLearningsGate), and
-    -- `hook-peer-message --undelivered` (UndeliveredPeerMessage), whose
-    -- answer is printed as the PostToolUse hook's additionalContext for the
-    -- sender to read. HookNeverOpensTheDatabase covers both; the outcome
-    -- guarantees below do not, because an event they could merely drop is
-    -- not what they have.
-    --
-    -- A second travels this way from the agent-tree companion and diff
-    -- panes rather than from a hook: ObservedEvent::PaneKey, one per
-    -- keypress that takes effect in a pane, which the board records as
-    -- keybinding usage (keybindings.allium: PanesRecordUsageLikeTheBoard).
-    -- It is not a task change, so HookEventsPushALiveRefresh does not apply
-    -- to it; an unreachable board drops it as it drops a hook event, with a
-    -- warning from the pane rather than a failed hook.
+    facing _: core/HookRunner
 
     -- Whether the board this hook belongs to is reachable.
     let board_reachable = board_accepts_hook_delivery()
@@ -1006,9 +1039,20 @@ surface HookDelivery {
         task_still_exists
 
     provides:
+        PreToolUse(task: core/Task)
+        PostToolUse(task: core/Task)
+        Stop(task: core/Task)
+        SubagentStart(task: core/Task, agent_id: String, session_id: String)
+        SubagentStop(task: core/Task, agent_id: String, session_id: String)
+        SessionStart(task: core/Task)
+        UserPromptSubmit(task: core/Task)
         -- `kind` is the hook payload's notification_type, absent on Claude
         -- Code versions that predate it (HookNotification).
         Notification(task: core/Task, kind: core/NotificationKind?)
+        -- A PostToolUse for Claude Code's SendMessage tool: delivered, or
+        -- failed because nothing answers to `to`.
+        SendMessageObserved(sender: core/Task, to: String, message: String)
+        SendMessageUndelivered(sender: core/Task, to: String, message: String)
 
     @guarantee HooksWriteThroughTheBoard
         -- A hook delivers its event to the running board and never to the
@@ -1059,9 +1103,7 @@ surface HookDelivery {
         -- treating the silence as an absent board. A hook runs inside the
         -- agent's own tool call, which does not proceed until the hook
         -- returns, so an unbounded wait would let one stalled board hang
-        -- every session on the machine. Before hooks delivered this way the
-        -- equivalent bound was the store's own lock timeout; this replaces
-        -- it rather than adding a limit that was not there before.
+        -- every session on the machine.
 
     @guarantee EventIsDroppedWhenTheBoardIsDown
         -- With no board reachable, the hook reports that plainly and fails.
@@ -1069,9 +1111,7 @@ surface HookDelivery {
         -- queued for later. A hook event is a timestamp or a liveness signal
         -- about a session whose board is not running to observe it, and the
         -- board's own tick reclassifies whatever it finds when it comes back
-        -- up. This is a deliberate change from the behaviour that preceded
-        -- it, where each hook wrote to the database whether a board was
-        -- running or not.
+        -- up.
 
     @guarantee MissingTaskSucceeds
         -- A hook whose task no longer exists still succeeds. The hook fires
@@ -1135,10 +1175,45 @@ surface HookDelivery {
         -- one of those.
 }
 
+-- The tmux liveness check. Every tick the board asks tmux which of this
+-- host's running and review tasks still have their window, and reports each
+-- one that does not. agent-tree.allium and pr-workflow.allium consume it
+-- qualified (`agent_health/WindowGone`).
+surface WindowLiveness {
+    facing _: core/Tmux
+
+    provides:
+        WindowGone(task: core/Task)
+
+    @guarantee OnlyADefiniteAbsenceIsGone
+        -- A tmux query failure (e.g. a transient error checking whether the
+        -- window exists) is never reported as the window being gone:
+        -- WindowGone is sent only on a definite absence, so a tmux hiccup can
+        -- never mark an agent crashed.
+
+    @guarantee PinnedWindowIsNotGone
+        -- The split-pinned task is exempt: while the split pane is active its
+        -- window has been absorbed into the pane by join-pane, so it is no
+        -- longer a standalone window. Both the tick that collects windows to
+        -- check and the board's WindowGone handler skip that task, so pinning
+        -- never produces a spurious crash (see split-pane.allium).
+
+    @guidance
+        -- src/runtime/tasks.rs sends TaskMessage::WindowGone; the board
+        -- handles it in src/tui/update/agent.rs::handle_window_gone.
+}
+
+-- The board's key for notifications.
+surface NotificationKeys {
+    facing _: core/Operator
+
+    provides:
+        -- The N key.
+        ToggleNotifications()
+}
+
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
 
--- Q1: Should stale/crashed detection trigger automatic status changes
---     (e.g., moving back to Backlog), or should it remain advisory-only
---     as it is today?
+open question "Should stale/crashed detection trigger automatic status changes (e.g., moving back to Backlog), or should it remain advisory-only as it is today?"

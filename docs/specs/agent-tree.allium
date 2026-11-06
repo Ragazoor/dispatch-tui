@@ -1121,9 +1121,7 @@ rule ShowAgentTreePane {
 rule DiscardAgentTreePaneOnWindowGone {
     -- The companion pane lives inside the agent window. When that window dies,
     -- the pane dies with it, whether or not dispatch asked for it.
-    -- agent-health.allium owns the tmux liveness surface that provides
-    -- WindowGone; until it declares one the checker reports this trigger as
-    -- unreachable.
+    -- agent-health.allium's WindowLiveness surface provides WindowGone.
     when: agent_health/WindowGone(task)
 
     let pane = AgentTreePane{task: task}
