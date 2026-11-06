@@ -77,6 +77,8 @@
 
 use "./core.allium" as core
 use "./startup.allium" as startup
+use "./dispatch.allium" as dispatch
+use "./agent-health.allium" as agent_health
 
 ------------------------------------------------------------
 -- Enumerations
@@ -280,6 +282,10 @@ value AgentCommit {
 -- it, the tasks with a live agent window (is_live_agent), and the tasks
 -- whose agent is detached (core/Task.is_detached), narrowed by the board's
 -- filter (ListsFollowTheBoardFilter), as RefreshAgentTreeAgentList lists them.
+--
+-- Named only as BoardPaneView's return types, PaneView and PaneResumeAnswer
+-- are reported as definition.unused: allium check does not count a bare
+-- contract return type as a use.
 value PaneView {
     -- Never narrowed by the filter: the tree and the commits section of a
     -- pane whose own agent the board hides still show its work.
@@ -540,7 +546,9 @@ entity AgentTreePane {
     -- leaves the list (ForgetPendingResumeJump), so a resume that never
     -- comes up cannot jump the user away later.
     pending_jump: core/Task?
-    -- List reads that showed the pending_jump row still detached (ResumeJumpWaitEnds).
+    -- List reads that showed the pending_jump row still detached since the
+    -- board accepted its resume: counted by RefreshAgentTreeAgentList, reset
+    -- by AgentTreeResumeAccepted, and read by ResumeJumpWaitEnds.
     pending_jump_reads: Integer
 
     -- The task under the agents section's cursor; null when the list is
@@ -621,6 +629,17 @@ entity AgentTreePane {
     -- been split; its appearance is what turns the condition true.
     task_arrived: task_resolution = waiting and board_task(task) != null and board_task(task).worktree != null
     diff_task_arrived: diff_pane != null and diff_task_resolution = waiting and board_task(task) != null and board_task(task).worktree != null
+
+    -- The rows the tree draws: one AgentTreeNode per entry of
+    -- changed_tree(rendered_changes), built exactly as RefreshAgentTree
+    -- builds the nodes it renders. Derived, never stored; the invariants
+    -- about rendered nodes range over it.
+    rendered_nodes: rendered_tree(root, rendered_changes, open_diff_paths)
+
+    -- The diffs the diff pane draws: one FileDiff per open path that the
+    -- selected source touches, built exactly as RefreshAgentTreeDiff builds
+    -- them. Derived, never stored.
+    rendered_diffs: rendered_file_diffs(root, selected_commit, open_diff_paths)
 
     -- A renderer either finds its task or gives up; a new renderer (a show,
     -- a re-split) starts waiting again whatever the last one reached.
@@ -836,7 +855,7 @@ rule SplitAgentTreePaneOnAgentLaunch {
     -- only an agent window does. One rule covers every launch path because they
     -- all emit AgentLaunched: fresh dispatch, research dispatch, quick dispatch,
     -- epic auto-dispatch, resume and retry-resume.
-    when: AgentLaunched(task, mode)
+    when: dispatch/AgentLaunched(task, mode)
 
     requires: current_agent(task).tmux_window != null
     requires: task.worktree != null
@@ -848,10 +867,19 @@ rule SplitAgentTreePaneOnAgentLaunch {
         status: shown,
         tmux_pane: core/TmuxPane.created(),
         last_rendered_at: now,
+        last_diff_rendered_at: now,
+        rendered_changes: [],
+        open_diff_paths: [],
+        diff_pane: null,
+        error_notice: null,
         last_agents_listed_at: now - config.agent_tree_agents_refresh_interval,
         focus: agents,
+        browse_focus: tree,
         listed_agents: [],
         hidden_agent_count: 0,
+        selected_agent: null,
+        pending_jump: null,
+        pending_jump_reads: 0,
         last_commits_listed_at: now - config.agent_tree_commits_refresh_interval,
         listed_commits: [],
         -- Unstaged work is the default source (AgentTreeShowsUnstagedWorkOnly).
@@ -1112,6 +1140,16 @@ rule ShowAgentTreePane {
     ensures: pane.listed_agents = []
     ensures: pane.hidden_agent_count = 0
     ensures: pane.last_agents_listed_at = now - config.agent_tree_agents_refresh_interval
+    ensures: pane.selected_agent = null
+    ensures: pane.pending_jump = null
+    ensures: pane.pending_jump_reads = 0
+
+    -- No tree and no notice until the fresh renderer's first git query. The
+    -- open set was emptied when the pane was hidden
+    -- (KillAgentTreeDiffPaneWithItsTree).
+    ensures: pane.rendered_changes = []
+    ensures: pane.error_notice = null
+    ensures: pane.notice_source = null
 
     -- And the same for the commits section — and the selection goes back to
     -- unstaged work. It is view state, and like focus it does not survive a
@@ -1162,7 +1200,10 @@ rule ShowAgentTreePane {
 rule DiscardAgentTreePaneOnWindowGone {
     -- The companion pane lives inside the agent window. When that window dies,
     -- the pane dies with it, whether or not dispatch asked for it.
-    when: WindowGone(task)
+    -- agent-health.allium owns the tmux liveness surface that provides
+    -- WindowGone; until it declares one the checker reports this trigger as
+    -- unreachable.
+    when: agent_health/WindowGone(task)
 
     let pane = AgentTreePane{task: task}
 
@@ -1184,7 +1225,7 @@ rule DiscardAgentTreePaneOnWindowCleared {
     -- retry-resume.
     when: agent: core/Agent.tmux_window transitions_to null
 
-    let pane = AgentTreePane{task: task}
+    let pane = AgentTreePane{task: agent.task}
 
     requires: exists pane
 
@@ -1263,7 +1304,6 @@ rule AgentTreePaneTaskHasNoWorktree {
 
     ensures: pane.task_resolution = unresolved
     ensures: pane.startup_failure = task_without_worktree_reason(pane.task)
-    ensures: pane.status = shown
 
     @guidance
         -- A row without a worktree is waited out like a row that has not
@@ -1285,15 +1325,13 @@ rule AgentTreePaneTaskNeverArrives {
 
     ensures: pane.task_resolution = unresolved
     ensures: pane.startup_failure = task_not_found_reason(pane.task)
-    ensures: pane.status = shown
 
     @guidance
-        -- pane.status = shown in all three failure outcomes (this rule, its
-        -- no-worktree sibling and the diff pane's pair) is the guarantee, not
-        -- a state change: the renderer keeps running and keeps the pane open.
-        -- Exiting was the bug. A pane that closes itself leaves nothing to
-        -- read; a pane that stays leaves the reason on screen until the user
-        -- has read it and pressed the exit key.
+        -- In all three failure outcomes (this rule, its no-worktree sibling
+        -- and the diff pane's pair) the renderer keeps running and keeps the
+        -- pane open (FailuresNeverCloseThePane). A pane that closes itself
+        -- leaves nothing to read; a pane that stays leaves the reason on
+        -- screen until the user has read it and pressed the exit key.
         --
         -- There is no retry after giving up. The failure is on screen, and
         -- the toggle (ShowAgentTreePane, after a hide) starts a fresh
@@ -1383,6 +1421,7 @@ rule RefreshAgentTree {
     requires: git_changes(pane.root, pane.selected_commit).ok
 
     let changes = git_changes(pane.root, pane.selected_commit).value
+    let notice_was = pane.notice_source
 
     ensures: pane.last_rendered_at = now
     ensures: pane.rendered_changes = changes
@@ -1392,9 +1431,10 @@ rule RefreshAgentTree {
     -- moments ago and survives every refresh until they press the next key; an
     -- agent-list notice belongs to the agents section's own timer, which
     -- clears it when its own read recovers.
-    ensures: pane.error_notice =
-        if old(pane.notice_source) = git_query: null
-        else: old(pane.error_notice)
+    ensures:
+        if notice_was = git_query:
+            pane.error_notice = null
+            pane.notice_source = null
 
     ensures:
         for entry in changed_tree(changes):
@@ -1429,7 +1469,7 @@ rule RefreshAgentTree {
                     -- Read from the pane's open set, which the refresh never
                     -- writes: a tick redraws the marker, it does not decide it.
                     diff_open: entry.kind = file
-                               and pane.open_diff_paths.contains(entry.path)
+                               and entry.path in pane.open_diff_paths
                 }
             )
 
@@ -1674,14 +1714,11 @@ rule AgentTreeGitFailureKeepsLastGoodTree {
     -- immediate retry: a persistently broken git must not spin.
     ensures: pane.last_rendered_at = now
 
-    -- The last good tree stays on screen. Not restated as an assignment
-    -- because the point is the ABSENCE of one — rendered_changes is the only
-    -- input to the tree, and this rule does not touch it.
-    ensures: pane.rendered_changes = old(pane.rendered_changes)
+    -- The last good tree stays on screen: rendered_changes is the only input
+    -- to the tree, and this rule does not touch it.
 
     ensures: pane.error_notice = git_failure_reason(pane.root, pane.selected_commit)
     ensures: pane.notice_source = git_query
-    ensures: pane.status = shown
 
     @guidance
         -- == Why keep the tree rather than blank it ==
@@ -1745,6 +1782,25 @@ rule ExitAgentTreeRenderer {
         -- (ShowAgentTreePane).
 }
 
+rule ExitAgentTreeDiffRenderer {
+    -- q, or Ctrl-C, inside the diff pane stops the diff renderer, and tmux
+    -- closes the pane with it. The tree above is untouched.
+    when: ExitAgentTreeDiffRenderer(user, pane)
+
+    requires: pane.diff_pane != null
+    requires: pane.diff_pane_content = diff
+
+    ensures: pane.diff_pane = null
+
+    @guidance
+        -- The open set is left alone: the diff renderer cannot write it
+        -- (DiffPaneHasNoToggleOfItsOwn). The file stays marked open in the
+        -- tree with no pane to show it, which is the brief break
+        -- DiffPaneExistsWhenSomethingIsOpen allows for a pane the user closed
+        -- by hand. Space on that file closes it; Space on any other file
+        -- opens it and splits a new pane (SplitAgentTreeDiffPane).
+}
+
 rule OpenAgentTreeFileDiff {
     -- Space or Enter on a file node whose diff is not open: open it, in place
     -- of whatever the lower pane was showing — another file's diff, or the
@@ -1753,7 +1809,7 @@ rule OpenAgentTreeFileDiff {
 
     requires: pane.focus = tree
     requires: node.kind = file
-    requires: not pane.open_diff_paths.contains(node.path)
+    requires: node.path not in pane.open_diff_paths
 
     ensures: pane.open_diff_paths = [node.path]
     ensures: AgentTreeDiffOpenSetChanged(pane: pane)
@@ -1797,9 +1853,11 @@ rule CloseAgentTreeFileDiff {
 
     requires: pane.focus = tree
     requires: node.kind = file
-    requires: pane.open_diff_paths.contains(node.path)
+    requires: node.path in pane.open_diff_paths
 
-    ensures: pane.open_diff_paths = old(pane.open_diff_paths).remove(node.path)
+    -- At most one path is open (OneOpenFileAtATime), so closing it empties
+    -- the set.
+    ensures: pane.open_diff_paths = []
     ensures: AgentTreeDiffOpenSetChanged(pane: pane)
 }
 
@@ -1809,7 +1867,7 @@ rule SplitAgentTreeDiffPane {
     -- splits its own the same way: OpenAgentTreeFileInEditor.)
     when: AgentTreeDiffOpenSetChanged(pane)
 
-    requires: not pane.open_diff_paths.is_empty()
+    requires: pane.open_diff_paths.count > 0
     requires: pane.diff_pane = null
 
     ensures: pane.diff_pane = core/TmuxPane.created()
@@ -1872,7 +1930,7 @@ rule ReplaceAgentTreeEditorWithDiff {
     -- respawn-pane -k). Unsaved edits in the editor are lost.
     when: AgentTreeDiffOpenSetChanged(pane)
 
-    requires: not pane.open_diff_paths.is_empty()
+    requires: pane.open_diff_paths.count > 0
     requires: pane.diff_pane != null
     requires: pane.diff_pane_content = editor
 
@@ -1898,7 +1956,7 @@ rule FocusFollowsTheOpenedFile {
     -- when the pane is split or respawned.
     when: AgentTreeDiffOpenSetChanged(pane)
 
-    requires: not pane.open_diff_paths.is_empty()
+    requires: pane.open_diff_paths.count > 0
     requires: pane.diff_pane != null
     requires: pane.diff_pane_content = diff
 
@@ -1972,7 +2030,7 @@ rule CloseAgentTreeDiffPaneWhenEmpty {
     -- Only a pane dispatch created is ever killed.
     when: AgentTreeDiffOpenSetChanged(pane)
 
-    requires: pane.open_diff_paths.is_empty()
+    requires: pane.open_diff_paths.count = 0
     requires: pane.diff_pane != null
     requires: pane.diff_pane_is_ours = true
     -- An editor pane is not killed here: closing a diff says nothing about
@@ -2041,7 +2099,6 @@ rule AgentTreeDiffPaneFailureIsVisible {
 
     ensures: pane.error_notice = reason
     ensures: pane.notice_source = diff_open
-    ensures: pane.status = shown
 
     @guidance
         -- A silent no-op is indistinguishable from a broken key, and the user
@@ -2053,8 +2110,7 @@ rule AgentTreeDiffPaneFailureIsVisible {
         -- gone by the next keypress (see ClearAgentTreeErrorNotice).
         --
         -- The renderer keeps running: a diff pane that cannot be opened must
-        -- not take the tree with it. pane.status = shown above is that
-        -- guarantee, not a state change.
+        -- not take the tree with it (FailuresNeverCloseThePane).
         --
         -- A diff needs no file on disk, so opening one is never refused for a
         -- missing file; the out-of-root case is gone because no path is
@@ -2253,6 +2309,8 @@ rule RefreshAgentTreeCommitList {
     requires: git_branch_commits(pane.root, pane.task.base_branch).ok
 
     let commits = git_branch_commits(pane.root, pane.task.base_branch).value
+    let selected = pane.selected_commit
+    let notice_was = pane.notice_source
 
     ensures: pane.last_commits_listed_at = now
     ensures: pane.listed_commits = commits
@@ -2260,17 +2318,16 @@ rule RefreshAgentTreeCommitList {
     -- The selection survives a read that still lists its commit, and falls
     -- back to unstaged work when the read no longer does. Kept by id, so a
     -- new commit arriving above it leaves it on the same commit.
-    ensures: pane.selected_commit =
-        if old(pane.selected_commit) != null
-           and commits.any(c => c.id = old(pane.selected_commit)):
-            old(pane.selected_commit)
-        else: null
+    ensures:
+        if selected != null and not commits.any(c => c.id = selected):
+            pane.selected_commit = null
 
     -- A working read clears its own stale notice and nothing else, exactly
     -- as RefreshAgentTree does for git.
-    ensures: pane.error_notice =
-        if old(pane.notice_source) = commit_list: null
-        else: old(pane.error_notice)
+    ensures:
+        if notice_was = commit_list:
+            pane.error_notice = null
+            pane.notice_source = null
 
     @guidance
         -- == What the list is ==
@@ -2327,11 +2384,9 @@ rule AgentTreeCommitListFailureKeepsLastList {
 
     -- Stamped anyway, so a persistently broken read does not spin.
     ensures: pane.last_commits_listed_at = now
-    ensures: pane.listed_commits = old(pane.listed_commits)
-    ensures: pane.selected_commit = old(pane.selected_commit)
+    -- listed_commits and selected_commit are left as they were.
     ensures: pane.error_notice = git_branch_commits_failure_reason(pane.root, pane.task.base_branch)
     ensures: pane.notice_source = commit_list
-    ensures: pane.status = shown
 
     @guidance
         -- The same reasoning as AgentTreeGitFailureKeepsLastGoodTree: a stale
@@ -2410,29 +2465,38 @@ rule RefreshAgentTreeAgentList {
     requires: pane.task_resolution = resolved
     requires: board_tasks().ok
 
-    let listed = board_tasks().value.filter(t => is_live_agent(t) or t.is_detached)
+    -- Every task the board lists is attached (is_live_agent) or detached
+    -- (core/Task.is_detached); see "Read-only" below.
+    let listed = board_tasks().value
+    let waiting = pane.pending_jump
+    let still_detached = waiting != null and waiting in listed and not is_live_agent(waiting)
+    let notice_was = pane.notice_source
 
     ensures: pane.last_agents_listed_at = now
     ensures: pane.listed_agents = grouped_by_epic(listed)
     ensures: pane.hidden_agent_count = board_hidden_agents()
 
     -- A resumed agent that now has a window: jump to it, and stop waiting.
-    -- One that left the list: stop waiting (ForgetPendingResumeJump).
-    let waiting = pane.pending_jump
+    -- One that left the list: stop waiting (ForgetPendingResumeJump). One
+    -- still detached: count the read; ResumeJumpWaitEnds ends the wait when
+    -- the count reaches its limit.
     ensures:
-        if waiting != null and listed.contains(waiting) and is_live_agent(waiting):
+        if waiting != null and waiting in listed and is_live_agent(waiting):
             AgentWindowSelected(window: current_agent(waiting).tmux_window)
     ensures: pane.pending_jump =
-        if waiting = null: null
-        else if not listed.contains(waiting): null
-        else if is_live_agent(waiting): null
-        else: waiting
+        if still_detached: waiting
+        else: null
+    ensures: pane.pending_jump_reads =
+        if still_detached: pane.pending_jump_reads + 1
+        else: pane.pending_jump_reads
+    ensures: AgentTreeAgentListRead(pane: pane)
 
     -- A working read clears its own stale notice and nothing else, exactly
     -- as RefreshAgentTree does for git.
-    ensures: pane.error_notice =
-        if old(pane.notice_source) = agent_list: null
-        else: old(pane.error_notice)
+    ensures:
+        if notice_was = agent_list:
+            pane.error_notice = null
+            pane.notice_source = null
 
     @guidance
         -- == What "live" and "detached" mean ==
@@ -2475,7 +2539,7 @@ rule RefreshAgentTreeAgentList {
         -- together with its detached_agents — the board's own answer,
         -- already filtered by the same definitions
         -- (LiveIsTheBoardsOwnDefinition, DetachedIsTheBoardsOwnDefinition),
-        -- so the filter above restates it rather than narrowing it. Not ok
+        -- so the pane takes it as it stands and does not filter it again. Not ok
         -- when the board could not be reached or its answer could not be
         -- read. Reading writes nothing to the board (AskingChangesNothing),
         -- and the pane never opens the store (PanesReadThroughTheBoard).
@@ -2518,11 +2582,9 @@ rule AgentTreeAgentListFailureKeepsLastList {
 
     -- Stamped anyway, so an absent board does not spin.
     ensures: pane.last_agents_listed_at = now
-    ensures: pane.listed_agents = old(pane.listed_agents)
-    ensures: pane.hidden_agent_count = old(pane.hidden_agent_count)
+    -- listed_agents and hidden_agent_count are left as they were.
     ensures: pane.error_notice = board_tasks_failure_reason()
     ensures: pane.notice_source = agent_list
-    ensures: pane.status = shown
 
     @guidance
         -- The same reasoning as AgentTreeGitFailureKeepsLastGoodTree: a stale
@@ -2540,12 +2602,13 @@ rule SwitchAgentTreeView {
 
     requires: pane.status = shown
 
+    -- The right-hand sides read the pre-rule values.
     ensures: pane.focus =
-        if old(pane.focus) = agents: old(pane.browse_focus)
+        if pane.focus = agents: pane.browse_focus
         else: agents
     ensures: pane.browse_focus =
-        if old(pane.focus) = agents: old(pane.browse_focus)
-        else: old(pane.focus)
+        if pane.focus = agents: pane.browse_focus
+        else: pane.focus
 
     @guidance
         -- The pane used to stack three sections and cycle focus through them
@@ -2568,8 +2631,10 @@ rule SwitchAgentTreeBrowseFocus {
     requires: pane.status = shown
     requires: pane.focus != agents
 
-    ensures: pane.focus = if old(pane.focus) = tree: commits else: tree
-    ensures: pane.browse_focus = pane.focus
+    let next = if pane.focus = tree: commits else: tree
+
+    ensures: pane.focus = next
+    ensures: pane.browse_focus = next
 
     @guidance
         -- `s` for "section". h/l and the arrows are the tree's own expand and
@@ -2584,7 +2649,7 @@ rule JumpToAgentWindow {
     when: JumpToAgentWindow(user, pane, target)
 
     requires: pane.focus = agents
-    requires: pane.listed_agents.contains(target)
+    requires: target in pane.listed_agents
     -- A detached row has no window to jump to; Space there resumes it
     -- (ResumeDetachedAgentFromThePane).
     requires: is_live_agent(target)
@@ -2612,7 +2677,6 @@ rule AgentTreeAgentJumpFailureIsVisible {
 
     ensures: pane.error_notice = reason
     ensures: pane.notice_source = agent_jump
-    ensures: pane.status = shown
 
     @guidance
         -- The direct answer to a keypress, so it must say something, for the
@@ -2626,7 +2690,7 @@ rule ResumeDetachedAgentFromThePane {
     when: ResumeDetachedAgent(user, pane, target)
 
     requires: pane.focus = agents
-    requires: pane.listed_agents.contains(target)
+    requires: target in pane.listed_agents
     requires: target.is_detached
     -- The pane's own task always has a window while its pane is shown, so
     -- it is never detached here; stated for symmetry with JumpToAgentWindow.
@@ -2658,6 +2722,8 @@ rule AgentTreeResumeAccepted {
     ensures: pane.pending_jump =
         if pane.selected_agent = target: target
         else: null
+    -- A new wait starts its count of list reads from zero.
+    ensures: pane.pending_jump_reads = 0
 
     @guidance
         -- Nothing is shown for an accepted request: the notice is for
@@ -2674,7 +2740,6 @@ rule AgentTreeResumeRefusedIsVisible {
 
     ensures: pane.error_notice = answer.refusal
     ensures: pane.notice_source = agent_jump
-    ensures: pane.status = shown
 
     @guidance
         -- The direct answer to a keypress, like a failed jump, so it uses
@@ -2692,10 +2757,13 @@ rule ResumeJumpWaitEnds {
     requires: pane.pending_jump_reads >= config.resume_jump_max_reads
 
     ensures: pane.pending_jump = null
-    ensures: pane.error_notice = "the agent did not start after a resume"
+    ensures: pane.error_notice = resume_never_started_reason(pane.pending_jump)
     ensures: pane.notice_source = agent_jump
 
     @guidance
+        -- resume_never_started_reason(task) reads "task <id> did not start
+        -- after a resume; press Space to try again".
+        --
         -- "Accepted" means only that the board took the request; the launch
         -- can still fail there, and without an end the pane would wait for
         -- ever and say nothing. The deadline is counted in list reads (one a
@@ -2783,12 +2851,12 @@ invariant OneDiffPanePerAgentWindow {
 -- SplitAgentTreeDiffPane's guidance argues for.
 invariant DiffPaneExistsWhenSomethingIsOpen {
     for p in AgentTreePanes:
-        not p.open_diff_paths.is_empty() implies p.diff_pane != null
+        (p.open_diff_paths.count > 0 implies p.diff_pane != null)
         -- The converse holds except while the editor is showing
         -- (OpenAgentTreeFileInEditor): an editor pane may exist with
         -- nothing open.
-        (p.diff_pane != null and p.diff_pane_content = diff)
-            implies not p.open_diff_paths.is_empty()
+        and ((p.diff_pane != null and p.diff_pane_content = diff)
+            implies p.open_diff_paths.count > 0)
 }
 
 -- The lower pane shows one file at a time. Opening a file replaces the one
@@ -2805,8 +2873,9 @@ invariant OneOpenFileAtATime {
 -- one toggle its expansion instead, and nothing can put its path in the open
 -- set.
 invariant OnlyFilesOpenDiffs {
-    for n in AgentTreeNodes:
-        n.diff_open implies n.kind = file
+    for p in AgentTreePanes:
+        for n in p.rendered_nodes:
+            n.diff_open implies n.kind = file
 }
 
 -- A row's open marker says exactly what the diff pane is showing. The tree is
@@ -2815,9 +2884,8 @@ invariant OnlyFilesOpenDiffs {
 -- there, or past one that is.
 invariant NodeDiffOpenMatchesOpenSet {
     for p in AgentTreePanes:
-        for n in AgentTreeNodes:
-            (n.pane_root = p.root and n.kind = file)
-                implies n.diff_open = p.open_diff_paths.contains(n.path)
+        for n in p.rendered_nodes:
+            n.kind = file implies n.diff_open = (n.path in p.open_diff_paths)
 }
 
 -- An untracked file never carries line counts, and it is the only kind of
@@ -2835,9 +2903,10 @@ invariant NodeDiffOpenMatchesOpenSet {
 -- worktree against the index, which does not include the file, and the pane
 -- does not invent a second way of counting for one kind of row.
 invariant UntrackedFilesHaveNoLineCounts {
-    for n in AgentTreeNodes:
-        (n.kind = file and change_for_node(n) = added and not is_tracked_node(n))
-            implies n.counts = null
+    for p in AgentTreePanes:
+        for n in p.rendered_nodes:
+            (n.kind = file and change_for_node(n) = added and not is_tracked_node(n))
+                implies n.counts = null
 }
 
 -- A directory's counts are the sum of the changed files beneath it, never
@@ -2846,8 +2915,9 @@ invariant UntrackedFilesHaveNoLineCounts {
 -- a directory holding one modified file and three brand-new ones from
 -- under-reporting itself as the modified file alone plus a false zero.
 invariant DirectoryCountsSumDescendants {
-    for n in AgentTreeNodes:
-        n.kind = directory implies n.counts = sum_counts_below_node(n)
+    for p in AgentTreePanes:
+        for n in p.rendered_nodes:
+            n.kind = directory implies n.counts = sum_counts_below_node(n)
 }
 
 -- No directory node holds a single child that is itself a directory. Such a
@@ -2869,16 +2939,18 @@ invariant DirectoryCountsSumDescendants {
 -- see the value's own doc. A tree whose only top-level row is a directory is
 -- therefore fine and ordinary.
 invariant NoSingleChildDirectoryChains {
-    for n in AgentTreeNodes:
-        n.kind = directory implies not has_lone_directory_child_node(n)
+    for p in AgentTreePanes:
+        for n in p.rendered_nodes:
+            n.kind = directory implies not has_lone_directory_child_node(n)
 }
 
 -- A rendered diff carries contents or a reason, never both and never neither.
 -- The pane always has something to draw for an open file, and the user is
 -- never left looking at a blank region wondering whether it is loading.
 invariant DiffBodyExcludesRefusal {
-    for d in FileDiffs:
-        (d.body = null) = (d.refusal != null)
+    for p in AgentTreePanes:
+        for d in p.rendered_diffs:
+            (d.body = null) = (d.refusal != null)
 }
 
 -- The tree never shows a commit the commits section does not list. Either
@@ -2908,8 +2980,9 @@ invariant TaskPaneRootIsTaskWorktree {
 -- second source to disagree with, no precedence to resolve, and no way for a
 -- badge to outlive the fact behind it.
 invariant BadgeIsWhatGitSaid {
-    for n in AgentTreeNodes:
-        n.kind = file implies n.badge = change_for_node(n)
+    for p in AgentTreePanes:
+        for n in p.rendered_nodes:
+            n.kind = file implies n.badge = change_for_node(n)
 }
 
 -- Every file node has a badge. The contrapositive is the fix for the bug this
@@ -2917,24 +2990,27 @@ invariant BadgeIsWhatGitSaid {
 -- there is no unbadged file node sitting in the tree implying "touched, but
 -- unchanged".
 invariant EveryFileNodeIsBadged {
-    for n in AgentTreeNodes:
-        n.kind = file implies n.badge != null
+    for p in AgentTreePanes:
+        for n in p.rendered_nodes:
+            n.kind = file implies n.badge != null
 }
 
 -- Expansion is a directory-only property, and it follows changed descendants
 -- exactly: no expanded file nodes, no expanded-but-unchanged directories, no
 -- collapsed directory hiding a badge on first render.
 invariant DirectoryExpansionFollowsChangedDescendants {
-    for n in AgentTreeNodes:
-        (n.expanded implies n.kind = directory)
-        and (n.kind = directory implies n.expanded = has_changed_descendant_node(n))
+    for p in AgentTreePanes:
+        for n in p.rendered_nodes:
+            (n.expanded implies n.kind = directory)
+            and (n.kind = directory implies n.expanded = has_changed_descendant_node(n))
 }
 
 -- Files are never badged as directories are: a directory carries no badge, so a
 -- badge on a node always means "git reports this exact file as changed".
 invariant OnlyFilesCarryBadges {
-    for n in AgentTreeNodes:
-        n.kind = directory implies n.badge = null
+    for p in AgentTreePanes:
+        for n in p.rendered_nodes:
+            n.kind = directory implies n.badge = null
 }
 
 ------------------------------------------------------------
@@ -3033,6 +3109,25 @@ surface AgentTreeCompanionPane {
         SelectAgentTreeSource(user, pane, commit)         -- Space, Enter (commits focus)
         JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus, attached row)
         ResumeDetachedAgent(user, pane, target)           -- Space, Enter (agents focus, detached row)
+
+        -- Not keys of their own. AgentTreeKeyPressed is raised for every key
+        -- above that the renderer handles (ClearAgentTreeErrorNotice), and
+        -- AgentTreeAgentCursorMoved for every one of them that moves the
+        -- agents section's cursor (ForgetPendingResumeJump).
+        AgentTreeKeyPressed(pane)
+        AgentTreeAgentCursorMoved(pane)
+
+    @guarantee FailuresNeverCloseThePane
+        -- A failed read or a refused request never closes a pane: not a task
+        -- that never arrives or has no worktree, not a failed git query,
+        -- commit-list or agent-list read, not a diff pane that would not
+        -- open, a failed jump, or a refused resume. Each says why in the pane
+        -- and leaves pane.status as it was. Only the exit key
+        -- (ExitAgentTreeRenderer) and the toggle (HideAgentTreePane) hide a
+        -- tree pane. The renderer takes results and keys one at a time in one
+        -- loop, and no result writes pane.status. A result that arrives after
+        -- the exit key is dropped with the process, so it never shows the
+        -- pane again.
 
     @guarantee PanesReadThroughTheBoard
         -- A pane's renderer reads its task and the attached and detached
@@ -3826,6 +3921,41 @@ surface AgentTreeDiffPane {
         -- here, the same way the tree's cursor is not — see the
         -- AgentTreeViewState open question, which covers both.
 
+}
+
+-- What tmux answers when the tree's renderer asks it for something on a
+-- keypress: a split it refused, or a window it could not select. Each is the
+-- failed outcome of a tmux call the renderer made, raised after the call
+-- returns.
+surface AgentTreeTmuxOutcomes {
+    facing _: core/Tmux
+
+    context pane: AgentTreePane
+
+    provides:
+        -- The lower pane could not be split or respawned, the renderer could
+        -- not tell which pane it runs in, or `v` named a file not on disk.
+        AgentTreeDiffPaneOpenFailed(pane, reason)
+        -- The selected agent's window could not be selected.
+        AgentTreeAgentJumpFailed(pane, reason)
+}
+
+-- The running board's answer to a pane's resume request. It arrives on its
+-- own, after the keypress that asked, because the request runs beside the
+-- renderer's key loop (ResumeDetachedAgentFromThePane).
+surface AgentTreeBoardAnswers {
+    facing _: core/BoardProcess
+
+    context pane: AgentTreePane
+
+    contracts:
+        demands BoardPaneView
+
+    provides:
+        -- answer is BoardPaneView.resume_agent's PaneResumeAnswer. A board
+        -- that could not be reached is answered as a refusal naming its
+        -- address.
+        AgentTreeResumeAnswered(pane, target, answer)
 }
 
 ------------------------------------------------------------
