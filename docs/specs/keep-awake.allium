@@ -94,7 +94,10 @@ rule RequestKeepAwake {
         -- The desktop is read from XDG_CURRENT_DESKTOP, XDG_SESSION_DESKTOP
         -- and DESKTOP_SESSION: any one of them naming GNOME counts. The
         -- board runs inside a tmux server that may have been started from
-        -- ssh, a TTY or a user unit, where the first is often missing.
+        -- ssh, a TTY or a user unit, where the first is often missing. When
+        -- none of them is set the environment says nothing about the desktop,
+        -- so the desktop's facility is tried when it is installed; a refusal
+        -- then surfaces as KeepAwakeRefused.
 }
 
 rule RefuseKeepAwakeOffLinux {

@@ -76,9 +76,13 @@ fn names_gnome(desktop: &str) -> bool {
 /// Choose the helper. The GNOME session manager is preferred on GNOME,
 /// because GNOME honours its inhibitors for screen lock and blanking; the
 /// generic systemd inhibitor is the fallback everywhere else. `desktops`
-/// holds the values of [`DESKTOP_VARS`] that are set.
+/// holds the values of [`DESKTOP_VARS`] that are set; none set counts as
+/// GNOME, since an environment that names no desktop is no evidence against it.
 pub fn hold_command<S: AsRef<str>>(desktops: &[S], gnome_inhibit_on_path: bool) -> HoldCommand {
-    let on_gnome = desktops.iter().any(|d| names_gnome(d.as_ref()));
+    // No variable at all means the board's environment says nothing (a tmux
+    // server started over ssh), not that the desktop is not GNOME, so the
+    // helper is tried when installed.
+    let on_gnome = desktops.is_empty() || desktops.iter().any(|d| names_gnome(d.as_ref()));
     let (program, flags): (&str, Vec<&str>) = if on_gnome && gnome_inhibit_on_path {
         (
             "gnome-session-inhibit",
@@ -410,6 +414,16 @@ mod tests {
             "{cmd:?}"
         );
         assert!(cmd.args.ends_with(&inner()));
-        assert_eq!(hold_command::<&str>(&[], true).program, "systemd-inhibit");
+    }
+
+    /// A tmux server started over ssh names no desktop at all. The GNOME
+    /// helper is then tried when installed, rather than the fallback.
+    #[test]
+    fn an_unknown_desktop_tries_the_gnome_helper_when_installed() {
+        assert_eq!(
+            hold_command::<&str>(&[], true).program,
+            "gnome-session-inhibit"
+        );
+        assert_eq!(hold_command::<&str>(&[], false).program, "systemd-inhibit");
     }
 }
