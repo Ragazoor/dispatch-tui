@@ -1,6 +1,10 @@
 use super::super::plugins::PLUGIN_DIR;
 use serde_json::Value;
 
+#[cfg(unix)]
+#[path = "../../../tests/common/script_command.rs"]
+mod script_command;
+
 fn hook_script() -> &'static str {
     PLUGIN_DIR
         .get_file("hooks/scripts/task-status-hook")
@@ -188,14 +192,10 @@ fn invoke_hook(
     payload: &str,
 ) {
     use std::io::Write;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
-    let mut child = Command::new("bash")
-        .arg(script_path)
-        .env("PATH", path_env)
-        // A dispatched agent's window sets DISPATCH_TASK_ID, which the scripts
-        // prefer over the branch; these tests resolve the id from the branch.
-        .env_remove("DISPATCH_TASK_ID")
+    // Strips `DISPATCH_*`: these tests resolve the task id from the branch.
+    let mut child = script_command::plugin_script_command(script_path, path_env)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -626,7 +626,7 @@ fn hooks_json_registers_pr_learnings_hook() {
 fn pr_learnings_hook_invokes_gate_only_for_gh_pr_create() {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo = tmp.path().join("repo");
@@ -663,10 +663,7 @@ fn pr_learnings_hook_invokes_gate_only_for_gh_pr_create() {
     );
 
     let invoke = |payload: &str| {
-        let mut child = Command::new("bash")
-            .arg(&script_path)
-            .env("PATH", &path)
-            .env_remove("DISPATCH_TASK_ID")
+        let mut child = script_command::plugin_script_command(&script_path, &path)
             .current_dir(&repo)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

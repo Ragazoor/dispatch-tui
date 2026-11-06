@@ -11,6 +11,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[path = "common/script_command.rs"]
+mod script_command;
+
 fn script(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("plugin/hooks/scripts")
@@ -72,11 +75,8 @@ fn run_script(
 ) -> (Option<i32>, String) {
     let (bin, log) = fake_dispatch(dir, dispatch_exit);
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
-    let mut cmd = Command::new("bash");
-    cmd.arg(script(name))
-        .current_dir(repo)
-        .env("PATH", path)
-        .env_remove("DISPATCH_TASK_ID")
+    let mut cmd = script_command::plugin_script_command(&script(name), &path);
+    cmd.current_dir(repo)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
