@@ -752,14 +752,14 @@ rule ClearBuildOutputOfDoneTask {
         -- not count. A symlink is never followed and never removed, so the
         -- cleanup cannot reach outside the worktree.
         --
-        -- The search walks the whole tree, because nested crates build into
-        -- their own target/: this repo's spacetime/module-tests/target held
-        -- ~23 GB per worktree, and a top-level-only search left 1.3 TB of it
-        -- behind across Done worktrees and filled the disk (task #99034).
+        -- The search walks the whole tree, because a nested crate builds into
+        -- its own target/ (this repo's spacetime/module-tests/target), and a
+        -- top-level-only search leaves that behind in every Done worktree.
         -- The walk does not descend into a tagged directory (it is removed
-        -- whole, so a tag below it is not listed separately), into .git, or
-        -- into any directory holding its own .git entry (file or directory):
-        -- that is another repository or worktree, not this one's output.
+        -- whole, so a tag below it is not listed separately) or into any
+        -- directory holding its own .git entry (file or directory): that is
+        -- another repository or worktree, not this one's output. So it never
+        -- reaches a .git directory either.
         -- There is no depth limit. An unreadable directory is skipped.
         --
         -- Only a LINKED git worktree is touched: its .git

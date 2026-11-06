@@ -15,9 +15,9 @@ pub struct BuildOutputCleared {
 
 /// Every directory at any depth of `worktree` holding a `CACHEDIR.TAG` that
 /// starts with [`CACHEDIR_TAG_SIGNATURE`]. The walk never follows a symlink,
-/// and does not descend into a tagged directory, into `.git`, or into a
-/// directory with its own `.git` entry (another repository or worktree). An
-/// unreadable directory, including the worktree itself, contributes none.
+/// and does not descend into a tagged directory or into a directory with its
+/// own `.git` entry (another repository or worktree), so it never reaches a
+/// `.git` directory either. An unreadable directory contributes none.
 pub fn build_output_dirs(worktree: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![worktree.to_path_buf()];
@@ -27,7 +27,7 @@ pub fn build_output_dirs(worktree: &Path) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             // `DirEntry::file_type` does not follow symlinks.
-            if !entry.file_type().is_ok_and(|t| t.is_dir()) || entry.file_name() == ".git" {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
                 continue;
             }
             let path = entry.path();
