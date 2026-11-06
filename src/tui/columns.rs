@@ -877,7 +877,7 @@ impl<'a> BoardView<'a> {
     /// the epics whose tasks may vouch for `epic_id`'s card.
     pub(in crate::tui) fn unhidden_subtree(self, epic_id: EpicId) -> HashSet<EpicId> {
         let hidden =
-            super::search::hidden_epic_closure(&self.filter.hidden_epics, &self.board.epics);
+            crate::models::hidden_epic_closure(&self.filter.hidden_epics, &self.board.epics);
         let mut ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
         ids.retain(|id| !hidden.contains(id));
         ids
@@ -1130,7 +1130,7 @@ impl App {
             let filter = &self.filter;
             // Hidden work cannot vouch for an ancestor (`unhidden_subtree`).
             let hidden =
-                super::search::hidden_epic_closure(&filter.hidden_epics, &self.board.epics);
+                crate::models::hidden_epic_closure(&filter.hidden_epics, &self.board.epics);
             self.board
                 .epics
                 .iter()

@@ -1465,3 +1465,20 @@ impl Store {
             .start_agent_for(task.0);
     }
 }
+
+/// The repo filter and epic hide-list this host's board last saved
+/// (`board-layout.allium`, "Hidden Epics and Work Packages"). The one reader of
+/// those rows: the board restores its filter from it at startup, and the pane
+/// handler narrows its agent list by it (`agent-tree.allium:
+/// ListsFollowTheBoardFilter`). An absent or unreadable row filters nothing.
+pub async fn load_saved_board_filter(db: &dyn SettingsStore) -> crate::models::SavedBoardFilter {
+    use crate::models::{HIDDEN_EPICS_KEY, REPO_FILTER_KEY, REPO_FILTER_MODE_KEY};
+    let repos = db.get_setting_string(REPO_FILTER_KEY).await.ok().flatten();
+    let mode = db
+        .get_setting_string(REPO_FILTER_MODE_KEY)
+        .await
+        .ok()
+        .flatten();
+    let hidden = db.get_setting_string(HIDDEN_EPICS_KEY).await.ok().flatten();
+    crate::models::SavedBoardFilter::parse(repos.as_deref(), mode.as_deref(), hidden.as_deref())
+}

@@ -133,7 +133,7 @@ pub(in crate::tui) struct BoardFilters<'a> {
     pub(in crate::tui) query_lower: String,
     pub(in crate::tui) id_digits: Option<&'a str>,
     /// Every epic the hide-list hides: the hidden ones and all their
-    /// descendants. See [`hidden_epic_closure`].
+    /// descendants. See [`crate::models::hidden_epic_closure`].
     pub(in crate::tui) hidden_epics: HashSet<EpicId>,
 }
 
@@ -145,27 +145,20 @@ impl<'a> BoardFilters<'a> {
             // hot path.
             query_lower: query.to_lowercase(),
             id_digits: id_digits_query(query),
-            hidden_epics: hidden_epic_closure(&filter.hidden_epics, epics),
+            hidden_epics: crate::models::hidden_epic_closure(&filter.hidden_epics, epics),
         }
     }
 
     /// Whether `task` survives all four filters: repo, epic hide-list,
     /// only-active and search.
     pub(in crate::tui) fn admits(&self, task: &Task) -> bool {
-        self.filter.matches(&task.repo_path)
-            && !self.task_is_hidden(task)
-            && self.filter.task_matches(task)
+        crate::models::task_admitted(
+            &self.filter.repos,
+            self.filter.mode,
+            &self.hidden_epics,
+            task,
+        ) && self.filter.task_matches(task)
             && self.matches_query(&task.title, task.id.0)
-    }
-
-    /// Whether `epic` is hidden, on its own or through an ancestor.
-    pub(in crate::tui) fn epic_is_hidden(&self, epic: EpicId) -> bool {
-        self.hidden_epics.contains(&epic)
-    }
-
-    /// Whether `task` sits under a hidden epic. A task with no epic never does.
-    pub(in crate::tui) fn task_is_hidden(&self, task: &Task) -> bool {
-        task.epic_id.is_some_and(|e| self.epic_is_hidden(e))
     }
 
     /// The search half alone, for a caller that has already applied the other
@@ -174,8 +167,6 @@ impl<'a> BoardFilters<'a> {
         own_search_match(title, id, &self.query_lower, self.id_digits)
     }
 }
-
-pub(in crate::tui) use crate::models::hidden_epic_closure;
 
 /// The epic ids that *directly own* at least one task carrying the
 /// board-search match: the task has an own match (title or id-prefix) AND the
@@ -286,8 +277,9 @@ impl<'a> EpicSearchPass<'a> {
     /// The hidden-epic closure for this pass, built on the first call and
     /// shared by every column, rather than rebuilt per column.
     pub(in crate::tui) fn hidden_epics(&self, view: BoardView<'a>) -> &HashSet<EpicId> {
-        self.hidden_epics
-            .get_or_init(|| hidden_epic_closure(&view.filter.hidden_epics, &view.board.epics))
+        self.hidden_epics.get_or_init(|| {
+            crate::models::hidden_epic_closure(&view.filter.hidden_epics, &view.board.epics)
+        })
     }
 
     /// Where each package card sits in this pass, built on the first call

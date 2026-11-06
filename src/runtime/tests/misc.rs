@@ -108,6 +108,7 @@ mod browser_and_tmux_window {
 
 mod load_init_helpers {
     use super::*;
+    use crate::models::RepoFilterMode;
 
     #[tokio::test]
     async fn load_notifications_pref_defaults_to_false_when_not_set() {
@@ -129,7 +130,7 @@ mod load_init_helpers {
     }
 
     #[tokio::test]
-    async fn load_repo_filter_loads_paths_and_mode() {
+    async fn load_board_filter_loads_paths_and_mode() {
         let db = Store::open_in_memory().unwrap();
         db.set_setting_string(
             "repo_filter",
@@ -142,7 +143,7 @@ mod load_init_helpers {
             .unwrap();
         let mut app = empty_app();
 
-        load_repo_filter(&db, &mut app).await;
+        load_board_filter(&db, &mut app).await;
 
         assert_eq!(
             app.repo_filter(),
@@ -152,25 +153,25 @@ mod load_init_helpers {
     }
 
     #[tokio::test]
-    async fn load_repo_filter_leaves_defaults_when_nothing_saved() {
+    async fn load_board_filter_leaves_defaults_when_nothing_saved() {
         let db = Store::open_in_memory().unwrap();
         let mut app = empty_app();
 
-        load_repo_filter(&db, &mut app).await;
+        load_board_filter(&db, &mut app).await;
 
         assert!(app.repo_filter().is_empty());
         assert_eq!(app.repo_filter_mode(), RepoFilterMode::Include);
     }
 
     #[tokio::test]
-    async fn load_repo_filter_ignores_an_unparseable_saved_mode() {
+    async fn load_board_filter_ignores_an_unparseable_saved_mode() {
         let db = Store::open_in_memory().unwrap();
         db.set_setting_string("repo_filter_mode", "bogus")
             .await
             .unwrap();
         let mut app = empty_app();
 
-        load_repo_filter(&db, &mut app).await;
+        load_board_filter(&db, &mut app).await;
 
         assert_eq!(
             app.repo_filter_mode(),
@@ -180,7 +181,7 @@ mod load_init_helpers {
     }
 
     #[tokio::test]
-    async fn load_board_hides_restores_both_hide_lists() {
+    async fn load_board_filter_restores_both_hide_lists() {
         let db = Store::open_in_memory().unwrap();
         db.set_setting_string("hidden_epics", "[3,5]")
             .await
@@ -190,7 +191,7 @@ mod load_init_helpers {
             .unwrap();
         let mut app = empty_app();
 
-        load_board_hides(&db, &mut app).await;
+        load_board_filter(&db, &mut app).await;
 
         assert_eq!(
             app.hidden_epics(),
@@ -203,14 +204,14 @@ mod load_init_helpers {
     }
 
     #[tokio::test]
-    async fn load_board_hides_ignores_unreadable_rows() {
+    async fn load_board_filter_ignores_unreadable_rows() {
         let db = Store::open_in_memory().unwrap();
         db.set_setting_string("hidden_epics", "not json")
             .await
             .unwrap();
         let mut app = empty_app();
 
-        load_board_hides(&db, &mut app).await;
+        load_board_filter(&db, &mut app).await;
 
         assert!(app.hidden_epics().is_empty());
         assert!(app.hidden_packages().is_empty());

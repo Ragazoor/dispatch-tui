@@ -222,7 +222,7 @@ impl App {
     /// the board never sits inside work it no longer shows.
     fn leave_hidden_views(&mut self) {
         let hidden =
-            super::super::hidden_epic_closure(&self.filter.hidden_epics, &self.board.epics);
+            crate::models::hidden_epic_closure(&self.filter.hidden_epics, &self.board.epics);
         loop {
             let inside_hidden = match &self.board.view_mode {
                 ViewMode::Epic { epic_id, .. } => hidden.contains(epic_id),

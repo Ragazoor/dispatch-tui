@@ -288,18 +288,15 @@ pub fn render_agents(
         if top_line < section.offset {
             section.offset = top_line;
         }
-        // Then the cursor's own row, which wins in a pane too short for both.
-        if visible > 0 && cursor_line >= section.offset + visible {
-            section.offset = cursor_line + 1 - visible;
-        }
-        // On the last agent, the hidden-agents line below it comes into view
-        // too, where the pane has room for it beside the cursor's row.
-        if cursor_line + 2 == drawn.len()
-            && drawn.last() == Some(&DrawnLine::HiddenByFilter)
-            && visible > 1
-            && cursor_line + 1 >= section.offset + visible
-        {
-            section.offset = cursor_line + 2 - visible;
+        // Then the cursor's own row, which wins in a pane too short for both
+        // — on the last agent, with the hidden-agents line below it where the
+        // pane has room for both (AgentListNamesHiddenAgents).
+        let bottom_line = match drawn.get(cursor_line + 1) {
+            Some(DrawnLine::HiddenByFilter) if visible > 1 => cursor_line + 1,
+            _ => cursor_line,
+        };
+        if visible > 0 && bottom_line >= section.offset + visible {
+            section.offset = bottom_line + 1 - visible;
         }
     }
 

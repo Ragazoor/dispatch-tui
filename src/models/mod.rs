@@ -77,8 +77,8 @@ pub use agent_events::*;
 
 pub mod board_filter;
 pub use board_filter::{
-    hidden_epic_closure, repo_filter_admits, RepoFilterMode, SavedBoardFilter, HIDDEN_EPICS_KEY,
-    HIDDEN_PACKAGES_KEY, REPO_FILTER_KEY, REPO_FILTER_MODE_KEY,
+    hidden_epic_closure, repo_filter_admits, task_admitted, RepoFilterMode, SavedBoardFilter,
+    HIDDEN_EPICS_KEY, HIDDEN_PACKAGES_KEY, REPO_FILTER_KEY, REPO_FILTER_MODE_KEY,
 };
 pub mod epics;
 pub use epics::*;

@@ -68,6 +68,20 @@ pub fn hidden_epic_closure(hidden: &HashSet<EpicId>, epics: &[Epic]) -> HashSet<
         .collect()
 }
 
+/// Whether the repo selection and the hidden-epic closure (`hidden`, from
+/// [`hidden_epic_closure`]) admit `task`: the one predicate the board's cards
+/// and the pane's agent list are both held to. A task with no epic is never
+/// hidden by the hide-list.
+pub fn task_admitted(
+    repos: &HashSet<String>,
+    mode: RepoFilterMode,
+    hidden: &HashSet<EpicId>,
+    task: &Task,
+) -> bool {
+    repo_filter_admits(repos, mode, &task.repo_path)
+        && !task.epic_id.is_some_and(|e| hidden.contains(&e))
+}
+
 /// The repo filter and epic hide-list as the board last saved them. An absent
 /// or unreadable setting filters nothing, as it does at board startup.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -100,8 +114,7 @@ impl SavedBoardFilter {
     /// and its epic is not hidden, on its own or through an ancestor.
     /// `hidden` is [`hidden_epic_closure`] of `self.hidden_epics`.
     pub fn admits(&self, task: &Task, hidden: &HashSet<EpicId>) -> bool {
-        repo_filter_admits(&self.repos, self.mode, &task.repo_path)
-            && !task.epic_id.is_some_and(|e| hidden.contains(&e))
+        task_admitted(&self.repos, self.mode, hidden, task)
     }
 }
 

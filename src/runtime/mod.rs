@@ -54,14 +54,14 @@ const AGENT_TREE_TOGGLE_COMMAND: &str = concat!(
 );
 
 use crate::embeddings::EmbeddingService;
-use crate::models::{EpicId, PaneId, TaskId, TmuxWindow, WorkPackageId};
+use crate::models::{PaneId, TaskId, TmuxWindow, WorkPackageId};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
 use crate::store::{RepoConfigRead, TaskRead};
 use crate::store_connection::{on_store_connected, StoreParts};
 use crate::tui::{
-    self, App, Command, EpicFoldState, Message, RepoFilterMode, SectionFoldState,
-    COLLAPSED_EPICS_KEY, COLLAPSED_SECTIONS_KEY, HIDDEN_EPICS_KEY, HIDDEN_PACKAGES_KEY,
+    self, App, Command, EpicFoldState, Message, SectionFoldState, COLLAPSED_EPICS_KEY,
+    COLLAPSED_SECTIONS_KEY, HIDDEN_PACKAGES_KEY,
 };
 use crate::{dispatch, mcp, models, store, tmux};
 
@@ -1196,8 +1196,7 @@ async fn hydrate_app(
         base_branch_pairs,
     )));
     load_notifications_pref(database, &mut app).await;
-    load_repo_filter(database, &mut app).await;
-    load_board_hides(database, &mut app).await;
+    load_board_filter(database, &mut app).await;
     load_collapsed_sections(database, &mut app).await;
     load_collapsed_epics(database, &mut app).await;
     if let Some(msg) = apply_tmux_focus_warning(runner) {
@@ -1219,36 +1218,21 @@ async fn load_notifications_pref(db: &dyn store::SettingsStore, app: &mut App) {
     app.set_notifications_enabled(enabled);
 }
 
-async fn load_repo_filter(db: &dyn store::SettingsStore, app: &mut App) {
-    if let Ok(Some(val)) = db.get_setting_string(crate::models::REPO_FILTER_KEY).await {
-        if let Ok(paths) = serde_json::from_str::<Vec<String>>(&val) {
-            app.set_repo_filter(paths.into_iter().collect());
-        }
-    }
-    if let Ok(Some(mode_str)) = db
-        .get_setting_string(crate::models::REPO_FILTER_MODE_KEY)
-        .await
-    {
-        if let Ok(mode) = mode_str.parse::<RepoFilterMode>() {
-            app.set_repo_filter_mode(mode);
-        }
-    }
-}
-
-/// Restore the hidden epics and work packages the board filter overlay saved
-/// (board-layout.allium: "Hidden Epics and Work Packages"). An unreadable or
-/// absent row leaves that list empty.
-async fn load_board_hides(db: &dyn store::SettingsStore, app: &mut App) {
-    async fn ids(db: &dyn store::SettingsStore, key: &str) -> Vec<i64> {
-        match db.get_setting_string(key).await {
-            Ok(Some(val)) => serde_json::from_str(&val).unwrap_or_default(),
-            _ => vec![],
-        }
-    }
-    let epics = ids(db, HIDDEN_EPICS_KEY).await.into_iter().map(EpicId);
-    let packages = ids(db, HIDDEN_PACKAGES_KEY).await;
+/// Restore the repo filter, its mode and the hidden epics and work packages the
+/// board filter overlay saved (board-layout.allium: "Hidden Epics and Work
+/// Packages"). The first three come from the same reader the pane handler uses
+/// (`store::load_saved_board_filter`), so the board and the pane cannot read
+/// them differently. An unreadable or absent row leaves that part empty.
+async fn load_board_filter(db: &dyn store::SettingsStore, app: &mut App) {
+    let saved = store::load_saved_board_filter(db).await;
+    app.set_repo_filter(saved.repos);
+    app.set_repo_filter_mode(saved.mode);
+    let packages: Vec<i64> = match db.get_setting_string(HIDDEN_PACKAGES_KEY).await {
+        Ok(Some(val)) => serde_json::from_str(&val).unwrap_or_default(),
+        _ => vec![],
+    };
     app.set_board_hides(
-        epics.collect(),
+        saved.hidden_epics,
         packages.into_iter().map(WorkPackageId).collect(),
     );
 }
