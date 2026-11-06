@@ -44,15 +44,25 @@ pub mod tui;
 pub mod worktree_admin;
 
 pub fn default_data_dir() -> std::path::PathBuf {
-    let base = std::env::var_os("XDG_DATA_HOME")
+    data_dir_from(
+        std::env::var_os("XDG_DATA_HOME"),
+        std::env::var("HOME").ok(),
+    )
+}
+
+/// `storage.allium: DataDirectory`'s default, from `$XDG_DATA_HOME` and
+/// `$HOME`. An empty value of either takes the same fallback as an absent one:
+/// it would otherwise resolve against whatever directory the process was
+/// started from. See `crate::setup::home_dir`.
+fn data_dir_from(
+    xdg_data_home: Option<std::ffi::OsString>,
+    home: Option<String>,
+) -> std::path::PathBuf {
+    let base = xdg_data_home
+        .filter(|xdg| !xdg.is_empty())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            // An empty `$HOME` takes the same fallback as an absent one: it
-            // would otherwise resolve `.local/share` against whatever
-            // directory the process was started from. See
-            // `crate::setup::home_dir`.
-            let home = std::env::var("HOME")
-                .ok()
+            let home = home
                 .filter(|home| !home.is_empty())
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -70,6 +80,42 @@ pub fn default_data_dir() -> std::path::PathBuf {
 /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
 pub(crate) fn budget_snapshot_path() -> std::path::PathBuf {
     default_data_dir().join(crate::setup::statusline::RATE_LIMITS_FILE_NAME)
+}
+
+#[cfg(test)]
+mod default_data_dir_tests {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    use super::data_dir_from;
+
+    /// storage.allium: DataDirectory — `$XDG_DATA_HOME/dispatch`, else
+    /// `~/.local/share/dispatch`.
+    #[test]
+    fn xdg_data_home_wins_when_set() {
+        assert_eq!(
+            data_dir_from(Some(OsString::from("/xdg")), Some("/home/u".into())),
+            PathBuf::from("/xdg/dispatch")
+        );
+    }
+
+    /// A set-but-empty `XDG_DATA_HOME` counts as unset, as the XDG spec says,
+    /// rather than resolving to the relative path `dispatch`.
+    #[test]
+    fn an_empty_xdg_data_home_falls_back_to_home() {
+        assert_eq!(
+            data_dir_from(Some(OsString::new()), Some("/home/u".into())),
+            PathBuf::from("/home/u/.local/share/dispatch")
+        );
+    }
+
+    #[test]
+    fn an_empty_home_falls_back_to_the_current_directory() {
+        assert_eq!(
+            data_dir_from(None, Some(String::new())),
+            PathBuf::from("./.local/share/dispatch")
+        );
+    }
 }
 
 #[cfg(test)]

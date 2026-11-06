@@ -277,14 +277,14 @@ struct Bootstrap {
 /// it aborts the launch (startup.allium:
 /// AbortWhenTheHostIdentityStoreIsUnusable) rather than leaving
 /// `local_host_id` empty and drawing anyway. Tolerating it does not
-/// degrade, it corrupts — the claim SQL in db/queries/tasks.rs applies
+/// degrade, it corrupts — the store's dispatch claim applies
 /// `is_locally_owned`'s two arms (nobody holds this task, or this
 /// machine does), and an undetermined identity fails only the second
 /// arm, so the claim still succeeds on every never-dispatched task —
 /// exactly the ones a first dispatch acts on. A worktree then gets
 /// provisioned while the host stamp is skipped for want of an id: a
 /// silent, durable violation of core.allium's `HostTracksWorktree`. A
-/// board that cannot complete one settings read at startup is not
+/// board that cannot read its own host file at startup is not
 /// going to stay useful either way, so this fails loudly here instead.
 async fn read_launch_identity(data_dir: &Path) -> Result<(String, Option<String>)> {
     let dir = data_dir.to_path_buf();
@@ -1084,13 +1084,13 @@ impl Drop for TuiRuntime {
 /// the same reason for a failed read/mint instead.
 ///
 /// Factored out of `bootstrap` so this mapping is exercisable directly
-/// against a real (possibly corrupted) database: reaching it through the
+/// against a real (possibly corrupted) host file: reaching it through the
 /// full interactive prompt needs `bootstrap`'s `interactive` flag to read
 /// true, which it can only do against a real terminal — `cargo test`'s
 /// stdin never reports one.
 ///
 /// One `StartupAbortReason` rather than a second: this failure and a failed
-/// `ensure_host_identity` read/mint are the same broken settings store and
+/// `ensure_host_identity` read/mint are the same broken host file and
 /// share the same remedy (repair it), so they share the message
 /// `HostIdentityUnavailable` already carries.
 ///

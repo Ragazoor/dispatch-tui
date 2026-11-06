@@ -739,20 +739,15 @@ pub trait SettingsStore: Send + Sync {
     async fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
     async fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
     async fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
-    // -- Managed-feed config (WP5) --
-    // Typed accessors over the `settings` table for the two managed feed
-    // scripts and their poll intervals. `Some(..)` upserts; `None` clears the
-    // key (so a subsequent get returns `None`). Intervals are stored as their
-    // decimal string. See `epics.allium` ProvisionManagedEpics / the `config`
-    // block for the authoritative semantics.
+    // -- Managed-feed config --
+    // Typed reads of the two managed feed scripts and their poll intervals;
+    // every write is `set_managed_feed_settings`, one change. Intervals are
+    // stored as their decimal string. See `epics.allium`
+    // ManagedFeedConfigViaMcp and `settings.allium` SetManagedFeedSettings.
     async fn get_reviews_feed_command(&self) -> Result<Option<String>>;
-    async fn set_reviews_feed_command(&self, value: Option<&str>) -> Result<()>;
     async fn get_reviews_feed_interval_secs(&self) -> Result<Option<i64>>;
-    async fn set_reviews_feed_interval_secs(&self, value: Option<i64>) -> Result<()>;
     async fn get_cve_feed_command(&self) -> Result<Option<String>>;
-    async fn set_cve_feed_command(&self, value: Option<&str>) -> Result<()>;
     async fn get_cve_feed_interval_secs(&self) -> Result<Option<i64>>;
-    async fn set_cve_feed_interval_secs(&self, value: Option<i64>) -> Result<()>;
     /// The provided managed-feed settings as ONE change: all land or none does
     /// (the module's `set_managed_feed_settings`). Absent fields stay as they
     /// are.

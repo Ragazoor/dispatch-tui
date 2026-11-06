@@ -59,7 +59,35 @@ fn read_existing(data_dir: &Path) -> anyhow::Result<Option<HostIdentity>> {
     };
     let identity: HostIdentity = serde_json::from_slice(&bytes)
         .with_context(|| format!("{} is not a readable identity", path.display()))?;
+    repair_mode(&path);
     Ok(Some(identity))
+}
+
+/// `host.allium: HostFileIsPrivate` on read: a host file someone loosened is
+/// put back to [`HOST_FILE_MODE`]. Best effort: a repair that fails is logged
+/// and the read still answers, since the content is already in hand.
+fn repair_mode(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = match std::fs::metadata(path) {
+        Ok(meta) => meta.permissions().mode() & 0o777,
+        Err(e) => {
+            tracing::warn!("cannot check the mode of {}: {e}", path.display());
+            return;
+        }
+    };
+    if mode == HOST_FILE_MODE {
+        return;
+    }
+    match std::fs::set_permissions(path, std::fs::Permissions::from_mode(HOST_FILE_MODE)) {
+        Ok(()) => tracing::warn!(
+            "{} had mode {mode:o}; set it back to {HOST_FILE_MODE:o}",
+            path.display()
+        ),
+        Err(e) => tracing::warn!(
+            "{} has mode {mode:o} and cannot be set to {HOST_FILE_MODE:o}: {e}",
+            path.display()
+        ),
+    }
 }
 
 /// Replace the host file with `identity`, atomically and privately.
@@ -158,9 +186,11 @@ pub fn rename_host(data_dir: &Path, label: &str) -> anyhow::Result<HostIdentity>
 
 /// `host.allium: AdoptUserIdentity` — the owner and its credential, written
 /// together in one whole-file replacement. The owner is written once
-/// (`core.allium: LocalHostOwnerIsWrittenOnce`): an owner already stored is
-/// kept, and only the credential is refreshed. Nothing is written when the
-/// file already holds both.
+/// (`core.allium: LocalHostOwnerIsWrittenOnce`): re-adopting the stored owner
+/// refreshes only its credential, and a different identity is refused with
+/// nothing written (`RefuseAChangedUserIdentity`), so the file never pairs one
+/// owner with another's credential. Nothing is written when the file already
+/// holds both.
 pub fn adopt_user_identity(
     data_dir: &Path,
     identity: &str,
@@ -172,6 +202,14 @@ pub fn adopt_user_identity(
     }
     if credential.is_empty() {
         anyhow::bail!("user identity credential must not be empty");
+    }
+    let identity = identity.trim();
+    if let Some(stored) = read_for_cli(data_dir)?.user_identity {
+        if stored != identity {
+            anyhow::bail!(
+                "this install belongs to user identity {stored}, not {identity}: refusing to store another identity's credential"
+            );
+        }
     }
     update(data_dir, |host| {
         // Validated above, so this cannot fail.

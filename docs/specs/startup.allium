@@ -2530,7 +2530,9 @@ surface HostLabelPrompt {
         -- ConfigUpdatePrompt, which has a second action for saying no, this
         -- surface provides exactly one — because the board does not draw until
         -- it is answered, and an action that cannot lead anywhere would be an
-        -- offer to hang the launch.
+        -- offer to hang the launch. A read of the answer that fails (end of
+        -- input, a terminal error) is nobody answering: the launch stops with
+        -- host_unnamed, as when nobody could be asked.
 
     @guarantee AppearsOnceEver
         -- A named machine never sees it again. It is the first launch's prompt,

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use super::super::{EpicId, SettingsStore, Store};
+use super::super::{EpicId, Store};
 
 #[async_trait::async_trait]
 impl super::super::SettingsStore for Store {
@@ -28,15 +28,10 @@ impl super::super::SettingsStore for Store {
             .applied()
     }
 
-    // -- Managed-feed config (WP5) --
+    // -- Managed-feed config --
 
     async fn get_reviews_feed_command(&self) -> Result<Option<String>> {
         self.get_setting_string(REVIEWS_FEED_COMMAND_KEY).await
-    }
-
-    async fn set_reviews_feed_command(&self, value: Option<&str>) -> Result<()> {
-        self.set_managed_feed_setting(REVIEWS_FEED_COMMAND_KEY, value)
-            .await
     }
 
     async fn get_reviews_feed_interval_secs(&self) -> Result<Option<i64>> {
@@ -47,21 +42,8 @@ impl super::super::SettingsStore for Store {
         )
     }
 
-    async fn set_reviews_feed_interval_secs(&self, value: Option<i64>) -> Result<()> {
-        self.set_managed_feed_setting(
-            REVIEWS_FEED_INTERVAL_SECS_KEY,
-            value.map(|n| n.to_string()).as_deref(),
-        )
-        .await
-    }
-
     async fn get_cve_feed_command(&self) -> Result<Option<String>> {
         self.get_setting_string(CVE_FEED_COMMAND_KEY).await
-    }
-
-    async fn set_cve_feed_command(&self, value: Option<&str>) -> Result<()> {
-        self.set_managed_feed_setting(CVE_FEED_COMMAND_KEY, value)
-            .await
     }
 
     async fn get_cve_feed_interval_secs(&self) -> Result<Option<i64>> {
@@ -69,14 +51,6 @@ impl super::super::SettingsStore for Store {
             CVE_FEED_INTERVAL_SECS_KEY,
             self.get_setting_string(CVE_FEED_INTERVAL_SECS_KEY).await?,
         )
-    }
-
-    async fn set_cve_feed_interval_secs(&self, value: Option<i64>) -> Result<()> {
-        self.set_managed_feed_setting(
-            CVE_FEED_INTERVAL_SECS_KEY,
-            value.map(|n| n.to_string()).as_deref(),
-        )
-        .await
     }
 
     async fn set_managed_feed_settings(
@@ -315,31 +289,19 @@ async fn host_file_call<T: Send + 'static>(
 // ---------------------------------------------------------------------------
 // Host identity keys (docs/specs/host.allium)
 // ---------------------------------------------------------------------------
+//
+// These name the identity fields so `refuse_identity_key` can keep them out of
+// the shared settings table. The identity itself lives in the host file
+// (`host.allium: IdentityLivesInHostFile`), never in a setting row.
 
-/// `settings` key holding this install's Host id (`core/Host.id`). Minted once
-/// by `ensure_host_identity` and never rewritten.
-///
+/// The name of this install's Host id (`core/Host.id`).
 pub(crate) const HOST_ID_KEY: &str = "host_id";
 
-/// `settings` key holding this install's operator-chosen Host label
-/// (`core/Host.label`). Absent until `rename_host` writes it; its absence is
-/// what `docs/specs/startup.allium`'s `PromptForHostLabelWhenUnnamed` reads as
-/// "this machine has not been named".
+/// The name of this install's operator-chosen Host label (`core/Host.label`).
 pub(crate) const HOST_LABEL_KEY: &str = "host_label";
 
-/// `settings` key holding this install's UserIdentity — `core/Host.owner` for
-/// the local row.
-///
-/// Beside the host id rather than anywhere else because the two are the same
-/// kind of fact about this install, asked at different times: the id is minted
-/// offline on first run, and this is learned from a shared store on first
-/// connect. Absent means "this install has never connected", which is a real
-/// and lasting state rather than a bounded window (`core.allium: Host.owner`).
-///
-/// There is exactly one place an install remembers who it is, and this is it.
-/// See `LocalHostOwnerIsWrittenOnce`: a second copy would be a second thing to
-/// keep in step, and the way it fails is a machine owned by a person the
-/// install no longer believes it is.
+/// The name of this install's UserIdentity (`core/Host.owner` for the local
+/// row).
 pub(crate) const USER_IDENTITY_KEY: &str = "user_identity";
 
 /// Refuse a write to `SettingsStore`'s generic key/value accessors when `key`
@@ -365,7 +327,7 @@ fn refuse_identity_key(key: &str) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Managed-feed config keys (WP5)
+// Managed-feed config keys
 // ---------------------------------------------------------------------------
 
 const REVIEWS_FEED_COMMAND_KEY: &str = "reviews_feed_command";
@@ -382,21 +344,6 @@ fn parse_setting_i64(key: &str, raw: Option<String>) -> Result<Option<i64>> {
             .map(Some)
             .with_context(|| format!("setting {key:?} is not a valid integer: {s:?}")),
         None => Ok(None),
-    }
-}
-
-impl Store {
-    /// Upsert a managed-feed settings key when `value` is `Some`, or delete the
-    /// row when `None` so a subsequent get returns `None`.
-    async fn set_managed_feed_setting(&self, key: &'static str, value: Option<&str>) -> Result<()> {
-        match value {
-            Some(v) => self.set_setting_string(key, v).await,
-            None => self
-                .caller
-                .clear_setting(self.host.clone(), key.to_string())
-                .await?
-                .applied(),
-        }
     }
 }
 

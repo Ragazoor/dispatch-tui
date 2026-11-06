@@ -172,55 +172,43 @@ async fn verify_command_get_unknown_path_is_none() {
 // --- managed-feed config keys (WP5) ---
 
 #[tokio::test]
-async fn reviews_feed_command_round_trips_and_clears() {
+async fn managed_feed_settings_round_trip_and_clear() {
+    use crate::store::ManagedFeedSettingsPatch;
     let db = in_memory_db().await;
     assert_eq!(db.get_reviews_feed_command().await.unwrap(), None);
-    db.set_reviews_feed_command(Some("/scripts/fetch-reviews.sh"))
-        .await
-        .unwrap();
+    db.set_managed_feed_settings(ManagedFeedSettingsPatch {
+        reviews_command: Some(Some("/scripts/fetch-reviews.sh".to_string())),
+        reviews_interval_secs: Some(Some(300)),
+        cve_command: Some(Some("/scripts/fetch-cve.sh".to_string())),
+        cve_interval_secs: Some(Some(900)),
+    })
+    .await
+    .unwrap();
     assert_eq!(
         db.get_reviews_feed_command().await.unwrap(),
         Some("/scripts/fetch-reviews.sh".to_string())
     );
-    db.set_reviews_feed_command(None).await.unwrap();
-    assert_eq!(db.get_reviews_feed_command().await.unwrap(), None);
-}
-
-#[tokio::test]
-async fn reviews_feed_interval_secs_round_trips_and_clears() {
-    let db = in_memory_db().await;
-    assert_eq!(db.get_reviews_feed_interval_secs().await.unwrap(), None);
-    db.set_reviews_feed_interval_secs(Some(300)).await.unwrap();
     assert_eq!(
         db.get_reviews_feed_interval_secs().await.unwrap(),
         Some(300)
     );
-    db.set_reviews_feed_interval_secs(None).await.unwrap();
-    assert_eq!(db.get_reviews_feed_interval_secs().await.unwrap(), None);
-}
-
-#[tokio::test]
-async fn cve_feed_command_round_trips_and_clears() {
-    let db = in_memory_db().await;
-    assert_eq!(db.get_cve_feed_command().await.unwrap(), None);
-    db.set_cve_feed_command(Some("/scripts/fetch-cve.sh"))
-        .await
-        .unwrap();
     assert_eq!(
         db.get_cve_feed_command().await.unwrap(),
         Some("/scripts/fetch-cve.sh".to_string())
     );
-    db.set_cve_feed_command(None).await.unwrap();
-    assert_eq!(db.get_cve_feed_command().await.unwrap(), None);
-}
-
-#[tokio::test]
-async fn cve_feed_interval_secs_round_trips_and_clears() {
-    let db = in_memory_db().await;
-    assert_eq!(db.get_cve_feed_interval_secs().await.unwrap(), None);
-    db.set_cve_feed_interval_secs(Some(900)).await.unwrap();
     assert_eq!(db.get_cve_feed_interval_secs().await.unwrap(), Some(900));
-    db.set_cve_feed_interval_secs(None).await.unwrap();
+
+    db.set_managed_feed_settings(ManagedFeedSettingsPatch {
+        reviews_command: Some(None),
+        reviews_interval_secs: Some(None),
+        cve_command: Some(None),
+        cve_interval_secs: Some(None),
+    })
+    .await
+    .unwrap();
+    assert_eq!(db.get_reviews_feed_command().await.unwrap(), None);
+    assert_eq!(db.get_reviews_feed_interval_secs().await.unwrap(), None);
+    assert_eq!(db.get_cve_feed_command().await.unwrap(), None);
     assert_eq!(db.get_cve_feed_interval_secs().await.unwrap(), None);
 }
 

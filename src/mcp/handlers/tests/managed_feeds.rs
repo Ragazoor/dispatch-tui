@@ -12,12 +12,18 @@ async fn no_args_returns_current_config() {
     let state = test_state().await;
     state
         .db
-        .set_reviews_feed_command(Some("/scripts/reviews.sh"))
+        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+            reviews_command: Some(Some("/scripts/reviews.sh".to_string())),
+            ..Default::default()
+        })
         .await
         .unwrap();
     state
         .db
-        .set_reviews_feed_interval_secs(Some(300))
+        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+            reviews_interval_secs: Some(Some(300)),
+            ..Default::default()
+        })
         .await
         .unwrap();
 
@@ -104,7 +110,10 @@ async fn set_omitted_field_leaves_existing() {
     let state = test_state().await;
     state
         .db
-        .set_reviews_feed_command(Some("/existing.sh"))
+        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+            reviews_command: Some(Some("/existing.sh".to_string())),
+            ..Default::default()
+        })
         .await
         .unwrap();
 
@@ -132,7 +141,10 @@ async fn set_null_clears() {
     let state = test_state().await;
     state
         .db
-        .set_reviews_feed_command(Some("/existing.sh"))
+        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+            reviews_command: Some(Some("/existing.sh".to_string())),
+            ..Default::default()
+        })
         .await
         .unwrap();
 
@@ -292,7 +304,10 @@ async fn no_args_is_read_only() {
     // Store a command directly, so a (wrongly) provisioning read would create epics.
     state
         .db
-        .set_reviews_feed_command(Some("/r.sh"))
+        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+            reviews_command: Some(Some("/r.sh".to_string())),
+            ..Default::default()
+        })
         .await
         .unwrap();
 
@@ -319,7 +334,10 @@ async fn write_returns_resulting_config() {
     let state = test_state().await;
     state
         .db
-        .set_cve_feed_command(Some("/old-cve.sh"))
+        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+            cve_command: Some(Some("/old-cve.sh".to_string())),
+            ..Default::default()
+        })
         .await
         .unwrap();
 

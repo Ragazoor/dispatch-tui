@@ -125,9 +125,24 @@ async fn provision_from_settings_is_noop_without_config() {
 #[tokio::test]
 async fn provision_from_settings_creates_tree() {
     let db = Store::open_in_memory().unwrap();
-    db.set_reviews_feed_command(Some(REVIEWS)).await.unwrap();
-    db.set_reviews_feed_interval_secs(Some(300)).await.unwrap();
-    db.set_cve_feed_command(Some(CVE)).await.unwrap();
+    db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+        reviews_command: Some(Some(REVIEWS.to_string())),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+        reviews_interval_secs: Some(Some(300)),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+        cve_command: Some(Some(CVE.to_string())),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
     provision_managed_feeds_from_settings(&db).await.unwrap();
 
     let epics = db.list_epics().await;
@@ -143,7 +158,12 @@ async fn provision_from_settings_creates_tree() {
 #[tokio::test]
 async fn write_managed_feed_settings_updates_only_provided_fields() {
     let db = Store::open_in_memory().unwrap();
-    db.set_cve_feed_command(Some("/existing.sh")).await.unwrap();
+    db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+        cve_command: Some(Some("/existing.sh".to_string())),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
 
     write_managed_feed_settings(
         &db,
@@ -175,7 +195,12 @@ async fn write_managed_feed_settings_updates_only_provided_fields() {
 #[tokio::test]
 async fn write_managed_feed_settings_clears_on_explicit_none() {
     let db = Store::open_in_memory().unwrap();
-    db.set_reviews_feed_command(Some(REVIEWS)).await.unwrap();
+    db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+        reviews_command: Some(Some(REVIEWS.to_string())),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
 
     write_managed_feed_settings(
         &db,

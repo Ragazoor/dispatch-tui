@@ -203,7 +203,10 @@ mod epic_tests {
         // Enable the reviews feed and provision it, exactly as
         // managed_feed_config does, then deliver the notification it sends.
         rt.database
-            .set_reviews_feed_command(Some("reviews.sh"))
+            .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+                reviews_command: Some(Some("reviews.sh".to_string())),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let settings = crate::service::read_managed_feed_settings(&*rt.database)

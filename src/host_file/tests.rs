@@ -263,18 +263,53 @@ fn adopting_a_user_identity_writes_it_and_its_credential_together() {
 /// `core.allium: LocalHostOwnerIsWrittenOnce`: a second adoption with a
 /// different owner leaves the stored owner alone; the credential is refreshed.
 #[test]
-fn adopting_never_overwrites_an_existing_owner() {
+fn adopting_a_different_identity_is_refused_and_writes_nothing() {
+    // host.allium: RefuseAChangedUserIdentity, and AdoptUserIdentity's "never
+    // an identity without the credential that proves it": owner A must not be
+    // paired with B's credential.
     let dir = tempfile::tempdir().unwrap();
     let mut owned = named("host-abc", "laptop");
     owned.user_identity = Some("first-owner".to_string());
     owned.credential = Some("old-token".to_string());
     write_raw(dir.path(), &owned, HOST_FILE_MODE);
 
-    let adopted = adopt_user_identity(dir.path(), "someone-else", "new-token").unwrap();
+    assert!(adopt_user_identity(dir.path(), "someone-else", "new-token").is_err());
+
+    assert_eq!(stored(dir.path()), owned);
+}
+
+/// The same identity re-adopted refreshes its credential and keeps the owner.
+#[test]
+fn re_adopting_the_stored_identity_refreshes_its_credential() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut owned = named("host-abc", "laptop");
+    owned.user_identity = Some("first-owner".to_string());
+    owned.credential = Some("old-token".to_string());
+    write_raw(dir.path(), &owned, HOST_FILE_MODE);
+
+    let adopted = adopt_user_identity(dir.path(), "first-owner", "new-token").unwrap();
 
     assert_eq!(adopted.user_identity.as_deref(), Some("first-owner"));
     assert_eq!(adopted.credential.as_deref(), Some("new-token"));
     assert_eq!(stored(dir.path()), adopted);
+}
+
+/// host.allium: HostFileIsPrivate holds on read too: a host file someone
+/// loosened is put back to the private mode by the next read, launch or CLI,
+/// and its content is left as it was.
+#[test]
+fn a_read_repairs_a_loosened_host_file_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = host_file_path(dir.path());
+    let identity = named("host-abc", "laptop");
+
+    write_raw(dir.path(), &identity, 0o644);
+    assert_eq!(resolve_for_launch(dir.path()).unwrap(), identity);
+    assert_eq!(mode_of(&path), HOST_FILE_MODE);
+
+    write_raw(dir.path(), &identity, 0o644);
+    assert_eq!(read_for_cli(dir.path()).unwrap(), identity);
+    assert_eq!(mode_of(&path), HOST_FILE_MODE);
 }
 
 // -- HostFileIsWrittenWhole / HostFileIsPrivate --------------------------------

@@ -26,15 +26,15 @@
 --           this file says whose a setting is, not how that fact is
 --           transported.
 --
--- WHY HOST, NOT UserIdentity. `core/Host.id` is minted offline on first run
--- and is never null, while `core/Host.owner` is null until a first connection
--- settles one and may never settle at all (core.allium: Host.owner). A setting
--- cannot wait out that gap: it is read back the moment it is written, on the
--- same board that just wrote it, and an install that has never connected must
--- not lose access to its own preferences while it waits for a connection that
--- may never come. Scoping by host id still delivers the isolation the design
--- calls for — no two hosts ever share an id, so a teammate's board never sees
--- this one's settings — without that gap.
+-- WHY HOST, NOT UserIdentity. A setting describes one machine: a feed command
+-- names a script path on that machine's disk, a fold or a filter is one
+-- board's view. Keyed by the person, the same person's two machines would
+-- share those values and overwrite each other's. Keyed by host id, no two
+-- machines share a row, since no two hosts share an id (core.allium:
+-- Host.id). Writing still needs the person: the store accepts a setting only
+-- from the host's owner (store-split.allium: SaveSettingForHost), so an
+-- install that has never connected has no stored settings and runs on the
+-- defaults.
 
 use "./core.allium" as core
 
@@ -105,8 +105,8 @@ rule SetManagedFeedSettings {
 -- The board's way into this file. Each feature that keeps a preference emits
 -- one of these requests from its own rule, qualified
 -- (`settings/SaveSetting(key: …, value: …)`): tasks.allium's section and epic
--- folds, board-layout.allium's repo filter and hide-lists, the notifications
--- toggle, and epics.allium's managed-feed configuration. This surface does not
+-- folds, board-layout.allium's repo filter and hide-lists, agent-health.allium's
+-- notifications toggle, and epics.allium's managed-feed configuration. This surface does not
 -- list them; the feature that owns a preference owns the decision to keep it.
 surface SettingWrites {
     facing _: core/BoardProcess

@@ -131,7 +131,10 @@ async fn the_store_reaches_the_settings_tables() {
 
     // managed-feed config, also settings-backed
     local
-        .set_reviews_feed_command(Some("gh pr list"))
+        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+            reviews_command: Some(Some("gh pr list".to_string())),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(

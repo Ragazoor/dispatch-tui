@@ -114,10 +114,9 @@ pub trait HostStore: Send + Sync {
 /// SpacetimeDB module and it never travels in a snapshot, so the only honest
 /// place for it is here.
 ///
-/// The split has a practical consequence worth knowing: adopting an identity is
-/// two writes on two halves, not one. They are not atomic, and they do not need
-/// to be — an identity with no credential presents as a conflict on the next
-/// connection, which is a state the system already refuses loudly.
+/// Adoption writes the identity and its credential together, in one host-file
+/// replacement (`adopt_user_identity_with_credential`), so the file never holds
+/// one without the other.
 #[async_trait::async_trait]
 pub trait IdentityCredentialStore: Send + Sync {
     /// The stored credential, or `None` on an install that has never connected.

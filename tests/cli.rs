@@ -24,9 +24,8 @@ use dispatch_tui::models::TaskId;
 use dispatch_tui::store::{Store, TaskRead};
 
 /// A fresh in-memory store for the in-process command tests. The temp file is
-/// only a path that nothing opens, for the tests that also pass `--db` to the
-/// binary.
-async fn sqlite() -> (NamedTempFile, Store) {
+/// only a path that nothing opens.
+async fn in_memory_store() -> (NamedTempFile, Store) {
     let tmp = NamedTempFile::new().unwrap();
     let db = Store::open_in_memory().unwrap();
     (tmp, db)
@@ -103,8 +102,8 @@ fn store_backed_commands_fail_cleanly_when_the_store_is_unreachable() {
     }
 }
 
-/// `uninstall --purge` works in the data directory `--db` names, not only the
-/// default one: a purge against a throwaway `--db` forgets that directory's
+/// `uninstall --purge` works in the data directory `--data-dir` names, not only
+/// the default one: a purge against a throwaway `--data-dir` forgets that directory's
 /// identity and leaves the real one alone. `$HOME` and `$XDG_DATA_HOME` point
 /// into a temp directory, so nothing real is reachable either way.
 #[test]
@@ -156,8 +155,8 @@ fn dead_store_address() -> String {
 }
 
 /// Task #4982, cli.allium: CliCommandsReachTheStoreWithoutManagingIt. With
-/// nothing named, a command reaches the address a board on the same `--db`
-/// recorded beside it (`store-server`, startup.allium: StoreAddressRecord) --
+/// nothing named, a command reaches the address a board on the same
+/// `--data-dir` recorded beside it (`store-server`, startup.allium: StoreAddressRecord) --
 /// and when that board has gone without removing it, the command fails naming
 /// THAT address rather than falling back to the managed one.
 ///
@@ -275,9 +274,9 @@ fn make_plan_file(title: &str, goal: &str) -> NamedTempFile {
 // silently doing something.
 // ---------------------------------------------------------------------------
 
-/// A `--db` path that deliberately does not exist. Every assertion in this
-/// section is about clap rejecting argv *before* anything opens a database, so
-/// pointing at a path no `Store::open` could succeed on makes that claim
+/// A `--data-dir` path that deliberately does not exist. Every assertion in
+/// this section is about clap rejecting argv *before* anything reads the data
+/// directory, so pointing at a path nothing could open makes that claim
 /// structural rather than merely asserted — and saves the tests a temp file
 /// none of them ever reads.
 const UNOPENABLE_DB: &str = "/nonexistent-dir/dispatch-test.db";
@@ -723,7 +722,7 @@ async fn seed_repo_path(db: &Store, path: &str) {
 
 #[tokio::test]
 async fn prune_repo_paths_removes_nonexistent_paths() {
-    let (_tmp, db) = sqlite().await;
+    let (_tmp, db) = in_memory_store().await;
     // A path that exists on disk, and one that does not.
     let real_dir = tempfile::tempdir().unwrap();
     let real_path = real_dir.path().to_str().unwrap();
@@ -940,7 +939,7 @@ async fn prune_repo_paths_removes_this_hosts_missing_path_and_its_verify_command
 
 #[tokio::test]
 async fn prune_repo_paths_empty_db_succeeds() {
-    let (_tmp, db) = sqlite().await;
+    let (_tmp, db) = in_memory_store().await;
     let mut out = Vec::new();
     commands::prune_repo_paths(&db, &mut out).await.unwrap();
     let stdout = String::from_utf8(out).unwrap();
@@ -956,7 +955,7 @@ async fn prune_repo_paths_empty_db_succeeds() {
 
 #[tokio::test]
 async fn dispatch_repo_set_verify_writes_command() {
-    let (_tmp, db) = sqlite().await;
+    let (_tmp, db) = in_memory_store().await;
     commands::set_verify(&db, "/r", "cargo test", &mut Vec::new())
         .await
         .unwrap();
@@ -968,7 +967,7 @@ async fn dispatch_repo_set_verify_writes_command() {
 
 #[tokio::test]
 async fn dispatch_repo_clear_verify_removes_command() {
-    let (_tmp, db) = sqlite().await;
+    let (_tmp, db) = in_memory_store().await;
     commands::set_verify(&db, "/r", "cargo test", &mut Vec::new())
         .await
         .unwrap();
@@ -986,7 +985,7 @@ async fn dispatch_repo_clear_verify_removes_command() {
 
 #[tokio::test]
 async fn dispatch_repo_set_verify_rejects_newline() {
-    let (_tmp, db) = sqlite().await;
+    let (_tmp, db) = in_memory_store().await;
     let err = commands::set_verify(&db, "/r", "a\nb", &mut Vec::new())
         .await
         .expect_err("expected failure for newline command");
@@ -999,7 +998,7 @@ async fn dispatch_repo_set_verify_rejects_newline() {
 // C2: a refused command must not leave a repo-path row behind.
 #[tokio::test]
 async fn dispatch_repo_set_verify_refused_command_writes_nothing() {
-    let (_tmp, db) = sqlite().await;
+    let (_tmp, db) = in_memory_store().await;
     commands::set_verify(&db, "/typo", "a\nb", &mut Vec::new())
         .await
         .expect_err("newline command must be refused");
@@ -1043,7 +1042,7 @@ async fn dispatch_repo_set_verify_keeps_the_host_of_an_existing_row() {
 // C5: clearing an unknown path is ignored, as the docs say.
 #[tokio::test]
 async fn dispatch_repo_clear_verify_ignores_an_unknown_path() {
-    let (_tmp, db) = sqlite().await;
+    let (_tmp, db) = in_memory_store().await;
     commands::clear_verify(&db, "/unknown", &mut Vec::new())
         .await
         .expect("clearing an unknown path is not an error");
@@ -1086,7 +1085,7 @@ async fn prune_repo_paths_keeps_a_path_it_cannot_inspect() {
 
 #[tokio::test]
 async fn dispatch_repo_set_verify_expands_tilde_in_path() {
-    let (_tmp, db) = sqlite().await;
+    let (_tmp, db) = in_memory_store().await;
     commands::set_verify(&db, "~/r", "cargo test", &mut Vec::new())
         .await
         .unwrap();

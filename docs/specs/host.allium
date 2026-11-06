@@ -81,7 +81,9 @@ entity HostFile {
     permissions: String        -- the file's mode; always config.host_file_mode
     credential: String?        -- the user identity's login credential; null until the first connection hands one out
 
-    -- The file holds a login credential, so only its owner may read it.
+    -- The file holds a login credential, so only its owner may read it. Every
+    -- write sets the mode (HostFileIsWrittenWhole), and every read puts a
+    -- loosened file back to it, logging that it did.
     invariant HostFileIsPrivate {
         permissions = config.host_file_mode
     }
@@ -331,7 +333,10 @@ rule AdoptUserIdentity {
         -- credential the store handed out with it are written together, in
         -- one whole-file replacement (HostFileIsWrittenWhole), so the file
         -- never holds an identity without the credential that proves it or
-        -- the reverse.
+        -- the reverse. The host-file write refuses a credential for an
+        -- identity other than the stored owner, so even a caller that skips
+        -- this rule's guard cannot pair one person with another's credential
+        -- (RefuseAChangedUserIdentity).
         --
         -- THE STORED ANSWER IS core/local_host().owner, AND THERE IS NO OTHER.
         -- "Persists across restarts" is not a separate obligation this rule

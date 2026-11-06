@@ -315,16 +315,22 @@ async fn save_setting_is_scoped_to_this_writers_own_host() {
 }
 
 #[tokio::test]
-async fn clear_setting_is_scoped_to_this_writers_own_host() {
+async fn managed_feed_settings_are_scoped_to_this_writers_own_host() {
     let (writer, caller) = writer_with(RecordingCaller::default());
 
-    writer.set_reviews_feed_command(None).await.unwrap();
+    writer
+        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+            reviews_command: Some(None),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     assert_eq!(
         caller.sent(),
-        vec![Sent::ClearSetting(
+        vec![Sent::SetManagedFeedSettings(
             "host-me".to_string(),
-            "reviews_feed_command".to_string()
+            vec![("reviews_feed_command".to_string(), None)]
         )]
     );
 }
@@ -473,7 +479,12 @@ async fn every_store_mutation_reaches_the_transport() {
 
     db.set_setting_bool("notifications", true).await.unwrap();
     db.set_setting_string("theme", "dark").await.unwrap();
-    db.set_reviews_feed_command(None).await.unwrap();
+    db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
+        reviews_command: Some(None),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
 
     db.subagent_start(TaskId(1), "agent-1", "session-1", now)
         .await
@@ -629,7 +640,7 @@ async fn every_store_mutation_reaches_the_transport() {
             "Unsubscribe",
             "SaveSetting",
             "SaveSetting",
-            "ClearSetting",
+            "SetManagedFeedSettings",
             "SubagentStart",
             "SubagentStop",
             "SubagentClear",
