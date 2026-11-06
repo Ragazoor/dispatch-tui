@@ -74,10 +74,11 @@ rule ClearSetting {
     ensures: SettingCleared(host: core/local_host(), key: key)
 
     @guidance
-        -- Clearing a key that was never set is a no-op rather than a
-        -- refusal: a caller here is typically restoring a default (e.g.
-        -- clearing a feed command), and finding the default already in
-        -- effect is not a mistake worth reporting. The store judges the
+        -- No board path emits this today: managed-feed clears go through
+        -- SetManagedFeedSettings. It is the general clear, kept for the next
+        -- preference that needs one. Clearing a key that was never set is a
+        -- no-op rather than a refusal: a caller is restoring a default, and
+        -- finding it already in effect is not a mistake worth reporting. The store judges the
         -- request and deletes the row if there is one (store-split.allium:
         -- ClearSettingForHost).
 }
@@ -106,14 +107,15 @@ rule SetManagedFeedSettings {
 -- one of these requests from its own rule, qualified
 -- (`settings/SaveSetting(key: …, value: …)`): tasks.allium's section and epic
 -- folds, board-layout.allium's repo filter and hide-lists, agent-health.allium's
--- notifications toggle, and epics.allium's managed-feed configuration. This surface does not
--- list them; the feature that owns a preference owns the decision to keep it.
+-- notifications toggle, and epics.allium's managed-feed configuration. The
+-- feature that owns a preference owns the decision to keep it, so a new one
+-- adds its own emission, not a line here.
 surface SettingWrites {
     facing _: core/BoardProcess
 
     provides:
         SaveSetting(key, value)
-        ClearSetting(key)
+        ClearSetting(key)    -- no emitter today (ClearSetting)
         SetManagedFeedSettings(writes)
 
     @guarantee SettingsAreStoredPerHost
