@@ -662,9 +662,7 @@ impl SelectionState {
 // FilterState — repo filter for the task board
 // ---------------------------------------------------------------------------
 
-/// Settings keys the hide-lists are saved under, as JSON arrays of ids.
-pub const HIDDEN_EPICS_KEY: &str = "hidden_epics";
-pub const HIDDEN_PACKAGES_KEY: &str = "hidden_packages";
+pub use crate::models::{HIDDEN_EPICS_KEY, HIDDEN_PACKAGES_KEY};
 
 #[derive(Debug, Clone, Default)]
 pub struct FilterState {
@@ -682,13 +680,7 @@ pub struct FilterState {
 
 impl FilterState {
     pub fn matches(&self, repo_path: &str) -> bool {
-        if self.repos.is_empty() {
-            return true;
-        }
-        match self.mode {
-            RepoFilterMode::Include => self.repos.contains(repo_path),
-            RepoFilterMode::Exclude => !self.repos.contains(repo_path),
-        }
+        crate::models::repo_filter_admits(&self.repos, self.mode, repo_path)
     }
 
     /// Whether the user hid this work package (its card only).

@@ -1220,12 +1220,15 @@ async fn load_notifications_pref(db: &dyn store::SettingsStore, app: &mut App) {
 }
 
 async fn load_repo_filter(db: &dyn store::SettingsStore, app: &mut App) {
-    if let Ok(Some(val)) = db.get_setting_string("repo_filter").await {
+    if let Ok(Some(val)) = db.get_setting_string(crate::models::REPO_FILTER_KEY).await {
         if let Ok(paths) = serde_json::from_str::<Vec<String>>(&val) {
             app.set_repo_filter(paths.into_iter().collect());
         }
     }
-    if let Ok(Some(mode_str)) = db.get_setting_string("repo_filter_mode").await {
+    if let Ok(Some(mode_str)) = db
+        .get_setting_string(crate::models::REPO_FILTER_MODE_KEY)
+        .await
+    {
         if let Ok(mode) = mode_str.parse::<RepoFilterMode>() {
             app.set_repo_filter_mode(mode);
         }

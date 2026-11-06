@@ -499,9 +499,12 @@ async fn detached_agents_are_listed_beside_attached_ones_without_a_window() {
         task: None,
         live_agents: vec![pane_agent(9), pane_agent(4)],
         detached_agents: vec![detached_pane_agent(6)],
+        hidden_agents: 0,
     }));
 
-    let rows = read_agent_rows(&board, TaskId(4)).await;
+    let rows = read_agent_list(&board, TaskId(4))
+        .await
+        .map(|list| list.rows);
 
     assert_eq!(rows, Ok(vec![agent(4, true), detached(6), agent(9, false)]));
 }
@@ -530,6 +533,7 @@ async fn the_agent_list_groups_agents_by_epic_with_epicless_last() {
     let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
         task: None,
         detached_agents: vec![],
+        hidden_agents: 0,
         live_agents: vec![
             crate::hooks::wire::PaneAgent {
                 epic: Some(five.clone()),
@@ -547,7 +551,10 @@ async fn the_agent_list_groups_agents_by_epic_with_epicless_last() {
         ],
     }));
 
-    let rows = read_agent_rows(&board, TaskId(1)).await.unwrap();
+    let rows = read_agent_list(&board, TaskId(1))
+        .await
+        .map(|list| list.rows)
+        .unwrap();
 
     let order: Vec<(i64, Option<crate::models::EpicId>)> = rows
         .iter()
@@ -564,13 +571,17 @@ async fn the_boards_agent_name_reaches_the_agent_row() {
     let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
         task: None,
         detached_agents: vec![],
+        hidden_agents: 0,
         live_agents: vec![crate::hooks::wire::PaneAgent {
             agent_name: "scar".into(),
             ..pane_agent(9)
         }],
     }));
 
-    let rows = read_agent_rows(&board, TaskId(7)).await.unwrap();
+    let rows = read_agent_list(&board, TaskId(7))
+        .await
+        .map(|list| list.rows)
+        .unwrap();
 
     assert_eq!(rows[0].agent_name, "scar");
 }
@@ -583,10 +594,13 @@ async fn the_agent_list_is_the_boards_live_agents_by_id_with_own_marked() {
     let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
         task: None,
         detached_agents: vec![],
+        hidden_agents: 0,
         live_agents: vec![pane_agent(9), pane_agent(4), pane_agent(7)],
     }));
 
-    let rows = read_agent_rows(&board, TaskId(7)).await;
+    let rows = read_agent_list(&board, TaskId(7))
+        .await
+        .map(|list| list.rows);
 
     assert_eq!(
         rows,
@@ -601,7 +615,9 @@ async fn the_agent_list_is_the_boards_live_agents_by_id_with_own_marked() {
 async fn an_unreachable_board_is_a_failed_agent_read_naming_the_board() {
     let board = FakeBoard(Err("connection refused".into()));
 
-    let read = read_agent_rows(&board, TaskId(7)).await;
+    let read = read_agent_list(&board, TaskId(7))
+        .await
+        .map(|list| list.rows);
 
     let reason = read.expect_err("an unreachable board must not read as an empty list");
     assert!(reason.contains("127.0.0.1:8899"), "{reason}");
@@ -626,11 +642,51 @@ async fn the_agent_list_lays_its_groups_out_as_the_epic_tree() {
     let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
         task: None,
         detached_agents: vec![],
+        hidden_agents: 0,
         live_agents: vec![with(1, &twenty), with(2, &thirty), with(3, &ten)],
     }));
 
-    let rows = read_agent_rows(&board, TaskId(9)).await.unwrap();
+    let rows = read_agent_list(&board, TaskId(9))
+        .await
+        .map(|list| list.rows)
+        .unwrap();
 
     let order: Vec<i64> = rows.iter().map(|row| row.id.0).collect();
     assert_eq!(order, vec![3, 2, 1]);
+}
+
+// ---- the board's filter (agent-tree.allium: ListsFollowTheBoardFilter) ----
+
+/// The read carries the board's hidden-agents count beside the rows.
+#[tokio::test]
+async fn the_agent_read_carries_the_boards_hidden_count() {
+    let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
+        task: None,
+        live_agents: vec![pane_agent(4)],
+        detached_agents: vec![],
+        hidden_agents: 3,
+    }));
+
+    let list = read_agent_list(&board, TaskId(4)).await.unwrap();
+
+    assert_eq!(list.hidden, 3);
+    assert_eq!(list.rows.len(), 1);
+}
+
+/// A good read sets the count; a failed one keeps it with the last rows
+/// (AgentTreeAgentListFailureKeepsLastList).
+#[test]
+fn a_failed_read_keeps_the_last_hidden_count() {
+    use crate::agent_tree::render::agents::AgentList;
+    let mut state = RenderState::new();
+    state.adopt_agent_read(Ok(AgentList {
+        rows: vec![agent(1, false)],
+        hidden: 2,
+    }));
+    assert_eq!(state.agents.hidden(), 2);
+
+    state.adopt_agent_read(Err("board gone".into()));
+
+    assert_eq!(state.agents.hidden(), 2);
+    assert_eq!(state.agents.rows().len(), 1);
 }

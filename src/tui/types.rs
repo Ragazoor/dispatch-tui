@@ -27,32 +27,7 @@ pub enum MoveDirection {
 // RepoFilterMode
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RepoFilterMode {
-    #[default]
-    Include,
-    Exclude,
-}
-
-impl RepoFilterMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            RepoFilterMode::Include => "include",
-            RepoFilterMode::Exclude => "exclude",
-        }
-    }
-}
-
-impl std::str::FromStr for RepoFilterMode {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "include" => Ok(RepoFilterMode::Include),
-            "exclude" => Ok(RepoFilterMode::Exclude),
-            _ => Err(format!("unknown filter mode: {s}")),
-        }
-    }
-}
+pub use crate::models::RepoFilterMode;
 
 // ---------------------------------------------------------------------------
 // Lens — how the board is read (`board-layout.allium`, "Board Lens")

@@ -19,7 +19,7 @@ use crate::agent_tree::changes::{git_branch_commits, git_changes};
 use crate::agent_tree::keys::{handle_key, KeyAction};
 use crate::agent_tree::model::{build_tree, TreeNode};
 use crate::agent_tree::pane::RefreshSchedule;
-use crate::agent_tree::render::agents::AgentRow;
+use crate::agent_tree::render::agents::{AgentList, AgentRow};
 use crate::agent_tree::render::commits::AgentCommit;
 use crate::agent_tree::render::render_pane;
 use crate::agent_tree::state::{Notice, RenderState};
@@ -247,7 +247,7 @@ pub(super) fn adopt_tree(rebuilt: TreeNode, tree: &mut TreeNode, state: &mut Ren
 /// Reads of the board's task list for the agents section, one per
 /// `AGENTS_REFRESH_INTERVAL`, produced off the render loop so a slow database
 /// never delays a keypress or a git tick.
-type AgentReads = std::sync::mpsc::Receiver<Result<Vec<AgentRow>, String>>;
+type AgentReads = std::sync::mpsc::Receiver<Result<AgentList, String>>;
 
 /// The agents section's re-read cadence — the spec's
 /// `config.agent_tree_agents_refresh_interval`.
@@ -263,7 +263,7 @@ fn drain_agent_reads(
     runner: &dyn ProcessRunner,
 ) {
     while let Ok(read) = agent_reads.try_recv() {
-        if let Some(window) = state.adopt_agent_list(read) {
+        if let Some(window) = state.adopt_agent_read(read) {
             jump_to_agent(&window, state, runner);
         }
     }
@@ -560,13 +560,14 @@ pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()
 
 /// One read of the agents section, from the running board
 /// (agent-tree.allium: RefreshAgentTreeAgentList, `board_tasks()` =
-/// BoardPaneView's `live_agents` and `detached_agents`). `Err` carries the notice to show -- naming
+/// BoardPaneView's `live_agents` and `detached_agents`, with its
+/// `hidden_agents` count). `Err` carries the notice to show -- naming
 /// the board -- and the loop keeps its last list
 /// (AgentTreeAgentListFailureKeepsLastList).
-pub(crate) async fn read_agent_rows(
+pub(crate) async fn read_agent_list(
     source: &dyn crate::agent_tree::pane::PaneViewSource,
     own: TaskId,
-) -> Result<Vec<AgentRow>, String> {
+) -> Result<AgentList, String> {
     let view = source.pane_view(own).await.map_err(|e| {
         format!(
             "could not read the agent list from the board at {}: {e:#}",
@@ -581,6 +582,7 @@ pub(crate) async fn read_agent_rows(
         is_own: agent.id == own,
         epic: agent.epic,
     };
+    let hidden = view.hidden_agents;
     let live = view.live_agents.into_iter().filter_map(|agent| {
         let window = TmuxWindow::parse(agent.tmux_window.as_deref()?)?;
         Some(row(agent, Some(window)))
@@ -602,7 +604,7 @@ pub(crate) async fn read_agent_rows(
             .map(crate::agent_tree::render::agents::pane_epic_path);
         (row.epic.is_none(), path, row.id)
     });
-    Ok(rows)
+    Ok(AgentList { rows, hidden })
 }
 
 /// Read the board's task list on its own timer and send each read, reduced to
@@ -621,14 +623,14 @@ fn spawn_agent_list_poller(
         // Only news is sent: in steady state the list does not change, and
         // the loop would otherwise re-adopt an identical list every second.
         // A failure is always sent, since it carries a notice to show.
-        let mut last_sent: Option<Vec<AgentRow>> = None;
+        let mut last_sent: Option<AgentList> = None;
         // `interval`'s first tick resolves immediately, so the read below still
         // fires right away on the first pass — the tick before it only delays
         // every pass after that, same as the sleep-after-read it replaces.
         let mut ticker = tokio::time::interval(AGENTS_REFRESH_INTERVAL);
         loop {
             ticker.tick().await;
-            let read = read_agent_rows(&*source, own).await;
+            let read = read_agent_list(&*source, own).await;
             let news = match &read {
                 Ok(rows) => last_sent.as_ref() != Some(rows),
                 Err(_) => true,

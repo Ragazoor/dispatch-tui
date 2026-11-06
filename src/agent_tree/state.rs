@@ -235,6 +235,18 @@ impl RenderState {
         }
     }
 
+    /// Take one read of the board's agent list, its hidden count with it. A
+    /// failed read keeps the last count with the last rows.
+    pub fn adopt_agent_read(
+        &mut self,
+        read: Result<crate::agent_tree::render::agents::AgentList, String>,
+    ) -> Option<crate::models::TmuxWindow> {
+        if let Ok(list) = &read {
+            self.agents.set_hidden(list.hidden);
+        }
+        self.adopt_agent_list(read.map(|list| list.rows))
+    }
+
     /// Take one read of the board's task list. A working read replaces the
     /// rows and clears the agents timer's own stale notice, nothing else; a
     /// failed one keeps the last rows and says why — the spec's

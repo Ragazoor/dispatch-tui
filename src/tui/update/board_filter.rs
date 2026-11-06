@@ -284,10 +284,13 @@ impl App {
                 sorted_ids_json(self.filter.hidden_packages.iter().map(|p| p.0)),
             ),
             (
-                "repo_filter",
+                crate::models::REPO_FILTER_KEY,
                 serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string()),
             ),
-            ("repo_filter_mode", self.filter.mode.as_str().to_string()),
+            (
+                crate::models::REPO_FILTER_MODE_KEY,
+                self.filter.mode.as_str().to_string(),
+            ),
         ];
         settings
             .into_iter()

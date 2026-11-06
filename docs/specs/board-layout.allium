@@ -1152,6 +1152,13 @@ rule CycleLensBackward {
 -- No MCP tool reads or sets the hide-lists: they are the operator's view of
 -- their own board, and no agent sees that board. The saved settings are
 -- per-host rows like the repo filter's, not shared data about the work.
+--
+-- The one other reader is the operator's own view beside an agent: the
+-- agent-tree pane's agents section lists only the agents this filter shows
+-- (agent-tree.allium: ListsFollowTheBoardFilter). The board applies the
+-- epic hide-list and the repo filter there, not the search, the lens or the
+-- package hide-list, and it reads them from the saved settings, so a change
+-- reaches the pane once the overlay closes.
 
 entity BoardHides {
     hidden_epics: Set<core/Epic>

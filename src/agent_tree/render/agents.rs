@@ -50,6 +50,15 @@ impl AgentRow {
     }
 }
 
+/// One successful read of the board's agent list: the rows to show and how
+/// many agents the board's filter left out of them
+/// (`agent-tree.allium: ListsFollowTheBoardFilter`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentList {
+    pub rows: Vec<AgentRow>,
+    pub hidden: usize,
+}
+
 /// The section's rows and its own cursor. Kept apart from the tree's cursor so
 /// Tab back and forth returns the user to where they were in each.
 #[derive(Debug, Default)]
@@ -61,6 +70,9 @@ pub struct AgentsSection {
     offset: usize,
     /// Rows drawn at the last render — the half-page motions' page.
     viewport_rows: usize,
+    /// Agents the board's filter left out, named on the section's last line
+    /// (`AgentListNamesHiddenAgents`).
+    hidden: usize,
 }
 
 impl AgentsSection {
@@ -82,6 +94,15 @@ impl AgentsSection {
             .and_then(|id| self.rows.iter().position(|row| row.id == id))
             .unwrap_or(self.cursor)
             .min(self.last());
+    }
+
+    /// How many agents the board's filter left out of the last good read.
+    pub fn hidden(&self) -> usize {
+        self.hidden
+    }
+
+    pub fn set_hidden(&mut self, hidden: usize) {
+        self.hidden = hidden;
     }
 
     pub fn selected(&self) -> Option<&AgentRow> {
@@ -137,11 +158,20 @@ pub(crate) enum DrawnLine {
     /// The rule between the last epic group and the epicless agents.
     EndOfEpics,
     Agent(usize),
+    /// The muted count of agents the board's filter hides, after every other
+    /// line (`AgentListNamesHiddenAgents`).
+    HiddenByFilter,
+}
+
+/// The text of the hidden-agents line.
+pub(crate) fn hidden_agents_text(hidden: usize) -> String {
+    let noun = if hidden == 1 { "agent" } else { "agents" };
+    format!("{hidden} {noun} hidden by board filter")
 }
 
 /// The lines `rows` draw as: a header wherever a new epic's group starts, and
 /// the end-of-epics rule where the epicless agents follow an epic group.
-/// `rows` arrive already grouped (`read_agent_rows`).
+/// `rows` arrive already grouped (`read_agent_list`).
 pub(crate) fn drawn_lines(rows: &[AgentRow]) -> Vec<DrawnLine> {
     let mut lines = Vec::with_capacity(rows.len());
     // The headers the previous row sat under, root first: a new group draws
@@ -235,7 +265,10 @@ pub fn render_agents(
 
     let visible = usize::from(area.height.saturating_sub(2));
     section.viewport_rows = visible;
-    let drawn = drawn_lines(&section.rows);
+    let mut drawn = drawn_lines(&section.rows);
+    if section.hidden > 0 {
+        drawn.push(DrawnLine::HiddenByFilter);
+    }
     if let Some(cursor_line) = drawn
         .iter()
         .position(|line| *line == DrawnLine::Agent(section.cursor))
@@ -258,6 +291,15 @@ pub fn render_agents(
         // Then the cursor's own row, which wins in a pane too short for both.
         if visible > 0 && cursor_line >= section.offset + visible {
             section.offset = cursor_line + 1 - visible;
+        }
+        // On the last agent, the hidden-agents line below it comes into view
+        // too, where the pane has room for it beside the cursor's row.
+        if cursor_line + 2 == drawn.len()
+            && drawn.last() == Some(&DrawnLine::HiddenByFilter)
+            && visible > 1
+            && cursor_line + 1 >= section.offset + visible
+        {
+            section.offset = cursor_line + 2 - visible;
         }
     }
 
@@ -294,6 +336,12 @@ pub fn render_agents(
                     ));
                 }
                 DrawnLine::EndOfEpics => return Some(crate::epic_header::end_of_epics_line(width)),
+                DrawnLine::HiddenByFilter => {
+                    return Some(Line::from(Span::styled(
+                        hidden_agents_text(section.hidden),
+                        Style::default().fg(MUTED),
+                    )))
+                }
             };
             let row = section.rows.get(index)?;
             let mut style = Style::default();
@@ -356,6 +404,53 @@ mod tests {
         out.lines()
             .position(|line| line.contains(needle))
             .unwrap_or_else(|| panic!("{needle:?} not drawn:\n{out}"))
+    }
+
+    // ---- AgentListNamesHiddenAgents --------------------------------------
+
+    #[test]
+    fn hidden_agents_are_named_on_a_muted_last_line() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![in_epic(7, 3, &["Three"]), row(4, false)]);
+        section.set_hidden(3);
+        let out = rendered(&mut section, true, 8);
+        let hint = line_of(&out, "3 agents hidden by board");
+        assert!(hint > line_of(&out, "task 4"), "{out}");
+        assert!(hint > line_of(&out, "╌"), "{out}");
+    }
+
+    #[test]
+    fn one_hidden_agent_reads_singular() {
+        assert_eq!(hidden_agents_text(1), "1 agent hidden by board filter");
+    }
+
+    #[test]
+    fn nothing_hidden_draws_no_hint_line() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![row(4, false)]);
+        let out = rendered(&mut section, true, 6);
+        assert!(!out.contains("hidden by board"), "{out}");
+    }
+
+    #[test]
+    fn a_list_whose_every_agent_is_hidden_shows_the_hint_alone() {
+        let mut section = AgentsSection::new();
+        section.set_hidden(2);
+        let out = rendered(&mut section, true, 5);
+        assert!(out.contains("2 agents hidden by board"), "{out}");
+        assert_eq!(section.space_action(), None);
+    }
+
+    #[test]
+    fn the_cursor_on_the_last_agent_brings_the_hint_into_view() {
+        let mut section = AgentsSection::new();
+        section.set_rows((1..=6).map(|id| row(id, false)).collect());
+        section.set_hidden(1);
+        rendered(&mut section, true, 5);
+        section.bottom();
+        let out = rendered(&mut section, true, 5);
+        assert!(out.contains("task 6"), "{out}");
+        assert!(out.contains("1 agent hidden"), "{out}");
     }
 
     // ---- AgentListGroupsByEpic -------------------------------------------

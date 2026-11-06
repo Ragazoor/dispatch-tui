@@ -110,8 +110,24 @@ pub async fn handle_pane_view(
             worktree: task.worktree,
             base_branch: task.base_branch,
         });
-    let ((live_tasks, detached_tasks), epics) =
-        tokio::join!(state.db.list_agent_tasks(), state.db.list_epics());
+    let ((live_tasks, detached_tasks), epics, filter) = tokio::join!(
+        state.db.list_agent_tasks(),
+        state.db.list_epics(),
+        saved_board_filter(state.db.as_ref())
+    );
+    // The board's saved repo filter and epic hide-list narrow both lists, and
+    // the answer says how many they left out (ListsFollowTheBoardFilter).
+    let hidden = crate::models::hidden_epic_closure(&filter.hidden_epics, &epics);
+    let listed_before = live_tasks.len() + detached_tasks.len();
+    let live_tasks: Vec<_> = live_tasks
+        .into_iter()
+        .filter(|t| filter.admits(t, &hidden))
+        .collect();
+    let detached_tasks: Vec<_> = detached_tasks
+        .into_iter()
+        .filter(|t| filter.admits(t, &hidden))
+        .collect();
+    let hidden_agents = listed_before - live_tasks.len() - detached_tasks.len();
     // Each epic once, however many of its agents are listed.
     let by_id = crate::models::epics::epic_id_lookup(&epics);
     let mut pane_epics: std::collections::HashMap<crate::models::EpicId, PaneEpic> =
@@ -157,7 +173,25 @@ pub async fn handle_pane_view(
         task,
         live_agents,
         detached_agents,
+        hidden_agents,
     }))
+}
+
+/// The repo filter and epic hide-list this host's board last saved
+/// (`agent-tree.allium: ListsFollowTheBoardFilter`). An absent or unreadable
+/// setting filters nothing, as it does at board startup.
+async fn saved_board_filter(
+    db: &dyn crate::store::SettingsStore,
+) -> crate::models::SavedBoardFilter {
+    use crate::models::{HIDDEN_EPICS_KEY, REPO_FILTER_KEY, REPO_FILTER_MODE_KEY};
+    let (repos, mode, hidden) = tokio::join!(
+        db.get_setting_string(REPO_FILTER_KEY),
+        db.get_setting_string(REPO_FILTER_MODE_KEY),
+        db.get_setting_string(HIDDEN_EPICS_KEY)
+    );
+    let value = |r: anyhow::Result<Option<String>>| r.ok().flatten();
+    let (repos, mode, hidden) = (value(repos), value(mode), value(hidden));
+    crate::models::SavedBoardFilter::parse(repos.as_deref(), mode.as_deref(), hidden.as_deref())
 }
 
 /// `BoardPaneView.resume_agent` (`docs/specs/agent-tree.allium`): a companion

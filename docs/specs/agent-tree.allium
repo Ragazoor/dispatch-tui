@@ -21,8 +21,9 @@
 --           fork point from the task's base branch and selects which change
 --           the tree and diff pane show; and the AGENTS SECTION beneath that,
 --           which lists every task with an agent — attached to a live window
---           or detached from one — jumps to the selected attached agent's
---           window, and asks the board to resume a detached one.
+--           or detached from one — that the board's own filter shows, jumps to
+--           the selected attached agent's window, and asks the board to resume
+--           a detached one.
 -- Excludes: Task-activity classification and the activity-signal hook (see
 --           agent-health.allium — HookPreToolUse fires for both PreToolUse and
 --           PostToolUse and is NOT modified by anything in this spec);
@@ -277,14 +278,20 @@ value AgentCommit {
 
 -- One answer from the board to a pane: its task, when the board's rows hold
 -- it, the tasks with a live agent window (is_live_agent), and the tasks
--- whose agent is detached (core/Task.is_detached), across every repo and
--- epic, as RefreshAgentTreeAgentList lists them.
+-- whose agent is detached (core/Task.is_detached), narrowed by the board's
+-- filter (ListsFollowTheBoardFilter), as RefreshAgentTreeAgentList lists them.
 value PaneView {
+    -- Never narrowed by the filter: the tree and the commits section of a
+    -- pane whose own agent the board hides still show its work.
     task: PaneTask?
     live_agents: [core/Task]
     -- Empty from a board that predates detached agents: the pane then lists
     -- the attached agents alone, as it did before.
     detached_agents: [core/Task]
+    -- How many attached and detached agents the board's filter left out of
+    -- the two lists above. Zero from a board that predates the filter, which
+    -- left none out.
+    hidden_agents: Integer
 }
 
 -- The board's answer to a pane's resume request (BoardPaneView.resume_agent).
@@ -328,6 +335,25 @@ contract BoardPaneView {
         -- live_agents holds exactly the tasks is_live_agent holds for in the
         -- board's rows — the Running or Review column with a tmux window
         -- recorded — and no others. The pane does not re-derive it.
+
+    @invariant ListsFollowTheBoardFilter
+        -- live_agents and detached_agents hold only the tasks the board's
+        -- repo filter and epic hide-list admit (board-layout.allium:
+        -- active_repo_filter, BoardHides.task_is_hidden): a task whose repo
+        -- the filter leaves out, or whose epic or any ancestor epic is on the
+        -- hide-list, is in neither. An epicless task is never hidden by the
+        -- hide-list. Nothing else narrows them: not the board's search, not
+        -- its lens, not the work package hide-list (which hides cards, never
+        -- tasks), and not which task is asking — a pane's own task is held
+        -- to the same filter. hidden_agents counts exactly the tasks this
+        -- left out that LiveIsTheBoardsOwnDefinition or
+        -- DetachedIsTheBoardsOwnDefinition would otherwise have listed.
+        --
+        -- The filter is the one this host's board last saved (settings.allium:
+        -- SaveSetting): the board saves it when its filter overlay closes, so
+        -- a change reaches the pane on the first read after that close, and
+        -- not while the overlay is still open. A board with nothing saved
+        -- filters nothing.
 
     @invariant DetachedIsTheBoardsOwnDefinition
         -- detached_agents holds exactly the tasks core/Task.is_detached holds
@@ -501,6 +527,11 @@ entity AgentTreePane {
     -- live, which is almost always. It is listed, marked, and not jumpable —
     -- see JumpToAgentWindow.
     listed_agents: [core/Task]
+
+    -- How many agents the board's filter left out of listed_agents, as the
+    -- same successful read reported it (PaneView.hidden_agents). Zero before
+    -- the first read; a failed read leaves it alone with the list.
+    hidden_agent_count: Integer
 
     -- The detached agent the board accepted a resume for, whose window the
     -- pane jumps to once a list read shows it attached
@@ -820,6 +851,7 @@ rule SplitAgentTreePaneOnAgentLaunch {
         last_agents_listed_at: now - config.agent_tree_agents_refresh_interval,
         focus: agents,
         listed_agents: [],
+        hidden_agent_count: 0,
         last_commits_listed_at: now - config.agent_tree_commits_refresh_interval,
         listed_commits: [],
         -- Unstaged work is the default source (AgentTreeShowsUnstagedWorkOnly).
@@ -1078,6 +1110,7 @@ rule ShowAgentTreePane {
     -- A fresh renderer also starts with an empty agents list and reads the
     -- board straight away, rather than one interval after it appears.
     ensures: pane.listed_agents = []
+    ensures: pane.hidden_agent_count = 0
     ensures: pane.last_agents_listed_at = now - config.agent_tree_agents_refresh_interval
 
     -- And the same for the commits section — and the selection goes back to
@@ -2381,6 +2414,7 @@ rule RefreshAgentTreeAgentList {
 
     ensures: pane.last_agents_listed_at = now
     ensures: pane.listed_agents = grouped_by_epic(listed)
+    ensures: pane.hidden_agent_count = board_hidden_agents()
 
     -- A resumed agent that now has a window: jump to it, and stop waiting.
     -- One that left the list: stop waiting (ForgetPendingResumeJump).
@@ -2417,11 +2451,24 @@ rule RefreshAgentTreeAgentList {
         -- dot (AgentRowShowsAgentName). A task with no worktree is not
         -- listed: there is no agent to reach or resume.
         --
-        -- Every repo and every epic is listed, not only this task's. The
-        -- question the section answers is "which agents can I reach", and an
-        -- agent in another repo is as reachable as one in this. A detached
-        -- agent on another machine is listed too; resuming it is refused
-        -- (ResumeIsTheBoardsOwnResume), and the refusal says why.
+        -- Every repo and every epic the board's filter shows is listed, not
+        -- only this task's. The question the section answers is "which agents
+        -- can I reach", and an agent in another repo is as reachable as one in
+        -- this. A detached agent on another machine is listed too; resuming
+        -- it is refused (ResumeIsTheBoardsOwnResume), and the refusal says
+        -- why.
+        --
+        -- == The board's filter ==
+        -- The list follows the board's repo filter and epic hide-list
+        -- (ListsFollowTheBoardFilter), so an agent working on an epic the
+        -- user hid on the board is not in the pane either (task #99019). The
+        -- board does the filtering and the pane takes its answer as it
+        -- stands, so the two cannot disagree about what is hidden. The
+        -- pane's own task gets no exception: when the board hides it, it is
+        -- not in the list, while the tree and commits sections still show
+        -- its work. A pending resume jump whose task the filter now hides
+        -- has left the list, so it is forgotten like any other.
+        -- board_hidden_agents() is the same answer's hidden_agents.
         --
         -- == Read-only ==
         -- board_tasks() is BoardPaneView's pane_view(pane.task.id).live_agents
@@ -2472,6 +2519,7 @@ rule AgentTreeAgentListFailureKeepsLastList {
     -- Stamped anyway, so an absent board does not spin.
     ensures: pane.last_agents_listed_at = now
     ensures: pane.listed_agents = old(pane.listed_agents)
+    ensures: pane.hidden_agent_count = old(pane.hidden_agent_count)
     ensures: pane.error_notice = board_tasks_failure_reason()
     ensures: pane.notice_source = agent_list
     ensures: pane.status = shown
@@ -2910,6 +2958,7 @@ surface AgentTreeCompanionPane {
         pane.listed_commits
         pane.selected_commit
         pane.listed_agents
+        pane.hidden_agent_count
         pane.task_resolution
         pane.startup_failure when pane.task_resolution = unresolved
 
@@ -3119,7 +3168,8 @@ surface AgentTreeCompanionPane {
         --
         -- The pane's own task is drawn dimmed and carries no other mark: its
         -- dot is `●` like any attached agent's. It is listed rather than
-        -- hidden so the list always reads as the whole set of agents, but
+        -- left out so the list always reads as the whole set of agents the
+        -- board shows (unless the board's filter hides it), but
         -- Space on it does nothing (see JumpToAgentWindow). A detached row is
         -- drawn in the ordinary colour; only its dot sets it apart.
         --
@@ -3147,8 +3197,9 @@ surface AgentTreeCompanionPane {
         -- Each header and each agent row of a group is indented by
         -- board-layout's EpicGroupTree.indent: config.epic_indent_step
         -- columns per level, growing no further past
-        -- config.epic_indent_max_depth. The pane lists every repo and every
-        -- epic, so every ancestor counts; the tree's top is the root epics.
+        -- config.epic_indent_max_depth. Every ancestor counts, and the tree's
+        -- top is the root epics: the board's filter never hides an ancestor
+        -- of a shown epic, since hiding an epic hides its whole subtree.
         -- The epicless agents below the dashed rule are not indented.
         --
         -- The agents with no epic come last, under the board's dashed rule
@@ -3176,6 +3227,18 @@ surface AgentTreeCompanionPane {
         -- id, nothing indented, as before. A board that predates the epic
         -- itself sends none, and every agent then reads as epicless: the list
         -- is the plain id-ordered list with no headers and no rule.
+
+    @guarantee AgentListNamesHiddenAgents
+        -- When pane.hidden_agent_count is above zero, the agents section ends
+        -- with one muted line, `<n> agents hidden by board filter` (`1 agent`
+        -- for one), below every agent row and below the epicless agents'
+        -- dashed rule. It plays the part the board's own hidden badge plays
+        -- (board-layout.allium, "Hidden Epics and Work Packages"): a
+        -- forgotten hide must not read as agents that are missing. At zero
+        -- the line is not drawn. Like the headers and the rule it is
+        -- decoration: never selectable, never a jump target, stepped over by
+        -- every cursor motion. A list whose every agent is hidden shows the
+        -- line alone.
 
     @guarantee AgentKeysFollowFocus
         -- With the commits or the agents section focused, the cursor motions

@@ -175,22 +175,7 @@ impl<'a> BoardFilters<'a> {
     }
 }
 
-/// The hidden epics and every descendant of them: what
-/// `board-layout.allium: BoardHides.epic_is_hidden` holds for. Free when nothing
-/// is hidden, which is the common case on the render hot path.
-pub(in crate::tui) fn hidden_epic_closure(
-    hidden: &HashSet<EpicId>,
-    epics: &[Epic],
-) -> HashSet<EpicId> {
-    if hidden.is_empty() {
-        return HashSet::new();
-    }
-    let children = crate::models::build_children_map(epics);
-    hidden
-        .iter()
-        .flat_map(|&e| crate::models::descendant_epic_ids_with_map(e, &children))
-        .collect()
-}
+pub(in crate::tui) use crate::models::hidden_epic_closure;
 
 /// The epic ids that *directly own* at least one task carrying the
 /// board-search match: the task has an own match (title or id-prefix) AND the

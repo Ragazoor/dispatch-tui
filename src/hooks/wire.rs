@@ -182,7 +182,8 @@ pub struct PaneView {
     /// is not the same answer as "arrived without a worktree".
     pub task: Option<PaneTask>,
     /// Exactly the tasks `Task::is_live_agent` holds for in the board's rows,
-    /// across every repo and epic (`LiveIsTheBoardsOwnDefinition`).
+    /// narrowed by the board filter (`LiveIsTheBoardsOwnDefinition`,
+    /// `ListsFollowTheBoardFilter`).
     pub live_agents: Vec<PaneAgent>,
     /// Exactly the tasks `Task::is_detached` holds for in the board's rows
     /// (`DetachedIsTheBoardsOwnDefinition`), each with no `tmux_window`.
@@ -191,6 +192,11 @@ pub struct PaneView {
     /// absent from a board that predates it.
     #[serde(default)]
     pub detached_agents: Vec<PaneAgent>,
+    /// How many attached and detached agents the board's repo filter and epic
+    /// hide-list left out of the two lists (`ListsFollowTheBoardFilter`).
+    /// Zero from a board that predates the filter, which left none out.
+    #[serde(default)]
+    pub hidden_agents: usize,
 }
 
 /// `agent-tree.allium`'s `PaneTask`.
