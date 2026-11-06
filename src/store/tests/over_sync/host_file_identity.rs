@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! Task #16755: adopting the identity the store hands out is ONE write of the
+//! Adopting the identity the store hands out is ONE write of the
 //! host file (`host.allium: AdoptUserIdentity`, `HostFileIsWrittenWhole`).
 
 use crate::host_file::{host_file_path, read_for_cli, resolve_for_launch};
@@ -14,9 +14,10 @@ async fn host_file_database(dir: &std::path::Path) -> Store {
 }
 
 /// The combined port method writes owner and credential into host.json
-/// together, and keeps a stored owner.
+/// together, keeps a stored owner, and refuses another identity's credential
+/// (`host.allium: RefuseAChangedUserIdentity`).
 #[tokio::test]
-async fn adopt_with_credential_writes_both_and_keeps_an_existing_owner() {
+async fn adopt_with_credential_writes_both_and_refuses_another_owner() {
     let dir = tempfile::tempdir().unwrap();
     let db = host_file_database(dir.path()).await;
 
@@ -27,12 +28,19 @@ async fn adopt_with_credential_writes_both_and_keeps_an_existing_owner() {
     assert_eq!(file.user_identity.as_deref(), Some("c0ffee"));
     assert_eq!(file.credential.as_deref(), Some("token-1"));
 
-    db.adopt_user_identity_with_credential("other", "token-2")
+    assert!(db
+        .adopt_user_identity_with_credential("other", "token-2")
+        .await
+        .is_err());
+    let file = read_for_cli(dir.path()).unwrap();
+    assert_eq!(file.user_identity.as_deref(), Some("c0ffee"), "write-once");
+    assert_eq!(file.credential.as_deref(), Some("token-1"));
+
+    db.adopt_user_identity_with_credential("c0ffee", "token-3")
         .await
         .unwrap();
     let file = read_for_cli(dir.path()).unwrap();
-    assert_eq!(file.user_identity.as_deref(), Some("c0ffee"), "write-once");
-    assert_eq!(file.credential.as_deref(), Some("token-2"));
+    assert_eq!(file.credential.as_deref(), Some("token-3"), "refreshed");
 }
 
 /// The session's adoption never leaves a credential without its owner: with
