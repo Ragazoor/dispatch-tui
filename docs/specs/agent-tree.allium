@@ -47,12 +47,11 @@
 --   * A file changed by a shell command, a script or a formatter is badged
 --     like any other, because git does not care which tool wrote it.
 --
--- An earlier design derived the tree from a hook-driven, append-only log of
--- Read/Write/Edit/NotebookEdit tool calls. It could express none of the three
--- above: the log records touches, never outcomes, so it could not see a
--- deletion, could not retract a badge, and could not see a shell edit at all.
--- That capture pipeline is gone — not dormant — and with it the Read badge,
--- which git cannot supply. See AgentTreeIsGitDerived.
+-- A log of the agent's tool calls could express none of the three: it records
+-- touches, never outcomes, so it cannot see a deletion, cannot retract a
+-- badge, and cannot see a shell edit at all. Nothing in the pane reads tool
+-- calls, and there is no Read badge, which git cannot supply. See
+-- AgentTreeIsGitDerived.
 --
 -- The pane remains a standalone process inside the agent's own tmux window. It
 -- does not touch the board TUI's state, its refresh cycle, or the kanban App.
@@ -104,12 +103,11 @@ enum TreeNodeKind { file | directory }
 --   binary    -- git reports the change without line contents.
 --   too_large -- the diff exceeds config.agent_tree_diff_max_bytes.
 --
--- There is no "untracked" refusal. It used to exist, with a placeholder
--- repeating git's advice to stage the file; against an index baseline that
--- advice removed the file from the pane instead of revealing it. An untracked
--- file's diff is now its whole contents as additions (RefreshAgentTreeDiff's
--- "Untracked files"), and both refusals above apply to those contents exactly
--- as they apply to any other diff.
+-- There is no "untracked" refusal. Against an index baseline, advice to stage
+-- the file would remove it from the pane instead of revealing it. An
+-- untracked file's diff is its whole contents as additions
+-- (RefreshAgentTreeDiff's "Untracked files"), and both refusals above apply
+-- to those contents exactly as they apply to any other diff.
 enum DiffRefusal { binary | too_large }
 
 -- Which of the two writers set the pane's current notice. The pane shows one
@@ -118,9 +116,8 @@ enum DiffRefusal { binary | too_large }
 -- wiping the answer to a keypress the user made half a second ago. See
 -- RefreshAgentTree's clearing expression.
 --
--- The second writer used to be a failed file open, back when Space and Enter
--- launched an editor. It is now a failed diff-pane split, which is the same
--- shape of event: the direct, immediate answer to a keypress.
+-- The second writer is a failed diff-pane split, or a `v` on a file that is
+-- not on disk: the direct, immediate answer to a keypress.
 --
 -- The agents section added two more writers of the same shape. agent_list is
 -- the timer's writer, like git_query: a failed read of the task list, cleared
@@ -262,7 +259,7 @@ value AgentTreeNode {
 -- PaneView.task until the board's rows hold the task, which is how "not
 -- arrived yet" and "arrived without a worktree" stay two different answers.
 --
--- base_branch no longer decides what the TREE shows by default — that is the
+-- base_branch does not decide what the TREE shows by default — that is the
 -- worktree against its index (AgentTreeShowsUnstagedWorkOnly). It decides only
 -- which commits the commits section lists (AgentTreeBaselineIsTaskBaseBranch).
 value PaneTask {
@@ -657,7 +654,7 @@ entity AgentTreePane {
         unresolved -> waiting
     }
 
-    -- Declared last: allium check (3.16) reads only an entity's final
+    -- Declared last: allium check (CLI 3.6.1) reads only an entity's final
     -- transitions block as the graph for `status`, and reports every
     -- shown/hidden edge as undeclared when this one comes first.
     transitions status {
@@ -718,7 +715,7 @@ config {
 
     -- The tmux key (pressed after the tmux prefix) that toggles the companion
     -- pane. "e" for explorer: unbound in tmux's default key table, so the
-    -- binding shadows nothing. See the ToggleKeyChoice open question.
+    -- binding shadows nothing, and it does not collide with prefix+space.
     agent_tree_toggle_key: String = "e"
 
     -- Height of the lower pane as a percentage of the AGENT WINDOW. The lower
@@ -799,14 +796,9 @@ rule BindAgentTreeToggle {
         -- board-startup path. Best-effort: a failing tmux call must not
         -- prevent the board TUI from starting.
         --
-        -- == IMPLEMENTED ==
-        -- setup_tmux_for_tui (src/runtime/mod.rs) binds
-        -- config.agent_tree_toggle_key right after the existing prefix+space
-        -- bind_key call, same function, same best-effort `let _ =` style.
-        --
-        -- The bound command is a new pattern for this codebase: a
-        -- format-string-parameterized run-shell, not a static tmux command
-        -- like prefix+space's `select-window -t =TUI`. tmux itself expands
+        -- The bound command is a format-string-parameterized run-shell, not
+        -- a static tmux command like prefix+space's
+        -- `select-window -t =TUI`. tmux itself expands
         -- #{window_name} into the command line at the moment the key is
         -- pressed, before invoking the shell — so the process this spawns
         -- (`dispatch toggle-agent-tree-pane <window>`) is handed the name of
@@ -814,11 +806,6 @@ rule BindAgentTreeToggle {
         -- The `-b` flag backgrounds the shell job so the keypress does not
         -- block the tmux client while it runs. See ToggleAgentTreePane's own
         -- guidance for what that process does with the window name.
-        --
-        -- Resolves ToggleKeyChoice: config.agent_tree_toggle_key's default
-        -- ("e") was adopted as-is, unchanged from the design's own rationale
-        -- (unbound in tmux's default key table, no collision with
-        -- prefix+space).
         --
         -- Surfaced in the in-TUI help overlay ([?]) and in list_keybindings
         -- as a row of the tmux.global group, marked as handled by tmux,
@@ -843,11 +830,6 @@ rule UnbindAgentTreeToggle {
         -- returned to whatever tmux had bound it to. Consequence, shared with
         -- prefix+space: the companion pane cannot be toggled while the board
         -- TUI is not running.
-        --
-        -- == IMPLEMENTED ==
-        -- teardown_tmux_for_tui (src/runtime/mod.rs) unbinds
-        -- config.agent_tree_toggle_key alongside the existing prefix+space
-        -- unbind_key call.
 }
 
 rule SplitAgentTreePaneOnAgentLaunch {
@@ -900,9 +882,13 @@ rule SplitAgentTreePaneOnAgentLaunch {
         -- command has been sent, using a split helper that takes both a size
         -- (config.agent_tree_pane_percent) and a command to run in the new
         -- pane — the same "create and immediately run a command" shape the
-        -- window-creation helper already establishes. The board's existing
-        -- 40%-hardcoded horizontal split helper is left alone; it serves the
-        -- board's own split-pane feature (see split-pane.allium).
+        -- window-creation helper has. It is not the board's 40% horizontal
+        -- split, which serves split-pane.allium. It passes the task's worktree
+        -- as the new pane's start directory (`split-window -c`), which keeps
+        -- the companion pane out of the after-split-window correction hook
+        -- (split-pane.allium's AgentWindowSplitStartsInTaskWorktree). The
+        -- toggle and resync paths hold only a window name, so they read the
+        -- worktree back from that window's @dispatch_dir option.
         --
         -- The new pane runs a standalone tree renderer for this task
         -- (`dispatch agent-tree <task_id>`), not part of the board's App. It
@@ -911,31 +897,12 @@ rule SplitAgentTreePaneOnAgentLaunch {
         -- rendered, so a pane opened before the agent's first edit shows
         -- nothing but the root (see RefreshAgentTree).
         --
-        -- NO RETROFIT. Creation is triggered only by window creation, so agent
-        -- windows that already existed when this feature shipped never grow a
-        -- pane on their own automatically. A manual toggle can still create
-        -- one on demand in such a window — see ShowAgentTreePane's
-        -- "Resolves ToggleTargetResolution" note, which is a different
+        -- NO RETROFIT. Creation is triggered only by window creation, so an
+        -- agent window without a pane never grows one on its own. A manual
+        -- toggle can still create one on demand in such a window — see
+        -- ShowAgentTreePane's "Retrofit on toggle" note, which is a different
         -- trigger (a deliberate keypress) than the automatic creation this
         -- rule covers.
-        --
-        -- == IMPLEMENTED ==
-        -- The size-and-command split helper described above is
-        -- tmux::split_window_horizontal_running (src/tmux.rs), a sibling of the
-        -- board's 40%-hardcoded split_window_horizontal, which is untouched.
-        -- It passes the task's worktree as the new pane's start directory
-        -- (`split-window -c`), which is what keeps the companion pane out of the
-        -- after-split-window correction hook — see split-pane.allium's
-        -- AgentWindowSplitStartsInTaskWorktree. The toggle and resync paths hold
-        -- only a window name, so they read the worktree back from that window's
-        -- @dispatch_dir option.
-        -- spawn_agent_tree_pane (src/dispatch/agents.rs) calls it at
-        -- config.agent_tree_pane_percent and is wired into dispatch_with_prompt
-        -- — covering fresh dispatch, research dispatch and quick dispatch, and
-        -- through them epic auto-dispatch — and into resume_agent, covering
-        -- resume and retry-resume. In both cases the call sits immediately
-        -- after the existing send-keys of the agent command, which is the
-        -- "after the agent command has been sent" timing above.
         --
         -- The new pane opens on the LEFT of the agent's own pane (tmux
         -- split-window's -b/"before" flag), keeping focus (-d) on the agent's
@@ -953,23 +920,12 @@ rule SplitAgentTreePaneOnAgentLaunch {
         -- ever creates a companion pane, and AgentTreePane.task is required
         -- rather than optional. A window with no task has no worktree to root a
         -- tree at and no base branch to list commits from; `dispatch agent-tree`
-        -- takes a REQUIRED task id (src/cli/agent_tree.rs), so there is no id to
-        -- launch it with in the first place. Such a pane would also be covered
-        -- by neither pane-teardown rule below, since both key off a Task.
-        --
-        -- This is now structural rather than test-enforced, and deliberately
-        -- so. It used to be asserted against real tmux, because dispatch had a
-        -- second window-creation path that launched an agent without a task
-        -- (the main session, since removed) and that path could have grown a
-        -- split by accident. With it gone, AgentLaunched is the only trigger
-        -- that creates a pane and it cannot fire without a Task, so a
-        -- real-tmux test would assert something no code path can reach. What
-        -- remains covered is the toggle: toggle_agent_tree_pane short-circuits
-        -- on a name that is not `task-<id>`, asserted at mock level by
-        -- toggle_agent_tree_pane_is_noop_for_non_task_window (src/dispatch/tests/agent_launch.rs)
-        -- and resync_agent_tree_pane_noop_for_non_task_window
-        -- (src/dispatch/agents.rs). A future third window-creation path that
-        -- launches an agent would put the real-tmux assertion back in scope.
+        -- takes a REQUIRED task id, so there is no id to launch it with in the
+        -- first place. Such a pane would also be covered by neither
+        -- pane-teardown rule below, since both key off a Task. This holds by
+        -- structure: every window-creation path that launches an agent has a
+        -- task. The toggle, which acts on any focused window, is a no-op on a
+        -- window whose name is not `task-<id>`.
 }
 
 rule HideAgentTreePane {
@@ -997,30 +953,25 @@ rule HideAgentTreePane {
         -- process refreshes it, no keypress can change what it shows, and the
         -- toggle that brings the tree back does not act on it.
         --
-        -- The predecessor of this paragraph said the opposite, of the editor
-        -- pane this replaced, and it was right about that one: an editor
-        -- holding a file the user asked for is useful with or without a tree
-        -- beside it, and it could be reused by a later renderer because it was
-        -- found by a mark rather than by anything a renderer held. A diff pane
-        -- has neither property — it is a view of a set only the tree can
-        -- change — so it is killed rather than orphaned.
+        -- An editor in the lower pane is the exception and stays
+        -- (EditorPaneOutlivesItsTree): a file the user asked to edit is useful
+        -- with or without a tree beside it. A diff pane is not — it is a view
+        -- of a set only the tree can change — so it is killed rather than
+        -- orphaned.
         --
         -- The killed pane is the companion pane, never the agent's own pane:
         -- the target is resolved from the AgentTreePane record for the focused
         -- window, not from "whichever pane is not focused".
         --
-        -- == IMPLEMENTED ==
         -- No AgentTreePane record is persisted anywhere (no DB row, no tmux
-        -- user option) — `let pane = AgentTreePane{window: current_tmux_window()}`
-        -- above is a spec-level abstraction, not a stored lookup. The
-        -- implementation re-derives both halves of it live from tmux on every
-        -- toggle: `current_tmux_window()` is resolved by tmux's own
-        -- #{window_name} format-string expansion inside the bound run-shell
-        -- command (see BindAgentTreeToggle), before dispatch even starts —
-        -- this process is simply handed the window name as an argv string.
-        -- `pane.status = shown` means the window HAS a companion pane, which is
-        -- read by identifying that pane directly (below), not from any stored
-        -- status field.
+        -- user option): `let pane = AgentTreePane{window: current_tmux_window()}`
+        -- above is a spec-level abstraction, not a stored lookup. Both halves
+        -- are re-derived live from tmux on every toggle. tmux resolves
+        -- `current_tmux_window()` itself, expanding #{window_name} inside the
+        -- bound run-shell command (see BindAgentTreeToggle), so this process
+        -- is handed the window name as an argv string. `pane.status = shown`
+        -- means the window HAS a companion pane, read by identifying that
+        -- pane directly (below), not from any stored status field.
         --
         -- == How the companion pane is identified ==
         -- By a role marker dispatch writes on the pane at the moment it creates
@@ -1030,76 +981,48 @@ rule HideAgentTreePane {
         -- matches the role's EXACT value, so the two never stand in for each
         -- other — a toggle cannot kill the diff pane, and opening a diff
         -- cannot respawn the tree. No pane in the window carrying the
-        -- agent-tree role means hidden.
+        -- agent-tree role means hidden. A pane without the marker is not
+        -- found: the toggle reads its window as hidden and splits a marked
+        -- pane beside it.
         --
         -- One marker, both panes, and that is the point: "a pane dispatch put in
-        -- this window" is now exactly "a pane carrying this option", whatever
+        -- this window" is exactly "a pane carrying this option", whatever
         -- its role — which is what the pin drain reads (see
         -- ToggleVsSplitPaneInteraction below and split-pane.allium's
         -- PinTaskInSplitPane), in one lookup, and without being taught about any
         -- future kind of dispatch-created pane.
         --
-        -- == What this replaced, part 1: the start command ==
-        -- Identity was first derived from the command the pane was started with
-        -- (tmux's #{pane_start_command}), matched as argv0's basename plus argv1.
-        -- It was correct, and it was chosen because it needed no migration — but
-        -- it re-derived identity from a string tmux was never asked to keep
-        -- stable. It whitespace-split a command line, so a dispatch binary at a
-        -- path containing a space mis-parsed; it compared argv0 by basename
-        -- because that path may be absolute; and it had to actively defend
-        -- against substring matching, because a pane showing this very file has
-        -- "agent-tree" in its command line. A marker written by the code that
-        -- created the pane needs none of those defences: it cannot be confused
-        -- by the contents of a file some other pane happens to be displaying.
+        -- == Why not the start command, focus or an index ==
+        -- The command the pane was started with (tmux's #{pane_start_command})
+        -- is a string tmux was never asked to keep stable: reading identity
+        -- from it means whitespace-splitting a command line (a binary path
+        -- with a space mis-parses), comparing argv0 by basename, and defending
+        -- against substring matches from a pane that merely displays this
+        -- file. A marker written by the code that created the pane needs none
+        -- of those defences.
         --
-        -- ACCEPTED COST: the marker is NOT retroactive. The start command was
-        -- reported for panes already running; an option can only be written to a
-        -- pane being created. So agent windows already open when this changed
-        -- carry unmarked panes, and for the remaining life of each such window
-        -- the toggle reads its tree as hidden and splits a SECOND tree pane, and
-        -- pinning or resyncing no longer finds those panes. This was accepted
-        -- deliberately (#3902): the regression is one-off and self-clearing as
-        -- agent windows turn over, and each affected window has its own escape
-        -- hatch — the second toggle press kills the marked pane the first one
-        -- created, and every pane in a fresh window is marked. The two
-        -- alternatives were rejected for the same reason: both keep the string
-        -- matcher alive, either as a fallback nothing forces anyone to delete, or
-        -- inside new startup code that backfills markers — which moves the
-        -- fragility rather than removing it.
-        --
-        -- == What this replaced, part 2: focus ==
-        -- Before either form of marker, the kill target used to be "the window's single INACTIVE pane"
-        -- (`tmux::inactive_pane_id`, allow-phantom-symbol: removed), justified by every split helper passing
-        -- `-d`, which leaves focus on the agent's own pane at split time. That
-        -- is a property of the split, not of the window, and it failed in two
-        -- ways once the user was involved:
+        -- "The window's single INACTIVE pane" is a property of where focus
+        -- happens to be, not of what a pane is, and it fails two ways:
         --   * With focus in the companion pane — which the user must take to
         --     press any key in it — the single inactive pane is the AGENT'S, so
-        --     the toggle killed the live claude session.
+        --     the toggle would kill the live claude session.
         --   * With a second dispatch-created pane open beside the tree, two
-        --     panes are inactive, which read as "hidden", so the toggle split a
+        --     panes are inactive, which would read as "hidden" and split a
         --     SECOND companion pane.
-        -- Identifying the pane by what it is rather than by where focus happens
-        -- to be is what makes "the companion pane, never the agent's own pane"
-        -- true rather than merely usually true. An index-based target remains
-        -- wrong for the separate reason it always was: `pane-base-index` shifts
+        -- Identifying the pane by what it is is what makes "the companion
+        -- pane, never the agent's own pane" true rather than merely usually
+        -- true. An index-based target is wrong too: `pane-base-index` shifts
         -- indices and a `-b` split renumbers them.
         --
-        -- == RESOLVED: ToggleVsSplitPaneInteraction ==
-        -- The former open question here asked whether the board's
-        -- split-pane join/swap operations (split-pane.allium: `join_pane`,
-        -- `exec_swap_split_pane`) needed to become companion-pane-aware,
-        -- since both predate every agent window carrying a companion pane.
-        -- Both sides needed fixing, and the first answer recorded here got the
-        -- division wrong. On the mutation side: `join_pane` drains the
-        -- companion panes left behind when it moves the agent's own pane out
-        -- (see split-pane.allium's PinTaskInSplitPane guidance) — every pane
-        -- dispatch put in that window, the diff pane included, since with one
-        -- open the old single-inactive-pane lookup was ambiguous and orphaned
-        -- both. `exec_swap_split_pane` resyncs a renamed window's companion
-        -- pane to the task the new name implies (see SwapSplitPane's guidance).
-        -- But this rule's own state-reading was NOT "already correct" as
-        -- previously claimed: see "What this replaced" above.
+        -- == ToggleVsSplitPaneInteraction ==
+        -- The board's split-pane join and swap act on agent windows that
+        -- carry companion panes, and both are companion-pane-aware.
+        -- `join_pane` drains the companion panes left behind when it moves
+        -- the agent's own pane out (see split-pane.allium's
+        -- PinTaskInSplitPane guidance) — every pane dispatch put in that
+        -- window, the diff pane included. `exec_swap_split_pane` resyncs a
+        -- renamed window's companion pane to the task the new name implies
+        -- (see SwapSplitPane's guidance).
         --
         -- A window name that doesn't parse as `task-<id>` (the inverse of
         -- TmuxWindow::for_task — the board's own TUI window, an editor
@@ -1171,27 +1094,21 @@ rule ShowAgentTreePane {
         -- manual expand/collapse the user had done. Being stateless is what
         -- makes this true: there is no history to lose.
         --
-        -- == IMPLEMENTED ==
         -- `pane.status = hidden` above is read the same live way
         -- HideAgentTreePane's guidance describes: no pane in the window carries
-        -- the agent-tree role marker. The re-split reuses
-        -- SplitAgentTreePaneOnAgentLaunch's own
-        -- implementation directly — toggle_agent_tree_pane
-        -- (src/dispatch/agents.rs) calls the same spawn_agent_tree_pane
-        -- helper that agent-launch time uses, so the show side of the toggle
-        -- and the initial split are one code path, not two. The task id it
-        -- passes to `dispatch agent-tree <task_id>` comes from parsing the
-        -- window name (`task-<id>`), never from a stored pane record.
+        -- the agent-tree role marker. The re-split is the same split
+        -- SplitAgentTreePaneOnAgentLaunch makes (spawn_agent_tree_pane), so the
+        -- show side of the toggle and the initial split are one code path. The
+        -- task id it passes to `dispatch agent-tree <task_id>` comes from
+        -- parsing the window name (`task-<id>`), never from a stored pane
+        -- record.
         --
-        -- Resolves ToggleTargetResolution in favour of retrofitting: because
-        -- "hidden" and "never had a pane" are the same live tmux state (no pane
-        -- carrying the marker), a task-<id> window that predates this feature —
-        -- or one whose automatic split at launch failed, or one whose pane
-        -- predates the role marker itself (see HideAgentTreePane's ACCEPTED
-        -- COST) — gets a marked companion pane the first time a user manually
-        -- toggles it. That is also what bounds that accepted regression: the
-        -- unmarked pane survives one extra press, and every pane the toggle
-        -- itself creates is marked. This does not violate
+        -- == Retrofit on toggle ==
+        -- "Hidden" and "never had a pane" are the same live tmux state (no pane
+        -- carrying the marker), so a task-<id> window with no marked pane —
+        -- its automatic split at launch failed, or its window predates the
+        -- feature or the marker — gets a marked companion pane the first time
+        -- a user toggles it. This does not violate
         -- SplitAgentTreePaneOnAgentLaunch's "no retrofit" guidance, which is
         -- about automatic creation on launch; a deliberate user keypress is a
         -- different trigger.
@@ -1252,10 +1169,9 @@ rule DiscardAgentTreePaneOnWindowCleared {
 -- THE RACE. The renderer starts within moments of the task being dispatched,
 -- and the board's rows may not hold the task yet: a dispatch made on another
 -- board, or a row the store has not yet delivered back, arrives a short while
--- later. A renderer that read once and treated "no such task" as final exited
--- on the spot, and since tmux closes a pane whose command exits, the pane
--- vanished the instant it opened, taking its error message with it. Nothing
--- on screen said what had happened.
+-- later. A renderer that read once and treated "no such task" as final would
+-- exit on the spot, and since tmux closes a pane whose command exits, the
+-- pane would vanish the instant it opened, taking its error message with it.
 --
 -- So a renderer waits for its task instead of reading it once: until the
 -- board answers with the row, for at most config.agent_tree_startup_wait,
@@ -1308,9 +1224,9 @@ rule AgentTreePaneTaskHasNoWorktree {
     @guidance
         -- A row without a worktree is waited out like a row that has not
         -- arrived. The pane is split off when the agent launches, and the
-        -- worktree is recorded on the row just after, so a pane that asked in
-        -- between used to give up on a task that was seconds from having one
-        -- (task 98781). If the worktree arrives within the wait,
+        -- worktree is recorded on the row just after, so a pane that asks in
+        -- between must not give up on a task that is seconds from having one.
+        -- If the worktree arrives within the wait,
         -- AgentTreePaneResolvesItsTask applies.
 }
 
@@ -1569,9 +1485,8 @@ rule RefreshAgentTree {
         -- == ChangePrecedence: when both queries name one path ==
         -- Against the index the two listings are DISJOINT: the diff reports
         -- only paths the index holds, and the untracked listing only paths it
-        -- does not, so no path can be named by both. The case that used to
-        -- collide shows this. `git rm --cached foo` takes foo out of the index
-        -- and leaves it on disk; the diff no longer sees foo at all, the
+        -- does not, so no path can be named by both. `git rm --cached foo` takes foo out of the index
+        -- and leaves it on disk; the diff does not see foo at all, the
         -- untracked listing does, and foo is badged added with no counts —
         -- correctly, since to git it is now an untracked file. A staged
         -- deletion that also removed the file from disk (`git rm foo`) is in
@@ -1663,16 +1578,12 @@ rule RefreshAgentTree {
         -- descendant is null — see AgentTreeNode.counts for why "+0 -0" would
         -- be a lie there.
         --
-        -- == Resolves TreeScanExclusions ==
-        -- The predecessor of this rule left open which subtrees a fuller
-        -- worktree traversal should skip, because an unfiltered eager scan of
-        -- a large repo is slow and mostly noise. The question is now moot and
-        -- the open question is removed: git already answers exactly the
-        -- question the scan was meant to approximate, and it already applies
-        -- the repo's own ignore rules. There is no traversal to exclude
-        -- anything from.
+        -- == TreeScanExclusions ==
+        -- There is no worktree traversal, so no subtree needs excluding from
+        -- one: git answers exactly the question "what changed", and it
+        -- applies the repo's own ignore rules.
         --
-        -- The consequence is unchanged and intended: an unchanged worktree
+        -- The consequence is intended: an unchanged worktree
         -- renders an EMPTY tree, not a repo browser. The pane answers "what
         -- has changed here", not "what is here".
         --
@@ -1692,8 +1603,7 @@ rule RefreshAgentTree {
         -- inspecting the tree widget's open-set. Asking the widget to open a
         -- directory reports success even when the key identifies no node, so
         -- an open-set assertion can encode the wrong key and pass while every
-        -- nested directory renders collapsed. That was the shipped behaviour
-        -- until #3811, under a green open-set test.
+        -- nested directory renders collapsed.
 }
 
 rule AgentTreeGitFailureKeepsLastGoodTree {
@@ -1815,26 +1725,19 @@ rule OpenAgentTreeFileDiff {
     ensures: AgentTreeDiffOpenSetChanged(pane: pane)
 
     @guidance
-        -- Decided on 2026-10-28 (task 98620): one file at a time. The pane
-        -- used to show every open file's diff at once, stacked, and an
-        -- all-files key filled the set in one press; both are gone. Opening a
-        -- file never asks the user to close the last one first.
-
-    @guidance
-        -- == A deleted file opens like any other ==
-        -- This is the one place the behaviour reverses from what it replaced.
-        -- The editor this used to launch was REFUSED on a node badged deleted,
-        -- because there was no file to hand it and most editors would have
-        -- shown a misleading empty buffer. A diff has the opposite property:
-        -- the deleted file's content is exactly what git prints for it, so the
-        -- deleted case is the one where opening it is most useful.
+        -- One file at a time. The pane never stacks several files' diffs and
+        -- has no all-files key. Opening a file never asks the user to close
+        -- the last one first.
         --
-        -- An open question used to sit at the foot of this spec asking
-        -- precisely this — whether the pane should show content git holds but
-        -- the worktree does not, and through which key. It is answered and
-        -- removed: through this key, like every other file. There is no
-        -- deleted-file guard anywhere in this rule set, and no refusal rule
-        -- paired with it.
+        -- == A deleted file opens like any other ==
+        -- The editor (`v`) refuses a node badged deleted, because there is no
+        -- file to hand it and most editors would show a misleading empty
+        -- buffer. A diff has the opposite property: the deleted file's
+        -- content is exactly what git prints for it, so the deleted case is
+        -- the one where opening it is most useful. Content git holds but the
+        -- worktree does not is shown through this key, like every other file.
+        -- There is no deleted-file guard anywhere in this rule, and no refusal
+        -- rule paired with it.
         --
         -- == Nothing is read from disk ==
         -- The pane does not open the file, stat it, or check it exists. The
@@ -1886,11 +1789,10 @@ rule SplitAgentTreeDiffPane {
         -- == Geometry ==
         -- The pane spans the WINDOW's full width beneath every pane in it
         -- (tmux split-window -f), taking config.agent_tree_diff_pane_percent
-        -- of the window's height. This reverses the earlier design, where the
-        -- diff subdivided the companion pane's narrow column so the agent's
-        -- pane kept its width: a diff in forty columns truncated most real
-        -- source lines (answered by widening rather than scrolling). The cost is that the agent's pane loses
-        -- height while a file is open and regains it when the pane closes.
+        -- of the window's height. It does not subdivide the companion pane's
+        -- narrow column: a diff in forty columns would truncate most real
+        -- source lines. The cost is that the agent's pane loses height while
+        -- a file is open and regains it when the pane closes.
         --
         -- == Reuse, never takeover ==
         -- If a lower pane this renderer created already exists it is reused
@@ -1904,10 +1806,9 @@ rule SplitAgentTreeDiffPane {
         -- Opening a file moves tmux focus to the lower pane, so the user can
         -- scroll the diff or type in the editor straight away
         -- (FocusFollowsTheOpenedFile). Getting back to the tree is tmux's own
-        -- pane navigation, and nothing this spec invents. This reverses the
-        -- earlier rule, which left focus in the tree so browsing was a
-        -- one-handed loop; that loop mattered while many files could be open
-        -- at once, and one file at a time removed it (task 98620).
+        -- pane navigation, and nothing this spec invents. With one file open
+        -- at a time there is no browsing loop that focus left in the tree
+        -- would serve.
         --
         -- == Why this is a rule and not an ensures on the two toggles ==
         -- A user can kill the lower pane themselves, with tmux or by pressing
@@ -1942,11 +1843,9 @@ rule ReplaceAgentTreeEditorWithDiff {
     ensures: pane.diff_startup_failure = null
 
     @guidance
-        -- Decided on 2026-10-28 (task 98620), reversing task 98506's
-        -- KeepEditorPaneWithPossiblyUnsavedWork, which refused with "quit the
-        -- editor first". The user chose replacement over the refusal, knowing
-        -- unsaved edits are lost: having to quit the editor before every next
-        -- file was the larger cost.
+        -- Replacement, not a refusal ("quit the editor first"), knowing unsaved
+        -- edits are lost: having to quit the editor before every next file is
+        -- the larger cost.
 }
 
 rule FocusFollowsTheOpenedFile {
@@ -2059,8 +1958,7 @@ rule EditorPaneOutlivesItsTree {
     ensures: pane.diff_pane_content = editor
 
     @guidance
-        -- Task 98506 (2026-10-25) protected the editor from every key; task
-        -- 98620 (2026-10-28) narrowed that to keys that do not open a file.
+        -- The editor is protected from every key that does not open a file.
         -- Opening a file is the user asking for the pane, so it is replaced.
         -- Leaving the tree is not, so the editor and any unsaved work in it
         -- stay. An editor pane with no tree beside it is harmless, unlike an
@@ -2177,10 +2075,8 @@ rule RefreshAgentTreeDiff {
         --
         -- == Order ==
         -- There is nothing to order: one file is open at a time
-        -- (OneOpenFileAtATime). The tree used to publish several paths in
-        -- row order, and keep an ordering rule over paths that matched its
-        -- rule over nodes; both went with task 98620. Were a list of several
-        -- ever published again, the pane renders it in the order given.
+        -- (OneOpenFileAtATime). Were a list of several ever published, the
+        -- pane renders it in the order given.
         --
         -- == Untracked files ==
         -- In the unstaged-work view an open UNTRACKED path — a new file, or one
@@ -2190,7 +2086,7 @@ rule RefreshAgentTreeDiff {
         -- see the file, so this is the one diff the pane takes against an empty
         -- side rather than against the source's baseline; it is still git's
         -- diff output and still read-only. It is not a refusal, and the pane
-        -- no longer advises staging the file: in this view staging it would
+        -- does not advise staging the file: in this view staging it would
         -- remove it from the pane.
         --
         -- The tree row for the same file still carries no counts
@@ -2525,7 +2421,7 @@ rule RefreshAgentTreeAgentList {
         -- == The board's filter ==
         -- The list follows the board's repo filter and epic hide-list
         -- (ListsFollowTheBoardFilter), so an agent working on an epic the
-        -- user hid on the board is not in the pane either (task #99019). The
+        -- user hid on the board is not in the pane either. The
         -- board does the filtering and the pane takes its answer as it
         -- stands, so the two cannot disagree about what is hidden. The
         -- pane's own task gets no exception: when the board hides it, it is
@@ -2611,11 +2507,10 @@ rule SwitchAgentTreeView {
         else: pane.focus
 
     @guidance
-        -- The pane used to stack three sections and cycle focus through them
-        -- with Tab. Two views fit the pane better: browsing a change is one
+        -- Two views, not three stacked sections: browsing a change is one
         -- activity (pick a commit, read its files) and listing agents is
-        -- another, and the agents list was a band that shrank the tree
-        -- whether or not it was wanted.
+        -- another, and an agents band would shrink the tree whether or not
+        -- it was wanted.
         --
         -- Flipping back returns to the section that had focus, with its
         -- cursor where it was. Each section keeps its cursor while hidden.
@@ -2968,7 +2863,7 @@ invariant SelectedCommitIsListed {
 
 -- A pane is always rooted at its task's worktree — never at the parent repo,
 -- and never at another task's worktree. This is what the real-tmux harness
--- observes directly: a pane whose resolved cwd is the parent repo is the #231
+-- observes directly: a pane whose resolved cwd is the parent repo is the
 -- failure mode the split hook exists to prevent.
 invariant TaskPaneRootIsTaskWorktree {
     for p in AgentTreePanes:
@@ -3094,7 +2989,7 @@ surface AgentTreeCompanionPane {
         ToggleSelectedAgentTreeFileDiff(user, pane, node) -- Space, Enter (file, tree focus)
 
         -- There is no all-files key: one file is open at a time
-        -- (OneOpenFileAtATime). `a` used to open every diff at once.
+        -- (OneOpenFileAtATime).
 
         -- The commits and agents sections. Tab and Shift+Tab flip between the
         -- browse view (tree and commits) and the agents view; `s` moves between
@@ -3284,8 +3179,7 @@ surface AgentTreeCompanionPane {
         -- sit in directly. The title is truncated with an ellipsis when the
         -- pane is narrow.
         --
-        -- Nesting is shown by order and indent, as on the board (task
-        -- #98901). The groups come in tree order (see "Order" in
+        -- Nesting is shown by order and indent, as on the board. The groups come in tree order (see "Order" in
         -- RefreshAgentTreeAgentList). Every ancestor of a group draws its
         -- header above it even when no agent sits in that ancestor
         -- directly, so a sub-epic never reads as unrelated to its parent.
@@ -3534,22 +3428,17 @@ surface AgentTreeCompanionPane {
         --   * Other people's work on the base branch never appears: whatever
         --     reached this branch by commit or merge is already in the index.
         --
-        -- == This REVERSES an earlier guarantee ==
-        -- The tree used to be measured from this worktree's fork point from
-        -- the task's base branch, and AgentTreeBaselineIsTaskBaseBranch then
-        -- promised "Committing does not empty the pane": an agent that
-        -- committed mid-session kept seeing its work in the tree. That
-        -- promise is withdrawn deliberately. Committing now DOES empty the
-        -- default view, and staging does too, because the user asked to watch
-        -- ongoing work rather than the branch's accumulated diff — an agent
-        -- that commits as it goes would otherwise bury the edit it is making
-        -- right now under every edit it has finished. What committing no
-        -- longer does is make the work unreachable: it moves from the tree to
-        -- a row of the commits section.
+        -- == Committing empties the default view ==
+        -- Committing empties the default view, and staging does too, because
+        -- the user watches ongoing work rather than the branch's accumulated
+        -- diff — an agent that commits as it goes would otherwise bury the
+        -- edit it is making right now under every edit it has finished.
+        -- Committing does not make the work unreachable: it moves from the
+        -- tree to a row of the commits section.
         --
         -- == No combined branch view ==
         -- There is no source that shows the whole branch's diff at once, and
-        -- no toggle back to the old fork-point tree. That is a deliberate
+        -- no fork-point tree. That is a deliberate
         -- exclusion, not an omission. The branch's full change set is what
         -- the board's review flow and the pull request are for; here the user
         -- reads the branch one commit at a time, which is how the agent made
@@ -3588,8 +3477,8 @@ surface AgentTreeCompanionPane {
         -- agent's commits" always means "commits reachable from HEAD and not
         -- from this worktree's fork point from the task's base branch" —
         -- never relative to HEAD alone, and never relative to a base tip. It
-        -- used to define what the TREE showed as well; that is now unstaged
-        -- work or one selected commit (AgentTreeShowsUnstagedWorkOnly,
+        -- does not decide what the TREE shows; that is unstaged work or one
+        -- selected commit (AgentTreeShowsUnstagedWorkOnly,
         -- AgentTreeSourceIsOneSelection), and no tree query resolves a branch.
         -- What the user depends on:
         --

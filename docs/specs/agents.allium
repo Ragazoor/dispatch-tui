@@ -387,11 +387,6 @@ surface AgentIdentity {
         current_agent(task).name
         current_agent(task).is_live
 
-    @guarantee AgentRowShowsAgentName
-        -- The agent tree's agents section reads `<agent name> <title>` per
-        -- row, in place of the `<alias> <title>` it read before step A3
-        -- (agent-tree.allium: AgentRowShowsAgentName).
-
     @guarantee PromptNamesTheAgent
         -- A dispatched agent's prompt tells it its own name (a line in the
         -- task block, for every mode). That other agents are reached by their
@@ -492,7 +487,7 @@ invariant AgentNameIsNotAnId {
 --     from the `task-<id>` parse to an agent-name lookup, keeping the parse for
 --     sessions started before A2 and not yet resumed.
 -- A3. The agent tree. The agents section and the hooks wire carry the agent
---     name (AgentRowShowsAgentName).
+--     name (agent-tree.allium's AgentRowShowsAgentName).
 -- A4. Move the live-session fields. The six fields on Agent above, and
 --     SubagentEntry.task -> SubagentEntry.agent. Hook writes go to the task's
 --     current agent. Readers switch over; Task stops writing them. The
