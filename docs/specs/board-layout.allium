@@ -976,7 +976,8 @@ entity CollapsedSections {
 --     column still holds tasks below it, the fold moves down
 --     (tasks.allium: FoldMovesToDrawnDescendant). Each drawn epic that
 --     takes its place — the drawn epic nearest below it, in each section
---     where it is skipped — is folded, and its own fold is cleared. The
+--     where it is skipped — is folded, and the skipped epic's fold is
+--     cleared. The
 --     user folded it to hide what sits under it, and what still sits there
 --     is now headed by those epics. When the skipped epic is drawn again
 --     later, it draws open.

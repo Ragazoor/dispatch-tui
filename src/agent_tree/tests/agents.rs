@@ -623,9 +623,10 @@ async fn an_unreachable_board_is_a_failed_agent_read_naming_the_board() {
     assert!(reason.contains("127.0.0.1:8899"), "{reason}");
 }
 
-/// The groups come in tree order: a child epic's group right after its
-/// parent's, before the next top-level epic, whatever the ids
-/// (RefreshAgentTreeAgentList's grouped_by_epic, task #98901).
+/// The groups come in compact tree order: a child epic's group right after
+/// its parent's, and a top-level group with no drawn child before one with
+/// a child, whatever the ids (RefreshAgentTreeAgentList's grouped_by_epic,
+/// tasks #98901, #99033).
 #[tokio::test]
 async fn the_agent_list_lays_its_groups_out_as_the_epic_tree() {
     let ten = pane_epic(10, &["Ten"]);
@@ -652,7 +653,7 @@ async fn the_agent_list_lays_its_groups_out_as_the_epic_tree() {
         .unwrap();
 
     let order: Vec<i64> = rows.iter().map(|row| row.id.0).collect();
-    assert_eq!(order, vec![3, 2, 1]);
+    assert_eq!(order, vec![1, 3, 2]);
 }
 
 // ---- the board's filter (agent-tree.allium: ListsFollowTheBoardFilter) ----

@@ -174,7 +174,7 @@ impl App {
         let valid_ids: HashSet<EpicId> = self.board.epics.iter().map(|e| e.id).collect();
         self.select.epics.retain(|id| valid_ids.contains(id));
         self.invalidate_layout_cache();
-        vec![]
+        self.move_skipped_epic_folds()
     }
 
     /// Splice a single fresh epic into the in-memory list, replacing the row
@@ -186,7 +186,7 @@ impl App {
             self.board.epics.push(epic);
         }
         self.invalidate_layout_cache();
-        vec![]
+        self.move_skipped_epic_folds()
     }
 
     pub(in crate::tui) fn handle_epic_created(&mut self, epic: Epic) -> Vec<Command> {

@@ -1,9 +1,10 @@
-//! A flattened column lays its epic groups out as the epic tree: tree order,
-//! a header for every drawn ancestor, a depth on each header, and folds that
-//! hide a whole subtree.
+//! A flattened column lays its epic groups out as the compact epic tree:
+//! a header only for an epic that owns a task in the section or where two
+//! drawn branches meet, leaves before deeper siblings, a depth on each
+//! header, and folds that hide a whole subtree.
 //!
 //! See "Flattening" (EpicGroupTree) and "Epic Folding" in
-//! `docs/specs/board-layout.allium` (task #98901).
+//! `docs/specs/board-layout.allium` (tasks #98901, #99033).
 use super::*;
 use crate::models::{EpicId, SubStatus, TaskStatus};
 use crate::tui::types::Lens;
@@ -44,10 +45,10 @@ fn flat_app(tasks: Vec<Task>, epics: Vec<Epic>) -> App {
     app
 }
 
-/// A child epic's group follows its parent's own tasks, before the next
-/// top-level epic, even though its id sorts after that epic's.
+/// A child epic's group follows its parent's own tasks. A top-level epic
+/// with no drawn child comes before one with a child, whatever the ids.
 #[test]
-fn a_child_group_follows_its_parent_in_tree_order() {
+fn a_leaf_group_comes_before_a_group_with_children() {
     let app = flat_app(
         vec![owned(1, 10), owned(2, 20), owned(3, 30)],
         vec![
@@ -59,34 +60,101 @@ fn a_child_group_follows_its_parent_in_tree_order() {
     assert_eq!(
         running_layout(&app),
         vec![
+            ('H', 20, 0),
+            ('T', 2, 0),
             ('H', 10, 0),
             ('T', 1, 0),
             ('H', 30, 1),
             ('T', 3, 0),
-            ('H', 20, 0),
-            ('T', 2, 0),
         ]
     );
 }
 
-/// An ancestor with no task of its own in the section still draws its header,
-/// so its child never reads as unrelated.
+/// A lone group skips the ancestors only it passes through: its own header
+/// draws flush, with nothing above it.
 #[test]
-fn an_ancestor_with_no_task_of_its_own_still_draws_its_header() {
+fn a_lone_group_draws_flush_without_its_ancestors() {
     let app = flat_app(
         vec![owned(3, 30)],
         vec![epic_under(10, None), epic_under(30, Some(10))],
     );
+    assert_eq!(running_layout(&app), vec![('H', 30, 0), ('T', 3, 0)]);
+}
+
+/// Groups that share no parent all draw flush, each under its own header.
+#[test]
+fn groups_with_no_shared_parent_draw_flush() {
+    let app = flat_app(
+        vec![owned(1, 11), owned(2, 21)],
+        vec![
+            epic_under(10, None),
+            epic_under(11, Some(10)),
+            epic_under(20, None),
+            epic_under(21, Some(20)),
+        ],
+    );
     assert_eq!(
         running_layout(&app),
-        vec![('H', 10, 0), ('H', 30, 1), ('T', 3, 0)]
+        vec![('H', 11, 0), ('T', 1, 0), ('H', 21, 0), ('T', 2, 0)]
     );
 }
 
-/// Sibling sub-epics come in ascending id under their parent, and a grandchild
-/// sits one level deeper than its parent.
+/// The elicitation example: A › B › X › C, A › B › D, A › E. A and B draw
+/// because branches meet there; X only one branch passes through, so C sits
+/// one step under B. E, a leaf, comes before B, which has children.
 #[test]
-fn siblings_sort_by_id_and_depth_grows_per_level() {
+fn headers_draw_only_where_branches_meet() {
+    let (a, b, x, c, d, e) = (1, 2, 3, 4, 5, 6);
+    let app = flat_app(
+        vec![owned(11, c), owned(12, d), owned(13, e)],
+        vec![
+            epic_under(a, None),
+            epic_under(b, Some(a)),
+            epic_under(x, Some(b)),
+            epic_under(c, Some(x)),
+            epic_under(d, Some(b)),
+            epic_under(e, Some(a)),
+        ],
+    );
+    assert_eq!(
+        running_layout(&app),
+        vec![
+            ('H', a, 0),
+            ('H', e, 1),
+            ('T', 13, 0),
+            ('H', b, 1),
+            ('H', c, 2),
+            ('T', 11, 0),
+            ('H', d, 2),
+            ('T', 12, 0),
+        ]
+    );
+}
+
+/// The tree is built per section: two groups that share a parent but sit
+/// in different sections each draw flush, with no shared header.
+#[test]
+fn shared_parents_are_found_per_section() {
+    let mut waiting = owned(2, 30);
+    waiting.sub_status = SubStatus::NeedsInput;
+    let app = flat_app(
+        vec![owned(1, 20), waiting],
+        vec![
+            epic_under(10, None),
+            epic_under(20, Some(10)),
+            epic_under(30, Some(10)),
+        ],
+    );
+    let layout = running_layout(&app);
+    assert!(!layout.contains(&('H', 10, 0)), "{layout:?}");
+    assert!(layout.contains(&('H', 20, 0)), "{layout:?}");
+    assert!(layout.contains(&('H', 30, 0)), "{layout:?}");
+}
+
+/// Under a shared parent, a sibling with no drawn child comes before one
+/// with a child; a grandchild sits one level deeper than its parent.
+#[test]
+fn leaf_siblings_come_first_and_depth_grows_per_level() {
     let app = flat_app(
         vec![owned(1, 40), owned(2, 30), owned(3, 50)],
         vec![
@@ -100,12 +168,12 @@ fn siblings_sort_by_id_and_depth_grows_per_level() {
         running_layout(&app),
         vec![
             ('H', 10, 0),
+            ('H', 40, 1),
+            ('T', 1, 0),
             ('H', 30, 1),
             ('T', 2, 0),
             ('H', 50, 2),
             ('T', 3, 0),
-            ('H', 40, 1),
-            ('T', 1, 0),
         ]
     );
 }
@@ -152,7 +220,7 @@ fn folding_a_parent_hides_its_whole_subtree() {
 
     assert_eq!(
         running_layout(&app),
-        vec![('F', 10, 0), ('H', 20, 0), ('T', 2, 0)]
+        vec![('H', 20, 0), ('T', 2, 0), ('F', 10, 0)]
     );
     let hidden = app
         .view()
@@ -165,16 +233,32 @@ fn folding_a_parent_hides_its_whole_subtree() {
     assert_eq!(hidden, Some(3), "its own task and its child's two");
 }
 
-/// A folded parent with no task of its own keeps its header while a
-/// descendant has a task in the section.
+/// A folded parent with no task of its own keeps its header while branches
+/// still meet at it.
 #[test]
-fn a_folded_parent_with_no_own_task_keeps_its_header() {
+fn a_folded_parent_with_no_own_task_keeps_its_header_while_branches_meet() {
+    let mut app = flat_app(
+        vec![owned(3, 30), owned(4, 40)],
+        vec![
+            epic_under(10, None),
+            epic_under(30, Some(10)),
+            epic_under(40, Some(10)),
+        ],
+    );
+    app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
+    assert_eq!(running_layout(&app), vec![('F', 10, 0)]);
+}
+
+/// A fold on an epic the section skips hides nothing: the tasks below it
+/// draw under their own header.
+#[test]
+fn a_fold_on_a_skipped_epic_hides_nothing() {
     let mut app = flat_app(
         vec![owned(3, 30)],
         vec![epic_under(10, None), epic_under(30, Some(10))],
     );
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
-    assert_eq!(running_layout(&app), vec![('F', 10, 0)]);
+    assert_eq!(running_layout(&app), vec![('H', 30, 0), ('T', 3, 0)]);
 }
 
 /// Folding the parent leaves a child's own recorded fold alone: when the
@@ -256,18 +340,27 @@ fn a_nested_groups_header_and_cards_are_indented_together() {
 /// card of its subtree (board-layout.allium: "Epic Folding").
 #[test]
 fn unfolding_a_parent_with_no_own_card_lands_on_its_subtrees_first_card() {
+    // 10 has two sub-epics with work, so it draws; as the one root with
+    // children it comes after the leaf roots 5 and 20.
     let mut app = flat_app(
-        vec![owned(1, 5), owned(6, 5), owned(3, 30), owned(2, 20)],
+        vec![
+            owned(1, 5),
+            owned(6, 5),
+            owned(3, 30),
+            owned(4, 40),
+            owned(2, 20),
+        ],
         vec![
             epic_under(5, None),
             epic_under(10, None),
             epic_under(20, None),
             epic_under(30, Some(10)),
+            epic_under(40, Some(10)),
         ],
     );
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
     app.selection_mut().set_column(2); // Running
-    for _ in 0..2 {
+    for _ in 0..3 {
         app.handle_key(make_key(crossterm::event::KeyCode::Char('j')));
     }
     assert!(
@@ -293,7 +386,9 @@ fn a_folded_child_sits_directly_under_its_parents_header() {
     ten.parent_epic_id = None;
     let mut thirty = make_epic_with_title(30, "Thirty");
     thirty.parent_epic_id = Some(EpicId(10));
-    let mut app = flat_app(vec![owned(3, 30)], vec![ten, thirty]);
+    let mut forty = make_epic_with_title(40, "Forty");
+    forty.parent_epic_id = Some(EpicId(10));
+    let mut app = flat_app(vec![owned(3, 30), owned(4, 40)], vec![ten, thirty, forty]);
     app.epic_folds.toggle(TaskStatus::Running, EpicId(30));
 
     let buf = render_to_buffer(&mut app, 160, 40);
@@ -320,4 +415,90 @@ fn a_task_with_an_unknown_epic_goes_below_the_separator() {
         .position(|i| matches!(i, ColumnItem::Task(t) if t.id.0 == 4))
         .expect("task drawn");
     assert!(stray > separator, "{items:?}");
+}
+
+// ---- the fold moves down (tasks.allium: FoldMovesToDrawnDescendant) ----
+
+/// The epics of the fold-move tests: A › B › C, A › B › D, A › E.
+fn fold_move_epics() -> Vec<Epic> {
+    vec![
+        epic_under(1, None),
+        epic_under(2, Some(1)),
+        epic_under(4, Some(2)),
+        epic_under(5, Some(2)),
+        epic_under(6, Some(1)),
+    ]
+}
+
+/// Whether `cmds` save the folded set.
+fn saves_epic_folds(cmds: &[crate::tui::Command]) -> bool {
+    cmds.iter().any(|c| {
+        matches!(
+            c,
+            crate::tui::Command::Settings(
+                crate::tui::commands::SettingsCommand::PersistStringSetting { key, .. }
+            ) if key == crate::tui::COLLAPSED_EPICS_KEY
+        )
+    })
+}
+
+/// A folded epic that stops drawing hands its fold to the epic that now
+/// heads what it hid, and the moved set is saved. The old fold is cleared.
+#[test]
+fn a_fold_on_an_epic_that_stops_drawing_moves_to_the_epic_below() {
+    let (a, b) = (1, 2);
+    let mut app = flat_app(
+        vec![owned(11, 4), owned(12, 5), owned(13, 6), owned(14, a)],
+        fold_move_epics(),
+    );
+    app.epic_folds.toggle(TaskStatus::Running, EpicId(a));
+
+    // A's own task and E's task finish: A no longer owns a task, and only
+    // B's branch passes through it.
+    let mut left: Vec<Task> = app.board.tasks.clone();
+    for t in left.iter_mut().filter(|t| t.id.0 == 13 || t.id.0 == 14) {
+        t.status = TaskStatus::Done;
+    }
+    let cmds = app.handle_refresh_tasks(left);
+
+    assert!(!app.epic_folds.is_folded(TaskStatus::Running, EpicId(a)));
+    assert!(app.epic_folds.is_folded(TaskStatus::Running, EpicId(b)));
+    assert!(saves_epic_folds(&cmds), "{cmds:?}");
+    assert_eq!(running_layout(&app), vec![('F', b, 0)]);
+}
+
+/// The move judges the column unfiltered: a search that skips the folded
+/// epic on screen does not move its fold.
+#[test]
+fn a_search_never_moves_a_fold() {
+    let a = 1;
+    let mut app = flat_app(
+        vec![owned(11, 4), owned(12, 5), owned(13, 6)],
+        fold_move_epics(),
+    );
+    app.epic_folds.toggle(TaskStatus::Running, EpicId(a));
+    app.search.query = "task 11".into();
+
+    let mut same = app.board.tasks.clone();
+    same[0].title = "task 11 renamed".into();
+    let cmds = app.handle_refresh_tasks(same);
+
+    assert!(app.epic_folds.is_folded(TaskStatus::Running, EpicId(a)));
+    assert!(!saves_epic_folds(&cmds), "{cmds:?}");
+}
+
+/// With no task left below the folded epic, there is nothing to move to:
+/// the fold stays recorded and inert.
+#[test]
+fn a_fold_with_nothing_below_stays_put() {
+    let a = 1;
+    let mut app = flat_app(vec![owned(11, 4)], fold_move_epics());
+    app.epic_folds.toggle(TaskStatus::Running, EpicId(a));
+
+    let mut gone = app.board.tasks.clone();
+    gone[0].status = TaskStatus::Done;
+    let cmds = app.handle_refresh_tasks(gone);
+
+    assert!(app.epic_folds.is_folded(TaskStatus::Running, EpicId(a)));
+    assert!(!saves_epic_folds(&cmds), "{cmds:?}");
 }

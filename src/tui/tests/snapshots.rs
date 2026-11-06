@@ -499,16 +499,23 @@ fn flat_view_nested_epic_header() {
     use crate::tui::tests::make_epic_with_title;
 
     let mut app = App::new(vec![]);
-    // root(10) "PR Reviews" -> child(20) "Bots PR"
+    // root(10) "PR Reviews" -> children(20) "Bots PR" and (30) "Human PR".
+    // Two branches meet at the root, so it draws (board-layout.allium:
+    // EpicGroupTree); one child alone would draw flush with no root.
     let root = make_epic_with_title(10, "PR Reviews");
     let mut child = make_epic_with_title(20, "Bots PR");
     child.parent_epic_id = Some(EpicId(10));
-    app.board.epics = vec![root, child];
+    let mut other = make_epic_with_title(30, "Human PR");
+    other.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![root, child, other];
 
     let mut t1 = make_task(1, TaskStatus::Running);
     t1.epic_id = Some(EpicId(20));
     t1.sort_order = Some(10);
-    app.board.tasks = vec![t1];
+    let mut t2 = make_task(2, TaskStatus::Running);
+    t2.epic_id = Some(EpicId(30));
+    t2.sort_order = Some(20);
+    app.board.tasks = vec![t1, t2];
     app.filter.lens = crate::tui::types::Lens::Flat;
     app.selection_mut().set_column(2); // Running column
 
