@@ -354,6 +354,7 @@ impl App {
             cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
                 crate::tui::commands::PersistFields::from_task(task).releasing_tmux_window(),
             )));
+            cmds.extend(self.maybe_respawn_split_pane(task_id));
         }
         cmds
     }

@@ -1513,3 +1513,146 @@ fn a_pane_close_with_no_entry_in_flight_resets_everything() {
     assert_eq!(pending_swap(&app.board.split), None);
     assert!(app.split_focused());
 }
+
+// SplitPaneRespawnOnWindowCleared (docs/specs/split-pane.allium) fires on any
+// path that clears the pinned task's tmux_window, not only the ones above.
+
+fn pinned_app(task: crate::models::Task) -> App {
+    let mut app = App::new(vec![task]);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some(test_pane_id("%5"));
+    app.board.split.pinned_task_id = Some(TaskId(1));
+    app
+}
+
+fn respawns_pinned_pane(cmds: &[Command]) -> bool {
+    cmds.iter().any(|c| {
+        matches!(c, Command::Split(crate::tui::commands::SplitCommand::RespawnPane { pane_id }) if pane_id == "%5")
+    })
+}
+
+#[test]
+fn detach_respawns_split_pane_for_pinned_task() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-1"));
+    let mut app = pinned_app(task);
+    app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(1)]);
+
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDetachTmux,
+    ));
+
+    assert!(
+        respawns_pinned_pane(&cmds),
+        "detach must respawn the pinned pane"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+    assert!(app.board.split.active);
+}
+
+#[test]
+fn move_backward_respawns_split_pane_for_pinned_task() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.tmux_window = Some(test_tmux_window("task-1"));
+    let mut app = pinned_app(task);
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
+        id: TaskId(1),
+        direction: MoveDirection::Backward,
+    }));
+
+    assert!(
+        respawns_pinned_pane(&cmds),
+        "a backward move must respawn the pinned pane"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+}
+
+#[test]
+fn epic_done_respawns_split_pane_for_pinned_subtask() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.tmux_window = Some(test_tmux_window("task-1"));
+    task.epic_id = Some(crate::models::EpicId(7));
+    let mut app = pinned_app(task);
+    let mut epic = make_epic(7);
+    epic.status = TaskStatus::Review;
+    app.board.epics = vec![epic];
+
+    let cmds = app.handle_move_epic_status(crate::models::EpicId(7), MoveDirection::Forward);
+
+    assert!(
+        respawns_pinned_pane(&cmds),
+        "an epic moved to Done must respawn its pinned subtask's pane"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+}
+
+#[test]
+fn refresh_clearing_pinned_window_respawns_split_pane() {
+    // ExitSession runs in the host reactor; the board sees it only as a row
+    // whose window is gone.
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-1"));
+    let mut app = pinned_app(task.clone());
+    task.tmux_window = None;
+    task.status = TaskStatus::Done;
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![task],
+    )));
+
+    assert!(
+        respawns_pinned_pane(&cmds),
+        "a refresh that clears the pinned window must respawn"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+}
+
+#[test]
+fn targeted_update_clearing_pinned_window_respawns_split_pane() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-1"));
+    let mut app = pinned_app(task.clone());
+    task.tmux_window = None;
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(
+        Box::new(task),
+    )));
+
+    assert!(
+        respawns_pinned_pane(&cmds),
+        "an update that clears the pinned window must respawn"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+}
+
+#[test]
+fn refresh_keeping_pinned_window_does_not_respawn() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-1"));
+    let mut app = pinned_app(task.clone());
+    task.title = "renamed".into();
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![task],
+    )));
+
+    assert!(!respawns_pinned_pane(&cmds));
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(1)));
+}
+
+#[test]
+fn refresh_without_the_pinned_row_does_not_respawn() {
+    // A respawn kills the agent in the pane; a row missing from one refresh
+    // is not proof its window is gone.
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-1"));
+    let mut app = pinned_app(task);
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![make_task(2, TaskStatus::Backlog)],
+    )));
+
+    assert!(!respawns_pinned_pane(&cmds));
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(1)));
+}

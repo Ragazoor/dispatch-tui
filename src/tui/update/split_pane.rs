@@ -289,6 +289,27 @@ impl App {
 
     /// If `task_id` is the split-pinned task, clear the pin and respawn the
     /// pane with a fresh shell.  Split mode stays active.
+    /// The store-side half of `SplitPaneRespawnOnWindowCleared`
+    /// (docs/specs/split-pane.allium): a window cleared off the board, such as
+    /// an agent's own exit_session served by the host reactor, reaches the
+    /// board only as a row without a window. Called after the board adopts
+    /// rows from the store. Only a row that is present and has no window
+    /// counts: a respawn kills whatever runs in the pane, so a row merely
+    /// missing from the list is not evidence enough to end a live agent.
+    pub(in crate::tui) fn respawn_split_pane_if_pinned_window_gone(&mut self) -> Vec<Command> {
+        let Some(id) = self.board.split.pinned_task_id else {
+            return vec![];
+        };
+        let window_gone = self
+            .board
+            .find_task(id)
+            .is_some_and(|t| t.tmux_window.is_none());
+        if !window_gone {
+            return vec![];
+        }
+        self.maybe_respawn_split_pane(id)
+    }
+
     pub(in crate::tui) fn maybe_respawn_split_pane(&mut self, task_id: TaskId) -> Vec<Command> {
         if self.board.split.active && self.board.split.pinned_task_id == Some(task_id) {
             self.board.split.pinned_task_id = None;
