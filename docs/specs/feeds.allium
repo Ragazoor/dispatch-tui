@@ -410,9 +410,12 @@ contract ExcludeFromReviews {
 -- goes unnoticed.
 --
 -- The CALLER SETS differ between the shared layers: the parse is shared by all
--- three entry points, the exec (src/feed/exec.rs::exec_feed_command) by only
--- the two runtime ones. verify-feed spawns its own `sh -c`, having no epic and
--- wanting terminal output rather than app.log (FeedCommandStderrOnSuccess).
+-- three entry points; the bounded spawn (src/feed/exec.rs::run_feed_command_bounded:
+-- `sh -c` in its own process group, the timeout, the output cap) is shared by
+-- all three too; the logging wrapper around it
+-- (src/feed/exec.rs::exec_feed_command) only by the two runtime ones, because
+-- verify-feed has no epic and wants terminal output rather than app.log
+-- (FeedCommandStderrOnSuccess).
 -- The module's ingest_feed is the single role dispatcher (FeedSync, under
 -- Rules).
 
@@ -431,7 +434,8 @@ contract FeedItemParse {
     @invariant AReviewTaggedFeedItemNamesItsPr
         -- The one CROSS-FIELD rule, and the one thing parse_feed_items checks
         -- itself. An item whose `tag` satisfies core/TaskTag.is_review must
-        -- carry a `url` that types as pr. Anything else — an empty url, or one
+        -- carry a `url` whose RESOLVED type is pr: its explicit `url_type`
+        -- when it declares one, else the type inferred from the URL string. Anything else — an empty url, or one
         -- that types as issue, security_alert or other — REJECTS THE WHOLE
         -- EMISSION, exactly like an unknown `tag`, and for the same reason:
         -- both are producer bugs a silent drop would hide.
@@ -489,6 +493,15 @@ contract ShippedFeedScriptFiles {
         -- file already at the .bak path; that decides how many backups exist
         -- (one per script), not whether one precedes the write.
 
+    @invariant ADeclinedOverwriteIsNotDrift
+        -- The drift check (src/setup/plugins.rs::shipped_scripts_are_current)
+        -- counts a script as current when its bytes and mode match what
+        -- dispatch ships, OR when a recorded refusal still matches both the
+        -- content on disk and the content dispatch ships. The apply then
+        -- writes nothing for it either, so the two halves of startup.allium's
+        -- ConfigDriftEngine keep OneDefinitionOfOutOfDate. The drift check
+        -- only reads the record; it never writes it.
+
     @invariant FailedScriptsClaimNoProvenance
         -- A script whose backup, write or chmod raised has NO digest recorded
         -- in the manifest for that apply. Its on-disk content is unknown to
@@ -535,18 +548,22 @@ enum Signal { direct_request | team_request | reviewed | commented | author_bot 
 -- every apply.
 --
 --   in_sync   -- the file on disk already matches what dispatch ships. No
---                write, no report line.
+--                content write (a wrong mode is repaired to 0755), no report
+--                line.
 --   installed -- nothing was at the path; the shipped content was written.
 --   updated   -- the file differed from the shipped content and was
 --                overwritten (silently when provenance was proven, otherwise
 --                only after an explicit interactive yes, and then only after
 --                a .bak copy).
---   kept      -- the file differed and provenance was unknown, so dispatch
---                left it alone. The one outcome that reports a path the user
---                may want to act on.
---   failed    -- the backup, the write or the chmod for this script raised an
---                error. The script is reported carrying that error and the
---                apply continues; no digest is recorded. See
+--   kept      -- the file differed and provenance was unknown, and the
+--                operator said no, had said no to this same pair before, or
+--                nobody could answer, so dispatch left it alone. The one
+--                outcome that reports a path the user may want to act on.
+--   failed    -- the backup, the write, the chmod or the mode repair for this
+--                script raised an error, or the overwrite question itself
+--                could not be answered (stdin closed). The script is reported
+--                carrying that error and the apply continues; no digest is
+--                recorded. See
 --                InstallShippedFeedScripts' PER-SCRIPT FAILURE section.
 enum ShippedScriptOutcome { in_sync | installed | updated | kept | failed }
 
@@ -587,6 +604,10 @@ config {
     -- Suffix for the pre-overwrite copy taken on the one destructive branch.
     script_backup_suffix: String = ".bak"
 
+    -- The operator's recorded refusals to overwrite an edited shipped script
+    -- (InstallShippedFeedScripts, DECLINED), beside the manifest.
+    script_declined_name: String = ".declined-overwrites.json"
+
     -- How often the feed runner wakes (core.allium: BoardClockTicks,
     -- FeedPollTick). Kept apart from core's config.tick_interval so the two
     -- can change independently; each epic still polls at its own resolved
@@ -598,6 +619,11 @@ config {
     -- write unbounded output into app.log on every poll
     -- (FeedCommandStderrOnSuccess).
     feed_stderr_cap: Integer = 2000
+
+    -- The most a feed command may write to stdout, and separately to stderr,
+    -- before the run fails and its process group is killed
+    -- (FeedCommandFailure bucket 8; src/feed/exec.rs::MAX_FEED_STDOUT_BYTES).
+    feed_output_cap_bytes: Integer = 33554432
 
     -- How much of an unparseable stdout verify-feed prints after the parse
     -- error, in characters (FeedItemParse).
@@ -630,9 +656,9 @@ rule VerifyFeed {
     -- stdout, and validates that it parses as Vec<FeedItem>. On success
     -- it prints a table of (external_id, title, tag, status) and exits 0.
     -- On failure (non-zero exit, parse failure including missing or
-    -- unknown tag, or running past feed_command_timeout, after which the
-    -- whole process group is killed) it prints the error to stderr and
-    -- exits 1.
+    -- unknown tag, running past feed_command_timeout, or writing more than
+    -- config.feed_output_cap_bytes, after either of which the whole process
+    -- group is killed) it prints the error to stderr and exits 1.
     --
     -- An emission that PARSES but contains ZERO items is NOT a failure: the
     -- runtime treats a clean empty emission as valid (it reconciles), so
@@ -755,8 +781,12 @@ rule InstallShippedFeedScripts {
     --      branch 1: it is unknown provenance, not an empty slot, and reading
     --      "unreadable" as "absent" would overwrite it with no prompt and no
     --      backup, which is the one thing branch 4 exists to prevent.
-    --   2. PRESENT AND IDENTICAL -> nothing to write. The digest is recorded
-    --      (idempotently) even though dispatch may not have written this
+    --   2. PRESENT AND IDENTICAL -> no content to write, but a wrong mode is
+    --      repaired to 0755: right bytes behind a mode the feed runner cannot
+    --      execute are not in sync with what dispatch ships, and a chmod that
+    --      raised on an earlier apply leaves exactly that. A repair that
+    --      raises is `failed` and records nothing. Otherwise the digest is
+    --      recorded (idempotently) even though dispatch may not have written this
     --      copy: the file demonstrably IS the shipped content, so claiming
     --      provenance over it asserts nothing that is not already true, and
     --      it means the NEXT release can update it silently instead of
@@ -777,7 +807,9 @@ rule InstallShippedFeedScripts {
     --          why it is being asked about. On yes: copy to
     --          <name><config.script_backup_suffix> FIRST, then write, then
     --          record. `updated`, with the backup named in the report. On
-    --          no: untouched. `kept`.
+    --          no: untouched, and the refusal is recorded (DECLINED, below).
+    --          `kept`. A prompt that cannot be answered at all (stdin closed)
+    --          is `failed` for this script and records nothing.
     --          The backup REPLACES any file already at the .bak path. It is
     --          a safety net for the overwrite the user just approved, not an
     --          archive, so there is only ever one of them per script.
@@ -799,7 +831,25 @@ rule InstallShippedFeedScripts {
     --          `kept`. Consenting to the drift report means "bring my
     --          installation up to date", not "destroy a file of unknown
     --          provenance while nobody is watching". A scripted launch in CI
-    --          must be incapable of eating a local edit.
+    --          must be incapable of eating a local edit. No refusal is
+    --          recorded: nobody decided anything.
+    --
+    -- DECLINED. A no records the pair (digest of the content kept on disk,
+    -- digest of the content dispatch ships) for that script in
+    -- <data_dir>/scripts/<config.script_declined_name>. While BOTH digests
+    -- still match, the operator has already answered this exact question:
+    -- branch 4 keeps the file WITHOUT asking, and the drift check does not
+    -- count the script as stale, so the launch is clean again. A further edit
+    -- to the file, or a release that ships different content, breaks the
+    -- match and the question is asked again. Any later successful write or
+    -- in-sync pass for the script drops its record. A missing, unreadable or
+    -- malformed record file reads as empty, on the same terms as the
+    -- provenance manifest: the cost is one more question, never a write.
+    --
+    -- REJECTED — asking again on every launch. An operator who deliberately
+    -- keeps an edited shipped script could then never get a clean start: the
+    -- drift prompt and the overwrite question return every time, which
+    -- trains them to answer without reading.
     --
     -- Branch 4 is the ONLY branch that can destroy user content, and it
     -- requires BOTH an interactive session AND an explicit yes.
@@ -813,8 +863,8 @@ rule InstallShippedFeedScripts {
     -- is taken BEFORE the write, not after and not "if the write succeeds",
     -- so a crash mid-write cannot leave the user with neither copy.
     --
-    -- PER-SCRIPT FAILURE. A failure while backing up, writing or chmod-ing
-    -- ONE shipped script does NOT fail the artefact. That script is reported
+    -- PER-SCRIPT FAILURE. A failure while backing up, writing, chmod-ing or
+    -- asking about ONE shipped script does NOT fail the artefact. That script is reported
     -- as `failed` carrying the error text, and the apply proceeds to the
     -- remaining scripts and to the config files (InstallShippedFeedConfigs).
     -- Failures are per-script and independent; four scripts landing fine and
@@ -850,23 +900,36 @@ rule InstallShippedFeedScripts {
             let shipped = shipped_script_content(name)
             let on_disk = file_content(path)
             let recorded = recorded_script_digest(data_dir, name)
+            let declined = declined_overwrite(data_dir, name)
 
             if not exists_at(path):
                 if script_write_succeeds(path, shipped):
                     ScriptFileWritten(path: path, content: shipped, executable: true)
                     ScriptDigestRecorded(name: name, digest: sha256(shipped))
             else if on_disk = shipped:
-                ScriptDigestRecorded(name: name, digest: sha256(shipped))
+                if script_mode_repair_succeeds(path):
+                    ScriptDigestRecorded(name: name, digest: sha256(shipped))
             else if recorded = sha256(on_disk):
                 if script_write_succeeds(path, shipped):
                     ScriptFileWritten(path: path, content: shipped, executable: true)
                     ScriptDigestRecorded(name: name, digest: sha256(shipped))
+            else if declined.kept = sha256(on_disk) and declined.shipped = sha256(shipped):
+                -- Already answered no for exactly this pair: kept, not asked.
+                ScriptOverwriteStillDeclined(name: name)
             else if operator_can_answer and approve_script_overwrite(path):
                 if script_backup_succeeds(path, script_backup_path(path)):
                     ScriptFileBackedUp(path: path, backup_path: script_backup_path(path))
                     if script_write_succeeds(path, shipped):
                         ScriptFileWritten(path: path, content: shipped, executable: true)
                         ScriptDigestRecorded(name: name, digest: sha256(shipped))
+            else if operator_can_answer and on_disk != null:
+                -- An unreadable file has no digest to record, so a no for it
+                -- is asked again next time.
+                ScriptOverwriteDeclined(
+                    name:    name,
+                    kept:    sha256(on_disk),
+                    shipped: sha256(shipped)
+                )
 
         ShippedFeedScriptsReconciled(
             data_dir: data_dir,
@@ -955,7 +1018,9 @@ rule InstallShippedFeedConfigs {
     -- A CONFIG WRITE FAILURE FAILS THE ARTEFACT, not the launch. It is
     -- reported in aggregate rather than per file: unlike a script, a config
     -- file has no per-file state worth distinguishing, and the cause is
-    -- nearly always the directory. The scripts are installed first, so their
+    -- nearly always the directory, so the first config that cannot be
+    -- written stops the pass and the next launch retries the rest. The
+    -- scripts are installed first, so their
     -- section still prints; the board then names `feed scripts` among the
     -- artefacts it could not update and retries it next launch
     -- (startup.allium: ApplyStaleConfigOnConsent, PartialFailureIsStillProgress).
@@ -1004,13 +1069,19 @@ rule ReportShippedFeedScripts {
     -- A missing section is ambiguous between "nothing to do" and "this
     -- version of dispatch does not do that yet"; a present one-liner is not.
     --
-    -- A `kept` line names the FULL PATH, and, where a backup was taken, the
-    -- backup path. `kept` is the only outcome that leaves the deployment
-    -- running something other than what dispatch ships, so it is the only
-    -- one the user may need to act on — and they cannot act on a bare file
-    -- name. The line also says why it was kept (it differs from the shipped
-    -- copy and dispatch did not write it), because "kept" alone reads like
-    -- reassurance rather than the open question it is.
+    -- A `kept` line names the FULL PATH. `kept` is the only outcome that
+    -- leaves the deployment running something other than what dispatch
+    -- ships, so it is the only one the user may need to act on — and they
+    -- cannot act on a bare file name. The line also says why it was kept (it
+    -- differs from the version dispatch ships and dispatch did not write it)
+    -- and what brings the question back (a further edit or a new release),
+    -- because "kept" alone reads like reassurance rather than the open
+    -- question it is. It names no flag: there is none.
+    --
+    -- A `kept` script never has a backup. A backup is taken only on the
+    -- approved overwrite, so the backup path appears on an `updated` line,
+    -- and on a `failed` line when the write after a successful backup
+    -- raised — that is exactly when the user needs to find it.
     --
     -- A `failed` script ALWAYS gets a line, and that line names the full
     -- path and the error text. A failure is never silent and is never folded
@@ -1253,7 +1324,12 @@ rule OverrideFeedOwner {
     ensures:
         split/PollOwnerOverridden(scope: epic, scope_id: epic.id, host: core/local_host())
 
+    -- The board reports the answer on the status line: "Feed-poll ownership
+    -- for epic #<id> reassigned to this host." when the store accepts, and
+    -- the store's refusal as an error otherwise.
+
     @guidance
+        -- Implementation: src/runtime/epics.rs::exec_override_feed_owner.
         -- The one entry is the yes answer to epics.allium's
         -- FeedOwnerTakeoverOffered (FeedBoardKeys), offered by EditEpic when a
         -- human sets or changes feed_command and an existing PollOwner names a
@@ -1278,8 +1354,10 @@ rule FeedCommandAuthority {
     -- authorship. A patch that leaves feed_command as it is, or sets it to the
     -- value it already has, is not a change and needs no authority.
     --
-    -- The rule also runs at CREATION: a new epic that carries a feed_command
-    -- is a command set by its creator, so the creator is the setter.
+    -- Both reducers that patch an epic, patch_epic and update_epic, hold a
+    -- patch to this rule. At CREATION there is nothing to check: a new epic
+    -- that carries a feed_command records its creator as the setter
+    -- (feed_command_set_by = created_by), managed epics included.
     requires:
         command = epic.feed_command
         or caller() = epic.created_by
@@ -2569,7 +2647,7 @@ rule DispatchRequiresRepoPath {
 rule FeedCommandFailure {
     when: FeedCommandFailed(epic, error)
 
-    -- Failures fall into seven buckets, all handled identically from the
+    -- Failures fall into eight buckets, all handled identically from the
     -- user's perspective: the failure is logged at warn level and the
     -- epic's last_run is bumped so we don't retry until the next interval.
     --
@@ -2599,13 +2677,19 @@ rule FeedCommandFailure {
     --      degraded-emission guards to see, so this bucket is reached the
     --      same way buckets 1-2 are — before any parse. See
     --      SerialisedFeedCycle's bounded-cost note above.
+    --   8. The command wrote more than config.feed_output_cap_bytes to
+    --      stdout or to stderr. Its process group is killed at once, as for
+    --      bucket 7, and no output is parsed: a runaway command must not be
+    --      able to fill the board's memory.
     --
     -- Bucket 5 also covers the epic being deleted WHILE the command runs
     -- (it can run for minutes): the store then refuses the sync with
     -- "epic N not found". The cycle re-reads the epic after a refused sync
     -- and, if it is gone, drops the cycle logging at debug, not warn: the
     -- next tick no longer lists the epic, so there is nothing to recover.
-    -- A refusal for an epic that still exists stays a warning.
+    -- A refusal for an epic that still exists stays a warning, and so does an
+    -- epic already missing when the cycle claims it: nothing deleted it under
+    -- a running command, so the request named an epic that was not there.
     --
     -- Buckets 5 and 6 are unreachable in a correctly-provisioned, unraced
     -- system; they are specified because the cycle must do something
@@ -3359,7 +3443,10 @@ rule ManualFeedTrigger {
     -- not the person who set the command, nothing runs and the status line
     -- is "Feed for '{epic.title}' runs only on its author's host". It is
     -- checked before the poll owner is consulted, so a host that may not run
-    -- the command neither claims nor asks.
+    -- the command neither claims nor asks. An epic deleted between the
+    -- keypress and that check is not blamed on the host: the status line is
+    -- the failure line, "Feed for '{epic.title}' failed: epic no longer
+    -- exists", as for the cycle's own bucket 5.
     ensures:
         status_bar = "Fetching feed for '{epic.title}'…"
         -- When the poll owner is, or after the claim turns out to be,
@@ -3584,8 +3671,8 @@ surface FeedBoardKeys {
         -- card highlighted on the board, or focused inside the Epic view. On
         -- a non-feed epic the key has no effect.
         ManualFeedRefresh(epic)
-        -- [y] on epics.allium's FeedOwnerTakeoverOffered prompt ("This feed is
-        -- currently owned by <host> — take over polling? [y/N]"). Any other
-        -- answer emits nothing.
+        -- [y] or [Y] on epics.allium's FeedOwnerTakeoverOffered prompt ("This
+        -- feed is currently owned by host <host> — take over polling? [y/N]").
+        -- Any other answer emits nothing.
         OverrideFeedOwner(epic)
 }
