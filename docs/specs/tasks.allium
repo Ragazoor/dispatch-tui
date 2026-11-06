@@ -1361,7 +1361,12 @@ rule ToggleBookmarkFromBoard {
 rule SetBookmark {
     when: BookmarkSet(subscriber, task, bookmarked)
 
-    -- Only the person themselves writes their own bookmark.
+    -- Only the person themselves writes their own bookmark: the subscriber is
+    -- the person the bookmark belongs to, the caller is the identity making
+    -- the call, and the operator (the store itself, a scheduled reducer
+    -- firing) is a caller like any other here. It may not set or clear a
+    -- person's bookmark: a bookmark is personal, and nothing it could repair
+    -- is worth reading another person's trail.
     requires: subscriber = caller()
     -- A task the caller cannot see is refused as a missing one
     -- (workspaces.allium: UnseenIsAsMissing).

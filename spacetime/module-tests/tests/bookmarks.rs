@@ -206,3 +206,82 @@ fn removing_a_member_drops_their_bookmarks_in_the_workspace() {
     assert!(bookmarks_for(&store, "bob").is_empty());
     assert_eq!(bookmarks_for(&store, "alice"), vec![task]);
 }
+
+/// B5: the store's own identity (the operator) is no exception. A bookmark is
+/// written only by the person it belongs to.
+#[test]
+fn the_operator_cannot_write_a_persons_bookmark() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let task = store.create("alice", epic_task("t", epic, "backlog"));
+
+    let err = store
+        .call_as_scheduler(|ctx| set_bookmark(ctx, identity_of("alice"), task, true))
+        .expect_err("the operator may not set it");
+    assert!(err.contains("bookmark"), "{err}");
+    assert!(bookmarks_for(&store, "alice").is_empty());
+}
+
+fn retitle(title: &str) -> TaskPatch {
+    TaskPatch {
+        title: Some(title.into()),
+        ..status_patch("backlog")
+    }
+}
+
+/// B2: `update_task` writes the fields and the caller's bookmark in one
+/// transaction.
+#[test]
+fn update_task_writes_the_fields_and_the_bookmark_together() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let task = store.create("alice", epic_task("before", epic, "backlog"));
+
+    store
+        .call("alice", |ctx| {
+            update_task(
+                ctx,
+                task,
+                None,
+                String::new(),
+                HOST_A.into(),
+                retitle("after"),
+                identity_of("alice"),
+                Some(true),
+            )
+        })
+        .expect("update");
+
+    assert_eq!(bookmarks_for(&store, "alice"), vec![task]);
+}
+
+/// B2: a refused bookmark undoes the fields. A call that moves the task into
+/// Done and bookmarks it is refused whole.
+#[test]
+fn update_task_with_a_refused_bookmark_writes_no_field() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let task = store.create("alice", epic_task("before", epic, "backlog"));
+    let patch = TaskPatch {
+        title: Some("never".into()),
+        ..status_patch("done")
+    };
+
+    let err = store
+        .call("alice", |ctx| {
+            update_task(
+                ctx,
+                task,
+                None,
+                String::new(),
+                HOST_A.into(),
+                patch,
+                identity_of("alice"),
+                Some(true),
+            )
+        })
+        .expect_err("done and bookmarked is refused");
+
+    assert!(err.contains("done"), "{err}");
+    assert!(bookmarks_for(&store, "alice").is_empty());
+}

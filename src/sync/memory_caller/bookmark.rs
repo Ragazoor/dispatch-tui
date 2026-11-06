@@ -7,6 +7,7 @@ use dispatch_spacetime_module as module;
 use crate::models::TaskId;
 
 use super::super::writes::ReducerOutcome;
+use super::visibility::Scope;
 use super::{MemoryReducerCaller, Tables, DONE};
 
 impl MemoryReducerCaller {
@@ -78,34 +79,60 @@ impl MemoryReducerCaller {
         task_id: TaskId,
         bookmarked: bool,
     ) -> Result<ReducerOutcome> {
-        if subscriber.trim().is_empty() {
-            return Ok(ReducerOutcome::Refused(
-                "cannot bookmark without an identity".into(),
-            ));
-        }
         let scope = self.scope();
-        if let Err(why) = Tables::require_own_identity(&scope, &subscriber) {
+        let mut tables = self.lock();
+        if let Err(why) =
+            Self::check_bookmark_write(&tables, &scope, &subscriber, task_id.0, bookmarked, None)
+        {
             return Ok(ReducerOutcome::Refused(why));
         }
-        let mut tables = self.lock();
-        let Some(task) = tables.visible_task(&scope, task_id.0) else {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {} does not exist",
-                task_id.0
-            )));
+        self.write_bookmark(&mut tables, subscriber, task_id, bookmarked);
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// The refusals of the module's `write_bookmark`, read off the tables with
+    /// no write. `status` is the status the task will hold when the bookmark
+    /// lands: `None` reads it from the task as it stands, `update_task` names
+    /// the status its patch leaves (this double has no rollback, so it checks
+    /// before either half).
+    pub(super) fn check_bookmark_write(
+        tables: &Tables,
+        scope: &Scope,
+        subscriber: &str,
+        task_id: i64,
+        bookmarked: bool,
+        status: Option<&str>,
+    ) -> Result<(), String> {
+        if subscriber.trim().is_empty() {
+            return Err("cannot bookmark without an identity".into());
+        }
+        // The operator is no exception: a bookmark is personal.
+        Tables::require_bookmark_owner(scope, subscriber)?;
+        let Some(task) = tables.visible_task(scope, task_id) else {
+            return Err(format!("task {task_id} does not exist"));
         };
+        let status = status.unwrap_or(&task.status);
+        if bookmarked && status == DONE {
+            return Err(format!("Task {task_id} is done and cannot be bookmarked"));
+        }
+        Ok(())
+    }
+
+    /// The write half of `write_bookmark`, once [`Self::check_bookmark_write`]
+    /// has passed. Both directions are idempotent.
+    pub(super) fn write_bookmark(
+        &self,
+        tables: &mut Tables,
+        subscriber: String,
+        task_id: TaskId,
+        bookmarked: bool,
+    ) {
         let id = module::bookmark_id(&subscriber, task_id.0);
         if !bookmarked {
             if tables.bookmarks.remove(&id).is_some() {
                 self.rows.remove_bookmark(id);
             }
-            return Ok(ReducerOutcome::Applied(vec![]));
-        }
-        if task.status == DONE {
-            return Ok(ReducerOutcome::Refused(format!(
-                "Task {} is done and cannot be bookmarked",
-                task_id.0
-            )));
+            return;
         }
         if let std::collections::btree_map::Entry::Vacant(entry) =
             tables.bookmarks.entry(id.clone())
@@ -118,6 +145,5 @@ impl MemoryReducerCaller {
             entry.insert(row.clone());
             self.rows.upsert_bookmark(&row.into());
         }
-        Ok(ReducerOutcome::Applied(vec![]))
     }
 }

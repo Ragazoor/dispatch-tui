@@ -234,6 +234,11 @@ rule UpdateTaskViaMcp {
     requires:
         if url != null and url != "":
             url_type != null
+    -- And the other way: a url_type with no url is refused too, whatever else
+    -- the call carries. A call that also sets `bookmarked` would otherwise
+    -- write through and answer "updated" with the url_type neither applied
+    -- nor refused.
+    requires: url_type = null or url != null
 
     -- Deletion is never reachable over MCP, on any path: there is no MCP
     -- delete tool. Permanent delete stays a human TUI action (tasks.allium:
@@ -362,6 +367,12 @@ rule UpdateTaskViaMcp {
         -- idempotent. Setting it on a Done task is refused (tasks.allium:
         -- SetBookmark), as is setting it in the same call that moves the task
         -- to done, which MarkTaskDoneViaMcp refuses on its own terms.
+        --
+        -- The bookmark and the other fields are ONE change: the store's
+        -- update_task writes them in a single transaction, so a refused
+        -- bookmark (a Done task, a board with no identity yet) leaves the
+        -- fields unwritten, and the call answers with the refusal and notifies
+        -- no one. A call that sets only `bookmarked` is SetBookmark itself.
         if bookmarked != null:
             BookmarkSet(subscriber: core/local_host().owner, task: task, bookmarked: bookmarked)
     -- A call whose only field is `bookmarked` writes no Task field, so it

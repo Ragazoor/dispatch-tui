@@ -741,7 +741,7 @@ fn drop_marks_of_those_who_cannot_see(
     if tasks.is_empty() {
         return;
     }
-    crate::bookmark::drop_marks_where(ctx, |task_id, subscriber| {
+    crate::bookmark::drop_marks_where(ctx, None, |task_id, subscriber| {
         tasks.contains(&task_id)
             && ctx
                 .db

@@ -341,6 +341,8 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
                 String::new(),
                 String::new(),
                 illegal_with_repo.clone(),
+                String::new(),
+                None,
             )
             .await
             .unwrap(),
@@ -350,6 +352,8 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
                 String::new(),
                 String::new(),
                 illegal_with_repo,
+                String::new(),
+                None,
             )
             .await
             .unwrap(),
@@ -372,6 +376,8 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
                 String::new(),
                 String::new(),
                 retitle.clone(),
+                String::new(),
+                None,
             )
             .await
             .unwrap(),
@@ -381,6 +387,8 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
                 String::new(),
                 String::new(),
                 retitle,
+                String::new(),
+                None,
             )
             .await
             .unwrap(),
@@ -390,12 +398,28 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
 
         let gone = TaskId(9_999_999);
         let why = refused(
-            real.update_task(gone, None, String::new(), String::new(), blank_task_patch())
-                .await
-                .unwrap(),
-            mem.update_task(gone, None, String::new(), String::new(), blank_task_patch())
-                .await
-                .unwrap(),
+            real.update_task(
+                gone,
+                None,
+                String::new(),
+                String::new(),
+                blank_task_patch(),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap(),
+            mem.update_task(
+                gone,
+                None,
+                String::new(),
+                String::new(),
+                blank_task_patch(),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap(),
         );
         assert!(why.contains("not found"), "{why}");
 
@@ -470,16 +494,26 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             String::new(),
             String::new(),
             to_done.clone(),
+            String::new(),
+            None,
         )
         .await
         .unwrap()
         .applied()
         .unwrap();
-        mem.update_task(done_mem, None, String::new(), String::new(), to_done)
-            .await
-            .unwrap()
-            .applied()
-            .unwrap();
+        mem.update_task(
+            done_mem,
+            None,
+            String::new(),
+            String::new(),
+            to_done,
+            String::new(),
+            None,
+        )
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
         wait_for!(rows_real
             .task(done_real)
             .is_some_and(|t| t.status == TaskStatus::Done));

@@ -497,7 +497,7 @@ fn update_task_into_a_private_epic_ends_the_claims_and_marks_it_strands() {
                 Some(private),
                 identity_of("boss"),
                 String::new(),
-                TaskPatch::default(),
+                TaskPatch::default(), String::new(), None,
             )
         })
         .expect("move");

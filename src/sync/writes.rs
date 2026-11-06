@@ -191,6 +191,9 @@ pub trait ReducerCaller: Send + Sync {
     /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.
     /// `host` is the caller's own host: a move into Done that leaves a pr-typed
     /// url writes a close row for it (`UpdateTaskDoneWritesACloseRow`).
+    /// `bookmarked` is `subscriber`'s own bookmark, written in the same
+    /// transaction (`UpdateTaskViaMcp`); `None` leaves it alone.
+    #[allow(clippy::too_many_arguments)]
     async fn update_task(
         &self,
         id: TaskId,
@@ -198,6 +201,8 @@ pub trait ReducerCaller: Send + Sync {
         owner: String,
         host: String,
         patch: bindings::TaskPatch,
+        subscriber: String,
+        bookmarked: Option<bool>,
     ) -> Result<ReducerOutcome>;
     async fn delete_task(&self, id: TaskId) -> Result<ReducerOutcome>;
     async fn set_task_epic(

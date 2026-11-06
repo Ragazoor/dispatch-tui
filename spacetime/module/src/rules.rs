@@ -58,6 +58,11 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 44: `update_task` carries the caller's bookmark (`subscriber`, `bookmarked`)
+///    and writes it in the same transaction as the fields, and `set_bookmark`
+///    is refused for anyone but the person it belongs to, the operator
+///    included (`bookmark.rs`; `mcp-task-tools.allium: UpdateTaskViaMcp`). A
+///    reducer argument an old board does not send.
 /// 43: repo-path authority — `save_repo_path`, `adopt_repo_path`,
 ///    `delete_repo_path` and `set_verify_command` (`config.rs`) are refused
 ///    unless the caller owns the named host; `set_verify_command` takes the
@@ -232,7 +237,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 43;
+pub const RULES_VERSION: i64 = 44;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first

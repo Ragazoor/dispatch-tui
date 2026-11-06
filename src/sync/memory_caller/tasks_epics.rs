@@ -405,6 +405,7 @@ impl MemoryReducerCaller {
     /// make is raised here BEFORE the first write, by running the patch's
     /// validation against a copy of the row. The two writes that follow, in
     /// the module's order, then cannot refuse.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn apply_update_task(
         &self,
         id: TaskId,
@@ -412,6 +413,8 @@ impl MemoryReducerCaller {
         owner: String,
         host: String,
         patch: bindings::TaskPatch,
+        subscriber: String,
+        bookmarked: Option<bool>,
     ) -> Result<ReducerOutcome> {
         {
             let scope = self.scope();
@@ -441,28 +444,51 @@ impl MemoryReducerCaller {
                 }
             }
             let patch = module::TaskPatch::from(patch.clone());
-            if let Err(why) = self.check_patch_would_apply(&mut tables, id, row, patch) {
-                return Ok(ReducerOutcome::Refused(why));
+            let after = match self.check_patch_would_apply(&mut tables, id, row, patch) {
+                Ok(after) => after,
+                Err(why) => return Ok(ReducerOutcome::Refused(why)),
+            };
+            // The module raises a refused bookmark inside the same
+            // transaction, so neither half stays; check it here, against the
+            // status the patch leaves.
+            if let Some(bookmarked) = bookmarked {
+                if let Err(why) = Self::check_bookmark_write(
+                    &tables,
+                    &scope,
+                    &subscriber,
+                    id.0,
+                    bookmarked,
+                    Some(&after.status),
+                ) {
+                    return Ok(ReducerOutcome::Refused(why));
+                }
             }
         }
         let relink_first = patch.repo_path.is_some();
-        let Some(epic_id) = epic_id else {
-            return self.patch_task_row(id, patch, true, Some(&host));
+        let written = match epic_id {
+            None => self.patch_task_row(id, patch, true, Some(&host))?,
+            Some(epic_id) => {
+                let epic = (epic_id != 0).then_some(EpicId(epic_id));
+                if relink_first {
+                    let moved = self.apply_set_task_epic(id, epic, owner)?;
+                    if matches!(moved, ReducerOutcome::Refused(_)) {
+                        return Ok(moved);
+                    }
+                    self.patch_task_row(id, patch, true, Some(&host))?
+                } else {
+                    let patched = self.patch_task_row(id, patch, true, Some(&host))?;
+                    if matches!(patched, ReducerOutcome::Refused(_)) {
+                        return Ok(patched);
+                    }
+                    self.apply_set_task_epic(id, epic, owner)?
+                }
+            }
         };
-        let epic = (epic_id != 0).then_some(EpicId(epic_id));
-        if relink_first {
-            let moved = self.apply_set_task_epic(id, epic, owner)?;
-            if matches!(moved, ReducerOutcome::Refused(_)) {
-                return Ok(moved);
-            }
-            self.patch_task_row(id, patch, true, Some(&host))
-        } else {
-            let patched = self.patch_task_row(id, patch, true, Some(&host))?;
-            if matches!(patched, ReducerOutcome::Refused(_)) {
-                return Ok(patched);
-            }
-            self.apply_set_task_epic(id, epic, owner)
+        if let (ReducerOutcome::Applied(_), Some(bookmarked)) = (&written, bookmarked) {
+            let mut tables = self.lock();
+            self.write_bookmark(&mut tables, subscriber, id, bookmarked);
         }
+        Ok(written)
     }
 
     /// Mirrors the module's `check_task_aim` call in `patch_task_row`.
@@ -485,7 +511,7 @@ impl MemoryReducerCaller {
         id: TaskId,
         mut row: module::Task,
         patch: module::TaskPatch,
-    ) -> Result<(), String> {
+    ) -> Result<module::Task, String> {
         module::check_task_patch(&row, &patch)?;
         self.check_task_aim(tables, &row, &patch)?;
         let has_agent = module::current_agent(&self.agent_store(tables), id.0).is_some();
@@ -497,7 +523,8 @@ impl MemoryReducerCaller {
             row = module::apply_schedule(row, &cron, &self.now())?;
         }
         row = module::schedule_after_status_write(&prior_status, row, &self.now());
-        Self::validate_task_write(tables, &row, &self.now())
+        Self::validate_task_write(tables, &row, &self.now())?;
+        Ok(row)
     }
 
     pub(super) fn apply_delete_task(&self, id: TaskId) -> Result<ReducerOutcome> {

@@ -60,9 +60,10 @@ pub trait IngestStore {
     fn now(&self) -> String;
     /// Insert an epic with a generated id; its id.
     fn insert_epic(&mut self, row: Epic) -> i64;
-    /// Overwrite a task row as given, a feed move. Its only rules are the
-    /// per-person marks': leaving the epic ends unseen marks, and entering Done
-    /// ends unseen marks and bookmarks (`end_marks_on_finish`).
+    /// Overwrite a task row as given, a feed move. Its only rule is the
+    /// per-person marks': leaving the epic ends unseen marks. A feed move only
+    /// re-routes a task and never sets Done, so it has no finish to end
+    /// bookmarks for (`end_marks_on_finish` is the other writers' seam).
     fn update_task(&mut self, row: Task);
     fn find_or_create_repo_group(&mut self, root: i64, title: &str, created_by: String) -> i64;
     fn flatten_epic(&mut self, root: i64) -> Result<(), String>;
@@ -116,7 +117,6 @@ impl IngestStore for ReducerStore<'_> {
             if prior.epic_id != row.epic_id {
                 clear_unseen_for_task(self.0, row.id);
             }
-            end_marks_on_finish(self.0, &prior, &row);
         }
         self.0.db.tasks().id().update(row);
     }

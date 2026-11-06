@@ -325,6 +325,8 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
                                 String::new(),
                                 String::new(),
                                 blank_task_patch(),
+                                String::new(),
+                                None,
                             )
                             .await,
                         p.mem
@@ -334,6 +336,8 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
                                 String::new(),
                                 String::new(),
                                 blank_task_patch(),
+                                String::new(),
+                                None,
                             )
                             .await,
                     ),
@@ -353,7 +357,9 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
                     Some(to_id),
                     String::new(),
                     String::new(),
-                    blank_task_patch()
+                    blank_task_patch(),
+                    String::new(),
+                    None,
                 ));
             }
             p.assert_move_rules(&label, task, to).await;
@@ -374,7 +380,9 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
                     None,
                     String::new(),
                     String::new(),
-                    patch.clone()
+                    patch.clone(),
+                    String::new(),
+                    None,
                 ));
             }
             p.wait(|r| r.task(task).and_then(|t| t.epic_id) != Some(EpicId(sub)))

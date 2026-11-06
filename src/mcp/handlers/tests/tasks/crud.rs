@@ -1057,3 +1057,56 @@ async fn update_tasks_with_only_url_type_is_still_refused() {
 
     assert!(is_error(&resp), "{resp:?}");
 }
+
+/// B3: a lone `url_type` next to `bookmarked` is refused too, not dropped
+/// ("Task N updated (bookmarked)" with the url_type neither applied nor refused).
+#[tokio::test]
+async fn update_tasks_url_type_with_bookmarked_but_no_url_is_refused() {
+    let (state, store, epic) = signal_fixture().await;
+    create_in_epic(&state, epic, json!({})).await;
+    let task = state.db.list_all().await[0].id;
+
+    let resp = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "url_type": "pr", "bookmarked": true }),
+    )
+    .await;
+
+    assert!(is_error(&resp), "{resp:?}");
+    assert!(
+        error_message(&resp).contains("url_type"),
+        "{}",
+        error_message(&resp)
+    );
+    assert!(crate::store::TaskRead::bookmarked_task_ids(&*store)
+        .await
+        .is_empty());
+}
+
+/// B2: fields and `bookmarked` are one change (`UpdateTaskViaMcp`). A refused
+/// bookmark leaves the title as it was.
+#[tokio::test]
+async fn update_tasks_refused_bookmark_leaves_the_fields_unwritten() {
+    let (state, _store, epic) = signal_fixture().await;
+    create_in_epic(&state, epic, json!({ "title": "before" })).await;
+    let task = state.db.list_all().await[0].id;
+    let done = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "status": "done" }),
+    )
+    .await;
+    assert!(!is_error(&done), "{}", error_message(&done));
+
+    let resp = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [task.0], "title": "after", "bookmarked": true }),
+    )
+    .await;
+
+    assert!(is_error(&resp), "{resp:?}");
+    let title = state.db.get_task(task).await.unwrap().title;
+    assert_eq!(title, "before", "the refused call must write nothing");
+}

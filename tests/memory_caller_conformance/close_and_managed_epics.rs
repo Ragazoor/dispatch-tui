@@ -210,12 +210,28 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
         };
         for task in [with_pr, without_pr] {
             both_applied(
-                real.update_task(task, None, String::new(), "host-a".into(), to_done())
-                    .await
-                    .unwrap(),
-                mem.update_task(task, None, String::new(), "host-a".into(), to_done())
-                    .await
-                    .unwrap(),
+                real.update_task(
+                    task,
+                    None,
+                    String::new(),
+                    "host-a".into(),
+                    to_done(),
+                    String::new(),
+                    None,
+                )
+                .await
+                .unwrap(),
+                mem.update_task(
+                    task,
+                    None,
+                    String::new(),
+                    "host-a".into(),
+                    to_done(),
+                    String::new(),
+                    None,
+                )
+                .await
+                .unwrap(),
             );
         }
         wait_for!(!close_shapes(with_pr).0.is_empty());
@@ -224,12 +240,28 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
         assert_eq!(real_rows, mem_rows);
         assert_eq!(close_shapes(without_pr), (vec![], vec![]));
         both_applied(
-            real.update_task(with_pr, None, String::new(), "host-a".into(), to_done())
-                .await
-                .unwrap(),
-            mem.update_task(with_pr, None, String::new(), "host-a".into(), to_done())
-                .await
-                .unwrap(),
+            real.update_task(
+                with_pr,
+                None,
+                String::new(),
+                "host-a".into(),
+                to_done(),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap(),
+            mem.update_task(
+                with_pr,
+                None,
+                String::new(),
+                "host-a".into(),
+                to_done(),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap(),
         );
         assert_eq!(close_shapes(with_pr).0.len(), 1, "done -> done adds none");
         assert_eq!(close_shapes(with_pr).1.len(), 1, "nor on the memory side");

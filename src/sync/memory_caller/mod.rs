@@ -535,6 +535,8 @@ impl ReducerCaller for MemoryReducerCaller {
         owner: String,
         host: String,
         patch: bindings::TaskPatch,
+        subscriber: String,
+        bookmarked: Option<bool>,
     ) -> Result<ReducerOutcome> {
         self.apply_update_task(
             id,
@@ -542,6 +544,8 @@ impl ReducerCaller for MemoryReducerCaller {
             owner,
             host,
             patch,
+            subscriber,
+            bookmarked,
         )
     }
 

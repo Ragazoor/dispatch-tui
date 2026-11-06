@@ -171,7 +171,22 @@ impl TaskCrud for Store {
         id: TaskId,
         epic: Option<Option<EpicId>>,
         patch: &TaskPatch<'_>,
+        bookmarked: Option<bool>,
     ) -> Result<()> {
+        // The person is needed only for a bookmark; one without an identity is
+        // refused before the fields are sent, as `set_bookmark` refuses it.
+        let subscriber =
+            match bookmarked {
+                Some(_) => match self.identity.user().await? {
+                    Some(identity) => identity,
+                    None => return Err(crate::sync::writes::StoreRefusal(
+                        "this board does not know who you are yet; try again once it has connected"
+                            .into(),
+                    )
+                    .into()),
+                },
+                None => String::new(),
+            };
         let owner = match epic {
             Some(target) => self.owner_for_epic_move(target).await?,
             None => String::new(),
@@ -183,6 +198,8 @@ impl TaskCrud for Store {
                 owner,
                 self.host.clone(),
                 encode::task_patch(patch),
+                subscriber,
+                bookmarked,
             )
             .await?
             .applied()

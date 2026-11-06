@@ -358,6 +358,17 @@ impl Tables {
         }
     }
 
+    /// The module's `write_bookmark` identity rule: only the person themselves,
+    /// the operator included. This double has no operator, so it is the
+    /// caller or nobody. Off without the workspace rules.
+    pub(super) fn require_bookmark_owner(scope: &Scope, subscriber: &str) -> Result<(), String> {
+        if !scope.on || subscriber == scope.who {
+            Ok(())
+        } else {
+            Err("a bookmark is written only by the person it belongs to".into())
+        }
+    }
+
     /// `EpicStaysInItsWorkspace` and `ReParentingKeepsTheHolder`.
     pub(super) fn check_epic_move(
         &self,

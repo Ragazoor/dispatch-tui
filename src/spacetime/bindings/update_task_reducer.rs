@@ -14,6 +14,8 @@ pub(super) struct UpdateTaskArgs {
     pub owner: String,
     pub host: String,
     pub patch: TaskPatch,
+    pub subscriber: String,
+    pub bookmarked: Option<bool>,
 }
 
 impl From<UpdateTaskArgs> for super::Reducer {
@@ -24,6 +26,8 @@ impl From<UpdateTaskArgs> for super::Reducer {
             owner: args.owner,
             host: args.host,
             patch: args.patch,
+            subscriber: args.subscriber,
+            bookmarked: args.bookmarked,
         }
     }
 }
@@ -50,8 +54,19 @@ pub trait update_task {
         owner: String,
         host: String,
         patch: TaskPatch,
+        subscriber: String,
+        bookmarked: Option<bool>,
     ) -> __sdk::Result<()> {
-        self.update_task_then(id, epic_id, owner, host, patch, |_, _| {})
+        self.update_task_then(
+            id,
+            epic_id,
+            owner,
+            host,
+            patch,
+            subscriber,
+            bookmarked,
+            |_, _| {},
+        )
     }
 
     /// Request that the remote module invoke the reducer `update_task` to run as soon as possible,
@@ -67,6 +82,8 @@ pub trait update_task {
         owner: String,
         host: String,
         patch: TaskPatch,
+        subscriber: String,
+        bookmarked: Option<bool>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -82,6 +99,8 @@ impl update_task for super::RemoteReducers {
         owner: String,
         host: String,
         patch: TaskPatch,
+        subscriber: String,
+        bookmarked: Option<bool>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -94,6 +113,8 @@ impl update_task for super::RemoteReducers {
                 owner,
                 host,
                 patch,
+                subscriber,
+                bookmarked,
             },
             callback,
         )

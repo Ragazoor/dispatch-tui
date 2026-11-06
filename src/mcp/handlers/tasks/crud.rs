@@ -45,26 +45,46 @@ async fn handle_update_task(
     // validate as a pair rather than mapping to one setter each, so they are
     // taken out here and everything else is folded in by the generated
     // `apply_to_params` below.
+    // A `url_type` with no `url` has no slot in `UpdateTaskParams`, so it is
+    // refused here, before any branch can drop it unseen (a call that also
+    // carries `bookmarked` writes through, and would answer "updated").
+    if parsed.url_type.is_some() && parsed.url.is_none() {
+        return service_err_to_response(
+            id,
+            ServiceError::Validation("url_type is only valid together with url".into()),
+        );
+    }
     match url_update(parsed.url.take(), parsed.url_type.take()) {
         Ok(Some(update)) => params = params.url(update),
         Ok(None) => {}
         Err(e) => return service_err_to_response(id, e),
     }
 
-    // `bookmarked` is not a Task field: it is the board person's own row,
-    // written after the task's fields (`UpdateTaskViaMcp`).
+    // `bookmarked` is not a Task field: it is the board person's own row. It
+    // rides in the same `UpdateTaskParams`, so the store writes it with the
+    // fields in one transaction (`UpdateTaskViaMcp`).
     let bookmarked = parsed.bookmarked.take();
-    let params = parsed.apply_to_params(params);
-    let mut fields: Vec<String> = params
+    let mut params = parsed.apply_to_params(params);
+    if let Some(bookmarked) = bookmarked {
+        params = params.bookmarked(bookmarked);
+    }
+    let fields: Vec<String> = params
         .updated_field_names()
         .into_iter()
         .map(str::to_string)
         .collect();
 
     let mut nudge = "";
-    // A call that sets no task field and no bookmark (a lone `url_type`) still
-    // reaches `update_task`, which refuses it as it always has.
-    if !fields.is_empty() || bookmarked.is_none() {
+    // A call that sets nothing (a lone `url_type` is refused above) reaches
+    // `update_task`, which refuses it as it always has.
+    // A call that sets only the bookmark writes no task field, so it leaves
+    // `updated_at` alone: a person's own mark is not an edit of the shared task
+    // (`UpdateTaskViaMcp`). That is `SetBookmark` itself.
+    if let (true, Some(bookmarked)) = (params.is_bookmark_only(), params.bookmarked) {
+        if let Err(e) = state.task_svc.set_bookmark(task_id, bookmarked).await {
+            return service_err_to_response(id, e);
+        }
+    } else {
         let result = match state.task_svc.update_task(params).await {
             Ok(result) => result,
             Err(e) => return service_err_to_response(id, e),
@@ -72,12 +92,6 @@ async fn handle_update_task(
         if result.was_pr_finalisation {
             nudge = super::reflection_nudge(&*state.db).await;
         }
-    }
-    if let Some(bookmarked) = bookmarked {
-        if let Err(e) = state.task_svc.set_bookmark(task_id, bookmarked).await {
-            return service_err_to_response(id, e);
-        }
-        fields.push("bookmarked".to_string());
     }
     state.notify_task_changed(task_id);
     let text = format!("Task {} updated ({}){}", task_id, fields.join(", "), nudge);

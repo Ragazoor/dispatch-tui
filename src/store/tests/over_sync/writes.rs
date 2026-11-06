@@ -61,6 +61,7 @@ enum Sent {
         String,
         String,
         Box<bindings::TaskPatch>,
+        Option<bool>,
     ),
     DeleteTask(TaskId),
     SetTaskEpic(TaskId, i64, String),
@@ -399,9 +400,18 @@ impl ReducerCaller for RecordingCaller {
         owner: String,
         host: String,
         patch: bindings::TaskPatch,
+        _subscriber: String,
+        bookmarked: Option<bool>,
     ) -> anyhow::Result<ReducerOutcome> {
         let epic_id = epic_id.map(encode::epic_ref);
-        self.answer(Sent::UpdateTask(id, epic_id, owner, host, Box::new(patch)))
+        self.answer(Sent::UpdateTask(
+            id,
+            epic_id,
+            owner,
+            host,
+            Box::new(patch),
+            bookmarked,
+        ))
     }
 
     async fn delete_task(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {

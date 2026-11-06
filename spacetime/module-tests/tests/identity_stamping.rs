@@ -102,7 +102,7 @@ fn update_task_detaches_under_the_same_authority() {
                 Some(0),
                 identity_of(who),
                 String::new(),
-                TaskPatch::default(),
+                TaskPatch::default(), String::new(), None,
             )
         })
     };

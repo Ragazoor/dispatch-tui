@@ -464,7 +464,7 @@ fn patch_task_into_done_respawns_a_phoenix_task() {
 /// `update_task`, moving `id` to `status`, as `HOST_A`'s board would.
 fn update_to(store: &Store, id: i64, patch: TaskPatch) -> Result<(), String> {
     store.call("alice", |ctx| {
-        update_task(ctx, id, None, String::new(), HOST_A.into(), patch)
+        update_task(ctx, id, None, String::new(), HOST_A.into(), patch, String::new(), None)
     })
 }
 

@@ -190,7 +190,7 @@ impl TaskService {
         // the caller looked is answered by the module, and mapped to the
         // `NotFound` the pre-checks used to give.
         self.db
-            .update_task(task_id, params.epic_id.map(Some), &patch)
+            .update_task(task_id, params.epic_id.map(Some), &patch, params.bookmarked)
             .await
             .map_err(|e| Self::refusal_as_not_found(e, task_id, params.epic_id))?;
 

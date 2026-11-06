@@ -94,6 +94,7 @@ fn every_source_the_board_reads_is_asked_for() {
         "visible_memberships",
         "unseen_items",
         "own_unseen_tasks",
+        "own_bookmarks",
         "own_subscriptions",
         "own_settings",
         "visible_learnings",

@@ -865,6 +865,8 @@ pub enum Reducer {
         owner: String,
         host: String,
         patch: TaskPatch,
+        subscriber: String,
+        bookmarked: Option<bool>,
     },
     UpdateWorkPackageWithLinks {
         id: i64,
@@ -1792,12 +1794,16 @@ Reducer::RecordBaseBranch{
                 owner,
                 host,
                 patch,
+                subscriber,
+                bookmarked,
 }             => __sats::bsatn::to_vec(&update_task_reducer::UpdateTaskArgs {
                 id: id.clone(),
                 epic_id: epic_id.clone(),
                 owner: owner.clone(),
                 host: host.clone(),
                 patch: patch.clone(),
+                subscriber: subscriber.clone(),
+                bookmarked: bookmarked.clone(),
 }),
             Reducer::UpdateWorkPackageWithLinks{
                 id,

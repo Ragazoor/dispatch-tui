@@ -511,7 +511,6 @@ impl module::IngestStore for TablesIngest<'_> {
             if prior.epic_id != row.epic_id {
                 self.caller.clear_unseen_for_task(self.tables, row.id);
             }
-            self.caller.end_marks_on_finish(self.tables, &prior, &row);
         }
         self.tables.tasks.insert(row.id, row.clone());
         self.caller.rows.upsert_task(&row.into());

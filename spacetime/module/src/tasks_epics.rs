@@ -672,6 +672,12 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
 /// `host` is the caller's own host: a move into Done that leaves a pr-typed
 /// url writes a close row for it (`UpdateTaskDoneWritesACloseRow`), when the
 /// task's host, else this one, is the caller's.
+///
+/// `bookmarked` is `subscriber`'s own bookmark on the task, written last in the
+/// same transaction (`mcp-task-tools.allium: UpdateTaskViaMcp`): a refusal of
+/// it, such as a Done task or a call that moved the task into Done, undoes the
+/// fields with it. `None` leaves the bookmark alone.
+#[allow(clippy::too_many_arguments)]
 #[spacetimedb::reducer]
 pub fn update_task(
     ctx: &ReducerContext,
@@ -680,6 +686,8 @@ pub fn update_task(
     owner: String,
     host: String,
     patch: TaskPatch,
+    subscriber: String,
+    bookmarked: Option<bool>,
 ) -> Result<(), String> {
     if visible_task(ctx, id).is_none() {
         return Err(format!("task {id} not found"));
@@ -698,13 +706,17 @@ pub fn update_task(
     match epic_id {
         Some(epic_id) if relink_first => {
             move_task_row(ctx, id, epic_id, owner)?;
-            patch_task_row(ctx, id, patch, true, Some(&host))
+            patch_task_row(ctx, id, patch, true, Some(&host))?;
         }
         Some(epic_id) => {
             patch_task_row(ctx, id, patch, true, Some(&host))?;
-            move_task_row(ctx, id, epic_id, owner)
+            move_task_row(ctx, id, epic_id, owner)?;
         }
-        None => patch_task_row(ctx, id, patch, true, Some(&host)),
+        None => patch_task_row(ctx, id, patch, true, Some(&host))?,
+    }
+    match bookmarked {
+        Some(bookmarked) => write_bookmark(ctx, subscriber, id, bookmarked),
+        None => Ok(()),
     }
 }
 

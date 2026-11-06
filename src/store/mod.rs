@@ -155,11 +155,16 @@ pub trait TaskCrud: TaskRead {
     /// leave the epic alone, `Some(None)` to detach onto the caller's board,
     /// `Some(Some(id))` to move. A missing task is an error here, unlike
     /// [`patch_task`](Self::patch_task)'s no-op.
+    ///
+    /// `bookmarked` is this board's person's own bookmark on the task, written
+    /// in the same transaction (`UpdateTaskViaMcp`): a refusal of it, such as a
+    /// Done task, leaves the fields unwritten too. `None` leaves it alone.
     async fn update_task(
         &self,
         id: TaskId,
         epic: Option<Option<EpicId>>,
         patch: &TaskPatch<'_>,
+        bookmarked: Option<bool>,
     ) -> Result<()>;
     /// Atomically set `pr_learnings_gate_shown_at` to now if it is currently null.
     /// Returns `true` if this call set it (first `gh pr create` for the task →

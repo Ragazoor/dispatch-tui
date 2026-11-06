@@ -56,6 +56,10 @@ pub struct UpdateTaskParams {
     /// schedule. The store validates the cron and arms `next_due`
     /// (`schedules.allium: SetSchedule`, `ClearSchedule`).
     pub schedule: Option<FieldUpdate>,
+    /// `None` = leave untouched; `Some(v)` = set or remove the caller's own
+    /// bookmark (`tasks.allium: SetBookmark`). Not a Task column: it travels
+    /// with the other fields in one store transaction (`UpdateTaskViaMcp`).
+    pub bookmarked: Option<bool>,
 }
 
 impl UpdateTaskParams {
@@ -94,6 +98,7 @@ impl UpdateTaskParams {
             auto_run_plan,
             phoenix,
             schedule,
+            bookmarked,
         } = self;
 
         [
@@ -118,6 +123,7 @@ impl UpdateTaskParams {
             ("auto_run_plan", auto_run_plan.is_some()),
             ("phoenix", phoenix.is_some()),
             ("schedule", schedule.is_some()),
+            ("bookmarked", bookmarked.is_some()),
         ]
         .into_iter()
         .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -149,7 +155,19 @@ impl UpdateTaskParams {
             auto_run_plan: None,
             phoenix: None,
             schedule: None,
+            bookmarked: None,
         }
+    }
+
+    pub fn bookmarked(mut self, bookmarked: bool) -> Self {
+        self.bookmarked = Some(bookmarked);
+        self
+    }
+
+    /// True when `bookmarked` is the only thing set: such a call writes no
+    /// task field, so it leaves `updated_at` alone (`UpdateTaskViaMcp`).
+    pub fn is_bookmark_only(&self) -> bool {
+        self.bookmarked.is_some() && self.updated_field_names() == ["bookmarked"]
     }
 
     pub fn status(mut self, status: TaskStatus) -> Self {
