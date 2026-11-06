@@ -179,7 +179,9 @@ pub async fn handle_pane_view(
 
 /// The repo filter and epic hide-list this host's board last saved
 /// (`agent-tree.allium: ListsFollowTheBoardFilter`). An absent or unreadable
-/// setting filters nothing, as it does at board startup.
+/// setting filters nothing, as it does at board startup. Served from the
+/// settings rows the board already holds, like the task list: no query leaves
+/// the board (`AnsweredFromTheBoardsRows`).
 async fn saved_board_filter(
     db: &dyn crate::store::SettingsStore,
 ) -> crate::models::SavedBoardFilter {
