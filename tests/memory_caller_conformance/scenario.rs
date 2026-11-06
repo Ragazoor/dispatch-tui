@@ -54,7 +54,7 @@ fn memory_caller_matches_the_real_reducers() {
         mem.migrate_store_to_workspaces();
         mem.migrate_store_to_workspaces(); // once
         join_default_workspace(&real, &mem, &accepted.identity).await;
-        for host in ["host-a", "host-b"] {
+        for host in ["host-a", "host-b", "host-c"] {
             for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
                 caller
                     .register_host(host.into(), String::new(), accepted.identity.clone())
@@ -239,34 +239,44 @@ fn memory_caller_matches_the_real_reducers() {
         compare_owner(task_id_real.0);
 
         // -- repo configuration ---------------------------------------------------
-        real.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"), "h".into(), "org/repo".into())
-            .await
-            .unwrap();
+        real.save_repo_path(
+            "/repo".into(),
+            ts("2026-01-01 00:00:00.000"),
+            "host-a".into(),
+            "org/repo".into(),
+        )
+        .await
+        .unwrap();
         wait_for!(!rows_real.repo_paths().is_empty());
-        mem.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"), "h".into(), "org/repo".into())
-            .await
-            .unwrap();
+        mem.save_repo_path(
+            "/repo".into(),
+            ts("2026-01-01 00:00:00.000"),
+            "host-a".into(),
+            "org/repo".into(),
+        )
+        .await
+        .unwrap();
         assert_eq!(rows_real.repo_paths(), rows_mem.repo_paths(), "repo_paths");
         assert_eq!(
-            rows_real.repo_paths_saved_by("h"),
-            rows_mem.repo_paths_saved_by("h"),
+            rows_real.repo_paths_saved_by("host-a"),
+            rows_mem.repo_paths_saved_by("host-a"),
             "repo_paths host stamp"
         );
         assert_eq!(
-            rows_real.repo_paths_saved_by("h"),
+            rows_real.repo_paths_saved_by("host-a"),
             vec!["/repo".to_string()]
         );
 
-        real.set_verify_command("/repo".into(), "cargo test".into())
+        real.set_verify_command("/repo".into(), "host-a".into(), "cargo test".into())
             .await
             .unwrap();
-        wait_for!(rows_real.verify_command("/repo").as_deref() == Some("cargo test"));
-        mem.set_verify_command("/repo".into(), "cargo test".into())
+        wait_for!(rows_real.verify_command("/repo", "host-a").as_deref() == Some("cargo test"));
+        mem.set_verify_command("/repo".into(), "host-a".into(), "cargo test".into())
             .await
             .unwrap();
         assert_eq!(
-            rows_real.verify_command("/repo"),
-            rows_mem.verify_command("/repo"),
+            rows_real.verify_command("/repo", "host-a"),
+            rows_mem.verify_command("/repo", "host-a"),
             "verify_command"
         );
 
@@ -291,66 +301,120 @@ fn memory_caller_matches_the_real_reducers() {
                 .save_repo_path(
                     "/repo".into(),
                     ts("2026-01-03 00:00:00.000"),
-                    "other-host".into(),
+                    "host-b".into(),
                     "org/repo".into(),
                 )
                 .await
                 .unwrap();
             caller
-                .save_repo_path(
-                    "/legacy".into(),
-                    ts("2026-01-03 00:00:00.000"),
-                    String::new(),
-                    String::new(),
-                )
-                .await
-                .unwrap();
-            caller
-                .adopt_repo_path("/legacy".into(), "adopter".into())
-                .await
-                .unwrap();
-            caller
-                .adopt_repo_path("/repo".into(), "adopter".into())
+                .adopt_repo_path("/repo".into(), "host-c".into())
                 .await
                 .unwrap();
             let refused = caller
-                .delete_repo_path("/repo".into(), "adopter".into())
+                .delete_repo_path("/repo".into(), "host-c".into())
                 .await
                 .unwrap();
             assert!(
-                matches!(refused, ReducerOutcome::Refused(ref m) if m.contains("other-host") || m.contains("host h")),
+                matches!(refused, ReducerOutcome::Refused(ref m) if m.contains("host-a") || m.contains("host-b")),
                 "another host's path is refused, naming it: {refused:?}"
             );
         }
-        wait_for!(rows_real.repo_paths_saved_by("other-host") == vec!["/repo".to_string()]);
+        wait_for!(rows_real.repo_paths_saved_by("host-b") == vec!["/repo".to_string()]);
         assert_eq!(
-            rows_real.repo_paths_saved_by("adopter"),
-            rows_mem.repo_paths_saved_by("adopter"),
+            rows_real.repo_paths_saved_by("host-c"),
+            rows_mem.repo_paths_saved_by("host-c"),
             "adopt and refused delete"
         );
         assert_eq!(
-            rows_real.repo_paths_saved_by("other-host"),
-            rows_mem.repo_paths_saved_by("other-host"),
+            rows_real.repo_paths_saved_by("host-b"),
+            rows_mem.repo_paths_saved_by("host-b"),
             "a second host owns its own row of the path"
         );
         assert_eq!(rows_real.repo_paths(), rows_mem.repo_paths(), "repo_paths");
 
         for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
             caller
-                .delete_repo_path("/repo".into(), "h".into())
+                .delete_repo_path("/repo".into(), "host-a".into())
                 .await
                 .unwrap();
             caller
-                .delete_repo_path("/repo".into(), "other-host".into())
-                .await
-                .unwrap();
-            caller
-                .delete_repo_path("/legacy".into(), "adopter".into())
+                .delete_repo_path("/repo".into(), "host-b".into())
                 .await
                 .unwrap();
         }
         wait_for!(rows_real.repo_paths().is_empty());
         assert!(rows_mem.repo_paths().is_empty());
+
+        // A3/A7: repo-path writes name a host and only its owner may make
+        // them; a verify command is set through the calling host's own row.
+        let mut foreign = Vec::new();
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            foreign.push(vec![
+                caller
+                    .save_repo_path(
+                        "/forged".into(),
+                        ts("2026-01-04 00:00:00.000"),
+                        "not-mine".into(),
+                        String::new(),
+                    )
+                    .await
+                    .unwrap(),
+                caller
+                    .adopt_repo_path("/forged".into(), "not-mine".into())
+                    .await
+                    .unwrap(),
+                caller
+                    .delete_repo_path("/forged".into(), "not-mine".into())
+                    .await
+                    .unwrap(),
+                caller
+                    .set_verify_command("/forged".into(), "not-mine".into(), "x".into())
+                    .await
+                    .unwrap(),
+            ]);
+            // Two machines, two repositories, one path.
+            for (host, github) in [("host-a", "org/one"), ("host-b", "org/two")] {
+                caller
+                    .save_repo_path(
+                        "/code/x".into(),
+                        ts("2026-01-04 00:00:00.000"),
+                        host.into(),
+                        github.into(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            caller
+                .set_verify_command("/code/x".into(), "host-b".into(), "make two".into())
+                .await
+                .unwrap();
+        }
+        for (real_out, mem_out) in foreign[0].iter().zip(&foreign[1]) {
+            assert!(
+                matches!(real_out, ReducerOutcome::Refused(_))
+                    && matches!(mem_out, ReducerOutcome::Refused(_)),
+                "a repo-path write for a host the sender does not own is refused: {real_out:?} / {mem_out:?}"
+            );
+        }
+        wait_for!(rows_real.verify_command("/code/x", "host-b").is_some());
+        for host in ["host-a", "host-b"] {
+            assert_eq!(
+                rows_real.verify_command("/code/x", host),
+                rows_mem.verify_command("/code/x", host),
+                "verify_command is read from {host}'s own row"
+            );
+        }
+        assert_eq!(rows_real.verify_command("/code/x", "host-a"), None);
+        assert_eq!(rows_real.repo_paths(), rows_mem.repo_paths(), "repo_paths");
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            for host in ["host-a", "host-b"] {
+                caller
+                    .delete_repo_path("/code/x".into(), host.into())
+                    .await
+                    .unwrap();
+            }
+        }
+        wait_for!(rows_real.repo_paths().is_empty());
 
         // -- subscriptions ----------------------------------------------------------
         // The connection's OWN identity, not an arbitrary hex string: this

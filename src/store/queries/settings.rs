@@ -105,7 +105,7 @@ impl super::super::RepoConfigRead for Store {
     }
 
     async fn get_verify_command(&self, path: &str) -> Option<String> {
-        self.rows.verify_command(path)
+        self.rows.verify_command(path, &self.host)
     }
 
     async fn list_all_base_branches(&self) -> Vec<(String, String)> {
@@ -163,7 +163,11 @@ impl super::super::RepoConfigStore for Store {
         // `""` clears it. The module's absent sentinel, not a command that
         // happens to be empty — see its header.
         self.caller
-            .set_verify_command(path.to_string(), normalised_verify_command(command))
+            .set_verify_command(
+                path.to_string(),
+                self.host.clone(),
+                normalised_verify_command(command),
+            )
             .await?
             .applied()
     }

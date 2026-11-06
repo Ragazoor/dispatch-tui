@@ -58,6 +58,13 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 43: repo-path authority — `save_repo_path`, `adopt_repo_path`,
+///    `delete_repo_path` and `set_verify_command` (`config.rs`) are refused
+///    unless the caller owns the named host; `set_verify_command` takes the
+///    host and acts through that host's row of the path, not the first row
+///    by path (`core.allium: SavedRepoPath`). The first connection after it
+///    also unifies the verify command of linked rows, once
+///    (`REPO_PATH_VERIFY_RULES_VERSION`, `config.rs: unify_repo_verify_commands`).
 /// 42: three data rules move into the module. A patch that moves `status` and
 ///    names no `sub_status` resets it to the new status's default
 ///    (`apply_task_patch`); a create or patch that would give a parent a second
@@ -225,13 +232,19 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 42;
+pub const RULES_VERSION: i64 = 43;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first
 /// connection (`config.rs: release_claims_of_non_setter_hosts`). Like
 /// [`WORKSPACES_RULES_VERSION`] it never moves: a RULES_VERSION bump leaves it.
 pub const FEED_SETTER_CLAIMS_RULES_VERSION: i64 = 37;
+
+/// The rules version that made one verify command per repository hold for rows
+/// saved before it: a store stamped with anything older has its linked rows
+/// unified once, on its first connection (`config.rs:
+/// unify_repo_verify_commands`). Never moves, like the two below.
+pub const REPO_PATH_VERIFY_RULES_VERSION: i64 = 43;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:

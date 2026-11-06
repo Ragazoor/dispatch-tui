@@ -59,6 +59,23 @@ pub fn rows_of_the_repository_at<'a>(rows: &'a [RepoPath], path: &str) -> Vec<&'
         .collect()
 }
 
+/// Every row of the repository `named` belongs to: its siblings and the whole
+/// GitHub group of each, so a row with no GitHub path still reaches the rest of
+/// its group (`core.allium: VerifyCommandIsPerRepository`).
+pub fn rows_of_the_repository_of<'a>(rows: &'a [RepoPath], named: &RepoPath) -> Vec<&'a RepoPath> {
+    let sibling = |r: &RepoPath| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path);
+    let groups: Vec<&str> = rows
+        .iter()
+        .filter(|r| sibling(r))
+        .map(|r| r.github_path.as_str())
+        .chain(std::iter::once(named.github_path.as_str()))
+        .filter(|g| !g.is_empty())
+        .collect();
+    rows.iter()
+        .filter(|r| sibling(r) || (!r.github_path.is_empty() && groups.contains(&r.github_path.as_str())))
+        .collect()
+}
+
 /// The rows of `row`'s repository that hold no verify command and must take
 /// `row`'s, so every row of one repository agrees.
 ///
@@ -120,6 +137,7 @@ pub fn save_repo_path(
     if path.trim().is_empty() {
         return Err("repo path is empty".into());
     }
+    require_acting_for(ctx, &host)?;
     // One read of the table serves the lookup, the join and the share.
     let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
     let own = rows
@@ -177,6 +195,7 @@ pub fn adopt_repo_path(ctx: &ReducerContext, path: String, host: String) -> Resu
     if host.is_empty() {
         return Err("host is empty".into());
     }
+    require_acting_for(ctx, &host)?;
     // `host` may already own a row of this path; a second would break the
     // one-row-per-(path, host) rule, so that case drops the unowned row.
     let owns = ctx
@@ -210,6 +229,7 @@ pub fn adopt_repo_path(ctx: &ReducerContext, path: String, host: String) -> Resu
 /// view). The row's verify command goes with it; sibling rows keep theirs.
 #[spacetimedb::reducer]
 pub fn delete_repo_path(ctx: &ReducerContext, path: String, host: String) -> Result<(), String> {
+    require_acting_for(ctx, &host)?;
     let rows: Vec<RepoPath> = ctx
         .db
         .repo_paths()
@@ -232,26 +252,75 @@ pub fn delete_repo_path(ctx: &ReducerContext, path: String, host: String) -> Res
     Ok(())
 }
 
-/// Set or clear a repo's verify command.
+/// Give every row of one repository the same verify command: that of the most
+/// recently used row that has one. Rows saved before `github_path` existed or
+/// before linked rows shared a command can differ; no later save repairs them,
+/// because a save only fills an empty command. Run once by
+/// `stamp_rules_version_on_connect` (`REPO_PATH_VERIFY_RULES_VERSION`). A row
+/// with no `github_path` is its own repository by path, as `is_sibling` says.
+pub fn unify_repo_verify_commands(ctx: &ReducerContext) {
+    let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
+    let key = |r: &RepoPath| {
+        if r.github_path.is_empty() {
+            format!("path:{}", r.path)
+        } else {
+            format!("github:{}", r.github_path)
+        }
+    };
+    let mut groups: std::collections::BTreeMap<String, Vec<&RepoPath>> = Default::default();
+    for row in &rows {
+        groups.entry(key(row)).or_default().push(row);
+    }
+    for group in groups.values() {
+        let Some(winner) = group
+            .iter()
+            .filter(|r| !r.verify_command.is_empty())
+            .max_by(|a, b| (&a.last_used, a.id).cmp(&(&b.last_used, b.id)))
+        else {
+            continue;
+        };
+        for row in group
+            .iter()
+            .filter(|r| r.verify_command != winner.verify_command)
+        {
+            ctx.db.repo_paths().id().update(RepoPath {
+                verify_command: winner.verify_command.clone(),
+                ..(*row).clone()
+            });
+        }
+    }
+}
+
+/// Set or clear a repo's verify command, acting through `host`'s row.
 ///
 /// `""` clears it. Newlines are refused here rather than at the caller, because
 /// this is the one place every caller passes through — the command is run as a
-/// single shell line, and a second line would run unannounced.
+/// single shell line, and a second line would run unannounced. The caller must
+/// own `host`. The row is `host`'s own row of `path`, else an unowned one; a
+/// row only another host has is not reachable, so two machines holding
+/// different repositories at one path cannot set each other's command. The
+/// command then goes to every row of that row's repository.
 #[spacetimedb::reducer]
 pub fn set_verify_command(
     ctx: &ReducerContext,
     path: String,
+    host: String,
     command: String,
 ) -> Result<(), String> {
     if command.contains('\n') || command.contains('\r') {
         return Err("verify command must be a single line; chain steps with && or ;".into());
     }
+    require_acting_for(ctx, &host)?;
     let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
+    let Some(named) = rows
+        .iter()
+        .find(|r| r.path == path && r.host == host)
+        .or_else(|| rows.iter().find(|r| r.path == path && r.host.is_empty()))
+    else {
+        return Err(format!("no repo path {path} for host {host}"));
+    };
     // The command belongs to the repository: every row that is the same one.
-    let repository = rows_of_the_repository_at(&rows, &path);
-    if repository.is_empty() {
-        return Err(format!("no repo path {path}"));
-    }
+    let repository = rows_of_the_repository_of(&rows, named);
     for row in repository {
         ctx.db.repo_paths().id().update(RepoPath {
             verify_command: command.clone(),
@@ -665,7 +734,10 @@ pub(crate) fn on_task_sight_lost(ctx: &ReducerContext, task_id: i64) {
     drop_marks_of_those_who_cannot_see(ctx, &std::collections::HashSet::from([task_id]));
 }
 
-fn drop_marks_of_those_who_cannot_see(ctx: &ReducerContext, tasks: &std::collections::HashSet<i64>) {
+fn drop_marks_of_those_who_cannot_see(
+    ctx: &ReducerContext,
+    tasks: &std::collections::HashSet<i64>,
+) {
     if tasks.is_empty() {
         return;
     }

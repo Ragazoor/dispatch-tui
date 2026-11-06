@@ -767,7 +767,9 @@ fn shared_store_with_caller() -> (
     let rows = std::sync::Arc::new(SharedRows::new());
     let clock: std::sync::Arc<dyn Clock> = std::sync::Arc::new(SystemClock);
     let memory = std::sync::Arc::new(
-        MemoryReducerCaller::new(rows.clone(), clock.clone()).with_sender("test-user"),
+        MemoryReducerCaller::new(rows.clone(), clock.clone())
+            .with_sender("test-user")
+            .with_registered_host(dispatch_tui::store::MEMORY_HOST_ID, "test-user"),
     );
     let caller: std::sync::Arc<dyn ReducerCaller> = memory.clone();
     let identity = std::sync::Arc::new(SettledIdentity::default());
@@ -783,30 +785,16 @@ fn shared_store_with_caller() -> (
     (dir, db, memory)
 }
 
-/// Save `path` as `host` did, with a verify command, straight through the
-/// reducer so the row's host is the test's choice.
+/// Save `path` as `host` did (`""` for a row saved before hosts were
+/// recorded), with a verify command, seeded straight into the store so the
+/// row's host is the test's choice.
 async fn seed_repo_path_saved_by(
-    db: &Store,
+    _db: &Store,
     memory: &dispatch_tui::sync::MemoryReducerCaller,
     host: &str,
     path: &str,
 ) {
-    use dispatch_tui::sync::ReducerCaller;
-    memory
-        .save_repo_path(path.into(), chrono::Utc::now(), host.into(), String::new())
-        .await
-        .unwrap();
-    memory
-        .set_verify_command(path.into(), "cargo test".into())
-        .await
-        .unwrap();
-    assert_eq!(
-        dispatch_tui::store::RepoConfigRead::get_verify_command(db, path)
-            .await
-            .as_deref(),
-        Some("cargo test"),
-        "seeding {path}"
-    );
+    memory.seed_repo_path(path, host, "", "cargo test");
 }
 
 // surface-provides.PruneRepoPathsViaCli — another host's path is not judged by
@@ -829,12 +817,11 @@ async fn prune_repo_paths_keeps_a_missing_path_another_host_saved() {
         stdout.contains("0 path(s) removed, 1 kept."),
         "kept counts the whole store, got: {stdout}"
     );
-    assert_eq!(
-        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, foreign)
+    assert!(
+        dispatch_tui::store::RepoConfigRead::list_repo_paths(&db)
             .await
-            .as_deref(),
-        Some("cargo test"),
-        "the other host's verify command must survive"
+            .contains(&foreign.to_string()),
+        "the other host's row, with its verify command, must survive"
     );
 }
 
@@ -931,9 +918,10 @@ async fn prune_repo_paths_removes_this_hosts_missing_path_and_its_verify_command
         "this host's pruned row takes its verify command with it"
     );
     assert!(
-        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, theirs)
+        dispatch_tui::store::RepoConfigRead::list_repo_paths(&db)
             .await
-            .is_some()
+            .contains(&theirs.to_string()),
+        "the other host's row stays"
     );
 }
 
@@ -1014,7 +1002,9 @@ async fn dispatch_repo_set_verify_refused_command_writes_nothing() {
     );
 }
 
-// C3: set-verify on another host's row must not take the row over.
+// C3: set-verify on a path only another host saved must not take that row
+// over: this host gets a row of its own and sets the command through it, and
+// the other host keeps its row.
 #[tokio::test]
 async fn dispatch_repo_set_verify_keeps_the_host_of_an_existing_row() {
     let (_dir, db, memory) = shared_store_with_caller();
@@ -1025,17 +1015,26 @@ async fn dispatch_repo_set_verify_keeps_the_host_of_an_existing_row() {
         .await
         .unwrap();
 
+    assert!(
+        dispatch_tui::store::RepoConfigRead::list_repo_paths_saved_by_this_host(&db)
+            .await
+            .contains(&theirs.to_string()),
+        "this host must get its own row, or its feeds and verify reads cannot see the path"
+    );
     assert_eq!(
         dispatch_tui::store::RepoConfigRead::get_verify_command(&db, theirs)
             .await
             .as_deref(),
         Some("make check")
     );
-    assert!(
-        !dispatch_tui::store::RepoConfigRead::list_repo_paths_saved_by_this_host(&db)
+    assert_eq!(
+        dispatch_tui::store::RepoConfigRead::list_repo_paths(&db)
             .await
-            .contains(&theirs.to_string()),
-        "the row must stay host-a's"
+            .iter()
+            .filter(|p| p.as_str() == theirs)
+            .count(),
+        1,
+        "the picker lists the path once though two hosts hold it"
     );
 }
 

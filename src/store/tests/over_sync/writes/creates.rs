@@ -302,7 +302,8 @@ async fn leaving_an_epic_carries_the_owner_and_joining_one_does_not() {
 }
 
 /// Clearing a verify command sends the store's absent sentinel, not a command
-/// that happens to be empty.
+/// that happens to be empty. Both name this host, whose row the module acts
+/// through.
 #[tokio::test]
 async fn clearing_a_verify_command_sends_the_absent_sentinel() {
     let (writer, caller) = writer_with(RecordingCaller::default());
@@ -316,8 +317,8 @@ async fn clearing_a_verify_command_sends_the_absent_sentinel() {
     assert_eq!(
         caller.sent(),
         vec![
-            Sent::SetVerifyCommand("/repo".into(), String::new()),
-            Sent::SetVerifyCommand("/repo".into(), "cargo test".into()),
+            Sent::SetVerifyCommand("/repo".into(), "host-me".into(), String::new()),
+            Sent::SetVerifyCommand("/repo".into(), "host-me".into(), "cargo test".into()),
         ]
     );
 }

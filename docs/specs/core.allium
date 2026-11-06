@@ -1001,6 +1001,11 @@ entity SavedRepoPath {
     last_used: Timestamp     -- updated on each use; drives recency ordering
     verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
                              -- Belongs to the REPOSITORY, not to the row (VerifyCommandIsPerRepository).
+                             -- Rows linked before that held can differ: the first connection after the module that
+                             -- added the rule (rules version 43) gives every row of a repository the command of its
+                             -- most recently used row that has one, once. Stamping github_path on old rows and giving a
+                             -- second host its own row need the board's git and local paths, so they are not migrated:
+                             -- a save stamps and creates them on use, and `repo set-verify` saves a missing own row.
     github_path: String?     -- the repository's GitHub path ("org/repo"), read by the saving host from its clone's
                              -- origin remote; null when unknown (no origin, not GitHub). Rows with the same
                              -- non-null github_path are one repository on several machines, so they share
@@ -1015,6 +1020,13 @@ entity SavedRepoPath {
                              -- A delete names the calling host and removes that host's row or a null-host row;
                              -- a path only ANOTHER host has is refused with the owning host named (the TUI shows
                              -- it), and a path nobody has is not an error (a stale view).
+                             -- Authority: save, adopt, delete and set-verify-command each name a host and are
+                             -- refused unless the caller owns that host (the same check as a setting write), so
+                             -- no one can forge, delete or re-command another person's row. Setting a verify
+                             -- command acts through the CALLING host's row of the path (its own, else an
+                             -- unowned one), never another host's row of the same path; it then reaches that
+                             -- row's repository (same github_path). Whoever owns a row of a repository may
+                             -- set the command every row of it shares.
 
     invariant VerifyCommandSingleLine {
         verify_command = null or not (verify_command.contains("\n") or verify_command.contains("\r"))  -- short-circuits: rhs only evaluated when verify_command != null

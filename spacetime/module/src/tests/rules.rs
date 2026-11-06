@@ -354,4 +354,5 @@ fn root_uniqueness_is_per_workspace() {
 fn migration_gate_versions_never_move() {
     assert_eq!(FEED_SETTER_CLAIMS_RULES_VERSION, 37);
     assert_eq!(WORKSPACES_RULES_VERSION, 17);
+    assert_eq!(REPO_PATH_VERIFY_RULES_VERSION, 43);
 }

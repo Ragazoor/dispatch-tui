@@ -808,6 +808,7 @@ pub enum Reducer {
     },
     SetVerifyCommand {
         path: String,
+        host: String,
         command: String,
     },
     SetWorkPackageVisibility {
@@ -1693,9 +1694,11 @@ Reducer::RecordBaseBranch{
 }),
             Reducer::SetVerifyCommand{
                 path,
+                host,
                 command,
 }             => __sats::bsatn::to_vec(&set_verify_command_reducer::SetVerifyCommandArgs {
                 path: path.clone(),
+                host: host.clone(),
                 command: command.clone(),
 }),
             Reducer::SetWorkPackageVisibility{

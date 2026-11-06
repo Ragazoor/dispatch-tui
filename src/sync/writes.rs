@@ -254,7 +254,12 @@ pub trait ReducerCaller: Send + Sync {
     /// Remove `host`'s row for `path`, or an unowned one; refused when only
     /// another host has the path.
     async fn delete_repo_path(&self, path: String, host: String) -> Result<ReducerOutcome>;
-    async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome>;
+    async fn set_verify_command(
+        &self,
+        path: String,
+        host: String,
+        command: String,
+    ) -> Result<ReducerOutcome>;
     async fn record_base_branch(
         &self,
         repo_path: String,

@@ -2,69 +2,46 @@ use super::*;
 
 // -- Repo configuration -----------------------------------------------------
 
+/// A caller owned by "alice", with three hosts she owns, plus one that is
+/// Bob's. Repo-path writes name a host and act only for its owner.
+fn repo_path_caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
+    let (caller, rows) = caller();
+    let caller = caller
+        .with_sender("alice")
+        .with_registered_host("a", "alice")
+        .with_registered_host("b", "alice")
+        .with_registered_host("bobs", "bob");
+    (caller, rows)
+}
+
+async fn save_path(caller: &MemoryReducerCaller, path: &str, host: &str, github: &str) {
+    caller
+        .save_repo_path(path.into(), at(TEST_STAMP), host.into(), github.into())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+}
+
 #[tokio::test]
 async fn save_repo_path_upserts_by_path_and_host_not_by_call_count() {
-    let (caller, rows) = caller();
-    caller
-        .save_repo_path(
-            "/repo".into(),
-            at("2026-01-01 00:00:00.000"),
-            "h".into(),
-            String::new(),
-        )
-        .await
-        .unwrap();
-    caller
-        .save_repo_path(
-            "/repo".into(),
-            at("2026-01-02 00:00:00.000"),
-            "h".into(),
-            String::new(),
-        )
-        .await
-        .unwrap();
-    let paths = rows.repo_paths();
-    assert_eq!(paths, vec!["/repo".to_string()]);
+    let (caller, rows) = repo_path_caller();
+    save_path(&caller, "/repo", "a", "").await;
+    save_path(&caller, "/repo", "a", "").await;
+    assert_eq!(rows.repo_paths(), vec!["/repo".to_string()]);
 }
 
 #[tokio::test]
 async fn save_repo_path_stamps_the_saving_host_and_adopts_a_row_with_none() {
-    let (caller, rows) = caller();
-    caller
-        .save_repo_path(
-            "/legacy".into(),
-            at("2026-01-01 00:00:00.000"),
-            String::new(),
-            String::new(),
-        )
-        .await
-        .unwrap();
-    assert!(rows.repo_paths_saved_by("laptop").is_empty());
+    let (caller, rows) = repo_path_caller();
+    caller.seed_repo_path("/legacy", "", "", "");
+    assert!(rows.repo_paths_saved_by("a").is_empty());
 
-    caller
-        .save_repo_path(
-            "/legacy".into(),
-            at("2026-01-02 00:00:00.000"),
-            "laptop".into(),
-            String::new(),
-        )
-        .await
-        .unwrap();
-    caller
-        .save_repo_path(
-            "/fresh".into(),
-            at("2026-01-02 00:00:00.000"),
-            "desk".into(),
-            String::new(),
-        )
-        .await
-        .unwrap();
+    save_path(&caller, "/legacy", "a", "").await;
+    save_path(&caller, "/fresh", "b", "").await;
 
-    assert_eq!(
-        rows.repo_paths_saved_by("laptop"),
-        vec!["/legacy".to_string()]
-    );
-    assert_eq!(rows.repo_paths_saved_by("desk"), vec!["/fresh".to_string()]);
+    assert_eq!(rows.repo_paths_saved_by("a"), vec!["/legacy".to_string()]);
+    assert_eq!(rows.repo_paths_saved_by("b"), vec!["/fresh".to_string()]);
     assert!(
         rows.repo_paths_saved_by("").is_empty(),
         "a row with no host is nobody's"
@@ -73,23 +50,63 @@ async fn save_repo_path_stamps_the_saving_host_and_adopts_a_row_with_none() {
 
 #[tokio::test]
 async fn save_repo_path_refuses_an_empty_path() {
-    let (caller, _rows) = caller();
+    let (caller, _rows) = repo_path_caller();
     let outcome = caller
-        .save_repo_path("   ".into(), at(TEST_STAMP), "h".into(), String::new())
+        .save_repo_path("   ".into(), at(TEST_STAMP), "a".into(), String::new())
         .await
         .unwrap();
     assert!(matches!(outcome, ReducerOutcome::Refused(_)));
 }
 
 #[tokio::test]
+async fn repo_path_writes_refuse_a_host_the_sender_does_not_own() {
+    let (caller, rows) = repo_path_caller();
+    save_path(&caller, "/repo", "a", "org/repo").await;
+    caller.seed_repo_path("/bobs", "bobs", "org/bobs", "make");
+    caller.seed_repo_path("/legacy", "", "", "");
+    let before = rows.repo_paths_saved_by("bobs");
+    for host in ["bobs", "nowhere", ""] {
+        let outcomes = [
+            caller
+                .save_repo_path("/forged".into(), at(TEST_STAMP), host.into(), String::new())
+                .await
+                .unwrap(),
+            caller
+                .adopt_repo_path("/legacy".into(), host.into())
+                .await
+                .unwrap(),
+            caller
+                .delete_repo_path("/bobs".into(), host.into())
+                .await
+                .unwrap(),
+            caller
+                .set_verify_command("/bobs".into(), host.into(), "evil".into())
+                .await
+                .unwrap(),
+        ];
+        for outcome in outcomes {
+            assert!(
+                matches!(outcome, ReducerOutcome::Refused(_)),
+                "host {host:?} must be refused, got {outcome:?}"
+            );
+        }
+    }
+    assert_eq!(rows.repo_paths_saved_by("bobs"), before, "bob's row stays");
+    assert_eq!(
+        rows.verify_command("/bobs", "bobs").as_deref(),
+        Some("make")
+    );
+    assert!(rows.repo_paths_saved_by("a").contains(&"/repo".to_string()));
+    assert!(!rows.repo_paths().contains(&"/forged".to_string()));
+    assert!(rows.repo_paths_unowned().contains(&"/legacy".to_string()));
+}
+
+#[tokio::test]
 async fn set_verify_command_refuses_a_multi_line_command() {
-    let (caller, _rows) = caller();
-    caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into(), String::new())
-        .await
-        .unwrap();
+    let (caller, _rows) = repo_path_caller();
+    save_path(&caller, "/repo", "a", "").await;
     let outcome = caller
-        .set_verify_command("/repo".into(), "a\nb".into())
+        .set_verify_command("/repo".into(), "a".into(), "a\nb".into())
         .await
         .unwrap();
     assert!(matches!(outcome, ReducerOutcome::Refused(_)));
@@ -97,40 +114,56 @@ async fn set_verify_command_refuses_a_multi_line_command() {
 
 #[tokio::test]
 async fn set_verify_command_refuses_an_unknown_path() {
-    let (caller, _rows) = caller();
+    let (caller, _rows) = repo_path_caller();
     let outcome = caller
-        .set_verify_command("/nowhere".into(), "cargo test".into())
+        .set_verify_command("/nowhere".into(), "a".into(), "cargo test".into())
         .await
         .unwrap();
     assert!(matches!(outcome, ReducerOutcome::Refused(_)));
 }
 
 #[tokio::test]
-async fn record_base_branch_upserts_by_repo_and_branch() {
-    let (caller, rows) = caller();
+async fn set_verify_command_acts_through_the_calling_hosts_row_not_the_first_by_path() {
+    let (caller, rows) = repo_path_caller();
+    // Two machines hold DIFFERENT repositories at one path; b's row comes
+    // second, so a first-by-path lookup would pick a's.
+    save_path(&caller, "/code/x", "a", "org/one").await;
+    save_path(&caller, "/code/x", "b", "org/two").await;
     caller
-        .record_base_branch("/repo".into(), "main".into(), at("2026-01-01 00:00:00.000"))
+        .set_verify_command("/code/x".into(), "b".into(), "make two".into())
         .await
-        .unwrap();
-    caller
-        .record_base_branch("/repo".into(), "main".into(), at("2026-01-02 00:00:00.000"))
-        .await
+        .unwrap()
+        .applied()
         .unwrap();
     assert_eq!(
-        rows.base_branches(),
-        vec![("/repo".to_string(), "main".to_string())]
+        rows.verify_command("/code/x", "b").as_deref(),
+        Some("make two")
+    );
+    assert_eq!(
+        rows.verify_command("/code/x", "a"),
+        None,
+        "another repository at the same path keeps its own command"
     );
 }
 
 #[tokio::test]
-async fn delete_repo_path_removes_every_row_for_that_path() {
-    let (caller, rows) = caller();
-    caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into(), String::new())
+async fn set_verify_command_refuses_a_path_only_another_host_has() {
+    let (caller, rows) = repo_path_caller();
+    save_path(&caller, "/repo", "a", "").await;
+    let outcome = caller
+        .set_verify_command("/repo".into(), "b".into(), "x".into())
         .await
         .unwrap();
+    assert!(matches!(outcome, ReducerOutcome::Refused(_)), "{outcome:?}");
+    assert_eq!(rows.verify_command("/repo", "a"), None);
+}
+
+#[tokio::test]
+async fn delete_repo_path_removes_every_row_for_that_path() {
+    let (caller, rows) = repo_path_caller();
+    save_path(&caller, "/repo", "a", "").await;
     caller
-        .delete_repo_path("/repo".into(), "h".into())
+        .delete_repo_path("/repo".into(), "a".into())
         .await
         .unwrap();
     assert!(rows.repo_paths().is_empty());
@@ -138,20 +171,9 @@ async fn delete_repo_path_removes_every_row_for_that_path() {
 
 #[tokio::test]
 async fn delete_repo_path_refuses_a_path_only_another_host_has_and_removes_an_unowned_one() {
-    let (caller, rows) = caller();
-    caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP), "a".into(), String::new())
-        .await
-        .unwrap();
-    caller
-        .save_repo_path(
-            "/legacy".into(),
-            at(TEST_STAMP),
-            String::new(),
-            String::new(),
-        )
-        .await
-        .unwrap();
+    let (caller, rows) = repo_path_caller();
+    save_path(&caller, "/repo", "a", "").await;
+    caller.seed_repo_path("/legacy", "", "", "");
     let refused = caller
         .delete_repo_path("/repo".into(), "b".into())
         .await
@@ -169,17 +191,9 @@ async fn delete_repo_path_refuses_a_path_only_another_host_has_and_removes_an_un
 
 #[tokio::test]
 async fn two_hosts_each_own_a_row_of_one_path_and_the_picker_lists_it_once() {
-    let (caller, rows) = caller();
+    let (caller, rows) = repo_path_caller();
     for host in ["a", "b"] {
-        caller
-            .save_repo_path(
-                "/repo".into(),
-                at(TEST_STAMP),
-                host.into(),
-                "org/repo".into(),
-            )
-            .await
-            .unwrap();
+        save_path(&caller, "/repo", host, "org/repo").await;
     }
     assert_eq!(rows.repo_paths_saved_by("a"), vec!["/repo".to_string()]);
     assert_eq!(rows.repo_paths_saved_by("b"), vec!["/repo".to_string()]);
@@ -188,27 +202,11 @@ async fn two_hosts_each_own_a_row_of_one_path_and_the_picker_lists_it_once() {
 
 #[tokio::test]
 async fn the_verify_command_and_base_branches_follow_the_github_path() {
-    let (caller, rows) = caller();
+    let (caller, rows) = repo_path_caller();
+    save_path(&caller, "/home/a/api", "a", "org/api").await;
+    save_path(&caller, "/home/b/api", "b", "org/api").await;
     caller
-        .save_repo_path(
-            "/home/a/api".into(),
-            at(TEST_STAMP),
-            "a".into(),
-            "org/api".into(),
-        )
-        .await
-        .unwrap();
-    caller
-        .save_repo_path(
-            "/home/b/api".into(),
-            at(TEST_STAMP),
-            "b".into(),
-            "org/api".into(),
-        )
-        .await
-        .unwrap();
-    caller
-        .set_verify_command("/home/a/api".into(), "make ci".into())
+        .set_verify_command("/home/a/api".into(), "a".into(), "make ci".into())
         .await
         .unwrap();
     caller
@@ -216,7 +214,7 @@ async fn the_verify_command_and_base_branches_follow_the_github_path() {
         .await
         .unwrap();
     assert_eq!(
-        rows.verify_command("/home/b/api").as_deref(),
+        rows.verify_command("/home/b/api", "b").as_deref(),
         Some("make ci")
     );
     assert!(
@@ -229,20 +227,9 @@ async fn the_verify_command_and_base_branches_follow_the_github_path() {
 
 #[tokio::test]
 async fn adopt_repo_path_stamps_only_an_unowned_row() {
-    let (caller, rows) = caller();
-    caller
-        .save_repo_path(
-            "/legacy".into(),
-            at(TEST_STAMP),
-            String::new(),
-            String::new(),
-        )
-        .await
-        .unwrap();
-    caller
-        .save_repo_path("/owned".into(), at(TEST_STAMP), "a".into(), String::new())
-        .await
-        .unwrap();
+    let (caller, rows) = repo_path_caller();
+    caller.seed_repo_path("/legacy", "", "", "");
+    save_path(&caller, "/owned", "a", "").await;
     caller
         .adopt_repo_path("/legacy".into(), "b".into())
         .await
@@ -258,6 +245,23 @@ async fn adopt_repo_path_stamps_only_an_unowned_row() {
     assert_eq!(rows.repo_paths_saved_by("b"), vec!["/legacy".to_string()]);
     assert_eq!(rows.repo_paths_saved_by("a"), vec!["/owned".to_string()]);
     assert_eq!(rows.repo_paths().len(), 2);
+}
+
+#[tokio::test]
+async fn record_base_branch_upserts_by_repo_and_branch() {
+    let (caller, rows) = caller();
+    caller
+        .record_base_branch("/repo".into(), "main".into(), at("2026-01-01 00:00:00.000"))
+        .await
+        .unwrap();
+    caller
+        .record_base_branch("/repo".into(), "main".into(), at("2026-01-02 00:00:00.000"))
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.base_branches(),
+        vec![("/repo".to_string(), "main".to_string())]
+    );
 }
 
 // -- Subscriptions ------------------------------------------------------------
@@ -452,12 +456,22 @@ async fn clear_setting_on_a_never_set_key_is_a_no_op() {
     assert!(outcome.won());
 }
 
+/// A caller owning every host the verify-command tests below save from.
+fn many_hosts_caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
+    let (caller, rows) = caller();
+    let mut caller = caller.with_sender("alice");
+    for host in ["a", "b", "c", "h1", "h2", "h3", "h5", "h6"] {
+        caller = caller.with_registered_host(host, "alice");
+    }
+    (caller, rows)
+}
+
 /// `core.allium: VerifyCommandIsPerRepository`: a row that first learns its
 /// GitHub path joins that repository's verify command, rather than keeping
 /// its own and splitting the repository in two.
 #[tokio::test]
 async fn a_row_that_learns_its_github_path_takes_the_repositorys_verify_command() {
-    let (caller, rows) = caller();
+    let (caller, rows) = many_hosts_caller();
     caller
         .save_repo_path(
             "/home/a/api".into(),
@@ -468,7 +482,7 @@ async fn a_row_that_learns_its_github_path_takes_the_repositorys_verify_command(
         .await
         .unwrap();
     caller
-        .set_verify_command("/home/a/api".into(), "make ci".into())
+        .set_verify_command("/home/a/api".into(), "a".into(), "make ci".into())
         .await
         .unwrap();
     // b's clone is saved before its origin is known, with a command of its own.
@@ -482,7 +496,7 @@ async fn a_row_that_learns_its_github_path_takes_the_repositorys_verify_command(
         .await
         .unwrap();
     caller
-        .set_verify_command("/home/b/api".into(), "cargo test".into())
+        .set_verify_command("/home/b/api".into(), "b".into(), "cargo test".into())
         .await
         .unwrap();
     caller
@@ -495,11 +509,11 @@ async fn a_row_that_learns_its_github_path_takes_the_repositorys_verify_command(
         .await
         .unwrap();
     assert_eq!(
-        rows.verify_command("/home/b/api").as_deref(),
+        rows.verify_command("/home/b/api", "b").as_deref(),
         Some("make ci")
     );
     assert_eq!(
-        rows.verify_command("/home/a/api").as_deref(),
+        rows.verify_command("/home/a/api", "a").as_deref(),
         Some("make ci")
     );
 }
@@ -508,7 +522,7 @@ async fn a_row_that_learns_its_github_path_takes_the_repositorys_verify_command(
 /// rows have none gives it to them, so the rows still agree.
 #[tokio::test]
 async fn a_row_that_brings_a_command_to_a_repository_without_one_shares_it() {
-    let (caller, rows) = caller();
+    let (caller, rows) = many_hosts_caller();
     caller
         .save_repo_path(
             "/home/a/api".into(),
@@ -528,7 +542,7 @@ async fn a_row_that_brings_a_command_to_a_repository_without_one_shares_it() {
         .await
         .unwrap();
     caller
-        .set_verify_command("/home/b/api".into(), "cargo test".into())
+        .set_verify_command("/home/b/api".into(), "b".into(), "cargo test".into())
         .await
         .unwrap();
     caller
@@ -541,11 +555,11 @@ async fn a_row_that_brings_a_command_to_a_repository_without_one_shares_it() {
         .await
         .unwrap();
     assert_eq!(
-        rows.verify_command("/home/a/api").as_deref(),
+        rows.verify_command("/home/a/api", "a").as_deref(),
         Some("cargo test")
     );
     assert_eq!(
-        rows.verify_command("/home/b/api").as_deref(),
+        rows.verify_command("/home/b/api", "b").as_deref(),
         Some("cargo test")
     );
 }
@@ -554,7 +568,7 @@ async fn a_row_that_brings_a_command_to_a_repository_without_one_shares_it() {
 /// even when the first row of that path has no GitHub path of its own.
 #[tokio::test]
 async fn a_verify_command_set_through_a_path_reaches_the_whole_repository() {
-    let (caller, rows) = caller();
+    let (caller, rows) = many_hosts_caller();
     for (host, github) in [("c", ""), ("a", "org/api")] {
         caller
             .save_repo_path(
@@ -576,11 +590,11 @@ async fn a_verify_command_set_through_a_path_reaches_the_whole_repository() {
         .await
         .unwrap();
     caller
-        .set_verify_command("/home/a/api".into(), "make ci".into())
+        .set_verify_command("/home/a/api".into(), "a".into(), "make ci".into())
         .await
         .unwrap();
     assert_eq!(
-        rows.verify_command("/home/b/api").as_deref(),
+        rows.verify_command("/home/b/api", "b").as_deref(),
         Some("make ci")
     );
 }
@@ -589,7 +603,7 @@ async fn a_verify_command_set_through_a_path_reaches_the_whole_repository() {
 /// re-save: only learning a GitHub path joins a repository.
 #[tokio::test]
 async fn a_plain_resave_keeps_the_rows_own_command() {
-    let (caller, rows) = caller();
+    let (caller, rows) = many_hosts_caller();
     caller
         .save_repo_path(
             "/home/a/api".into(),
@@ -600,7 +614,7 @@ async fn a_plain_resave_keeps_the_rows_own_command() {
         .await
         .unwrap();
     caller
-        .set_verify_command("/home/a/api".into(), "make ci".into())
+        .set_verify_command("/home/a/api".into(), "a".into(), "make ci".into())
         .await
         .unwrap();
     caller
@@ -613,7 +627,7 @@ async fn a_plain_resave_keeps_the_rows_own_command() {
         .await
         .unwrap();
     assert_eq!(
-        rows.verify_command("/home/a/api").as_deref(),
+        rows.verify_command("/home/a/api", "a").as_deref(),
         Some("make ci")
     );
 }
@@ -622,14 +636,14 @@ async fn a_plain_resave_keeps_the_rows_own_command() {
 /// command of an unrelated-looking row that merely shares its local path.
 #[tokio::test]
 async fn a_new_row_prefers_its_github_siblings_command() {
-    let (caller, rows) = caller();
+    let (caller, rows) = many_hosts_caller();
     // A: path P on host 1, origin unknown, command x.
     caller
         .save_repo_path("/p".into(), at(TEST_STAMP), "h1".into(), String::new())
         .await
         .unwrap();
     caller
-        .set_verify_command("/p".into(), "x".into())
+        .set_verify_command("/p".into(), "h1".into(), "x".into())
         .await
         .unwrap();
     // B: path Q on host 3, repository G, command y.
@@ -638,7 +652,7 @@ async fn a_new_row_prefers_its_github_siblings_command() {
         .await
         .unwrap();
     caller
-        .set_verify_command("/q".into(), "y".into())
+        .set_verify_command("/q".into(), "h3".into(), "y".into())
         .await
         .unwrap();
     // C: path P on host 2, repository G.
@@ -655,20 +669,20 @@ async fn a_new_row_prefers_its_github_siblings_command() {
         .collect();
     assert_eq!(of_g, ["y", "y"], "both rows of org/g agree");
     drop(t);
-    assert_eq!(rows.verify_command("/q").as_deref(), Some("y"));
+    assert_eq!(rows.verify_command("/q", "h3").as_deref(), Some("y"));
 }
 
 /// A new row whose repository has no command yet gives its own nothing to
 /// lose, and a row of that repository that later gets one shares it.
 #[tokio::test]
 async fn a_new_row_with_a_path_command_shares_it_with_its_repository() {
-    let (caller, _rows) = caller();
+    let (caller, _rows) = many_hosts_caller();
     caller
         .save_repo_path("/p".into(), at(TEST_STAMP), "h1".into(), String::new())
         .await
         .unwrap();
     caller
-        .set_verify_command("/p".into(), "x".into())
+        .set_verify_command("/p".into(), "h1".into(), "x".into())
         .await
         .unwrap();
     caller
@@ -694,7 +708,7 @@ async fn a_new_row_with_a_path_command_shares_it_with_its_repository() {
 /// repository of every row at its path, not only the rows at that path.
 #[tokio::test]
 async fn a_command_shared_from_a_path_row_reaches_whole_repositories() {
-    let (caller, _rows) = caller();
+    let (caller, _rows) = many_hosts_caller();
     for (path, host, github) in [
         ("/x", "h1", "org/a"),
         ("/y", "h2", "org/a"),
@@ -706,7 +720,7 @@ async fn a_command_shared_from_a_path_row_reaches_whole_repositories() {
             .unwrap();
     }
     caller
-        .set_verify_command("/w".into(), "c".into())
+        .set_verify_command("/w".into(), "h6".into(), "c".into())
         .await
         .unwrap();
     for (host, github) in [("h5", "org/b"), ("h3", "")] {

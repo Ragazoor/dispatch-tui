@@ -121,9 +121,44 @@ fn repo_rows(store: &Store, path: &str) -> Vec<(String, String, String)> {
     rows
 }
 
+/// A store with two hosts, both Alice's: repo-path writes name a host and only
+/// its owner may make them.
+fn repo_store() -> Store {
+    let store = Store::new();
+    // The first connection stamps the current rules version (and runs every
+    // one-time fix over the then-empty store); later ones rewind from it.
+    store
+        .call("alice", |ctx| {
+            stamp_rules_version_on_connect(ctx);
+            Ok(())
+        })
+        .expect("first connect");
+    store.register_host_for("host-a", "alice");
+    store.register_host_for("host-b", "alice");
+    store
+}
+
+/// A row as an older board left it (no host, or a host that is not ours to
+/// act for), which no reducer can create now.
+fn seed(store: &Store, path: &str, host: &str, github: &str) {
+    store
+        .call("alice", |ctx| {
+            ctx.db.repo_paths().insert(RepoPath {
+                id: 0,
+                path: path.into(),
+                last_used: "t".into(),
+                verify_command: String::new(),
+                host: host.into(),
+                github_path: github.into(),
+            });
+            Ok(())
+        })
+        .expect("seed");
+}
+
 fn save(store: &Store, path: &str, host: &str, github: &str) {
     store
-        .call("u", |ctx| {
+        .call("alice", |ctx| {
             save_repo_path(ctx, path.into(), "t".into(), host.into(), github.into())
         })
         .expect("save");
@@ -133,7 +168,7 @@ fn save(store: &Store, path: &str, host: &str, github: &str) {
 /// host saving the same path gets its own row and the first keeps its own.
 #[test]
 fn two_hosts_saving_one_path_each_own_a_row() {
-    let store = Store::new();
+    let store = repo_store();
     save(&store, "/repo", "host-a", "org/api");
     save(&store, "/repo", "host-b", "org/api");
     let hosts: Vec<String> = repo_rows(&store, "/repo")
@@ -146,7 +181,7 @@ fn two_hosts_saving_one_path_each_own_a_row() {
 /// Saving again touches the host's own row; it does not add a second one.
 #[test]
 fn saving_twice_from_one_host_keeps_one_row() {
-    let store = Store::new();
+    let store = repo_store();
     save(&store, "/repo", "host-a", "org/api");
     save(&store, "/repo", "host-a", "org/api");
     assert_eq!(repo_rows(&store, "/repo").len(), 1);
@@ -155,8 +190,8 @@ fn saving_twice_from_one_host_keeps_one_row() {
 /// A save by a host adopts a row no one owns instead of adding a second one.
 #[test]
 fn saving_a_path_adopts_a_row_that_has_no_host() {
-    let store = Store::new();
-    save(&store, "/repo", "", "");
+    let store = repo_store();
+    seed(&store, "/repo", "", "");
     save(&store, "/repo", "host-b", "org/api");
     assert_eq!(
         repo_rows(&store, "/repo"),
@@ -169,13 +204,13 @@ fn saving_a_path_adopts_a_row_that_has_no_host() {
 /// shares the GitHub path, even at a different local path.
 #[test]
 fn the_verify_command_is_shared_across_rows_with_one_github_path() {
-    let store = Store::new();
+    let store = repo_store();
     save(&store, "/home/a/api", "host-a", "org/api");
     save(&store, "/home/b/code/api", "host-b", "org/api");
     save(&store, "/home/a/other", "host-a", "org/other");
     store
-        .call("u", |ctx| {
-            set_verify_command(ctx, "/home/a/api".into(), "make ci".into())
+        .call("alice", |ctx| {
+            set_verify_command(ctx, "/home/a/api".into(), "host-a".into(), "make ci".into())
         })
         .expect("set");
     assert_eq!(repo_rows(&store, "/home/b/code/api")[0].2, "make ci");
@@ -185,11 +220,11 @@ fn the_verify_command_is_shared_across_rows_with_one_github_path() {
 /// A host that saves the repo later starts with the command already set.
 #[test]
 fn a_new_row_starts_with_its_repositorys_verify_command() {
-    let store = Store::new();
+    let store = repo_store();
     save(&store, "/home/a/api", "host-a", "org/api");
     store
-        .call("u", |ctx| {
-            set_verify_command(ctx, "/home/a/api".into(), "make ci".into())
+        .call("alice", |ctx| {
+            set_verify_command(ctx, "/home/a/api".into(), "host-a".into(), "make ci".into())
         })
         .expect("set");
     save(&store, "/home/b/api", "host-b", "org/api");
@@ -199,13 +234,13 @@ fn a_new_row_starts_with_its_repositorys_verify_command() {
 /// Without a GitHub path the path itself is the repository.
 #[test]
 fn a_row_without_a_github_path_shares_only_with_its_own_path() {
-    let store = Store::new();
+    let store = repo_store();
     save(&store, "/repo", "host-a", "");
     save(&store, "/repo", "host-b", "");
     save(&store, "/elsewhere", "host-a", "");
     store
-        .call("u", |ctx| {
-            set_verify_command(ctx, "/repo".into(), "make".into())
+        .call("alice", |ctx| {
+            set_verify_command(ctx, "/repo".into(), "host-a".into(), "make".into())
         })
         .expect("set");
     assert!(repo_rows(&store, "/repo").iter().all(|r| r.2 == "make"));
@@ -215,12 +250,14 @@ fn a_row_without_a_github_path_shares_only_with_its_own_path() {
 /// `cli.allium: PruneRepoPathsViaCli` — adoption stamps only an unowned row.
 #[test]
 fn adopting_a_path_stamps_only_an_unowned_row() {
-    let store = Store::new();
-    save(&store, "/legacy", "", "");
+    let store = repo_store();
+    seed(&store, "/legacy", "", "");
     save(&store, "/owned", "host-a", "");
     for p in ["/legacy", "/owned", "/missing"] {
         store
-            .call("bob", |ctx| adopt_repo_path(ctx, p.into(), "host-b".into()))
+            .call("alice", |ctx| {
+                adopt_repo_path(ctx, p.into(), "host-b".into())
+            })
             .expect("adopt never fails");
     }
     assert_eq!(repo_rows(&store, "/legacy")[0].0, "host-b");
@@ -232,12 +269,12 @@ fn adopting_a_path_stamps_only_an_unowned_row() {
 /// another host has, naming that host.
 #[test]
 fn deleting_a_path_removes_own_or_unowned_rows_and_refuses_other_hosts() {
-    let store = Store::new();
+    let store = repo_store();
     save(&store, "/repo", "host-a", "");
-    save(&store, "/legacy", "", "");
+    seed(&store, "/legacy", "", "");
 
     let err = store
-        .call("bob", |ctx| {
+        .call("alice", |ctx| {
             delete_repo_path(ctx, "/repo".into(), "host-b".into())
         })
         .expect_err("another host's row is refused");
@@ -245,7 +282,7 @@ fn deleting_a_path_removes_own_or_unowned_rows_and_refuses_other_hosts() {
     assert_eq!(repo_rows(&store, "/repo").len(), 1);
 
     store
-        .call("bob", |ctx| {
+        .call("alice", |ctx| {
             delete_repo_path(ctx, "/legacy".into(), "host-b".into())
         })
         .expect("an unowned row may be removed");
@@ -262,7 +299,7 @@ fn deleting_a_path_removes_own_or_unowned_rows_and_refuses_other_hosts() {
 /// Deleting one host's row leaves the other host's row of the same path.
 #[test]
 fn deleting_a_path_leaves_another_hosts_row_of_it() {
-    let store = Store::new();
+    let store = repo_store();
     save(&store, "/repo", "host-a", "");
     save(&store, "/repo", "host-b", "");
     store
@@ -276,10 +313,191 @@ fn deleting_a_path_leaves_another_hosts_row_of_it() {
 /// A path nobody has saved is not an error (a stale view, as before).
 #[test]
 fn deleting_an_unknown_path_is_ok() {
-    let store = Store::new();
+    let store = repo_store();
     store
         .call("alice", |ctx| {
             delete_repo_path(ctx, "/nope".into(), "host-a".into())
         })
         .expect("nothing to delete");
+}
+
+/// `core.allium: SavedRepoPath` (authority) — every repo-path reducer is
+/// refused for a host the caller does not own, and changes nothing.
+#[test]
+fn repo_path_writes_are_refused_for_a_host_the_caller_does_not_own() {
+    let store = repo_store();
+    store.register_host_for("bobs", "bob");
+    seed(&store, "/bobs", "bobs", "org/bobs");
+    seed(&store, "/legacy", "", "");
+    for host in ["bobs", "nowhere", ""] {
+        let results = [
+            store.call("alice", |ctx| {
+                save_repo_path(
+                    ctx,
+                    "/forged".into(),
+                    "t".into(),
+                    host.into(),
+                    String::new(),
+                )
+            }),
+            store.call("alice", |ctx| {
+                adopt_repo_path(ctx, "/legacy".into(), host.into())
+            }),
+            store.call("alice", |ctx| {
+                delete_repo_path(ctx, "/bobs".into(), host.into())
+            }),
+            store.call("alice", |ctx| {
+                set_verify_command(ctx, "/bobs".into(), host.into(), "evil".into())
+            }),
+        ];
+        for result in results {
+            assert!(result.is_err(), "host {host:?} must be refused");
+        }
+    }
+    assert_eq!(
+        repo_rows(&store, "/bobs"),
+        vec![("bobs".into(), "org/bobs".into(), String::new())]
+    );
+    assert!(repo_rows(&store, "/forged").is_empty());
+    assert_eq!(repo_rows(&store, "/legacy")[0].0, "");
+}
+
+/// A7 — two machines hold different repositories at one path: a verify command
+/// is set through the calling host's own row, not the first row by path.
+#[test]
+fn a_verify_command_is_set_through_the_calling_hosts_row() {
+    let store = repo_store();
+    save(&store, "/code/x", "host-a", "org/one");
+    save(&store, "/code/x", "host-b", "org/two");
+    store
+        .call("alice", |ctx| {
+            set_verify_command(ctx, "/code/x".into(), "host-b".into(), "make two".into())
+        })
+        .expect("set");
+    let rows = repo_rows(&store, "/code/x");
+    assert_eq!(rows[0], ("host-a".into(), "org/one".into(), String::new()));
+    assert_eq!(
+        rows[1],
+        ("host-b".into(), "org/two".into(), "make two".into())
+    );
+}
+
+/// A host with no row of the path cannot set its command through another's.
+#[test]
+fn a_verify_command_is_refused_for_a_path_only_another_host_has() {
+    let store = repo_store();
+    save(&store, "/repo", "host-a", "");
+    let err = store
+        .call("alice", |ctx| {
+            set_verify_command(ctx, "/repo".into(), "host-b".into(), "x".into())
+        })
+        .expect_err("host-b has no row of /repo");
+    assert!(err.contains("host-b"), "{err}");
+    assert_eq!(repo_rows(&store, "/repo")[0].2, "");
+}
+
+// -- A4: rows linked before one verify command per repository ------------------
+
+fn seed_with_command(
+    store: &Store,
+    path: &str,
+    host: &str,
+    github: &str,
+    last_used: &str,
+    command: &str,
+) {
+    store
+        .call("alice", |ctx| {
+            ctx.db.repo_paths().insert(RepoPath {
+                id: 0,
+                path: path.into(),
+                last_used: last_used.into(),
+                verify_command: command.into(),
+                host: host.into(),
+                github_path: github.into(),
+            });
+            Ok(())
+        })
+        .expect("seed");
+}
+
+fn connect_after_rewinding_to(store: &Store, version: i64) {
+    store
+        .call("root", |ctx| {
+            ctx.db
+                .rules_version()
+                .id()
+                .update(RulesVersion { id: 1, version });
+            Ok(())
+        })
+        .expect("rewind");
+    store
+        .call("alice", |ctx| {
+            stamp_rules_version_on_connect(ctx);
+            Ok(())
+        })
+        .expect("connect");
+}
+
+/// `core.allium: SavedRepoPath.verify_command` — rows of one repository hold
+/// one value. The first connection after the module that added the rule gives
+/// every linked row the command of the most recently used row that has one.
+#[test]
+fn the_upgrade_unifies_the_verify_command_of_linked_rows() {
+    let store = repo_store();
+    seed_with_command(
+        &store,
+        "/home/a/api",
+        "host-a",
+        "org/api",
+        "2026-01-01",
+        "old",
+    );
+    seed_with_command(
+        &store,
+        "/home/b/api",
+        "host-b",
+        "org/api",
+        "2026-02-01",
+        "new",
+    );
+    seed_with_command(&store, "/home/c/api", "host-b", "org/api", "2026-03-01", "");
+    seed_with_command(
+        &store,
+        "/home/a/other",
+        "host-a",
+        "org/other",
+        "2026-01-01",
+        "keep",
+    );
+    connect_after_rewinding_to(&store, REPO_PATH_VERIFY_RULES_VERSION - 1);
+    for path in ["/home/a/api", "/home/b/api", "/home/c/api"] {
+        assert_eq!(repo_rows(&store, path)[0].2, "new", "{path}");
+    }
+    assert_eq!(repo_rows(&store, "/home/a/other")[0].2, "keep");
+}
+
+/// A store already past that version is left alone: a later bump must not
+/// re-run the fix over commands set since.
+#[test]
+fn a_later_connection_does_not_unify_again() {
+    let store = repo_store();
+    seed_with_command(
+        &store,
+        "/home/a/api",
+        "host-a",
+        "org/api",
+        "2026-01-01",
+        "one",
+    );
+    seed_with_command(
+        &store,
+        "/home/b/api",
+        "host-b",
+        "org/api",
+        "2026-02-01",
+        "two",
+    );
+    connect_after_rewinding_to(&store, REPO_PATH_VERIFY_RULES_VERSION);
+    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "one");
 }

@@ -74,7 +74,7 @@ enum Sent {
     SaveRepoPath(String, String, String),
     AdoptRepoPath(String, String),
     DeleteRepoPath(String, String),
-    SetVerifyCommand(String, String),
+    SetVerifyCommand(String, String, String),
     RecordBaseBranch(String, String, String),
     Subscribe(String, i64),
     Unsubscribe(String, i64),
@@ -487,9 +487,10 @@ impl ReducerCaller for RecordingCaller {
     async fn set_verify_command(
         &self,
         path: String,
+        host: String,
         command: String,
     ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::SetVerifyCommand(path, command))
+        self.answer(Sent::SetVerifyCommand(path, host, command))
     }
 
     async fn record_base_branch(

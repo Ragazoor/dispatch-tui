@@ -8,6 +8,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct SetVerifyCommandArgs {
     pub path: String,
+    pub host: String,
     pub command: String,
 }
 
@@ -15,6 +16,7 @@ impl From<SetVerifyCommandArgs> for super::Reducer {
     fn from(args: SetVerifyCommandArgs) -> Self {
         Self::SetVerifyCommand {
             path: args.path,
+            host: args.host,
             command: args.command,
         }
     }
@@ -35,8 +37,8 @@ pub trait set_verify_command {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`set_verify_command:set_verify_command_then`] to run a callback after the reducer completes.
-    fn set_verify_command(&self, path: String, command: String) -> __sdk::Result<()> {
-        self.set_verify_command_then(path, command, |_, _| {})
+    fn set_verify_command(&self, path: String, host: String, command: String) -> __sdk::Result<()> {
+        self.set_verify_command_then(path, host, command, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `set_verify_command` to run as soon as possible,
@@ -48,6 +50,7 @@ pub trait set_verify_command {
     fn set_verify_command_then(
         &self,
         path: String,
+        host: String,
         command: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
@@ -60,13 +63,20 @@ impl set_verify_command for super::RemoteReducers {
     fn set_verify_command_then(
         &self,
         path: String,
+        host: String,
         command: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(SetVerifyCommandArgs { path, command }, callback)
+        self.imp.invoke_reducer_with_callback(
+            SetVerifyCommandArgs {
+                path,
+                host,
+                command,
+            },
+            callback,
+        )
     }
 }

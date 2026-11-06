@@ -49,6 +49,17 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
         join_default_workspace(&real, &mem, &accepted.identity).await;
+        // Repo-path writes act for a host the caller owns.
+        for host in ["host-a", "host-b"] {
+            for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+                caller
+                    .register_host(host.into(), String::new(), accepted.identity.clone())
+                    .await
+                    .unwrap()
+                    .applied()
+                    .unwrap();
+            }
+        }
         let identity = accepted.identity.clone();
 
         let mut woken = rows_real.changed();
@@ -626,41 +637,41 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
                 .save_repo_path(
                     "/home/a/api".into(),
                     ts("2026-01-05 00:00:00.000"),
-                    "a".into(),
+                    "host-a".into(),
                     "org/api".into(),
                 )
                 .await
                 .unwrap();
             caller
-                .set_verify_command("/home/a/api".into(), "make ci".into())
+                .set_verify_command("/home/a/api".into(), "host-a".into(), "make ci".into())
                 .await
                 .unwrap();
             caller
                 .save_repo_path(
                     "/home/b/api".into(),
                     ts("2026-01-05 00:00:00.000"),
-                    "b".into(),
+                    "host-b".into(),
                     String::new(),
                 )
                 .await
                 .unwrap();
             caller
-                .set_verify_command("/home/b/api".into(), "cargo test".into())
+                .set_verify_command("/home/b/api".into(), "host-b".into(), "cargo test".into())
                 .await
                 .unwrap();
             caller
                 .save_repo_path(
                     "/home/b/api".into(),
                     ts("2026-01-05 00:00:00.000"),
-                    "b".into(),
+                    "host-b".into(),
                     "org/api".into(),
                 )
                 .await
                 .unwrap();
         }
-        wait_for!(rows_real.verify_command("/home/b/api").as_deref() == Some("make ci"));
+        wait_for!(rows_real.verify_command("/home/b/api", "host-b").as_deref() == Some("make ci"));
         assert_eq!(
-            rows_mem.verify_command("/home/b/api").as_deref(),
+            rows_mem.verify_command("/home/b/api", "host-b").as_deref(),
             Some("make ci")
         );
     });

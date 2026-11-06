@@ -319,6 +319,31 @@ impl MemoryReducerCaller {
         self
     }
 
+    /// Put a `repo_paths` row in the store as it would stand, bypassing the
+    /// host-authority check — a fixture's way to give the store a row another
+    /// host saved, or one saved before hosts were recorded (`host == ""`),
+    /// which no reducer can create now.
+    pub fn seed_repo_path(
+        &self,
+        path: impl Into<String>,
+        host: impl Into<String>,
+        github_path: impl Into<String>,
+        verify_command: impl Into<String>,
+    ) {
+        let mut tables = self.lock();
+        self.write_repo_path(
+            &mut tables,
+            module::RepoPath {
+                id: 0,
+                path: path.into(),
+                last_used: self.now(),
+                verify_command: verify_command.into(),
+                host: host.into(),
+                github_path: github_path.into(),
+            },
+        );
+    }
+
     fn now(&self) -> String {
         stamp(self.clock.now())
     }
@@ -591,8 +616,13 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_delete_repo_path(path, host)
     }
 
-    async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome> {
-        self.apply_set_verify_command(path, command)
+    async fn set_verify_command(
+        &self,
+        path: String,
+        host: String,
+        command: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_set_verify_command(path, host, command)
     }
 
     async fn record_base_branch(

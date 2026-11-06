@@ -338,4 +338,9 @@ pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
     if previous < FEED_SETTER_CLAIMS_RULES_VERSION {
         release_claims_of_non_setter_hosts(ctx);
     }
+    // Once, for rows linked before one command per repository held
+    // (`core.allium: SavedRepoPath.verify_command`).
+    if previous < REPO_PATH_VERIFY_RULES_VERSION {
+        unify_repo_verify_commands(ctx);
+    }
 }

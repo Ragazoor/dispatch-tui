@@ -208,6 +208,9 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused("repo path is empty".into()));
         }
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         // The module's single read of the table.
         let rows: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
         let own = rows
@@ -270,6 +273,9 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused("host is empty".into()));
         }
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let owns = tables
             .repo_paths
             .values()
@@ -297,6 +303,9 @@ impl MemoryReducerCaller {
         host: String,
     ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let rows: Vec<module::RepoPath> = tables
             .repo_paths
             .values()
@@ -328,6 +337,7 @@ impl MemoryReducerCaller {
     pub(super) fn apply_set_verify_command(
         &self,
         path: String,
+        host: String,
         command: String,
     ) -> Result<ReducerOutcome> {
         if command.contains('\n') || command.contains('\r') {
@@ -336,11 +346,20 @@ impl MemoryReducerCaller {
             ));
         }
         let mut tables = self.lock();
-        let rows: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
-        let repository = module::rows_of_the_repository_at(&rows, &path);
-        if repository.is_empty() {
-            return Ok(ReducerOutcome::Refused(format!("no repo path {path}")));
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
         }
+        let rows: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
+        let Some(named) = rows
+            .iter()
+            .find(|r| r.path == path && r.host == host)
+            .or_else(|| rows.iter().find(|r| r.path == path && r.host.is_empty()))
+        else {
+            return Ok(ReducerOutcome::Refused(format!(
+                "no repo path {path} for host {host}"
+            )));
+        };
+        let repository = module::rows_of_the_repository_of(&rows, named);
         for row in repository {
             self.write_repo_path(
                 &mut tables,

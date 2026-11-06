@@ -32,11 +32,15 @@ pub async fn set_verify(
     if command.trim().is_empty() {
         anyhow::bail!("verify command is empty; use `repo clear-verify` to remove it");
     }
-    // Creates the saved path when it does not exist yet (`cli.allium`): the
-    // store's own `set_verify_command` only updates a path that is saved. A
-    // path that is already saved is left alone, so a row another host saved
-    // keeps that host (saving would re-stamp it as this one's).
-    if !database.list_repo_paths().await.contains(&path) {
+    // Creates this host's row of the path when it has none (`cli.allium`): the
+    // store's own `set_verify_command` acts through this host's row of a saved
+    // path. A row only another host saved does not count, so this host gets its
+    // own beside it; a row this host already has is left alone.
+    if !database
+        .list_repo_paths_saved_by_this_host()
+        .await
+        .contains(&path)
+    {
         database.save_repo_path(&path).await?;
     }
     database.set_verify_command(&path, Some(command)).await?;
@@ -48,7 +52,14 @@ pub async fn set_verify(
 /// to clear and is ignored.
 pub async fn clear_verify(database: &Store, path: &str, out: &mut dyn Write) -> Result<()> {
     let path = expand_tilde(path);
-    if database.list_repo_paths().await.contains(&path) {
+    // Only a row this host can act through (its own, or an unowned one) has a
+    // command this host may clear.
+    let actable = database
+        .list_repo_paths_saved_by_this_host()
+        .await
+        .contains(&path)
+        || database.list_unowned_repo_paths().await.contains(&path);
+    if actable {
         database.set_verify_command(&path, None).await?;
     }
     writeln!(out, "verify_command cleared for {path}")?;

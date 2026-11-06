@@ -502,12 +502,13 @@ impl ReducerCaller for SdkReducerCaller {
     async fn set_verify_command(
         &self,
         path: String,
+        host: String,
         command: String,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the verify command",
-            set_verify_command_then(path, command)
+            set_verify_command_then(path, host, command)
         )
     }
 

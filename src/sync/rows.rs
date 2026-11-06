@@ -1323,12 +1323,20 @@ impl SharedRows {
         })
     }
 
-    /// The verify command stored on `path`'s `repo_paths` row, if any.
-    pub fn verify_command(&self, path: &str) -> Option<String> {
+    /// The verify command stored on `host`'s `repo_paths` row of `path`, else
+    /// on an unowned row of it (saved before hosts were recorded), if any. A
+    /// row only another host has is not read: two machines may hold different
+    /// repositories at one path. Mirrors the module's `set_verify_command`.
+    pub fn verify_command(&self, path: &str, host: &str) -> Option<String> {
         self.read(|rows| {
             rows.repo_paths
                 .values()
-                .find(|row| row.path == path)
+                .find(|row| row.path == path && row.host == host)
+                .or_else(|| {
+                    rows.repo_paths
+                        .values()
+                        .find(|row| row.path == path && row.host.is_empty())
+                })
                 .and_then(|row| row.verify_command.clone())
         })
     }
