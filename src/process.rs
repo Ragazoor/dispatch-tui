@@ -207,7 +207,7 @@ pub(crate) fn non_interactive_env(
     let mut env = vec![("GIT_TERMINAL_PROMPT", "0".to_string())];
     // Like `GIT_SSH_COMMAND` below, a value the user set stays: `force` with a
     // keyring askpass is how they unlock keys.
-    if existing_askpass.map_or(true, |v| v.trim().is_empty()) {
+    if existing_askpass.is_none_or(|v| v.trim().is_empty()) {
         env.push(("SSH_ASKPASS_REQUIRE", "never".to_string()));
     }
     if let Some(command) = existing_ssh.map(str::trim).filter(|c| !c.is_empty()) {

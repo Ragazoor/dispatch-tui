@@ -230,7 +230,12 @@ async fn dump_from_own_copy(
     store_at: &dyn Fn(&str) -> Arc<dyn SnapshotTarget>,
 ) -> Result<Snapshot> {
     for attempt in 1..=PORT_ATTEMPTS {
-        let (address, child) = spawn_on_free_port(spawner, copy, log)?;
+        let (address, child) = match spawn_on_free_port(spawner, copy, log) {
+            Ok(started) => started,
+            // The same lost race, seen at the start: start over on a new port.
+            Err(e) if attempt < PORT_ATTEMPTS && lost_the_port(&e) => continue,
+            Err(e) => return Err(e),
+        };
         let answered = wait_until_answering(&address, start_timeout).await;
         let foreign = answered.is_ok() && !spawner.listener_is_ours(&address, copy);
         let result = match answered {
@@ -249,6 +254,14 @@ async fn dump_from_own_copy(
         return result;
     }
     unreachable!("the loop returns on its last attempt")
+}
+
+/// Whether a failed start was "address already in use".
+fn lost_the_port(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .filter_map(|e| e.downcast_ref::<std::io::Error>())
+        .any(|e| e.kind() == std::io::ErrorKind::AddrInUse)
 }
 
 /// Start a store over `copy` on a free local port, returning its address and
