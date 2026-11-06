@@ -792,8 +792,7 @@ rule SplitPaneClosedResets {
         -- having already asked the application to close.
         --
         -- Nothing in flight is cancelled here either, and a SwapInFlight is no
-        -- exception — it used to be cleared here, which contradicted this very
-        -- sentence. A close says a pane went away; it does not say the tmux
+        -- exception. A close says a pane went away; it does not say the tmux
         -- work already under way will not report back, and that report is what
         -- ends the rearrangement. A swap has exactly two terminators, and a
         -- close is neither of them: the successful pane report and the failed
@@ -889,13 +888,13 @@ rule TrackSplitPaneFocus {
         -- colour, and entry and exit both reset focused to true.
 }
 
--- == Jump to Agent Window / Activate Task (Space key) ==
+-- == Activate Task (Space key) ==
 --
 -- Pressing Space on a task is the single "work on this task" action: it
 -- jumps tmux focus to that task's agent window when one exists, and
--- otherwise starts or resumes the agent. This unifies the former Space
--- jump key with the now-removed [d] dispatch/resume key, and — while split
--- mode is active — the swap action of the now-removed [S] key.
+-- otherwise starts or resumes the agent. While split mode is active it
+-- swaps the task's window into the pane instead of jumping. There is no
+-- separate dispatch, resume or swap key.
 --
 -- Priority order (first match wins):
 --   1. Task pinned in the split pane   -> focus that pane.
@@ -986,17 +985,10 @@ rule ActivateTask {
         -- silence here is indistinguishable from a dropped keypress, and the
         -- one fact the operator needs is which machine to go to.
         --
-        -- FOUNDATIONS-ONLY CAVEAT: naming the label requires resolving a
-        -- FOREIGN host id to that host's label, which needs a registry of
-        -- every host's (id, label) pair -- not just this install's own row,
-        -- which is all core/Host models today (see core.allium's Host entity
-        -- and host.allium's scope note). That registry is explicitly
-        -- out-of-scope work for the host-identity/tasks.host/locality-gating
-        -- foundations this branch is, so the implementation shows a generic
-        -- "another machine" message instead of a label until it lands. This
-        -- branch is unreachable on a single-machine install either way, so
-        -- the gap has no observable effect yet -- revisit the message the
-        -- moment a shared host registry exists.
+        -- The board does not yet resolve a foreign host id to that host's
+        -- label, so the message says "another machine" rather than naming it
+        -- (src/tui/mod.rs::foreign_worktree_refusal). On a single-machine
+        -- install this branch is unreachable, so the gap has no effect there.
         --
         -- No card indicator is specified. Marking owned-elsewhere cards on the
         -- board is a board-visuals concern and there are no remote hosts to
@@ -1023,7 +1015,6 @@ rule ActivateTask {
         --      pinned one): the window is swapped into the split pane in
         --      place, per SwapSplitPane. tmux focus is NOT transferred — the
         --      board keeps focus and the pane simply changes what it shows.
-        --      This is the surface the retired [S] key used to provide.
         --
         --   3. Has a tmux window, split inactive: the normal jump calls tmux
         --      select-window on current_agent(task).tmux_window. Branches 2 and 3 both cover
@@ -1089,9 +1080,8 @@ rule JumpBackToTuiWindow {
         -- front, because the binding is a command tmux runs later and any pane
         -- identity captured at registration time would be stale by then.
         --
-        -- Implemented in src/runtime/mod.rs (setup_tmux_for_tui /
-        -- teardown_tmux_for_tui) via tmux::bind_key / unbind_key.
-        -- Best-effort: a failing tmux call does not prevent the TUI starting.
+        -- Installed by src/runtime/mod.rs::setup_tmux_for_tui and removed by
+        -- src/runtime/mod.rs::teardown_tmux_for_tui. Best-effort: a failing tmux call does not prevent the TUI starting.
         --
         -- Surfaced in the in-TUI help overlay ([?]) and in list_keybindings
         -- as a row of the tmux.global group, marked as handled by tmux,
@@ -1137,20 +1127,19 @@ rule PinTaskInSplitPane {
         -- the rest by status (dispatch / resume / retry) exactly as it does
         -- outside split mode.
         --
-        -- == IMPLEMENTED: companion-pane draining ==
-        -- The empty-pane case (no task currently pinned) reaches this via
-        -- `exec_enter_split_mode_with_task` (src/runtime/split.rs), which
-        -- calls `dispatch::join_task_window_into_pane`
-        -- (src/dispatch/split_panes.rs), which moves only the agent's own
-        -- (active) pane out of its window. Whatever dispatch itself put in
+        -- == Companion-pane draining ==
+        -- A pin moves only the agent's own (active) pane out of its window
+        -- (src/dispatch/split_panes.rs::join_task_window_into_pane, reached
+        -- from src/runtime/split.rs::exec_enter_split_mode_with_task).
+        -- Whatever dispatch itself put in
         -- that window (docs/specs/agent-tree.allium: the agent-tree companion
         -- pane, and any editor pane opened from it) is left behind in a window
         -- nothing owns — and a lone companion pane is indistinguishable, from
         -- live tmux state alone, from the companion being toggled hidden.
-        -- `join_task_window_into_pane` therefore captures EVERY such pane
-        -- *before* the join and kills each once the join succeeds. When those
-        -- were the window's only other panes, the window is gone, restoring
-        -- the "the window no longer exists" assumption
+        -- The pin therefore captures EVERY such pane *before* the join and
+        -- kills each once the join succeeds. When those were the window's
+        -- only other panes, the window is gone, which is the "the window no
+        -- longer exists" assumption
         -- `SplitPaneRespawnOnWindowCleared`'s guidance relies on. The panes are
         -- found by the role marker dispatch wrote on each at creation
         -- (see agent-tree.allium's HideAgentTreePane), asked as one question — "which
@@ -1158,11 +1147,10 @@ rule PinTaskInSplitPane {
         -- future dispatch-created pane is drained without this path being
         -- taught about it. Both the check and the kill are best-effort: a
         -- failure is logged, never propagated, since these panes are
-        -- decorative. `tmux::join_pane` itself stays a plain tmux wrapper with
-        -- no companion-pane awareness — that orchestration lives above it, alongside
-        -- the equivalent resync in SwapSplitPane's guidance below. Resolves
-        -- agent-tree.allium's ToggleVsSplitPaneInteraction open question for
-        -- the join half of the gap.
+        -- decorative. The tmux join itself knows nothing of companion panes;
+        -- that orchestration lives above it, alongside the equivalent resync
+        -- in SwapSplitPane's guidance below. This is the join half of
+        -- agent-tree.allium's ToggleVsSplitPaneInteraction.
         --
         -- == Leftover window ==
         -- Draining reaches only panes dispatch marked. A pane it did not mark
@@ -1254,72 +1242,60 @@ rule SwapSplitPane {
         -- best-effort, because the pane is home and reversing would carry it
         -- back out.
         --
-        -- == IMPLEMENTED: companion-pane resync ==
-        -- `exec_swap_split_pane` (src/runtime/split.rs) uses `swap-pane` to
-        -- atomically exchange the previously-pinned task's pane and the new
-        -- task's pane 0. `swap-pane` moves *pane objects* between windows —
-        -- each pane keeps its own pane ID and running process, but which
-        -- window it belongs to (and so which layout slot it occupies) is
-        -- exactly what gets exchanged; it is the *window* that keeps its
-        -- identity (its name, its position in the session), not the pane
-        -- that started there. A pane ID resolved before the swap therefore
-        -- names a pane in the *other* window afterwards — measured directly
-        -- fixing this rule's own `@dispatch_dir` rewrite below, where
-        -- targeting by the pre-swap pane ID silently wrote the option onto
-        -- the wrong window and was only caught by the real-tmux test in
-        -- tests/tmux_lifecycle.rs, never by the MockProcessRunner argv-shape
-        -- tests (which do not model this semantic at all). `exec_swap_split_pane`
-        -- then renames the window (formerly the new task's, now holding the
-        -- old task's pane) to the old task's window name. Neither step
-        -- touches the window's other panes: a
-        -- renamed window's agent-tree companion pane (docs/specs/agent-tree.allium),
-        -- if any, keeps running `dispatch agent-tree <new_task_id>` under a
-        -- window now named (and considered to belong to) the old task —
+        -- == Companion-pane resync ==
+        -- The swap (src/dispatch/split_panes.rs::swap_task_window_into_pane,
+        -- reached from src/runtime/split.rs::exec_swap_split_pane) uses
+        -- `swap-pane` to exchange the previously-pinned task's pane and the
+        -- new task's pane 0 atomically. `swap-pane` moves *pane objects*
+        -- between windows: each pane keeps its own pane ID and running
+        -- process, but which window it belongs to (and so which layout slot
+        -- it occupies) is exactly what gets exchanged. The *window* keeps its
+        -- identity (its name, its position in the session), not the pane that
+        -- started there. A pane ID resolved before the swap therefore names a
+        -- pane in the *other* window afterwards. Only a real-tmux test
+        -- (tests/tmux_lifecycle.rs) shows this; the MockProcessRunner
+        -- argv-shape tests do not model it. The swap then renames the window
+        -- (formerly the new task's, now holding the old task's pane) to the
+        -- old task's window name. Neither step touches the window's other
+        -- panes, so a renamed window's agent-tree companion pane, if any,
+        -- would keep running `dispatch agent-tree <new_task_id>` under a
+        -- window now named (and considered to belong to) the old task,
         -- silently rendering the wrong agent's tree.
         --
-        -- After a successful rename, `dispatch::resync_agent_tree_pane`
-        -- (src/dispatch/agents.rs) parses the task id back out of the
-        -- window's own new name (the same `task-<id>` inverse
-        -- `toggle_agent_tree_pane` already uses) and, if the window carries
-        -- a companion pane, kills it and relaunches
-        -- `dispatch agent-tree <task_id>` for that correct task — and marks the
-        -- relaunched pane with its role, since it is a new pane and an unmarked
-        -- one would read as "no companion" to the next toggle. A no-op for
-        -- a non-task window name or a window with no companion pane at all.
-        -- Best-effort throughout: failures are logged, never propagated.
+        -- So after a successful rename,
+        -- src/dispatch/agents.rs::resync_agent_tree_pane parses the task id
+        -- back out of the window's own new name (the same `task-<id>` inverse
+        -- the agent-tree toggle uses) and, if the window carries a companion
+        -- pane, kills it and relaunches `dispatch agent-tree <task_id>` for
+        -- that correct task, and marks the relaunched pane with its role,
+        -- since it is a new pane and an unmarked one would read as "no
+        -- companion" to the next toggle. A no-op for a non-task window name
+        -- or a window with no companion pane at all. Best-effort throughout:
+        -- failures are logged, never propagated.
         --
         -- The `old_task = null` branch (no previously-pinned task) needs no
-        -- equivalent fix: `tmux::kill_window` there destroys the whole
-        -- window, companion pane included, so nothing is left to desync.
-        -- Resolves agent-tree.allium's ToggleVsSplitPaneInteraction open
-        -- question for the swap half of the gap.
+        -- resync: killing the window there destroys it whole, companion pane
+        -- included, so nothing is left to desync. This is the swap half of
+        -- agent-tree.allium's ToggleVsSplitPaneInteraction.
         --
-        -- == IMPLEMENTED: @dispatch_dir rewrite ==
-        -- The rename above fixes which task the resync targets, but not where
-        -- its companion starts: renaming a window never touches its window
+        -- == @dispatch_dir rewrite ==
+        -- The rename fixes which task the resync targets, but not where its
+        -- companion starts: renaming a window never touches its window
         -- options, so `@dispatch_dir` (see AgentWindowSplitStartsInTaskWorktree
-        -- below) still names the *incoming* task's worktree immediately after
-        -- the rename. Left alone, `resync_agent_tree_pane`'s read of
-        -- `@dispatch_dir` would race that staleness — sometimes observing it,
-        -- sometimes not, depending on unrelated timing — rather than being
-        -- reliably wrong or reliably right. `swap_task_window_into_pane`
-        -- (src/dispatch/split_panes.rs) closes this by rewriting
-        -- `@dispatch_dir` to the outgoing task's own worktree — via
-        -- `tmux::set_window_dispatch_dir` — immediately after the rename and
-        -- before calling `resync_agent_tree_pane`, so the read is never racing
-        -- anything: the correct value is written, synchronously, on the same
-        -- thread, before it is ever read back. Targeted by the window's *new
-        -- name*, not by any pane ID resolved earlier in the swap — see the
-        -- companion-pane-resync guidance above for why a pre-swap pane ID
-        -- would name the wrong window here. The outgoing task's worktree
-        -- path is threaded in from the TUI's own in-memory task list
-        -- (`App::handle_swap_split_pane`, src/tui/update/split_pane.rs) rather
-        -- than queried fresh — the same `find_task` lookup that already
-        -- resolves the outgoing window's name resolves its worktree too, so no
-        -- new database access is added to the dispatch/tmux layer. Best-effort
-        -- like the resync itself: a failed rewrite is logged, never
-        -- propagated, since the swap's pane exchange and rename have already
-        -- succeeded by this point.
+        -- below) still names the *incoming* task's worktree right after the
+        -- rename. Left alone, the resync's read of `@dispatch_dir` would race
+        -- that staleness rather than be reliably right. The swap therefore
+        -- rewrites `@dispatch_dir` to the outgoing task's own worktree
+        -- (src/tmux.rs::set_window_dispatch_dir) immediately after the rename
+        -- and before the resync, on the same thread, so the read never races
+        -- anything. The rewrite targets the window by its *new name*, never by
+        -- a pane ID resolved earlier in the swap, for the reason above. The
+        -- outgoing task's worktree comes from the board's own in-memory task
+        -- list (src/tui/update/split_pane.rs::handle_swap_split_pane), the
+        -- same lookup that resolves the outgoing window's name, so the
+        -- dispatch and tmux layers read no store. Best-effort like the resync
+        -- itself: a failed rewrite is logged, never propagated, since the
+        -- pane exchange and rename have already succeeded by this point.
 }
 
 rule DeferSwapWhileSwapInFlight {
@@ -1351,9 +1327,8 @@ rule DeferSwapWhileSwapInFlight {
         --     TmuxWindowTargetedExactly then refuses to resolve. Every later
         --     name-targeted operation on that task — its @dispatch_dir
         --     rewrite, its companion resync, its notifications, its kill —
-        --     fails until a human closes one of the two windows. Observed in
-        --     the field: two windows named task-4749, reported as a failed
-        --     @dispatch_dir rewrite after a swap.
+        --     fails until a human closes one of the two windows. It shows as
+        --     a failed @dispatch_dir rewrite after a swap.
         --
         -- Why held rather than dropped. Pressing Space on one task and then
         -- another is ordinary browsing, and the second press is not a
@@ -1488,7 +1463,7 @@ rule SplitPaneSwapSettles {
         -- toggle is the one that survives, because a swap into a pane the user
         -- has just asked to close achieves nothing they asked for. Acting on
         -- both is worse than arbitrary: the replayed request starts a fresh
-        -- rearrangement and marks swap_in_flight, and the exit then breaks out
+        -- rearrangement and sets in_flight, and the exit then breaks out
         -- the very pane that rearrangement is exchanging — two tmux operations
         -- issued against one pane at once, and the swap's own report would
         -- afterwards set active back to true, re-opening the split the press
@@ -1497,12 +1472,10 @@ rule SplitPaneSwapSettles {
 }
 
 -- The entry counterpart of SplitPaneSwapSettles above: the moment split mode
--- starts describing the pane it asked for. Resolved the open question this file
--- used to carry here — whether entry should share the swap's in-flight
--- serialisation, or whether a second [s] during entry should mean "exit again".
--- It is both: the held press is replayed as the toggle it is, and a toggle
--- replayed against a pane that has just opened exits. The two readings only
--- looked like alternatives.
+-- starts describing the pane it asked for. Entry shares the swap's in-flight
+-- serialisation, and a second [s] during entry still means "exit again": the
+-- held press is replayed as the toggle it is, and a toggle replayed against a
+-- pane that has just opened exits.
 
 rule SplitPaneEntrySettles {
     when: SplitPaneEntrySettled(pane, task, succeeded)
@@ -1595,14 +1568,13 @@ rule AgentWindowSplitStartsInTaskWorktree {
         -- client — which is how dispatch, or any script, shells out to tmux —
         -- starts the new pane in the *invoking process's* cwd, while a split the
         -- user triggers from an attached client starts it in the *session's*
-        -- cwd. Neither is the worktree. This was issue #231, fixed by commit
-        -- 8bf36803.
+        -- cwd. Neither is the worktree.
         --
         -- Mechanism, in two tiers. Each agent window carries its worktree path
         -- in a per-window tmux user option, @dispatch_dir, set when the window
-        -- is created. A rename alone never changes it — that is what SwapSplitPane's
-        -- "== IMPLEMENTED: @dispatch_dir rewrite ==" guidance above rewrites it
-        -- for, so this invariant keeps holding across a swap's rename too.
+        -- is created. A rename alone never changes it, which is why
+        -- SwapSplitPane's "@dispatch_dir rewrite" guidance above rewrites it,
+        -- so this keeps holding across a swap's rename too.
         --
         --   1. Splits dispatch makes itself (the agent-tree companion pane) pass
         --      `split-window -c <worktree>`, so those panes are correct by
@@ -1614,11 +1586,12 @@ rule AgentWindowSplitStartsInTaskWorktree {
         --      there (#{pane_start_path}, which tmux populates before the hook
         --      runs), and it corrects with `respawn-pane -k -c <worktree>`.
         --
-        -- The correction is never delivered as keystrokes. An earlier mechanism
-        -- typed `cd <worktree>` + Enter at the new pane, which is only correct if
-        -- a shell happens to be reading it: the agent-tree companion pane exits
-        -- on `q`, so any worktree path containing that letter closed the pane the
-        -- moment it opened, and the other letters moved its cursor. Whatever
+        -- The correction is never delivered as keystrokes
+        -- (SplitDirectoryIsNeverKeystrokes). Typing `cd <worktree>` + Enter at
+        -- the new pane is only correct if a shell happens to be reading it:
+        -- the agent-tree companion pane exits on `q`, so any worktree path
+        -- containing that letter would close the pane the moment it opened,
+        -- and the other letters would move its cursor. Whatever
         -- occupies a pane is the pane's business, so the directory is set through
         -- tmux rather than through the pane's input.
         --
@@ -1626,10 +1599,8 @@ rule AgentWindowSplitStartsInTaskWorktree {
         -- #{pane_id}): inside run-shell -bC the enclosing command's target
         -- context is lost and tmux falls back to the session's *active* pane,
         -- which during a background split is whatever the user is looking at —
-        -- typically the board. That defect (#3781) once typed `cd <worktree>`
-        -- into the kanban board, where `c` fired the Copy-Task binding and the
-        -- remainder landed in the resulting text field. The lesson outlives the
-        -- keystrokes: an untargeted respawn-pane would restart the wrong pane.
+        -- typically the board. An untargeted respawn-pane would restart the
+        -- wrong pane (SplitDirectoryTargetsNewPaneOnly).
         --
         -- @dispatch_dir must be quoted where it is interpolated into the hook's
         -- innermost command. Unquoted, a worktree path containing a space
