@@ -690,3 +690,33 @@ fn a_failed_read_keeps_the_last_hidden_count() {
     assert_eq!(state.agents.hidden(), 2);
     assert_eq!(state.agents.rows().len(), 1);
 }
+
+/// ResumeJumpWaitEnds counts list reads, so the poller hands the loop every
+/// read, not only one that changed the list: a resumed agent whose launch
+/// failed leaves the list as it was, and the wait must still run out.
+#[tokio::test]
+async fn the_agent_list_poller_sends_an_unchanged_list_again() {
+    let board = std::sync::Arc::new(FakeBoard(Ok(crate::hooks::wire::PaneView {
+        task: None,
+        live_agents: vec![pane_agent(4)],
+        detached_agents: vec![detached_pane_agent(6)],
+        hidden_agents: 0,
+    })));
+    let (reads, poller) =
+        spawn_agent_list_poller(board, TaskId(4), std::time::Duration::from_millis(1));
+
+    let received = tokio::task::spawn_blocking(move || {
+        (0..2)
+            .map(|_| {
+                reads
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .is_ok()
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .expect("receiver thread");
+    poller.abort();
+
+    assert_eq!(received, vec![true, true]);
+}

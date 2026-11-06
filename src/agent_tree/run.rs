@@ -247,7 +247,7 @@ pub(super) fn adopt_tree(rebuilt: TreeNode, tree: &mut TreeNode, state: &mut Ren
 /// Reads of the board's task list for the agents section, one per
 /// `AGENTS_REFRESH_INTERVAL`, produced off the render loop so a slow database
 /// never delays a keypress or a git tick.
-type AgentReads = std::sync::mpsc::Receiver<Result<AgentList, String>>;
+pub(crate) type AgentReads = std::sync::mpsc::Receiver<Result<AgentList, String>>;
 
 /// The agents section's re-read cadence — the spec's
 /// `config.agent_tree_agents_refresh_interval`.
@@ -406,8 +406,10 @@ fn run_loop<B: Backend>(
     let mut schedule = RefreshSchedule::new(REFRESH_INTERVAL, Instant::now());
 
     loop {
-        drain_agent_reads(agent_reads, &mut state, runner);
+        // Answers first: a read that shows a resumed agent attached must find
+        // the jump it is waiting on already pending.
         resumes.drain(&mut state);
+        drain_agent_reads(agent_reads, &mut state, runner);
         if drain_commit_reads(commit_reads, root, &mut tree, &mut state) {
             refresh(root, runner, &mut tree, &mut state);
             schedule.mark(Instant::now());
@@ -517,7 +519,8 @@ pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()
     // The task and the live-agent list come from the running board, which
     // already holds them (`PanesReadThroughTheBoard`).
     let source = std::sync::Arc::new(crate::agent_tree::pane::BoardPaneSource { port: board_port });
-    let (agent_reads, poller) = spawn_agent_list_poller(source.clone(), task_id);
+    let (agent_reads, poller) =
+        spawn_agent_list_poller(source.clone(), task_id, AGENTS_REFRESH_INTERVAL);
     let (resumes, resume_worker) = spawn_resume_worker(source.clone());
     let mut usage = crate::agent_tree::pane::PaneUsage::new(board_port, task_id);
 
@@ -614,32 +617,26 @@ pub(crate) async fn read_agent_list(
 /// A task rather than an inline read because the render loop is synchronous
 /// and the board read is not; the loop runs on the runtime's calling thread, so
 /// this runs on a worker beside it.
-fn spawn_agent_list_poller(
+pub(crate) fn spawn_agent_list_poller(
     source: std::sync::Arc<dyn crate::agent_tree::pane::PaneViewSource>,
     own: TaskId,
+    every: Duration,
 ) -> (AgentReads, tokio::task::JoinHandle<()>) {
     let (tx, rx) = std::sync::mpsc::channel();
     let handle = tokio::spawn(async move {
-        // Only news is sent: in steady state the list does not change, and
-        // the loop would otherwise re-adopt an identical list every second.
-        // A failure is always sent, since it carries a notice to show.
-        let mut last_sent: Option<AgentList> = None;
+        // Every read is sent, changed or not: a pending resume jump counts
+        // list reads (`ResumeJumpWaitEnds`), and a resumed agent whose launch
+        // failed leaves the list exactly as it was. Re-adopting an identical
+        // list is harmless — the cursor stays on its task.
         // `interval`'s first tick resolves immediately, so the read below still
         // fires right away on the first pass — the tick before it only delays
         // every pass after that, same as the sleep-after-read it replaces.
-        let mut ticker = tokio::time::interval(AGENTS_REFRESH_INTERVAL);
+        let mut ticker = tokio::time::interval(every);
         loop {
             ticker.tick().await;
             let read = read_agent_list(&*source, own).await;
-            let news = match &read {
-                Ok(rows) => last_sent.as_ref() != Some(rows),
-                Err(_) => true,
-            };
-            if news {
-                last_sent = read.as_ref().ok().cloned();
-                if tx.send(read).is_err() {
-                    return;
-                }
+            if tx.send(read).is_err() {
+                return;
             }
         }
     });

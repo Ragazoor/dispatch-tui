@@ -549,9 +549,10 @@ entity AgentTreePane {
     pending_jump_reads: Integer
 
     -- The task under the agents section's cursor; null when the list is
-    -- empty. View state, moved by the cursor motions and kept on its task
-    -- across list reads (RefreshAgentTreeAgentList, "The cursor follows its
-    -- task").
+    -- empty, and the first row once a read brings rows. View state, written
+    -- by the cursor motions on AgentTreeCompanionPane (not modelled as rules;
+    -- see the AgentTreeViewState open question) and kept on its task across
+    -- list reads (RefreshAgentTreeAgentList, "The cursor follows its task").
     selected_agent: core/Task?
 
     -- The agents section's own redraw stamp. Separate from last_rendered_at
@@ -848,8 +849,10 @@ rule SplitAgentTreePaneOnAgentLaunch {
         root: task.worktree.path,
         status: shown,
         tmux_pane: core/TmuxPane.created(),
-        last_rendered_at: now,
-        last_diff_rendered_at: now,
+        -- The first tree and diff queries run at once (RefreshAgentTree,
+        -- RefreshAgentTreeDiff), not one interval later.
+        last_rendered_at: now - config.agent_tree_refresh_interval,
+        last_diff_rendered_at: now - config.agent_tree_refresh_interval,
         rendered_changes: [],
         open_diff_paths: [],
         diff_pane: null,
@@ -1051,7 +1054,8 @@ rule ShowAgentTreePane {
 
     ensures: pane.status = shown
     ensures: pane.tmux_pane = core/TmuxPane.created()
-    ensures: pane.last_rendered_at = now
+    -- The fresh renderer's first git query runs at once.
+    ensures: pane.last_rendered_at = now - config.agent_tree_refresh_interval
     -- A fresh renderer starts on the agents view: who is working is the first
     -- thing the user wants, and the changed files are one Tab away. Focus is
     -- view state and does not survive a hide.
@@ -1776,7 +1780,6 @@ rule SplitAgentTreeDiffPane {
     ensures: pane.diff_pane = core/TmuxPane.created()
     ensures: pane.diff_pane_is_ours = true
     ensures: pane.diff_pane_content = diff
-    ensures: pane.error_notice = null
     ensures: pane.lower_pane_has_focus = true
 
     -- The diff pane's renderer is its own process and resolves the task for
@@ -1836,7 +1839,6 @@ rule ReplaceAgentTreeEditorWithDiff {
     requires: pane.diff_pane_content = editor
 
     ensures: pane.diff_pane_content = diff
-    ensures: pane.error_notice = null
     ensures: pane.lower_pane_has_focus = true
     ensures: pane.diff_task_resolution = waiting
     ensures: pane.diff_renderer_started_at = now
@@ -1859,7 +1861,6 @@ rule FocusFollowsTheOpenedFile {
     requires: pane.diff_pane != null
     requires: pane.diff_pane_content = diff
 
-    ensures: pane.error_notice = null
     ensures: pane.lower_pane_has_focus = true
 }
 
@@ -1885,7 +1886,6 @@ rule OpenAgentTreeFileInEditor {
     ensures: pane.diff_pane != null
     ensures: pane.diff_pane_is_ours = true
     ensures: pane.diff_pane_content = editor
-    ensures: pane.error_notice = null
     ensures: pane.lower_pane_has_focus = true
     -- The pane no longer shows a diff, so no row is marked open
     -- (OneOpenFileAtATime). Emptying the set this way does NOT close the
@@ -2162,8 +2162,11 @@ rule RefreshAgentTreeDiff {
 }
 
 rule ClearAgentTreeErrorNotice {
-    -- Any key the renderer handles acknowledges a notice. There is no separate
-    -- dismiss key and no timer.
+    -- Any key pressed in the pane acknowledges a notice — bound or not, and
+    -- the first `g` of the gg chord too. There is no separate dismiss key and
+    -- no timer. The clear comes before the key's own action, so a rule the
+    -- key starts never has to clear the notice again, and a notice the key's
+    -- own action raises survives it.
     when: AgentTreeKeyPressed(pane)
 
     requires: pane.error_notice != null
@@ -2177,9 +2180,10 @@ rule ClearAgentTreeErrorNotice {
         -- could expire before they looked, and a dedicated dismiss key would be
         -- one more binding to document for a one-line message.
         --
-        -- AgentTreeKeyPressed covers every key on the AgentTreeCompanionPane
-        -- surface, the exit key included — clearing state on the way out is
-        -- harmless, and the alternative is enumerating exceptions.
+        -- AgentTreeKeyPressed covers every key event in the pane, the exit
+        -- key included — clearing state on the way out is harmless, and the
+        -- alternative is enumerating exceptions. The diff pane clears its own
+        -- notice the same way.
 }
 
 -- == Commits Section ==
@@ -2335,6 +2339,10 @@ rule SelectAgentTreeSource {
         -- a one-handed loop of motion and Space, the same shape as browsing
         -- diffs in the tree.
         --
+        -- The selection is recorded where the diff pane reads it
+        -- (OpenSetIsNotWorktreeState). A failed write of it is shown like a
+        -- failed diff-pane split (AgentTreeDiffPaneFailureIsVisible).
+        --
         -- Selecting changes only what the pane shows. Nothing is checked out,
         -- reset or staged, and the worktree and HEAD are exactly as they were
         -- (ReadOnlyObservation).
@@ -2458,11 +2466,15 @@ rule RefreshAgentTreeAgentList {
         -- A read that changes the list keeps the agents cursor on the task it
         -- was on, not on the row index: an agent starting above it must not
         -- move the selection onto a different agent. When the selected task
-        -- has left the list, the cursor clamps to the last row.
+        -- has left the list, the cursor stays at its row index, clamped to
+        -- the last row.
         --
         -- == Latency ==
         -- The read runs beside the renderer, not inside its key loop, so a
-        -- slow board never delays a keypress. The price is that a new list
+        -- slow board never delays a keypress. It is sent to the loop every
+        -- time, changed or not, because ResumeJumpWaitEnds counts reads. It
+        -- may start during the startup wait; the loop takes what arrived once
+        -- the task resolves. The price is that a new list
         -- can take up to about twice the interval to reach the screen. That
         -- is fine for a list that changes on the scale of minutes.
 }
@@ -3006,7 +3018,7 @@ surface AgentTreeCompanionPane {
         ResumeDetachedAgent(user, pane, target)           -- Space, Enter (agents focus, detached row)
 
         -- Not keys of their own. AgentTreeKeyPressed is raised for every key
-        -- above that the renderer handles (ClearAgentTreeErrorNotice), and
+        -- event in the pane, bound or not (ClearAgentTreeErrorNotice), and
         -- AgentTreeAgentCursorMoved for every one of them that moves the
         -- agents section's cursor (ForgetPendingResumeJump).
         AgentTreeKeyPressed(pane)
@@ -3824,6 +3836,10 @@ surface AgentTreeTmuxOutcomes {
     provides:
         -- The lower pane could not be split or respawned, the renderer could
         -- not tell which pane it runs in, or `v` named a file not on disk.
+        -- Also raised when the pane cannot record what the lower pane reads
+        -- (the open set, the selected source, or that an editor took the
+        -- pane over): the same notice, the direct answer to the same kind of
+        -- keypress.
         AgentTreeDiffPaneOpenFailed(pane, reason)
         -- The selected agent's window could not be selected.
         AgentTreeAgentJumpFailed(pane, reason)
