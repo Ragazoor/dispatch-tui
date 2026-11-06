@@ -328,6 +328,7 @@ fn dispatch_system(rt: &super::TuiRuntime, cmd: crate::tui::commands::SystemComm
             urgent,
         } => drop(rt.exec_send_notification(&title, &body, urgent)),
         OpenInBrowser { url } => drop(rt.exec_open_in_browser(url)),
+        CheckRepoPaths { paths } => drop(rt.exec_check_repo_paths(paths)),
     }
 }
 

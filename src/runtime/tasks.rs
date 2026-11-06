@@ -202,19 +202,30 @@ impl TuiRuntime {
         app.update(Message::Task(
             crate::tui::messages::TaskMessage::MarkDispatching(task.id),
         ));
-        let _ = self.database.save_repo_path(&expanded).await;
+        if let Err(e) = self.database.save_repo_path(&expanded).await {
+            tracing::warn!("quick dispatch: saving repo path {expanded}: {e}");
+        }
         let paths = self.board_reads.list_repo_paths().await;
         app.update(Message::RepoPathsUpdated(paths));
         // A request like every other launch path (tasks.allium:
         // CreateQuickTask): origin `quick`, and the `quick` mode the module
         // never derives on its own, so this host's provisioning launches the
         // quick-dispatch agent. Nothing is provisioned here.
-        self.request_for_dispatch(
-            task.id,
-            models::DispatchOrigin::Quick,
-            Some(models::DispatchMode::Quick),
-        )
-        .await;
+        let requested = self
+            .request_for_dispatch(
+                task.id,
+                models::DispatchOrigin::Quick,
+                Some(models::DispatchMode::Quick),
+            )
+            .await;
+        if !requested {
+            // The task was created before the request failed, so it stays in
+            // Backlog. Say so, rather than leave it to be found.
+            self.send_system_error(format!(
+                "Quick dispatch failed; task #{} was created and stays in Backlog",
+                task.id.0
+            ));
+        }
         // After the request: the agent's launch does not wait on the link.
         self.link_new_task(app, work_package, task.id).await;
     }
@@ -605,9 +616,9 @@ impl TuiRuntime {
         id: TaskId,
         origin: models::DispatchOrigin,
         mode: Option<models::DispatchMode>,
-    ) {
+    ) -> bool {
         let reason = match self.task_svc.request_dispatch(id, origin, mode).await {
-            Ok(crate::store::RequestDispatchAnswer::Requested(_)) => return,
+            Ok(crate::store::RequestDispatchAnswer::Requested(_)) => return true,
             Ok(crate::store::RequestDispatchAnswer::Refused(why)) => {
                 format!("Task #{} was not dispatched: {why}", id.0)
             }
@@ -617,6 +628,7 @@ impl TuiRuntime {
             crate::tui::messages::TaskMessage::DispatchAbandoned(id),
         ));
         self.send_system_error(reason);
+        false
     }
 
     pub(super) fn exec_check_window(
@@ -905,46 +917,46 @@ impl TuiRuntime {
         db: Arc<dyn crate::store::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) -> Vec<crate::models::DispatchRequest> {
+        let (messages, requests) = Self::read_board(&*db).await;
+        for message in messages {
+            let _ = tx.send(message);
+        }
+        requests
+    }
+
+    /// Read every table the board draws, as the messages that apply them, in
+    /// the order they must apply. The one list both refresh paths use
+    /// (`reload_board` sends them, `exec_refresh_from_db` applies them), so
+    /// the tick backstop cannot read fewer tables than the pump path.
+    ///
+    /// Also answers with the dispatch requests it read, so a caller can serve
+    /// them without reading the rows a second time.
+    async fn read_board(
+        db: &dyn crate::store::BoardReads,
+    ) -> (Vec<Message>, Vec<crate::models::DispatchRequest>) {
+        use crate::tui::messages::{EpicMessage, TaskMessage, WorkPackageMessage};
         let tasks = db.list_all().await;
-        let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
-            tasks,
-        )));
-
         let unseen = db.unseen_task_ids().await;
-        let _ = tx.send(Message::Task(
-            crate::tui::messages::TaskMessage::UnseenRefreshed(unseen),
-        ));
         let bookmarks = db.bookmarked_task_ids().await;
-        let _ = tx.send(Message::Task(
-            crate::tui::messages::TaskMessage::BookmarksRefreshed(bookmarks),
-        ));
-
         let epics = db.list_epics().await;
-        let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
-            epics,
-        )));
-
         let packages = db.list_work_packages().await;
         let links = db.list_work_package_links().await;
-        let _ = tx.send(Message::WorkPackage(
-            crate::tui::messages::WorkPackageMessage::Refresh { packages, links },
-        ));
-
         let paths = db.list_repo_paths().await;
-        let _ = tx.send(Message::RepoPathsUpdated(paths));
-
         let pairs = db.list_all_base_branches().await;
-        let _ = tx.send(Message::BaseBranchesUpdated(
-            super::group_base_branches_by_repo(pairs),
-        ));
-
-        // This host's dispatch requests, from the same reload as the cards, so
+        // This host's dispatch requests, from the same read as the cards, so
         // DispatchingFeedback follows the row (dispatch.allium).
         let requests = db.dispatch_requests().await;
-        let _ = tx.send(Message::Task(
-            crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(requests.clone()),
-        ));
-        requests
+        let messages = vec![
+            Message::Task(TaskMessage::Refresh(tasks)),
+            Message::Task(TaskMessage::UnseenRefreshed(unseen)),
+            Message::Task(TaskMessage::BookmarksRefreshed(bookmarks)),
+            Message::Epic(EpicMessage::Refresh(epics)),
+            Message::WorkPackage(WorkPackageMessage::Refresh { packages, links }),
+            Message::RepoPathsUpdated(paths),
+            Message::BaseBranchesUpdated(super::group_base_branches_by_repo(pairs)),
+            Message::Task(TaskMessage::DispatchRequestsRefreshed(requests.clone())),
+        ];
+        (messages, requests)
     }
 
     /// Spawn a single-task reload. Sends `TaskMessage::Updated` on success.
@@ -1017,23 +1029,11 @@ impl TuiRuntime {
             return vec![];
         }
 
-        let tasks = self.board_reads.list_all().await;
-        let mut cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
-            tasks,
-        )));
-        self.exec_refresh_epics_from_db(app).await;
-        let unseen = self.board_reads.unseen_task_ids().await;
-        cmds.extend(app.update(Message::Task(
-            crate::tui::messages::TaskMessage::UnseenRefreshed(unseen),
-        )));
-        let bookmarks = self.board_reads.bookmarked_task_ids().await;
-        cmds.extend(app.update(Message::Task(
-            crate::tui::messages::TaskMessage::BookmarksRefreshed(bookmarks),
-        )));
-        let requests = self.board_reads.dispatch_requests().await;
-        cmds.extend(app.update(Message::Task(
-            crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(requests),
-        )));
+        let (messages, _) = Self::read_board(&*self.board_reads).await;
+        let mut cmds = Vec::new();
+        for message in messages {
+            cmds.extend(app.update(message));
+        }
         // Snapshot *after* the refresh so the next tick only re-reads when a
         // write has occurred since this point.
         self.record_refreshed_at(self.board_reads.revision().await);

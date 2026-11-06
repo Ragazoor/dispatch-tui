@@ -29,6 +29,8 @@ pub enum SystemMessage {
     ToggleNotifications,
     /// Open a URL in the user's browser.
     OpenInBrowser { url: String },
+    /// The repo paths that are not directories, from `CheckRepoPaths`.
+    BrokenRepoPathsFound(Vec<String>),
 }
 
 impl SystemMessage {
@@ -45,6 +47,7 @@ impl SystemMessage {
             SystemMessage::ToggleHelp => app.handle_toggle_help(),
             SystemMessage::ToggleNotifications => app.handle_toggle_notifications(),
             SystemMessage::OpenInBrowser { url } => app.handle_open_in_browser(url),
+            SystemMessage::BrokenRepoPathsFound(paths) => app.handle_broken_repo_paths_found(paths),
         }
     }
 }

@@ -2165,6 +2165,15 @@ rule EditTask {
     --     empty-URL_TYPE fallback applies (preserve prior type if the
     --     url string is unchanged, else infer from the string).
 
+    -- Only fields the user changed are written. The save compares each
+    -- parsed field with the snapshot the editor opened with and sends the
+    -- differences; an untouched field is left to whatever the store holds now,
+    -- so a status an agent moved, or a model set, while the editor was open is
+    -- not reverted by a description-only save. A refused write (the store
+    -- answers an error) is reported and nothing else happens: the board does
+    -- not show the edit and the repo path is not saved. The epic editor
+    -- follows the same rule for title, description, feed command and interval.
+
     let prior = task.status
 
     ensures:

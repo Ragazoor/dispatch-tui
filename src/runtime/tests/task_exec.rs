@@ -208,6 +208,27 @@ async fn exec_refresh_from_db_syncs_external_changes() {
 }
 
 #[tokio::test]
+async fn exec_refresh_from_db_reads_repo_paths_and_base_branches() {
+    // W6: the tick refresh is the backstop for a shared store, so it must
+    // read every table `reload_board` reads, not only tasks and epics.
+    let (rt, mut app) = test_runtime().await;
+    rt.db_write().save_repo_path("/elsewhere").await.unwrap();
+    rt.db_write()
+        .record_base_branch("/elsewhere", "develop")
+        .await
+        .unwrap();
+    assert!(app.repo_paths().is_empty());
+
+    rt.exec_refresh_from_db(&mut app).await;
+
+    assert!(app.repo_paths().contains(&"/elsewhere".to_string()));
+    assert_eq!(
+        app.base_branches_for("/elsewhere"),
+        &["develop".to_string()]
+    );
+}
+
+#[tokio::test]
 async fn exec_refresh_from_db_returns_commands_from_refresh() {
     let (rt, mut app) = test_runtime().await;
     // Insert a task directly into DB as Running
@@ -221,7 +242,11 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
         .unwrap();
     // Load it into app
     let cmds = rt.exec_refresh_from_db(&mut app).await;
-    assert!(cmds.is_empty()); // First load — no transition
+    // First load — no transition. The repo-path check is not one.
+    assert!(cmds.iter().all(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::CheckRepoPaths { .. })
+    )));
 
     let task = rt.database.list_all().await[0].clone();
     rt.db_write()

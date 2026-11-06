@@ -13,4 +13,8 @@ pub enum SystemCommand {
     },
     /// Open a URL in the user's browser.
     OpenInBrowser { url: String },
+    /// Check which of these repo paths are no longer directories, off the
+    /// update loop (a stalled mount must not freeze the board). Answers with
+    /// `SystemMessage::BrokenRepoPathsFound`.
+    CheckRepoPaths { paths: Vec<String> },
 }

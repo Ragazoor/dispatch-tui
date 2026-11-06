@@ -677,3 +677,12 @@ mod host_reactor {
         ));
     }
 }
+
+#[test]
+fn input_loop_stops_once_the_key_receiver_is_dropped() {
+    // W5: the loop must notice quit without waiting for one more keypress.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    assert!(!crate::runtime::input_loop_should_stop(&tx));
+    drop(rx);
+    assert!(crate::runtime::input_loop_should_stop(&tx));
+}

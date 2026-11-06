@@ -192,3 +192,32 @@ async fn clearing_feed_command_offers_no_takeover() {
     );
     assert_eq!(*app.input_mode(), crate::tui::InputMode::Normal);
 }
+
+/// W3: the snapshot is taken when the editor opens. A save that changes only
+/// the description must not write the snapshot's title back over a rename
+/// made while the editor was open.
+#[tokio::test]
+async fn an_epic_edit_writes_only_the_fields_the_user_changed() {
+    let (db, rt, mut app) = runtime_and_app().await;
+    let snapshot = db.create_epic("Original", "", None).await.unwrap();
+    rt.epic_svc
+        .update_epic(UpdateEpicParams {
+            title: Some("Renamed meanwhile".into()),
+            ..UpdateEpicParams::for_epic(snapshot.id)
+        })
+        .await
+        .unwrap();
+
+    let text = "--- TITLE ---\nOriginal\n--- DESCRIPTION ---\nNew desc\n\
+                --- FEED_COMMAND ---\n\n--- FEED_INTERVAL_SECS ---\n\n";
+    rt.finalize_epic_edit(
+        &mut app,
+        snapshot.clone(),
+        EditorOutcome::Saved(text.into()),
+    )
+    .await;
+
+    let after = db.get_epic(snapshot.id).await.unwrap();
+    assert_eq!(after.description, "New desc");
+    assert_eq!(after.title, "Renamed meanwhile", "title was reverted");
+}

@@ -45,17 +45,31 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_repo_paths_updated(&mut self, paths: Vec<String>) -> Vec<Command> {
-        self.broken_repo_paths = paths
-            .iter()
-            .filter(|p| !std::path::Path::new(p).is_dir())
-            .cloned()
-            .collect();
+        // Drop marks for paths that left the list; the directory check itself
+        // runs off this thread and answers with `BrokenRepoPathsFound`.
+        self.broken_repo_paths.retain(|p| paths.contains(p));
+        let check = crate::tui::commands::SystemCommand::CheckRepoPaths {
+            paths: paths.clone(),
+        };
         self.board.repo_paths = paths;
         // The cursor indexes the repo list directly; keep it on a real row.
         self.input.repo_cursor = self
             .input
             .repo_cursor
             .min(self.board.repo_paths.len().saturating_sub(1));
+        vec![Command::System(check)]
+    }
+
+    pub(in crate::tui) fn handle_broken_repo_paths_found(
+        &mut self,
+        broken: Vec<String>,
+    ) -> Vec<Command> {
+        // A late answer for an older list must not mark a path that has since
+        // left it.
+        self.broken_repo_paths = broken
+            .into_iter()
+            .filter(|p| self.board.repo_paths.contains(p))
+            .collect();
         vec![]
     }
 

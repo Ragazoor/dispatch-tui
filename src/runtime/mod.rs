@@ -326,6 +326,11 @@ async fn start_services_after_connect(
     });
 }
 
+/// Whether the input thread should leave: the board dropped the key receiver.
+fn input_loop_should_stop(key_tx: &mpsc::UnboundedSender<crossterm::event::KeyEvent>) -> bool {
+    key_tx.is_closed()
+}
+
 /// Read terminal events on a dedicated blocking thread. Keys go to `key_tx`;
 /// resizes and focus changes become system messages on `msg_tx`. The thread
 /// idles while `input_paused` is set (e.g. an external editor owns the
@@ -336,6 +341,11 @@ fn spawn_input_thread(
     input_paused: Arc<AtomicBool>,
 ) {
     tokio::task::spawn_blocking(move || loop {
+        // Quit drops the key receiver. Check it every pass, so the thread
+        // leaves on its own instead of waiting for one more keypress.
+        if input_loop_should_stop(&key_tx) {
+            break;
+        }
         if input_paused.load(Ordering::Relaxed) {
             std::thread::sleep(INPUT_PAUSE_SLEEP);
             continue;

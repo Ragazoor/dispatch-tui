@@ -1118,35 +1118,38 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn broken_repo_paths_marks_nonexistent_path_on_update() {
+fn repo_paths_update_asks_the_runtime_to_check_them_instead_of_checking_inline() {
     let mut app = make_app();
-    app.update(Message::RepoPathsUpdated(vec![
-        "/tmp".to_string(),
+    let cmds = app.update(Message::RepoPathsUpdated(vec![
         "/this-path-absolutely-does-not-exist-dispatch-test".to_string(),
     ]));
     assert!(
-        app.broken_repo_paths
-            .contains("/this-path-absolutely-does-not-exist-dispatch-test"),
-        "non-existent path should be in broken_repo_paths"
+        app.broken_repo_paths.is_empty(),
+        "no filesystem call on the update loop"
     );
-    assert!(
-        !app.broken_repo_paths.contains("/tmp"),
-        "/tmp is a real directory and must not appear in broken_repo_paths"
-    );
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::CheckRepoPaths { paths })
+            if paths == &["/this-path-absolutely-does-not-exist-dispatch-test".to_string()]
+    )));
 }
 
 #[test]
-fn broken_repo_paths_replaced_on_second_update() {
+fn broken_repo_paths_found_marks_only_paths_still_listed() {
     let mut app = make_app();
-    app.update(Message::RepoPathsUpdated(vec![
-        "/this-path-absolutely-does-not-exist-dispatch-test".to_string(),
-    ]));
-    assert!(!app.broken_repo_paths.is_empty());
+    app.update(Message::RepoPathsUpdated(vec!["/a".to_string()]));
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::BrokenRepoPathsFound(vec![
+            "/a".to_string(),
+            "/gone".to_string(),
+        ]),
+    ));
+    assert!(app.broken_repo_paths.contains("/a"));
+    assert!(!app.broken_repo_paths.contains("/gone"));
 
-    // Replace with only real paths — cache must be cleared
-    app.update(Message::RepoPathsUpdated(vec!["/tmp".to_string()]));
-    assert!(
-        app.broken_repo_paths.is_empty(),
-        "broken_repo_paths must be empty after update with only valid paths"
-    );
+    // Replaced, not accumulated, by the next answer.
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::BrokenRepoPathsFound(vec![]),
+    ));
+    assert!(app.broken_repo_paths.is_empty());
 }

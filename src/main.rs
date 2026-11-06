@@ -829,14 +829,21 @@ fn main() -> Result<()> {
                 cli.spacetime_server.clone(),
                 command,
             )),
-        command => tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?
-            .block_on(run_async(
+        command => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            let result = runtime.block_on(run_async(
                 &cli.data_dir,
                 cli.spacetime_server.clone(),
                 command,
-            )),
+            ));
+            // Dropping a runtime waits for every `spawn_blocking` task, and
+            // the input thread and the pop-out editor watcher block on the
+            // terminal and on tmux. Give them a moment, then leave.
+            runtime.shutdown_timeout(std::time::Duration::from_secs(2));
+            result
+        }
     }
 }
 

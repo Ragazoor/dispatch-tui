@@ -272,7 +272,16 @@ impl TuiRuntime {
 
             let mut consecutive_failures = 0;
             let outcome = watch_editor(
-                || window_alive_with_bounded_retry(&window, &*runner, &mut consecutive_failures),
+                || {
+                    // The board is gone (quit dropped the receiver): stop
+                    // watching so shutdown does not wait for the editor.
+                    !msg_tx.is_closed()
+                        && window_alive_with_bounded_retry(
+                            &window,
+                            &*runner,
+                            &mut consecutive_failures,
+                        )
+                },
                 || std::thread::sleep(POLL_INTERVAL),
                 || std::fs::read_to_string(&path),
             );
@@ -358,26 +367,53 @@ impl TuiRuntime {
             phoenix,
         } = applied;
 
-        let mut params = UpdateTaskParams::for_task(task_id)
-            .status(status)
-            .plan_path(plan_path)
-            .title(title.clone())
-            .description(description.clone())
-            .repo_path(repo_path.clone())
-            .tag(Some(tag))
-            .base_branch(base_branch.clone())
-            .wrap_up_mode(wrap_up_mode)
-            .model(model)
-            .phoenix(phoenix);
-        // Only forward a url change when the edit actually altered it.
-        if let Some(url_update) = url {
-            params = params.url(url_update);
+        // Send only what the user changed against the snapshot the editor
+        // opened with. The snapshot can be stale: an agent may have moved the
+        // task, or `set_model` may have run, while the editor was open.
+        let mut params = UpdateTaskParams::for_task(task_id);
+        if status != task.status {
+            params.status = Some(status);
         }
+        if title != task.title {
+            params.title = Some(title.clone());
+        }
+        if description != task.description {
+            params.description = Some(description.clone());
+        }
+        if repo_path != task.repo_path {
+            params.repo_path = Some(repo_path.clone());
+        }
+        if resolved_plan_path != task.plan_path {
+            params.plan_path = Some(plan_path);
+        }
+        if tag != task.tag {
+            params.tag = Some(tag);
+        }
+        if let Some(branch) = base_branch.as_ref().filter(|b| **b != task.base_branch) {
+            params.base_branch = Some(branch.clone());
+        }
+        if wrap_up_mode != task.wrap_up_mode {
+            params.wrap_up_mode = Some(wrap_up_mode);
+        }
+        if model != task.model {
+            params.model = Some(model);
+        }
+        if phoenix != task.phoenix {
+            params.phoenix = Some(phoenix);
+        }
+        // Only forward a url change when the edit actually altered it.
+        params.url = url;
 
-        if let Err(e) = self.task_svc.update_task(params).await {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("updating task", e),
-            )));
+        if !params.updated_field_names().is_empty() {
+            if let Err(e) = self.task_svc.update_task(params).await {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("updating task", e),
+                )));
+                // Return before the optimistic update and the repo-path save.
+                // The write was refused, so showing the edit would report an
+                // error beside evidence that it worked.
+                return vec![];
+            }
         }
 
         // Persist non-empty edited repo_path to the known list so sibling
@@ -424,27 +460,38 @@ impl TuiRuntime {
         // needed to tell "changed" from "left alone" for the take-over
         // prompt (epics.allium: EditEpic).
         let original_feed_command = epic.feed_command.clone();
-        if let Err(e) = self
-            .epic_svc
-            .update_epic(UpdateEpicParams {
-                title: Some(applied.title.clone()),
-                description: Some(applied.description.clone()),
-                feed_command: Some(applied.feed_command.clone()),
-                feed_interval_secs: Some(applied.feed_interval_secs),
-                visibility: applied.visibility,
-                ..UpdateEpicParams::for_epic(epic_id)
-            })
-            .await
-        {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("updating epic", e),
-            )));
-            // Return before the optimistic update below. The write was refused
-            // — a sub-floor feed_interval_secs is the reachable case
-            // (epics.allium: EditEpic) — so applying it locally anyway would
-            // report an error while showing the user evidence it succeeded, and
-            // the board would only self-correct on the next DB refresh.
-            return vec![];
+        // Send only what the user changed against the snapshot the editor
+        // opened with, so a rename made while it was open is not reverted.
+        let new_feed_command = match &applied.feed_command {
+            crate::service::FieldUpdate::Set(c) => Some(c.clone()),
+            crate::service::FieldUpdate::Clear => None,
+        };
+        let mut params = UpdateEpicParams::for_epic(epic_id);
+        if applied.title != epic.title {
+            params.title = Some(applied.title.clone());
+        }
+        if applied.description != epic.description {
+            params.description = Some(applied.description.clone());
+        }
+        if new_feed_command != epic.feed_command {
+            params.feed_command = Some(applied.feed_command.clone());
+        }
+        if applied.feed_interval_secs != epic.feed_interval_secs {
+            params.feed_interval_secs = Some(applied.feed_interval_secs);
+        }
+        params.visibility = applied.visibility;
+        if !params.updated_field_names().is_empty() {
+            if let Err(e) = self.epic_svc.update_epic(params).await {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("updating epic", e),
+                )));
+                // Return before the optimistic update below. The write was refused
+                // — a sub-floor feed_interval_secs is the reachable case
+                // (epics.allium: EditEpic) — so applying it locally anyway would
+                // report an error while showing the user evidence it succeeded, and
+                // the board would only self-correct on the next DB refresh.
+                return vec![];
+            }
         }
         let mut updated = epic;
         updated.title = applied.title;

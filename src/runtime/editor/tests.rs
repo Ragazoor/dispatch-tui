@@ -733,6 +733,79 @@ async fn finalize_task_edit_unchanged_repo_path_does_not_save() {
 }
 
 #[tokio::test]
+async fn finalize_task_edit_keeps_a_status_change_made_while_the_editor_was_open() {
+    // W3: the snapshot is taken at open. A description-only save must not put
+    // the status back to the snapshot's value.
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let snapshot = seed_task(&*db).await;
+    let text =
+        crate::editor::format_editor_content(&snapshot).replace("Original desc", "Edited desc");
+
+    let (tx, _rx) = unbounded_channel();
+    let rt = editor_runtime(db.clone(), runner.clone(), tx);
+    rt.task_svc
+        .update_task(
+            UpdateTaskParams::for_task(snapshot.id)
+                .status(TaskStatus::Review)
+                .model(Some(crate::models::TaskModel::Opus)),
+        )
+        .await
+        .unwrap();
+    let mut app = App::new(vec![snapshot.clone()]);
+
+    rt.exec_finalize_editor_result(
+        &mut app,
+        EditKind::TaskEdit(Box::new(snapshot.clone())),
+        EditorOutcome::Saved(text),
+    )
+    .await;
+
+    let updated = db.get_task(snapshot.id).await.unwrap();
+    assert_eq!(updated.description, "Edited desc");
+    assert_eq!(updated.status, TaskStatus::Review, "status was reverted");
+    assert_eq!(
+        updated.model,
+        Some(crate::models::TaskModel::Opus),
+        "model was reverted"
+    );
+}
+
+#[tokio::test]
+async fn finalize_task_edit_does_not_show_a_refused_edit() {
+    // W4: when the write fails, the board must not show the edit and the
+    // repo path must not be saved.
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let task = seed_task(&*db).await;
+
+    let (tx, _rx) = unbounded_channel();
+    let rt = editor_runtime(db.clone(), runner.clone(), tx);
+    rt.task_svc
+        .update_task(UpdateTaskParams::for_task(task.id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+    rt.task_svc.delete_task(task.id).await.unwrap();
+    let mut app = App::new(vec![task.clone()]);
+
+    let text = crate::editor::format_editor_content(&task)
+        .replace("Original title", "Refused title")
+        .replace("/orig/repo", "/refused/repo");
+    rt.exec_finalize_editor_result(
+        &mut app,
+        EditKind::TaskEdit(Box::new(task.clone())),
+        EditorOutcome::Saved(text),
+    )
+    .await;
+
+    assert_eq!(app.tasks()[0].title, "Original title");
+    assert!(!db
+        .list_repo_paths()
+        .await
+        .contains(&"/refused/repo".to_string()));
+}
+
+#[tokio::test]
 async fn finalize_task_edit_cancelled_does_not_change_db() {
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let db = Arc::new(Store::open_in_memory().unwrap());
