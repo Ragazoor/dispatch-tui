@@ -40,6 +40,148 @@ use "./cli.allium" as cli
 use "./startup.allium" as startup
 
 ------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- A FeedItem is the wire format that a feed_command emits. The runner
+-- spawns the command, parses stdout as a JSON array of FeedItem, and
+-- upserts each item as a Task under the owning Epic.
+--
+-- The command is responsible for whatever upstream fetching is needed
+-- (e.g. calling `gh api`, scraping a dashboard). The dispatch runtime is
+-- only responsible for invocation, parsing, and persistence.
+
+value FeedItem {
+    external_id: String       -- stable, unique-per-feed identifier (e.g. "pr:acme/app#42")
+    title: String
+    description: String
+    url: String = ""          -- optional external URL; empty string when absent.
+                              -- When the URL points to a known GitHub repo whose
+                              -- local clone is registered in the dispatch repo
+                              -- list, the runner uses it to resolve a repo_path
+                              -- for the inserted Task. See UpsertFeedTasks.
+    url_type: core/UrlType?   -- optional explicit type for `url`. When set, the
+                              -- inserted Task's url_type is taken verbatim from
+                              -- this field; when absent, the type is inferred
+                              -- from the URL string (see UpsertFeedTasks).
+                              -- Lets a feed declare types inference cannot
+                              -- reach — e.g. the security feed declaring
+                              -- security_alert for Dependabot alert URLs that
+                              -- would otherwise classify as other. Defaults to
+                              -- absent when the script omits the field,
+                              -- preserving wire compatibility with scripts
+                              -- written before this field existed. Ignored
+                              -- when url is empty (there is no URL to type).
+    status: core/TaskStatus   -- desired column for newly-inserted tasks
+    tag: core/TaskTag         -- required: drives DispatchMode for the inserted
+                              -- Task. Feed scripts must set this so dispatch
+                              -- routes the task to the correct agent (e.g.
+                              -- pr_review for Dependabot PRs, fix for
+                              -- security alerts). Missing or unknown tag
+                              -- causes parse failure in verify-feed and the
+                              -- FeedRunner.
+                              --
+                              -- A REVIEW tag (core/TaskTag.is_review — today
+                              -- dependabot, pr_review and release_please)
+                              -- additionally
+                              -- REQUIRES `url` to name a pull request: see
+                              -- the FeedItemParse contract's
+                              -- AReviewTaggedFeedItemNamesItsPr. Nothing else
+                              -- constrains the pair.
+    labels: List<String> = [] -- optional free-form labels copied to Task.labels
+                              -- on insert and re-applied on every conflict update.
+                              -- Ordered: the JSON array order is preserved through
+                              -- to badge rendering order on the card
+                              -- (feed-controlled, not user-editable). Defaults
+                              -- to the empty list when the script omits the field,
+                              -- preserving wire compatibility with scripts
+                              -- written before this field existed.
+    sort_order: Integer?      -- optional ordering hint copied to Task.sort_order;
+                              -- a column sorts lower values first, and a task
+                              -- without one by its id. Used by the CVE feed to surface CRITICAL
+                              -- alerts above HIGH/MEDIUM/LOW (1=CRITICAL, 2=HIGH,
+                              -- 3=MEDIUM, 4=LOW). Optional; omission leaves
+                              -- Task.sort_order unchanged.
+    wrap_up_mode: core/WrapUpMode? -- optional; sets the inserted Task's
+                              -- wrap_up_mode. Applied on INSERT only: on a
+                              -- conflict (re-poll of the same external_id) the
+                              -- existing Task's wrap_up_mode is preserved, like
+                              -- status/sub_status/repo_path, so a user's manual
+                              -- change survives feed refreshes — as long as the
+                              -- item remains present in every emission (an item
+                              -- that drops out and later reappears is deleted
+                              -- and reinserted, taking the feed value again;
+                              -- same tradeoff as status/repo_path). Absent
+                              -- leaves the Task's wrap_up_mode null (decide at
+                              -- wrap-up time). Used by the CVE-alert feed
+                              -- scripts (fetch-cve.sh, fetch-security.sh) to
+                              -- default fix tasks to pr so wrap-up goes
+                              -- straight to a PR — a CVE-shaped item defaults
+                              -- to pr whichever of the two emits it, except a
+                              -- fetch-cve.sh item linked to an existing fix PR,
+                              -- which defaults to done — and by fetch-log-warnings.sh
+                              -- to default its triage cards to rebase. Why each
+                              -- script picks the path it does is in
+                              -- feed-scripts.allium, not here.
+                              -- Defaults to absent when the
+                              -- script omits the field, preserving wire
+                              -- compatibility with scripts written before
+                              -- this field existed.
+    signals: Set<Signal> = {} -- optional routing signals a feed script attaches
+                              -- to this item; routed into the right feed bucket
+                              -- by the RouteSignals contract. Defaults to the
+                              -- empty set when the script omits the field,
+                              -- preserving wire compatibility with scripts
+                              -- written before this field existed.
+                              --
+                              -- UNRECOGNISED signal values are DROPPED with a
+                              -- warning rather than failing the whole item. This
+                              -- is a deliberate, scoped exception to the
+                              -- otherwise strict feed-JSON parse-failure rule
+                              -- (and to the Storage Boundary Validation rule in
+                              -- core.allium): a newer feed script's signal value
+                              -- must not break ingest on an older dispatch
+                              -- binary. This contrasts with `tag`, where an
+                              -- unknown value DOES cause parse failure, because
+                              -- tag drives dispatch routing and a silent drop
+                              -- there would mis-route the task.
+                              --
+                              -- BOTH halves of that contrast -- lenient signals
+                              -- and strict tag -- are properties of the FeedItem
+                              -- decode itself, not of any one caller, so they
+                              -- apply UNIFORMLY to all three feed entry points
+                              -- (auto-poll, manual "r", verify-feed). No caller
+                              -- can opt out of either, and none can drift from
+                              -- the others on this. Where the drop WARNING lands
+                              -- does differ by entry point: the two runtime paths
+                              -- log it to app.log, while verify-feed surfaces it
+                              -- on stderr (VerifyFeed).
+}
+
+-- One line's worth of what applying the feed_scripts artefact did to one
+-- dispatch-owned feed script. Carries the FULL path, not the bare name, because the only outcome
+-- a user has to act on (kept) is actionable only if they can find the file.
+value ShippedScriptReport {
+    name: String                        -- the shipped file name, e.g. "fetch-cve.sh"
+    path: String                        -- absolute path under <data_dir>/scripts/
+    outcome: ShippedScriptOutcome
+    backup_path: String?                -- set iff the overwrite was preceded by a
+                                        -- .bak copy, i.e. only on the approved
+                                        -- unknown-provenance branch. Named in the
+                                        -- report so the user can restore. A
+                                        -- single path, not a list: the backup
+                                        -- always REPLACES any existing .bak (see
+                                        -- InstallShippedFeedScripts branch 4).
+    error: String?                      -- set iff outcome = failed, carrying the
+                                        -- underlying error text (permission
+                                        -- denied, disk full). Non-null exactly
+                                        -- when the outcome is failed: every other
+                                        -- outcome is a success and has nothing to
+                                        -- report, and a failure with no error
+                                        -- text is a line the user cannot act on.
+}
+
+------------------------------------------------------------
 -- Contracts
 ------------------------------------------------------------
 
@@ -232,6 +374,135 @@ contract ExcludeFromReviews {
         -- src/feed/ingest/tests.rs for the reconcile behaviour.
 }
 
+-- The JSON decode of a feed command's stdout into FeedItems lives in ONE
+-- shared function, called by ALL THREE feed entry points: the shared feed
+-- cycle (src/feed/cycle.rs::FeedCycle::run, which serves both the auto-poll
+-- job and the manual "r" refresh) and the verify-feed CLI
+-- (src/main.rs::cmd_verify_feed). N call sites would be N places a change to
+-- the wire format could land in one path and not the others.
+--
+-- The cross-field rule is checked here rather than in FeedItem's own decode
+-- because serde's field attributes cannot see a sibling field: a cross-field
+-- rule there would need a shadow struct duplicating every field. The single
+-- decode point is just as uniform for everything that arrives over the wire.
+--
+-- WHAT IT DOES NOT COVER, deliberately: the rule guards the DECODE, not the
+-- STORAGE boundary. The module's upsert does not re-validate, so a FeedItem
+-- built as a struct literal reaches the store unchecked. No production path
+-- does that — the only decoders are FeedCycle::run and cmd_verify_feed, both
+-- through this function, and nothing outside tests constructs the struct.
+-- A second enforcement point in the module would put a mid-transaction
+-- failure on a path with no unguarded producer, so the boundary stays where
+-- the wire is. A test fixture that could not have come off the wire is fixed
+-- rather than exempted.
+--
+-- WHY THE RULE EXISTS. Both shipped producers satisfy it by construction:
+-- each emits `url` straight from `gh`, which is always a /pull/ URL, and
+-- core/UrlType.infer types anything containing /pull/ as pr. So the rule costs
+-- nothing and pins what the dependabot runbook is entitled to assume — that a
+-- FEED-created review task names a PR the feed's own author filter already
+-- passed (dispatch-prompt.allium: AReviewRunbookCarriesOnlyTheBranchThatApplies).
+--
+-- BLAST RADIUS, ACCEPTED. fetch-reviews.sh emits ONE array for the whole
+-- review board, so a single non-conforming item empties the board for that
+-- cycle rather than costing one card. That is the trade the strict `tag` rule
+-- already makes, for the same reason: a missing card is the failure mode that
+-- goes unnoticed.
+--
+-- The CALLER SETS differ between the shared layers: the parse is shared by all
+-- three entry points, the exec (src/feed/exec.rs::exec_feed_command) by only
+-- the two runtime ones. verify-feed spawns its own `sh -c`, having no epic and
+-- wanting terminal output rather than app.log (FeedCommandStderrOnSuccess).
+-- The module's ingest_feed is the single role dispatcher (FeedSync, under
+-- Rules).
+
+contract FeedItemParse {
+    parse_feed_items: (stdout: String) -> List<FeedItem>
+
+    @invariant OneDecodeForEveryEntryPoint
+        -- The auto-poll job, the manual "r" refresh and verify-feed all decode
+        -- through parse_feed_items. None has a decode of its own.
+
+    @invariant DecodeRulesBelongToTheItem
+        -- Strict `tag` and `url_type` rejection and lenient `signals` dropping
+        -- are properties of FeedItem's decode, not of any caller, so every
+        -- caller gets them identically and none can opt out.
+
+    @invariant AReviewTaggedFeedItemNamesItsPr
+        -- The one CROSS-FIELD rule, and the one thing parse_feed_items checks
+        -- itself. An item whose `tag` satisfies core/TaskTag.is_review must
+        -- carry a `url` that types as pr. Anything else — an empty url, or one
+        -- that types as issue, security_alert or other — REJECTS THE WHOLE
+        -- EMISSION, exactly like an unknown `tag`, and for the same reason:
+        -- both are producer bugs a silent drop would hide.
+
+    @invariant PresentationIsNotShared
+        -- Only the decode is common. The manual path renders a parse failure
+        -- as a status-bar string; verify-feed prints the message plus the
+        -- first config.verify_feed_preview_chars characters of the stdout.
+
+    @guidance
+        -- Implementation: src/feed/parse.rs::parse_feed_items, re-exported
+        -- from src/feed/mod.rs. The lenient half of the item decode is
+        -- src/models/tasks.rs::deserialize_lenient_signals.
+}
+
+-- The black boxes InstallShippedFeedScripts and InstallShippedFeedConfigs
+-- write through, and the properties they keep. Each invariant quantifies over
+-- filesystem state, which this spec has no entity for.
+
+contract ShippedFeedScriptFiles {
+    -- One report per entry of config.shipped_scripts, in that order, carrying
+    -- the outcome InstallShippedFeedScripts' branches produced for it —
+    -- `failed`, with the error text, for any script whose backup or write
+    -- raised. It is the branch classification, surfaced for reporting; it
+    -- re-derives nothing and decides nothing.
+    shipped_script_reports: (data_dir: String) -> List<ShippedScriptReport>
+
+    @invariant OneReportPerScript
+        -- Every script yields exactly one report whether it succeeded or not:
+        -- the loop never exits early, so a failure mid-list cannot truncate
+        -- the reports for the scripts after it.
+
+    @invariant ConfigFilesAreNeverOverwritten
+        -- The apply never writes over a file that already exists at a config
+        -- path under <data_dir>/scripts/. No prompt and no manifest state
+        -- unlocks it: InstallShippedFeedConfigs has exactly one write branch
+        -- and it is guarded on absence.
+
+    @invariant UnknownProvenanceIsNeverSilentlyOverwritten
+        -- A shipped script whose on-disk content matches NEITHER the shipped
+        -- content NOR the recorded digest is overwritten only after an
+        -- explicit interactive yes. When nobody can answer it is always kept.
+        -- The manifest exists to make this cheap: without it every differing
+        -- script would need a prompt, and a prompt the user cannot avoid is a
+        -- prompt the user stops reading.
+
+    @invariant EveryDestructiveWriteIsPrecededByABackup
+        -- The one branch that can replace content dispatch did not write
+        -- copies the existing file to <name><config.script_backup_suffix>
+        -- BEFORE writing. The ordering is the invariant: "back up after
+        -- writing" is no version of it. The backup is FALLIBLE, and the
+        -- invariant survives that: if the copy raises, dispatch abandons that
+        -- script — no write is attempted, the on-disk copy is left as the user
+        -- had it, and the script is reported `failed`. The backup REPLACES any
+        -- file already at the .bak path; that decides how many backups exist
+        -- (one per script), not whether one precedes the write.
+
+    @invariant FailedScriptsClaimNoProvenance
+        -- A script whose backup, write or chmod raised has NO digest recorded
+        -- in the manifest for that apply. Its on-disk content is unknown to
+        -- dispatch, so the next apply must reach branch 4 (unknown provenance)
+        -- and ask, rather than branch 3 (proven provenance), which overwrites
+        -- silently. Recording a digest dispatch did not successfully write
+        -- would convert a failure into future consent.
+
+    @guidance
+        -- Implementation: src/setup/plugins.rs::install_shipped_feed_scripts
+        -- returns the reports; src/setup/plugins.rs::install_shipped_feed_configs
+        -- writes the config files.
+}
+
 ------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
@@ -278,152 +549,6 @@ enum Signal { direct_request | team_request | reviewed | commented | author_bot 
 --                apply continues; no digest is recorded. See
 --                InstallShippedFeedScripts' PER-SCRIPT FAILURE section.
 enum ShippedScriptOutcome { in_sync | installed | updated | kept | failed }
-
-------------------------------------------------------------
--- FeedItem
-------------------------------------------------------------
-
--- A FeedItem is the wire format that a feed_command emits. The runner
--- spawns the command, parses stdout as a JSON array of FeedItem, and
--- upserts each item as a Task under the owning Epic.
---
--- The command is responsible for whatever upstream fetching is needed
--- (e.g. calling `gh api`, scraping a dashboard). The dispatch runtime is
--- only responsible for invocation, parsing, and persistence.
-
-value FeedItem {
-    external_id: String       -- stable, unique-per-feed identifier (e.g. "pr:acme/app#42")
-    title: String
-    description: String
-    url: String = ""          -- optional external URL; empty string when absent.
-                              -- When the URL points to a known GitHub repo whose
-                              -- local clone is registered in the dispatch repo
-                              -- list, the runner uses it to resolve a repo_path
-                              -- for the inserted Task. See UpsertFeedTasks.
-    url_type: core/UrlType?   -- optional explicit type for `url`. When set, the
-                              -- inserted Task's url_type is taken verbatim from
-                              -- this field; when absent, the type is inferred
-                              -- from the URL string (see UpsertFeedTasks).
-                              -- Lets a feed declare types inference cannot
-                              -- reach — e.g. the security feed declaring
-                              -- security_alert for Dependabot alert URLs that
-                              -- would otherwise classify as other. Defaults to
-                              -- absent when the script omits the field,
-                              -- preserving wire compatibility with scripts
-                              -- written before this field existed. Ignored
-                              -- when url is empty (there is no URL to type).
-    status: core/TaskStatus   -- desired column for newly-inserted tasks
-    tag: core/TaskTag         -- required: drives DispatchMode for the inserted
-                              -- Task. Feed scripts must set this so dispatch
-                              -- routes the task to the correct agent (e.g.
-                              -- pr_review for Dependabot PRs, fix for
-                              -- security alerts). Missing or unknown tag
-                              -- causes parse failure in verify-feed and the
-                              -- FeedRunner.
-                              --
-                              -- A REVIEW tag (core/TaskTag.is_review — today
-                              -- dependabot, pr_review and release_please)
-                              -- additionally
-                              -- REQUIRES `url` to name a pull request: see
-                              -- the FeedItemParse contract's
-                              -- AReviewTaggedFeedItemNamesItsPr. Nothing else
-                              -- constrains the pair.
-    labels: List<String> = [] -- optional free-form labels copied to Task.labels
-                              -- on insert and re-applied on every conflict update.
-                              -- Ordered: the JSON array order is preserved through
-                              -- to badge rendering order on the card
-                              -- (feed-controlled, not user-editable). Defaults
-                              -- to the empty list when the script omits the field,
-                              -- preserving wire compatibility with scripts
-                              -- written before this field existed.
-    sort_order: Integer?      -- optional ordering hint copied to Task.sort_order;
-                              -- a column sorts lower values first, and a task
-                              -- without one by its id. Used by the CVE feed to surface CRITICAL
-                              -- alerts above HIGH/MEDIUM/LOW (1=CRITICAL, 2=HIGH,
-                              -- 3=MEDIUM, 4=LOW). Optional; omission leaves
-                              -- Task.sort_order unchanged.
-    wrap_up_mode: core/WrapUpMode? -- optional; sets the inserted Task's
-                              -- wrap_up_mode. Applied on INSERT only: on a
-                              -- conflict (re-poll of the same external_id) the
-                              -- existing Task's wrap_up_mode is preserved, like
-                              -- status/sub_status/repo_path, so a user's manual
-                              -- change survives feed refreshes — as long as the
-                              -- item remains present in every emission (an item
-                              -- that drops out and later reappears is deleted
-                              -- and reinserted, taking the feed value again;
-                              -- same tradeoff as status/repo_path). Absent
-                              -- leaves the Task's wrap_up_mode null (decide at
-                              -- wrap-up time). Used by the CVE-alert feed
-                              -- scripts (fetch-cve.sh, fetch-security.sh) to
-                              -- default fix tasks to pr so wrap-up goes
-                              -- straight to a PR — a CVE-shaped item defaults
-                              -- to pr whichever of the two emits it, except a
-                              -- fetch-cve.sh item linked to an existing fix PR,
-                              -- which defaults to done — and by fetch-log-warnings.sh
-                              -- to default its triage cards to rebase. Why each
-                              -- script picks the path it does is in
-                              -- feed-scripts.allium, not here.
-                              -- Defaults to absent when the
-                              -- script omits the field, preserving wire
-                              -- compatibility with scripts written before
-                              -- this field existed.
-    signals: Set<Signal> = {} -- optional routing signals a feed script attaches
-                              -- to this item; routed into the right feed bucket
-                              -- by the RouteSignals contract. Defaults to the
-                              -- empty set when the script omits the field,
-                              -- preserving wire compatibility with scripts
-                              -- written before this field existed.
-                              --
-                              -- UNRECOGNISED signal values are DROPPED with a
-                              -- warning rather than failing the whole item. This
-                              -- is a deliberate, scoped exception to the
-                              -- otherwise strict feed-JSON parse-failure rule
-                              -- (and to the Storage Boundary Validation rule in
-                              -- core.allium): a newer feed script's signal value
-                              -- must not break ingest on an older dispatch
-                              -- binary. This contrasts with `tag`, where an
-                              -- unknown value DOES cause parse failure, because
-                              -- tag drives dispatch routing and a silent drop
-                              -- there would mis-route the task.
-                              --
-                              -- BOTH halves of that contrast -- lenient signals
-                              -- and strict tag -- are properties of the FeedItem
-                              -- decode itself, not of any one caller, so they
-                              -- apply UNIFORMLY to all three feed entry points
-                              -- (auto-poll, manual "r", verify-feed). No caller
-                              -- can opt out of either, and none can drift from
-                              -- the others on this. Where the drop WARNING lands
-                              -- does differ by entry point: the two runtime paths
-                              -- log it to app.log, while verify-feed surfaces it
-                              -- on stderr (VerifyFeed).
-}
-
-------------------------------------------------------------
--- Shipped script installation
-------------------------------------------------------------
-
--- One line's worth of what applying the feed_scripts artefact did to one
--- dispatch-owned feed script. Carries the FULL path, not the bare name, because the only outcome
--- a user has to act on (kept) is actionable only if they can find the file.
-value ShippedScriptReport {
-    name: String                        -- the shipped file name, e.g. "fetch-cve.sh"
-    path: String                        -- absolute path under <data_dir>/scripts/
-    outcome: ShippedScriptOutcome
-    backup_path: String?                -- set iff the overwrite was preceded by a
-                                        -- .bak copy, i.e. only on the approved
-                                        -- unknown-provenance branch. Named in the
-                                        -- report so the user can restore. A
-                                        -- single path, not a list: the backup
-                                        -- always REPLACES any existing .bak (see
-                                        -- InstallShippedFeedScripts branch 4).
-    error: String?                      -- set iff outcome = failed, carrying the
-                                        -- underlying error text (permission
-                                        -- denied, disk full). Non-null exactly
-                                        -- when the outcome is failed: every other
-                                        -- outcome is a success and has nothing to
-                                        -- report, and a failure with no error
-                                        -- text is a line the user cannot act on.
-}
 
 ------------------------------------------------------------
 -- Config
@@ -480,8 +605,10 @@ config {
 }
 
 ------------------------------------------------------------
--- Producing FeedItems
+-- Rules
 ------------------------------------------------------------
+
+-- == Producing FeedItems ==
 
 -- Feed scripts are user-owned executables that write a JSON array of
 -- FeedItem objects to stdout, exit 0 on success, and emit any errors on
@@ -533,7 +660,7 @@ rule VerifyFeed {
         -- Coverage: tests/cli.rs verify_feed_*.
         -- Spawns <command> via sh -c, parses stdout as FeedItem array via
         -- the shared src/feed/parse.rs::parse_feed_items (see the
-        -- FeedItemParse block below) -- not its own serde_json call.
+        -- FeedItemParse contract) -- not its own serde_json call.
         -- On success: print_table(items), exit 0.
         -- On failure (non-zero exit or parse error): print_stderr, exit 1;
         -- a parse error also prints the first
@@ -695,7 +822,7 @@ rule InstallShippedFeedScripts {
     --
     -- A BACKUP failure ABANDONS the script before the write: nothing is
     -- written, the on-disk copy is left exactly as the user had it, and the
-    -- outcome is `failed`. This is what keeps
+    -- outcome is `failed`. This is what keeps ShippedFeedScriptFiles'
     -- EveryDestructiveWriteIsPrecededByABackup true in the presence of a
     -- fallible backup — the fallback on "cannot back up" is to not destroy,
     -- never to destroy without a copy.
@@ -772,14 +899,8 @@ rule InstallShippedFeedScripts {
     -- further to do to that script this run — the failure leaves the rule
     -- via the report, not via an alternative write path.
     --
-    -- `shipped_script_reports(data_dir)` yields one ShippedScriptReport per
-    -- entry in config.shipped_scripts, carrying the outcome the branches
-    -- above produced for it — `failed`, with the error text, for any script
-    -- whose backup or write raised. It is the branch classification,
-    -- surfaced for reporting; it re-derives nothing and decides nothing.
-    -- Every script yields exactly one report whether it succeeded or not:
-    -- the loop never exits early, so a failure mid-list cannot truncate the
-    -- reports for the scripts after it.
+    -- `shipped_script_reports(data_dir)` is the ShippedFeedScriptFiles
+    -- contract's: one report per script, in config order.
 
     @guidance
         -- Implementation:
@@ -948,10 +1069,6 @@ rule ReportShippedFeedScripts {
 -- fetch-dependabot.sh is still installed (InstallShippedFeedScripts) so an
 -- operator can wire an epic to it by hand; installing the file creates no
 -- row.
-
-------------------------------------------------------------
--- Rules
-------------------------------------------------------------
 
 -- == Polling ==
 
@@ -1951,6 +2068,9 @@ rule FlatFeedReconcile {
         -- orphaned. Every path is one transaction: a refusal anywhere rolls
         -- the whole ingest back, so there is no
         -- partial pass to salvage and no per-write log-and-continue.
+        -- The re-home MOVES the existing row (writes epic_id in place), never
+        -- deletes and recreates it: a feed epic's subtree holds at most one
+        -- task per external_id, and a move can never collide with itself.
         -- Coverage: src/feed/ingest/tests.rs (re-home + delete empty RepoGroup
         -- sub-epic on flat sync; no-op when no sub-epics exist; manual sub-epics
         -- preserved; reviews_parent epic unaffected — routed to
@@ -2478,7 +2598,7 @@ rule FeedCommandFailure {
     --      finish or orphaned; the exec never produces output for the
     --      degraded-emission guards to see, so this bucket is reached the
     --      same way buckets 1-2 are — before any parse. See
-    --      SerialisedFeedCycle's bounded-cost note below.
+    --      SerialisedFeedCycle's bounded-cost note above.
     --
     -- Bucket 5 also covers the epic being deleted WHILE the command runs
     -- (it can run for minutes): the store then refuses the sync with
@@ -3046,80 +3166,6 @@ rule AppendOnlyFeed {
         -- (upsert_feed_tasks_inserts_no_task_for_a_retired_external_id).
 }
 
-
--- FeedItemParse (conceptual): the JSON decode of a feed command's stdout into
--- Vec<FeedItem> lives in ONE shared function, src/feed/parse.rs::parse_feed_items,
--- called by ALL THREE feed entry points:
---
---   - src/feed/cycle.rs::FeedCycle::run        (BOTH runtime paths: the
---     auto-poll job and the manual "r" refresh share this one cycle)
---   - src/main.rs::cmd_verify_feed             (verify-feed CLI)
---
--- One function rather than three literal serde_json calls, because N call sites
--- are N places a change to the feed wire format can land in one path and not the
--- others -- the drift shape that produced the reviews_parent parent-flat bug in
--- the sync layer.
---
--- Two properties of that centralisation are load-bearing:
---
---   - The DECODE RULES are NOT per-caller and never were. Strict `tag`/`url_type`
---     rejection and lenient `signals` dropping belong to FeedItem's Deserialize
---     impl (src/models/tasks.rs::deserialize_lenient_signals for the lenient
---     half), so every caller gets them identically and none can opt out.
---   - AReviewTaggedFeedItemNamesItsPr is the one CROSS-FIELD rule, and it is the
---     one thing parse_feed_items validates itself. An item whose `tag` satisfies
---     core/TaskTag.is_review must carry a `url` that types as pr; anything else
---     — an empty url, or one that types as issue, security_alert or other —
---     REJECTS THE WHOLE EMISSION, exactly like an unknown `tag`, and for the
---     same reason: both are producer bugs a silent drop would hide.
---
---     Why not in Deserialize with the others: serde's field attributes cannot
---     see a sibling field, so a cross-field rule there means a shadow struct
---     duplicating all ten fields — the parity-drift shape this repo already
---     guards against elsewhere. parse_feed_items is the single decode point for
---     all three entry points, so a check placed there is just as uniform for
---     everything that arrives over the wire.
---
---     WHAT IT DOES NOT COVER, deliberately: the rule guards the DECODE, not the
---     STORAGE boundary. the module's upsert does not re-validate, so a FeedItem
---     built as a struct literal reaches the DB unchecked. No production path
---     does that — the only two decoders are FeedCycle::run and cmd_verify_feed,
---     both via parse_feed_items, and nothing outside tests constructs the
---     struct — but several DB-layer tests do, and they are asserting ingest
---     rather than decode. Adding a second enforcement point there would put a
---     mid-transaction failure on a path with no unguarded producer, so the
---     boundary stays where the wire is. A test fixture that could not have come
---     off the wire is still worth fixing rather than exempting, which is what
---     the ones affected by this rule got.
---
---     WHY THE RULE EXISTS. Both shipped producers already satisfy it by
---     construction: each emits `url` straight from `gh`, which is always a
---     /pull/ URL, and core/UrlType.infer types anything containing /pull/ as
---     pr. So the rule costs nothing today and pins what the dependabot runbook
---     is entitled to assume — that a FEED-created review task names a PR the
---     feed's own author filter already passed. See
---     AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch-prompt.allium, whose
---     author-check omission is gated on that provenance.
---
---     BLAST RADIUS, ACCEPTED. fetch-reviews.sh emits ONE array for the whole
---     review board, so a single non-conforming item empties the board for that
---     cycle rather than costing one card. That is the same trade the strict
---     `tag` rule already makes, and it is preferred here for the same reason: a
---     missing card is the failure mode that goes unnoticed.
---   - PRESENTATION of a parse failure is deliberately NOT shared: the manual path
---     renders a status-bar string, verify-feed prints the message plus a
---     500-character preview of the offending stdout. Only the decode is common.
---
--- Note the CALLER SETS differ between the shared layers: the parse is shared by
--- all three entry points, the exec (exec_feed_command) by only the two runtime
--- ones -- verify-feed deliberately spawns its own `sh -c`, having no
--- epic_id/epic_title and wanting terminal output rather than app.log (see
--- FeedCommandStderrOnSuccess). The module's ingest_feed is the single role
--- dispatcher (see the FeedSync block below).
---
--- Implementation: src/feed/parse.rs::parse_feed_items, re-exported from
--- src/feed/mod.rs.
-
 -- == Retired feed items ==
 
 -- A core/RetiredFeedItem records an external_id the user deleted from a feed
@@ -3127,7 +3173,7 @@ rule AppendOnlyFeed {
 -- DeleteEpic). It exists so that delete means "I am done with this item"
 -- rather than "show it to me again on the next poll".
 --
--- IngestSkipsRetiredFeedItems. No sync path ever INSERTS a task for an id
+-- Ingest skips retired items. No sync path ever INSERTS a task for an id
 -- retired under the feed epic whose cycle emitted it — flat, grouped and
 -- role-routed alike, reconcile and additive alike:
 --
@@ -3483,19 +3529,18 @@ rule ServeFeedTeardownRequest {
 -- Invariants
 ------------------------------------------------------------
 
--- OneFeedCycleAtATimePerEpic (prose invariant): at most one feed cycle per epic
--- is in flight at any moment. Enforced by SerialisedFeedCycle. Stated as prose
--- rather than as an expression-bearing invariant because a cycle is an
--- in-process activity, not entity state — there is nothing to quantify over.
+-- One feed cycle at a time per epic (prose invariant, enforced by
+-- SerialisedFeedCycle): at most one feed cycle per epic is in flight at any
+-- moment. Stated as prose because a cycle is an in-process activity, not entity
+-- state — there is nothing to quantify over.
 --
--- This is what makes RoleRoutedFeedSync's keep-set sound. Since store-split M3
--- its steps run in one module transaction, so two cycles can no longer
--- interleave INSIDE the sync; but each cycle's keep-set comes from the
--- emission it fetched, and the argument that "a task in the subtree but
--- absent from this emission is stale" holds only if no other cycle for the
--- same epic wrote between this cycle's exec and its sync. Because the
--- stale-delete feeds TaskTeardown, breaking it destroys a live agent's worktree
--- rather than merely losing a row.
+-- This is what makes RoleRoutedFeedSync's keep-set sound. Its steps run in one
+-- module transaction, so two cycles cannot interleave INSIDE the sync; but each
+-- cycle's keep-set comes from the emission it fetched, and the argument that "a
+-- task in the subtree but absent from this emission is stale" holds only if no
+-- other cycle for the same epic wrote between this cycle's exec and its sync.
+-- Because the stale-delete feeds TaskTeardown, breaking it destroys a live
+-- agent's worktree rather than merely losing a row.
 --
 -- Deliberately scoped to "another CYCLE", not "another writer": a concurrent
 -- non-feed writer moving a task into the reconciled subtree can still produce
@@ -3507,49 +3552,12 @@ rule ServeFeedTeardownRequest {
 -- never flat on the parent. RoleRoutedFeedSync maintains this by moving any
 -- parent-stranded feed task down to its routed role sub-epic and by deleting
 -- stale parent-stranded feed tasks. A violation means an emission bypassed the
--- role router with a flat upsert (the manual-trigger / stale-parent-task bug),
--- which also deadlocks the subtree-uniqueness constraint on the next
--- reconcile.
+-- role router with a flat upsert.
 -- Manual (external_id = null) tasks on the parent are permitted and unaffected.
 invariant NoFlatFeedTasksOnReviewsParent {
     for epic in core/Epics where feed_role = reviews_parent:
         not epic.subtasks.any(t => t.external_id != null)
 }
-
--- ConfigFilesAreNeverOverwritten (prose invariant): the apply never writes over a
--- file that already exists at a config path under <data_dir>/scripts/. There
--- is no flag, no prompt and no manifest state that unlocks it —
--- InstallShippedFeedConfigs has exactly one write branch and it is guarded on
--- absence. Stated as prose because it quantifies over filesystem state, which
--- this spec has no entity for.
---
--- UnknownProvenanceIsNeverSilentlyOverwritten (prose invariant): a shipped
--- script whose on-disk content matches NEITHER the shipped content NOR the
--- recorded digest is overwritten only after an explicit interactive yes.
--- When nobody can answer it is always kept. This is the invariant the manifest exists to
--- make cheap: without it every differing script would need a prompt, and a
--- prompt the user cannot avoid is a prompt the user stops reading.
---
--- EveryDestructiveWriteIsPrecededByABackup (prose invariant): the one branch
--- that can replace content dispatch did not write copies the existing file to
--- <name><config.script_backup_suffix> BEFORE writing. The ordering is part of
--- the invariant, not an implementation detail: "back up after writing" is not
--- a weaker version of this, it is no version of it.
---
--- The backup is FALLIBLE, and the invariant survives that: if the copy raises,
--- dispatch abandons that script — no write is attempted, the on-disk copy is
--- left as the user had it, and the script is reported `failed`. So there is
--- still no reachable state in which the destructive write happened and the
--- backup did not. The backup REPLACES any file already at the .bak path; that
--- is a decision about how many backups exist (one per script), not about
--- whether one precedes the write.
---
--- FailedScriptsClaimNoProvenance (prose invariant): a script whose backup,
--- write or chmod raised has NO digest recorded in the manifest for that run.
--- Its on-disk content is unknown to dispatch, so the next apply must reach
--- branch 4 (unknown provenance) and ask, rather than branch 3 (proven
--- provenance), which overwrites silently. Recording a digest dispatch did not
--- successfully write would convert a failure into future consent.
 
 -- The floor binds the RESOLVED cadence, not merely the stored one, so the
 -- fallback an unset epic inherits must itself clear the floor. Were
@@ -3562,49 +3570,22 @@ invariant DefaultFeedIntervalClearsTheFloor {
 }
 
 ------------------------------------------------------------
--- Notifications
+-- Surfaces
 ------------------------------------------------------------
 
--- After a successful sync (regardless of whether any tasks actually
--- changed), the runner sends one BoardEvent::EpicChanged per affected epic on
--- the notification channel so the TUI reloads only those epics and their
--- tasks — not the whole board. Since store-split M3 the affected epics are the
--- feed epic and every epic below it, because the module does not say which of
--- them it wrote to (src/store/mod.rs::FeedIngestOutcome). Failed runs do NOT
--- send a refresh.
+-- The board keys this spec owns. The "r" key reaches ManualFeedTrigger and
+-- the yes answer to epics.allium's feed-ownership take-over prompt reaches
+-- OverrideFeedOwner; neither listens to keybindings.allium's KeyActionRun.
+surface FeedBoardKeys {
+    facing _: core/Operator
 
--- FlatFeedReconcile re-homing and subtree uniqueness (resolved): the
--- feed-task subtree-uniqueness triggers (enforce_feed_task_subtree_unique_
--- insert/update, migration v72) key their "role sub-epic" branch on
--- feed_role NOT IN ('none', 'reviews-parent') — this matches ANY
--- command-carrying feed_role, including a plain feed epic like CVE
--- (feed_role = cve), not only reviews_parent. So the triggers DO cover a
--- plain feed epic's own parent+RepoGroup subtree.
---
--- This is safe by construction, not merely by convention: the Feed Task
--- Identity Invariant guarantees at most one task row per external_id within
--- the subtree at any time. FlatFeedReconcile's re-home step therefore MUST
--- move the existing row (UPDATE epic_id, the same mechanism
--- the store's flatten_epic reducer already does, writing epic_id in place),
--- never delete-and-recreate — a move relocates the sole existing row for
--- that external_id and can never collide with itself, whereas a
--- delete+recreate would (even if only transiently) risk two rows sharing an
--- external_id in the subtree.
-
--- Insert-trigger self-conflict on in-place updates (resolved; the SQLite
--- triggers it concerned were removed with SQLite, task #36865): the "SAME role -> fields updated in place" path above (== Global
--- identity and the move ==) resolves via `INSERT ... ON CONFLICT(epic_id,
--- external_id) DO UPDATE` (UpsertFeedTasks' statement, reused here). SQLite
--- fires BEFORE INSERT triggers before resolving the ON CONFLICT arm, so the
--- v72 subtree-uniqueness insert trigger — whose EXISTS check
--- had no exclusion for the row ON CONFLICT was about to update, unlike the
--- sibling update trigger's `t.id != OLD.id` — matched the task's own prior
--- row and aborted, on EVERY re-upsert of an already-tracked task. Because
--- UpsertFeedTasks batches a whole epic's item list in one transaction, this
--- silently dropped any other new task batched alongside the false-positive,
--- not merely the offending one. Migration v76 adds `t.epic_id !=
--- NEW.epic_id` to the trigger's EXISTS check: safe because the
--- tasks_epic_external_id unique index (v38) already guarantees at most one
--- row per (epic_id, external_id), so the excluded match can only ever be the
--- self-row ON CONFLICT resolves against — never a second, distinct row, and
--- never a genuine cross-epic duplicate elsewhere in the subtree.
+    provides:
+        -- [r] (keybinding action refresh_feed) on a selected feed epic: its
+        -- card highlighted on the board, or focused inside the Epic view. On
+        -- a non-feed epic the key has no effect.
+        ManualFeedRefresh(epic)
+        -- [y] on epics.allium's FeedOwnerTakeoverOffered prompt ("This feed is
+        -- currently owned by <host> — take over polling? [y/N]"). Any other
+        -- answer emits nothing.
+        OverrideFeedOwner(epic)
+}

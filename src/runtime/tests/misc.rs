@@ -874,7 +874,7 @@ mod bootstrap {
         );
     }
 
-    /// docs/specs/feeds.allium, "Setup seeding": no example feed epic is
+    /// docs/specs/feeds.allium, "No feed epic is seeded": no example feed epic is
     /// seeded. A deleted "Dependabot" epic used to come back on every start.
     #[tokio::test]
     async fn bootstrap_seeds_no_example_feed_epic() {
