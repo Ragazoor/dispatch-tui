@@ -45,7 +45,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::process::ProcessRunner;
+use crate::process::{ProcessRunner, SUBPROCESS_TIMEOUT};
 use crate::startup_abort::StartupAbort;
 
 /// `startup.allium`'s `config.managed_store_address`. Loopback only.
@@ -525,7 +525,12 @@ impl SpacetimeCliPublisher {
             .map(String::from),
         );
         let args: Vec<&str> = argv.iter().map(String::as_str).collect();
-        match self.runner.run("spacetime", &args) {
+        // Bounded: a store that accepts connections but stalls on reducers must
+        // not hang startup. A timeout is an `Err`, reported as a warning.
+        match self
+            .runner
+            .run_with_timeout("spacetime", &args, SUBPROCESS_TIMEOUT)
+        {
             Err(e) => Err(format!("{e:#}")),
             Ok(output) if output.status.success() => Ok(()),
             Ok(output) => {

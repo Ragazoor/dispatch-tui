@@ -342,3 +342,63 @@ fn fetch_reviews_fails_the_emission_when_a_search_fails() {
     assert!(!ok, "a failed search must fail the run; stdout: {stdout}");
     assert!(stderr.contains("failed"), "stderr: {stderr}");
 }
+
+/// Runs a script from a temp dir with the given `bots.conf` and a stub `gh`
+/// that answers everything with an empty list. Returns (success, stdout, stderr).
+fn run_with_bots_conf(script_rel: &str, bots_conf: &str) -> (bool, String, String) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let name = std::path::Path::new(script_rel).file_name().unwrap();
+    let script = dir.path().join(name);
+    std::fs::write(&script, repo_file(script_rel)).unwrap();
+    std::fs::write(dir.path().join("bots.conf"), bots_conf).unwrap();
+    std::fs::write(dir.path().join("repos.conf"), "REPOS=(o/r)\n").unwrap();
+    std::fs::write(dir.path().join("teams.conf"), "TEAMS=()\n").unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let gh = bin.join("gh");
+    std::fs::write(&gh, format!("#!/usr/bin/env bash\n{GH_OK}\n")).unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = std::process::Command::new("bash")
+        .arg(&script)
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// A bad `bots.conf` is fatal, not a warning: the run fails with no emission,
+/// so the feed runner keeps the last good board instead of reconciling a
+/// partial one (feed-scripts.allium, "A malformed BOT_AUTHORS entry is fatal").
+/// That is why these warnings carry no `notice:` prefix: a notice means
+/// "emitted fine, here is a hint".
+#[test]
+fn bad_bots_conf_fails_both_readers_with_no_emission() {
+    for script in ["scripts/fetch-reviews.sh", "scripts/fetch-dependabot.sh"] {
+        for conf in [
+            "BOT_AUTHORS=(\"dependabot[bot]\")\n",
+            "BOT_AUTHORS=(app/x)\nRELEASE_BOT_AUTHORS=(app/x)\n",
+        ] {
+            let (ok, stdout, stderr) = run_with_bots_conf(script, conf);
+            assert!(!ok, "{script} must fail on {conf:?}; stderr: {stderr}");
+            assert!(stdout.trim().is_empty(), "{script} emitted: {stdout}");
+            assert!(
+                stderr.contains("bots.conf"),
+                "{script} must name the file: {stderr}"
+            );
+            assert!(
+                !stderr.lines().any(|l| l.starts_with("notice:")),
+                "a fatal config error is not a notice: {stderr}"
+            );
+        }
+    }
+}

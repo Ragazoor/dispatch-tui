@@ -111,6 +111,7 @@ pub async fn run_feed_command_bounded(
         // Same non-interactive environment as `run_bounded`.
         .envs(crate::process::non_interactive_env(
             std::env::var("GIT_SSH_COMMAND").ok().as_deref(),
+            std::env::var("SSH_ASKPASS_REQUIRE").ok().as_deref(),
         ))
         .kill_on_drop(true)
         .stdin(std::process::Stdio::null())

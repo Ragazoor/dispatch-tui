@@ -193,17 +193,23 @@ pub(crate) fn kill_process_group(pgid: u32, signal: &str) {
 }
 
 /// The environment every non-interactive child gets, shared by [`run_bounded`]
-/// and the feed runner. `GIT_TERMINAL_PROMPT=0` and `SSH_ASKPASS_REQUIRE=never` always. `GIT_SSH_COMMAND` is set
+/// and the feed runner. `GIT_TERMINAL_PROMPT=0` always; `SSH_ASKPASS_REQUIRE=never` unless
+/// the caller already set one. `GIT_SSH_COMMAND` is set
 /// only when the caller already set one, with `BatchMode=yes` appended: git
 /// ranks it above `core.sshCommand`, so inventing one would override the user's
 /// ssh config. Without one, [`detach_from_terminal`] stops ssh prompting.
-pub(crate) fn non_interactive_env(existing_ssh: Option<&str>) -> Vec<(&'static str, String)> {
+pub(crate) fn non_interactive_env(
+    existing_ssh: Option<&str>,
+    existing_askpass: Option<&str>,
+) -> Vec<(&'static str, String)> {
     // Without a tty ssh falls back to a GUI askpass when a display is set;
     // `never` stops that dialog. Child-only: the user's ssh config is untouched.
-    let mut env = vec![
-        ("GIT_TERMINAL_PROMPT", "0".to_string()),
-        ("SSH_ASKPASS_REQUIRE", "never".to_string()),
-    ];
+    let mut env = vec![("GIT_TERMINAL_PROMPT", "0".to_string())];
+    // Like `GIT_SSH_COMMAND` below, a value the user set stays: `force` with a
+    // keyring askpass is how they unlock keys.
+    if existing_askpass.map_or(true, |v| v.trim().is_empty()) {
+        env.push(("SSH_ASKPASS_REQUIRE", "never".to_string()));
+    }
     if let Some(command) = existing_ssh.map(str::trim).filter(|c| !c.is_empty()) {
         env.push(("GIT_SSH_COMMAND", format!("{command} -o BatchMode=yes")));
     }
@@ -302,6 +308,7 @@ pub(crate) fn run_bounded(
     timeout: Duration,
 ) -> Result<Output> {
     let ambient_ssh = std::env::var("GIT_SSH_COMMAND").ok();
+    let ambient_askpass = std::env::var("SSH_ASKPASS_REQUIRE").ok();
     use std::io::Write;
 
     let mut command = std::process::Command::new(program);
@@ -313,7 +320,10 @@ pub(crate) fn run_bounded(
     // and no controlling terminal: a prompt (ssh passphrase, https credential)
     // fails at once instead of stopping on SIGTTIN until the deadline.
     detach_from_terminal(&mut command);
-    command.envs(non_interactive_env(ambient_ssh.as_deref()));
+    command.envs(non_interactive_env(
+        ambient_ssh.as_deref(),
+        ambient_askpass.as_deref(),
+    ));
     // Never the caller's stdin: the board's is the operator's terminal, and a
     // child that reads it (a test reaching an interactive prompt) blocks and
     // takes keystrokes from the board.

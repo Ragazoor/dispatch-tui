@@ -587,7 +587,7 @@ fn mock_timeouts_stay_aligned_across_an_out_of_band_window_lookup() {
 
 #[test]
 fn non_interactive_env_sets_no_ssh_command_when_the_caller_has_none() {
-    let env = non_interactive_env(None);
+    let env = non_interactive_env(None, None);
     assert_eq!(
         env,
         vec![
@@ -599,14 +599,25 @@ fn non_interactive_env_sets_no_ssh_command_when_the_caller_has_none() {
 
 #[test]
 fn non_interactive_env_appends_batch_mode_to_the_callers_ssh_command() {
-    let env = non_interactive_env(Some("ssh -i /k"));
+    let env = non_interactive_env(Some("ssh -i /k"), None);
     assert!(env.contains(&("GIT_SSH_COMMAND", "ssh -i /k -o BatchMode=yes".to_string())));
     assert!(env.contains(&("GIT_TERMINAL_PROMPT", "0".to_string())));
 }
 
 #[test]
+fn non_interactive_env_keeps_the_callers_askpass_setting() {
+    let env = non_interactive_env(None, Some("force"));
+    assert!(
+        !env.iter().any(|(k, _)| *k == "SSH_ASKPASS_REQUIRE"),
+        "the user's own SSH_ASKPASS_REQUIRE must pass through untouched: {env:?}"
+    );
+    let env = non_interactive_env(None, Some(""));
+    assert!(env.contains(&("SSH_ASKPASS_REQUIRE", "never".to_string())));
+}
+
+#[test]
 fn non_interactive_env_ignores_an_empty_ssh_command() {
-    assert_eq!(non_interactive_env(Some("  ")).len(), 2);
+    assert_eq!(non_interactive_env(Some("  "), None).len(), 2);
 }
 
 #[test]

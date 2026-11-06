@@ -1355,6 +1355,20 @@ fn claiming_calls_the_reducer_on_the_managed_database_as_the_cli_login() {
 }
 
 #[test]
+fn claiming_is_bounded_and_a_timeout_is_an_error_not_a_hang() {
+    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    SpacetimeCliPublisher::new(runner.clone(), "/data/dispatch_module.wasm")
+        .claim_store_owner()
+        .unwrap();
+    let timeouts = runner.recorded_timeouts();
+    assert_eq!(timeouts.len(), 1);
+    assert!(
+        timeouts[0].is_some(),
+        "claim_store_owner must have a deadline"
+    );
+}
+
+#[test]
 fn a_store_that_already_has_a_publisher_counts_as_claimed() {
     let (outcome, _) = claim_with(MockProcessRunner::fail(
         "Error: this store already has a recorded publisher",

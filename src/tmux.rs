@@ -472,9 +472,10 @@ pub fn kill_window_at(target: &PaneId, runner: &dyn ProcessRunner) -> Result<()>
 /// the session's active pane, not the caller's.
 pub fn pane_pid(pane: &PaneId, runner: &dyn ProcessRunner) -> Option<u32> {
     let output = runner
-        .run(
+        .run_with_timeout(
             "tmux",
             &["display-message", "-p", "-t", pane.as_str(), "#{pane_pid}"],
+            SUBPROCESS_TIMEOUT,
         )
         .ok()?;
     if !output.status.success() {

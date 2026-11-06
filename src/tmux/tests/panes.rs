@@ -679,6 +679,17 @@ fn pane_pid_is_none_when_tmux_cannot_say() {
     assert_eq!(pane_pid(&test_pane_id("%3"), &mock), None);
 }
 
+#[test]
+fn pane_pid_is_bounded() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"4242\n")]);
+    pane_pid(&test_pane_id("%3"), &mock);
+    assert_eq!(
+        mock.recorded_timeouts(),
+        vec![Some(crate::process::SUBPROCESS_TIMEOUT)],
+        "a wedged tmux server must not hang the relaunch path"
+    );
+}
+
 // --- pane_exists ---
 
 #[test]
