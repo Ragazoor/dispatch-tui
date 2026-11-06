@@ -1254,6 +1254,11 @@ rule UpdateEpicIsOneTransaction {
     requires: epic.exists
 
     ensures: EpicPatchAccepted(epic: epic, patch: patch)
+    -- A patch that names a feed_command is held to feeds.allium's
+    -- FeedCommandAuthority (spacetime/module/src/tasks_epics.rs::may_change_feed_command).
+    ensures:
+        if patch.feed_command != null:
+            EpicFeedCommandSet(epic: epic, command: patch.feed_command)
     ensures:
         if workspace != null: epic.workspace = workspace
     ensures:
@@ -2747,6 +2752,6 @@ open question "Seeing other machines' requests (deferred past M7, and so beyond 
 
 open question "Feed request prune emitters (task #98873): RequestRowsArePruned sweeps feed_requests, and the module runs that sweep from request_feed_refresh and from the stale delete that writes a teardown row (task #98909), but not from request_dispatch or request_wrap_up. A person who dispatches and wraps up but whose feed epics only run on one host therefore prunes finished teardown rows only when a stale delete writes the next one. Should every request write sweep all three tables, or is the sweep at the two feed writers acceptable?"
 
-open question "A refresh row left on a former poll owner (task #98873): when the poll moves (OverrideFeedOwner, or FeedCommandAuthority dropping a claim), a refresh row still requested on the old owner's host stays open, and that host's board still serves it (it re-checks only FeedCommandRunsOnSettersHost, not ownership), so for that one cycle two hosts may reconcile the epic. Should serving a refresh row also require that the serving host is still the epic's poll owner, failing the row otherwise, or should moving the poll fail the open refresh rows on the old host?"
+-- Resolved: "A refresh row left on a former poll owner". Serving a refresh row requires that the serving host still owns the epic's poll, and fails the row "this host no longer owns the poll" otherwise (feeds.allium: ServeFeedRefreshRequest), so two hosts never reconcile one epic.
 
 open question "M7, update_tasks' done path when close_task gets NO ANSWER (found by weed, not decided): the board treats a no-answer like a refusal and the tool replies that the task could NOT be moved to done and is still in its previous status. The close may in fact have landed. A retry is a done -> done re-close (no restamp, no respawn), but for a task with a pr-typed url it writes a second close row and runs gh pr close again. Should the tool settle a no-answer by re-reading the task, as exit_session settles its own no-answer by looking for the row (mcp-task-tools.allium: ExitSessionViaMcp), or is the 'try again' reply acceptable?"

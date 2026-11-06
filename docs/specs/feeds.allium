@@ -36,6 +36,8 @@
 
 use "./core.allium" as core
 use "./store-split.allium" as split
+use "./cli.allium" as cli
+use "./startup.allium" as startup
 
 ------------------------------------------------------------
 -- Contracts
@@ -46,27 +48,20 @@ use "./store-split.allium" as split
 -- TOTAL: every input, including the empty signal set, maps to exactly one of
 -- my_reviews, team_reviews or bots. It NEVER returns none, reviews_parent or
 -- cve — those roles exist for structural epic placement (see core/FeedRole),
--- not as routing outcomes.
+-- not as routing outcomes. The precedence is stated once, in the Precedence
+-- invariant below. Two of its choices need a reason:
 --
--- Precedence is strict first-match-wins, in this order:
+--   - Engagement wins over the bot rule: a bot-authored PR I have reviewed
+--     still lands in my reviews. "Engagement" excludes my OWN activity — a
+--     comment I made on my own PR (author_me) is not engagement.
+--   - org_review (an org-scoped review-requested/reviewed-by/commenter match,
+--     outside the repos.conf repo list) counts as a direct review request. It
+--     still loses to the bot rule, so an org-scoped bot PR routes to bots
+--     unless it is also reviewed or commented.
 --
---   1. engaged = (reviewed or commented) and not author_me  -> my_reviews
---      Engagement wins over the bot rule: a bot-authored PR I have reviewed
---      still lands in my reviews. Note "engagement" excludes my OWN activity —
---      a comment I made on my own PR (author_me) is not engagement, so this
---      branch does not fire for it.
---   2. author_bot                                           -> bots
---   3. direct_request or org_review                          -> my_reviews
---      org_review (an org-scoped review-requested/reviewed-by/commenter
---      match, outside the repos.conf repo list) is treated the same as a
---      direct review request: it still loses to the bot rule above, so an
---      org-scoped bot PR routes to bots unless it is also reviewed or
---      commented (engagement still wins — see rule 1).
---   4. team_request                                         -> team_reviews
---   5. fallback (no signal matches, including the empty set) -> my_reviews
---      Routing never fails; an unmatched item defaults to my_reviews. Logging
---      a warning for the empty/unmatched case is the caller's job (WP3), not
---      this function's.
+-- Routing never fails; an unmatched item defaults to my_reviews. Logging a
+-- warning for the empty or unmatched case is the caller's job, not this
+-- function's.
 
 contract RouteSignals {
     route: (signals: Set<Signal>) -> core/FeedRole
@@ -156,16 +151,13 @@ contract RouteSignals {
 -- when it names one of the teams the user lists in teams.conf. Between them
 -- they cover both shapes a re-request can take, so nothing else is needed.
 --
--- An earlier draft of this contract added a third rescuing signal for the
--- same fact, read from the PR's own pending-reviewer list. It was rejected
--- once its one genuine gap was traced to its real cause: the org-scoped pass
--- used to collapse its personal-request qualifier into org_review, which made
--- an org-wide re-request indistinguishable from "I once commented here". That
--- collapse is the bug, and the fix belongs where the signal is produced —
--- see feed-scripts.allium: "The org-scoped personal-request qualifier keeps
--- its own signal". Re-deriving the fact here instead would have bought a
--- permanent second source, a bounded list scan, and a truncation failure mode
--- that must be reasoned about forever, to paper over a flattened signal.
+-- REJECTED — a third rescuing signal read from the PR's own pending-reviewer
+-- list. Its one genuine use would be an org-wide re-request, and that is
+-- served where the signal is produced: the org-scoped pass keeps its
+-- personal-request qualifier as its own signal rather than folding it into
+-- org_review (feed-scripts.allium: "The org-scoped personal-request qualifier
+-- keeps its own signal"). Re-deriving the fact here would buy a second
+-- source, a bounded list scan and a truncation failure mode.
 --
 -- == Limit of the mechanism ==
 --
@@ -266,9 +258,10 @@ contract ExcludeFromReviews {
 enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me | org_review | approved }
 
 -- The outcome of reconciling ONE dispatch-owned feed script against the copy
--- on disk, during `dispatch setup`. Produced by InstallShippedFeedScripts,
--- consumed by ReportShippedFeedScripts. The five values are exhaustive: every
--- shipped script lands on exactly one of them on every setup run.
+-- on disk, when the board applies the feed_scripts artefact. Produced by
+-- InstallShippedFeedScripts, consumed by ReportShippedFeedScripts. The five
+-- values are exhaustive: every shipped script lands on exactly one of them on
+-- every apply.
 --
 --   in_sync   -- the file on disk already matches what dispatch ships. No
 --                write, no report line.
@@ -281,8 +274,8 @@ enum Signal { direct_request | team_request | reviewed | commented | author_bot 
 --                left it alone. The one outcome that reports a path the user
 --                may want to act on.
 --   failed    -- the backup, the write or the chmod for this script raised an
---                error. The script is reported carrying that error and setup
---                continues; no digest is recorded. See
+--                error. The script is reported carrying that error and the
+--                apply continues; no digest is recorded. See
 --                InstallShippedFeedScripts' PER-SCRIPT FAILURE section.
 enum ShippedScriptOutcome { in_sync | installed | updated | kept | failed }
 
@@ -332,8 +325,8 @@ value FeedItem {
                               -- dependabot, pr_review and release_please)
                               -- additionally
                               -- REQUIRES `url` to name a pull request: see
-                              -- AReviewTaggedFeedItemNamesItsPr in the
-                              -- FeedItemParse block below. Nothing else
+                              -- the FeedItemParse contract's
+                              -- AReviewTaggedFeedItemNamesItsPr. Nothing else
                               -- constrains the pair.
     labels: List<String> = [] -- optional free-form labels copied to Task.labels
                               -- on insert and re-applied on every conflict update.
@@ -344,9 +337,8 @@ value FeedItem {
                               -- preserving wire compatibility with scripts
                               -- written before this field existed.
     sort_order: Integer?      -- optional ordering hint copied to Task.sort_order;
-                              -- the existing column ordering uses
-                              -- COALESCE(sort_order, id) ASC so lower values sort
-                              -- first. Used by the CVE feed to surface CRITICAL
+                              -- a column sorts lower values first, and a task
+                              -- without one by its id. Used by the CVE feed to surface CRITICAL
                               -- alerts above HIGH/MEDIUM/LOW (1=CRITICAL, 2=HIGH,
                               -- 3=MEDIUM, 4=LOW). Optional; omission leaves
                               -- Task.sort_order unchanged.
@@ -377,7 +369,7 @@ value FeedItem {
                               -- this field existed.
     signals: Set<Signal> = {} -- optional routing signals a feed script attaches
                               -- to this item; routed into the right feed bucket
-                              -- by the RouteSignals contract below. Defaults to the
+                              -- by the RouteSignals contract. Defaults to the
                               -- empty set when the script omits the field,
                               -- preserving wire compatibility with scripts
                               -- written before this field existed.
@@ -403,15 +395,15 @@ value FeedItem {
                               -- the others on this. Where the drop WARNING lands
                               -- does differ by entry point: the two runtime paths
                               -- log it to app.log, while verify-feed surfaces it
-                              -- on stderr (see the VerifyFeed rule above).
+                              -- on stderr (VerifyFeed).
 }
 
 ------------------------------------------------------------
 -- Shipped script installation
 ------------------------------------------------------------
 
--- One line's worth of what `dispatch setup` did to one dispatch-owned feed
--- script. Carries the FULL path, not the bare name, because the only outcome
+-- One line's worth of what applying the feed_scripts artefact did to one
+-- dispatch-owned feed script. Carries the FULL path, not the bare name, because the only outcome
 -- a user has to act on (kept) is actionable only if they can find the file.
 value ShippedScriptReport {
     name: String                        -- the shipped file name, e.g. "fetch-cve.sh"
@@ -438,15 +430,13 @@ value ShippedScriptReport {
 ------------------------------------------------------------
 
 config {
-    -- DISPATCH-OWNED scripts. Written to <data_dir>/scripts/ on every
-    -- `dispatch setup`, executable (0755), and kept up to date thereafter
-    -- (InstallShippedFeedScripts).
+    -- DISPATCH-OWNED scripts. Written to <data_dir>/scripts/ whenever the
+    -- feed_scripts artefact is applied, executable (0755), and kept up to
+    -- date thereafter (InstallShippedFeedScripts).
     --
-    -- The list is the whole shipped set, not a curated subset: before this
-    -- rule existed only fetch-dependabot.sh was installed, so the four other
-    -- shipped scripts reached a deployment only if the user copied them out
-    -- of a git checkout by hand — and a user who installed dispatch from a
-    -- release binary had no checkout to copy from.
+    -- The list is the whole shipped set, not a curated subset: a user who
+    -- installed dispatch from a release binary has no checkout to copy a
+    -- script out of.
     shipped_scripts: List<String> = [
         "fetch-dependabot.sh",
         "fetch-reviews.sh",
@@ -471,6 +461,22 @@ config {
 
     -- Suffix for the pre-overwrite copy taken on the one destructive branch.
     script_backup_suffix: String = ".bak"
+
+    -- How often the feed runner wakes (core.allium: BoardClockTicks,
+    -- FeedPollTick). Kept apart from core's config.tick_interval so the two
+    -- can change independently; each epic still polls at its own resolved
+    -- interval (FeedTick).
+    feed_poll_interval: Duration = 2.seconds
+
+    -- The most stderr a feed command's run writes to app.log and carries on
+    -- its outcome, in characters, after trimming. A verbose script must not
+    -- write unbounded output into app.log on every poll
+    -- (FeedCommandStderrOnSuccess).
+    feed_stderr_cap: Integer = 2000
+
+    -- How much of an unparseable stdout verify-feed prints after the parse
+    -- error, in characters (FeedItemParse).
+    verify_feed_preview_chars: Integer = 500
 }
 
 ------------------------------------------------------------
@@ -491,7 +497,7 @@ config {
 -- == verify-feed CLI ==
 
 rule VerifyFeed {
-    when: VerifyFeedCommand(command)
+    when: cli/VerifyFeedCommand(command)
 
     -- The verify-feed subcommand spawns <command> via `sh -c`, captures
     -- stdout, and validates that it parses as Vec<FeedItem>. On success
@@ -529,7 +535,9 @@ rule VerifyFeed {
         -- the shared src/feed/parse.rs::parse_feed_items (see the
         -- FeedItemParse block below) -- not its own serde_json call.
         -- On success: print_table(items), exit 0.
-        -- On failure (non-zero exit or parse error): print_stderr, exit 1.
+        -- On failure (non-zero exit or parse error): print_stderr, exit 1;
+        -- a parse error also prints the first
+        -- config.verify_feed_preview_chars characters of the stdout.
         -- cmd_verify_feed installs a stderr tracing subscriber before
         -- parsing (it is the only feed path that does not call
         -- init_app_log_subscriber), so lenient-decode warnings such as the
@@ -537,10 +545,11 @@ rule VerifyFeed {
         -- swallowed.
 }
 
--- == Setup: installing the shipped feed scripts ==
+-- == Installing the shipped feed scripts ==
 
--- `dispatch setup` writes two CLASSES of file into <data_dir>/scripts/, and
--- they get OPPOSITE rules. The split is not arbitrary — it follows from how
+-- The feed_scripts artefact (startup.allium: ConfigArtefact, applied by
+-- ApplyStaleConfigOnConsent) writes two CLASSES of file into
+-- <data_dir>/scripts/, and they get OPPOSITE rules. The split is not arbitrary — it follows from how
 -- the shipped scripts are built.
 --
 -- Every shipped script ships with EMPTY config placeholders (REPOS=(),
@@ -557,9 +566,9 @@ rule VerifyFeed {
 --
 -- Hence: scripts are kept up to date, configs are create-new-only forever.
 --
--- REJECTED — keep everything create-new-only (the behaviour before this
--- rule). It means a bug fixed in a shipped script never reaches any
--- deployment that has run setup once, which is every deployment. The fix
+-- REJECTED — keep everything create-new-only. A bug fixed in a shipped
+-- script would then never reach a deployment that already has the script,
+-- which is every deployment. The fix
 -- would ship, the release notes would claim it, and the file that actually
 -- runs would still be the old one. Silent, permanent, and invisible from
 -- inside the running system.
@@ -576,22 +585,24 @@ rule VerifyFeed {
 -- approved without being read. The manifest exists so that case is silent.
 
 rule InstallShippedFeedScripts {
-    when: ApplyFeedScriptsArtefact(data_dir, operator_can_answer)
+    when: startup/ApplyFeedScriptsArtefact(data_dir, operator_can_answer)
 
     -- Fires from startup.allium's ApplyStaleConfigOnConsent, when the drift
     -- report named the `feed_scripts` artefact and the operator accepted it.
-    -- There is no `dispatch setup` to fire from any more (startup.allium:
+    -- There is no separate setup command (startup.allium:
     -- NoSeparateSetupCommand).
     --
     -- `operator_can_answer` is false when nobody is there to ask — a scripted
     -- launch, a CI job, stdin redirected from nowhere. It is phrased as a
     -- capability rather than as a flag because the decision below turns on
-    -- "can I ask?", not on how the command was invoked. On the startup path it
-    -- is exactly `confirmer.is_some()`: the absence of someone to ask IS the
-    -- input, so there is no code path that could read a queued "yes" out of
-    -- silence.
+    -- "can I ask?", not on how the command was invoked. It is exactly
+    -- `confirmer.is_some()`: the absence of someone to ask IS the input, so
+    -- there is no code path that could read a queued "yes" out of silence.
+    -- The one emitter passes true, since the operator has just answered the
+    -- drift prompt; the false arm is this artefact's own contract, held by
+    -- its tests (a None confirmer).
     --
-    -- PROVENANCE MANIFEST. Setup maintains
+    -- PROVENANCE MANIFEST. The apply maintains
     -- <data_dir>/scripts/<config.script_manifest_name>: a map from script
     -- file name to the digest of the content DISPATCH LAST WROTE to that
     -- path. Only scripts appear in it. Config files never do, because they
@@ -599,10 +610,10 @@ rule InstallShippedFeedScripts {
     -- it would create a second thing to keep in step with nothing reading it.
     --
     -- A manifest that is MISSING, UNREADABLE OR MALFORMED is treated as
-    -- EMPTY and NEVER fails setup. The manifest is an optimisation on
+    -- EMPTY and NEVER fails the apply. The manifest is an optimisation on
     -- consent: it exists to let an untouched copy be updated without asking.
     -- Losing it costs prompts, not correctness — every script simply falls to
-    -- the unknown-provenance branch, which is the conservative one. A setup
+    -- the unknown-provenance branch, which is the conservative one. An apply
     -- that refused to run because a JSON file it wrote itself was truncated
     -- would be trading the user's whole install on a cache. A manifest that
     -- cannot be WRITTEN is tolerated on the same terms and for the same
@@ -623,7 +634,7 @@ rule InstallShippedFeedScripts {
     --      provenance over it asserts nothing that is not already true, and
     --      it means the NEXT release can update it silently instead of
     --      prompting. This is how a deployment that predates the manifest
-    --      heals itself on first setup. `in_sync` — not reported.
+    --      heals itself on its first apply. `in_sync` — not reported.
     --   3. DIFFERS, AND THE ON-DISK DIGEST MATCHES THE RECORDED ONE ->
     --      dispatch wrote this file and nobody has touched it since; a newer
     --      version now ships. Overwrite, re-record. NO prompt, NO backup —
@@ -654,7 +665,7 @@ rule InstallShippedFeedScripts {
     --          that no dispatch command ever removes, in the one directory
     --          the user is meant to be able to read at a glance.
     --          REJECTED — refusing the overwrite while a .bak exists. It
-    --          makes setup stall on a file it created itself, and the remedy
+    --          makes the apply stall on a file it created itself, and the remedy
     --          (delete the .bak) is exactly the data loss the refusal claimed
     --          to prevent, just performed by hand.
     --        - nobody to ask: NEVER prompt, NEVER overwrite.
@@ -676,12 +687,11 @@ rule InstallShippedFeedScripts {
     -- so a crash mid-write cannot leave the user with neither copy.
     --
     -- PER-SCRIPT FAILURE. A failure while backing up, writing or chmod-ing
-    -- ONE shipped script does NOT fail the setup run. That script is
-    -- reported as `failed` carrying the error text, and setup proceeds to
-    -- the remaining scripts, to the config files
-    -- (InstallShippedFeedConfigs), and to everything downstream of them:
-    -- MCP config, plugin install, statusline and tmux. Failures are per-script and independent; four scripts landing
-    -- fine and one failing is four scripts installed.
+    -- ONE shipped script does NOT fail the artefact. That script is reported
+    -- as `failed` carrying the error text, and the apply proceeds to the
+    -- remaining scripts and to the config files (InstallShippedFeedConfigs).
+    -- Failures are per-script and independent; four scripts landing fine and
+    -- one failing is four scripts installed.
     --
     -- A BACKUP failure ABANDONS the script before the write: nothing is
     -- written, the on-disk copy is left exactly as the user had it, and the
@@ -702,11 +712,10 @@ rule InstallShippedFeedScripts {
     -- whole update over a single unwritable file leaves them with neither the
     -- update nor a way to make progress.
     --
-    -- REJECTED — aborting the whole run. One unwritable file would block the
-    -- MCP config and the plugin install, which had nothing to do with the
-    -- failure, and would leave the user worse off than before they ran
-    -- setup: a half-configured install and no way to finish it without
-    -- fixing an unrelated permission first.
+    -- REJECTED — failing the whole artefact. One unwritable script would
+    -- hold back the four that could be written, and the user would be left
+    -- with neither the update nor a way to make progress without fixing an
+    -- unrelated permission first.
 
     ensures:
         for name in config.shipped_scripts:
@@ -806,14 +815,14 @@ rule InstallShippedFeedScripts {
 }
 
 rule InstallShippedFeedConfigs {
-    when: ApplyFeedScriptsArtefact(data_dir, _)
+    when: startup/ApplyFeedScriptsArtefact(data_dir, _)
 
     -- The user-owned half. Each config file in config.shipped_script_configs
     -- is created with the shipped placeholder content if and only if nothing
-    -- exists at the path. If something does, setup does not read it, does not
-    -- diff it, does not prompt about it, does not back it up and does not
+    -- exists at the path. If something does, the apply does not read it, does
+    -- not diff it, does not prompt about it, does not back it up and does not
     -- record it in the manifest. There is no branch that writes over a
-    -- .conf file — not with --yes, not with a prompt, not ever.
+    -- .conf file — not with a prompt, not ever.
     --
     -- The manifest is deliberately not consulted here. Provenance only buys
     -- the right to overwrite silently, and no overwrite exists on this path,
@@ -822,22 +831,17 @@ rule InstallShippedFeedConfigs {
     -- Config files are NOT marked executable. They are sourced by the
     -- scripts, never run.
     --
-    -- A CONFIG WRITE FAILURE DOES NOT FAIL THE RUN either. The argument that
-    -- made the script half non-fatal — one unwritable file must not block the
-    -- MCP config and the plugin install, which had nothing to do with it —
-    -- applies here unchanged, and a config half that aborted would be the
-    -- hole in it. The failure is reported as one line in the `Feed scripts:`
-    -- section and setup carries on. It is reported in aggregate rather than
-    -- per file: unlike a script, a config file has no per-file state worth
-    -- distinguishing, and the cause is nearly always the directory.
+    -- A CONFIG WRITE FAILURE FAILS THE ARTEFACT, not the launch. It is
+    -- reported in aggregate rather than per file: unlike a script, a config
+    -- file has no per-file state worth distinguishing, and the cause is
+    -- nearly always the directory. The scripts are installed first, so their
+    -- section still prints; the board then names `feed scripts` among the
+    -- artefacts it could not update and retries it next launch
+    -- (startup.allium: ApplyStaleConfigOnConsent, PartialFailureIsStillProgress).
     --
-    -- This is the pre-existing behaviour for repos.conf and bots.conf, now
-    -- stated as its own rule (it was a clause inside the seeding rule) and
-    -- extended to org.conf and log-warnings.conf, whose readers
-    -- (fetch-reviews.sh, fetch-log-warnings.sh) were being installed for the
-    -- first time by InstallShippedFeedScripts above. Installing a reader
-    -- without its conf would seed an inert script with no file to configure
-    -- it from — the same reasoning that put repos.conf and bots.conf here.
+    -- Every config file a shipped script reads is in the list. Installing a
+    -- reader without its conf would leave an inert script with no file to
+    -- configure it from.
 
     ensures:
         for name in config.shipped_script_configs:
@@ -850,31 +854,25 @@ rule InstallShippedFeedConfigs {
                 )
 
     @guidance
-        -- Implementation: src/setup/plugins.rs::install_if_absent, unchanged
-        -- in behaviour — it already uses create_new(true), so absence is
-        -- decided by the filesystem atomically rather than by a check-then-
-        -- write race. The two new bodies come from scripts/org.conf and
-        -- scripts/log-warnings.conf via include_str!, beside the existing
-        -- shipped_config_content bodies.
-        -- Implementation: src/setup/plugins.rs::install_shipped_feed_configs.
+        -- Implementation: src/setup/plugins.rs::install_shipped_feed_configs,
+        -- through src/setup/plugins.rs::install_if_absent, which uses
+        -- create_new(true), so absence is decided by the filesystem atomically
+        -- rather than by a check-then-write race. The bodies come from
+        -- scripts/*.conf via include_str!. The failure is raised from
+        -- src/setup/config_update.rs::apply_feed_scripts after the scripts'
+        -- section is printed.
         -- Coverage: src/setup/plugins.rs tests prefixed with
         -- install_shipped_feed_configs_.
 }
 
--- A run whose only reportable event is a `kept` or a `failed` script still
--- closes with "Setup complete." rather than "Already configured, nothing to
--- do." Nothing was written in that case, but something happened that the user
--- may have to act on, and the nothing-to-do line invites them to stop reading.
---
 rule ReportShippedFeedScripts {
     when: ShippedFeedScriptsReconciled(data_dir, reports)
 
-    -- Setup prints ONE `Feed scripts:` section on stdout, in the style of the
-    -- existing `MCP config:` and `Plugin:` sections (src/setup/mod.rs
-    -- ::run_setup_in). One indented line per script that was installed,
-    -- updated, kept or failed; NOTHING for a script already in sync.
+    -- The apply prints ONE `Feed scripts:` section on stdout. One indented
+    -- line per script that was installed, updated, kept or failed; NOTHING
+    -- for a script already in sync.
     --
-    -- Silence for in_sync is the point. After the first setup the steady
+    -- Silence for in_sync is the point. After the first apply the steady
     -- state is five in-sync scripts, and a section that lists all five every
     -- run is noise the user learns to skip — which costs them the one line
     -- that is not noise. A section that only speaks when something changed
@@ -901,10 +899,9 @@ rule ReportShippedFeedScripts {
     --
     -- FAILED LINES COME FIRST, before the installed/updated/kept lines. The
     -- section is ordered by how much the user has to do about it, and a
-    -- failure is the only outcome where setup did not achieve what it set
-    -- out to do. Putting it last risks it scrolling off behind four
-    -- successes, and the sections that print AFTER this one (plugin,
-    -- statusline) would then be the last thing on screen. Within each group
+    -- failure is the only outcome where the apply did not achieve what it
+    -- set out to do. Putting it last risks it scrolling off behind four
+    -- successes. Within each group
     -- the order is config.shipped_scripts order, so repeated runs print
     -- stably.
 
@@ -930,29 +927,27 @@ rule ReportShippedFeedScripts {
         -- through tracing).
         -- The section header prints once, not once per line: with a single
         -- reportable script the output is the header line plus one indented
-        -- line, matching how `Plugin:` renders its "  → Skills: ..." detail.
+        -- "  → ..." line.
         -- Ordering within the launch is startup.allium's, not this rule's:
-        -- ConfigArtefact::ALL lists `feed_scripts` last, so the section
-        -- follows the MCP, plugin and statusline ones.
+        -- src/setup/config_update.rs::ConfigArtefact::ALL lists
+        -- `feed_scripts` last, so the section prints after the other
+        -- artefacts' output.
         -- Coverage: src/setup/plugins.rs tests prefixed with
         -- feed_scripts_section_.
 }
 
--- == Setup seeding ==
+-- == No feed epic is seeded ==
 --
--- NO EXAMPLE FEED EPIC IS SEEDED. Starting the board never creates a feed
--- epic wired to fetch-dependabot.sh. An earlier rule did, keyed on "no epic
--- has feed_command = the installed script's path", so an operator who deleted
--- that "Dependabot" epic got it back on the next start. It was also redundant:
--- the managed reviews tree (My / Team / Bots sub-epics) already surfaces bot
--- PRs, Dependabot's included. The only feed epics that appear on their own are
--- the managed ones provisioned from settings (ProvisionManagedEpics, epics.allium), which
--- the operator controls through those settings.
+-- Starting the board never creates a feed epic wired to a shipped script. A
+-- seeded epic would come back every time the operator deleted it, and the
+-- managed reviews tree (My / Team / Bots sub-epics) already surfaces bot PRs,
+-- Dependabot's included. The only feed epics that appear on their own are the
+-- managed ones provisioned from settings (epics.allium:
+-- ProvisionManagedEpics), which the operator controls through those settings.
 --
--- fetch-dependabot.sh itself is still installed (InstallShippedFeedScripts) so
--- an operator can wire an epic to it by hand; installing the file creates no
--- row. A store that already holds a "Dependabot" epic from before keeps it
--- until the operator deletes it, and it then stays deleted.
+-- fetch-dependabot.sh is still installed (InstallShippedFeedScripts) so an
+-- operator can wire an epic to it by hand; installing the file creates no
+-- row.
 
 ------------------------------------------------------------
 -- Rules
@@ -972,8 +967,9 @@ rule FeedTick {
     --
     -- An epic whose STORED interval is below core/config.min_feed_interval is
     -- not polled at all. It is skipped and a warning naming the epic is
-    -- emitted ONCE per epic per stored value, not on every tick (a 2-second
-    -- tick would log ~43k lines a day per epic): a different bad value warns
+    -- emitted ONCE per epic per stored value, not on every tick (at
+    -- config.feed_poll_interval that would be tens of thousands of lines a day
+    -- per epic): a different bad value warns
     -- again, and a valid value forgets the warning so a later bad one warns
     -- again. The skip itself holds on every tick. Write-time validation
     -- (epics.allium: CreateEpic, UpdateEpicViaMcp, ManagedFeedConfigViaMcp) is
@@ -983,13 +979,10 @@ rule FeedTick {
     -- work anyway. Skipping rather than clamping is deliberate: a clamped
     -- feed would run at a cadence nobody chose while looking healthy.
     --
-    -- The floor also covers the negative case, which failed differently and
-    -- worse: a negative interval read as an effectively infinite one, so the
-    -- feed went permanently silent with nothing logged. Both now take the
-    -- same visible path.
-    --
+    -- The floor also covers a negative interval, which takes the same
+    -- visible path rather than reading as an effectively infinite one.
     ensures:
-        for epic in Epic where epic.is_feed:
+        for epic in core/Epics where is_feed:
             if epic.feed_interval_secs != null
                and seconds(epic.feed_interval_secs) < core/config.min_feed_interval:
                 FeedIntervalBelowMinimumWarned(epic: epic)
@@ -1011,21 +1004,21 @@ rule FeedTick {
                     -- FeedCommandRunsOnSettersHost comes first: a host whose
                     -- owner did not set the command neither claims nor runs.
                     let poll_owner = core/PollOwner{scope: epic, scope_id: epic.id}
-                    if local_host().owner != (epic.feed_command_set_by ?? epic.created_by):
+                    if core/local_host().owner != (epic.feed_command_set_by ?? epic.created_by):
                         -- skipped, last_run bumped as below
                     else if not exists poll_owner:
-                        -- CLAIM, THEN RUN (task #98873). The cycle runs only
+                        -- CLAIM, THEN RUN. The cycle runs only
                         -- once the claim is answered and the owner read back
                         -- is this host; see "Claim then run" below.
                         core/PollOwner.created(
                             scope: epic,
                             scope_id: epic.id,
-                            host: local_host(),
+                            host: core/local_host(),
                             claimed_at: now
                         )
-                        if core/PollOwner{scope: epic, scope_id: epic.id}.host = local_host():
+                        if core/PollOwner{scope: epic, scope_id: epic.id}.host = core/local_host():
                             FeedCycleRequested(epic: epic)
-                    else if poll_owner.host = local_host():
+                    else if poll_owner.host = core/local_host():
                         FeedCycleRequested(epic: epic)
                     -- else: another host owns this epic's feed. This tick
                     -- does no exec and emits no FeedCycleRequested for it —
@@ -1034,12 +1027,12 @@ rule FeedTick {
                     -- regardless of which arm above ran, same as it already
                     -- is for a dropped SerialisedFeedCycle request. Without
                     -- that, a non-owning host would re-read core/PollOwner
-                    -- on every 2-second tick forever instead of only at this
+                    -- on every feed poll tick instead of only at this
                     -- epic's own feed interval; the ownership answer changes
                     -- rarely enough that the extra latency to notice a
                     -- reassignment costs nothing real.
 
-    -- FEED REQUESTS ARE SERVED ON EVERY TICK (task #98873). Beside the
+    -- FEED REQUESTS ARE SERVED ON EVERY TICK. Beside the
     -- interval walk above, each tick picks up the open feed requests on this
     -- host (store-split.allium: FeedRequest) that this process has not
     -- already taken up, whatever the epic's interval and last_run say: a
@@ -1051,7 +1044,7 @@ rule FeedTick {
     -- ServeFeedTeardownRequest.
     ensures:
         for request in split/FeedRequests where
-                host = local_host() and is_open and not served_by_this_process(this):
+                host = core/local_host() and is_open and not served_by_this_process(this):
             FeedRequestPickedUp(request: request)
 
     @guidance
@@ -1065,10 +1058,9 @@ rule FeedTick {
         -- Command execution MUST NOT block the event loop. Each eligible
         -- epic's command is spawned as a background tokio::task so that
         -- key events and MCP notifications remain responsive during fetch.
-        -- FeedRunner runs in its own loop at FEED_POLL_INTERVAL (2s,
-        -- src/feed/mod.rs::FEED_POLL_INTERVAL), independent from the TUI's
-        -- Tick / TICK_INTERVAL (core.allium: BoardClockTicks). Both are 2s today, but the constants
-        -- are kept separate so the two concerns can evolve independently.
+        -- FeedRunner runs in its own loop at config.feed_poll_interval
+        -- (src/feed/mod.rs::FEED_POLL_INTERVAL), independent from the TUI's
+        -- Tick (core.allium: BoardClockTicks).
         -- Implementation: src/feed/mod.rs::FeedRunner (struct and
         -- src/feed/mod.rs::FeedRunner::tick).
         --
@@ -1100,33 +1092,25 @@ rule FeedTick {
         --
         -- == Host scoping ==
         --
-        -- Before core/PollOwner, every host subscribed to a feed epic ran
-        -- its command independently on every eligible tick — wasteful (N
-        -- teammates, N gh/curl/whatever calls for the one script) and racy
-        -- (see docs/plans/2026-09-21-phase-6c-feed-watchers-stragglers-reducers.md,
-        -- Decision 1, "feed polling is not yet host-scoped"). The claim
-        -- above closes it to exactly one host per epic. This is narrower
-        -- than PollPrStatus's host scoping in one respect: before task
-        -- #98873 it applied ONLY to FeedTick's own claim gate, and a manual
-        -- "r" ran the cycle on whichever host it was pressed. Since task
-        -- #98873 ONLY THE POLL OWNER RECONCILES AN EPIC, whoever asked: a
-        -- manual "r" on another host becomes a refresh request the owner
-        -- serves (ManualFeedTrigger, ServeFeedRefreshRequest), because two
-        -- hosts of the setter reconciling one epic could let an older
-        -- emission delete what the other just wrote (SerialisedFeedCycle).
-        -- Both paths stay held to FeedCommandRunsOnSettersHost (task
-        -- #98851), because that rule is about whose command this is, not
-        -- about who polls it.
+        -- Exactly one host per epic runs its command: without the claim N
+        -- subscribed teammates would make N upstream calls for the one script,
+        -- and race each other. ONLY THE POLL OWNER RECONCILES AN EPIC,
+        -- whoever asked: a manual "r" on another host becomes a refresh
+        -- request the owner serves (ManualFeedTrigger, ServeFeedRefreshRequest),
+        -- because two hosts of the setter reconciling one epic could let an
+        -- older emission delete what the other just wrote (SerialisedFeedCycle).
+        -- Both paths stay held to FeedCommandRunsOnSettersHost, because that
+        -- rule is about whose command this is, not about who polls it.
         --
-        -- == Claim then run (task #98873) ==
+        -- == Claim then run ==
         --
         -- When no PollOwner row exists, the tick spawns ONE background task
         -- for the epic that awaits claim_poll_owner and only then runs the
         -- cycle. If the claim is refused or fails in transport, or the owner
         -- read back afterwards is another host (a second host of the same
         -- person won the claim first), the task stands down: no exec, no
-        -- sync. Before this the tick claimed and ran at once, so two hosts
-        -- that both saw no owner could both run a cycle. The tick itself
+        -- sync, so two hosts that both saw no owner never both run a cycle.
+        -- The tick itself
         -- never awaits the claim: the event loop stays responsive, as for the
         -- command (below). A manual "r" on a host with no owner claims first
         -- the same way (ManualFeedTrigger).
@@ -1142,33 +1126,22 @@ rule FeedTick {
 rule OverrideFeedOwner {
     when: OverrideFeedOwner(epic)
 
-    -- Reassigns (or creates, if none existed) the epic's core/PollOwner row
-    -- to whoever calls this — unconditionally, even when a different host
-    -- already holds it. The only way a feed epic's poll ownership ever
-    -- moves, since FeedTick's own claim (above) only ever fills an ABSENT
-    -- row. D11 (store-split.allium: OverridePollOwner): the store refuses
-    -- unless local_host() is registered with an owner equal to the caller.
+    -- Moves the epic's core/PollOwner row to this host — unconditionally,
+    -- even when a different host already holds it. The only way a feed
+    -- epic's poll ownership ever moves, since FeedTick's own claim only ever
+    -- fills an ABSENT row. The store does the reassignment and its checks
+    -- (store-split.allium: OverridePollOwner, which refuses unless this host
+    -- is registered to the caller, the caller sees the epic and this host's
+    -- owner set the command).
     ensures:
-        let existing = core/PollOwner{scope: epic, scope_id: epic.id}
-        if exists existing:
-            existing.host = local_host()
-            existing.claimed_at = now
-        else:
-            core/PollOwner.created(
-                scope: epic,
-                scope_id: epic.id,
-                host: local_host(),
-                claimed_at: now
-            )
+        split/PollOwnerOverridden(scope: epic, scope_id: epic.id, host: core/local_host())
 
     @guidance
-        -- One trigger: epics.allium: EditEpic, when a human sets or changes
-        -- feed_command and an existing PollOwner names a different host —
-        -- see EditEpic's own guidance for the y/n prompt this sits behind
-        -- ("this feed is currently owned by <host label> — take over?").
-        -- Declining leaves feed_command changed but ownership untouched;
-        -- this rule fires only on accept. There is no MCP trigger: the
-        -- override_poll_owner tool that also reached this rule was removed.
+        -- The one entry is the yes answer to epics.allium's
+        -- FeedOwnerTakeoverOffered (FeedBoardKeys), offered by EditEpic when a
+        -- human sets or changes feed_command and an existing PollOwner names a
+        -- different host. Declining leaves feed_command changed but ownership
+        -- untouched. There is no MCP tool for it.
         --
         -- No `requires` on epic.status: every feed epic runs cycles whatever
         -- its status, so there is no status in which ownership is moot.
@@ -1177,12 +1150,12 @@ rule OverrideFeedOwner {
 -- == Serialisation ==
 
 rule FeedCommandAuthority {
-    when: EpicFeedCommandSet(epic, command)
+    when: split/EpicFeedCommandSet(epic, command)
 
-    -- Task #98746 (V8), #98851 (M2). A host runs feed_command as a shell
-    -- command, so changing it is changing what a person's machine runs. Only
-    -- three roles may change it: the epic's creator and an admin of the
-    -- epic's workspace (a super-admin and the store operator always may). The
+    -- A host runs feed_command as a shell command, so changing it is changing
+    -- what a person's machine runs. Only the epic's creator and an admin of
+    -- the epic's workspace may change it (a super-admin and the store
+    -- operator always may). The
     -- owner of the host that holds the poll claim has NO authority of its
     -- own: a claim is something any host can take, so it cannot stand for
     -- authorship. A patch that leaves feed_command as it is, or sets it to the
@@ -1195,6 +1168,7 @@ rule FeedCommandAuthority {
         or caller() = epic.created_by
         or epic.workspace.is_admin(caller())
         or is_super_admin(caller())
+        or caller_is_store_operator()
 
     ensures:
         epic.feed_command = command
@@ -1203,9 +1177,8 @@ rule FeedCommandAuthority {
         -- so the setter's own host can claim the feed at its next tick.
         if command != old(epic.feed_command):
             epic.feed_command_set_by = caller()
-            for claim in core/PollOwners.where(p =>
-                    p.scope = epic and p.scope_id = epic.id
-                    and p.host.owner != caller()):
+            for claim in core/PollOwners where scope = epic and scope_id = epic.id
+                    and host.owner != caller():
                 not exists claim
 
     @guidance
@@ -1219,9 +1192,9 @@ rule FeedCommandAuthority {
 rule FeedCommandRunsOnSettersHost {
     when: FeedCycleWanted(epic, host)
 
-    -- Task #98851 (M2), decided with the user: option (a). A host runs an
-    -- epic's feed_command, whether for FeedTick's auto-poll or for the "r"
-    -- refresh, only when the host's OWNER is the person who last set it. Seeing
+    -- A host runs an epic's feed_command, whether for FeedTick's auto-poll or
+    -- for the "r" refresh, only when the host's OWNER is the person who last
+    -- set it. Seeing
     -- an epic, following it, or holding its claim does not let a person's host
     -- run a command somebody else wrote. A shared feed is therefore polled by
     -- its setter's host alone, and pauses while that host is offline.
@@ -1243,13 +1216,13 @@ rule FeedCommandRunsOnSettersHost {
         --      an epic this host's owner did not set, claimed or not.
         --   3. ManualFeedTrigger: the "r" key refuses with the status line
         --      "Feed for '<title>' runs only on its author's host".
-        --   4. ServeFeedRefreshRequest (task #98873): the poll owner
+        --   4. ServeFeedRefreshRequest: the poll owner
         --      re-checks this rule before running a refresh another host
         --      asked for, and fails the row when it no longer holds (the
         --      command was re-set by someone else after the request).
         --
-        -- CLAIMS FROM BEFORE THE RULE (task #98911, M9, decided with the
-        -- user: a one-time sweep). Only a NEW claim is gated, so a claim a
+        -- CLAIMS FROM BEFORE THE RULE (a one-time sweep). Only a NEW claim is
+        -- gated, so a claim a
         -- non-setter's host took before the rule would stall the feed for
         -- good: that host may no longer run the command and skips, and the
         -- setter's host sees the claim and skips too. When a store moves onto
@@ -1271,10 +1244,9 @@ rule SerialisedFeedCycle {
     -- removed that this host holds. Exactly THREE surfaces request one, all on
     -- the epic's poll owner: FeedTick (per eligible epic, above),
     -- ManualFeedRefresh (the "r" key, when this host is the owner or claims
-    -- it) and ServeFeedRefreshRequest (an "r" pressed on another host, task
-    -- #98873). The verify-feed CLI execs a
-    -- feed command but performs no sync and shares no process with the TUI, so
-    -- it is outside this rule.
+    -- it) and ServeFeedRefreshRequest (an "r" pressed on another host). The
+    -- verify-feed CLI execs a feed command but performs no sync and shares no
+    -- process with the TUI, so it is outside this rule.
     --
     -- At most ONE cycle per epic runs at a time. A request arriving while a
     -- cycle for the SAME epic is in flight is DROPPED — not queued, not
@@ -1286,11 +1258,9 @@ rule SerialisedFeedCycle {
     -- == Why the whole cycle, and why dropped ==
     --
     -- RoleRoutedFeedSync's stale-delete keep-set is computed from ONE
-    -- emission, and each delete filters on a task's CURRENT epic. Before
-    -- store-split M3 its steps were separate non-transactional writes, so two
-    -- cycles could interleave inside the sync; since M3 the sync is one
-    -- module transaction (IngestFeedEmission) and cannot. The claim still
-    -- matters: a cycle reconciling against an emission fetched before the
+    -- emission, and each delete filters on a task's CURRENT epic. The sync is
+    -- one module transaction (IngestFeedEmission), so two cycles cannot
+    -- interleave inside it. The claim still matters: a cycle reconciling against an emission fetched before the
     -- other cycle's writes landed can see a task the other has moved or
     -- inserted as absent from its own (older) emission, delete it, and —
     -- since the delete feeds TaskTeardown — force remove a live review
@@ -1304,16 +1274,16 @@ rule SerialisedFeedCycle {
     -- in-flight work per epic at one cycle regardless of how many requests
     -- arrive while it runs.
     --
-    -- == Scope across hosts (decided in task #98854, built in task #98873) ==
+    -- == Scope across hosts ==
     --
     -- The claim registry is per PROCESS. Two hosts of the one person who set
     -- the command may both run it, so two hosts could reconcile one epic and
     -- an older emission from one could delete what the other just wrote.
-    -- ONLY THE EPIC'S POLL OWNER RECONCILES IT NOW, so the per-process claim
-    -- is enough: every cycle for an epic runs in one process.
+    -- ONLY THE EPIC'S POLL OWNER RECONCILES IT, so the per-process claim is
+    -- enough: every cycle for an epic runs in one process.
     --   - FeedTick runs a cycle only on the owner, and claims an unowned epic
     --     BEFORE running it (claim then run, under FeedTick).
-    --   - A manual "r" on the owner runs the cycle as before. On a host with
+    --   - A manual "r" on the owner runs the cycle there. On a host with
     --     no owner it claims first, the same way. On any other host it runs
     --     nothing locally: it writes a refresh request
     --     (store-split.allium: RequestFeedRefresh), and the status line says
@@ -1324,8 +1294,8 @@ rule SerialisedFeedCycle {
     --     other, and the row is reported done.
     -- FeedCommandRunsOnSettersHost still gates the serving host: being the
     -- poll owner does not let a host run a command its owner did not set.
-    -- A removed task held by another host is no longer left behind: the
-    -- ingest writes a teardown request for that host (store-split.allium:
+    -- A removed task held by another host is not left behind: the ingest
+    -- writes a teardown request for that host (store-split.allium:
     -- StaleDeleteRequestsTeardownOnTheHoldingHost, ServeFeedTeardownRequest).
     --
     -- == Scope: this closes the feed-vs-feed race ONLY ==
@@ -1382,7 +1352,7 @@ rule SerialisedFeedCycle {
         -- still contend, since the subtree stale-delete reaches any child epic;
         -- not reachable today, and out of scope.
         --
-        -- BOUNDED COST (was ACCEPTED COST until #4150) — a hung feed command
+        -- BOUNDED COST — a hung feed command
         -- starves its epic for at most feed_command_timeout (core.allium
         -- config), not forever.
         -- src/feed/exec.rs::run_feed_command_bounded (shared by
@@ -1398,15 +1368,13 @@ rule SerialisedFeedCycle {
         -- src/process.rs::run_bounded, the repo's kill-on-timeout primitive,
         -- only covers SYNCHRONOUS ProcessRunner children and so could not be
         -- reused for this async call site directly.
-        -- Because the claim still spans the exec, the epic's claim IS held for
-        -- up to feed_command_timeout — every tick and every manual "r" for
-        -- that epic in that window is still dropped, exactly as before — but
-        -- the window is now bounded, and the epic recovers on its own once the
-        -- deadline fires: no restart needed. This remains a real change from
-        -- pre-#4091 behaviour (the two paths were unserialised then, so a
-        -- manual refresh still worked while a poll was stuck), and the
-        -- residual bounded window is deliberate for the same reason the
-        -- original claim was: letting a manual refresh STEAL an aged claim
+        -- Because the claim spans the exec, the epic's claim IS held for up to
+        -- feed_command_timeout — every tick and every manual "r" for that
+        -- epic in that window is dropped — but the window is bounded, and the
+        -- epic recovers on its own once the deadline fires: no restart
+        -- needed. A manual refresh therefore does not work while a poll is
+        -- stuck, and that bounded window is deliberate for the same reason the
+        -- claim is: letting a manual refresh STEAL an aged claim
         -- would reintroduce exactly the interleave this rule exists to
         -- prevent. A future reader must not "fix" the residual window by
         -- loosening the claim; shrinking feed_command_timeout is the
@@ -1437,13 +1405,12 @@ rule IngestFeedEmission {
     when: FeedEmissionPosted(epic, items, additive, host)
 
     requires: epic.feed_command != null
-    -- Task #98873: host is the ingesting board's own host, which the caller
-    -- must act for. The stale delete compares each removed task's host with
+    -- host is the ingesting board's own host, which the caller must act for. The stale delete compares each removed task's host with
     -- it to decide who tears the task down
     -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost).
     requires: host.owner != null and host.owner = caller()
-    -- Task #98909 (IngestRefusesAHostThatLostTheClaim): when the epic's poll
-    -- is claimed, it is claimed by this host. A cycle that began before its
+    -- IngestRefusesAHostThatLostTheClaim: when the epic's poll is claimed, it
+    -- is claimed by this host. A cycle that began before its
     -- host's claim was overridden must not reconcile over the new owner's, so
     -- ingest_feed refuses and writes nothing. An epic with no claim row at all
     -- is accepted: the board claims before it runs, but a seed or a CLI import
@@ -1468,9 +1435,9 @@ rule IngestFeedEmission {
     -- the role and repo-group sub-epics, grouping, per-item upsert
     -- (UpsertFeedTasks), the stale-subtree delete, clearing tasks stranded on
     -- the reviews parent, DropClosedRetiredFeedItems, and the epic status
-    -- recalculation that follows (EpicStatusRecalculation). The board no
-    -- longer passes group_by_repo or feed_role: a board that read a stale
-    -- copy of either cannot ingest by the wrong strategy.
+    -- recalculation that follows (EpicStatusRecalculation). The board does
+    -- not pass group_by_repo or feed_role: a board that read a stale copy of
+    -- either cannot ingest by the wrong strategy.
     --
     -- `additive` is the board's classification of the emission (degraded, or
     -- the epic is append-only). The module does not re-derive it from the
@@ -1493,25 +1460,23 @@ rule IngestFeedEmission {
     -- role sub-epics survives and is never reported. An additive call reports
     -- nothing. A removed task another host holds is not torn down here: the
     -- module writes a teardown request for that host in the same transaction
-    -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost). The
-    -- outcome names the feed epic and every epic below it as
-    -- affected, since the module does not say which of them it wrote to (see
-    -- Notifications).
+    -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost).
+    --
+    -- NOTIFICATIONS. After a successful sync, whether or not any task
+    -- changed, the board sends one BoardEvent::EpicChanged per affected epic
+    -- so the TUI reloads only those epics and their tasks, not the whole
+    -- board. The affected epics are the feed epic and every epic below it,
+    -- because the module does not say which of them it wrote to
+    -- (src/store/mod.rs::FeedIngestOutcome). A failed run sends none.
     ensures:
         FeedIngested(epic: epic, items: items, additive: additive)
 
     @guidance
-        -- RULES VERSION. Moving these rules into the module bumped the rules
-        -- version to 2 (sync.allium: AStoreWithOtherRulesFailsTheAttempt). A
-        -- board on version 1 would route in the board and write with the old
-        -- reducers, and refuses to run against a version 2 module.
-        --
-        -- WHAT THE EARLIER RULES BELOW MEAN NOW. UpsertFeedTasks,
-        -- GroupedFeedUpsert, FlatFeedReconcile and RoleRoutedFeedSync still
-        -- say WHAT happens to the store; where they say "the runner" or "the
-        -- runtime" decides it, the module does. Their coverage notes name the
-        -- board-side tests that existed before M3; the same obligations are
-        -- now covered through the store handle (src/feed/ingest/tests.rs),
+        -- WHO DECIDES. UpsertFeedTasks, GroupedFeedUpsert, FlatFeedReconcile
+        -- and RoleRoutedFeedSync say WHAT happens to the store; where they say
+        -- "the runner" or "the runtime" decides it, the module does. Their
+        -- obligations are covered through the store handle
+        -- (src/feed/ingest/tests.rs),
         -- by the module's own tests (spacetime/module/src/tests.rs) and by
         -- tests/memory_caller_conformance/feeds.rs::memory_caller_ingests_a_feed_like_the_real_module,
         -- which runs one emission sequence against the live module and the
@@ -1569,13 +1534,13 @@ rule UpsertFeedTasks {
     --     item.external_id, base_branch = the resolved default branch
     --     of resolved_path[item] (read from `origin/HEAD`, falling
     --     back to "main" when resolved_path is empty or the ref is
-    --     missing), epic = epic, created_by = local_host().owner — recording
+    --     missing), epic = epic, created_by = core/local_host().owner — recording
     --     which host's feed run produced this row, the same field
     --     core/Task.created_by already carries for hand-created tasks (see
     --     core.allium). Stamped on insert only, per created_by's existing
     --     "stamped once, never rewritten" rule; a re-poll's update branch
     --     below never touches it. Null when this install has never connected
-    --     to a shared store (local_host().owner is then null), exactly like
+    --     to a shared store (core/local_host().owner is then null), exactly like
     --     any other created_by write. Additionally, when item.url is non-empty,
     --     the inserted Task's url is set from item.url with url_type
     --     resolved by precedence: an explicit item.url_type wins; when
@@ -1598,10 +1563,8 @@ rule UpsertFeedTasks {
     --     re-poll, and a reinserted item starts on the default again.
     --     url (and its url_type) are
     --     backfilled TOGETHER from item.url when the existing Task's url
-    --     is null (COALESCE semantics), so feed tasks that pre-date the
-    --     URL-on-insert behavior, or were inserted from a script revision
-    --     that did not emit a URL, get their url populated on the next
-    --     refresh once a URL is available. The backfilled url_type follows
+    --     is null, so a feed task inserted from a script revision that did
+    --     not emit a URL gets its url on the next refresh that carries one. The backfilled url_type follows
     --     the same precedence as insert: explicit item.url_type wins,
     --     inference from the URL string otherwise. An existing non-null
     --     url (and its type) is never overwritten — a URL set by an agent
@@ -1609,13 +1572,9 @@ rule UpsertFeedTasks {
     --     values.
     --     updated_at is
     --     bumped. labels and sort_order are feed-controlled (never
-    --     user-editable in this iteration), so they are always replaced —
-    --     on a done task too. There used to be a done exception, because
-    --     sort_order carried the Done column's completion rank and a
-    --     severity-rank re-poll would clobber it. That rank is
-    --     core/Task.completed_at now (tasks.allium, ConfirmDone), which no
-    --     feed field writes on a re-poll, so the exception has nothing left
-    --     to protect.
+    --     user-editable), so they are always replaced — on a done task too.
+    --     The Done column's completion rank is core/Task.completed_at
+    --     (tasks.allium, ConfirmDone), which no feed field writes.
     --     This means a user who manually fixes the repo_path on a feed
     --     task (via 'e') keeps that correction across subsequent feed
     --     refreshes, while the feed-owned tag, labels, and sort_order
@@ -1648,12 +1607,12 @@ rule UpsertFeedTasks {
             -- Declared type wins over inference; only consulted when
             -- item.url is non-empty.
             let resolved_url_type = item.url_type ?? infer_url_type(item.url)
-            let existing = Task{epic: epic, external_id: item.external_id}
+            let existing = core/Task{epic: epic, external_id: item.external_id}
             -- A retired id is never inserted (see "Retired feed items" below).
             -- It is keyed on the epic whose cycle emits it, which for a
             -- grouped or role-routed sub-epic is the root, not `epic`.
             if not exists existing and not is_retired(epic.nearest_feed_epic, item.external_id):
-                Task.created(
+                core/Task.created(
                     title: item.title,
                     description: item.description,
                     tag: item.tag,
@@ -1672,7 +1631,7 @@ rule UpsertFeedTasks {
                     completed_at: if item.status = done: now else: null,
                     external_id: item.external_id,
                     epic: epic,
-                    created_by: local_host().owner,
+                    created_by: core/local_host().owner,
                     base_branch: detect_default_branch(resolved),
                     -- url built from item.url whenever non-empty; null
                     -- otherwise. url_type precedence: explicit
@@ -1690,10 +1649,9 @@ rule UpsertFeedTasks {
                 existing.description = item.description
                 existing.tag = item.tag
                 existing.labels = item.labels
-                -- Applied unconditionally, done tasks included. The skip that
-                -- used to guard a done task existed only because sort_order
-                -- doubled as the Done column's completion rank; it is
-                -- core/Task.completed_at now, which no feed field can reach.
+                -- Applied unconditionally, done tasks included: the Done
+                -- column ranks by core/Task.completed_at, which no feed field
+                -- can reach.
                 existing.sort_order = item.sort_order
                 -- url backfilled from item.url when existing.url is null,
                 -- with the same explicit-wins url_type precedence as
@@ -1721,22 +1679,18 @@ rule UpsertFeedTasks {
         -- events that are never retracted. Either way this clause is where
         -- that missing evidence would be acted on irreversibly.
         if not additive:
-            for task in Tasks where epic = epic and external_id != null:
+            for task in core/Tasks where task.epic = epic and task.external_id != null:
                 if not items.any(i => i.external_id = task.external_id):
                     not exists task
                     TaskTeardown(task)
 
     @guidance
-        -- created_by = local_host().owner records which host's feed run
+        -- created_by = core/local_host().owner records which host's feed run
         -- actually produced a task, independent of PollOwner
         -- (core.allium)/FeedTick's ownership claim above — a feed script
         -- still executes locally on whatever host runs it (it needs that
         -- machine's gh credentials), and this is what makes the row say so
-        -- afterward. Previously left null on every feed-created task (no
-        -- rule stamped it), which is what core/Epic.created_by's own comment
-        -- meant by "created by an unidentified process (e.g. a feed)" — that
-        -- reading no longer holds for Task.created_by after this change, only
-        -- for Epic.created_by, which this rule does not touch.
+        -- afterward. This rule does not touch Epic.created_by.
         --
         -- Status preservation is intentional: once a user starts working
         -- on a feed-derived task (moves it to running, opens a PR, etc.),
@@ -1746,8 +1700,8 @@ rule UpsertFeedTasks {
         -- user-corrected path must survive feed refreshes. Only the
         -- INSERT path writes a repo_path; the UPDATE path leaves it
         -- alone.
-        -- The ON CONFLICT clause is conditional on external_id NOT NULL —
-        -- non-feed tasks (external_id = null) never collide.
+        -- The match is keyed on (epic, external_id) with external_id set, so
+        -- non-feed tasks (external_id = null) never match.
         -- Implementation: the per-item upsert and the per-epic stale delete are
         -- spacetime/module/src/feed.rs::upsert_feed_tasks_inner, which every
         -- strategy of ingest_feed calls (IngestFeedEmission). The board's
@@ -1780,8 +1734,7 @@ rule UpsertFeedTasks {
         -- cleanup only rows this host owns (or that were never dispatched); a
         -- row another host owns is left for that host, which gets a teardown
         -- request written by the module in the delete's own transaction
-        -- (task #98873; store-split.allium:
-        -- StaleDeleteRequestsTeardownOnTheHoldingHost) and serves it
+        -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost) and serves it
         -- whenever its board next runs (ServeFeedTeardownRequest).
         --
         -- HOW THE REPORT IS BUILT. The delete itself is unconditional (every
@@ -1792,15 +1745,16 @@ rule UpsertFeedTasks {
         -- then reports only the ones CONFIRMED absent from that view
         -- afterward. The candidates are every feed task in the epic's subtree,
         -- so a removed row that owned neither a worktree nor a tmux window is
-        -- reported too; its teardown runs no command. A candidate that survives the call (raced by a
-        -- concurrent non-feed write; since task #98873 only the poll owner
-        -- reconciles an epic, so no other host's cycle races it) is silently
+        -- reported too; its teardown runs no command. A candidate that
+        -- survives the call (raced by a concurrent non-feed write; only the
+        -- poll owner reconciles an epic, so no other host's cycle races it) is
+        -- silently
         -- dropped rather than reported, which can under-report a removal —
         -- an orphaned worktree this cycle misses, caught by whichever later
         -- cycle next sees that same row absent and freshly reportable. It
         -- never OVER-reports: nothing is torn down that the reducer did not
-        -- itself remove. Both properties are deliberate — see decision 1 of
-        -- docs/plans/2026-09-21-phase-6c-feed-watchers-stragglers-reducers.md.
+        -- itself remove. Both properties are deliberate: a missed orphan is
+        -- caught later, a wrongly torn-down worktree is not recoverable.
 }
 
 rule GroupedFeedUpsert {
@@ -1853,15 +1807,19 @@ rule GroupedFeedUpsert {
     ensures:
         -- A retired item with no task left in the subtree is dropped before
         -- grouping, so no sub-epic is found-or-created just to hold nothing.
-        let admitted = items.filter(i => not retired_without_task(epic, i))
-        let groups = group_by(admitted, item => repo_name(item.url))
-        for (name, group_items) in groups:
-            let sub_epic = Epic.find(parent = epic, title = name)
-                           ?? Epic.created(title: name, parent: epic,
-                                           project_id: epic.project_id,
-                                           repo_path: "", description: "",
-                                           origin: repo_group)
-            UpsertFeedTasks(sub_epic, group_items)
+        let admitted = items where not retired_without_task(epic, this)
+        -- One group per distinct repo_name(url) of the admitted items.
+        for name in repo_names(admitted):
+            let group_items = admitted where repo_name(url) = name
+            let found = core/Epic{parent: epic, title: name}
+            if exists found:
+                UpsertFeedTasks(found, group_items)
+            else:
+                let sub_epic = core/Epic.created(title: name, parent: epic,
+                                                 project_id: epic.project_id,
+                                                 repo_path: "", description: "",
+                                                 origin: repo_group)
+                UpsertFeedTasks(sub_epic, group_items)
         -- Reconcile sub-epics absent from this emission. A sub-epic
         -- whose title no current item maps to has its feed tasks cleared
         -- (manual tasks survive, per UpsertFeedTasks). When items is empty,
@@ -1878,8 +1836,8 @@ rule GroupedFeedUpsert {
         -- exact case this rule's own `ensures` comment is about ("no sub-epic
         -- is found-or-created just to hold nothing"). A group whose repo
         -- already has a sub-epic passes every item through unfiltered,
-        -- including a retired-without-task one: `UpsertFeedTasks`'s own
-        -- `IngestSkipsRetiredFeedItems` clause still refuses the insert, so
+        -- including a retired-without-task one: UpsertFeedTasks' own retired
+        -- check still refuses the insert ("Retired feed items"), so
         -- nothing reappears; the only observable difference is that an
         -- existing sub-epic whose current batch is entirely retired ids is
         -- reconciled as "present with nothing new" rather than treated as if
@@ -1990,8 +1948,8 @@ rule FlatFeedReconcile {
         -- The flat branch reports its removed rows in
         -- the same SHAPE as every other path (see UpsertFeedTasks' guidance),
         -- so a re-homed task deleted as stale is torn down rather than
-        -- orphaned. Since store-split M3 every path is one transaction: a
-        -- refusal anywhere rolls the whole ingest back, so there is no
+        -- orphaned. Every path is one transaction: a refusal anywhere rolls
+        -- the whole ingest back, so there is no
         -- partial pass to salvage and no per-write log-and-continue.
         -- Coverage: src/feed/ingest/tests.rs (re-home + delete empty RepoGroup
         -- sub-epic on flat sync; no-op when no sub-epics exist; manual sub-epics
@@ -2054,9 +2012,8 @@ rule RoleRoutedFeedSync {
     -- task found sitting directly on the parent is in scope exactly like one in
     -- a role sub-epic. This is deliberate: a reviews_parent epic must hold NO
     -- feed-managed task directly (see NoFlatFeedTasksOnReviewsParent). A flat
-    -- feed task can be stranded on the parent by an out-of-band flat upsert
-    -- (e.g. an older binary, or a manual trigger that pre-dates feed_role
-    -- dispatch); this rule is what heals it. For each emitted PR,
+    -- feed task can be stranded on the parent by an out-of-band flat upsert;
+    -- this rule is what heals it. For each emitted PR,
     -- route(item.signals) (the RouteSignals contract) picks the target role:
     --
     --   - Present in the subtree, SAME role  -> fields updated in place
@@ -2103,8 +2060,7 @@ rule RoleRoutedFeedSync {
     -- the found-or-created repo-group id for the duration of ONE reconcile, so
     -- multiple items sharing a repo do not create duplicate sub-epics. The
     -- find-or-create runs inside the module's ingest transaction and has no
-    -- failure arm of its own (before store-split M3 a failed create fell back
-    -- to the role sub-epic; that fallback is gone with the separate write).
+    -- failure arm of its own.
     --
     -- The third level widens every subtree operation below (identity lookup,
     -- stale delete, recalculation) — see each section for the specifics.
@@ -2139,8 +2095,7 @@ rule RoleRoutedFeedSync {
     -- already lives in a role sub-epic — both must go so the parent holds no
     -- flat feed task (NoFlatFeedTasksOnReviewsParent). Manual (external_id =
     -- null) tasks on the parent are preserved. This converges the invariant from
-    -- any starting state, including the corrupt parent+sub-epic duplicate state
-    -- the old flat-upsert bug produced.
+    -- any starting state, including a parent+sub-epic duplicate of one PR.
     --
     -- Steps run as ONE non-interleaved unit per parent tick. Because the whole
     -- emission is reconciled together, "present but different role" = move and
@@ -2160,7 +2115,7 @@ rule RoleRoutedFeedSync {
         -- `items` — is what the rest of this rule reconciles against, INCLUDING
         -- the stale-delete keep-set below, so an excluded item that already had
         -- a task loses it on this cycle.
-        let kept = items.filter(i => not excluded(i.signals))
+        let kept = items where not excluded(signals)
 
         -- Retired items with no task left in the subtree are skipped before
         -- routing, so no repo-group sub-epic is found-or-created for them.
@@ -2189,10 +2144,10 @@ rule RoleRoutedFeedSync {
             -- external_id; the scan order (parent, then repo-group
             -- grandchildren, then role sub-epics last) makes a
             -- role-sub-epic-direct copy win a tie over a repo-group copy.
-            let existing = Task{external_id: item.external_id}
-                           where existing.epic = epic
-                              or existing.epic.parent_epic_id = epic.id
-                              or existing.epic.parent_epic_id in {my.id, team.id, bots.id}
+            let existing = (core/Tasks where external_id = item.external_id
+                              and (this.epic = epic
+                                   or this.epic.parent_epic_id = epic.id
+                                   or this.epic.parent_epic_id in {my.id, team.id, bots.id})).first
             if exists existing:
                 if existing.epic != target:
                     -- MOVE: reassign epic only; state-bearing fields preserved.
@@ -2231,7 +2186,7 @@ rule RoleRoutedFeedSync {
         -- is the exact clause that would destroy a live review agent's
         -- worktree on a partially degraded emission.
         if not additive:
-            for task in Tasks where (task.epic.parent_epic_id = epic.id
+            for task in core/Tasks where (task.epic.parent_epic_id = epic.id
                                      or task.epic.parent_epic_id in {my.id, team.id, bots.id})
                                 and task.external_id != null:
                 if not kept.any(i => i.external_id = task.external_id):
@@ -2249,7 +2204,7 @@ rule RoleRoutedFeedSync {
         -- the emission at all, so on a tainted cycle it is the least
         -- discriminating delete of the three and the first to go.
         if not additive:
-            for task in Tasks where task.epic = epic and task.external_id != null:
+            for task in core/Tasks where task.epic = epic and task.external_id != null:
                 not exists task
                 TaskTeardown(task)
 
@@ -2310,9 +2265,9 @@ rule RoleRoutedFeedSync {
         -- deliberate and stays: the protection against tearing down a live
         -- agent lives UPSTREAM, in whether the delete happens at all
         -- (DegradedNonEmptyEmission, or AppendOnlyFeed for an epic that
-        -- never removes at all), not in a state check here. See the former
-        -- rule's "why not gate the teardown on task state instead" for the
-        -- alternative that was rejected, and do not reintroduce it here.
+        -- never removes at all), not in a state check here. See
+        -- DegradedNonEmptyEmission's "why not gate the teardown on task state
+        -- instead" for the alternative that was rejected.
         --
         -- Sequencing note — the ensures clauses of this rule and of
         -- UpsertFeedTasks / GroupedFeedUpsert write `not exists task` BEFORE
@@ -2337,7 +2292,7 @@ rule RoleRoutedFeedSync {
         -- reconciled AND cleaned up here, and this board never shows a row
         -- gone while its worktree is still being removed.
         --
-        -- A removed row ANOTHER host holds is not waited on (task #98873).
+        -- A removed row ANOTHER host holds is not waited on.
         -- Its teardown is a request row the module wrote in the ingest's own
         -- transaction (store-split.allium:
         -- StaleDeleteRequestsTeardownOnTheHoldingHost), served by that host's
@@ -2345,22 +2300,16 @@ rule RoleRoutedFeedSync {
         -- long after this cycle notifies. Its worktree outlives the row on
         -- that machine until then; nothing on this board shows it.
         --
-        -- This resolves what was previously an unspecified divergence — the
-        -- auto-poll path notified first, the manual path cleaned up first — and
-        -- it resolves it towards the manual path's stronger guarantee. It became
-        -- a single decision to make rather than two behaviours to keep in step
-        -- once both paths were funnelled through the one shared cycle
-        -- (src/feed/cycle.rs::FeedCycle::run, which owns the teardown and hands
-        -- its callers an already-cleaned-up outcome to present).
+        -- Both paths share this ordering because both run the one shared
+        -- cycle (src/feed/cycle.rs::FeedCycle::run, which owns the teardown
+        -- and hands its callers an already-cleaned-up outcome to present).
         --
         -- The cost, stated honestly: the auto-poll path's BoardEvent::EpicChanged
-        -- now waits on `git worktree remove` for every removed task, so a
+        -- waits on `git worktree remove` for every removed task, so a
         -- mass-merge that removes a dozen tasks at once lags the board by that
         -- fan-out. It is bounded — cleanup_removed_feed_tasks runs repos in
-        -- parallel and only serialises within a repo — and buying it is the
-        -- elimination of a window in which the board disagreed with the
-        -- filesystem. The previous asymmetry was not a considered trade; it was
-        -- an artefact of two call sites growing the same feature independently.
+        -- parallel and only serialises within a repo — and it buys a board
+        -- that never disagrees with the filesystem.
         --
         -- The existing-task lookup
         -- that decides
@@ -2394,8 +2343,7 @@ rule RoleRoutedFeedSync {
         -- (the report reaches the outcome on both sync paths);
         -- src/feed/ingest/tests/role_routing.rs::route_routed_preserves_manual_task_on_parent
         -- (a manual task survives the stale delete, so it never reaches the
-        -- removed-rows report; the per-step reducer whose own test covered
-        -- that report directly was deleted in store-split M7);
+        -- removed-rows report);
         -- src/feed/tests.rs::tick_removed_task_tears_down_its_worktree
         -- and src/runtime/tests/feeds.rs::exec_trigger_epic_feed_removed_task_tears_down_its_worktree
         -- (the teardown is actually wired up, once per feed path); and the
@@ -2429,8 +2377,8 @@ rule NewReviewRequestIsSignalled {
     -- the repo group under the role sub-epic when that sub-epic groups by
     -- repo, else the role sub-epic itself.
     ensures:
-        for task in inserted_tasks(epic, items).where(t => route(t.signals) in {my_reviews, team_reviews}):
-            for m in task.epic.workspace.memberships.where(m => task.epic.visible_to(m.user)):
+        for task in inserted_tasks(epic, items) where route(signals) in {my_reviews, team_reviews}:
+            for m in task.epic.workspace.memberships where task.epic.visible_to(user):
                 core/UnseenTask.created(subscriber: m.user, task: task)
 
     @guidance
@@ -2445,13 +2393,12 @@ rule NewReviewRequestIsSignalled {
         -- neither does a MOVE between role sub-epics (Team Reviews into My
         -- Reviews, Bots into Team Reviews): the task is not new, and the
         -- signal says "something new landed here". A retired PR is never
-        -- re-inserted (IngestSkipsRetiredFeedItems), so it is never
-        -- re-signalled either.
+        -- re-inserted ("Retired feed items"), so it is never re-signalled
+        -- either.
         --
         -- MY REVIEWS AND TEAM REVIEWS, NOT BOTS. Both hold PRs a person is
         -- asked to review, directly or through a team, and the operator wants
-        -- to hear about each new one (task #98730; My Reviews alone was the
-        -- first cut). Bots, CVE and every flat or grouped feed insert without
+        -- to hear about each new one. Bots, CVE and every flat or grouped feed insert without
         -- the signal: Bots inserts arrive in bulk, so marking them would bury
         -- the marks that matter.
         --
@@ -2513,9 +2460,9 @@ rule FeedCommandFailure {
     --      (DegradedEmptyEmission below). Unlike buckets 1-3 this one is
     --      reached only AFTER a successful parse — the stdout was valid,
     --      it just carried nothing while the command complained.
-    --   5. The epic's own configuration cannot be read, or the epic no
-    --      longer exists / no longer carries a feed_command by the time the
-    --      cycle claims it. These come BEFORE the exec: nothing is spawned.
+    --   5. The epic no longer exists, or no longer carries a feed_command,
+    --      by the time the cycle claims it. These come BEFORE the exec:
+    --      nothing is spawned.
     --      They exist because the cycle reads feed_command (and
     --      feed_append_only) from the epic itself rather than accepting them
     --      from its caller (SerialisedFeedCycle), and the module reads
@@ -2550,7 +2497,7 @@ rule FeedCommandFailure {
 
     ensures:
         log_warn(epic.id, epic.title, error)
-        epic.last_run = now()
+        epic.last_run = now
 
     @guidance
         -- Implementation: src/feed/mod.rs::FeedRunner::tick spawns a
@@ -2569,14 +2516,12 @@ rule FeedCommandFailure {
         -- here too — a change to parse semantics is made once (FeedItemParse).
         -- Bucket 4 is raised after the parse by the shared predicate in
         -- src/feed/exec.rs (see DegradedEmptyEmission).
-        -- Bucket 5's two epic-read arms are pinned by the tests in
-        -- src/feed/cycle.rs: the missing-epic arm by deleting the epic before
-        -- the cycle runs, and the read-error arm by fault injection (renaming
-        -- the epics table through a second connection to the same file). Both
-        -- assert that the feed command never runs and that nothing is synced --
-        -- the arms are otherwise unreachable, and an earlier version of the
-        -- manual path defaulted the unreadable feed_role to none and synced
-        -- FLAT onto a reviews_parent epic.
+        -- Bucket 5 is read from the board's own view of the epic in
+        -- src/feed/cycle.rs::FeedCycle::run, which has no read-error arm. The
+        -- missing-epic arm is pinned by
+        -- src/feed/cycle/tests.rs::a_cycle_whose_epic_is_gone_fails_without_running_the_command
+        -- and the mid-cycle deletion by
+        -- src/feed/cycle/tests.rs::a_sync_refused_because_the_epic_was_deleted_mid_cycle_is_not_a_warning.
         -- Bucket 7 is exec_feed_command's tokio::time::timeout around the
         -- child (see SerialisedFeedCycle's BOUNDED COST note above for why
         -- src/process.rs::run_bounded couldn't be reused for this call site).
@@ -2610,7 +2555,7 @@ rule FeedCommandStderrOnSuccess {
     -- emission, and the two rules below say what a tainted emission is
     -- allowed to do.
     --
-    -- FeedStderrNotice (the one exemption): a stderr LINE that starts with
+    -- THE ONE EXEMPTION, notice lines: a stderr LINE that starts with
     -- "notice:" is informational and does not taint. The runner drops such
     -- lines before it classifies (src/feed/exec.rs::significant_stderr), so
     -- a script can tell the user something (fetch-reviews.sh: "TEAMS is
@@ -2632,17 +2577,13 @@ rule FeedCommandStderrOnSuccess {
     -- emission means nothing, because the reason a script soft-fails is
     -- precisely that it produces FEWER items than the truth.
     --
-    -- This REVERSES a deliberate decision recorded here by #3900, which
-    -- had seen this failure and chose to keep stderr diagnostic-only —
-    -- the sentence it wrote said an empty emission still reconciles and
-    -- still removes tasks absent from it. #3989 reversed that sentence
-    -- for the empty case because the observed cost was unbounded data
-    -- loss: a soft-failing script that exits 0 with an empty array wiped
-    -- a whole reviews_parent subtree, worktrees and all. #4095 then
-    -- extended the same reasoning to the non-empty case, which #3989 had
-    -- left explicitly waved through as a recorded residual risk.
+    -- REJECTED — stderr as diagnostic only, so that an empty emission still
+    -- reconciles and removes every task absent from it. The cost is
+    -- unbounded data loss: a soft-failing script that exits 0 with an empty
+    -- array wipes a whole reviews_parent subtree, worktrees and all, and a
+    -- partially failing one removes whatever its failed queries dropped.
     --
-    -- ACCEPTED COST of the reversal: a feed script that writes to stderr
+    -- ACCEPTED COST of tainting: a feed script that writes to stderr
     -- on EVERY run never removes anything. If it also legitimately emits
     -- an empty array on a day with genuinely zero items it is treated as
     -- failed INDEFINITELY; if it emits items it still syncs them, but
@@ -2656,14 +2597,13 @@ rule FeedCommandStderrOnSuccess {
     -- force-removed worktree and a deleted branch that no one can get
     -- back.
     --
-    -- The logged text is trimmed and truncated to 2000 characters: a
-    -- verbose script must not be able to write unbounded output into
-    -- app.log on every poll.
+    -- The logged text is trimmed and truncated to config.feed_stderr_cap
+    -- characters.
 
     requires: exit_status = 0 and stderr != ""
 
     ensures:
-        log_warn(epic.id, epic.title, truncate(stderr, 2000))
+        log_warn(epic.id, epic.title, truncate(stderr, config.feed_stderr_cap))
         -- and then, when items.count > 0, the emission syncs ADDITIVELY
         -- (DegradedNonEmptyEmission). When items.count = 0 the sync is
         -- suppressed entirely by DegradedEmptyEmission instead.
@@ -2692,7 +2632,8 @@ rule FeedCommandStderrOnSuccess {
         -- exec_feed_command_truncates_long_stderr,
         -- exec_feed_command_truncates_multi_byte_stderr_without_panicking and
         -- exec_feed_command_reports_stderr_of_exactly_the_cap_complete (the
-        -- capture and the 2000-character cap);
+        -- capture and the config.feed_stderr_cap cap,
+        -- src/feed/exec.rs::MAX_FEED_STDERR_CHARS);
         -- src/feed/tests.rs::tick_stderr_on_zero_exit_does_not_suppress_sync
         -- (one item alongside stderr still syncs — additively).
 }
@@ -2703,10 +2644,10 @@ rule DegradedEmptyEmission {
     -- The guard. A feed command that exits 0, parses to ZERO items, and
     -- wrote to stderr is treated as a FAILED command, not as an emission
     -- meaning "everything is gone". This is the signature of a script
-    -- that soft-failed internally and emitted an empty array anyway —
-    -- exactly how #3900's incident ran: a wrong gh account made every
-    -- repo-scoped query fail, each soft-failed to an empty array, and the
-    -- reviews_parent subtree was wiped.
+    -- that soft-failed internally and emitted an empty array anyway — for
+    -- example a wrong gh account making every repo-scoped query fail, each
+    -- soft-failing to an empty array, which would wipe the reviews_parent
+    -- subtree.
     --
     -- Effect: FeedCommandFailed (bucket 4). Logged at warn level,
     -- epic.last_run bumped, and NO SYNC RUNS AT ALL — not the upsert, not
@@ -2743,15 +2684,14 @@ rule DegradedEmptyEmission {
     -- not by this rule. This rule fires only at items.count = 0; a
     -- partially degraded emission — e.g. some of scripts/fetch-reviews.sh's
     -- four repo-scoped queries soft-failing to [] while the others succeed
-    -- — is non-empty and so falls to that rule instead. #3989 recorded that
-    -- gap here as a residual risk and left it open; #4095 closed it.
+    -- — is non-empty and so falls to that rule instead.
 
     requires: exit_status = 0 and items.count = 0 and stderr != ""
 
     ensures:
-        FeedCommandFailed(epic, truncate(stderr, 2000))
+        FeedCommandFailed(epic, truncate(stderr, config.feed_stderr_cap))
         -- and therefore, by FeedCommandFailure: log_warn and
-        -- epic.last_run = now(). No FeedSync dispatch occurs, so no
+        -- epic.last_run = now. No FeedSync dispatch occurs, so no
         -- UpsertFeedTasks / GroupedFeedUpsert / FlatFeedReconcile /
         -- RoleRoutedFeedSync pass runs and no task is created, updated,
         -- moved or removed.
@@ -2774,14 +2714,9 @@ rule DegradedEmptyEmission {
         --     but wrote to stderr: <stderr>", so the status bar shows
         --     "Feed for '<title>' failed: command emitted no items but wrote
         --     to stderr: <stderr>" (ManualFeedTrigger). The ensures clause's
-        --     truncate(stderr, 2000) names the stderr the reason embeds — the
-        --     cap is applied once, by exec_feed_command, before the predicate
-        --     ever sees the text.
-        -- Consequence: the zero-item "command wrote to stderr" hint that
-        -- #3900 added to ManualFeedTrigger is now UNREACHABLE — a
-        -- zero-item run that wrote to stderr can no longer produce a
-        -- success outcome at all — so that hint is deleted, superseded by
-        -- this harder failure.
+        --     truncate(stderr, config.feed_stderr_cap) names the stderr the
+        --     reason embeds — the cap is applied once, by exec_feed_command,
+        --     before the predicate ever sees the text.
         -- Coverage: inline unit tests on the predicate in src/feed/exec.rs —
         -- degraded_when_zero_items_and_stderr_present (fires),
         -- not_degraded_when_zero_items_and_no_stderr and
@@ -2804,17 +2739,18 @@ rule DegradedEmptyEmission {
 rule DegradedNonEmptyEmission {
     when: FeedCommandCompleted(epic, items)
 
-    -- The partial-degradation guard, and the answer to the question #3989
-    -- left open on DegradedEmptyEmission.
+    -- The partial-degradation guard, DegradedEmptyEmission's counterpart for
+    -- an emission that is not empty.
     --
     -- A feed command that exits 0, parses to AT LEAST ONE item, and wrote to
     -- stderr is a PARTIALLY degraded emission: some of what it was asked to
     -- fetch came back, and some of it soft-failed. scripts/fetch-reviews.sh
     -- runs eight-plus scoped queries and each failure branch prints to stderr
     -- and substitutes []; a wrong gh account, an expired token or one
-    -- rate-limited org therefore produces exactly this signature. It is the
-    -- #3900 mechanism at partial scale, and it is MORE likely than total
-    -- failure, not less — total failure needs every query to fail at once.
+    -- rate-limited org therefore produces exactly this signature. It is
+    -- DegradedEmptyEmission's mechanism at partial scale, and it is MORE
+    -- likely than total failure, not less — total failure needs every query
+    -- to fail at once.
     --
     -- Effect: the sync runs, but ADDITIVELY. An additive sync performs every
     -- write that follows from what the emission CONTAINS — insert, field
@@ -2851,8 +2787,8 @@ rule DegradedNonEmptyEmission {
     -- printing anything — is not detected, and its omissions still delete and
     -- tear down. The script contract (FeedCommandFailure) requires errors to
     -- be reported, so a silent soft-fail is a script bug; dispatch cannot
-    -- distinguish it from a genuine removal. Unlike #3989's residual risk,
-    -- this one has no known instance and no cheaper detector.
+    -- distinguish it from a genuine removal. It has no known instance and no
+    -- cheaper detector.
     --
     -- The rule applies to EVERY feed epic uniformly — flat, grouped and
     -- reviews_parent alike.
@@ -2863,7 +2799,7 @@ rule DegradedNonEmptyEmission {
         -- The sync dispatches exactly as FeedSync says (by role, by
         -- group_by_repo), with removals disabled for this cycle.
         FeedSync(epic, items, additive: true)
-        for task in Tasks where task.external_id != null and task.epic in epic.subtree:
+        for task in core/Tasks where task.external_id != null and task.epic in epic.subtree:
             -- Nothing absent from a tainted emission is removed, whatever
             -- its status and whether or not it carries agent state.
             exists task
@@ -2916,8 +2852,7 @@ rule DegradedNonEmptyEmission {
         -- degraded_partial_when_items_present_and_stderr_present (fires),
         -- not_partially_degraded_when_zero_items and
         -- not_partially_degraded_when_no_stderr (both boundaries);
-        -- src/feed/ingest/tests.rs, one per removal mechanism (the additive
-        -- per-step reducer's own test went with it in store-split M7):
+        -- src/feed/ingest/tests.rs, one per removal mechanism:
         -- additive_role_routed_sync_keeps_a_task_absent_from_the_emission,
         -- additive_role_routed_sync_keeps_parent_stranded_tasks,
         -- additive_grouped_sync_keeps_tasks_in_a_dropped_repo_sub_epic and
@@ -2980,8 +2915,8 @@ rule AppendOnlyFeed {
     -- (DropClosedRetiredFeedItems). Deleting the append-only epic itself is
     -- the one reset — its records go with it.
     --
-    -- A task left in done rather than deleted keeps its row, and the ON
-    -- CONFLICT arm of UpsertFeedTasks matches it on every later poll, so the
+    -- A task left in done rather than deleted keeps its row, and the match
+    -- arm of UpsertFeedTasks finds it on every later poll, so the
     -- status-preservation clause leaves it in done. ACCEPTED CONSEQUENCE:
     -- every later poll re-applies the item's title, description, tag, labels
     -- and sort_order to that done task and bumps updated_at — for as long as
@@ -3076,7 +3011,7 @@ rule AppendOnlyFeed {
         -- The sync dispatches exactly as FeedSync says (by role, by
         -- group_by_repo), with removals disabled — permanently, for this epic.
         FeedSync(epic, items, additive: true)
-        for task in Tasks where task.external_id != null and task.epic in epic.subtree:
+        for task in core/Tasks where task.external_id != null and task.epic in epic.subtree:
             -- Absence from an append-only feed's emission is not evidence of
             -- anything, so nothing is removed, whatever its status and whether
             -- or not it carries agent state.
@@ -3223,10 +3158,9 @@ rule AppendOnlyFeed {
 -- or an item can be re-routed to a different role, without the record going
 -- stale.
 --
--- SINCE store-split M3, retired_without_task's subtree walk runs inside the
--- module's ingest_feed, over every row the store holds, not over the poll
--- owner's subscribed view (IngestFeedEmission). Before M3 it ran on the board,
--- which is the assumption sync.allium: BoardConnection.covered_epics describes.
+-- retired_without_task's subtree walk runs inside the module's ingest_feed,
+-- over every row the store holds, not over the poll owner's subscribed view
+-- (IngestFeedEmission).
 
 rule DropClosedRetiredFeedItems {
     when: FeedSync(epic, items, additive)
@@ -3284,7 +3218,7 @@ rule DropClosedRetiredFeedItems {
 --      migration; it heals a feed epic whose grouping was just toggled off
 --      (epics.allium ToggleGroupByRepo), which flips the flag but moves no task
 --      synchronously. When the epic has no RepoGroup sub-epics this reduces to
---      a plain UpsertFeedTasks, exactly as before.
+--      a plain UpsertFeedTasks.
 -- The reviews_parent path lives in its own function (ingest_role_routed),
 -- separate from ingest_flat and ingest_grouped, because it orchestrates a
 -- whole subtree rather than an epic's own emission. The WHOLE feed_role
@@ -3334,10 +3268,10 @@ rule ManualFeedTrigger {
     --     found nothing to do.
     --   - On failure: "Feed for '<title>' failed: <error>"
     --   - When DROPPED: "Feed for '<title>' is already refreshing…"
-    --   - When ANOTHER HOST owns the poll (task #98873): "Feed for '<title>':
+    --   - When ANOTHER HOST owns the poll: "Feed for '<title>':
     --     the poll owner (<host>) will refresh it"
     --
-    -- WHERE IT RUNS (task #98873). Only the epic's poll owner reconciles it
+    -- WHERE IT RUNS. Only the epic's poll owner reconciles it
     -- (SerialisedFeedCycle, scope across hosts):
     --   - this host is the poll owner: the cycle runs here, as below;
     --   - no poll owner yet: this host claims first and runs the cycle only
@@ -3367,18 +3301,15 @@ rule ManualFeedTrigger {
     -- before the feed recovers on its own (SerialisedFeedCycle's BOUNDED
     -- COST).
     --
-    -- There is no zero-item stderr hint on the success line. #3900 had
-    -- one (" — command wrote to stderr (see app.log)", gated on N = 0 AND
-    -- the command having written to stderr while exiting 0); that exact
-    -- combination is now DegradedEmptyEmission, which produces the
-    -- FAILURE line instead, so the hint is unreachable and gone. The
-    -- additive suffix above is not that hint returning: it fires on the
-    -- OPPOSITE arm (N > 0 with stderr), and it reports a decision dispatch
-    -- took — removals were withheld — rather than merely pointing at the log.
+    -- There is no zero-item stderr hint on the success line: zero items with
+    -- stderr on a zero exit is DegradedEmptyEmission, which produces the
+    -- FAILURE line instead. The additive suffix fires on the OPPOSITE arm
+    -- (N > 0 with stderr), and it reports a decision dispatch took — removals
+    -- were withheld — rather than merely pointing at the log.
 
     requires: epic.feed_command != null
 
-    -- FeedCommandRunsOnSettersHost (task #98851): when local_host().owner is
+    -- FeedCommandRunsOnSettersHost: when core/local_host().owner is
     -- not the person who set the command, nothing runs and the status line
     -- is "Feed for '{epic.title}' runs only on its author's host". It is
     -- checked before the poll owner is consulted, so a host that may not run
@@ -3387,7 +3318,7 @@ rule ManualFeedTrigger {
         status_bar = "Fetching feed for '{epic.title}'…"
         -- When the poll owner is, or after the claim turns out to be,
         -- another host, nothing below runs here:
-        --   split/FeedRefreshRequested(epic, local_host())
+        --   split/FeedRefreshRequested(epic, core/local_host())
         --   status_bar = "Feed for '{epic.title}': the poll owner
         --                 ({owner_host}) will refresh it"
         -- or, on a refused request:
@@ -3415,7 +3346,7 @@ rule ManualFeedTrigger {
         -- dropped arm is a distinct FeedMessage variant (AlreadyRefreshing),
         -- not a Failed with a special string, so the status bar cannot blame the
         -- user's feed command for a serialisation decision. The poll-owner arm
-        -- is likewise its own variant (OwnerWillRefresh, task #98873), not a
+        -- is likewise its own variant (OwnerWillRefresh), not a
         -- Refreshed with a zero count.
         -- Keybinding: src/tui/input/normal.rs::run_normal, action refresh_feed.
         -- The keypress gate ("is this a feed epic at all?") is still answered
@@ -3446,36 +3377,39 @@ rule ManualFeedTrigger {
         -- manual trigger failures surface in the status bar.
 }
 
--- == Serving feed requests (task #98873) ==
+-- == Serving feed requests ==
 
 rule ServeFeedRefreshRequest {
     when: FeedRequestPickedUp(request)
 
     requires: request.kind = refresh
-    requires: request.host = local_host()
+    requires: request.host = core/local_host()
     -- A board serves only rows its own owner asked for. A row another
     -- identity wrote is logged and left alone (the module's D11 check on the
     -- write is the first line, this the second).
-    requires: request.requested_by = local_host().owner
+    requires: request.requested_by = core/local_host().owner
 
     let epic = request.epic
     let setter = epic.feed_command_set_by ?? epic.created_by
 
     ensures:
         -- Claimed first; nothing runs unless the claim is accepted.
-        split/FeedRequestDelivered(request: request, host: local_host())
-        if epic.feed_command != null and local_host().owner = setter
-                and poll_owner(epic) = local_host():
-            -- ONE cycle, through the same per-process claim as every other
-            -- cycle for the epic (SerialisedFeedCycle).
-            FeedCycleRequested(epic: epic)
+        split/FeedRequestDelivered(request: request, host: core/local_host())
+        if not exists epic:
+            split/FeedRequestFailed(request: request, reporter: core/local_host(),
+                                    reason: "epic no longer exists")
+        else if core/local_host().owner != setter:
+            split/FeedRequestFailed(request: request, reporter: core/local_host(),
+                                    reason: "this host's owner did not set the command")
+        else if poll_owner(epic) != core/local_host():
+            split/FeedRequestFailed(request: request, reporter: core/local_host(),
+                                    reason: "this host no longer owns the poll")
         else:
-            split/FeedRequestFailed(
-                request: request,
-                reporter: local_host(),
-                reason: "this host may not run the epic's feed command"
-                    or "this host no longer owns the poll"
-            )
+            -- ONE cycle, through the same per-process claim as every other
+            -- cycle for the epic (SerialisedFeedCycle). An epic whose
+            -- feed_command was cleared reaches the cycle and fails there
+            -- (FeedCommandFailure bucket 5), which fails the row.
+            FeedCycleRequested(epic: epic)
 
     @guidance
         -- Driven by FeedTick, which picks the row up on the owner's next poll
@@ -3487,6 +3421,7 @@ rule ServeFeedRefreshRequest {
         -- not run, so two hosts never reconcile one epic.
         -- As for ManualFeedTrigger, the epic's last_run is NOT updated: the
         -- next automatic poll fires at its normal time.
+        -- Implementation: src/feed/mod.rs::FeedRunner::spawn_refresh_request.
         --
         -- THE OUTCOME, reported by reducer call once the cycle ends
         -- (store-split.allium: HostReportsFeedRequestDone,
@@ -3513,11 +3448,11 @@ rule ServeFeedTeardownRequest {
     when: FeedRequestPickedUp(request)
 
     requires: request.kind = teardown
-    requires: request.host = local_host()
-    requires: request.requested_by = local_host().owner
+    requires: request.host = core/local_host()
+    requires: request.requested_by = core/local_host().owner
 
     ensures:
-        split/FeedRequestDelivered(request: request, host: local_host())
+        split/FeedRequestDelivered(request: request, host: core/local_host())
         FeedTaskReleased(
             repo_path: request.repo_path,
             worktree: request.worktree,
@@ -3581,7 +3516,7 @@ invariant NoFlatFeedTasksOnReviewsParent {
         not epic.subtasks.any(t => t.external_id != null)
 }
 
--- ConfigFilesAreNeverOverwritten (prose invariant): setup never writes over a
+-- ConfigFilesAreNeverOverwritten (prose invariant): the apply never writes over a
 -- file that already exists at a config path under <data_dir>/scripts/. There
 -- is no flag, no prompt and no manifest state that unlocks it —
 -- InstallShippedFeedConfigs has exactly one write branch and it is guarded on
@@ -3591,7 +3526,7 @@ invariant NoFlatFeedTasksOnReviewsParent {
 -- UnknownProvenanceIsNeverSilentlyOverwritten (prose invariant): a shipped
 -- script whose on-disk content matches NEITHER the shipped content NOR the
 -- recorded digest is overwritten only after an explicit interactive yes.
--- Under --yes it is always kept. This is the invariant the manifest exists to
+-- When nobody can answer it is always kept. This is the invariant the manifest exists to
 -- make cheap: without it every differing script would need a prompt, and a
 -- prompt the user cannot avoid is a prompt the user stops reading.
 --
@@ -3611,7 +3546,7 @@ invariant NoFlatFeedTasksOnReviewsParent {
 --
 -- FailedScriptsClaimNoProvenance (prose invariant): a script whose backup,
 -- write or chmod raised has NO digest recorded in the manifest for that run.
--- Its on-disk content is unknown to dispatch, so the next setup must reach
+-- Its on-disk content is unknown to dispatch, so the next apply must reach
 -- branch 4 (unknown provenance) and ask, rather than branch 3 (proven
 -- provenance), which overwrites silently. Recording a digest dispatch did not
 -- successfully write would convert a failure into future consent.

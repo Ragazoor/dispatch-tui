@@ -1137,6 +1137,12 @@ rule ApplyStaleConfigOnConsent {
     let failed = apply_config_update(drift)
 
     ensures:
+        -- The feed_scripts artefact is applied by feeds.allium's
+        -- InstallShippedFeedScripts and InstallShippedFeedConfigs, under the
+        -- data directory (storage.allium: DataDirectory). The operator just
+        -- answered the prompt, so someone is there to ask.
+        if feed_scripts in drift.items:
+            ApplyFeedScriptsArtefact(data_dir: data_dir(), operator_can_answer: true)
         StartupConfigResolved(operator, outcome: updated)
 
     @guidance

@@ -589,6 +589,8 @@ surface DispatchCommandLine {
         CliAttachPlanRequested(task_id, path)
         CliPaneRendererStarted(invocation, task_id)
         CliPaneRendererStopped(renderer)
+        -- `dispatch verify-feed <command>` (feeds.allium: VerifyFeed).
+        VerifyFeedCommand(command)
 
     @guarantee EveryFailureNamesItsCause
         -- A command that cannot do what it was asked ends with a non-zero
