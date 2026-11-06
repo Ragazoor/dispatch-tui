@@ -50,8 +50,6 @@ impl StoreSpawner for FakeSpawner {
                 "no spacetime",
             ));
         }
-        self.starts
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         std::fs::write(log, "store output")?;
         *self.seen.lock().unwrap() = Some((address.to_string(), data_dir.to_path_buf()));
         if self.answer_on_start {
