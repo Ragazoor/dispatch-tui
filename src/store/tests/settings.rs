@@ -169,7 +169,7 @@ async fn verify_command_get_unknown_path_is_none() {
     assert_eq!(db.get_verify_command("/does/not/exist").await, None);
 }
 
-// --- managed-feed config keys (WP5) ---
+// --- managed-feed config keys ---
 
 #[tokio::test]
 async fn managed_feed_settings_round_trip_and_clear() {

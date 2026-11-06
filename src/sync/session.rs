@@ -89,9 +89,11 @@ pub trait HostStore: Send + Sync {
     /// Adopt `identity` together with the `credential` that proves it, as ONE
     /// write: on a handle that keeps its identity in the host file, one
     /// whole-file replacement, so the file never holds the one without the
-    /// other (`host.allium: AdoptUserIdentity`). The owner keeps write-once
-    /// semantics; the credential is refreshed. Rejects an empty identity or
-    /// credential.
+    /// other (`host.allium: AdoptUserIdentity`). Re-adopting the stored owner
+    /// refreshes its credential; a different identity is refused with nothing
+    /// written, so the file never pairs one owner with another's credential
+    /// (`settle_identity` refuses that case before it gets here). Rejects an
+    /// empty identity or credential.
     async fn adopt_user_identity_with_credential(
         &self,
         identity: &str,

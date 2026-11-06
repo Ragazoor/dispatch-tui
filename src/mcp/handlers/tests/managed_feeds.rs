@@ -14,13 +14,6 @@ async fn no_args_returns_current_config() {
         .db
         .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
             reviews_command: Some(Some("/scripts/reviews.sh".to_string())),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    state
-        .db
-        .set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
             reviews_interval_secs: Some(Some(300)),
             ..Default::default()
         })

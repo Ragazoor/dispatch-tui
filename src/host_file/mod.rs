@@ -51,24 +51,30 @@ pub fn host_file_path(data_dir: &Path) -> PathBuf {
 /// Read and parse the host file. `Ok(None)` is "no file"; any other failure to
 /// read or parse is an error, never "no file".
 fn read_existing(data_dir: &Path) -> anyhow::Result<Option<HostIdentity>> {
+    use std::io::Read;
     let path = host_file_path(data_dir);
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
+    let read_failed =
+        |e: std::io::Error| anyhow::Error::new(e).context(format!("read {}", path.display()));
+    let mut file = match std::fs::File::open(&path) {
+        Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(anyhow::Error::new(e).context(format!("read {}", path.display()))),
+        Err(e) => return Err(read_failed(e)),
     };
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(read_failed)?;
     let identity: HostIdentity = serde_json::from_slice(&bytes)
         .with_context(|| format!("{} is not a readable identity", path.display()))?;
-    repair_mode(&path);
+    repair_mode(&file, &path);
     Ok(Some(identity))
 }
 
 /// `host.allium: HostFileIsPrivate` on read: a host file someone loosened is
-/// put back to [`HOST_FILE_MODE`]. Best effort: a repair that fails is logged
-/// and the read still answers, since the content is already in hand.
-fn repair_mode(path: &Path) {
+/// put back to [`HOST_FILE_MODE`], on the file already open. Best effort: a
+/// repair that fails is logged and the read still answers, since the content
+/// is already in hand.
+fn repair_mode(file: &std::fs::File, path: &Path) {
     use std::os::unix::fs::PermissionsExt;
-    let mode = match std::fs::metadata(path) {
+    let mode = match file.metadata() {
         Ok(meta) => meta.permissions().mode() & 0o777,
         Err(e) => {
             tracing::warn!("cannot check the mode of {}: {e}", path.display());
@@ -78,7 +84,7 @@ fn repair_mode(path: &Path) {
     if mode == HOST_FILE_MODE {
         return;
     }
-    match std::fs::set_permissions(path, std::fs::Permissions::from_mode(HOST_FILE_MODE)) {
+    match file.set_permissions(std::fs::Permissions::from_mode(HOST_FILE_MODE)) {
         Ok(()) => tracing::warn!(
             "{} had mode {mode:o}; set it back to {HOST_FILE_MODE:o}",
             path.display()
@@ -108,28 +114,28 @@ fn write_whole(data_dir: &Path, identity: &HostIdentity) -> anyhow::Result<()> {
 
 /// Read-modify-write: replace the file with `change` applied to what is there.
 /// Fails, writing nothing, when there is no readable host file. A change that
-/// leaves the identity as it was writes nothing.
-fn update(data_dir: &Path, change: impl FnOnce(&mut HostIdentity)) -> anyhow::Result<HostIdentity> {
+/// leaves the identity as it was writes nothing, and a change that refuses
+/// writes nothing either.
+fn update(
+    data_dir: &Path,
+    change: impl FnOnce(&mut HostIdentity) -> anyhow::Result<()>,
+) -> anyhow::Result<HostIdentity> {
     let mut identity = read_for_cli(data_dir)?;
     let before = identity.clone();
-    change(&mut identity);
+    change(&mut identity)?;
     if identity != before {
         write_whole(data_dir, &identity)?;
     }
     Ok(identity)
 }
 
-/// `core.allium: LocalHostOwnerIsWrittenOnce`: set the owner only when none is
-/// stored. Trims and rejects an empty identity.
-fn set_owner_if_unset(host: &mut HostIdentity, identity: &str) -> anyhow::Result<()> {
+/// A user identity, trimmed; an empty one is refused.
+fn checked_identity(identity: &str) -> anyhow::Result<&str> {
     let identity = identity.trim();
     if identity.is_empty() {
         anyhow::bail!("user identity must not be empty");
     }
-    if host.user_identity.is_none() {
-        host.user_identity = Some(identity.to_string());
-    }
-    Ok(())
+    Ok(identity)
 }
 
 /// The board launch's identity step (`startup.allium`:
@@ -160,7 +166,8 @@ pub fn resolve_for_launch(data_dir: &Path) -> Result<HostIdentity, StartupAbort>
 }
 
 /// A one-shot CLI command's read (`cli.allium: CliCommandsNeedAHostFile`).
-/// Never writes: with no host file it fails with a message telling the
+/// Never writes content (it may put a loosened mode back, `HostFileIsPrivate`):
+/// with no host file it fails with a message telling the
 /// operator to run `dispatch tui` once.
 pub fn read_for_cli(data_dir: &Path) -> anyhow::Result<HostIdentity> {
     read_existing(data_dir)?.with_context(|| {
@@ -180,7 +187,8 @@ pub fn rename_host(data_dir: &Path, label: &str) -> anyhow::Result<HostIdentity>
         anyhow::bail!("host label must not be empty");
     }
     update(data_dir, |identity| {
-        identity.label = Some(label.to_string())
+        identity.label = Some(label.to_string());
+        Ok(())
     })
 }
 
@@ -196,25 +204,21 @@ pub fn adopt_user_identity(
     identity: &str,
     credential: &str,
 ) -> anyhow::Result<HostIdentity> {
+    let identity = checked_identity(identity)?;
     let credential = credential.trim();
-    if identity.trim().is_empty() {
-        anyhow::bail!("user identity must not be empty");
-    }
     if credential.is_empty() {
         anyhow::bail!("user identity credential must not be empty");
     }
-    let identity = identity.trim();
-    if let Some(stored) = read_for_cli(data_dir)?.user_identity {
-        if stored != identity {
-            anyhow::bail!(
-                "this install belongs to user identity {stored}, not {identity}: refusing to store another identity's credential"
-            );
-        }
-    }
     update(data_dir, |host| {
-        // Validated above, so this cannot fail.
-        let _ = set_owner_if_unset(host, identity);
+        match host.user_identity.as_deref() {
+            Some(stored) if stored != identity => anyhow::bail!(
+                "this install belongs to user identity {stored}, not {identity}: refusing to store another identity's credential"
+            ),
+            Some(_) => {}
+            None => host.user_identity = Some(identity.to_string()),
+        }
         host.credential = Some(credential.to_string());
+        Ok(())
     })
 }
 
@@ -225,24 +229,18 @@ pub fn set_credential(data_dir: &Path, credential: &str) -> anyhow::Result<HostI
         anyhow::bail!("user identity credential must not be empty");
     }
     update(data_dir, |host| {
-        host.credential = Some(credential.to_string())
+        host.credential = Some(credential.to_string());
+        Ok(())
     })
 }
 
 /// Store the user identity once: a second call with a different identity
 /// leaves the stored one alone.
 pub fn adopt_user_identity_once(data_dir: &Path, identity: &str) -> anyhow::Result<HostIdentity> {
-    let mut checked = HostIdentity {
-        host_id: String::new(),
-        label: None,
-        user_identity: None,
-        credential: None,
-        extra: Default::default(),
-    };
-    set_owner_if_unset(&mut checked, identity)?;
+    let identity = checked_identity(identity)?;
     update(data_dir, |host| {
-        if host.user_identity.is_none() {
-            host.user_identity = checked.user_identity;
-        }
+        host.user_identity
+            .get_or_insert_with(|| identity.to_string());
+        Ok(())
     })
 }

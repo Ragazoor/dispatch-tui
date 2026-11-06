@@ -51,16 +51,17 @@ pub fn default_data_dir() -> std::path::PathBuf {
 }
 
 /// `storage.allium: DataDirectory`'s default, from `$XDG_DATA_HOME` and
-/// `$HOME`. An empty value of either takes the same fallback as an absent one:
-/// it would otherwise resolve against whatever directory the process was
-/// started from. See `crate::setup::home_dir`.
+/// `$HOME`. A relative `$XDG_DATA_HOME` (empty included) is ignored, as the XDG
+/// Base Directory spec says, and an empty `$HOME` takes the same fallback as an
+/// absent one: either would otherwise resolve against whatever directory the
+/// process was started from. See `crate::setup::home_dir`.
 fn data_dir_from(
     xdg_data_home: Option<std::ffi::OsString>,
     home: Option<String>,
 ) -> std::path::PathBuf {
     let base = xdg_data_home
-        .filter(|xdg| !xdg.is_empty())
         .map(std::path::PathBuf::from)
+        .filter(|xdg| xdg.is_absolute())
         .unwrap_or_else(|| {
             let home = home
                 .filter(|home| !home.is_empty())
@@ -105,6 +106,15 @@ mod default_data_dir_tests {
     fn an_empty_xdg_data_home_falls_back_to_home() {
         assert_eq!(
             data_dir_from(Some(OsString::new()), Some("/home/u".into())),
+            PathBuf::from("/home/u/.local/share/dispatch")
+        );
+    }
+
+    /// A relative `XDG_DATA_HOME` is ignored too (XDG Base Directory spec).
+    #[test]
+    fn a_relative_xdg_data_home_falls_back_to_home() {
+        assert_eq!(
+            data_dir_from(Some(OsString::from("rel")), Some("/home/u".into())),
             PathBuf::from("/home/u/.local/share/dispatch")
         );
     }

@@ -127,17 +127,7 @@ async fn provision_from_settings_creates_tree() {
     let db = Store::open_in_memory().unwrap();
     db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
         reviews_command: Some(Some(REVIEWS.to_string())),
-        ..Default::default()
-    })
-    .await
-    .unwrap();
-    db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
         reviews_interval_secs: Some(Some(300)),
-        ..Default::default()
-    })
-    .await
-    .unwrap();
-    db.set_managed_feed_settings(crate::store::ManagedFeedSettingsPatch {
         cve_command: Some(Some(CVE.to_string())),
         ..Default::default()
     })

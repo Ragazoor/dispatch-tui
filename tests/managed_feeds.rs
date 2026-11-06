@@ -47,11 +47,6 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
     // Configure both managed feeds, then provision (the startup path).
     db.set_managed_feed_settings(dispatch_tui::store::ManagedFeedSettingsPatch {
         reviews_command: Some(Some(REVIEWS_CMD.to_string())),
-        ..Default::default()
-    })
-    .await
-    .unwrap();
-    db.set_managed_feed_settings(dispatch_tui::store::ManagedFeedSettingsPatch {
         cve_command: Some(Some(CVE_CMD.to_string())),
         ..Default::default()
     })

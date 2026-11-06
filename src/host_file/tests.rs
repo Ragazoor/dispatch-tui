@@ -261,7 +261,7 @@ fn adopting_a_user_identity_writes_it_and_its_credential_together() {
 }
 
 /// `core.allium: LocalHostOwnerIsWrittenOnce`: a second adoption with a
-/// different owner leaves the stored owner alone; the credential is refreshed.
+/// different owner is refused and changes nothing.
 #[test]
 fn adopting_a_different_identity_is_refused_and_writes_nothing() {
     // host.allium: RefuseAChangedUserIdentity, and AdoptUserIdentity's "never
