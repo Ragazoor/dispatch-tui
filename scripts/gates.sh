@@ -21,6 +21,14 @@
 # Run from the repo root.
 set -e
 
+# Git exports these to hooks, as absolute paths in a worktree. Inherited, they
+# make a self-test's `git init`/`config`/`commit` in its temp dir act on the
+# real repository instead: a push from a worktree once set `core.bare = true`
+# and a test user.email in the shared .git/config and committed a tree that
+# deletes every file onto the branch. The gates run from the repo root, where
+# git finds the repository without them.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE
+
 fmt_mode="${1:---check}"
 case "$fmt_mode" in
     --check | --fix) ;;
