@@ -502,3 +502,27 @@ fn a_fold_with_nothing_below_stays_put() {
     assert!(app.epic_folds.is_folded(TaskStatus::Running, EpicId(a)));
     assert!(!saves_epic_folds(&cmds), "{cmds:?}");
 }
+
+/// An epic refresh moves a fold whose epic stopped drawing, with no task
+/// refresh needed (tasks.allium: FoldMovesToDrawnDescendant).
+#[test]
+fn an_epic_refresh_moves_a_fold_that_no_longer_draws() {
+    let a = 1;
+    let mut app = flat_app(
+        vec![owned(11, 4), owned(12, 5), owned(14, a)],
+        fold_move_epics(),
+    );
+    app.epic_folds.toggle(TaskStatus::Running, EpicId(a));
+    // A owns task 14, so it draws. Remove it: only B's branch is left.
+    let mut remaining = app.board.tasks.clone();
+    remaining.retain(|t| t.id.0 != 14);
+    let cmds = app.handle_refresh_epics(app.board.epics.clone());
+    assert!(cmds.is_empty(), "a still draws: {cmds:?}");
+    app.board.tasks = remaining;
+
+    let cmds = app.handle_refresh_epics(app.board.epics.clone());
+
+    assert!(!app.epic_folds.is_folded(TaskStatus::Running, EpicId(a)));
+    assert!(app.epic_folds.is_folded(TaskStatus::Running, EpicId(2)));
+    assert!(saves_epic_folds(&cmds), "{cmds:?}");
+}

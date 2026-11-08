@@ -379,8 +379,9 @@ impl App {
             .and_then(|t| Self::take_cleanup(t, follow_up, guard));
         self.clear_agent_tracking(id);
         self.board.tasks.retain(|t| t.id != id);
+        let mut respawn = self.move_skipped_epic_folds();
         self.sync_board_selection();
-        let respawn = self.maybe_respawn_split_pane(id);
+        respawn.extend(self.maybe_respawn_split_pane(id));
         (cleanup, respawn)
     }
 

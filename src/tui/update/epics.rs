@@ -211,7 +211,8 @@ impl App {
         if let Some(slot) = self.board.epics.iter_mut().find(|e| e.id == epic.id) {
             *slot = epic;
         }
-        vec![]
+        // An edit can reparent the epic, which reshapes the compact tree.
+        self.move_skipped_epic_folds()
     }
 
     pub(in crate::tui) fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
@@ -273,6 +274,7 @@ impl App {
         }
         self.board.epics.retain(|e| !subtree.contains(&e.id));
         self.board.tasks.retain(|t| !in_subtree(t));
+        cmds.extend(self.move_skipped_epic_folds());
         // If we were viewing this epic, exit
         if matches!(&self.board.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
             self.handle_exit_epic();
