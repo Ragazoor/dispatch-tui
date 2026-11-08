@@ -137,6 +137,16 @@ impl Harness {
         commands::dispatch(cmd, &mut self.app, &self.rt).await
     }
 
+    /// Apply the next message the runtime reported, and drain the commands it
+    /// cascades into: the board's half of a flow whose file work runs off the
+    /// command drain (the trust check and grant report through `msg_tx`).
+    async fn apply_next_msg(&mut self) {
+        let msg = self.next_msg().await;
+        for cmd in self.app.update(msg) {
+            drain(&self.rt, &mut self.app, cmd).await;
+        }
+    }
+
     /// Serve the dispatch requests the arms under test wrote, the way this
     /// host's reactor would once the row pump delivers them
     /// (`store-split.allium: HostClaimsDispatch`), and wait for each to land.

@@ -117,6 +117,7 @@ async fn dispatch_task_check_trust_and_dispatch_prompts_for_an_untrusted_repo() 
         mode: models::DispatchMode::Dispatch,
     }))
     .await;
+    h.apply_next_msg().await;
 
     let status = h.app.status_message().unwrap_or_default();
     assert!(
@@ -144,6 +145,7 @@ async fn dispatch_task_quick_dispatch_stops_at_the_trust_prompt_for_an_untrusted
         epic_id: None,
     }))
     .await;
+    h.apply_next_msg().await;
 
     let status = h.app.status_message().unwrap_or_default();
     assert!(
@@ -187,6 +189,7 @@ async fn dispatch_task_trust_and_dispatch_grants_trust_then_dispatches() {
         mode: models::DispatchMode::Dispatch,
     }))
     .await;
+    h.apply_next_msg().await;
     h.serve_requests().await;
 
     assert!(matches!(
@@ -230,10 +233,10 @@ async fn dispatch_task_trust_and_dispatch_abandons_on_a_trust_write_failure() {
         mode: models::DispatchMode::Dispatch,
     }))
     .await;
+    h.apply_next_msg().await;
 
-    // Both the abandon and the error apply directly to `app`, the same way
-    // `CheckTrustAndDispatch`'s untrusted branch does — this runs
-    // synchronously inside `dispatch_task`, never through `msg_tx`.
+    // The grant reports through `msg_tx`; applying `TrustGranted` abandons the
+    // claim and raises the error.
     assert!(
         !h.app.is_dispatching(id),
         "an abandoned dispatch must clear the dispatching marker"
@@ -270,6 +273,7 @@ async fn dispatch_task_trust_and_quick_dispatch_grants_trust_then_dispatches() {
         epic_id: None,
     }))
     .await;
+    h.apply_next_msg().await;
     h.serve_requests().await;
 
     // `Created` applies to `app` directly, the same way `MarkDispatching`
@@ -320,6 +324,7 @@ async fn dispatch_task_check_trust_and_dispatch_proceeds_when_already_trusted() 
             mode: models::DispatchMode::Dispatch,
         }))
         .await;
+    h.apply_next_msg().await;
     for cmd in extra {
         drain(&h.rt, &mut h.app, cmd).await;
     }
@@ -359,6 +364,7 @@ async fn dispatch_task_quick_dispatch_proceeds_when_already_trusted() {
         epic_id: None,
     }))
     .await;
+    h.apply_next_msg().await;
     h.serve_requests().await;
 
     assert_eq!(

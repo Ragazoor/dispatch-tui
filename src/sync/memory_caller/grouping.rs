@@ -4,6 +4,8 @@
 
 use anyhow::Result;
 
+use super::bindings;
+
 use dispatch_spacetime_module as module;
 
 use crate::models::EpicId;
@@ -153,12 +155,19 @@ impl MemoryReducerCaller {
 
     /// Mirrors `regroup_epic`.
     pub(super) fn apply_regroup_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
-        let root = root.0;
         let scope = self.scope();
         let mut tables = self.lock();
-        if tables.visible_epic(&scope, root).is_none() {
+        if tables.visible_epic(&scope, root.0).is_none() {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
+        Ok(match self.regroup_epic_rows(&mut tables, root.0) {
+            Ok(()) => ReducerOutcome::Applied(vec![]),
+            Err(why) => ReducerOutcome::Refused(why),
+        })
+    }
+
+    /// The body of `regroup_epic`, shared with `set_epic_group_by_repo`.
+    pub(super) fn regroup_epic_rows(&self, tables: &mut Tables, root: i64) -> Result<(), String> {
         let tasks: Vec<module::Task> = tables
             .tasks
             .values()
@@ -167,21 +176,92 @@ impl MemoryReducerCaller {
             .collect();
         let mut joined = std::collections::BTreeSet::new();
         for task in tasks {
-            let target = self.route_to_repo_group(&mut tables, root, &task.repo_path);
+            let target = self.route_to_repo_group(tables, root, &task.repo_path);
             if target != root {
-                if let Err(why) = self.relink_task(&mut tables, task, target) {
-                    return Ok(ReducerOutcome::Refused(why));
-                }
+                self.relink_task(tables, task, target)?;
                 joined.insert(target);
             }
         }
         for sub in joined {
             if let Some(epic) = tables.epics.get(&sub).cloned() {
-                self.recalculate_one(&mut tables, &epic);
+                self.recalculate_one(tables, &epic);
             }
         }
-        self.recalculate_epic_chain(&mut tables, root);
-        Ok(ReducerOutcome::Applied(vec![]))
+        self.recalculate_epic_chain(tables, root);
+        Ok(())
+    }
+
+    /// Mirrors `set_epic_group_by_repo`: the flag write and, for a non-feed
+    /// epic, the regroup or flatten, whole or not at all.
+    ///
+    /// The module leans on its rolled-back transaction; this double has none.
+    /// The flag patch is dry-run first (`check_only`), so its refusals (the
+    /// append-only one) leave nothing written; if the move then refuses, the
+    /// epic row is put back as it was. Tasks the move had already relinked
+    /// stay moved, which only a store-side refusal of `relink_task` could
+    /// cause, and the conformance scenario does not reach one.
+    pub(super) fn apply_set_epic_group_by_repo(
+        &self,
+        id: EpicId,
+        group_by_repo: bool,
+    ) -> Result<ReducerOutcome> {
+        {
+            let scope = self.scope();
+            let tables = self.lock();
+            if tables.visible_epic(&scope, id.0).is_none() {
+                return Ok(ReducerOutcome::Refused(format!(
+                    "epic {} does not exist",
+                    id.0
+                )));
+            }
+        }
+        let patch = || bindings::EpicPatch {
+            group_by_repo: Some(group_by_repo),
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: None,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            feed_role: None,
+            origin: None,
+            feed_append_only: None,
+            completed_at: None,
+        };
+        let dry = self.patch_epic_row(id, patch(), true)?;
+        if matches!(dry, ReducerOutcome::Refused(_)) {
+            return Ok(dry);
+        }
+        let original = self.lock().epics.get(&id.0).cloned();
+        let written = self.patch_epic_row(id, patch(), false)?;
+        if matches!(written, ReducerOutcome::Refused(_)) {
+            return Ok(written);
+        }
+        let scope = self.scope();
+        let mut tables = self.lock();
+        let Some(epic) = tables.visible_epic(&scope, id.0) else {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        };
+        if !epic.feed_command.is_empty() {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
+        let moved = if group_by_repo {
+            self.regroup_epic_rows(&mut tables, id.0)
+        } else {
+            self.flatten_epic_rows(&mut tables, id.0)
+        };
+        Ok(match moved {
+            Ok(()) => ReducerOutcome::Applied(vec![]),
+            Err(why) => {
+                if let Some(original) = original {
+                    tables.epics.insert(id.0, original);
+                }
+                ReducerOutcome::Refused(why)
+            }
+        })
     }
 
     /// Mirrors `flatten_epic`.

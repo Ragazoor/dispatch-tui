@@ -115,6 +115,18 @@ impl Rig {
         (self.db.get_task(task.id).await.unwrap(), dir)
     }
 
+    /// Apply the next message the runtime reported (the trust grant reports
+    /// through `msg_tx`) and drain the commands it cascades into.
+    async fn apply_next_msg(&mut self) {
+        let msg = self.next_msg().await;
+        for cmd in self.app.update(msg) {
+            let mut queue = std::collections::VecDeque::from(vec![cmd]);
+            while let Some(command) = queue.pop_front() {
+                queue.extend(commands::dispatch(command, &mut self.app, &self.rt).await);
+            }
+        }
+    }
+
     async fn next_msg(&mut self) -> Message {
         tokio::time::timeout(TEST_TIMEOUT, self.msgs.recv())
             .await
@@ -303,6 +315,7 @@ async fn quick_dispatch_creates_then_requests_a_quick_row() {
         epic_id: None,
     }))
     .await;
+    r.apply_next_msg().await;
 
     let tasks = r.db.list_all().await;
     assert_eq!(tasks.len(), 1, "quick dispatch creates its task");

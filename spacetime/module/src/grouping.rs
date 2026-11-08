@@ -183,6 +183,12 @@ pub fn regroup_epic(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
     if visible_epic(ctx, root_id).is_none() {
         return Ok(());
     }
+    regroup_epic_rows(ctx, root_id)
+}
+
+/// [`regroup_epic`]'s body, shared with `set_epic_group_by_repo`; the caller
+/// has checked the epic is visible.
+pub(crate) fn regroup_epic_rows(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
     let tasks: Vec<Task> = ctx.db.tasks().epic_id().filter(&root_id).collect();
     let mut joined = std::collections::BTreeSet::new();
     for task in tasks {
@@ -212,6 +218,12 @@ pub fn flatten_epic(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
     if visible_epic(ctx, root_id).is_none() {
         return Ok(());
     }
+    flatten_epic_rows(ctx, root_id)
+}
+
+/// [`flatten_epic`]'s body, shared with `set_epic_group_by_repo`; the caller
+/// has checked the epic is visible.
+pub(crate) fn flatten_epic_rows(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
     let subs: Vec<Epic> = ctx
         .db
         .epics()

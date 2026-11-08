@@ -158,4 +158,11 @@ impl super::super::EpicCrud for Store {
     async fn flatten_epic(&self, root: EpicId) -> Result<()> {
         self.caller.flatten_epic(root).await?.applied()
     }
+
+    async fn set_epic_group_by_repo(&self, id: EpicId, group_by_repo: bool) -> Result<()> {
+        self.caller
+            .set_epic_group_by_repo(id, group_by_repo)
+            .await?
+            .applied()
+    }
 }

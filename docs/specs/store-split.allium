@@ -1243,6 +1243,33 @@ rule UpdateTaskDoneWritesACloseRow {
         -- RULES_VERSION moves to 34: the board passes the new argument.
 }
 
+rule SetEpicGroupByRepoIsOneTransaction {
+    when: EpicGroupByRepoSetRequested(epic, group_by_repo)
+
+    -- The board's group-by-repo toggle (epics.allium: ToggleGroupByRepo) is ONE
+    -- reducer, set_epic_group_by_repo: it writes the flag and, for a non-feed
+    -- epic, runs RegroupEpic (flag on) or FlattenEpic (flag off) in the same
+    -- transaction. Two calls left the flag set and the tasks unmoved when the
+    -- second one failed.
+    requires: epic.exists
+
+    ensures: EpicPatchAccepted(epic: epic, patch: { group_by_repo: group_by_repo })
+    ensures:
+        if epic.feed_command = null:
+            if group_by_repo:
+                RegroupEpic(epic)
+            else:
+                FlattenEpic(epic)
+
+    @guidance
+        -- The flag write is patch_epic's, so the append-only refusal is
+        -- unchanged, and a refusal of any part leaves the epic and its tasks as
+        -- they were. A missing epic is an error, as in update_epic.
+        -- regroup_epic and flatten_epic stay as reducers: ingest paths and the
+        -- MCP surface still call them directly.
+        -- RULES_VERSION moves to 45: the board calls the new reducer.
+}
+
 rule UpdateEpicIsOneTransaction {
     when: EpicUpdateRequested(epic, patch, workspace?, visibility?)
 

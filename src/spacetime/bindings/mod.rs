@@ -147,6 +147,7 @@ pub mod session_request_timeout_type;
 pub mod session_request_type;
 pub mod set_bookmark_reducer;
 pub mod set_display_name_reducer;
+pub mod set_epic_group_by_repo_reducer;
 pub mod set_epic_visibility_reducer;
 pub mod set_managed_feed_settings_reducer;
 pub mod set_member_role_reducer;
@@ -347,6 +348,7 @@ pub use session_request_timeout_type::SessionRequestTimeout;
 pub use session_request_type::SessionRequest;
 pub use set_bookmark_reducer::set_bookmark;
 pub use set_display_name_reducer::set_display_name;
+pub use set_epic_group_by_repo_reducer::set_epic_group_by_repo;
 pub use set_epic_visibility_reducer::set_epic_visibility;
 pub use set_managed_feed_settings_reducer::set_managed_feed_settings;
 pub use set_member_role_reducer::set_member_role;
@@ -786,6 +788,10 @@ pub enum Reducer {
     SetDisplayName {
         name: String,
     },
+    SetEpicGroupByRepo {
+        id: i64,
+        group_by_repo: bool,
+    },
     SetEpicVisibility {
         epic_id: i64,
         visibility: String,
@@ -983,6 +989,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedWorkspaces { .. } => "seed_workspaces",
             Reducer::SetBookmark { .. } => "set_bookmark",
             Reducer::SetDisplayName { .. } => "set_display_name",
+            Reducer::SetEpicGroupByRepo { .. } => "set_epic_group_by_repo",
             Reducer::SetEpicVisibility { .. } => "set_epic_visibility",
             Reducer::SetManagedFeedSettings { .. } => "set_managed_feed_settings",
             Reducer::SetMemberRole { .. } => "set_member_role",
@@ -1658,6 +1665,13 @@ Reducer::RecordBaseBranch{
                 name,
 }             => __sats::bsatn::to_vec(&set_display_name_reducer::SetDisplayNameArgs {
                 name: name.clone(),
+}),
+            Reducer::SetEpicGroupByRepo{
+                id,
+                group_by_repo,
+}             => __sats::bsatn::to_vec(&set_epic_group_by_repo_reducer::SetEpicGroupByRepoArgs {
+                id: id.clone(),
+                group_by_repo: group_by_repo.clone(),
 }),
             Reducer::SetEpicVisibility{
                 epic_id,

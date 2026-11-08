@@ -203,12 +203,14 @@ impl TuiRuntime {
         id: models::EpicId,
         group_by_repo: bool,
     ) {
-        let params = crate::service::UpdateEpicParams {
-            group_by_repo: Some(group_by_repo),
-            ..crate::service::UpdateEpicParams::for_epic(id)
-        };
-        match self.epic_svc.update_epic(params).await {
-            Ok(result) => self.write_back_epic_completed_at(app, result),
+        match self
+            .epic_svc
+            .set_epic_group_by_repo(id, group_by_repo)
+            .await
+        {
+            // One store transaction wrote the flag and moved the tasks, so
+            // there is no half-done state to report; one board refresh follows.
+            Ok(()) => self.exec_refresh_epics_from_db(app).await,
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                     Self::db_error("toggling group by repo", e),
@@ -221,7 +223,7 @@ impl TuiRuntime {
                 // persisted epic (epics.allium: ToggleGroupByRepo).
                 //
                 // One epic, spliced — not the full `exec_refresh_epics_from_db`
-                // the SUCCESS arm ends with. That arm refreshes wholesale
+                // the SUCCESS arm runs. That arm refreshes wholesale
                 // because regroup/flatten really did move tasks between
                 // epics; here the write was refused and nothing moved, so a
                 // whole-board replace would also stomp any OTHER epic's
@@ -230,9 +232,7 @@ impl TuiRuntime {
                 // value is pushed straight onto the board, so it has to come
                 // from wherever the board's other rows come from — a card
                 // spliced in from a different source is the one row on screen
-                // that nothing else agrees with. The service read two arms
-                // below is different and correctly stays: it decides whether to
-                // regroup, and regrouping is a write.
+                // that nothing else agrees with.
                 match self.board_reads.get_epic(id).await {
                     Some(persisted) => {
                         app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
@@ -248,37 +248,8 @@ impl TuiRuntime {
                         );
                     }
                 }
-                return;
             }
         }
-        // Deliberately inlines update + migrate + single board refresh instead
-        // of delegating to exec_patch_epic: exec_patch_epic does not trigger
-        // regroup/flatten, and calling exec_refresh_epics_from_db once here
-        // avoids a double board refresh that would otherwise flash the UI.
-        // Apply migration only for non-feed epics (feed epics group via ingestion).
-        match self.epic_svc.get_epic(id).await {
-            Ok(epic) if epic.feed_command.is_none() => {
-                let res = if group_by_repo {
-                    self.epic_svc.regroup_epic(id).await
-                } else {
-                    self.epic_svc.flatten_epic(id).await
-                };
-                if let Err(e) = res {
-                    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                        Self::db_error("regrouping epic", e),
-                    )));
-                    return;
-                }
-            }
-            Ok(_) => {}
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("loading epic after toggle", e),
-                )));
-                return;
-            }
-        }
-        self.exec_refresh_epics_from_db(app).await;
     }
 
     pub(super) async fn exec_reparent_epic(

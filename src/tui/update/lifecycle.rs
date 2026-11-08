@@ -3,6 +3,7 @@
 use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskId, TaskStatus, TmuxWindow};
 
 use super::super::commands::CleanupFollowUp;
+use super::super::messages::TrustFlow;
 use super::super::types::*;
 use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
 
@@ -260,6 +261,67 @@ impl App {
         ));
         self.input.mode = InputMode::ConfirmTrustRepoQuickDispatch { draft, epic_id };
         vec![]
+    }
+
+    /// A background trust check finished. Takes the branch the check used to
+    /// take inline: resume, ask, or report.
+    pub(in crate::tui) fn handle_trust_checked(
+        &mut self,
+        flow: TrustFlow,
+        result: Result<bool, String>,
+    ) -> Vec<Command> {
+        match (flow, result) {
+            (TrustFlow::Dispatch { id, mode, .. }, Ok(true)) => self.handle_dispatch_task(id, mode),
+            (
+                TrustFlow::Dispatch {
+                    id,
+                    mode,
+                    repo_path,
+                },
+                Ok(false),
+            ) => self.handle_trust_check_untrusted(id, mode, repo_path),
+            (TrustFlow::QuickDispatch { draft, epic_id }, Ok(true)) => {
+                vec![Command::Task(
+                    crate::tui::commands::TaskCommand::QuickDispatchTrusted { draft, epic_id },
+                )]
+            }
+            (TrustFlow::QuickDispatch { draft, epic_id }, Ok(false)) => {
+                self.handle_trust_check_untrusted_for_quick_dispatch(draft, epic_id)
+            }
+            (_, Err(e)) => self.handle_status_info(format!("Trust check failed: {e}")),
+        }
+    }
+
+    /// A background trust grant finished. A board dispatch had already claimed
+    /// its task (`TrustAndDispatch` marks it dispatching), so a failure
+    /// abandons that claim; the grant runs upstream of the request, so there is
+    /// no request of ours to release.
+    pub(in crate::tui) fn handle_trust_granted(
+        &mut self,
+        flow: TrustFlow,
+        result: Result<(), String>,
+    ) -> Vec<Command> {
+        match (flow, result) {
+            (TrustFlow::Dispatch { id, mode, .. }, Ok(())) => {
+                vec![Command::Task(
+                    crate::tui::commands::TaskCommand::DispatchAgent {
+                        id,
+                        mode: Some(mode),
+                    },
+                )]
+            }
+            (TrustFlow::QuickDispatch { draft, epic_id }, Ok(())) => {
+                vec![Command::Task(
+                    crate::tui::commands::TaskCommand::QuickDispatchTrusted { draft, epic_id },
+                )]
+            }
+            (flow, Err(e)) => {
+                if let TrustFlow::Dispatch { id, .. } = flow {
+                    self.unmark_dispatching(id);
+                }
+                self.handle_error(format!("Failed to trust repo: {e}"))
+            }
+        }
     }
 
     /// This host's reactor provisioned a dispatch request and the module

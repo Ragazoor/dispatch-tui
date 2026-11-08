@@ -263,6 +263,72 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         same_epic(regrouped);
         same_epic(root);
 
+        // -- set_epic_group_by_repo: the flag and the move are one call ---------
+        let regrouped_sub = regrouped;
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .set_epic_group_by_repo(EpicId(root), false)
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        wait_for!(rows_real.epic(EpicId(regrouped_sub)).is_none());
+        assert!(rows_mem.epic(EpicId(regrouped_sub)).is_none());
+        assert_eq!(rows_real.task(task).unwrap().epic_id, Some(EpicId(root)));
+        same_task(task.0);
+        same_epic(root);
+        assert!(!rows_real.epic(EpicId(root)).unwrap().group_by_repo);
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .set_epic_group_by_repo(EpicId(root), true)
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        wait_for!(rows_real
+            .task(task)
+            .is_some_and(|t| t.epic_id != Some(EpicId(root))));
+        same_task(task.0);
+        let toggled_back = rows_real.task(task).unwrap().epic_id.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(toggled_back)).is_some());
+        same_epic(toggled_back);
+        same_epic(root);
+        assert!(rows_real.epic(EpicId(root)).unwrap().group_by_repo);
+
+        // An append-only epic refuses grouping, and its flag stays off.
+        let append_only = bindings::Epic {
+            feed_append_only: true,
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let append_id = real.create_epic(append_only.clone()).await.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(append_id)).is_some());
+        mem.align_next_epic_id(append_id);
+        assert_eq!(mem.create_epic(append_only).await.unwrap().0, append_id);
+        refused(
+            real.set_epic_group_by_repo(EpicId(append_id), true)
+                .await
+                .unwrap(),
+            mem.set_epic_group_by_repo(EpicId(append_id), true)
+                .await
+                .unwrap(),
+        );
+        same_epic(append_id);
+        assert!(!rows_real.epic(EpicId(append_id)).unwrap().group_by_repo);
+
+        // A missing epic is refused, not a no-op.
+        let why = refused(
+            real.set_epic_group_by_repo(EpicId(9_999_997), true)
+                .await
+                .unwrap(),
+            mem.set_epic_group_by_repo(EpicId(9_999_997), true)
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("does not exist"), "{why}");
+
         // -- epic_id moves through set_task_epic, never patch_task --------------
         let by_patch = bindings::TaskPatch {
             epic_id: Some(root),

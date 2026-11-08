@@ -760,6 +760,14 @@ rule ProvisionDispatch {
         -- DispatchTask; declining dispatches nothing. Trust is keyed on the
         -- REPO path, which is what makes the worktree beneath
         -- <repo_path>/.worktrees/... launchable.
+        -- The trust check and the trust grant read and write Claude Code's
+        -- ~/.claude.json, several MB and possibly on a stalled mount, so they
+        -- run on a blocking thread OFF the command drain and report back as a
+        -- message (TrustChecked, TrustGranted), never by holding the drain: a
+        -- slow file freezes only the one dispatch waiting on it, not the
+        -- board. The result message names the flow that asked (dispatch or
+        -- quick dispatch) and the board then takes the same branch it always
+        -- did: dispatch, ask, report the failure, or abandon the claim.
         -- Quick dispatch shares this gate — see QuickDispatchTrustGate and
         -- TrustRepoForQuickDispatch in tasks.allium, which apply the same
         -- check to the still-pending creation parameters (no task exists yet

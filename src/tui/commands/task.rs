@@ -166,11 +166,12 @@ pub enum TaskCommand {
         task: Box<Task>,
         mode: DispatchMode,
     },
-    /// Check whether `repo_path` is trusted by Claude Code (reads
-    /// `~/.claude.json` via `spawn_blocking`) and emit the message that routes
-    /// to a dispatch or a trust-confirmation prompt based on the result.
-    /// Keeps the file I/O off the render thread — see docs/conventions.md
-    /// "No `std::fs` inside async handlers".
+    /// Check whether `repo_path` is trusted by Claude Code. The read of
+    /// `~/.claude.json` runs on a blocking thread that is NOT awaited: the
+    /// result comes back as `TaskMessage::TrustChecked`, which routes to a
+    /// dispatch or a trust-confirmation prompt. Keeps the file I/O off the
+    /// command drain — see docs/conventions.md "No `std::fs` inside async
+    /// handlers".
     CheckTrustAndDispatch {
         id: TaskId,
         repo_path: String,
@@ -236,6 +237,13 @@ pub enum TaskCommand {
         window: TmuxWindow,
     },
     QuickDispatch {
+        draft: TaskDraft,
+        epic_id: Option<EpicId>,
+    },
+    /// `QuickDispatch` once its repo is known to be trusted: create the task
+    /// and request the dispatch. Emitted by
+    /// [`crate::tui::messages::TaskMessage::TrustChecked`] and `TrustGranted`.
+    QuickDispatchTrusted {
         draft: TaskDraft,
         epic_id: Option<EpicId>,
     },

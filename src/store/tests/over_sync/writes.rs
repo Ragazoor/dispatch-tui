@@ -72,6 +72,7 @@ enum Sent {
     BatchDelete(Vec<i64>, Vec<i64>),
     Regroup(i64),
     Flatten(i64),
+    SetGroupByRepo(i64, bool),
     SaveRepoPath(String, String, String),
     AdoptRepoPath(String, String),
     DeleteRepoPath(String, String),
@@ -473,6 +474,14 @@ impl ReducerCaller for RecordingCaller {
 
     async fn flatten_epic(&self, root: EpicId) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::Flatten(root.0))
+    }
+
+    async fn set_epic_group_by_repo(
+        &self,
+        id: EpicId,
+        group_by_repo: bool,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::SetGroupByRepo(id.0, group_by_repo))
     }
 
     async fn save_repo_path(

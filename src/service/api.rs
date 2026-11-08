@@ -503,6 +503,12 @@ macro_rules! epic_service_api {
                 root: $crate::models::EpicId
             ) -> Result<(), $crate::service::ServiceError>;
 
+            async fn set_epic_group_by_repo(
+                &self,
+                id: $crate::models::EpicId,
+                group_by_repo: bool
+            ) -> Result<(), $crate::service::ServiceError>;
+
             /// Materialise the managed feed-epic tree from already-read settings. The
             /// caller reads the four settings via its read-only handle
             /// ([`crate::service::read_managed_feed_settings`]) and passes them in; the

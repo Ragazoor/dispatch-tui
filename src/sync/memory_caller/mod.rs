@@ -594,6 +594,14 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_flatten_epic(root)
     }
 
+    async fn set_epic_group_by_repo(
+        &self,
+        id: EpicId,
+        group_by_repo: bool,
+    ) -> Result<ReducerOutcome> {
+        self.apply_set_epic_group_by_repo(id, group_by_repo)
+    }
+
     async fn batch_delete(
         &self,
         task_ids: Vec<TaskId>,

@@ -1330,6 +1330,10 @@ rule ToggleGroupByRepo {
         -- claiming "append-only  group:on [R]", a pair the system does not
         -- allow, until the next timed refresh happened to correct it. See
         -- AppendOnlyEpicIndicator.
+        -- The flag write and the migration are ONE store reducer
+        -- (store-split.allium: SetEpicGroupByRepoIsOneTransaction), so a
+        -- refused migration leaves the flag as it was; the board no longer
+        -- re-reads the epic between the two.
         -- The task migration (RegroupEpic / FlattenEpic) only runs for
         -- non-feed epics (feed_command = null):
         --   * turning ON  → RegroupEpic moves every task into
@@ -1339,9 +1343,9 @@ rule ToggleGroupByRepo {
         -- For feed epics the flag still flips but no migration fires
         -- SYNCHRONOUSLY from the keypress: repo-grouping is driven by the feed
         -- ingestion itself, so triggering a migration directly from the toggle
-        -- would duplicate that code path. The non-feed guard lives HERE, in
-        -- this toggle handler, and nowhere else: it re-reads the epic after the
-        -- flag write and only calls RegroupEpic/FlattenEpic when
+        -- would duplicate that code path. The non-feed guard lives in the
+        -- set_epic_group_by_repo reducer, and nowhere else: it reads the epic
+        -- after the flag write and only runs RegroupEpic/FlattenEpic when
         -- feed_command = null. The two migration rules do not re-check it
         -- themselves (see their own guidance), so a feed epic is spared a
         -- migration because this caller declines to ask for one, not because

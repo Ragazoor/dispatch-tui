@@ -6,6 +6,25 @@ use super::super::commands::CleanupFollowUp;
 use super::super::types::{Command, MoveDirection, TaskDraft, TaskEdit, TreeNav};
 use crate::tui::App;
 
+/// Which dispatch flow a trust check or grant belongs to, carried through the
+/// background file work so the result message can resume the right one.
+#[derive(Debug, Clone)]
+pub enum TrustFlow {
+    /// A board dispatch of an existing task (`CheckTrustAndDispatch`,
+    /// `TrustAndDispatch`). The task is already claimed once a grant is asked
+    /// for; a check runs before the claim.
+    Dispatch {
+        id: TaskId,
+        mode: DispatchMode,
+        repo_path: String,
+    },
+    /// A quick dispatch, keyed on the pending draft: no task exists yet.
+    QuickDispatch {
+        draft: TaskDraft,
+        epic_id: Option<EpicId>,
+    },
+}
+
 /// Messages targeting the task domain.
 ///
 /// Wrapped by [`crate::tui::types::Message::Task`] for dispatch.
@@ -104,6 +123,19 @@ pub enum TaskMessage {
         draft: TaskDraft,
         epic_id: Option<EpicId>,
     },
+    /// A background trust check finished (dispatch.allium: "Repo-trust
+    /// pre-gate"). `Ok(true)` resumes the flow, `Ok(false)` asks the user,
+    /// `Err` is reported in the status bar.
+    TrustChecked {
+        flow: TrustFlow,
+        result: Result<bool, String>,
+    },
+    /// A background trust grant finished. `Ok` resumes the flow; `Err` is an
+    /// error popup, and for a board dispatch the claim is abandoned.
+    TrustGranted {
+        flow: TrustFlow,
+        result: Result<(), String>,
+    },
     RetryResume(TaskId),
     RetryFresh(TaskId),
     /// A background `TaskCommand::Cleanup` released the worktree. Carries the
@@ -192,6 +224,8 @@ impl TaskMessage {
             TaskMessage::TrustCheckUntrustedForQuickDispatch { draft, epic_id } => {
                 app.handle_trust_check_untrusted_for_quick_dispatch(draft, epic_id)
             }
+            TaskMessage::TrustChecked { flow, result } => app.handle_trust_checked(flow, result),
+            TaskMessage::TrustGranted { flow, result } => app.handle_trust_granted(flow, result),
             TaskMessage::RetryResume(id) => app.handle_retry_resume(id),
             TaskMessage::RetryFresh(id) => app.handle_retry_fresh(id),
             TaskMessage::CleanupSucceeded { id, follow_up } => {

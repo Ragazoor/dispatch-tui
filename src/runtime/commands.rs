@@ -187,15 +187,12 @@ async fn dispatch_task(
             rt.exec_dispatch_agent(id, mode).await;
             vec![]
         }
-        TrustAndDispatch { task, mode } => rt.exec_trust_and_dispatch(app, task, mode).await,
+        TrustAndDispatch { task, mode } => rt.exec_trust_and_dispatch(task, mode),
         CheckTrustAndDispatch {
             id,
             repo_path,
             mode,
-        } => {
-            rt.exec_check_trust_and_dispatch(app, id, repo_path, mode)
-                .await
-        }
+        } => rt.exec_check_trust_and_dispatch(id, repo_path, mode),
         Cleanup {
             id,
             repo_path,
@@ -246,12 +243,13 @@ async fn dispatch_task(
             rt.exec_jump_to_tmux(window);
             vec![]
         }
-        QuickDispatch { draft, epic_id } => {
-            rt.exec_check_trust_and_quick_dispatch(app, draft, epic_id)
-                .await
+        QuickDispatch { draft, epic_id } => rt.exec_check_trust_and_quick_dispatch(draft, epic_id),
+        QuickDispatchTrusted { draft, epic_id } => {
+            rt.exec_quick_dispatch(app, draft, epic_id).await;
+            vec![]
         }
         TrustAndQuickDispatch { draft, epic_id } => {
-            rt.exec_trust_and_quick_dispatch(app, draft, epic_id).await
+            rt.exec_trust_and_quick_dispatch(draft, epic_id)
         }
         KillTmuxWindow { window } => {
             drop(rt.exec_kill_tmux_window(window));

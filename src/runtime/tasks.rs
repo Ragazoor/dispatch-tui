@@ -33,78 +33,82 @@ impl TuiRuntime {
         }
     }
 
-    /// Record trust for `repo_path` in Claude Code's config, off the async threads.
-    async fn grant_trust(&self, repo_path: String) -> anyhow::Result<()> {
+    /// Record trust for `repo_path` in Claude Code's config, then report to
+    /// the board as `TaskMessage::TrustGranted`.
+    ///
+    /// Not awaited by the drain: `~/.claude.json` is several MB and may sit on
+    /// a stalled mount, so the read-modify-write runs on a blocking thread and
+    /// the board resumes the flow when the message arrives (dispatch.allium:
+    /// "Repo-trust pre-gate"). A panic on that thread is reported as a failure
+    /// too, so the flow always gets exactly one answer.
+    fn spawn_grant_trust(&self, repo_path: String, flow: crate::tui::messages::TrustFlow) {
         let claude_json_path = self.claude_json_path.clone();
+        let tx = self.msg_tx.clone();
         tokio::task::spawn_blocking(move || {
-            crate::dispatch::trust_at(&claude_json_path, &repo_path)
-        })
-        .await
-        .unwrap_or_else(|e| Err(anyhow::anyhow!("trust_at panicked: {e}")))
+            let result = std::panic::catch_unwind(|| {
+                crate::dispatch::trust_at(&claude_json_path, &repo_path)
+            })
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("trust_at panicked")))
+            .map_err(|e| format!("{e:#}"));
+            let _ = tx.send(Message::Task(
+                crate::tui::messages::TaskMessage::TrustGranted { flow, result },
+            ));
+        });
     }
 
-    /// Whether `repo_path` is already trusted, off the async threads.
-    async fn check_trusted(&self, repo_path: String) -> anyhow::Result<bool> {
+    /// Whether `repo_path` is already trusted, reported to the board as
+    /// `TaskMessage::TrustChecked`. Off the drain, like [`Self::spawn_grant_trust`].
+    fn spawn_check_trusted(&self, repo_path: String, flow: crate::tui::messages::TrustFlow) {
         let claude_json_path = self.claude_json_path.clone();
+        let tx = self.msg_tx.clone();
         tokio::task::spawn_blocking(move || {
-            crate::dispatch::is_trusted_at(&claude_json_path, &repo_path)
-        })
-        .await
-        .unwrap_or_else(|e| Err(anyhow::anyhow!("is_trusted_at panicked: {e}")))
+            let result = std::panic::catch_unwind(|| {
+                crate::dispatch::is_trusted_at(&claude_json_path, &repo_path)
+            })
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("is_trusted_at panicked")))
+            .map_err(|e| e.to_string());
+            let _ = tx.send(Message::Task(
+                crate::tui::messages::TaskMessage::TrustChecked { flow, result },
+            ));
+        });
     }
 
-    /// `TaskCommand::TrustAndDispatch`: grant trust, then dispatch.
-    pub(super) async fn exec_trust_and_dispatch(
+    /// `TaskCommand::TrustAndDispatch`: grant trust, then dispatch (the
+    /// `TrustGranted` message carries on).
+    pub(super) fn exec_trust_and_dispatch(
         &self,
-        app: &mut App,
         task: Box<models::Task>,
         mode: models::DispatchMode,
     ) -> Vec<Command> {
-        let id = task.id;
-        let trust_result = self.grant_trust(task.repo_path.clone()).await;
-
-        match trust_result {
-            Ok(()) => {
-                self.exec_dispatch_agent(id, Some(mode)).await;
-            }
-            Err(e) => {
-                // Abandoned, not failed: the trust grant runs *upstream* of
-                // the claim, so there is no claim of ours to release.
-                app.update(Message::Task(
-                    crate::tui::messages::TaskMessage::DispatchAbandoned(id),
-                ));
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Failed to trust repo: {e:#}"),
-                )));
-            }
-        }
+        let repo_path = task.repo_path.clone();
+        self.spawn_grant_trust(
+            repo_path.clone(),
+            crate::tui::messages::TrustFlow::Dispatch {
+                id: task.id,
+                mode,
+                repo_path,
+            },
+        );
         vec![]
     }
 
-    /// `TaskCommand::CheckTrustAndDispatch`: dispatch if trusted, otherwise ask.
-    pub(super) async fn exec_check_trust_and_dispatch(
+    /// `TaskCommand::CheckTrustAndDispatch`: dispatch if trusted, otherwise ask
+    /// (the `TrustChecked` message decides).
+    pub(super) fn exec_check_trust_and_dispatch(
         &self,
-        app: &mut App,
         id: models::TaskId,
         repo_path: String,
         mode: models::DispatchMode,
     ) -> Vec<Command> {
-        let trust_result = self.check_trusted(repo_path.clone()).await;
-        match trust_result {
-            Ok(true) => app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
-                id, mode,
-            ))),
-            Ok(false) => app.update(Message::Task(
-                crate::tui::messages::TaskMessage::TrustCheckUntrusted {
-                    id,
-                    mode,
-                    repo_path,
-                },
-            )),
-            Err(e) => app.update(Message::System(
-                crate::tui::messages::SystemMessage::StatusInfo(format!("Trust check failed: {e}")),
-            )),
-        }
+        self.spawn_check_trusted(
+            repo_path.clone(),
+            crate::tui::messages::TrustFlow::Dispatch {
+                id,
+                mode,
+                repo_path,
+            },
+        );
+        vec![]
     }
 
     /// `TaskCommand::QuickDispatch`.
@@ -113,48 +117,28 @@ impl TuiRuntime {
     /// an untrusted repo would otherwise stall on Claude Code's own
     /// interactive trust prompt (see src/dispatch/trust.rs), silently
     /// defeating "quick" dispatch's unattended, immediate contract.
-    pub(super) async fn exec_check_trust_and_quick_dispatch(
+    pub(super) fn exec_check_trust_and_quick_dispatch(
         &self,
-        app: &mut App,
         draft: tui::TaskDraft,
         epic_id: Option<models::EpicId>,
     ) -> Vec<Command> {
-        let trust_result = self.check_trusted(draft.repo_path.clone()).await;
-        match trust_result {
-            Ok(true) => {
-                self.exec_quick_dispatch(app, draft, epic_id).await;
-                vec![]
-            }
-            Ok(false) => app.update(Message::Task(
-                crate::tui::messages::TaskMessage::TrustCheckUntrustedForQuickDispatch {
-                    draft,
-                    epic_id,
-                },
-            )),
-            Err(e) => app.update(Message::System(
-                crate::tui::messages::SystemMessage::StatusInfo(format!("Trust check failed: {e}")),
-            )),
-        }
+        self.spawn_check_trusted(
+            draft.repo_path.clone(),
+            crate::tui::messages::TrustFlow::QuickDispatch { draft, epic_id },
+        );
+        vec![]
     }
 
     /// `TaskCommand::TrustAndQuickDispatch`: grant trust, then quick-dispatch.
-    pub(super) async fn exec_trust_and_quick_dispatch(
+    pub(super) fn exec_trust_and_quick_dispatch(
         &self,
-        app: &mut App,
         draft: tui::TaskDraft,
         epic_id: Option<models::EpicId>,
     ) -> Vec<Command> {
-        let trust_result = self.grant_trust(draft.repo_path.clone()).await;
-        match trust_result {
-            Ok(()) => {
-                self.exec_quick_dispatch(app, draft, epic_id).await;
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Failed to trust repo: {e:#}"),
-                )));
-            }
-        }
+        self.spawn_grant_trust(
+            draft.repo_path.clone(),
+            crate::tui::messages::TrustFlow::QuickDispatch { draft, epic_id },
+        );
         vec![]
     }
 

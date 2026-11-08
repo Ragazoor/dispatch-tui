@@ -877,6 +877,44 @@ pub fn update_epic(
     Ok(())
 }
 
+/// Set an epic's `group_by_repo` flag and, for a non-feed epic, move its tasks
+/// to match, in one transaction: regroup when the flag turns on, flatten when
+/// it turns off (`store-split.allium: SetEpicGroupByRepoIsOneTransaction`).
+///
+/// The flag write is [`patch_epic`]'s, so its refusals (append-only) hold, and
+/// a refusal of the move rolls the flag back with it. A missing epic is an
+/// error, as in [`update_epic`].
+#[spacetimedb::reducer]
+pub fn set_epic_group_by_repo(
+    ctx: &ReducerContext,
+    id: i64,
+    group_by_repo: bool,
+) -> Result<(), String> {
+    if visible_epic(ctx, id).is_none() {
+        return Err(format!("epic {id} does not exist"));
+    }
+    patch_epic_row(
+        ctx,
+        id,
+        EpicPatch {
+            group_by_repo: Some(group_by_repo),
+            ..EpicPatch::default()
+        },
+    )?;
+    let Some(epic) = visible_epic(ctx, id) else {
+        return Ok(());
+    };
+    // Feed epics group through ingestion, not through the toggle.
+    if !epic.feed_command.is_empty() {
+        return Ok(());
+    }
+    if group_by_repo {
+        crate::grouping::regroup_epic_rows(ctx, id)
+    } else {
+        crate::grouping::flatten_epic_rows(ctx, id)
+    }
+}
+
 /// [`patch_epic`]'s body, shared with [`update_epic`]; the caller has checked
 /// the epic is visible.
 fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(), String> {

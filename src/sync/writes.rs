@@ -233,6 +233,14 @@ pub trait ReducerCaller: Send + Sync {
     /// `epics.allium: FlattenEpic`, in one transaction: every `repo-group`
     /// sub-epic's tasks move back onto `root` and the emptied sub-epics go.
     async fn flatten_epic(&self, root: EpicId) -> Result<ReducerOutcome>;
+    /// `store-split.allium: SetEpicGroupByRepoIsOneTransaction`: the epic's
+    /// `group_by_repo` flag and, for a non-feed epic, `RegroupEpic` (on) or
+    /// `FlattenEpic` (off), in one transaction. A missing epic is refused.
+    async fn set_epic_group_by_repo(
+        &self,
+        id: EpicId,
+        group_by_repo: bool,
+    ) -> Result<ReducerOutcome>;
 
     /// `tasks.allium: BatchDelete`'s atomic call — see
     /// `spacetime/module/src/tasks_epics.rs::batch_delete`'s doc comment for why this

@@ -190,3 +190,123 @@ fn trust_check_untrusted_for_quick_dispatch_enters_confirm_mode() {
     let msg = app.status.message.as_deref().expect("status set");
     assert!(msg.contains("/my/repo"), "got: {msg}");
 }
+
+// -- The background trust check and grant report back as messages ------------
+
+fn dispatch_flow() -> crate::tui::messages::TrustFlow {
+    crate::tui::messages::TrustFlow::Dispatch {
+        id: TaskId(1),
+        mode: DispatchMode::Dispatch,
+        repo_path: "/repo".into(),
+    }
+}
+
+fn quick_flow() -> crate::tui::messages::TrustFlow {
+    crate::tui::messages::TrustFlow::QuickDispatch {
+        draft: TaskDraft {
+            title: "Quick".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        epic_id: None,
+    }
+}
+
+fn trust_checked(flow: crate::tui::messages::TrustFlow, result: Result<bool, String>) -> Message {
+    Message::Task(crate::tui::messages::TaskMessage::TrustChecked { flow, result })
+}
+
+fn trust_granted(flow: crate::tui::messages::TrustFlow, result: Result<(), String>) -> Message {
+    Message::Task(crate::tui::messages::TaskMessage::TrustGranted { flow, result })
+}
+
+#[test]
+fn a_trusted_check_resumes_a_board_dispatch() {
+    let mut app = make_app();
+    let cmds = without_usage(app.update(trust_checked(dispatch_flow(), Ok(true))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(TaskCommand::DispatchAgent { id: TaskId(1), .. })
+        )),
+        "expected DispatchAgent, got {cmds:?}"
+    );
+}
+
+#[test]
+fn an_untrusted_check_asks_before_a_board_dispatch() {
+    let mut app = make_app();
+    let cmds = without_usage(app.update(trust_checked(dispatch_flow(), Ok(false))));
+    assert!(cmds.is_empty(), "nothing dispatches before the answer");
+    assert!(matches!(
+        app.input.mode,
+        InputMode::ConfirmTrustRepo {
+            task_id: TaskId(1),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_trusted_check_resumes_a_quick_dispatch() {
+    let mut app = make_app();
+    let cmds = without_usage(app.update(trust_checked(quick_flow(), Ok(true))));
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::Task(TaskCommand::QuickDispatchTrusted { .. }))),
+        "expected QuickDispatchTrusted, got {cmds:?}"
+    );
+}
+
+#[test]
+fn an_untrusted_check_asks_before_a_quick_dispatch() {
+    let mut app = make_app();
+    let cmds = without_usage(app.update(trust_checked(quick_flow(), Ok(false))));
+    assert!(cmds.is_empty());
+    assert!(matches!(
+        app.input.mode,
+        InputMode::ConfirmTrustRepoQuickDispatch { .. }
+    ));
+}
+
+#[test]
+fn a_failed_check_is_reported_and_dispatches_nothing() {
+    let mut app = make_app();
+    let cmds = without_usage(app.update(trust_checked(dispatch_flow(), Err("io".into()))));
+    assert!(cmds.is_empty());
+    let status = app.status_message().unwrap_or_default();
+    assert!(status.contains("Trust check failed: io"), "got {status:?}");
+}
+
+#[test]
+fn a_granted_trust_resumes_each_flow() {
+    let mut app = make_app();
+    let cmds = without_usage(app.update(trust_granted(dispatch_flow(), Ok(()))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(TaskCommand::DispatchAgent {
+            id: TaskId(1),
+            mode: Some(DispatchMode::Dispatch)
+        })
+    )));
+    let cmds = without_usage(app.update(trust_granted(quick_flow(), Ok(()))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Task(TaskCommand::QuickDispatchTrusted { .. }))));
+}
+
+#[test]
+fn a_failed_grant_abandons_the_claim_and_raises_the_error() {
+    let mut app = make_app();
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
+    let cmds = without_usage(app.update(trust_granted(dispatch_flow(), Err("bad json".into()))));
+    assert!(cmds.is_empty());
+    assert!(!app.is_dispatching(TaskId(1)), "the claim is abandoned");
+    let err = app.error_popup().unwrap_or_default();
+    assert!(
+        err.contains("Failed to trust repo: bad json"),
+        "got {err:?}"
+    );
+}

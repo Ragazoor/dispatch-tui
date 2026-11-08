@@ -466,6 +466,16 @@ impl EpicService {
         Ok(self.db.flatten_epic(root).await?)
     }
 
+    /// The group-by-repo toggle: the flag and, for a non-feed epic, the regroup
+    /// or flatten, in one store transaction.
+    pub async fn set_epic_group_by_repo(
+        &self,
+        id: EpicId,
+        group_by_repo: bool,
+    ) -> Result<(), ServiceError> {
+        Ok(self.db.set_epic_group_by_repo(id, group_by_repo).await?)
+    }
+
     /// The delete pre-check (`DeleteEpic`, epics.allium): every task in the
     /// subtree must be done in the store's true rows.
     ///

@@ -658,6 +658,9 @@ pub trait EpicCrud: EpicRead {
     /// `epics.allium: FlattenEpic`, likewise: the tasks of every `repo-group`
     /// sub-epic move back onto `root` and the emptied sub-epics are deleted.
     async fn flatten_epic(&self, root: EpicId) -> Result<()>;
+    /// `store-split.allium: SetEpicGroupByRepoIsOneTransaction`: the flag and
+    /// its regroup or flatten, in one transaction.
+    async fn set_epic_group_by_repo(&self, id: EpicId, group_by_repo: bool) -> Result<()>;
 }
 
 /// Read-only work-package queries (`work-packages.allium`). Held (via

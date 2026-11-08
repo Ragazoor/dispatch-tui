@@ -29,5 +29,5 @@ pub use keep_awake::KeepAwakeMessage;
 pub use pr::PrMessage;
 pub use split::{EnterFailure, SplitMessage};
 pub use system::SystemMessage;
-pub use task::TaskMessage;
+pub use task::{TaskMessage, TrustFlow};
 pub use work_package::WorkPackageMessage;
