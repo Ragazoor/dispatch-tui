@@ -19,7 +19,7 @@ Agents let me take on more work than before. Dispatch is my way of organising th
 
 **How do I stay close to code I do care about?** At work the code is not a black box, and I do not want to drift away from it because an agent writes it. The agent-tree pane (`Prefix+e` in an agent's window) shows the files the agent changed. From there one key opens a file's diff and another opens the file in your editor.
 
-**How far can agents orchestrate themselves?** I do some of the orchestration myself from the board. Agents now do a lot more of it. Claude is a first-class user of the board: through MCP tools it can do most of what you can do there. Agents can also send each other messages natively. Auto-dispatch helps too: it starts the next task in an epic when the one before it finishes. With only these tools, a lot of patterns are easy to try, for example:
+**How far can agents orchestrate themselves?** I do some of the orchestration myself from the board. Agents now do a lot more of it. Claude is a first-class user of the board: through MCP tools it can do all of what you can do there and a bit more. Agents can also send each other messages natively. Auto-dispatch helps too: it starts the next task in an epic when the one before it finishes. With only these tools, a lot of patterns are easy to try, for example:
 
 - fan out work to several agents, then fan their results back in
 - let one agent create, dispatch and follow other tasks
