@@ -47,8 +47,18 @@ pub fn join_task_window_into_pane(
     let companion_panes = companion_panes_or_none(window, runner);
 
     let pane_id = tmux::join_pane(window, target_pane, runner)?;
+    tag_pinned_pane(&pane_id, window, runner);
     drain_pinned_from_window(window, &pane_id, companion_panes, runner);
     Ok(pane_id)
+}
+
+/// Record on the pinned pane the window it came from, so a later retire of the
+/// board's window can return it. See split-pane.allium's "Home tag on the
+/// pinned pane". Best-effort: an untagged pane is only not returned.
+fn tag_pinned_pane(pane_id: &PaneId, window: &TmuxWindow, runner: &dyn ProcessRunner) {
+    if let Err(e) = tmux::set_pane_home(pane_id, window, runner) {
+        tracing::warn!(%window, %pane_id, error = %e, "failed to tag the pinned pane with its home window");
+    }
 }
 
 /// The companion panes of `window`, or none when the check fails.
@@ -270,6 +280,8 @@ fn exchange_panes<'a>(
     // immune to both. See learning #324 and tests/tmux_lifecycle.rs's
     // `swap_works_when_pane_base_index_is_1`.
     tmux::swap_pane(&new_pane_id, right_pane, runner).context("swap pane failed")?;
+    // The incoming agent now sits in the board's window.
+    tag_pinned_pane(&new_pane_id, new_window, runner);
     Ok((new_pane_id, displaced))
 }
 

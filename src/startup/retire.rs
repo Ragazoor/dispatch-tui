@@ -62,20 +62,71 @@ pub(super) fn retire_board_window_with(
                 RetireOutcome::SessionDiscarded
             }
         }
-        Ok(Some(pane)) => {
-            // Read before the kill: tmux forgets the pane with the window.
-            let pid = tmux::pane_pid(&pane, runner);
-            if let Err(e) = tmux::kill_window_at(&pane, runner) {
-                tracing::warn!("could not retire the board's window in '{session}': {e}");
+        Ok(Some(pane)) => match return_pinned_agents(&pane, runner) {
+            Ok(Some(board_pane)) => {
+                // Read before the kill: tmux forgets the pane with the window.
+                // The board's own pane, never the agent's: the lookup's `pane`
+                // may be the agent's when that is the focused one, and by now
+                // it has left the window.
+                let pid = tmux::pane_pid(&board_pane, runner);
+                if let Err(e) = tmux::kill_window_at(&board_pane, runner) {
+                    tracing::warn!("could not retire the board's window in '{session}': {e}");
+                }
+                Some((board_pane, pid))
             }
-            Some((pane, pid))
-        }
+            // The board's pane was already gone: the window held only the
+            // agent, and it is now named for its home.
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(
+                    "not closing the board's window in '{session}': a pinned agent could not be returned: {e:#}"
+                );
+                return RetireOutcome::BoardWindowSurvived;
+            }
+        },
         Err(e) => {
             tracing::warn!("could not look for a board window in '{session}': {e}");
             None
         }
     };
     session_state_after_retire(session, pane.as_ref(), runner, alive)
+}
+
+/// Return every pinned agent in the board's window (the window holding `pane`)
+/// to a window of its own, before the window is closed.
+/// `RetiringReturnsPinnedAgentsFirst` in docs/specs/startup.allium.
+///
+/// `Some(pane)` is the board's own pane, still to be closed with its window.
+/// `None` means the window held nothing but agents, so it was renamed to the
+/// agent's home instead and there is nothing to close. An `Err` leaves the
+/// window as it was and the caller must not close it.
+fn return_pinned_agents(
+    pane: &PaneId,
+    runner: &dyn ProcessRunner,
+) -> anyhow::Result<Option<PaneId>> {
+    use anyhow::Context;
+    let panes = tmux::panes_with_home_in_window_of(pane, runner)
+        .context("could not list the board window's panes")?;
+    let (pinned, others): (Vec<_>, Vec<_>) =
+        panes.into_iter().partition(|(_, home)| home.is_some());
+    let board_pane = others.into_iter().next().map(|(id, _)| id);
+    for (index, (agent, home)) in pinned.into_iter().enumerate() {
+        let Some(home) = home else { continue };
+        if board_pane.is_none() && index == 0 {
+            // Nothing else holds the window: it becomes the agent's.
+            tmux::rename_window(agent.as_str(), &home.window, runner)
+                .context("could not rename the window to the agent's home")?;
+            if let Some(dir) = &home.dir {
+                if let Err(e) = tmux::set_window_dispatch_dir(&home.window, dir, runner) {
+                    tracing::warn!(window = %home.window, error = %e, "failed to restore @dispatch_dir");
+                }
+            }
+        } else {
+            crate::dispatch::restore_pinned_pane(&agent, &home.window, home.dir.as_deref(), runner)
+                .with_context(|| format!("could not return {agent} to {}", home.window))?;
+        }
+    }
+    Ok(board_pane)
 }
 
 /// How long to wait for a retired board to actually be gone.

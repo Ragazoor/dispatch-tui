@@ -403,3 +403,66 @@ fn a_process_in_a_background_window_reads_its_own_window_not_the_active_one() {
         "a launch from a sibling window must retire the board, not mistake itself for it"
     );
 }
+
+/// Pin `task-42` into the board's window; returns the board's pane and the
+/// pinned agent's pane.
+fn pin_task_42(server: &TmuxServer) -> (PaneId, PaneId) {
+    let target = format!("{SESSION}:{}", BOARD.as_str());
+    let board_pane = test_pane_id(
+        server
+            .tmux_stdout(&["display-message", "-p", "-t", &target, "#{pane_id}"])
+            .trim(),
+    );
+    let window = dispatch_tui::models::TmuxWindow::parse("task-42").unwrap();
+    let pinned =
+        dispatch_tui::dispatch::join_task_window_into_pane(&window, &board_pane, &server.runner())
+            .expect("pin");
+    (board_pane, pinned)
+}
+
+/// `RetiringReturnsPinnedAgentsFirst`: a task pinned into the board's window
+/// lives inside it, and `kill-window` would end the agent with the board.
+#[test]
+fn retiring_the_board_returns_a_pinned_agent_to_a_window_of_its_own() {
+    if !tmux_available_or_skip() {
+        return;
+    }
+    let server = server_with(true, &["task-42"]);
+    let (_, pinned) = pin_task_42(&server);
+    assert!(
+        !server.has_window("task-42"),
+        "the pin consumed the agent's only window, so its name lives nowhere else"
+    );
+
+    let outcome = retire_board_window(SESSION, &server.runner());
+
+    assert_eq!(outcome, RetireOutcome::SessionReady);
+    assert!(
+        server.pane_exists(pinned.as_str()),
+        "the pinned agent's pane must survive the retire"
+    );
+    assert!(
+        server.has_window("task-42"),
+        "and be back in a window of its own name"
+    );
+    assert!(!server.has_window(BOARD.as_str()));
+}
+
+/// The board's own pane is gone (a SIGTERM) but the window survived holding the
+/// agent: the retire renames it rather than closing it.
+#[test]
+fn retiring_a_board_window_that_holds_only_a_pinned_agent_keeps_the_agent() {
+    if !tmux_available_or_skip() {
+        return;
+    }
+    let server = server_with(true, &["task-42", "task-43"]);
+    let (board_pane, pinned) = pin_task_42(&server);
+    server.tmux_ok(&["kill-pane", "-t", board_pane.as_str()]);
+
+    let outcome = retire_board_window(SESSION, &server.runner());
+
+    assert_eq!(outcome, RetireOutcome::SessionReady);
+    assert!(server.pane_exists(pinned.as_str()), "the agent survives");
+    assert!(server.has_window("task-42"));
+    assert!(!server.has_window(BOARD.as_str()));
+}
