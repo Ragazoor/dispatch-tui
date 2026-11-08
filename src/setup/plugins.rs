@@ -274,6 +274,66 @@ pub const SCRIPT_MANIFEST_NAME: &str = ".install-manifest.json";
 /// Suffix for the pre-overwrite copy taken on the one destructive branch.
 pub const SCRIPT_BACKUP_SUFFIX: &str = ".bak";
 
+/// The operator's recorded refusals to overwrite an edited shipped script,
+/// beside the manifest (feeds.allium: InstallShippedFeedScripts, DECLINED).
+pub const SCRIPT_DECLINED_NAME: &str = ".declined-overwrites.json";
+
+/// One recorded "no": the digest of the content the operator kept and of the
+/// content dispatch shipped when they said it. While both still match, the
+/// question has already been answered.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct DeclinedOverwrite {
+    kept: String,
+    shipped: String,
+}
+
+impl DeclinedOverwrite {
+    fn covers(&self, on_disk: &str, shipped: &str) -> bool {
+        self.kept == script_digest(on_disk) && self.shipped == script_digest(shipped)
+    }
+}
+
+type DeclinedOverwrites = std::collections::BTreeMap<String, DeclinedOverwrite>;
+
+/// Read the declined-overwrite record. Missing, unreadable or malformed reads
+/// as EMPTY, on the manifest's terms: the cost is one more question, never a
+/// write.
+fn read_declined_overwrites(data_dir: &Path) -> DeclinedOverwrites {
+    let path = installed_script_path(data_dir, SCRIPT_DECLINED_NAME);
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return DeclinedOverwrites::new();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+/// Persist the declined-overwrite record; a failure is logged and swallowed,
+/// as for the manifest. An empty record removes the file.
+fn write_declined_overwrites(data_dir: &Path, declined: &DeclinedOverwrites) {
+    let path = installed_script_path(data_dir, SCRIPT_DECLINED_NAME);
+    if declined.is_empty() {
+        if let Err(e) = fs::remove_file(&path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!("failed to remove {}: {e}", path.display());
+            }
+        }
+        return;
+    }
+    let encoded = match serde_json::to_string_pretty(declined) {
+        Ok(encoded) => encoded,
+        Err(e) => {
+            tracing::warn!("failed to encode {}: {e}", path.display());
+            return;
+        }
+    };
+    if let Err(e) = crate::atomic_write::write_bytes(
+        &path,
+        crate::atomic_write::Mode::Fixed(0o644),
+        encoded.as_bytes(),
+    ) {
+        tracing::warn!("failed to write {}: {e}", path.display());
+    }
+}
+
 /// Where a shipped script, config file or the manifest lives under `data_dir`.
 pub fn installed_script_path(data_dir: &Path, name: &str) -> PathBuf {
     data_dir.join("scripts").join(name)
@@ -427,24 +487,36 @@ fn write_shipped_script(path: &Path, content: &str) -> Result<()> {
 ///
 /// A script counts as current only if its bytes AND its mode match. A file the
 /// feed runner cannot execute is not in sync with what dispatch ships, however
-/// right its content is.
+/// right its content is. A script the operator has declined to overwrite also
+/// counts as current while the refusal still matches both the content on disk
+/// and the content shipped (feeds.allium: ADeclinedOverwriteIsNotDrift): the
+/// installer then writes nothing for it either. The record is only read here.
 pub fn shipped_scripts_are_current(data_dir: &Path) -> bool {
+    let declined = read_declined_overwrites(data_dir);
     SHIPPED_SCRIPTS.iter().all(|file| {
         let path = installed_script_path(data_dir, file.name);
         // `file_is_up_to_date` is setup's single definition of "already up to
         // date"; a second copy here could disagree with the writer and report
         // a file stale forever.
-        super::file_is_up_to_date(&path, file.content) && has_script_mode(&path)
+        (super::file_is_up_to_date(&path, file.content) && has_script_mode(&path))
+            || still_declined(&declined, file, &path)
     }) && SHIPPED_SCRIPT_CONFIGS
         .iter()
         .all(|file| installed_script_path(data_dir, file.name).exists())
 }
 
+/// Whether the operator already declined to overwrite `path` with exactly
+/// this shipped content, and the file still holds what they kept.
+fn still_declined(declined: &DeclinedOverwrites, file: &ShippedFile, path: &Path) -> bool {
+    declined.get(file.name).is_some_and(|record| {
+        fs::read_to_string(path).is_ok_and(|on_disk| record.covers(&on_disk, file.content))
+    })
+}
+
 /// Install and update every script in [`SHIPPED_SCRIPTS`] under `data_dir`.
 ///
-/// `interactive` is true when setup may ask the user a question; it is false
-/// under `--yes`. It is a capability rather than the flag itself because the
-/// decision below turns on "can I ask?", not on how the invocation was spelled.
+/// `confirmer` is `None` when nobody can answer (a scripted launch). Its
+/// absence is the input, so no path can read a yes out of silence.
 ///
 /// Exactly one branch fires per script:
 ///
@@ -462,18 +534,18 @@ pub fn shipped_scripts_are_current(data_dir: &Path) -> bool {
 ///      asked for. `Updated`.
 ///   4. DIFFERS, DIGEST MATCHES NO RECORDED DIGEST -> provenance is UNKNOWN.
 ///      Covers both "no manifest entry at all" (a pre-manifest deployment or a
-///      hand-copied file) and "the user edited it". Interactive: prompt
-///      through `confirm_dangerous`, which defaults to NO, and on yes copy to
-///      `<name>.bak` BEFORE writing. Non-interactive: keep it. `--yes` means
-///      "do not stop to ask about the safe things", not "destroy a file of
-///      unknown provenance while nobody is watching" — a script-invoked setup
-///      in CI must be incapable of eating a local edit.
+///      hand-copied file) and "the user edited it". A refusal already
+///      recorded for exactly this pair keeps it without asking. Otherwise,
+///      with someone to ask: prompt through `confirm_dangerous`, which
+///      defaults to NO; on yes copy to `<name>.bak` BEFORE writing, on no
+///      record the refusal. With nobody to ask: keep it and record nothing —
+///      a scripted launch in CI must be incapable of eating a local edit.
 ///
 /// Branch 4 is the only branch that can destroy user content, and it needs
-/// both an interactive session and an explicit yes.
+/// both someone to ask and an explicit yes.
 ///
-/// A backup, write or chmod failure for ONE script yields `Failed` for that
-/// script and does not fail the run — the remaining scripts, the config files
+/// A backup, write, chmod or prompt failure for ONE script yields `Failed`
+/// for that script and does not fail the run — the remaining scripts, the config files
 /// and everything downstream still happen. A failed script's digest is never
 /// recorded: claiming provenance over a file dispatch did not successfully
 /// write would convert this failure into next run's silent overwrite.
@@ -499,18 +571,27 @@ pub fn install_shipped_feed_scripts(
     }
 
     let mut manifest = read_script_manifest(data_dir);
+    let mut declined = read_declined_overwrites(data_dir);
     let mut reports = Vec::with_capacity(SHIPPED_SCRIPTS.len());
 
     for file in SHIPPED_SCRIPTS {
-        reports.push(install_one_shipped_script(
-            data_dir,
-            file,
-            confirmer,
-            &mut manifest,
-        )?);
+        let report =
+            install_one_shipped_script(data_dir, file, confirmer, &mut manifest, &mut declined)?;
+        // A script that now holds what dispatch wrote or ships needs no
+        // refusal on record any more.
+        if matches!(
+            report.outcome,
+            ShippedScriptOutcome::Installed
+                | ShippedScriptOutcome::InSync
+                | ShippedScriptOutcome::Updated
+        ) {
+            declined.remove(file.name);
+        }
+        reports.push(report);
     }
 
     write_script_manifest(data_dir, &manifest);
+    write_declined_overwrites(data_dir, &declined);
     Ok(reports)
 }
 
@@ -521,6 +602,7 @@ fn install_one_shipped_script(
     file: ShippedFile,
     confirmer: Option<&dyn super::Confirmer>,
     manifest: &mut std::collections::BTreeMap<String, String>,
+    declined: &mut DeclinedOverwrites,
 ) -> Result<ShippedScriptReport> {
     let ShippedFile {
         name,
@@ -565,12 +647,15 @@ fn install_one_shipped_script(
     // AND when the file changed, so one test covers both meanings
     // of unknown provenance. An unreadable file has no digest at
     // all and lands here too.
+    let current = current.ok();
     let recorded = manifest.get(name);
     let proven = current
-        .ok()
-        .is_some_and(|c| recorded.is_some_and(|rec| *rec == script_digest(&c)));
+        .as_deref()
+        .is_some_and(|c| recorded.is_some_and(|rec| *rec == script_digest(c)));
     if !proven {
-        return install_unknown_provenance_script(file, path, confirmer, manifest);
+        return install_unknown_provenance_script(
+            file, path, current, confirmer, manifest, declined,
+        );
     }
     Ok(record_shipped_script(
         write_shipped_script(&path, shipped),
@@ -609,13 +694,28 @@ fn record_shipped_script(
 fn install_unknown_provenance_script(
     file: ShippedFile,
     path: PathBuf,
+    on_disk: Option<String>,
     confirmer: Option<&dyn super::Confirmer>,
     manifest: &mut std::collections::BTreeMap<String, String>,
+    declined: &mut DeclinedOverwrites,
 ) -> Result<ShippedScriptReport> {
     let ShippedFile {
         name,
         content: shipped,
     } = file;
+    // The operator already said no to exactly this pair: keep it unasked.
+    if let Some(on_disk) = &on_disk {
+        if declined
+            .get(name)
+            .is_some_and(|record| record.covers(on_disk, shipped))
+        {
+            return Ok(ShippedScriptReport::new(
+                name,
+                path,
+                ShippedScriptOutcome::Kept,
+            ));
+        }
+    }
     // The ABSENCE of a confirmer is how "nobody can answer" is expressed, the
     // same way the startup check expresses it — so there is no flag a caller
     // could set inconsistently, and no path that reads a yes out of silence.
@@ -635,7 +735,18 @@ fn install_unknown_provenance_script(
     };
     if !approved {
         // No digest recorded: the provenance is still unknown, and recording
-        // one would license a silent overwrite next run.
+        // one would license a silent overwrite next run. A no from someone
+        // who was asked IS recorded, so the same question is not asked again
+        // (an unreadable file has no digest to record it against).
+        if let (Some(_), Some(on_disk)) = (confirmer, &on_disk) {
+            declined.insert(
+                name.to_string(),
+                DeclinedOverwrite {
+                    kept: script_digest(on_disk),
+                    shipped: script_digest(shipped),
+                },
+            );
+        }
         return Ok(ShippedScriptReport::new(
             name,
             path,
@@ -666,7 +777,7 @@ fn install_unknown_provenance_script(
 ///
 /// The user-owned half. If something is already there, setup does not read it,
 /// diff it, prompt about it, back it up or record it in the manifest. There is
-/// no branch that writes over a `.conf` file — not with `--yes`, not with a
+/// no branch that writes over a `.conf` file — not with a
 /// prompt, not ever. It deliberately takes no confirmer: there is no question
 /// to ask.
 pub fn install_shipped_feed_configs(data_dir: &Path) -> Result<()> {
@@ -742,8 +853,9 @@ fn script_report_line(report: &ShippedScriptReport) -> Option<String> {
             None => format!("  → updated {path}"),
         },
         ShippedScriptOutcome::Kept => format!(
-            "  → kept {path} (differs from the version dispatch ships; \
-             re-run without --yes to update it)"
+            "  → kept {path} (differs from the version dispatch ships and \
+             dispatch did not write it; you are asked again after a further \
+             edit or a new release)"
         ),
     })
 }

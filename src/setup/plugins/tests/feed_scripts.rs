@@ -93,8 +93,7 @@ fn report_for<'a>(reports: &'a [ShippedScriptReport], name: &str) -> &'a Shipped
     })
 }
 
-/// The `--yes` shape: never interactive, and a confirmer that panics if
-/// anything prompts it.
+/// A launch with nobody to ask: no confirmer at all.
 fn install_scripts_unattended(data_dir: &Path) -> Vec<ShippedScriptReport> {
     install_shipped_feed_scripts(data_dir, None).unwrap()
 }
@@ -414,8 +413,8 @@ fn install_shipped_feed_scripts_never_overwrites_unknown_provenance_unattended()
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         edit,
-        "`--yes` means \"do not stop to ask about the safe things\", not \"destroy a file \
-         of unknown provenance while nobody is watching\""
+        "consenting to the drift report means \"bring my installation up to date\", not \
+         \"destroy a file of unknown provenance while nobody is watching\""
     );
     assert_eq!(
         report_for(&reports, "fetch-dependabot.sh").outcome,
@@ -675,8 +674,8 @@ fn install_shipped_feed_configs_never_overwrites_an_existing_config() {
         assert_eq!(
             std::fs::read_to_string(installed_script_path(data_dir.path(), name)).unwrap(),
             format!("# mine: {name}\n"),
-            "setup never writes over an existing config path — not with --yes, not with a \
-             prompt, not ever"
+            "the apply never writes over an existing config path — not with a prompt, \
+             not ever"
         );
     }
 }
@@ -992,5 +991,166 @@ fn install_shipped_feed_scripts_survives_a_failing_prompt_and_still_writes_the_m
     assert!(
         manifest_map(data_dir.path()).len() >= SHIPPED_SCRIPTS.len() - 1,
         "the other scripts' digests must be recorded"
+    );
+}
+
+// -- Declined overwrites (feeds.allium: InstallShippedFeedScripts, DECLINED;
+//    ShippedFeedScriptFiles.ADeclinedOverwriteIsNotDrift) --
+
+/// The declined-overwrite record as a name -> {kept, shipped} map.
+fn declined_map(data_dir: &Path) -> serde_json::Map<String, Value> {
+    let path = scripts_dir(data_dir).join(SCRIPT_DECLINED_NAME);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<Value>(&raw)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default(),
+        Err(_) => serde_json::Map::new(),
+    }
+}
+
+/// A full, current install with `fetch-reviews.sh` edited on the box.
+fn install_then_edit(data_dir: &Path, edit: &str) -> PathBuf {
+    install_scripts_unattended(data_dir);
+    install_shipped_feed_configs(data_dir).unwrap();
+    plant(data_dir, "fetch-reviews.sh", edit)
+}
+
+#[test]
+fn a_declined_overwrite_is_recorded_and_not_asked_again() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
+    let path = install_then_edit(data_dir.path(), edit);
+    // The edit is neither shipped nor recorded content: unknown provenance.
+    write_manifest(data_dir.path(), &[]);
+
+    let first = FakeConfirmer::new(vec![], vec![false]);
+    install_shipped_feed_scripts(data_dir.path(), Some(&first)).unwrap();
+    assert_eq!(first.dangerous_call_count(), 1);
+
+    let entry = declined_map(data_dir.path())
+        .get("fetch-reviews.sh")
+        .cloned()
+        .expect("a no must be recorded");
+    assert_eq!(entry["kept"], Value::String(script_digest(edit)));
+    assert_eq!(
+        entry["shipped"],
+        Value::String(script_digest(shipped("fetch-reviews.sh")))
+    );
+
+    let second = FakeConfirmer::never();
+    let reports = install_shipped_feed_scripts(data_dir.path(), Some(&second)).unwrap();
+    assert_eq!(
+        report_for(&reports, "fetch-reviews.sh").outcome,
+        ShippedScriptOutcome::Kept
+    );
+    assert_eq!(
+        second.dangerous_call_count(),
+        0,
+        "the operator already answered this exact question"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), edit);
+}
+
+#[test]
+fn a_declined_overwrite_is_not_drift() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
+    install_then_edit(data_dir.path(), edit);
+    assert!(
+        !shipped_scripts_are_current(data_dir.path()),
+        "an undecided edit is drift"
+    );
+
+    let confirmer = FakeConfirmer::new(vec![], vec![false]);
+    install_shipped_feed_scripts(data_dir.path(), Some(&confirmer)).unwrap();
+
+    assert!(
+        shipped_scripts_are_current(data_dir.path()),
+        "a refusal that still matches both digests must give a clean launch"
+    );
+}
+
+#[test]
+fn a_further_edit_after_a_decline_asks_again() {
+    let data_dir = tempfile::tempdir().unwrap();
+    install_then_edit(data_dir.path(), "#!/usr/bin/env bash\n# mine\necho '[]'\n");
+    let first = FakeConfirmer::new(vec![], vec![false]);
+    install_shipped_feed_scripts(data_dir.path(), Some(&first)).unwrap();
+
+    plant(
+        data_dir.path(),
+        "fetch-reviews.sh",
+        "#!/usr/bin/env bash\n# mine, again\necho '[]'\n",
+    );
+    assert!(!shipped_scripts_are_current(data_dir.path()));
+    let second = FakeConfirmer::new(vec![], vec![false]);
+    install_shipped_feed_scripts(data_dir.path(), Some(&second)).unwrap();
+    assert_eq!(second.dangerous_call_count(), 1);
+}
+
+#[test]
+fn a_new_shipped_version_after_a_decline_asks_again() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
+    install_then_edit(data_dir.path(), edit);
+    // A refusal recorded against an older release's content.
+    let record = serde_json::json!({
+        "fetch-reviews.sh": { "kept": script_digest(edit), "shipped": script_digest("older") }
+    });
+    std::fs::write(
+        scripts_dir(data_dir.path()).join(SCRIPT_DECLINED_NAME),
+        record.to_string(),
+    )
+    .unwrap();
+
+    assert!(!shipped_scripts_are_current(data_dir.path()));
+    let confirmer = FakeConfirmer::new(vec![], vec![false]);
+    install_shipped_feed_scripts(data_dir.path(), Some(&confirmer)).unwrap();
+    assert_eq!(confirmer.dangerous_call_count(), 1);
+}
+
+#[test]
+fn nobody_to_ask_records_no_refusal() {
+    let data_dir = tempfile::tempdir().unwrap();
+    install_then_edit(data_dir.path(), "#!/usr/bin/env bash\n# mine\necho '[]'\n");
+
+    install_scripts_unattended(data_dir.path());
+
+    assert!(
+        !declined_map(data_dir.path()).contains_key("fetch-reviews.sh"),
+        "nobody decided anything"
+    );
+}
+
+#[test]
+fn an_approved_overwrite_drops_the_refusal() {
+    let data_dir = tempfile::tempdir().unwrap();
+    install_then_edit(data_dir.path(), "#!/usr/bin/env bash\n# mine\necho '[]'\n");
+    let no = FakeConfirmer::new(vec![], vec![false]);
+    install_shipped_feed_scripts(data_dir.path(), Some(&no)).unwrap();
+
+    plant(
+        data_dir.path(),
+        "fetch-reviews.sh",
+        "#!/usr/bin/env bash\n# mine, again\necho '[]'\n",
+    );
+    let yes = FakeConfirmer::new(vec![], vec![true]);
+    install_shipped_feed_scripts(data_dir.path(), Some(&yes)).unwrap();
+
+    assert!(!declined_map(data_dir.path()).contains_key("fetch-reviews.sh"));
+}
+
+#[test]
+fn feed_scripts_section_kept_line_names_no_flag() {
+    let reports = vec![report("fetch-cve.sh", ShippedScriptOutcome::Kept)];
+    let line = &feed_scripts_section_lines(&reports)[0];
+    assert!(
+        !line.contains("--yes"),
+        "there is no --yes flag, got {line:?}"
+    );
+    assert!(
+        line.contains("dispatch did not write it"),
+        "the line says why it was kept, got {line:?}"
     );
 }

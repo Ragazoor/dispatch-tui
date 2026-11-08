@@ -107,8 +107,11 @@ impl FeedCycle {
             return FeedCycleOutcome::Busy;
         };
 
+        // Missing before the exec: nothing deleted it under a running command,
+        // so it warns like every other bucket (feeds.allium FeedCommandFailure
+        // bucket 5). Only a deletion mid-cycle is `epic_gone`'s debug.
         let Some(mut epic) = self.db.get_epic(self.epic_id).await else {
-            return self.epic_gone();
+            return self.fail("epic no longer exists");
         };
         let Some(feed_command) = epic.feed_command.take() else {
             return self.fail("epic has no feed command");
@@ -255,9 +258,9 @@ impl FeedCycle {
         self.fail(format!("{err:#}"))
     }
 
-    /// The epic was deleted under the cycle. Expected, so debug not warn; the
-    /// next tick no longer lists the epic. feeds.allium `FeedCommandFailure`
-    /// bucket 5.
+    /// The epic was deleted under the cycle, while its command ran. Expected,
+    /// so debug not warn; the next tick no longer lists the epic.
+    /// feeds.allium `FeedCommandFailure` bucket 5.
     fn epic_gone(&self) -> FeedCycleOutcome {
         tracing::debug!(
             epic_id = self.epic_id.0,

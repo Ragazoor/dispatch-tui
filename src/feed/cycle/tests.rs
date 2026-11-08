@@ -77,6 +77,24 @@ async fn a_cycle_whose_epic_is_gone_fails_without_running_the_command() {
     );
 }
 
+/// Bucket 5, before the exec: an epic already missing when the cycle claims
+/// it was not deleted under a running command, so it is logged at warn like
+/// every other bucket (feeds.allium: FeedCommandFailure).
+#[tokio::test]
+async fn a_cycle_whose_epic_is_gone_before_the_exec_warns() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let sentinel = dir.path().join("command-ran");
+    let epic_id = reviews_parent_with_sentinel_command(&db, &sentinel).await;
+    db.delete_epic(epic_id).await.unwrap();
+
+    let log = crate::test_log::logged_during(|| async {
+        failure(cycle(Arc::clone(&db), epic_id).run().await);
+    })
+    .await;
+    assert!(log.contains("WARN"), "got: {log}");
+}
+
 /// Bucket 5, mid-cycle: the epic is deleted while the command runs, so the
 /// store refuses the sync. That is a race, logged below warn; a refusal
 /// for an epic that still exists stays a warning.

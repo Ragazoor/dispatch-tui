@@ -462,6 +462,32 @@ mod feed_epic_trigger {
         .unwrap();
     }
 
+    /// feeds.allium ManualFeedTrigger: an epic deleted between the keypress
+    /// and the setter check fails as the cycle's bucket 5 would, rather than
+    /// blaming this host for not being the author's.
+    #[tokio::test]
+    async fn exec_trigger_epic_feed_on_a_deleted_epic_fails_as_missing() {
+        let db = test_db().await;
+        let epic = db.create_epic("Gone", "", None).await.unwrap();
+        db.delete_epic(epic.id).await.unwrap();
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![]))).await;
+
+        rt.exec_trigger_epic_feed(epic.id, "Gone".to_string());
+
+        let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+            .await
+            .expect("timed out")
+            .expect("channel closed");
+        match msg {
+            Message::Feed(crate::tui::messages::FeedMessage::Failed { error, .. }) => {
+                assert!(error.contains("epic no longer exists"), "got: {error}");
+            }
+            other => panic!("expected Failed, got: {other:?}"),
+        }
+    }
+
     /// `FeedCommandRunsOnSettersHost`: the "r" key runs the command on this
     /// machine, so it refuses a command another person set and runs nothing.
     #[tokio::test]

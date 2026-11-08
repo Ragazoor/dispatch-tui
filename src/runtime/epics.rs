@@ -342,11 +342,16 @@ impl TuiRuntime {
             // THIS machine, so it needs the person who set it to be this
             // machine's owner. Read from the epic as it is now, like the
             // command itself.
-            let may_run = match board_reads.get_epic(epic_id).await {
-                Some(epic) => crate::feed::host_may_run_feed(&*board_reads, &host_id, &epic).await,
-                None => false,
+            // An epic deleted since the keypress is the cycle's bucket 5, not
+            // a refusal of this host (feeds.allium: ManualFeedTrigger).
+            let Some(epic) = board_reads.get_epic(epic_id).await else {
+                let _ = tx.send(Message::Feed(FeedMessage::Failed {
+                    epic_title,
+                    error: "epic no longer exists".to_string(),
+                }));
+                return;
             };
-            if !may_run {
+            if !crate::feed::host_may_run_feed(&*board_reads, &host_id, &epic).await {
                 let _ = tx.send(Message::Feed(FeedMessage::NotAuthorsHost { epic_title }));
                 return;
             }
