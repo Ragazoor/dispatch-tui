@@ -1166,8 +1166,9 @@ rule AutoDispatchNextSubtask {
         -- notification is sent to the TUI when the row finishes either way. A failed request has already had its claim
         -- released by the module (store-split.allium:
         -- ReleaseClaimOfFailedRequest), conditionally, so the subtask is back
-        -- in backlog with the default backlog sub_status and the seeded
-        -- last_pre_tool_use_at cleared, unless it was provisioned or moved on
+        -- in backlog with the default backlog sub_status and the agent its
+        -- claim started ended as launch_failed (agents.allium:
+        -- EndAgentWhenLaunchFails), unless it was provisioned or moved on
         -- meanwhile. The chain releases nothing itself.
         --
         -- No chain failure can fail the close. This rule runs in the close's

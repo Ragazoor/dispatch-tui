@@ -115,7 +115,7 @@ entity HandedOutAgentName {
 -- person picking up the work.
 rule StartAgentOnFreshLaunch {
     -- Reported unreachable until store-split.allium declares the module
-    -- reducer surface that provides DispatchRequested (task 98970).
+    -- reducer surface that provides DispatchRequested.
     when: store_split/DispatchRequested(task, requester, origin, mode?)
 
     -- Fires only when the claim succeeds (every requires of
