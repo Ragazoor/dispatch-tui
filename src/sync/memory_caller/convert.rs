@@ -389,6 +389,16 @@ mirror!(
 );
 
 mirror!(
+    module::LearningVerdict,
+    bindings::LearningVerdict {
+        id,
+        task_id,
+        learning_id,
+        verdict,
+    }
+);
+
+mirror!(
     module::WorkPackage,
     bindings::WorkPackage {
         id,

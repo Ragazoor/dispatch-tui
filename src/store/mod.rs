@@ -962,6 +962,16 @@ pub trait LearningRetrievalStore: Send + Sync {
     /// Return all retrievals recorded for `task_id`, ordered by id ascending.
     async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
 
+    /// The learnings off-topic in `repo_path`: `threshold` or more
+    /// `not_applicable` verdicts from tasks in that repo and no `helped` one.
+    /// Dispatch injection leaves them out for tasks in that repo
+    /// (`core.allium: Learning.off_topic_in_repo`).
+    async fn learnings_off_topic_in_repo(
+        &self,
+        repo_path: &str,
+        threshold: usize,
+    ) -> Result<std::collections::BTreeSet<LearningId>>;
+
     /// Apply a batch of `task_id`'s verdicts atomically. One verdict stands per
     /// (task, learning): a repeat replaces the earlier one and moves the score
     /// by the difference. `Helped` counts +1 toward `upvote_count` (and sets

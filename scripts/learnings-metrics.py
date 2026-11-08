@@ -262,6 +262,34 @@ def verdict_coverage_metrics():
         print("  most often not_applicable: " + ", ".join(f"#{i} ({n})" for i, n in na.most_common(10)))
 
 
+OFF_TOPIC_VERDICTS_TO_MUTE = 3  # src/dispatch/prompts.rs; run 9 (task 98686) added the mute
+MUTE_FROM = "2026-11-08"
+
+
+def mute_metrics():
+    """(learning, repo) pairs the per-repo dispatch mute leaves out right now.
+
+    `core.allium: Learning.off_topic_in_repo`: 3+ not_applicable verdicts from tasks in
+    that repo and no helped. Reads only verdicts whose task still exists, as the board does.
+    Watch two things: the mute's reach (entries, repos), and whether the not_applicable
+    share of injected pairs falls in the weeks after MUTE_FROM.
+    """
+    V, T = table("learning_verdicts"), table("tasks")
+    repo = {t["id"]: t["repo_path"] for t in T}
+    counts = collections.defaultdict(collections.Counter)
+    for v in V:
+        if v["task_id"] in repo:
+            counts[(v["learning_id"], repo[v["task_id"]])][v["verdict"]] += 1
+    muted = sorted(
+        (k for k, c in counts.items()
+         if c["not_applicable"] >= OFF_TOPIC_VERDICTS_TO_MUTE and c["helped"] == 0),
+        key=lambda k: -counts[k]["not_applicable"],
+    )
+    repos = collections.Counter(os.path.basename(r) for _, r in muted)
+    print(f"muted from dispatch injection now (since {MUTE_FROM}): {len(muted)} (learning, repo) pairs,"
+          f" {len({l for l, _ in muted})} learnings; by repo: {dict(repos.most_common())}")
+
+
 def pr_metrics():
     prs = {}
     for f in glob.glob(TRAJ):
@@ -297,5 +325,6 @@ if __name__ == "__main__":
     mistakes_metrics()
     user_scope_metrics()
     verdict_coverage_metrics()
+    mute_metrics()
     if "--prs" in sys.argv:
         pr_metrics()

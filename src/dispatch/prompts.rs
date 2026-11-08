@@ -1059,6 +1059,11 @@ wrapping up are the user's call once they have read what you found.";
 /// Maximum total learnings injected into a dispatch prompt via RAG.
 pub const DISPATCH_INJECTION_CAP: usize = 5;
 
+/// `not_applicable` verdicts from tasks in one repo, with no `helped` there,
+/// that leave a learning out of that repo's dispatch injection
+/// (`learnings.allium: AugmentDispatchPromptWithLearnings`).
+pub const OFF_TOPIC_VERDICTS_TO_MUTE: usize = 3;
+
 /// Push-injection groups for a dispatch prompt.
 #[derive(Default, Clone)]
 pub struct LearningInjections<'a> {
@@ -1178,6 +1183,24 @@ pub async fn list_learnings_for_dispatch_rag(
         }
     };
 
+    // An entry off-topic in this repo is left out before ranking, so its slot
+    // goes to the next candidate (`core.allium: Learning.off_topic_in_repo`).
+    // A failed read mutes nothing: injection degrades to the unfiltered set.
+    let muted = db
+        .learnings_off_topic_in_repo(&task.repo_path, OFF_TOPIC_VERDICTS_TO_MUTE)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                task_id = task.id.0,
+                error = ?e,
+                "dispatch RAG: failed to read verdicts, muting nothing"
+            );
+            Default::default()
+        });
+    let rows: Vec<_> = rows
+        .into_iter()
+        .filter(|(l, _)| !muted.contains(&l.id))
+        .collect();
     let candidates = deserialize_candidate_rows(rows);
 
     let epic_id_str = task.epic_id.map(|e| e.0.to_string());

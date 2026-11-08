@@ -104,9 +104,12 @@ pub(in crate::sync) fn subscription_queries(
         // machine's own, so the ask narrows it by host.
         format!("SELECT * FROM own_settings WHERE host = '{host}'"),
         // The knowledge base (`docs/specs/learnings.allium`): the learnings
-        // the caller may see, and the retrievals of the tasks they hold.
+        // the caller may see, and the retrievals and verdicts of the tasks
+        // they hold. Verdicts feed the per-repo dispatch mute
+        // (`core.allium: Learning.off_topic_in_repo`).
         "SELECT * FROM visible_learnings".to_string(),
         "SELECT * FROM visible_learning_retrievals".to_string(),
+        "SELECT * FROM visible_learning_verdicts".to_string(),
         // Usage telemetry is NOT subscribed: a view over it would re-run on
         // every recorded event. `query_usage` asks the store on demand
         // (`own_usage_summary`).

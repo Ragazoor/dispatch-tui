@@ -132,6 +132,11 @@ struct Rows {
     /// which ids exist is the kind of invariant a single map holds for free.
     learnings: BTreeMap<i64, (Learning, Option<Vec<u8>>)>,
     learning_retrievals: BTreeMap<i64, LearningRetrieval>,
+    /// Standing verdicts on the tasks this person holds, from the
+    /// `visible_learning_verdicts` view. Read only to derive the per-repo
+    /// dispatch mute (`core.allium: Learning.off_topic_in_repo`), so they are
+    /// held as the store sends them and the verdict string is read there.
+    learning_verdicts: BTreeMap<i64, bindings::LearningVerdict>,
     /// The tables the store's task, subscription and settings reads need
     /// beyond the ones above (task #4916). None carries a sentinel, an enum or a timestamp a reader
     /// interprets, so they are held as the store sends them.
@@ -226,6 +231,7 @@ impl Rows {
             && self.poll_owners.is_empty()
             && self.learnings.is_empty()
             && self.learning_retrievals.is_empty()
+            && self.learning_verdicts.is_empty()
             && self.subscriptions.is_empty()
             && self.unseen_tasks.is_empty()
             && self.bookmarks.is_empty()
@@ -523,6 +529,17 @@ impl SharedRows {
 
     pub fn remove_learning_retrieval(&self, id: i64) {
         self.write(|rows| rows.learning_retrievals.remove(&id).is_some());
+    }
+
+    pub fn upsert_learning_verdict(&self, row: &bindings::LearningVerdict) {
+        self.write(|rows| {
+            rows.learning_verdicts.insert(row.id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_learning_verdict(&self, id: i64) {
+        self.write(|rows| rows.learning_verdicts.remove(&id).is_some());
     }
 
     pub fn upsert_subscription(&self, row: &bindings::Subscription) {
@@ -937,6 +954,10 @@ impl SharedRows {
             return;
         };
         self.write(|rows| remove_if_held(&mut rows.learning_retrievals, &old.id, &old));
+    }
+
+    pub fn retire_learning_verdict(&self, old: &bindings::LearningVerdict) {
+        self.write(|rows| remove_if_held(&mut rows.learning_verdicts, &old.id, old));
     }
 
     pub fn retire_unseen_task(&self, old: &bindings::UnseenTask) {
@@ -1407,6 +1428,40 @@ impl SharedRows {
                 .values()
                 .filter(|(l, emb)| emb.is_none() && is_approved_non_task(l))
                 .map(|(l, _)| l.clone())
+                .collect()
+        })
+    }
+
+    /// The learnings off-topic in `repo_path`: at least `threshold`
+    /// `not_applicable` verdicts from tasks in that repo and no `helped` one
+    /// (`core.allium: Learning.off_topic_in_repo`). A verdict whose task the
+    /// board no longer holds does not count; `wrong` counts neither way.
+    pub fn learnings_off_topic_in_repo(
+        &self,
+        repo_path: &str,
+        threshold: usize,
+    ) -> std::collections::BTreeSet<LearningId> {
+        self.read(|rows| {
+            let mut counts: BTreeMap<i64, (usize, usize)> = BTreeMap::new();
+            for v in rows.learning_verdicts.values() {
+                let in_repo = rows
+                    .tasks
+                    .get(&v.task_id)
+                    .is_some_and(|t| t.repo_path == repo_path);
+                if !in_repo {
+                    continue;
+                }
+                let entry = counts.entry(v.learning_id).or_default();
+                match v.verdict.as_str() {
+                    "not_applicable" => entry.0 += 1,
+                    "helped" => entry.1 += 1,
+                    _ => {}
+                }
+            }
+            counts
+                .into_iter()
+                .filter(|(_, (off_topic, helped))| *off_topic >= threshold && *helped == 0)
+                .map(|(id, _)| LearningId(id))
                 .collect()
         })
     }

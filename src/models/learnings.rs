@@ -182,8 +182,9 @@ pub struct Learning {
 pub enum LearningVerdict {
     Helped,
     Wrong,
-    /// Read, and did not fit this task. Counts 0: a signal for measuring the
-    /// store, not a ranking input (`learnings.allium: RateLearningViaMcp`).
+    /// Read, and did not fit this task. Counts 0 toward the score; enough of
+    /// them from one repo, with no `helped`, mute the entry from that repo's
+    /// dispatch injection (`core.allium: Learning.off_topic_in_repo`).
     NotApplicable,
 }
 

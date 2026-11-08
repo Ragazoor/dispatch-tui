@@ -1120,6 +1120,18 @@ entity Learning {
             or (scope = epic and task.epic != null and scope_ref = str(task.epic.id))
         )
 
+    -- True when tasks in the given repo have found this learning off-topic:
+    -- their standing verdicts on it hold at least
+    -- config.off_topic_verdicts_to_mute not_applicable and no helped. wrong
+    -- verdicts count neither way, and a deleted task's verdicts are gone with
+    -- it (LearningVerdict). Derived from the verdict rows when asked, never
+    -- stored. Dispatch injection leaves such a learning out for that repo
+    -- only; query_learnings ignores it (learnings.allium:
+    -- AugmentDispatchPromptWithLearnings).
+    off_topic_in_repo(repo_path):
+        (LearningVerdicts where learning = this and task.repo_path = repo_path and verdict = not_applicable).count >= config.off_topic_verdicts_to_mute
+        and (LearningVerdicts where learning = this and task.repo_path = repo_path and verdict = helped).count = 0
+
     invariant ScopeRefConsistency {
         (scope = user implies scope_ref = null)
         and (scope != user implies scope_ref != null)
@@ -1345,6 +1357,12 @@ config {
     -- (see learnings.allium: ArchiveStaleLearning)
     stale_learning_cleanup_enabled: Boolean = true
     stale_learning_threshold: Duration = 90.days
+
+    -- How many standing not_applicable verdicts from one repo's tasks, with no
+    -- helped verdict from that repo, mute a learning from dispatch injection
+    -- in that repo (Learning.off_topic_in_repo; learnings.allium:
+    -- AugmentDispatchPromptWithLearnings).
+    off_topic_verdicts_to_mute: Integer = 3
 
     -- How many levels below an epic the store's recursive delete reaches. An
     -- epic delete (single or batch) refuses a subtree nested deeper rather

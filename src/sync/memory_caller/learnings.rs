@@ -32,7 +32,7 @@ impl MemoryReducerCaller {
             .map(|r| r.id)
             .collect();
         self.delete_learning_retrieval_rows(tables, retrievals);
-        tables.learning_verdicts.retain(|_, v| v.task_id != task_id);
+        self.delete_learning_verdict_rows(tables, |v| v.task_id == task_id);
     }
 
     /// Collect every learning matching `pred`, apply `f`, and write each
@@ -77,6 +77,25 @@ impl MemoryReducerCaller {
             if tables.learning_retrievals.remove(&id).is_some() {
                 self.rows.remove_learning_retrieval(id);
             }
+        }
+    }
+
+    /// Delete every `learning_verdicts` row matching `pred`, and tell the
+    /// board, as the module's cascades do.
+    pub(super) fn delete_learning_verdict_rows(
+        &self,
+        tables: &mut Tables,
+        pred: impl Fn(&module::LearningVerdict) -> bool,
+    ) {
+        let ids: Vec<i64> = tables
+            .learning_verdicts
+            .values()
+            .filter(|v| pred(v))
+            .map(|v| v.id)
+            .collect();
+        for id in ids {
+            tables.learning_verdicts.remove(&id);
+            self.rows.remove_learning_verdict(id);
         }
     }
 
@@ -149,7 +168,7 @@ impl MemoryReducerCaller {
             .map(|r| r.id)
             .collect();
         self.delete_learning_retrieval_rows(tables, retrievals);
-        tables.learning_verdicts.retain(|_, v| v.learning_id != id);
+        self.delete_learning_verdict_rows(tables, |v| v.learning_id == id);
         true
     }
 
@@ -315,6 +334,11 @@ impl MemoryReducerCaller {
                 },
             );
             touched.push(learning_id);
+        }
+        for row in standing.values() {
+            if tables.learning_verdicts.get(&row.id).map(|v| &v.verdict) != Some(&row.verdict) {
+                self.rows.upsert_learning_verdict(&row.clone().into());
+            }
         }
         tables.learning_verdicts = standing;
         tables.next_learning_verdict_id = next_id;
