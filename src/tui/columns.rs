@@ -535,16 +535,8 @@ impl<'a> BoardView<'a> {
         // The section's compact tree (board-layout.allium: `EpicGroupTree`):
         // headers only where an epic owns a group here or branches meet, in
         // that tree's order, siblings by their place in the board's tree.
-        let full: Vec<Vec<EpicId>> = groups
-            .iter()
-            .map(|&(eid, _)| {
-                tree.place(eid)
-                    .map_or_else(|| vec![eid], |p| p.path.clone())
-            })
-            .collect();
-        let compact = crate::epic_tree::CompactTree::build(&full, |e| {
-            tree.place(e).map_or(usize::MAX, |p| p.rank)
-        });
+        let full: Vec<Vec<EpicId>> = groups.iter().map(|&(eid, _)| tree.full_path(eid)).collect();
+        let compact = crate::epic_tree::CompactTree::build(&full, |e| tree.rank(e));
 
         // `open` is the path of headers the last group sat under, top first,
         // each with the index of its item when it drew folded: a group shares

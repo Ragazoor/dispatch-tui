@@ -203,35 +203,40 @@ impl App {
     /// unfiltered — every task it holds on the main board, with no search,
     /// lens, hide or repo filter — so a passing filter never moves a fold.
     pub(in crate::tui) fn move_skipped_epic_folds(&mut self) -> Vec<Command> {
+        let columns = [TaskStatus::Running, TaskStatus::Review];
+        // The common case: no fold recorded, nothing to move.
+        if columns.iter().all(|&s| !self.epic_folds.any_in(s)) {
+            return vec![];
+        }
         let tree = crate::tui::types::EpicTree::build(&self.board.epics, None);
         let lookup = crate::models::epic_id_lookup(&self.board.epics);
         let mut moved = false;
-        for status in [TaskStatus::Running, TaskStatus::Review] {
+        for status in columns {
             let folded = self.epic_folds.folded_in(status);
             if folded.is_empty() {
                 continue;
             }
             // Each section's groups, as full paths in the board's tree.
-            let mut sections: std::collections::BTreeMap<_, Vec<Vec<EpicId>>> =
+            let mut sections: std::collections::BTreeMap<_, (Vec<EpicId>, Vec<Vec<EpicId>>)> =
                 std::collections::BTreeMap::new();
             for task in self.board.tasks.iter().filter(|t| t.status == status) {
                 let Some(eid) = task.epic_id.filter(|e| lookup.contains_key(e)) else {
                     continue;
                 };
-                let path = tree
-                    .place(eid)
-                    .map_or_else(|| vec![eid], |p| p.path.clone());
-                let groups = sections
+                let (seen, groups) = sections
                     .entry(crate::models::ColumnSection::for_task(task))
                     .or_default();
-                if !groups.contains(&path) {
-                    groups.push(path);
+                if !seen.contains(&eid) {
+                    seen.push(eid);
+                    groups.push(tree.full_path(eid));
                 }
             }
             let laid_out: Vec<_> = sections
                 .into_values()
-                .map(|groups| {
-                    let compact = crate::epic_tree::CompactTree::build(&groups, |e| e.0);
+                .map(|(_, groups)| {
+                    // The same sibling order the column draws, so the fold
+                    // moves to the epic the column shows.
+                    let compact = crate::epic_tree::CompactTree::build(&groups, |e| tree.rank(e));
                     (groups, compact)
                 })
                 .collect();

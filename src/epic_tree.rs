@@ -87,7 +87,7 @@ impl CompactTree {
     /// `FoldMovesToDrawnDescendant`). Empty when `epic` is drawn itself or
     /// no group lies below it.
     pub(crate) fn takers(&self, groups: &[Vec<EpicId>], epic: EpicId) -> Vec<EpicId> {
-        if self.paths.iter().any(|p| p.contains(&epic)) {
+        if self.draws(epic) {
             return Vec::new();
         }
         let mut out = Vec::new();

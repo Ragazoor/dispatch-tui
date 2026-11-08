@@ -221,12 +221,21 @@ pub(crate) fn hidden_agents_text(hidden: usize) -> String {
 /// The lines `rows` draw as: a header wherever a new epic's group starts, and
 /// the end-of-epics rule where the epicless agents follow an epic group.
 /// `rows` arrive already grouped (`read_agent_list`).
+#[cfg(test)]
 pub(crate) fn drawn_lines(rows: &[AgentRow]) -> Vec<DrawnLine> {
+    drawn_lines_with(rows, compact_paths(rows))
+}
+
+/// `drawn_lines` over paths the caller already has from [`compact_paths`].
+fn drawn_lines_with(
+    rows: &[AgentRow],
+    paths: Vec<Option<Vec<crate::models::EpicId>>>,
+) -> Vec<DrawnLine> {
     let mut lines = Vec::with_capacity(rows.len());
     // The headers the previous row sat under, root first: a new group draws
     // only the part of its path it does not share with them.
     let mut open: Vec<crate::models::EpicId> = Vec::new();
-    for (index, path) in compact_paths(rows).into_iter().enumerate() {
+    for (index, path) in paths.into_iter().enumerate() {
         match path {
             Some(path) => {
                 if path != open {
@@ -313,8 +322,8 @@ pub fn render_agents(
 
     let visible = usize::from(area.height.saturating_sub(2));
     section.viewport_rows = visible;
-    let mut drawn = drawn_lines(&section.rows);
     let paths = compact_paths(&section.rows);
+    let mut drawn = drawn_lines_with(&section.rows, paths.clone());
     if section.hidden > 0 {
         drawn.push(DrawnLine::HiddenByFilter);
     }
