@@ -732,12 +732,27 @@ impl MemoryReducerCaller {
         if let Some(refusal) = refusal {
             return Ok(refusal);
         }
-        self.patch_epic_row(id, patch, false)?;
+        // The dry run said yes to every part, so a refusal here means the dry
+        // run and the module's order have drifted apart. Name the part rather
+        // than leave a half-applied update.
+        let applied = |part: &str, outcome: ReducerOutcome| -> Result<()> {
+            match outcome {
+                ReducerOutcome::Refused(reason) => Err(anyhow::anyhow!(
+                    "update_epic {}: the {part} part was refused after the dry run accepted it: {reason}",
+                    id.0
+                )),
+                _ => Ok(()),
+            }
+        };
+        applied("patch", self.patch_epic_row(id, patch, false)?)?;
         if let Some(workspace_id) = workspace_id {
-            self.move_epic_row(id, workspace_id, false)?;
+            applied("move", self.move_epic_row(id, workspace_id, false)?)?;
         }
         if let Some(visibility) = visibility {
-            self.set_epic_visibility_row(id, visibility, false)?;
+            applied(
+                "visibility",
+                self.set_epic_visibility_row(id, visibility, false)?,
+            )?;
         }
         Ok(ReducerOutcome::Applied(vec![]))
     }

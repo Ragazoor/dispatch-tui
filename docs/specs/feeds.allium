@@ -1557,7 +1557,10 @@ rule SerialisedFeedCycle {
         -- on a stdout over the cap) it SIGKILLs the whole group
         -- (src/feed/exec.rs::kill_process_group) and reaps the shell, so a
         -- pipeline such as `gh | jq` dies with its shell instead of leaving
-        -- children behind. kill_on_drop(true) stays set as a backstop for a
+        -- children behind. The run ends when the SHELL exits, not when the
+        -- pipes reach EOF: it reads what is buffered for a short grace, then
+        -- kills the group, so a helper started with `&` that inherited stdout
+        -- cannot turn a valid emission into a timeout. kill_on_drop(true) stays set as a backstop for a
         -- dropped future, but it reaches only the `sh -c`, never the
         -- pipeline, and is not what bounds the cost.
         -- src/process.rs::run_bounded, the repo's kill-on-timeout primitive,

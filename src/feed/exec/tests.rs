@@ -422,3 +422,16 @@ fn a_real_error_beside_a_notice_still_degrades() {
 fn the_notice_prefix_must_start_the_line() {
     assert!(degraded_partial_emission(3, "error: see notice: x").is_some());
 }
+
+// --- background child holding stdout ---
+
+#[tokio::test]
+async fn bounded_run_returns_when_a_background_child_holds_stdout() {
+    // The script prints its emission and exits, but `sleep 60 &` inherited
+    // stdout and keeps the pipe open. The runner must wait on the child, not
+    // on the pipe.
+    let out = run_feed_command_bounded("printf 'emission'; sleep 60 &", Duration::from_secs(10))
+        .await
+        .expect("a valid emission must not become a timeout");
+    assert_eq!(out.stdout, b"emission".to_vec());
+}

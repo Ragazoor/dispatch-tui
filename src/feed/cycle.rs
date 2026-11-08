@@ -243,9 +243,15 @@ impl FeedCycle {
             Some(paths) => Arc::clone(paths),
             None => Arc::new(self.db.list_repo_paths_saved_by_this_host().await),
         };
-        let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths, &*self.runner);
-        let base_branches = super::resolve_base_branches(&repo_paths, &*self.runner);
-        let entries = super::FeedItemWithTarget::zip(items, repo_paths, base_branches);
+        // `git` calls, each bounded at 10 s: keep them off the async workers.
+        let runner = Arc::clone(&self.runner);
+        let entries = tokio::task::spawn_blocking(move || {
+            let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths, &*runner);
+            let base_branches = super::resolve_base_branches(&repo_paths, &*runner);
+            super::FeedItemWithTarget::zip(items, repo_paths, base_branches)
+        })
+        .await
+        .map_err(|err| anyhow::anyhow!("resolving feed item repos failed: {err}"))?;
 
         super::ingest_emission(&*self.db, self.epic_id, entries, mode).await
     }

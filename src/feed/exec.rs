@@ -83,6 +83,28 @@ async fn kill_process_group(pid: Option<u32>) {
         .await;
 }
 
+/// How long to keep reading buffered output after the child has exited.
+const PIPE_GRACE: Duration = Duration::from_millis(500);
+
+/// Read `pipe` into `buf`, capped at one byte past [`MAX_FEED_STDOUT_BYTES`]. On
+/// a read error or an overrun, stop the writer so the other pipe reaches EOF.
+async fn read_capped<R: tokio::io::AsyncRead + Unpin>(
+    pipe: Option<R>,
+    buf: &mut Vec<u8>,
+    pid: Option<u32>,
+) -> std::io::Result<()> {
+    let Some(pipe) = pipe else { return Ok(()) };
+    // One byte past the cap tells "exactly at the cap" from "over".
+    let result = pipe
+        .take(MAX_FEED_STDOUT_BYTES as u64 + 1)
+        .read_to_end(buf)
+        .await;
+    if result.is_err() || buf.len() > MAX_FEED_STDOUT_BYTES {
+        kill_process_group(pid).await;
+    }
+    result.map(|_| ())
+}
+
 /// Run `cmd` under `sh -c` with the feed bounds: `timeout`, a process-group
 /// kill and a stdout cap. Shared by the runtime ([`exec_feed_command`]) and the
 /// `verify-feed` CLI so both enforce the same limits. Logs nothing; the caller
@@ -126,60 +148,43 @@ pub async fn run_feed_command_bounded(
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
 
+    // Buffers live outside the futures so whatever was read survives when the
+    // reads are cut short after the child exits.
+    let mut out_buf = Vec::new();
+    let mut err_buf = Vec::new();
     let run = async {
-        let read_stdout = async {
-            let mut buf = Vec::new();
-            if let Some(pipe) = stdout_pipe {
-                // One byte past the cap tells "exactly at the cap" from "over".
-                if let Err(err) = pipe
-                    .take(MAX_FEED_STDOUT_BYTES as u64 + 1)
-                    .read_to_end(&mut buf)
-                    .await
-                {
-                    // The pipe is dead; stop the writer so the other reads
-                    // reach EOF now rather than at the timeout.
-                    kill_process_group(pid).await;
-                    return Err(err);
-                }
-            }
-            if buf.len() > MAX_FEED_STDOUT_BYTES {
-                // Stop the writer so the other reads reach EOF now rather
-                // than at the timeout.
-                kill_process_group(pid).await;
-            }
-            Ok::<_, std::io::Error>(buf)
+        let reads = async {
+            tokio::join!(
+                read_capped(stdout_pipe, &mut out_buf, pid),
+                read_capped(stderr_pipe, &mut err_buf, pid)
+            )
         };
-        let read_stderr = async {
-            let mut buf = Vec::new();
-            if let Some(pipe) = stderr_pipe {
-                // One byte past the cap tells "exactly at the cap" from "over".
-                if let Err(err) = pipe
-                    .take(MAX_FEED_STDOUT_BYTES as u64 + 1)
-                    .read_to_end(&mut buf)
-                    .await
-                {
-                    kill_process_group(pid).await;
-                    return Err(err);
-                }
-            }
-            if buf.len() > MAX_FEED_STDOUT_BYTES {
-                // Past the cap the pipe is no longer drained; stop the writer
-                // rather than leave it running until the deadline.
+        tokio::pin!(reads);
+        // Wait on the child, not the pipes: a background helper that inherited
+        // stdout holds the pipe open long after the script exited.
+        let (status, read_results) = tokio::select! {
+            status = child.wait() => {
+                let finished = tokio::time::timeout(PIPE_GRACE, &mut reads).await.ok();
+                // Stop anything still holding the pipes.
                 kill_process_group(pid).await;
+                (status?, finished)
             }
-            Ok::<_, std::io::Error>(buf)
+            results = &mut reads => (child.wait().await?, Some(results)),
         };
-        let (stdout, stderr, status) = tokio::join!(read_stdout, read_stderr, child.wait());
-        Ok::<_, std::io::Error>(std::process::Output {
-            status: status?,
-            stdout: stdout?,
-            stderr: stderr?,
-        })
+        if let Some((out, err)) = read_results {
+            out?;
+            err?;
+        }
+        Ok::<_, std::io::Error>(status)
     };
     let result = tokio::time::timeout(timeout, run).await;
 
     let output = match result {
-        Ok(Ok(o)) => o,
+        Ok(Ok(status)) => std::process::Output {
+            status,
+            stdout: out_buf,
+            stderr: err_buf,
+        },
         Ok(Err(err)) => return Err(format!("{err:#}")),
         Err(_elapsed) => {
             kill_process_group(pid).await;

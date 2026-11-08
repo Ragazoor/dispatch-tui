@@ -322,3 +322,47 @@ async fn delete_epic_refuses_a_subtree_nested_past_the_depth_cap() {
     assert!(rows.epic(root).is_some(), "nothing is half-deleted");
     assert!(rows.epic(parent).is_some());
 }
+
+/// `apply_update_epic` dry-runs every part, then applies them. A patch plus a
+/// visibility change must land together, and a refused part must write nothing.
+#[tokio::test]
+async fn update_epic_applies_every_part_or_none() {
+    let (caller, rows) = caller();
+    let id = caller.create_epic(blank_epic()).await.unwrap();
+
+    let ok = caller
+        .update_epic(
+            id,
+            bindings::EpicPatch {
+                title: Some("renamed".into()),
+                ..blank_epic_patch()
+            },
+            None,
+            Some("private".into()),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(ok, ReducerOutcome::Applied(_)), "{ok:?}");
+    let row = rows.epics().into_iter().find(|e| e.id == id).unwrap();
+    assert_eq!(row.title, "renamed");
+    assert_eq!(row.visibility.to_string(), "private");
+
+    let refused = caller
+        .update_epic(
+            id,
+            bindings::EpicPatch {
+                title: Some("not applied".into()),
+                ..blank_epic_patch()
+            },
+            None,
+            Some("bogus".into()),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(refused, ReducerOutcome::Refused(_)), "{refused:?}");
+    let row = rows.epics().into_iter().find(|e| e.id == id).unwrap();
+    assert_eq!(
+        row.title, "renamed",
+        "a refused part leaves the title alone"
+    );
+}
