@@ -339,34 +339,43 @@ directory, so the pair travels together.
 
 ### Shipped feed scripts
 
-`dispatch setup` writes two classes of file into `<data_dir>/scripts/`, with
-deliberately opposite rules.
+When `dispatch tui` finds its configuration out of date and you accept the
+update, the `feed scripts` artefact writes two classes of file into
+`<data_dir>/scripts/`, with deliberately opposite rules
+(`docs/specs/feeds.allium`, InstallShippedFeedScripts).
 
 **Scripts** — `fetch-dependabot.sh`, `fetch-reviews.sh`, `fetch-cve.sh`,
 `fetch-security.sh`, `fetch-log-warnings.sh` — are dispatch-owned. They ship
 with empty placeholders, so a copy on disk is expected to stay byte-identical
-to what dispatch shipped. Setup records a SHA-256 of each script it writes — or finds already
-identical, which is how a deployment predating the manifest heals itself — in
-`<data_dir>/scripts/.install-manifest.json`. On the next run:
+to what dispatch shipped. Dispatch records a SHA-256 of each script it writes —
+or finds already identical, which is how a deployment predating the manifest
+heals itself — in `<data_dir>/scripts/.install-manifest.json`. On the next
+update:
 
 - A script that still matches its recorded digest is **updated silently** when a
   newer version ships. This is how a fix in this repo reaches a running
   deployment.
 - A script that matches neither the shipped content nor its recorded digest has
-  **unknown provenance** — you edited it, or it predates the manifest. Setup
+  **unknown provenance** — you edited it, or it predates the manifest. Dispatch
   asks before overwriting, defaulting to **No**, and copies the current file to
-  `<name>.bak` before it writes. `dispatch setup --yes` never asks and never
-  overwrites such a file; it reports it and moves on.
+  `<name>.bak` before it writes. A launch with nobody to answer never asks and
+  never overwrites such a file.
+- If you answer **No**, the refusal is recorded in
+  `<data_dir>/scripts/.declined-overwrites.json` against the digests of your
+  copy and of the shipped one. While both still match, the script is not
+  reported as out of date and you are not asked again. A further edit, or a
+  release that ships a different version, brings the question back.
 
 **Config files** — `repos.conf`, `bots.conf`, `org.conf`, `teams.conf`,
-`log-warnings.conf` — are yours. Setup creates them if they are missing and
+`log-warnings.conf` — are yours. Dispatch creates them if they are missing and
 never touches them again. There is no flag or prompt that overwrites one. They
 are the entire edit surface: put your repos, orgs, teams, bot logins and log
 paths here rather than in the scripts. `teams.conf` is the only source of Team
 Reviews: it lists the `<org>/<team-slug>` teams whose review requests you want
 there.
 
-A missing or corrupt manifest is treated as empty and never fails setup. Only
+A missing or corrupt manifest (or refusal record) is treated as empty and
+never fails the update. Only
 scripts that DIFFER fall back to asking: a missing script is still installed and
 an identical one is still adopted.
 
@@ -397,7 +406,7 @@ Each script has an optional interval (`reviews_feed_interval_secs`,
 `cve_feed_interval_secs`); unset falls back to the default feed interval. Both
 are bound by the same 60s floor — provisioning copies them onto the managed
 epics' `feed_interval_secs`, so they are not a separate kind of cadence.
-Both scripts are installed into `<data_dir>/scripts/` by `dispatch setup` (see
+Both scripts are installed into `<data_dir>/scripts/` by the startup configuration update (see
 "Shipped feed scripts" above). They ship with empty repo/org placeholders and
 read their real configuration from the `.conf` files beside them — edit those,
 not the scripts.
