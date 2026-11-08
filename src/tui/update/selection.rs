@@ -197,6 +197,74 @@ impl App {
             })
     }
 
+    /// Move each fold whose epic the compact tree no longer draws onto the
+    /// epics that now head what it hid, and save the set when one moved
+    /// (`tasks.allium`: FoldMovesToDrawnDescendant). Judged on the column
+    /// unfiltered — every task it holds on the main board, with no search,
+    /// lens, hide or repo filter — so a passing filter never moves a fold.
+    pub(in crate::tui) fn move_skipped_epic_folds(&mut self) -> Vec<Command> {
+        let columns = [TaskStatus::Running, TaskStatus::Review];
+        // The common case: no fold recorded, nothing to move.
+        if columns.iter().all(|&s| !self.epic_folds.any_in(s)) {
+            return vec![];
+        }
+        let tree = crate::tui::types::EpicTree::build(&self.board.epics, None);
+        let lookup = crate::models::epic_id_lookup(&self.board.epics);
+        let mut moved = false;
+        for status in columns {
+            let folded = self.epic_folds.folded_in(status);
+            if folded.is_empty() {
+                continue;
+            }
+            // Each section's groups, as full paths in the board's tree.
+            let mut sections: std::collections::BTreeMap<_, (Vec<EpicId>, Vec<Vec<EpicId>>)> =
+                std::collections::BTreeMap::new();
+            for task in self.board.tasks.iter().filter(|t| t.status == status) {
+                let Some(eid) = task.epic_id.filter(|e| lookup.contains_key(e)) else {
+                    continue;
+                };
+                let (seen, groups) = sections
+                    .entry(crate::models::ColumnSection::for_task(task))
+                    .or_default();
+                if !seen.contains(&eid) {
+                    seen.push(eid);
+                    groups.push(tree.full_path(eid));
+                }
+            }
+            let laid_out: Vec<_> = sections
+                .into_values()
+                .map(|(_, groups)| {
+                    // The same sibling order the column draws, so the fold
+                    // moves to the epic the column shows.
+                    let compact = crate::epic_tree::CompactTree::build(&groups, |e| tree.rank(e));
+                    (groups, compact)
+                })
+                .collect();
+            for epic in folded {
+                if laid_out.iter().any(|(_, c)| c.draws(epic)) {
+                    continue;
+                }
+                let mut takers: Vec<EpicId> = Vec::new();
+                for (groups, compact) in &laid_out {
+                    for taker in compact.takers(groups, epic) {
+                        if !takers.contains(&taker) {
+                            takers.push(taker);
+                        }
+                    }
+                }
+                if !takers.is_empty() {
+                    self.epic_folds.move_down(status, epic, &takers);
+                    moved = true;
+                }
+            }
+        }
+        if !moved {
+            return vec![];
+        }
+        self.invalidate_layout_cache();
+        self.persist_epic_folds()
+    }
+
     fn persist_epic_folds(&self) -> Vec<Command> {
         Self::persist_setting(crate::tui::COLLAPSED_EPICS_KEY, self.epic_folds.serialise())
     }

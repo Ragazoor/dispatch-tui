@@ -135,8 +135,8 @@ impl ListCursor for AgentsSection {
     }
 }
 
-/// A group's epic ids from the root down to its own: its place in the epic
-/// tree the section lays its groups out as (`AgentListGroupsByEpic`).
+/// A group's epic ids from the root down to its own: its full path, which
+/// [`compact_paths`] reduces to the headers it draws (`AgentListGroupsByEpic`).
 pub(crate) fn pane_epic_path(epic: &PaneEpic) -> Vec<crate::models::EpicId> {
     epic.ancestors
         .iter()
@@ -145,12 +145,61 @@ pub(crate) fn pane_epic_path(epic: &PaneEpic) -> Vec<crate::models::EpicId> {
         .collect()
 }
 
+/// Each row's compact path (`AgentListGroupsByEpic`): the drawn epics from
+/// the top down to its own, `None` for an epicless row. A header draws only
+/// for an epic an agent sits in, or where two branches meet
+/// (`crate::epic_tree::CompactTree`).
+pub(crate) fn compact_paths(rows: &[AgentRow]) -> Vec<Option<Vec<crate::models::EpicId>>> {
+    let (groups, full) = epic_groups(rows);
+    let tree = crate::epic_tree::CompactTree::build(&full, |e| e.0);
+    rows.iter()
+        .map(|row| {
+            let epic = row.epic.as_ref()?;
+            let at = groups.iter().position(|&id| id == epic.id)?;
+            tree.paths.get(at).cloned()
+        })
+        .collect()
+}
+
+/// The distinct epics `rows` sit in, first seen first, and each one's full
+/// path from the root.
+fn epic_groups(rows: &[AgentRow]) -> (Vec<crate::models::EpicId>, Vec<Vec<crate::models::EpicId>>) {
+    let mut ids = Vec::new();
+    let mut paths = Vec::new();
+    for epic in rows.iter().filter_map(|row| row.epic.as_ref()) {
+        if !ids.contains(&epic.id) {
+            ids.push(epic.id);
+            paths.push(pane_epic_path(epic));
+        }
+    }
+    (ids, paths)
+}
+
+/// Order `rows` as the section draws them: the epic groups in compact tree
+/// order, siblings by epic id, each group's agents by task id, then the
+/// epicless agents by task id (RefreshAgentTreeAgentList's grouped_by_epic).
+pub(crate) fn order_rows(rows: &mut [AgentRow]) {
+    let (ids, full) = epic_groups(rows);
+    let tree = crate::epic_tree::CompactTree::build(&full, |e| e.0);
+    let mut rank = std::collections::HashMap::with_capacity(ids.len());
+    for (place, &group) in tree.order.iter().enumerate() {
+        if let Some(&id) = ids.get(group) {
+            rank.insert(id, place);
+        }
+    }
+    rows.sort_by_key(|row| {
+        let place = row.epic.as_ref().and_then(|e| rank.get(&e.id).copied());
+        (place.is_none(), place, row.id)
+    });
+}
+
 /// One line the section draws (`AgentListGroupsByEpic`). Only an agent line
 /// holds the cursor; the other two are decoration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DrawnLine {
-    /// A header over the group that starts at `row`: at `level` 0 its root
-    /// ancestor, at its ancestors' count its own epic. `level` is its depth.
+    /// A header over the group that starts at `row`: the epic at `level` on
+    /// that row's compact path ([`compact_paths`]), the last its own epic.
+    /// `level` is its depth.
     EpicHeader {
         row: usize,
         level: usize,
@@ -172,15 +221,23 @@ pub(crate) fn hidden_agents_text(hidden: usize) -> String {
 /// The lines `rows` draw as: a header wherever a new epic's group starts, and
 /// the end-of-epics rule where the epicless agents follow an epic group.
 /// `rows` arrive already grouped (`read_agent_list`).
+#[cfg(test)]
 pub(crate) fn drawn_lines(rows: &[AgentRow]) -> Vec<DrawnLine> {
+    drawn_lines_with(rows, compact_paths(rows))
+}
+
+/// `drawn_lines` over paths the caller already has from [`compact_paths`].
+fn drawn_lines_with(
+    rows: &[AgentRow],
+    paths: Vec<Option<Vec<crate::models::EpicId>>>,
+) -> Vec<DrawnLine> {
     let mut lines = Vec::with_capacity(rows.len());
     // The headers the previous row sat under, root first: a new group draws
     // only the part of its path it does not share with them.
     let mut open: Vec<crate::models::EpicId> = Vec::new();
-    for (index, row) in rows.iter().enumerate() {
-        match row.epic.as_ref() {
-            Some(epic) => {
-                let path = pane_epic_path(epic);
+    for (index, path) in paths.into_iter().enumerate() {
+        match path {
+            Some(path) => {
                 if path != open {
                     let shared = open.iter().zip(&path).take_while(|(a, b)| a == b).count();
                     // The group's own header always draws, even when the
@@ -265,7 +322,8 @@ pub fn render_agents(
 
     let visible = usize::from(area.height.saturating_sub(2));
     section.viewport_rows = visible;
-    let mut drawn = drawn_lines(&section.rows);
+    let paths = compact_paths(&section.rows);
+    let mut drawn = drawn_lines_with(&section.rows, paths.clone());
     if section.hidden > 0 {
         drawn.push(DrawnLine::HiddenByFilter);
     }
@@ -324,9 +382,14 @@ pub fn render_agents(
                 DrawnLine::Agent(index) => index,
                 DrawnLine::EpicHeader { row, level } => {
                     let epic = section.rows.get(row)?.epic.as_ref()?;
-                    let (id, title) = match epic.ancestors.get(level) {
-                        Some(ancestor) => (ancestor.id, ancestor.title.as_str()),
-                        None => (epic.id, epic.breadcrumb.last().map_or("", String::as_str)),
+                    let id = *paths.get(row)?.as_ref()?.get(level)?;
+                    let title = if id == epic.id {
+                        epic.breadcrumb.last().map_or("", String::as_str)
+                    } else {
+                        epic.ancestors
+                            .iter()
+                            .find(|a| a.id == id)
+                            .map_or("", |a| a.title.as_str())
                     };
                     return Some(crate::epic_header::epic_header_line(
                         id, title, width, level,
@@ -352,10 +415,9 @@ pub fn render_agents(
             // clips it: attached or detached (AgentRowShowsAgentName).
             let dot = if row.window.is_some() { '●' } else { '○' };
             // An agent steps in with its group's header; the epicless do not.
-            let indent = row
-                .epic
-                .as_ref()
-                .map_or(0, |e| crate::epic_header::epic_indent(e.ancestors.len()));
+            let indent = paths.get(index).and_then(Option::as_ref).map_or(0, |p| {
+                crate::epic_header::epic_indent(p.len().saturating_sub(1))
+            });
             let text = format!(
                 "{:indent$}{dot} {} {}",
                 "",
@@ -531,11 +593,13 @@ mod tests {
         }
     }
 
-    /// Every ancestor between a group and the root draws a header above it,
-    /// each one level deeper, even one no agent sits in directly
-    /// (AgentListGroupsByEpic).
+    /// The compact tree: a header for an epic an agent sits in, and for an
+    /// epic where two branches meet; an ancestor only one branch passes
+    /// through draws none and adds no level (AgentListGroupsByEpic). Here
+    /// 10 owns an agent and 30 sits under it; 40 has a single branch, so 50
+    /// draws flush.
     #[test]
-    fn a_nested_group_draws_a_header_for_each_ancestor_not_yet_drawn() {
+    fn a_nested_group_draws_headers_only_where_branches_meet() {
         let rows = vec![
             nested(1, 10, "Ten", &[]),
             nested(2, 30, "Thirty", &[(10, "Ten")]),
@@ -549,10 +613,44 @@ mod tests {
                 DrawnLine::EpicHeader { row: 1, level: 1 },
                 DrawnLine::Agent(1),
                 DrawnLine::EpicHeader { row: 2, level: 0 },
-                DrawnLine::EpicHeader { row: 2, level: 1 },
                 DrawnLine::Agent(2),
             ]
         );
+    }
+
+    /// The elicitation example, rows as the read orders them: E (a leaf)
+    /// under A, then C and D meeting at B. X sits between B and C with one
+    /// branch, so C is one level under B.
+    #[test]
+    fn headers_meet_at_the_nearest_shared_parent() {
+        let rows = vec![
+            nested(3, 6, "E", &[(1, "A")]),
+            nested(1, 4, "C", &[(1, "A"), (2, "B"), (3, "X")]),
+            nested(2, 5, "D", &[(1, "A"), (2, "B")]),
+        ];
+        assert_eq!(
+            drawn_lines(&rows),
+            vec![
+                DrawnLine::EpicHeader { row: 0, level: 0 },
+                DrawnLine::EpicHeader { row: 0, level: 1 },
+                DrawnLine::Agent(0),
+                DrawnLine::EpicHeader { row: 1, level: 1 },
+                DrawnLine::EpicHeader { row: 1, level: 2 },
+                DrawnLine::Agent(1),
+                DrawnLine::EpicHeader { row: 2, level: 2 },
+                DrawnLine::Agent(2),
+            ]
+        );
+        let mut section = AgentsSection::new();
+        section.set_rows(rows);
+        let out = rendered(&mut section, true, 14);
+        let lines: Vec<&str> = out.lines().collect();
+        let at = |needle: &str| lines[line_of(&out, needle)];
+        assert!(at("#1 A ").starts_with("│#1 A "), "{out}");
+        assert!(at("#2 B ").starts_with("│  #2 B "), "{out}");
+        assert!(at("#4 C ").starts_with("│    #4 C "), "{out}");
+        assert!(!out.contains("#3 X"), "{out}");
+        assert!(at("task 1").starts_with("│    ● #1 task 1"), "{out}");
     }
 
     /// Headers and agent rows of a nested group step in together, two columns
@@ -560,8 +658,12 @@ mod tests {
     #[test]
     fn a_nested_groups_header_and_agents_are_indented() {
         let mut section = AgentsSection::new();
-        section.set_rows(vec![nested(2, 30, "Thirty", &[(10, "Ten")]), row(4, false)]);
-        let out = rendered(&mut section, true, 10);
+        section.set_rows(vec![
+            nested(2, 30, "Thirty", &[(10, "Ten")]),
+            nested(3, 40, "Forty", &[(10, "Ten")]),
+            row(4, false),
+        ]);
+        let out = rendered(&mut section, true, 12);
         let lines: Vec<&str> = out.lines().collect();
         let at = |needle: &str| lines[line_of(&out, needle)];
         assert!(at("#10 Ten").starts_with("│#10 Ten"), "{out}");
@@ -792,6 +894,9 @@ mod tests {
             id: crate::models::EpicId(10),
             title: "Ten".into(),
         }];
+        // A second branch under 10, so 10 draws (two branches meet there).
+        let mut sibling = test_pane_epic(40, &["Forty"]);
+        sibling.ancestors = nested.ancestors.clone();
         let mut section = AgentsSection::new();
         section.set_rows(vec![
             in_epic(1, 5, &["Five"]),
@@ -801,10 +906,15 @@ mod tests {
                 epic: Some(nested),
                 ..row(4, false)
             },
+            AgentRow {
+                epic: Some(sibling),
+                ..row(6, false)
+            },
         ]);
         section.bottom();
-        // Scrolled past the nested group's headers: lines 0..=5 are above.
-        section.offset = 6;
+        section.up();
+        // Scrolled past the nested group's headers: lines 0..=6 are above.
+        section.offset = 7;
         let out = rendered(&mut section, true, 6);
         assert!(out.contains("#10 Ten"), "root header hidden:\n{out}");
         assert!(out.contains("#30 Thirty"), "{out}");

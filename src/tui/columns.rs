@@ -515,30 +515,38 @@ impl<'a> BoardView<'a> {
         tree: &crate::tui::types::EpicTree,
         items: &mut Vec<ColumnItem<'a>>,
     ) {
-        // Groups are already adjacent and in tree order, because
-        // `group_keys` ranked them by their epic's place in the tree before
-        // the card key. `open` is the path of headers the last group sat
-        // under, top first, each with the index of its item when it drew
-        // folded: a group shares the headers of the prefix it has in common
-        // with it, and draws the rest. Under a folded header nothing more is
-        // drawn; the group's cards join that header's hidden count.
-        let mut open: Vec<(EpicId, Option<usize>)> = Vec::new();
+        // Groups are already adjacent, because `group_keys` ranked them by
+        // their epic's place in the tree before the card key. A task naming
+        // an epic the board does not hold has no group to join: it is an
+        // orphan, sorted with them (`FlattenedGroupKeys::key_for`), so it
+        // goes below the separator like one.
+        let mut groups: Vec<(EpicId, &[FlatCard<'a>])> = Vec::new();
+        let mut orphans: Vec<&'a Task> = Vec::new();
         for group in run.chunk_by(|(_, _, _, a), (_, _, _, b)| a.epic_id == b.epic_id) {
-            let t0 = group[0].3;
-            // A task naming an epic the board does not hold has no group to
-            // join: it is an orphan, sorted with them (`FlattenedGroupKeys::
-            // key_for`), so it goes below the separator like one.
-            let Some(eid) = t0.epic_id.filter(|eid| epic_lookup.contains_key(eid)) else {
-                if !open.is_empty() {
-                    items.push(ColumnItem::OrphanSeparator);
-                    open.clear();
-                }
-                items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
-                continue;
-            };
-            // Every epic on a tree path is on the board, so the lookup holds it.
-            let own_path = [eid];
-            let path = tree.place(eid).map_or(&own_path[..], |p| p.path.as_slice());
+            match group[0]
+                .3
+                .epic_id
+                .filter(|eid| epic_lookup.contains_key(eid))
+            {
+                Some(eid) => groups.push((eid, group)),
+                None => orphans.extend(group.iter().map(|&(_, _, _, t)| t)),
+            }
+        }
+        // The section's compact tree (board-layout.allium: `EpicGroupTree`):
+        // headers only where an epic owns a group here or branches meet, in
+        // that tree's order, siblings by their place in the board's tree.
+        let full: Vec<Vec<EpicId>> = groups.iter().map(|&(eid, _)| tree.full_path(eid)).collect();
+        let compact = crate::epic_tree::CompactTree::build(&full, |e| tree.rank(e));
+
+        // `open` is the path of headers the last group sat under, top first,
+        // each with the index of its item when it drew folded: a group shares
+        // the headers of the prefix it has in common with it, and draws the
+        // rest. Under a folded header nothing more is drawn; the group's
+        // cards join that header's hidden count.
+        let mut open: Vec<(EpicId, Option<usize>)> = Vec::new();
+        for &i in &compact.order {
+            let group = groups[i].1;
+            let path = compact.paths[i].as_slice();
             let shared = open
                 .iter()
                 .zip(path)
@@ -575,6 +583,12 @@ impl<'a> BoardView<'a> {
             if folded_at.is_none() {
                 items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
             }
+        }
+        if !orphans.is_empty() {
+            if !groups.is_empty() {
+                items.push(ColumnItem::OrphanSeparator);
+            }
+            items.extend(orphans.into_iter().map(ColumnItem::Task));
         }
     }
 

@@ -1036,6 +1036,51 @@ rule ToggleEpicFold {
         -- ToggleSectionCollapse does for sections.
 }
 
+-- A fold whose epic the compact tree stops drawing moves down to the epics
+-- that now head what it hid (board-layout.allium, "Epic Folding"; task
+-- #99033). `skipped` is a recorded fold whose epic is drawn in no section of
+-- its column. `takers` are the drawn epics nearest below that epic, one per
+-- section where it is skipped and some task below it remains: each is the
+-- epic the compact tree draws in its place there (board-layout.allium:
+-- EpicGroupTree.drawn_parent). Both are judged on the column unfiltered:
+-- every task it holds on the main board, with no search, lens narrowing,
+-- hidden epic, hidden work package or repo filter applied
+-- (board-layout.allium, "Epic Folding"). The trigger fires whenever the
+-- board's tasks or epics change.
+rule FoldMovesToDrawnDescendant {
+    when: UnfilteredColumnLaidOut(skipped, takers)
+
+    requires: folded_epics.is_folded(skipped)
+    requires: takers.count > 0
+
+    ensures:
+        folded_epics.folded.remove(skipped)
+        for taker in takers:
+            folded_epics.folded.add(board_layout/EpicFoldRef(column: skipped.column, epic: taker))
+        settings/SaveSetting(key: "collapsed_epics",
+            value: serialised(moved_down(folded_epics.folded, skipped, takers)))
+
+    @guidance
+        -- The user folded the epic to hide what sits under it. When that
+        -- epic stops drawing a header, the epics now heading those tasks
+        -- inherit the fold, so the tasks stay hidden under a header that
+        -- names them. The old fold is cleared, not kept: when the skipped
+        -- epic draws again later, it draws open, and its descendants keep
+        -- the folds they inherited.
+        --
+        -- It moves only when the epic is drawn in no section of the
+        -- column. While one section still draws it, the fold stays, and in
+        -- the sections that skip it the fold hides nothing.
+        --
+        -- With no taker — no task left below the epic in the column — the
+        -- fold stays recorded and inert, as any fold naming no group is.
+        --
+        -- == Black boxes ==
+        -- moved_down(set, skipped, takers) is `set` without `skipped` and
+        -- with a fold for each taker in skipped's column: the set this rule
+        -- leaves.
+}
+
 -- == Batch Status Movement ==
 
 rule BatchMoveForward {

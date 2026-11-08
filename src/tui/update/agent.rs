@@ -63,6 +63,7 @@ impl App {
         }
 
         self.board.tasks = new_tasks;
+        cmds.extend(self.move_skipped_epic_folds());
         self.sync_board_selection();
         self.dirty = true;
         cmds
@@ -92,12 +93,13 @@ impl App {
     /// Splice a single fresh task into the in-memory list, replacing the row
     /// with a matching id or appending if it's a newly-created task.
     pub(in crate::tui) fn handle_task_updated(&mut self, new_task: Task) -> Vec<Command> {
-        let cmds = self.detect_task_transition_notifications(&new_task);
+        let mut cmds = self.detect_task_transition_notifications(&new_task);
         if let Some(slot) = self.board.tasks.iter_mut().find(|t| t.id == new_task.id) {
             *slot = new_task;
         } else {
             self.board.tasks.push(new_task);
         }
+        cmds.extend(self.move_skipped_epic_folds());
         self.sync_board_selection();
         cmds
     }

@@ -526,6 +526,19 @@ impl EpicTree {
     pub(in crate::tui) fn place(&self, epic: EpicId) -> Option<&TreePlace> {
         self.places.get(&epic)
     }
+
+    /// `epic`'s counted ancestors from the top down, ending with `epic`
+    /// itself: the full path `crate::epic_tree::CompactTree` reduces to the
+    /// headers a section draws. An epic the tree does not hold is its own path.
+    pub(in crate::tui) fn full_path(&self, epic: EpicId) -> Vec<EpicId> {
+        self.place(epic)
+            .map_or_else(|| vec![epic], |p| p.path.clone())
+    }
+
+    /// `epic`'s pre-order place, the sibling order the compact tree sorts by.
+    pub(in crate::tui) fn rank(&self, epic: EpicId) -> usize {
+        self.place(epic).map_or(usize::MAX, |p| p.rank)
+    }
 }
 
 impl FlattenedGroupKeys {

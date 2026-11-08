@@ -125,6 +125,22 @@ impl EpicFoldState {
         }
     }
 
+    /// The folded epics in `status`'s column.
+    pub(in crate::tui) fn folded_in(&self, status: TaskStatus) -> Vec<EpicId> {
+        self.folded
+            .iter()
+            .filter(|&&(s, _)| s == status)
+            .map(|&(_, epic)| epic)
+            .collect()
+    }
+
+    /// Move `from`'s fold onto each of `to` in the same column
+    /// (tasks.allium: `FoldMovesToDrawnDescendant`).
+    pub(in crate::tui) fn move_down(&mut self, status: TaskStatus, from: EpicId, to: &[EpicId]) {
+        self.folded.remove(&(status, from));
+        self.folded.extend(to.iter().map(|&epic| (status, epic)));
+    }
+
     /// Fold every entry into `acc`, for the same reason
     /// [`SectionFoldState::fold_into_fingerprint`] does.
     pub(in crate::tui) fn fold_into_fingerprint(&self, mut acc: u64) -> u64 {

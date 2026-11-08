@@ -14,6 +14,7 @@ pub mod dispatch;
 pub mod editor;
 pub mod embeddings;
 pub(crate) mod epic_header;
+pub(crate) mod epic_tree;
 pub mod feed;
 pub mod git;
 pub mod hooks;
