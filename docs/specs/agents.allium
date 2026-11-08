@@ -275,7 +275,8 @@ rule BackfillCurrentAgents {
         -- agent, points the task's SubagentEntry rows at it, and blanks them
         -- on the Task, so a later run finds nothing to copy and cannot
         -- overwrite a newer agent fact with an older Task one. A task with no
-        -- current agent has its stale facts blanked and its entries dropped
+        -- current agent whose row still holds facts has them blanked and its
+        -- entries dropped
         -- (spacetime/module/src/agent.rs::backfill_agents_into).
         --
         -- The start mode is `dispatch` because the store cannot tell how the

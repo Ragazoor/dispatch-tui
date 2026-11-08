@@ -1621,7 +1621,6 @@ rule ReleaseClaimOfFailedRequest {
         if still_claimed:
             task.status = backlog
             task.sub_status = default_sub_status(backlog)
-            current_agent(task).last_pre_tool_use_at = null
             -- agents.allium: EndAgentWhenLaunchFails ends the task's current
             -- agent as launch_failed in this same write.
             FailedDispatchReleasedClaim(task: task)
@@ -1642,9 +1641,9 @@ rule ReleaseClaimOfFailedRequest {
         -- meanwhile is left alone rather than stomped back to backlog. The
         -- rollup runs in the module so no board has to recalculate an epic
         -- after the module moved its subtask (the backstop and the restart
-        -- sweep have no board report behind them to do it). The
-        -- last_pre_tool_use_at clear unwinds the stamp RequestDispatch wrote
-        -- (the sanctioned exception in agent-health.allium).
+        -- sweep have no board report behind them to do it). The stamp
+        -- RequestDispatch wrote stays on the agent the release ends, as
+        -- history nothing reads.
 }
 
 -- == Session requests: wrap-up and exit-session (M5) ==

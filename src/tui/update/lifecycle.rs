@@ -40,12 +40,15 @@ impl App {
             // next ClassifyAgentActivity tick does not render "stale · 0m"
             // before the first PreToolUse hook fires. SeedActivity bypasses
             // the generic Persist so a later hook write is not clobbered by
-            // an in-memory snapshot.
-            let seed_at = (new_status == TaskStatus::Running).then(|| {
-                let at = chrono::Utc::now();
-                task.last_pre_tool_use_at = Some(at);
-                at
-            });
+            // an in-memory snapshot. Only a task with a worktree has a current
+            // agent to hold the stamp; the store refuses it on a task that
+            // never ran (agent-health.allium: ClassifyAgentActivity).
+            let seed_at =
+                (new_status == TaskStatus::Running && task.worktree.is_some()).then(|| {
+                    let at = chrono::Utc::now();
+                    task.last_pre_tool_use_at = Some(at);
+                    at
+                });
 
             let mut fields = crate::tui::commands::PersistFields::from_task(task);
             if detach.is_some() {

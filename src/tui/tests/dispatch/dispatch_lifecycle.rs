@@ -467,6 +467,53 @@ fn manual_move_review_to_running_seeds_last_pre_tool_use_at() {
     );
 }
 
+// agent-health.allium: ClassifyAgentActivity. A task that never ran has no
+// current agent to hold the stamp, and the store refuses a write that sets a
+// session fact on no agent (agents.allium, A15), so the move does not seed.
+#[test]
+fn manual_move_of_a_never_launched_task_into_running_does_not_seed() {
+    let task = make_task(1, TaskStatus::Backlog);
+    assert!(task.worktree.is_none());
+    let mut app = App::new(vec![task]);
+
+    let cmds = app.update(Message::Task(TaskMessage::Move {
+        id: TaskId(1),
+        direction: MoveDirection::Forward,
+    }));
+
+    let t = app.board.find_task(TaskId(1)).expect("task");
+    assert_eq!(t.status, TaskStatus::Running);
+    assert!(t.last_pre_tool_use_at.is_none());
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Task(TaskCommand::SeedActivity { .. }))),
+        "unexpected SeedActivity in {cmds:?}",
+    );
+}
+
+// A backlog task that kept its worktree still has its current agent, so the
+// move into running seeds it.
+#[test]
+fn manual_move_of_a_backlog_task_with_a_worktree_into_running_seeds() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    let mut app = App::new(vec![task]);
+
+    let cmds = app.update(Message::Task(TaskMessage::Move {
+        id: TaskId(1),
+        direction: MoveDirection::Forward,
+    }));
+
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(TaskCommand::SeedActivity { id: TaskId(1), .. })
+        )),
+        "no SeedActivity in {cmds:?}",
+    );
+}
+
 /// A resume the board refuses never vanishes without a status message.
 fn detached_running_app() -> App {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
