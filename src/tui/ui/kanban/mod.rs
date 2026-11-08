@@ -45,6 +45,8 @@ use popups::{
 #[cfg(test)]
 pub(in crate::tui) use status_bar::batch_action_hints;
 use status_bar::render_status_bar;
+#[cfg(test)]
+pub(in crate::tui) use status_bar::status_line;
 
 /// A column's identity colour — the single source of truth for it.
 ///

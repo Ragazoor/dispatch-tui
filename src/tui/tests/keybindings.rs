@@ -1040,6 +1040,72 @@ fn every_family_namespace_can_be_set_up() {
 }
 
 // ---------------------------------------------------------------------------
+// Mode-bar hints
+// ---------------------------------------------------------------------------
+
+/// Every `[key]` a mode's status-bar hint advertises is a key of that mode's
+/// namespace (`HelpOverlayIsTheTable`: no second list of keys). The mode bars
+/// in `status_bar.rs` are hand-written strings beside the table; this is what
+/// catches one that kept advertising a removed key, as the `[F]lat` bar did for
+/// the normal-mode bars. A catch-all row (`ANY_OTHER_KEY`) accepts any key,
+/// so `[y/n]` passes in a confirm mode.
+#[test]
+fn mode_bar_keys_are_all_in_the_modes_namespace() {
+    fn tokens(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = text;
+        while let Some(open) = rest.find('[') {
+            let Some(close) = rest[open..].find(']') else {
+                break;
+            };
+            let inner = &rest[open + 1..open + close];
+            out.extend(inner.split('/').map(|k| k.trim().to_string()));
+            rest = &rest[open + close + 1..];
+        }
+        out
+    }
+
+    let mut checked = 0;
+    for ns in board_namespaces() {
+        if matches!(
+            ns,
+            KeyNamespace::BoardNormal
+                | KeyNamespace::BoardDetail
+                | KeyNamespace::BoardHelp
+                | KeyNamespace::BoardError
+        ) {
+            continue;
+        }
+        let rows: Vec<&KeyBinding> = KEY_BINDINGS.iter().filter(|b| b.namespace == ns).collect();
+        let probe = KeyBinding {
+            namespace: ns,
+            keys: &[],
+            context: None,
+            action: "",
+            description: "",
+            note: None,
+            records_usage: true,
+        };
+        for app in apps_in(&probe) {
+            let (line, _) = crate::tui::ui::status_line(&app);
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            for key in tokens(&text) {
+                checked += 1;
+                let known = rows
+                    .iter()
+                    .any(|b| b.keys.contains(&key.as_str()) || b.keys.contains(&ANY_OTHER_KEY));
+                assert!(
+                    known,
+                    "the {} bar advertises `{key}`, which is not a key of that namespace: {text:?}",
+                    ns.name()
+                );
+            }
+        }
+    }
+    assert!(checked > 10, "the test read no hints ({checked})");
+}
+
+// ---------------------------------------------------------------------------
 // ModifiedPressMatchesOnlyItsOwnRow
 // ---------------------------------------------------------------------------
 

@@ -46,7 +46,7 @@ The pre-push hook (`.githooks/pre-push`) runs `scripts/gates.sh --fix`: the form
 
 **That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op.
 
-**`./scripts/verify.sh` is what the verify command runs** (still read the command itself from `get_task`). It runs `scripts/gates.sh --check` (the same sequence the pre-push hook runs, with `cargo fmt --check`) and then `cargo test --no-fail-fast`. A wrap-up rebase lands commits on `main` without a push, so the hook never sees them; verify is what holds them to the gates. It fails on a distro toolchain, like the hook.
+**`./scripts/verify.sh` is what the verify command runs** (still read the command itself from `get_task`). It runs `scripts/gates.sh --check` (the same sequence the pre-push hook runs, with `cargo fmt --check`) and then `cargo test --no-fail-fast`. A wrap-up rebase lands commits on `main` without a push, so the hook never sees them; verify is what holds them to the gates. It fails when the host `rustc` is not the version `rust-toolchain.toml` pins (`scripts/check-toolchain.sh`), like the hook. With rustup the pin governs the toolchain, so this cannot drift; a distro `rustc` is accepted only while its version equals the pin.
 
 Cite `path::symbol` (`src/feed/exec.rs::exec_feed_command`) rather than `file:NN` in docs: a symbol is checked against the real file, a line number only for existence. See "`file:NN` vs `path::symbol` citations" in `docs/conventions.md`.
 

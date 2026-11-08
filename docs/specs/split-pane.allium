@@ -308,6 +308,12 @@ rule ToggleSplitMode {
         -- HoldToggleWhileRearrangementInFlight rather than acted on against
         -- that state.
         --
+        -- Both entry branches split or join against the board's OWN pane
+        -- (`$TMUX_PANE`, read once at the entry point), never the session's
+        -- active pane: the operator may have another window or pane focused
+        -- when the request runs. Only when `$TMUX_PANE` is unknown does entry
+        -- fall back to the session's active pane.
+        --
         -- Entry is best-effort: outside tmux it fails with a status hint
         -- ("Split mode requires tmux") and split mode stays inactive.
         -- focused resets to true on both entry and exit.
@@ -1084,6 +1090,13 @@ rule JumpBackToTuiWindow {
         -- The TUI window is renamed to the fixed "TUI" constant at startup so
         -- the binding can target it by name. Both the binding and the rename
         -- are torn down on exit (unbind-key space; rename restored).
+        --
+        -- The rename, outbound and restoring, targets this board's own pane
+        -- (`$TMUX_PANE`), scoped to its session. A lookup by the name "TUI" is
+        -- server-wide and would fail on, or rename, another board's window.
+        -- Without `$TMUX_PANE` there is no safe target, so teardown leaves
+        -- the window's name alone (and startup does the same); the key
+        -- bindings are session-wide and are set and unset either way.
         --
         -- The leading "=" anchors the target to an exact name match: tmux
         -- otherwise resolves a name target by prefix, so a window merely

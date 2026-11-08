@@ -51,7 +51,7 @@ fn hint(text: impl Into<Line<'static>>, color: Color) -> (Line<'static>, Style) 
 /// The composed Normal-mode hint line is the one structurally-heavier flavour;
 /// it lives in its own builder (`normal_status_line`), and everything else is
 /// a fixed per-mode hint.
-fn status_line(app: &App) -> (Line<'static>, Style) {
+pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
     if let Some(msg) = &app.status.message {
         return (Line::from(msg.clone()), Style::default().fg(YELLOW));
     }

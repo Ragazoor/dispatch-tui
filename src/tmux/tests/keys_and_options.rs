@@ -372,6 +372,18 @@ fn a_commented_out_focus_events_line_does_not_count_as_set() {
 }
 
 #[test]
+fn focus_events_line_variants_are_recognised() {
+    assert!(contains_focus_events("set -s focus-events on\n"));
+    assert!(contains_focus_events("set -gs focus-events on\n"));
+    assert!(contains_focus_events("set-option -sg focus-events on\n"));
+    assert!(contains_focus_events("set -g focus-events on # for vim\n"));
+    assert!(!contains_focus_events("set -g focus-events on#x\n"));
+    assert!(!contains_focus_events("set -g focus-events on extra\n"));
+    assert!(!contains_focus_events("set -w focus-events on\n"));
+    assert!(!contains_focus_events("set -g focus-events off # on\n"));
+}
+
+#[test]
 fn focus_events_write_appends_after_a_commented_line_and_keeps_mode() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();

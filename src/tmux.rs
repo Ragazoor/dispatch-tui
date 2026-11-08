@@ -940,12 +940,19 @@ const FOCUS_EVENTS_SETTING: &str = "focus-events on";
 /// Whether this `~/.tmux.conf` content already carries the focus-events line.
 ///
 /// A commented-out line does not count: only an uncommented
-/// `set[-option] -g focus-events on` does.
+/// `set[-option] -g|-s|-gs focus-events on` does, with or without a trailing
+/// ` # comment`.
 fn contains_focus_events(content: &str) -> bool {
     content.lines().any(|line| {
-        let mut words = line.split_whitespace();
+        // A trailing comment (` # ...`) does not change the setting.
+        let code = line.split_once(" #").map_or(line, |(code, _)| code);
+        let mut words = code.split_whitespace();
         matches!(words.next(), Some("set" | "set-option"))
-            && words.next() == Some("-g")
+            && words.next().is_some_and(|flags| {
+                flags.len() > 1
+                    && flags.starts_with('-')
+                    && flags[1..].chars().all(|c| matches!(c, 'g' | 's'))
+            })
             && words.next() == Some("focus-events")
             && words.next() == Some("on")
             && words.next().is_none()

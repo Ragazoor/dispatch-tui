@@ -2,7 +2,9 @@
 # verify.sh — the repo's verify command: every gate the pre-push hook runs,
 # in check mode, then the full test suite.
 #
-# Fails on a distro toolchain (see gates.sh). Never reformats the tree.
+# Fails when the host rustc is not the pinned version (see gates.sh,
+# check-toolchain.sh): rustup keeps them equal, a distro rustc only by luck.
+# Never reformats the tree.
 #
 # Run from the repo root:  ./scripts/verify.sh
 set -e
