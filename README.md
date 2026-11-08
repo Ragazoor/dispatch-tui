@@ -2,6 +2,8 @@
 
 A terminal kanban board that runs Claude Code agents. Each agent gets its own git worktree and tmux window.
 
+Dispatch is a hobby project. I built it to learn how I want to work with agents, and it is still changing as I learn. Take it as one person's experiment, not a finished product.
+
 <!-- The images below come from a made-up demo project. Regenerate them with scripts/readme-demo/run.sh. -->
 ![A tour of the board: into an epic, into a nested epic, back out, and into a work package](docs/images/tour.gif)
 
@@ -9,12 +11,19 @@ A terminal kanban board that runs Claude Code agents. Each agent gets its own gi
 
 ## Why
 
-Most agent managers are session managers: they open a terminal and let you watch. Dispatch is a workflow tool.
+Agents let me take on more work than before. Dispatch is my way of organising that work so I do not get overwhelmed. These are the questions I have been exploring, in the order they came up.
 
-- **Every agent has a task** — a title, a status, a repo, and often a plan
-- **Agents move their own cards** — hooks report start, finish, and blocked; you never set a status by hand
-- **Work is isolated** — one worktree and one branch per agent, so your checkout stays clean
-- **Agents coordinate** — an MCP server lets them create tasks, read the knowledge base, and chain the next one
+**How do I keep a lot of work in my head?** I namespace it. Epics work like folders: they hold tasks and other epics, nested as deep as I need. Work packages gather the epics and tasks behind one goal, wherever they sit on the board. Each agent has a task card, which is moved by the TUI as it starts, finishes or gets stuck.
+
+**How do I work on a project where the code is a black box?** In this project agents write the code, and I mostly do not read it. Instead, all work starts from the specs in [`docs/specs/`](docs/specs/), written in [Allium](https://github.com/juxt/allium). They are the source of truth the agents work from: spec first, then tests, then code. So far that has worked well.
+
+**How do I stay close to code I do care about?** At work the code is not a black box, and I do not want to drift away from it because an agent writes it. The agent-tree pane (`Prefix+e` in an agent's window) shows the files the agent changed. From there one key opens a file's diff and another opens the file in your editor.
+
+**How far can agents orchestrate themselves?** I do some of the orchestration myself from the board. Agents now do a lot more of it. Claude is a first-class user of the board: through MCP tools it can do all of what you can do there and a bit more. Agents can also send each other messages natively. Auto-dispatch helps too: it starts the next task in an epic when the one before it finishes. With only these tools, a lot of patterns are easy to try, for example:
+
+- fan out work to several agents, then fan their results back in
+- let one agent create, dispatch and follow other tasks
+- let agents talk to each other with messages to coordinate
 
 ## A look around
 
@@ -85,6 +94,8 @@ In a hurry? Press `D` instead. It skips the form, dispatches at once, and the ag
 **Columns** — Backlog → Running → Review → Done. `Space` is the one action key: it dispatches a Backlog task, and jumps to or resumes a Running one.
 
 **Worktrees** — each agent works in `<repo>/.worktrees/<id>-<slug>`. Closing the tmux window keeps the worktree, so `Space` resumes where the agent left off.
+
+**Agent tree** — `Prefix+e` in an agent's tmux window shows or hides a pane with the files the agent changed. `Space` opens a file's diff and `v` opens the file in your editor.
 
 **Plans** — a markdown file describing what to build. Attach one and the agent implements it directly instead of designing first.
 
