@@ -267,7 +267,9 @@ use "./core.allium" as core
 --
 --   1. Retrieve list_learnings_for_dispatch_rag(task) — union of user + repo +
 --      epic-scoped learnings whose status = approved. Entries in
---      rejected or archived are excluded.
+--      rejected or archived are excluded, and so is any entry off-topic in
+--      the task's repo (core/Learning.off_topic_in_repo; see
+--      AugmentDispatchPromptWithLearnings) — before ranking and the cap.
 --   2. Render all retrieved learnings — procedural and non-procedural alike —
 --      into a single RAG-ranked "## Validated knowledge for this task" block.
 --      There is no separate procedural-prefix section; kind only affects how a
@@ -331,7 +333,10 @@ use "./core.allium" as core
 --
 -- Rule: a `not_applicable` verdict counts 0. It does not touch upvote_count,
 -- last_upvoted_at, updated_at or status, so it neither ranks an entry down nor
--- keeps a stale one alive. It is stored like any verdict, one per (task,
+-- keeps a stale one alive. It does feed one thing: enough of them from one
+-- repo's tasks, with no helped, mute the entry from dispatch injection in that
+-- repo (core/Learning.off_topic_in_repo, AugmentDispatchPromptWithLearnings).
+-- It is stored like any verdict, one per (task,
 -- learning), so a later helped or wrong from the same task replaces it, and it
 -- replacing a helped or wrong moves the score back by that verdict's weight.
 --
@@ -411,7 +416,7 @@ rule AugmentDispatchPromptWithLearnings {
 
     requires: mode in {standard, resume, quick, epic_planning}
 
-    let relevant = core/Learnings where applies_to_dispatch(task)
+    let relevant = core/Learnings where applies_to_dispatch(task) and not off_topic_in_repo(task.repo_path)
 
     ensures:
         for l in relevant:
@@ -433,7 +438,32 @@ rule AugmentDispatchPromptWithLearnings {
         -- If relevant is empty, nothing is prepended and the rule still fires
         -- (DispatchPromptAugmented with empty learnings is a no-op).
         -- Implemented in render_validated_knowledge_block() /
-        -- build_and_record_injections() (src/dispatch/prompts.rs).
+        -- build_and_record_injections() (src/dispatch/prompts.rs). The
+        -- off-topic mute is applied in list_learnings_for_dispatch_rag
+        -- (src/dispatch/prompts.rs) before rag_rank_learnings.
+        --
+        -- Off-topic mute. relevant also leaves out a learning that is
+        -- off_topic_in_repo(task.repo_path): among the standing
+        -- core/LearningVerdict rows on it from tasks with this task's
+        -- repo_path, at least core/config.off_topic_verdicts_to_mute (3)
+        -- are not_applicable and none is helped. wrong verdicts count
+        -- neither way; a deleted task's verdicts are gone with it.
+        --   - Dispatch injection only. QueryLearningsViaMcp is unchanged, so
+        --     an agent that asks can still find a muted entry.
+        --   - Per repo. An entry muted in repo A still injects in repo B: an
+        --     entry off-topic in one repo may fit another.
+        --   - Before ranking and the cap. A muted entry's slot goes to the
+        --     next-ranked candidate; the block still holds up to the cap.
+        --   - Reversible. One later helped verdict from a task in that repo
+        --     un-mutes it, since the mute needs zero helped.
+        --   - Not a score change. upvote_count, status and updated_at are
+        --     untouched and the entry is not archived.
+        --   - Derived from the verdict rows at each dispatch; nothing new is
+        --     stored.
+        -- Why: the similarity ranking alone injects many entries that do not
+        -- fit, and not_applicable is spread thinly over many entries, so
+        -- pruning cannot fix it. Muting per repo removes the repeat misses
+        -- while an entry stays available everywhere it has fitted.
         --
         -- The block's own header owns the rating instruction: it names the full
         -- call ("rate_learning(learning_id, task_id, verdict) — helped if it
@@ -710,7 +740,9 @@ rule RateLearningViaMcp {
         --            fit this task. Weight 0: on a first verdict the learning
         --            row is not written at all (not even updated_at, so it
         --            cannot keep a stale entry from ArchiveStaleLearning). It
-        --            is a measurement signal, not a ranking input.
+        --            never moves the score, but it feeds the per-repo dispatch
+        --            mute (core/Learning.off_topic_in_repo; see
+        --            AugmentDispatchPromptWithLearnings).
         -- No verdict changes status: there is no human-approval queue. A
         -- downvoted entry stays active but ranks lower and becomes eligible for
         -- ArchiveStaleLearning once its score is non-positive and it goes

@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
 use crate::embeddings::{serialize_embedding, EmbeddingService};
-use crate::models::{LearningKind, LearningScope};
+use crate::models::{LearningKind, LearningScope, LearningVerdict, RetrievalSource};
 use crate::store::{
     CreateLearningRow, CreateTaskRequest, LearningRetrievalStore, LearningStore, Store, TaskCrud,
     TaskRead,
 };
 
-use super::{build_and_record_injections, list_learnings_for_dispatch_rag, DISPATCH_INJECTION_CAP};
+use super::{
+    build_and_record_injections, list_learnings_for_dispatch_rag, DISPATCH_INJECTION_CAP,
+    OFF_TOPIC_VERDICTS_TO_MUTE,
+};
 
 // The test EmbeddingService returns vec![0.1f32; 384]. Use the same dimensionality
 // for stored embeddings so cosine similarity is computed correctly.
@@ -235,4 +238,154 @@ async fn build_and_record_injections_records_all_as_prompt_injection() {
     assert!(rows
         .iter()
         .all(|r| matches!(r.source, crate::models::RetrievalSource::PromptInjection)));
+}
+
+// ---------------------------------------------------------------------------
+// learnings.allium: an entry off-topic in a repo is left out of that repo's
+// dispatch injection (and only that repo's, and only injection).
+// ---------------------------------------------------------------------------
+
+async fn task_in(db: &Arc<Store>, repo: &str) -> crate::models::Task {
+    let id = db
+        .create_task(CreateTaskRequest::fixture("new task", repo))
+        .await
+        .unwrap();
+    db.get_task(id).await.unwrap()
+}
+
+async fn user_learning(db: &Arc<Store>, summary: &str) -> crate::models::LearningId {
+    db.create_learning(CreateLearningRow {
+        kind: LearningKind::Convention,
+        summary,
+        detail: None,
+        scope: LearningScope::User,
+        scope_ref: None,
+        tags: &[],
+        source_task_id: None,
+        embedding: Some(&fake_emb_bytes()),
+    })
+    .await
+    .unwrap()
+}
+
+/// `n` finished tasks in `repo`, each shown `learning` and rating it `verdict`.
+async fn rated_in(
+    db: &Arc<Store>,
+    repo: &str,
+    learning: crate::models::LearningId,
+    verdict: LearningVerdict,
+    n: usize,
+) -> Vec<crate::models::TaskId> {
+    let mut ids = Vec::new();
+    for _ in 0..n {
+        let id = db
+            .create_task(CreateTaskRequest {
+                status: crate::models::TaskStatus::Done,
+                ..CreateTaskRequest::fixture("earlier task", repo)
+            })
+            .await
+            .unwrap();
+        db.record_retrieval(id, learning, RetrievalSource::PromptInjection)
+            .await
+            .unwrap();
+        db.apply_verdicts_tx(id, &[(learning, verdict)])
+            .await
+            .unwrap();
+        ids.push(id);
+    }
+    ids
+}
+
+/// The learnings a new task in `repo` would be shown.
+async fn injected_in(db: &Arc<Store>, repo: &str) -> Vec<crate::models::LearningId> {
+    let task = task_in(db, repo).await;
+    let emb_svc = EmbeddingService::new_test();
+    list_learnings_for_dispatch_rag(&**db, &task, &emb_svc, 0.0)
+        .await
+        .into_iter()
+        .map(|l| l.id)
+        .collect()
+}
+
+const MUTE: usize = OFF_TOPIC_VERDICTS_TO_MUTE;
+
+#[tokio::test]
+async fn an_off_topic_entry_is_left_out_and_its_slot_goes_to_the_next_candidate() {
+    let db = seed_db().await;
+    let muted = user_learning(&db, "off topic here").await;
+    for i in 0..DISPATCH_INJECTION_CAP {
+        user_learning(&db, &format!("candidate {i}")).await;
+    }
+    rated_in(&db, "/repo/a", muted, LearningVerdict::NotApplicable, MUTE).await;
+    let ids = injected_in(&db, "/repo/a").await;
+    assert_eq!(ids.len(), DISPATCH_INJECTION_CAP);
+    assert!(!ids.contains(&muted));
+}
+
+#[tokio::test]
+async fn one_verdict_short_of_the_threshold_still_injects() {
+    let db = seed_db().await;
+    let entry = user_learning(&db, "nearly muted").await;
+    rated_in(
+        &db,
+        "/repo/a",
+        entry,
+        LearningVerdict::NotApplicable,
+        MUTE - 1,
+    )
+    .await;
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
+}
+
+#[tokio::test]
+async fn the_mute_is_per_repo() {
+    let db = seed_db().await;
+    let entry = user_learning(&db, "fits b, not a").await;
+    rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable, MUTE).await;
+    assert!(injected_in(&db, "/repo/b").await.contains(&entry));
+}
+
+#[tokio::test]
+async fn one_helped_in_the_repo_keeps_the_entry_injecting() {
+    let db = seed_db().await;
+    let entry = user_learning(&db, "sometimes fits").await;
+    rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable, MUTE).await;
+    rated_in(&db, "/repo/a", entry, LearningVerdict::Helped, 1).await;
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
+}
+
+#[tokio::test]
+async fn wrong_verdicts_do_not_count_toward_the_mute() {
+    let db = seed_db().await;
+    let entry = user_learning(&db, "misleading, not off-topic").await;
+    rated_in(
+        &db,
+        "/repo/a",
+        entry,
+        LearningVerdict::NotApplicable,
+        MUTE - 1,
+    )
+    .await;
+    rated_in(&db, "/repo/a", entry, LearningVerdict::Wrong, 1).await;
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
+}
+
+#[tokio::test]
+async fn the_mute_changes_neither_the_score_nor_the_status() {
+    let db = seed_db().await;
+    let muted = user_learning(&db, "off topic here").await;
+    rated_in(&db, "/repo/a", muted, LearningVerdict::NotApplicable, MUTE).await;
+    let _ = injected_in(&db, "/repo/a").await;
+    let row = db.get_learning(muted).await.unwrap().unwrap();
+    assert_eq!(row.upvote_count, 0);
+    assert_eq!(row.status, crate::models::LearningStatus::Approved);
+}
+
+#[tokio::test]
+async fn a_deleted_tasks_verdicts_stop_counting() {
+    let db = seed_db().await;
+    let entry = user_learning(&db, "muted until a task goes").await;
+    let tasks = rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable, MUTE).await;
+    db.delete_task(tasks[0]).await.unwrap();
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
 }

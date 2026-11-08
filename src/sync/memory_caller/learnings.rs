@@ -32,7 +32,7 @@ impl MemoryReducerCaller {
             .map(|r| r.id)
             .collect();
         self.delete_learning_retrieval_rows(tables, retrievals);
-        tables.learning_verdicts.retain(|_, v| v.task_id != task_id);
+        self.delete_learning_verdict_rows(tables, |v| v.task_id == task_id);
     }
 
     /// Collect every learning matching `pred`, apply `f`, and write each
@@ -77,6 +77,25 @@ impl MemoryReducerCaller {
             if tables.learning_retrievals.remove(&id).is_some() {
                 self.rows.remove_learning_retrieval(id);
             }
+        }
+    }
+
+    /// Delete every `learning_verdicts` row matching `pred`, and tell the
+    /// board, as the module's cascades do.
+    pub(super) fn delete_learning_verdict_rows(
+        &self,
+        tables: &mut Tables,
+        pred: impl Fn(&module::LearningVerdict) -> bool,
+    ) {
+        let ids: Vec<i64> = tables
+            .learning_verdicts
+            .values()
+            .filter(|v| pred(v))
+            .map(|v| v.id)
+            .collect();
+        for id in ids {
+            tables.learning_verdicts.remove(&id);
+            self.rows.remove_learning_verdict(id);
         }
     }
 
@@ -149,7 +168,7 @@ impl MemoryReducerCaller {
             .map(|r| r.id)
             .collect();
         self.delete_learning_retrieval_rows(tables, retrievals);
-        tables.learning_verdicts.retain(|_, v| v.learning_id != id);
+        self.delete_learning_verdict_rows(tables, |v| v.learning_id == id);
         true
     }
 
@@ -258,6 +277,7 @@ impl MemoryReducerCaller {
         let mut learnings = tables.learnings.clone();
         let mut next_id = tables.next_learning_verdict_id;
         let mut touched = Vec::new();
+        let mut changed = Vec::new();
         for (learning_id, verdict) in &verdicts {
             let learning_id = learning_id.0;
             let Some(row) = learnings.get(&learning_id).cloned() else {
@@ -275,6 +295,7 @@ impl MemoryReducerCaller {
             .map_err(anyhow::Error::msg)?;
             match previous {
                 Some(s) => {
+                    changed.push(s.id);
                     standing.insert(
                         s.id,
                         module::LearningVerdict {
@@ -286,6 +307,7 @@ impl MemoryReducerCaller {
                 None => {
                     let id = next_id;
                     next_id += 1;
+                    changed.push(id);
                     standing.insert(
                         id,
                         module::LearningVerdict {
@@ -315,6 +337,11 @@ impl MemoryReducerCaller {
                 },
             );
             touched.push(learning_id);
+        }
+        for id in &changed {
+            if let Some(row) = standing.get(id) {
+                self.rows.upsert_learning_verdict(&row.clone().into());
+            }
         }
         tables.learning_verdicts = standing;
         tables.next_learning_verdict_id = next_id;

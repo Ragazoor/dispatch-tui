@@ -12,9 +12,10 @@ use crate::spacetime::bindings::{
     RepoPathsTableAccess as _, UnseenItemsTableAccess as _, UserProfilesTableAccess as _,
     VisibleAgentsTableAccess as _, VisibleDispatchRequestsTableAccess as _,
     VisibleFeedRequestsTableAccess as _, VisibleLearningRetrievalsTableAccess as _,
-    VisibleLearningsTableAccess as _, VisibleMembershipsTableAccess as _,
-    VisiblePollOwnersTableAccess as _, VisibleSessionRequestsTableAccess as _,
-    VisibleWorkPackageLinksTableAccess as _, VisibleWorkspacesTableAccess as _,
+    VisibleLearningVerdictsTableAccess as _, VisibleLearningsTableAccess as _,
+    VisibleMembershipsTableAccess as _, VisiblePollOwnersTableAccess as _,
+    VisibleSessionRequestsTableAccess as _, VisibleWorkPackageLinksTableAccess as _,
+    VisibleWorkspacesTableAccess as _,
 };
 
 // One table's three callbacks, so "every table gets all three" is
@@ -180,6 +181,13 @@ impl SpacetimeSdkConnector {
             visible_learning_retrievals,
             upsert_learning_retrieval,
             retire_learning_retrieval
+        );
+        wire_view!(
+            self,
+            db,
+            visible_learning_verdicts,
+            upsert_learning_verdict,
+            retire_learning_verdict
         );
         wire_view!(
             self,

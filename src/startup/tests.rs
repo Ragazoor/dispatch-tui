@@ -267,8 +267,9 @@ fn retire_board_window_kills_the_board_window_and_nothing_else() {
     let mock = MockProcessRunner::new(vec![
         // list-panes -s: the session holds the board plus two agents.
         MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n1 %1 task-42\n1 %2 task-43\n"),
-        MockProcessRunner::ok_with_stdout(b"4242\n"), // display-message: pane_pid
-        MockProcessRunner::ok(),                      // kill-window
+        MockProcessRunner::ok_with_stdout(b"%0\t\t\n"), // list-panes: the board pane alone, nothing pinned
+        MockProcessRunner::ok_with_stdout(b"4242\n"),   // display-message: pane_pid
+        MockProcessRunner::ok(),                        // kill-window
         // pane_exists: %0 is gone the moment it is asked about.
         MockProcessRunner::ok_with_stdout(b"%1\n%2\n"),
         MockProcessRunner::ok(), // has-session
@@ -331,12 +332,13 @@ fn retire_board_window_waits_for_the_retired_pane_to_go() {
     // was holding the port, moments after they had closed it.
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n1 %1 task-42\n"), // list-panes -s
-        MockProcessRunner::ok_with_stdout(b"4242\n"),                   // pane_pid
-        MockProcessRunner::ok(),                                        // kill-window
-        MockProcessRunner::ok_with_stdout(b"%0\n%1\n"),                 // pane_exists: still there
-        MockProcessRunner::ok_with_stdout(b"%1\n"),                     // pane_exists: gone
-        MockProcessRunner::ok(),                                        // has-session
-        MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n"),           // read back
+        MockProcessRunner::ok_with_stdout(b"%0\t\t\n"), // list-panes: the board pane alone, nothing pinned
+        MockProcessRunner::ok_with_stdout(b"4242\n"),   // pane_pid
+        MockProcessRunner::ok(),                        // kill-window
+        MockProcessRunner::ok_with_stdout(b"%0\n%1\n"), // pane_exists: still there
+        MockProcessRunner::ok_with_stdout(b"%1\n"),     // pane_exists: gone
+        MockProcessRunner::ok(),                        // has-session
+        MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n"), // read back
     ])
     .with_queued_window_lookup();
 
@@ -361,13 +363,14 @@ fn retire_board_window_waits_for_the_board_process_not_just_the_pane() {
     // managed store. `RetiredMeansGoneNotSignalled`.
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n1 %1 task-42\n"), // list-panes -s
-        MockProcessRunner::ok_with_stdout(b"4242\n"),                   // pane_pid
-        MockProcessRunner::ok(),                                        // kill-window
-        MockProcessRunner::ok_with_stdout(b"%1\n"),                     // pane_exists: gone
-        MockProcessRunner::ok_with_stdout(b"%1\n"),                     // pane_exists: gone
-        MockProcessRunner::ok_with_stdout(b"%1\n"),                     // pane_exists: gone
-        MockProcessRunner::ok(),                                        // has-session
-        MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n"),           // read back
+        MockProcessRunner::ok_with_stdout(b"%0\t\t\n"), // list-panes: the board pane alone, nothing pinned
+        MockProcessRunner::ok_with_stdout(b"4242\n"),   // pane_pid
+        MockProcessRunner::ok(),                        // kill-window
+        MockProcessRunner::ok_with_stdout(b"%1\n"),     // pane_exists: gone
+        MockProcessRunner::ok_with_stdout(b"%1\n"),     // pane_exists: gone
+        MockProcessRunner::ok_with_stdout(b"%1\n"),     // pane_exists: gone
+        MockProcessRunner::ok(),                        // has-session
+        MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n"), // read back
     ])
     .with_queued_window_lookup();
     let polls = std::cell::Cell::new(0);
@@ -406,10 +409,11 @@ fn pane_process_alive_sees_this_process_and_not_a_bogus_session() {
 fn retire_board_window_reports_the_session_gone_when_the_board_was_its_last_window() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"), // list-panes -s
-        MockProcessRunner::ok_with_stdout(b"4242\n"),     // pane_pid
-        MockProcessRunner::ok(),                          // kill-window
-        MockProcessRunner::ok_with_stdout(b""),           // pane_exists: gone
-        MockProcessRunner::fail("no such session"),       // has-session
+        MockProcessRunner::ok_with_stdout(b"%0\t\t\n"), // list-panes: the board pane alone, nothing pinned
+        MockProcessRunner::ok_with_stdout(b"4242\n"),   // pane_pid
+        MockProcessRunner::ok(),                        // kill-window
+        MockProcessRunner::ok_with_stdout(b""),         // pane_exists: gone
+        MockProcessRunner::fail("no such session"),     // has-session
     ])
     .with_queued_window_lookup();
 
@@ -424,10 +428,11 @@ fn retire_board_window_reports_the_session_gone_when_the_board_was_its_last_wind
 fn retire_board_window_reports_a_window_that_would_not_close() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"), // list-panes -s
-        MockProcessRunner::ok_with_stdout(b"4242\n"),     // pane_pid
-        MockProcessRunner::fail("can't kill window"),     // kill-window
-        MockProcessRunner::ok_with_stdout(b""),           // pane_exists: gone
-        MockProcessRunner::ok(),                          // has-session
+        MockProcessRunner::ok_with_stdout(b"%0\t\t\n"), // list-panes: the board pane alone, nothing pinned
+        MockProcessRunner::ok_with_stdout(b"4242\n"),   // pane_pid
+        MockProcessRunner::fail("can't kill window"),   // kill-window
+        MockProcessRunner::ok_with_stdout(b""),         // pane_exists: gone
+        MockProcessRunner::ok(),                        // has-session
         MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"), // list-panes -s, read back
     ])
     .with_queued_window_lookup();
@@ -867,4 +872,106 @@ fn host_identity_unavailable_is_worded_distinctly_and_names_the_remedy() {
     ] {
         assert_ne!(msg, other.message());
     }
+}
+
+// -- A pinned agent survives the retire (RetiringReturnsPinnedAgentsFirst) --
+
+fn calls_named(mock: &MockProcessRunner, verb: &str) -> Vec<Vec<String>> {
+    mock.recorded_calls()
+        .into_iter()
+        .filter(|(_, args)| args.first().is_some_and(|a| a == verb))
+        .map(|(_, args)| args)
+        .collect()
+}
+
+fn position_of(mock: &MockProcessRunner, verb: &str) -> Option<usize> {
+    mock.recorded_calls()
+        .iter()
+        .position(|(_, args)| args.first().is_some_and(|a| a == verb))
+}
+
+#[test]
+fn retire_breaks_a_pinned_agent_out_before_it_kills_the_window() {
+    let mock = MockProcessRunner::new(vec![
+        // list-panes -s: the agent pane is the active one in the board window.
+        MockProcessRunner::ok_with_stdout(b"1 %1 TUI\n"),
+        // list-panes of that window: the board's %0 and the pinned %1.
+        MockProcessRunner::ok_with_stdout(b"%0\t\t/repo\n%1\ttask-42\t/wt/42\n"),
+        MockProcessRunner::ok(), // has-session (refuse_duplicate)
+        MockProcessRunner::ok(), // break-pane
+        MockProcessRunner::ok(), // set-option @dispatch_dir
+        MockProcessRunner::ok_with_stdout(b"4242\n"), // pane_pid of the board's pane
+        MockProcessRunner::ok(), // kill-window
+        MockProcessRunner::ok_with_stdout(b""), // pane_exists: gone
+        MockProcessRunner::ok(), // has-session
+        MockProcessRunner::ok_with_stdout(b"1 %5 task-42\n"), // read back
+    ])
+    .with_queued_window_lookup();
+
+    let outcome = retire_board_window_with("dispatch", &mock, &|_| false);
+
+    assert_eq!(outcome, RetireOutcome::SessionReady);
+    let breaks = calls_named(&mock, "break-pane");
+    assert_eq!(breaks.len(), 1, "the pinned agent is broken out");
+    assert!(
+        breaks[0].contains(&"%1".to_string()) && breaks[0].contains(&"task-42".to_string()),
+        "to its home window: {:?}",
+        breaks[0]
+    );
+    assert!(
+        position_of(&mock, "break-pane") < position_of(&mock, "kill-window"),
+        "the break-out comes before the kill, or the kill takes the agent"
+    );
+    let kills = calls_named(&mock, "kill-window");
+    assert_eq!(
+        kills[0],
+        vec!["kill-window", "-t", "%0"],
+        "the kill targets the board's own pane, not the agent's"
+    );
+}
+
+#[test]
+fn retire_leaves_the_window_alone_when_a_pinned_agent_cannot_be_returned() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"),
+        MockProcessRunner::ok_with_stdout(b"%0\t\t\n%1\ttask-42\t\n"),
+        MockProcessRunner::fail("window already exists"), // refuse_duplicate / break-pane
+        MockProcessRunner::fail("window already exists"),
+        MockProcessRunner::ok_with_stdout(b""),
+        MockProcessRunner::ok_with_stdout(b""),
+        MockProcessRunner::ok_with_stdout(b""),
+    ])
+    .with_queued_window_lookup();
+
+    let outcome = retire_board_window_with("dispatch", &mock, &|_| false);
+
+    assert_eq!(outcome, RetireOutcome::BoardWindowSurvived);
+    assert!(
+        calls_named(&mock, "kill-window").is_empty(),
+        "a window holding an agent that could not be returned is not closed"
+    );
+}
+
+#[test]
+fn retire_renames_a_window_the_board_has_already_left() {
+    // A SIGTERM ended the board's pane; the window survives holding the agent.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"1 %1 TUI\n"),
+        MockProcessRunner::ok_with_stdout(b"%1\ttask-42\t/wt/42\n"),
+        MockProcessRunner::ok(), // rename-window's has-window lookup
+        MockProcessRunner::ok(), // rename-window
+        MockProcessRunner::ok(), // set @dispatch_dir
+        MockProcessRunner::ok(), // has-session
+        MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n"), // read back
+    ])
+    .with_queued_window_lookup();
+
+    let outcome = retire_board_window_with("dispatch", &mock, &|_| false);
+
+    assert_eq!(outcome, RetireOutcome::SessionReady);
+    assert!(
+        calls_named(&mock, "kill-window").is_empty(),
+        "the window holds only the agent: nothing to close"
+    );
+    assert_eq!(calls_named(&mock, "rename-window").len(), 1);
 }

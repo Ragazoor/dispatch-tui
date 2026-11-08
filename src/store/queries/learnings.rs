@@ -142,6 +142,14 @@ impl super::super::LearningRetrievalStore for Store {
         Ok(self.rows.retrievals_for_task(task_id))
     }
 
+    async fn learnings_off_topic_in_repo(
+        &self,
+        repo_path: &str,
+        threshold: usize,
+    ) -> Result<std::collections::BTreeSet<LearningId>> {
+        Ok(self.rows.learnings_off_topic_in_repo(repo_path, threshold))
+    }
+
     async fn apply_verdicts_tx(
         &self,
         task_id: TaskId,

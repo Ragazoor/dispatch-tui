@@ -503,8 +503,27 @@ rule ProvisionDispatch {
         -- reads the cap, and decides once per board run, not per launch. The
         -- wrapped command probes again in the pane and runs the bare command
         -- when the probe fails, as an if/else so a failing agent is never
-        -- run twice. A launch past its dispatch deadline skips the scope and
-        -- the sccache start, and the sccache start is bounded at 5 seconds.
+        -- run twice.
+        --
+        -- Both steps run inside the dispatch deadline (ProvisioningStopsAtTheDeadline):
+        -- a launch past it skips both. The scope probe is also skipped, and
+        -- not cached, when less than its worst case remains (30 seconds:
+        -- `PREPARE_SCOPE_WORST_CASE`, the probe, the cap read and the cap
+        -- write together), so a launch short of time runs unwrapped now and
+        -- may probe on a later launch. An answer already decided costs
+        -- nothing and is used whatever time is left. The sccache start is
+        -- bounded by the time left and by 5 seconds, whichever is shorter.
+        --
+        -- == The child environment (non_interactive_env) ==
+        -- Every bounded subprocess (`run_bounded`: git, gh, tmux) runs in its
+        -- own session with no controlling terminal, and gets
+        -- `GIT_TERMINAL_PROMPT=0` so git never prompts. `SSH_ASKPASS_REQUIRE=never`
+        -- is added unless the user already set a non-blank value, because
+        -- without a tty ssh would otherwise open a GUI askpass dialog when a
+        -- display is set; `force` with a keyring askpass is how some users
+        -- unlock keys. A `GIT_SSH_COMMAND` the user set stays, with
+        -- `-o BatchMode=yes` appended (git ranks it above `core.sshCommand`,
+        -- so one is never invented). The user's own ssh config is not touched.
 
     @guarantee SccacheServerStartsOutsideTheCap
         -- When RUSTC_WRAPPER=sccache is set, dispatch starts the sccache
@@ -1247,6 +1266,15 @@ rule ResumeTask {
         -- another resume of such a task with a status message, and drops the
         -- task from the set when the launch reports success (Resumed) or
         -- failure (ResumeFailed).
+        --
+        -- A resume that fails after it created the task's tmux window (setting
+        -- the dispatch dir, ensuring the split hook, writing the prompt file,
+        -- sending the launch keys) kills that half-created window before it
+        -- reports ResumeFailed, as a failed fresh dispatch does. Left alone,
+        -- the bare shell in `task-N` would be found by the next resume's
+        -- has_window check, which would "reattach", mark the task Running with
+        -- no agent in it, and drop the message. If the kill itself fails, that
+        -- is logged and the original failure is the one reported.
         --
         -- A message is delivered as the FIRST INPUT of the resumed session:
         -- it is the positional prompt of the same `claude ... --continue`

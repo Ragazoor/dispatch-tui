@@ -31,6 +31,7 @@ async fn dispatch_split_enter_with_task_joins_that_task_window() {
             MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
             MockProcessRunner::ok_with_stdout(b"%1 \n"), // companion_pane_ids: none
             MockProcessRunner::ok(),                    // join-pane
+            MockProcessRunner::ok(),                    // set-option -p: home window
             MockProcessRunner::ok_with_stdout(b"board\n"), // leftover check: task-1 is gone
         ])
         .with_windows(&["task-1"]),
@@ -60,6 +61,14 @@ async fn dispatch_split_enter_with_task_joins_that_task_window() {
             .iter()
             .any(|c| c.contains("join-pane")),
         "the task's window is joined in, not split afresh: {:?}",
+        h.mock.flattened_calls()
+    );
+    assert!(
+        h.mock
+            .flattened_calls()
+            .iter()
+            .any(|c| c.contains("set-option -p") && c.contains("@dispatch_home_window task-1")),
+        "the pinned pane is tagged with its home window: {:?}",
         h.mock.flattened_calls()
     );
 }
@@ -130,6 +139,7 @@ async fn dispatch_split_swap_hands_the_pane_to_the_incoming_task() {
     let mut h = harness(
         MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // swap-pane
+            MockProcessRunner::ok(), // set-option -p: home window
             MockProcessRunner::ok(), // kill-window (no outgoing task)
         ])
         .with_windows(&["task-1"]),
@@ -161,6 +171,14 @@ async fn dispatch_split_swap_hands_the_pane_to_the_incoming_task() {
             .iter()
             .any(|c| c.contains("swap-pane")),
         "got: {:?}",
+        h.mock.flattened_calls()
+    );
+    assert!(
+        h.mock
+            .flattened_calls()
+            .iter()
+            .any(|c| c.contains("set-option -p") && c.contains("@dispatch_home_window task-1")),
+        "the swapped-in pane is tagged with its home window: {:?}",
         h.mock.flattened_calls()
     );
 }

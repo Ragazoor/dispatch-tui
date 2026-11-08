@@ -695,6 +695,7 @@ const DECODES_EVERY_COLUMN: &[(&str, &str)] = &[
     ("feed_request", "decode::feed_request reads every column"),
     ("workspace", "stored raw: no decoder"),
     ("membership", "stored raw: no decoder"),
+    ("learning_verdict", "stored raw: no decoder"),
     ("setting", "stored raw: no decoder"),
 ];
 

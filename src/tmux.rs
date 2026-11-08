@@ -940,12 +940,19 @@ const FOCUS_EVENTS_SETTING: &str = "focus-events on";
 /// Whether this `~/.tmux.conf` content already carries the focus-events line.
 ///
 /// A commented-out line does not count: only an uncommented
-/// `set[-option] -g focus-events on` does.
+/// `set[-option] -g|-s|-gs focus-events on` does, with or without a trailing
+/// ` # comment`.
 fn contains_focus_events(content: &str) -> bool {
     content.lines().any(|line| {
-        let mut words = line.split_whitespace();
+        // A trailing comment (` # ...`) does not change the setting.
+        let code = line.split_once(" #").map_or(line, |(code, _)| code);
+        let mut words = code.split_whitespace();
         matches!(words.next(), Some("set" | "set-option"))
-            && words.next() == Some("-g")
+            && words.next().is_some_and(|flags| {
+                flags.len() > 1
+                    && flags.starts_with('-')
+                    && flags[1..].chars().all(|c| matches!(c, 'g' | 's'))
+            })
             && words.next() == Some("focus-events")
             && words.next() == Some("on")
             && words.next().is_none()
@@ -1340,6 +1347,62 @@ pub fn set_pane_option(
         "set-option",
     )?;
     Ok(())
+}
+
+/// Pane option naming the window a pinned agent's pane was pinned from.
+/// Written at pin and swap, read by the retire of the board's window
+/// (`RetiringReturnsPinnedAgentsFirst` in docs/specs/startup.allium).
+pub const HOME_WINDOW_OPTION: &str = "@dispatch_home_window";
+
+/// Tag `pane_id` with the window it is pinned from. See [`HOME_WINDOW_OPTION`].
+pub fn set_pane_home(
+    pane_id: &PaneId,
+    window: &TmuxWindow,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    set_pane_option(pane_id, HOME_WINDOW_OPTION, window.as_str(), runner)
+}
+
+/// A pane's home tag: the window it was pinned from, and the directory the
+/// pane started in (the agent's worktree), which is written back as that
+/// window's `@dispatch_dir`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneHome {
+    pub window: TmuxWindow,
+    pub dir: Option<String>,
+}
+
+/// Every pane of the window holding `pane`, with its home tag if it has one.
+pub fn panes_with_home_in_window_of(
+    pane: &PaneId,
+    runner: &dyn ProcessRunner,
+) -> Result<Vec<(PaneId, Option<PaneHome>)>> {
+    let format = format!("#{{pane_id}}\t#{{{HOME_WINDOW_OPTION}}}\t#{{pane_start_path}}");
+    let listing = run_checked_stdout(
+        runner,
+        &["list-panes", "-t", pane.as_str(), "-F", &format],
+        "list-panes",
+    )?;
+    listing
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let id = pane_id_from_output(parts.next().unwrap_or("").to_string(), "list-panes")?;
+            let home = parts
+                .next()
+                .and_then(TmuxWindow::parse)
+                .map(|window| PaneHome {
+                    window,
+                    dir: parts
+                        .next()
+                        .map(str::trim_end)
+                        .filter(|d| !d.is_empty())
+                        .map(str::to_owned),
+                });
+            Ok((id, home))
+        })
+        .collect()
 }
 
 /// Move a tmux window into the current window as a right pane (40% width).

@@ -308,6 +308,12 @@ rule ToggleSplitMode {
         -- HoldToggleWhileRearrangementInFlight rather than acted on against
         -- that state.
         --
+        -- Both entry branches split or join against the board's OWN pane
+        -- (`$TMUX_PANE`, read once at the entry point), never the session's
+        -- active pane: the operator may have another window or pane focused
+        -- when the request runs. Only when `$TMUX_PANE` is unknown does entry
+        -- fall back to the session's active pane.
+        --
         -- Entry is best-effort: outside tmux it fails with a status hint
         -- ("Split mode requires tmux") and split mode stays inactive.
         -- focused resets to true on both entry and exit.
@@ -1085,6 +1091,13 @@ rule JumpBackToTuiWindow {
         -- the binding can target it by name. Both the binding and the rename
         -- are torn down on exit (unbind-key space; rename restored).
         --
+        -- The rename, outbound and restoring, targets this board's own pane
+        -- (`$TMUX_PANE`), scoped to its session. A lookup by the name "TUI" is
+        -- server-wide and would fail on, or rename, another board's window.
+        -- Without `$TMUX_PANE` there is no safe target, so teardown leaves
+        -- the window's name alone (and startup does the same); the key
+        -- bindings are session-wide and are set and unset either way.
+        --
         -- The leading "=" anchors the target to an exact name match: tmux
         -- otherwise resolves a name target by prefix, so a window merely
         -- *starting* with "TUI" could absorb the jump (see the
@@ -1181,6 +1194,27 @@ rule PinTaskInSplitPane {
         -- Tagged, not killed: killing the window would take the user's pane
         -- and its scrollback with it to settle a naming question, the same
         -- trade RefuseExitSplitModeOntoLiveWindow rejects.
+        --
+        -- == Home tag on the pinned pane ==
+        -- The pinned pane itself is tagged with the window it was pinned from
+        -- and that window's worktree (the pane options @dispatch_home_window
+        -- and @dispatch_home_dir), written by the pin and again by every swap
+        -- for the pane swapped in. Pane options travel with the pane. The tag
+        -- is what lets a process that is NOT this board return the pane home:
+        -- a pin whose window held only the agent leaves that name in no tmux
+        -- window at all, and nothing but the pane remembers it.
+        --
+        -- The one reader is startup.allium's `RetireTheBoardWindow`
+        -- (`RetiringReturnsPinnedAgentsFirst`). A board that is SIGNALLED
+        -- never runs the restore itself: kill-window removes the joined pane
+        -- with the window before the board's handler could issue a break-pane,
+        -- and a SIGTERM that ends only the board's pane leaves the window
+        -- holding just the agent. So a signalled exit
+        -- (startup/BoardExited(cause: signalled)) issues no split restore, and
+        -- the later launch's retire is what keeps the agent alive. A confirmed
+        -- quit is unchanged: QuitExitsSplitMode restores and awaits it.
+        -- Best-effort like the other tags: an untagged pane is simply not
+        -- returned, as before.
 }
 
 rule SwapSplitPane {

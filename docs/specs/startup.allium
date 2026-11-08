@@ -313,6 +313,24 @@ contract SessionLauncher {
         -- own rule that a session with no windows ceases to exist. A restart
         -- that took the agents down with the board would make restarting cost
         -- more than the stale board it fixes.
+        --
+        -- The one exception is an agent pinned into the board's window
+        -- (`RetiringReturnsPinnedAgentsFirst`): its pane lives inside that
+        -- window, so closing the window would end it, and it is returned to a
+        -- window of its own first.
+
+    @invariant RetiringReturnsPinnedAgentsFirst
+        -- Before retire_board_window closes the board's window, every pane in
+        -- it that carries split-pane.allium's home tag is returned to its home
+        -- window (rejoined where that window still exists, broken out into a
+        -- new window of that name where it does not). If the board's window
+        -- holds nothing else, because the board's own pane is already gone,
+        -- the window is renamed to the home name instead of being closed. A
+        -- pane that cannot be returned is NOT closed over: the window is left
+        -- alone and the outcome is board_window_survived, which aborts the
+        -- launch (AbortWhenThePreviousBoardWillNotClose) rather than ending an
+        -- agent. Panes without the tag (a shell the user split) die with the
+        -- window as before.
 
     @invariant RetiringAnAbsentBoardWindowSucceeds
         -- A session with no board window — the operator closed it, or the
@@ -2219,6 +2237,13 @@ rule AbortWhenTheAgentPortIsTaken {
 -- a rival — and nothing in this spec creates a second session under a derived
 -- or suffixed name. Two boards would contend for one agent port and one set of
 -- tmux keybindings.
+--
+-- The supported shape is one board per tmux SERVER. The board binds Prefix+Space
+-- and Prefix+e server-wide when it starts and unbinds them when it exits, so a
+-- second board in another session of the same server loses its keys when
+-- either one quits, until the next launch binds them again. That is accepted,
+-- not guarded: per-board key tables would cost more than the second-board case
+-- is worth. Nothing refuses a second session's board.
 
 -- EveryLaunchProducesAFreshBoard: `dispatch tui` starts a board, on every path
 -- through this spec that does not abort. There is no path on which the command
