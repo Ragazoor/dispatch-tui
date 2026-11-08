@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::guard::FeedSyncGuard;
+use super::EPIC_GONE;
 use crate::dispatch::resolve_feed_item_repo_paths;
 use crate::models::EpicId;
 use crate::process::ProcessRunner;
@@ -111,7 +112,7 @@ impl FeedCycle {
         // so it warns like every other bucket (feeds.allium FeedCommandFailure
         // bucket 5). Only a deletion mid-cycle is `epic_gone`'s debug.
         let Some(mut epic) = self.db.get_epic(self.epic_id).await else {
-            return self.fail("epic no longer exists");
+            return self.fail(EPIC_GONE);
         };
         let Some(feed_command) = epic.feed_command.take() else {
             return self.fail("epic has no feed command");
@@ -267,7 +268,7 @@ impl FeedCycle {
             epic_title = %self.epic_title,
             "feed cycle dropped: epic no longer exists"
         );
-        FeedCycleOutcome::Failed("epic no longer exists".to_string())
+        FeedCycleOutcome::Failed(EPIC_GONE.to_string())
     }
 
     /// Log a failure against this cycle's epic and return it for the caller to

@@ -281,7 +281,7 @@ pub const SCRIPT_DECLINED_NAME: &str = ".declined-overwrites.json";
 /// One recorded "no": the digest of the content the operator kept and of the
 /// content dispatch shipped when they said it. While both still match, the
 /// question has already been answered.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct DeclinedOverwrite {
     kept: String,
     shipped: String,
@@ -295,30 +295,37 @@ impl DeclinedOverwrite {
 
 type DeclinedOverwrites = std::collections::BTreeMap<String, DeclinedOverwrite>;
 
-/// Read the declined-overwrite record. Missing, unreadable or malformed reads
-/// as EMPTY, on the manifest's terms: the cost is one more question, never a
-/// write.
-fn read_declined_overwrites(data_dir: &Path) -> DeclinedOverwrites {
-    let path = installed_script_path(data_dir, SCRIPT_DECLINED_NAME);
+/// Whether the operator already declined to overwrite `name`'s `on_disk`
+/// content with exactly this `shipped` content. The drift check and the
+/// installer both ask through here, so they cannot disagree.
+fn already_declined(
+    declined: &DeclinedOverwrites,
+    name: &str,
+    on_disk: &str,
+    shipped: &str,
+) -> bool {
+    declined
+        .get(name)
+        .is_some_and(|record| record.covers(on_disk, shipped))
+}
+
+/// Read one of the JSON records kept beside the scripts (the provenance
+/// manifest, the declined-overwrite record). MISSING, UNREADABLE OR MALFORMED
+/// reads as EMPTY and never raises: each is a cache of consent, so losing one
+/// costs a question, never a write.
+fn read_scripts_record<T: serde::de::DeserializeOwned + Default>(data_dir: &Path, name: &str) -> T {
+    let path = installed_script_path(data_dir, name);
     let Ok(raw) = fs::read_to_string(&path) else {
-        return DeclinedOverwrites::new();
+        return T::default();
     };
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
-/// Persist the declined-overwrite record; a failure is logged and swallowed,
-/// as for the manifest. An empty record removes the file.
-fn write_declined_overwrites(data_dir: &Path, declined: &DeclinedOverwrites) {
-    let path = installed_script_path(data_dir, SCRIPT_DECLINED_NAME);
-    if declined.is_empty() {
-        if let Err(e) = fs::remove_file(&path) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!("failed to remove {}: {e}", path.display());
-            }
-        }
-        return;
-    }
-    let encoded = match serde_json::to_string_pretty(declined) {
+/// Persist one of those records. A failure is logged and swallowed for the
+/// same reason a read failure is.
+fn write_scripts_record<T: serde::Serialize>(data_dir: &Path, name: &str, record: &T) {
+    let path = installed_script_path(data_dir, name);
+    let encoded = match serde_json::to_string_pretty(record) {
         Ok(encoded) => encoded,
         Err(e) => {
             tracing::warn!("failed to encode {}: {e}", path.display());
@@ -331,6 +338,19 @@ fn write_declined_overwrites(data_dir: &Path, declined: &DeclinedOverwrites) {
         encoded.as_bytes(),
     ) {
         tracing::warn!("failed to write {}: {e}", path.display());
+    }
+}
+
+/// Persist the declined-overwrite record; an empty record removes the file.
+fn write_declined_overwrites(data_dir: &Path, declined: &DeclinedOverwrites) {
+    if !declined.is_empty() {
+        return write_scripts_record(data_dir, SCRIPT_DECLINED_NAME, declined);
+    }
+    let path = installed_script_path(data_dir, SCRIPT_DECLINED_NAME);
+    if let Err(e) = fs::remove_file(&path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!("failed to remove {}: {e}", path.display());
+        }
     }
 }
 
@@ -427,32 +447,14 @@ impl ShippedScriptReport {
 /// because a JSON file it wrote itself was truncated would trade the user's
 /// whole install on a cache.
 fn read_script_manifest(data_dir: &Path) -> std::collections::BTreeMap<String, String> {
-    let path = installed_script_path(data_dir, SCRIPT_MANIFEST_NAME);
-    let Ok(raw) = fs::read_to_string(&path) else {
-        return std::collections::BTreeMap::new();
-    };
-    serde_json::from_str(&raw).unwrap_or_default()
+    read_scripts_record(data_dir, SCRIPT_MANIFEST_NAME)
 }
 
 /// Persist the provenance manifest. A write failure is logged and swallowed
 /// for the same reason a read failure is: the manifest is a cache of consent,
 /// not the install itself.
 fn write_script_manifest(data_dir: &Path, manifest: &std::collections::BTreeMap<String, String>) {
-    let path = installed_script_path(data_dir, SCRIPT_MANIFEST_NAME);
-    let encoded = match serde_json::to_string_pretty(manifest) {
-        Ok(encoded) => encoded,
-        Err(e) => {
-            tracing::warn!("failed to encode {}: {e}", path.display());
-            return;
-        }
-    };
-    if let Err(e) = crate::atomic_write::write_bytes(
-        &path,
-        crate::atomic_write::Mode::Fixed(0o644),
-        encoded.as_bytes(),
-    ) {
-        tracing::warn!("failed to write {}: {e}", path.display());
-    }
+    write_scripts_record(data_dir, SCRIPT_MANIFEST_NAME, manifest);
 }
 
 /// Give `path` mode 0755 unless it already has it.
@@ -492,7 +494,7 @@ fn write_shipped_script(path: &Path, content: &str) -> Result<()> {
 /// and the content shipped (feeds.allium: ADeclinedOverwriteIsNotDrift): the
 /// installer then writes nothing for it either. The record is only read here.
 pub fn shipped_scripts_are_current(data_dir: &Path) -> bool {
-    let declined = read_declined_overwrites(data_dir);
+    let declined: DeclinedOverwrites = read_scripts_record(data_dir, SCRIPT_DECLINED_NAME);
     SHIPPED_SCRIPTS.iter().all(|file| {
         let path = installed_script_path(data_dir, file.name);
         // `file_is_up_to_date` is setup's single definition of "already up to
@@ -508,9 +510,8 @@ pub fn shipped_scripts_are_current(data_dir: &Path) -> bool {
 /// Whether the operator already declined to overwrite `path` with exactly
 /// this shipped content, and the file still holds what they kept.
 fn still_declined(declined: &DeclinedOverwrites, file: &ShippedFile, path: &Path) -> bool {
-    declined.get(file.name).is_some_and(|record| {
-        fs::read_to_string(path).is_ok_and(|on_disk| record.covers(&on_disk, file.content))
-    })
+    fs::read_to_string(path)
+        .is_ok_and(|on_disk| already_declined(declined, file.name, &on_disk, file.content))
 }
 
 /// Install and update every script in [`SHIPPED_SCRIPTS`] under `data_dir`.
@@ -571,7 +572,7 @@ pub fn install_shipped_feed_scripts(
     }
 
     let mut manifest = read_script_manifest(data_dir);
-    let mut declined = read_declined_overwrites(data_dir);
+    let mut declined: DeclinedOverwrites = read_scripts_record(data_dir, SCRIPT_DECLINED_NAME);
     let mut reports = Vec::with_capacity(SHIPPED_SCRIPTS.len());
 
     for file in SHIPPED_SCRIPTS {
@@ -704,17 +705,15 @@ fn install_unknown_provenance_script(
         content: shipped,
     } = file;
     // The operator already said no to exactly this pair: keep it unasked.
-    if let Some(on_disk) = &on_disk {
-        if declined
-            .get(name)
-            .is_some_and(|record| record.covers(on_disk, shipped))
-        {
-            return Ok(ShippedScriptReport::new(
-                name,
-                path,
-                ShippedScriptOutcome::Kept,
-            ));
-        }
+    if on_disk
+        .as_deref()
+        .is_some_and(|c| already_declined(declined, name, c, shipped))
+    {
+        return Ok(ShippedScriptReport::new(
+            name,
+            path,
+            ShippedScriptOutcome::Kept,
+        ));
     }
     // The ABSENCE of a confirmer is how "nobody can answer" is expressed, the
     // same way the startup check expresses it — so there is no flag a caller
@@ -727,7 +726,22 @@ fn install_unknown_provenance_script(
             path.display(),
             script_backup_path(&path).display()
         )) {
-            Ok(answer) => answer,
+            Ok(true) => true,
+            Ok(false) => {
+                // A no from someone who was asked is recorded, so the same
+                // question is not asked again (an unreadable file has no
+                // digest to record it against).
+                if let Some(on_disk) = &on_disk {
+                    declined.insert(
+                        name.to_string(),
+                        DeclinedOverwrite {
+                            kept: script_digest(on_disk),
+                            shipped: script_digest(shipped),
+                        },
+                    );
+                }
+                false
+            }
             // An unanswerable prompt (closed stdin) is a failure of this
             // script only: the run goes on and the manifest is still written.
             Err(e) => return Ok(ShippedScriptReport::failed(name, path, e)),
@@ -735,18 +749,7 @@ fn install_unknown_provenance_script(
     };
     if !approved {
         // No digest recorded: the provenance is still unknown, and recording
-        // one would license a silent overwrite next run. A no from someone
-        // who was asked IS recorded, so the same question is not asked again
-        // (an unreadable file has no digest to record it against).
-        if let (Some(_), Some(on_disk)) = (confirmer, &on_disk) {
-            declined.insert(
-                name.to_string(),
-                DeclinedOverwrite {
-                    kept: script_digest(on_disk),
-                    shipped: script_digest(shipped),
-                },
-            );
-        }
+        // one would license a silent overwrite next run.
         return Ok(ShippedScriptReport::new(
             name,
             path,

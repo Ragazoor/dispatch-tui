@@ -347,7 +347,7 @@ impl TuiRuntime {
             let Some(epic) = board_reads.get_epic(epic_id).await else {
                 let _ = tx.send(Message::Feed(FeedMessage::Failed {
                     epic_title,
-                    error: "epic no longer exists".to_string(),
+                    error: crate::feed::EPIC_GONE.to_string(),
                 }));
                 return;
             };

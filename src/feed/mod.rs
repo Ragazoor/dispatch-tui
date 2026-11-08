@@ -153,6 +153,11 @@ const DEFAULT_FEED_INTERVAL: Duration = Duration::from_secs(60);
 /// concerns stay independent.
 const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// The failure text when a feed epic is gone, whichever path finds it
+/// (feeds.allium: FeedCommandFailure bucket 5, ManualFeedTrigger,
+/// ServeFeedRefreshRequest).
+pub(crate) const EPIC_GONE: &str = "epic no longer exists";
+
 /// Whether `epic` is due to run this tick, given `last_run` and `now`.
 ///
 /// The feed-cadence floor is enforced on read (feeds.allium: FeedTick).
@@ -477,9 +482,7 @@ impl FeedRunner {
                 return;
             }
             let Some(epic) = board_reads.get_epic(epic_id).await else {
-                let reported = db
-                    .report_feed_request_failed(row.id, "epic no longer exists")
-                    .await;
+                let reported = db.report_feed_request_failed(row.id, EPIC_GONE).await;
                 report_outcome(&served, row.id, reported);
                 return;
             };
