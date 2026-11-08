@@ -13,7 +13,7 @@ Dispatch is a hobby project. I built it to learn how I want to work with agents,
 
 Agents let me take on more work than before. Dispatch is my way of organising that work so I do not get overwhelmed. These are the questions I have been exploring, in the order they came up.
 
-**How do I keep a lot of work in my head?** I namespace it. Epics work like folders: they hold tasks and other epics, nested as deep as I need. Work packages gather the epics and tasks behind one goal, wherever they sit on the board. Each agent has a task card, and moves that card itself as it starts, finishes or gets stuck.
+**How do I keep a lot of work in my head?** I namespace it. Epics work like folders: they hold tasks and other epics, nested as deep as I need. Work packages gather the epics and tasks behind one goal, wherever they sit on the board. Each agent has a task card, which is moved by the TUI as it starts, finishes or gets stuck.
 
 **How do I work on a project where the code is a black box?** In this project agents write the code, and I mostly do not read it. Instead, all work starts from the specs in [`docs/specs/`](docs/specs/), written in [Allium](https://github.com/juxt/allium). They are the source of truth the agents work from: spec first, then tests, then code. So far that has worked well.
 
