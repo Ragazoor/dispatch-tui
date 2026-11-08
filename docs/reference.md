@@ -329,7 +329,7 @@ fingerprinted by module target plus the static head of the message. On a
 210k-line log that is 37 cards rather than 106k. Each card defaults to
 `wrap_up_mode: "rebase"`.
 
-Like the other templates it ships **inert**, and `dispatch setup` installs it
+Like the other templates it ships **inert**, and the startup configuration update installs it
 and its `log-warnings.conf` into `<data_dir>/scripts/` (see "Shipped feed
 scripts" below). Edit the INSTALLED conf, never the tracked one — setting
 `LOG_FILE` and `REPO_URL` in `scripts/log-warnings.conf` would leave a
