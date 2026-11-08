@@ -245,9 +245,9 @@ async fn build_and_record_injections_records_all_as_prompt_injection() {
 // dispatch injection (and only that repo's, and only injection).
 // ---------------------------------------------------------------------------
 
-async fn task_in(db: &Arc<Store>, title: &str, repo: &str) -> crate::models::Task {
+async fn task_in(db: &Arc<Store>, repo: &str) -> crate::models::Task {
     let id = db
-        .create_task(CreateTaskRequest::fixture(title, repo))
+        .create_task(CreateTaskRequest::fixture("new task", repo))
         .await
         .unwrap();
     db.get_task(id).await.unwrap()
@@ -268,124 +268,114 @@ async fn user_learning(db: &Arc<Store>, summary: &str) -> crate::models::Learnin
     .unwrap()
 }
 
-/// One finished task in `repo` that was shown `learning` and rated it.
+/// `n` finished tasks in `repo`, each shown `learning` and rating it `verdict`.
 async fn rated_in(
     db: &Arc<Store>,
     repo: &str,
     learning: crate::models::LearningId,
     verdict: LearningVerdict,
-) -> crate::models::TaskId {
-    let id = db
-        .create_task(CreateTaskRequest {
-            status: crate::models::TaskStatus::Done,
-            ..CreateTaskRequest::fixture("earlier task", repo)
-        })
-        .await
-        .unwrap();
-    let task = db.get_task(id).await.unwrap();
-    db.record_retrieval(task.id, learning, RetrievalSource::PromptInjection)
-        .await
-        .unwrap();
-    db.apply_verdicts_tx(task.id, &[(learning, verdict)])
-        .await
-        .unwrap();
-    task.id
+    n: usize,
+) -> Vec<crate::models::TaskId> {
+    let mut ids = Vec::new();
+    for _ in 0..n {
+        let id = db
+            .create_task(CreateTaskRequest {
+                status: crate::models::TaskStatus::Done,
+                ..CreateTaskRequest::fixture("earlier task", repo)
+            })
+            .await
+            .unwrap();
+        db.record_retrieval(id, learning, RetrievalSource::PromptInjection)
+            .await
+            .unwrap();
+        db.apply_verdicts_tx(id, &[(learning, verdict)])
+            .await
+            .unwrap();
+        ids.push(id);
+    }
+    ids
 }
 
-async fn injected_ids(
-    db: &Arc<Store>,
-    task: &crate::models::Task,
-) -> Vec<crate::models::LearningId> {
+/// The learnings a new task in `repo` would be shown.
+async fn injected_in(db: &Arc<Store>, repo: &str) -> Vec<crate::models::LearningId> {
+    let task = task_in(db, repo).await;
     let emb_svc = EmbeddingService::new_test();
-    list_learnings_for_dispatch_rag(&**db, task, &emb_svc, 0.0)
+    list_learnings_for_dispatch_rag(&**db, &task, &emb_svc, 0.0)
         .await
         .into_iter()
         .map(|l| l.id)
         .collect()
 }
 
+const MUTE: usize = OFF_TOPIC_VERDICTS_TO_MUTE;
+
 #[tokio::test]
-async fn an_entry_off_topic_in_this_repo_is_left_out_of_its_dispatch_injection() {
+async fn an_off_topic_entry_is_left_out_and_its_slot_goes_to_the_next_candidate() {
     let db = seed_db().await;
     let muted = user_learning(&db, "off topic here").await;
-    for _ in 0..OFF_TOPIC_VERDICTS_TO_MUTE {
-        rated_in(&db, "/repo/a", muted, LearningVerdict::NotApplicable).await;
+    for i in 0..DISPATCH_INJECTION_CAP {
+        user_learning(&db, &format!("candidate {i}")).await;
     }
-    let task = task_in(&db, "new task", "/repo/a").await;
-    assert!(!injected_ids(&db, &task).await.contains(&muted));
+    rated_in(&db, "/repo/a", muted, LearningVerdict::NotApplicable, MUTE).await;
+    let ids = injected_in(&db, "/repo/a").await;
+    assert_eq!(ids.len(), DISPATCH_INJECTION_CAP);
+    assert!(!ids.contains(&muted));
 }
 
 #[tokio::test]
 async fn one_verdict_short_of_the_threshold_still_injects() {
     let db = seed_db().await;
     let entry = user_learning(&db, "nearly muted").await;
-    for _ in 1..OFF_TOPIC_VERDICTS_TO_MUTE {
-        rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable).await;
-    }
-    let task = task_in(&db, "new task", "/repo/a").await;
-    assert!(injected_ids(&db, &task).await.contains(&entry));
+    rated_in(
+        &db,
+        "/repo/a",
+        entry,
+        LearningVerdict::NotApplicable,
+        MUTE - 1,
+    )
+    .await;
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
 }
 
 #[tokio::test]
 async fn the_mute_is_per_repo() {
     let db = seed_db().await;
     let entry = user_learning(&db, "fits b, not a").await;
-    for _ in 0..OFF_TOPIC_VERDICTS_TO_MUTE {
-        rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable).await;
-    }
-    let task = task_in(&db, "new task", "/repo/b").await;
-    assert!(injected_ids(&db, &task).await.contains(&entry));
+    rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable, MUTE).await;
+    assert!(injected_in(&db, "/repo/b").await.contains(&entry));
 }
 
 #[tokio::test]
 async fn one_helped_in_the_repo_keeps_the_entry_injecting() {
     let db = seed_db().await;
     let entry = user_learning(&db, "sometimes fits").await;
-    for _ in 0..OFF_TOPIC_VERDICTS_TO_MUTE {
-        rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable).await;
-    }
-    rated_in(&db, "/repo/a", entry, LearningVerdict::Helped).await;
-    let task = task_in(&db, "new task", "/repo/a").await;
-    assert!(injected_ids(&db, &task).await.contains(&entry));
+    rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable, MUTE).await;
+    rated_in(&db, "/repo/a", entry, LearningVerdict::Helped, 1).await;
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
 }
 
 #[tokio::test]
 async fn wrong_verdicts_do_not_count_toward_the_mute() {
     let db = seed_db().await;
     let entry = user_learning(&db, "misleading, not off-topic").await;
-    for _ in 1..OFF_TOPIC_VERDICTS_TO_MUTE {
-        rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable).await;
-    }
-    rated_in(&db, "/repo/a", entry, LearningVerdict::Wrong).await;
-    let task = task_in(&db, "new task", "/repo/a").await;
-    assert!(injected_ids(&db, &task).await.contains(&entry));
-}
-
-#[tokio::test]
-async fn a_muted_entrys_slot_goes_to_the_next_candidate() {
-    let db = seed_db().await;
-    let muted = user_learning(&db, "off topic here").await;
-    for i in 0..DISPATCH_INJECTION_CAP {
-        user_learning(&db, &format!("candidate {i}")).await;
-    }
-    for _ in 0..OFF_TOPIC_VERDICTS_TO_MUTE {
-        rated_in(&db, "/repo/a", muted, LearningVerdict::NotApplicable).await;
-    }
-    let task = task_in(&db, "new task", "/repo/a").await;
-    let ids = injected_ids(&db, &task).await;
-    assert_eq!(ids.len(), DISPATCH_INJECTION_CAP);
-    assert!(!ids.contains(&muted));
+    rated_in(
+        &db,
+        "/repo/a",
+        entry,
+        LearningVerdict::NotApplicable,
+        MUTE - 1,
+    )
+    .await;
+    rated_in(&db, "/repo/a", entry, LearningVerdict::Wrong, 1).await;
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
 }
 
 #[tokio::test]
 async fn the_mute_changes_neither_the_score_nor_the_status() {
     let db = seed_db().await;
     let muted = user_learning(&db, "off topic here").await;
-    for _ in 0..OFF_TOPIC_VERDICTS_TO_MUTE {
-        rated_in(&db, "/repo/a", muted, LearningVerdict::NotApplicable).await;
-    }
-    let task = task_in(&db, "new task", "/repo/a").await;
-    let _ = injected_ids(&db, &task).await;
+    rated_in(&db, "/repo/a", muted, LearningVerdict::NotApplicable, MUTE).await;
+    let _ = injected_in(&db, "/repo/a").await;
     let row = db.get_learning(muted).await.unwrap().unwrap();
     assert_eq!(row.upvote_count, 0);
     assert_eq!(row.status, crate::models::LearningStatus::Approved);
@@ -395,11 +385,7 @@ async fn the_mute_changes_neither_the_score_nor_the_status() {
 async fn a_deleted_tasks_verdicts_stop_counting() {
     let db = seed_db().await;
     let entry = user_learning(&db, "muted until a task goes").await;
-    let mut tasks = Vec::new();
-    for _ in 0..OFF_TOPIC_VERDICTS_TO_MUTE {
-        tasks.push(rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable).await);
-    }
+    let tasks = rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable, MUTE).await;
     db.delete_task(tasks[0]).await.unwrap();
-    let task = task_in(&db, "new task", "/repo/a").await;
-    assert!(injected_ids(&db, &task).await.contains(&entry));
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
 }

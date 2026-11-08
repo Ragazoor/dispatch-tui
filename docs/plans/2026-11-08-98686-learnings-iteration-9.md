@@ -2,7 +2,8 @@
 
 Task #98686, run 9, 2026-11-08. Follows `2026-10-29-98645-learnings-iteration-8.md`.
 
-Two changes, both approved by the operator in this session:
+Two changes. The operator approved the deletes by id. For ranking, the operator asked for a more
+aggressive step and asked what the move was; I chose the per-repo mute and built it:
 
 - **Prune by evidence.** Deleted #747, #90215, #90240, #768 and #753. Each had 4 to 10
   `not_applicable` verdicts, no `helped`, 0 or 1 upvotes and almost no `query_learnings`
@@ -16,7 +17,9 @@ Two changes, both approved by the operator in this session:
   the next candidate. `query_learnings` is unchanged. The mute changes no score, status or
   `updated_at`, and it is derived, not stored. One later `helped` from that repo lifts it.
   No module, bindings or rules-version change.
-- `scripts/learnings-metrics.py` prints the mute's current reach.
+- `scripts/learnings-metrics.py` prints the mute's current reach. It reads every verdict
+  row, while a board reads only verdicts on tasks its user holds, so the script's count is
+  an upper bound on what any one board mutes. On this single-operator store they match.
 
 ## Why this, why now
 

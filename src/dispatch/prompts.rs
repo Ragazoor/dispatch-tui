@@ -1171,7 +1171,7 @@ pub async fn list_learnings_for_dispatch_rag(
         }
     };
 
-    let rows = match db.list_all_approved_non_task_learnings().await {
+    let mut rows = match db.list_all_approved_non_task_learnings().await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(
@@ -1189,18 +1189,8 @@ pub async fn list_learnings_for_dispatch_rag(
     let muted = db
         .learnings_off_topic_in_repo(&task.repo_path, OFF_TOPIC_VERDICTS_TO_MUTE)
         .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(
-                task_id = task.id.0,
-                error = ?e,
-                "dispatch RAG: failed to read verdicts, muting nothing"
-            );
-            Default::default()
-        });
-    let rows: Vec<_> = rows
-        .into_iter()
-        .filter(|(l, _)| !muted.contains(&l.id))
-        .collect();
+        .unwrap_or_default();
+    rows.retain(|(l, _)| !muted.contains(&l.id));
     let candidates = deserialize_candidate_rows(rows);
 
     let epic_id_str = task.epic_id.map(|e| e.0.to_string());

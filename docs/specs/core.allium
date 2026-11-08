@@ -1128,6 +1128,11 @@ entity Learning {
     -- stored. Dispatch injection leaves such a learning out for that repo
     -- only; query_learnings ignores it (learnings.allium:
     -- AugmentDispatchPromptWithLearnings).
+    -- The verdicts counted are those the dispatching board can see: the ones
+    -- on tasks its user holds (sync.allium: visible_learning_verdicts). On a
+    -- one-operator store that is every task in the repo; in a shared
+    -- workspace two operators can mute different sets. Accepted: verdicts
+    -- arrive through the same per-user view as retrievals.
     off_topic_in_repo(repo_path):
         (LearningVerdicts where learning = this and task.repo_path = repo_path and verdict = not_applicable).count >= config.off_topic_verdicts_to_mute
         and (LearningVerdicts where learning = this and task.repo_path = repo_path and verdict = helped).count = 0

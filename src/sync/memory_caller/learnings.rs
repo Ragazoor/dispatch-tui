@@ -277,6 +277,7 @@ impl MemoryReducerCaller {
         let mut learnings = tables.learnings.clone();
         let mut next_id = tables.next_learning_verdict_id;
         let mut touched = Vec::new();
+        let mut changed = Vec::new();
         for (learning_id, verdict) in &verdicts {
             let learning_id = learning_id.0;
             let Some(row) = learnings.get(&learning_id).cloned() else {
@@ -294,6 +295,7 @@ impl MemoryReducerCaller {
             .map_err(anyhow::Error::msg)?;
             match previous {
                 Some(s) => {
+                    changed.push(s.id);
                     standing.insert(
                         s.id,
                         module::LearningVerdict {
@@ -305,6 +307,7 @@ impl MemoryReducerCaller {
                 None => {
                     let id = next_id;
                     next_id += 1;
+                    changed.push(id);
                     standing.insert(
                         id,
                         module::LearningVerdict {
@@ -335,8 +338,8 @@ impl MemoryReducerCaller {
             );
             touched.push(learning_id);
         }
-        for row in standing.values() {
-            if tables.learning_verdicts.get(&row.id).map(|v| &v.verdict) != Some(&row.verdict) {
+        for id in &changed {
+            if let Some(row) = standing.get(id) {
                 self.rows.upsert_learning_verdict(&row.clone().into());
             }
         }

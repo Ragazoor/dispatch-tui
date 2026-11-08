@@ -270,7 +270,8 @@ def mute_metrics():
     """(learning, repo) pairs the per-repo dispatch mute leaves out right now.
 
     `core.allium: Learning.off_topic_in_repo`: 3+ not_applicable verdicts from tasks in
-    that repo and no helped. Reads only verdicts whose task still exists, as the board does.
+    that repo and no helped. Reads every verdict whose task still exists; a board reads only
+    verdicts on tasks its user holds, so this is an upper bound on any one board's mute.
     Watch two things: the mute's reach (entries, repos), and whether the not_applicable
     share of injected pairs falls in the weeks after MUTE_FROM.
     """

@@ -460,11 +460,10 @@ rule AugmentDispatchPromptWithLearnings {
         --     untouched and the entry is not archived.
         --   - Derived from the verdict rows at each dispatch; nothing new is
         --     stored.
-        -- Why: run 9 of the learnings iteration (task 98686) found
-        -- not_applicable was 51% of injected (task, learning) pairs, spread
-        -- over 207 entries. A chronological replay of 10 days of verdicts
-        -- with this rule at threshold 3 would have avoided 51 off-topic
-        -- injections at a cost of 3 helped ones.
+        -- Why: the similarity ranking alone injects many entries that do not
+        -- fit, and not_applicable is spread thinly over many entries, so
+        -- pruning cannot fix it. Muting per repo removes the repeat misses
+        -- while an entry stays available everywhere it has fitted.
         --
         -- The block's own header owns the rating instruction: it names the full
         -- call ("rate_learning(learning_id, task_id, verdict) — helped if it

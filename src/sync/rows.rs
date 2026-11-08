@@ -1452,10 +1452,11 @@ impl SharedRows {
                     continue;
                 }
                 let entry = counts.entry(v.learning_id).or_default();
-                match v.verdict.as_str() {
-                    "not_applicable" => entry.0 += 1,
-                    "helped" => entry.1 += 1,
-                    _ => {}
+                use crate::models::LearningVerdict as V;
+                match V::parse(&v.verdict) {
+                    Ok(V::NotApplicable) => entry.0 += 1,
+                    Ok(V::Helped) => entry.1 += 1,
+                    Ok(V::Wrong) | Err(_) => {}
                 }
             }
             counts
