@@ -52,33 +52,30 @@
 -- See StopOnAUserIdentityConflict, and host.allium: RefuseAChangedUserIdentity
 -- for why that is worth stopping a board over when nothing else here is.
 --
--- EVERY BOARD HAS A STORE. Until Phase 12 of the SpacetimeDB migration (task
--- #4916) a board with none configured read and wrote its own database and was
--- a first-class way to run. That install no longer exists: the store is
--- mandatory, and a launch that names none runs dispatch's own managed store on
--- loopback, starting it and publishing its module first where needed
--- (startup.allium: BringUpTheManagedStoreOnceTheHostIsNamed). By the time
--- OpenBoardConnection fires, configured_store_server() therefore always names
--- a store: the one the operator gave, or the managed one. Everything below
--- holds for every board, not only a configured one.
+-- EVERY BOARD HAS A STORE. A launch that names none runs dispatch's own
+-- managed store on loopback, starting it and publishing its module first where
+-- needed (startup.allium: BringUpTheManagedStoreOnceTheHostIsNamed). By the
+-- time OpenBoardConnection fires, configured_store_server() therefore always
+-- names a store: the one the operator gave, or the managed one. Everything
+-- below holds for every board.
 --
--- AND NO BOARD HAS A LOCAL DATABASE (task #16755). The board's old SQLite
--- file is not opened by the board, by MCP or by any subcommand
--- (storage.allium: NoSqlite), and nothing is migrated out
--- of a leftover copy (storage.allium: CodeNeverTouchesLegacyDatabase).
+-- AND NO BOARD HAS A LOCAL DATABASE. No local database is opened by the
+-- board, by MCP or by any subcommand (storage.allium: NoSqlite), and nothing
+-- is migrated out of a leftover copy (storage.allium:
+-- CodeNeverTouchesLegacyDatabase).
 --
--- THE ONE PLACE A BOARD IS REALLY WORSE OFF THAN BEFORE. A board reads only
--- the store, and a store that goes down means a board with no cards on it. There is no fallback to the local copy and there must not be
--- one: core.allium's shared tables have exactly one copy, and a board that
+-- A STORE THAT IS DOWN MEANS A BOARD WITH NO CARDS ON IT. A board reads only
+-- the store. There is no fallback to a local copy and there must not be one:
+-- core.allium's shared tables have exactly one copy, and a board that
 -- silently served an older one would be showing work whose current state it
 -- cannot see — a colleague's task that has since been finished, reassigned or
 -- deleted, drawn as though it were live. An empty board with an outage on it is
--- a worse experience and a truer one. See BoardReadsFromTheSubscription and
--- ADisconnectedBoardDrawsNoSharedRows below.
+-- a worse experience and a truer one. See AConnectedBoardDrawsOnlyDeliveredRows
+-- and ADisconnectedBoardDrawsNoSharedRows below.
 --
 -- AND IT CANNOT WRITE EITHER. The same bargain, on the other side: a board
 -- whose store is down refuses the mutation, says so, and changes nothing
--- anywhere. It does not queue it for later and it does not fall back to the
+-- anywhere. It does not queue it for later and it does not fall back to a
 -- local copy. A queue would be a second authority over a shared row — replayed
 -- minutes later, on top of whatever a colleague did meanwhile, with the
 -- operator's original intent long since acted on elsewhere. See
@@ -87,6 +84,7 @@
 use "./core.allium" as core
 use "./startup.allium" as startup
 use "./host.allium" as host
+use "./spacetime-seed.allium" as seed
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -136,11 +134,12 @@ entity BoardConnection {
         config.reconnect_backoff_max
     )
 
-    -- The epics this board has asked for. Derived from the shared Subscription
-    -- rows rather than held here, so that subscribing on the desktop is already
-    -- true on the laptop — the subscription belongs to the PERSON, and the
-    -- connection is a machine's.
-    subscribed_epics: core/Subscriptions.where(s => s.subscriber = core/local_host().owner) -> epic
+    -- The epics this board has asked for: those the identity's own
+    -- core/Subscription rows name (the own_subscriptions view). Derived from
+    -- the shared rows rather than held here, so that subscribing on the
+    -- desktop is already true on the laptop — the subscription belongs to the
+    -- PERSON, and the connection is a machine's.
+    subscribed_epics: followed_epics_of(core/local_host().owner)
 
     -- The epics whose rows this board asks for: every followed epic and every
     -- sub-epic beneath one, AT ANY DEPTH. Following an epic is following its
@@ -153,67 +152,24 @@ entity BoardConnection {
     -- rows say what the person chose, and the tree says what that choice
     -- reaches. Nobody follows a sub-epic by hand to see it. The store
     -- derives it (the covered_epics view), so it follows a follow live.
-    covered_epics: core/Epics.where(e =>
-        e in subscribed_epics
-            or core/Epic.ancestor_chain(e).any(a => a in subscribed_epics))
+    covered_epics: covered_epics_of(core/local_host().owner)
 
-    -- ASSUMPTION THIS PLACES ON A FEED'S POLL OWNER. `feeds.allium`'s
-    -- `retired_without_task(epic, item)` — the join behind
-    -- `IngestSkipsRetiredFeedItems` — decides "no survivor" by walking the
-    -- feed epic's subtree over whatever rows this connection has delivered
-    -- (`SharedRows::retired_without_task`, reached through
-    -- `TaskCrud::retired_without_task`). That walk is only as complete as
-    -- `covered_epics` is: it is correct when the host running that feed's
-    -- poll (`core/PollOwner`) has this feed epic in `covered_epics`, so the
-    -- whole subtree arrives live through the covered_epics view.
-    -- A poll owner whose board has NOT followed the feed epic — — sees
-    -- a thinner subtree than the store holds, and a task surviving outside
-    -- that thinner view reads as absent.
+    -- WHAT THIS MEANS FOR A FEED'S POLL OWNER. The feed runner picks the
+    -- feed epics it polls from the epics this board holds: covered_epics
+    -- together with the own_epics view (an epic this identity created is held
+    -- whether or not anyone follows it). A feed epic this host neither follows
+    -- nor created is never polled here. Everything after the poll runs in
+    -- the module's ingest_feed, over every row the store holds rather than
+    -- over this connection's rows: the retired-item check
+    -- (spacetime/module/src/feed_ingest.rs::retired_without_task), the
+    -- routing into sub-epics and the stale-subtree delete. So a poll owner
+    -- that holds only part of a feed epic's subtree never reads a survivor
+    -- as absent.
     --
-    -- THE COST IS NOT JUST A SKIPPED INSERT. An id `retired_without_task`
-    -- wrongly calls survivor-less is dropped from the batch's keep-set before
-    -- routing (`feeds.allium`'s "Retired feed items"), and a trusted,
-    -- mirroring cycle then passes that thinner keep-set to the stale-subtree
-    -- delete inside the module's `ingest_feed` — which runs SERVER-SIDE, over
-    -- every row the store holds, not over this connection's view. The
-    -- survivor the poll owner could not see is not merely left retired; it is
-    -- deleted, by a reducer that had the row in front of it the whole time.
-    --
-    -- NOT JUST THIS ONE JOIN, SINCE task #4916. Every board now has a store
-    -- (`store::Store` reads every shared row from the subscription), so
-    -- `FeedRunner`'s OTHER reads — `list_epics`, every
-    -- `list_tasks_for_epic`/`list_sub_epics` call ingest's routing
-    -- makes while walking a feed epic's sub-epics — are ALSO answered from
-    -- the subscription, through the same `Store`. Not
-    -- `list_repo_paths`, though: `repo_paths`/`repo_base_branches` are
-    -- subscribed to UNFILTERED (SubscribeOnceIdentityIsSettled's "repo lists"
-    -- clause), so that one read is always complete regardless of
-    -- `covered_epics`. And the epic/task reads above answer from
-    -- `covered_epics` UNION the `own_epics`/`own_tasks` views — an epic or task this host's
-    -- identity created is visible whether or not anyone follows it — not
-    -- from `covered_epics` alone.
-    --
-    -- WHAT THAT MEANS FOR AN UNFOLLOWED FEED EPIC. Not "a thin view of the
-    -- whole cycle" as if the epic were half-visible — `list_epics` simply
-    -- never returns an epic this host neither follows nor created, so
-    -- `FeedRunner::tick` never polls it in the first place. The thinner-view
-    -- failure this note is actually about needs one of three narrower
-    -- conditions: (a) this host's identity CREATED the feed epic (so
-    -- the `own_epics` view makes it visible) but never followed it, so its own
-    -- subtree tasks are seen while a teammate's tasks in the same subtree are
-    -- not; (b) no longer possible (the store walks the subtree); or (c) a host followed the feed
-    -- epic, was assigned `core/PollOwner` for it, and later unfollowed. (c)
-    -- is closed since task #8196: UnsubscribeFromEpic releases the claim
-    -- of any host the unfollower owns on every feed epic it stops covering,
-    -- so the feed pauses until another host follows, never silently stops
-    -- for everyone.
-    --
-    -- Cases (a) and (b) remain documented assumptions, not enforced ones:
-    -- nothing here makes a feed's poll owner follow that feed epic, or checks
-    -- that it does before a cycle runs — `core/PollOwner` decides which HOST polls,
-    -- not whether that host's board is subscribed to what it polls. A store
-    -- deployment must keep every feed epic followed by whichever host ends
-    -- up its poll owner for this to stay correct.
+    -- A CLAIM DOES NOT OUTLIVE THE FOLLOW. UnsubscribeFromEpic releases the
+    -- poll claims of this person's hosts on every feed epic the unfollow
+    -- stops covering, so the feed pauses until another host that holds the
+    -- epic claims it; it never silently stops for every board.
 
     -- WHAT A CONNECTION OWNS BESIDES ITS STATUS: the rows its subscriptions
     -- have delivered.
@@ -227,7 +183,8 @@ entity BoardConnection {
     -- A set that outlived its connection would be a cache, and a cache is
     -- precisely what must not exist here: core.allium's shared tables have one
     -- copy, and a second one served during an outage would draw a colleague's
-    -- finished work as though it were live. See BoardReadsFromTheSubscription.
+    -- finished work as though it were live. See
+    -- AConnectedBoardDrawsOnlyDeliveredRows below.
     --
     -- The implementation's counterpart is `SharedRows` (`src/sync/rows.rs`),
     -- held beside the transport. Where it sits does not matter; that it is
@@ -237,11 +194,37 @@ entity BoardConnection {
         -- On a board with a connection, every shared row on screen arrived
         -- through that connection's subscriptions. There is no second reader.
         --
+        -- ONE SOURCE. Every drawn board has a connection (OpenBoardConnection
+        -- runs before it draws), so there is no second branch. Not "the
+        -- subscription, falling back to local": a shared table has exactly
+        -- one copy, so any other copy is not a cache of the store but
+        -- whatever some install last wrote, which may be months stale and may
+        -- name tasks that no longer exist. Serving it during an outage would
+        -- put a colleague's finished work back on screen as though it were
+        -- live.
+        --
+        -- EVERY SHARED READ, NOT ONLY THE DRAWING. "Drawn" here covers every
+        -- read of a shared row the board's own process makes — an MCP tool
+        -- looking up a task, a setting read back after it was saved, the
+        -- subscribed-epic list, the feed runner's epic list — and not only
+        -- the reads that put cards on screen. Every `store::Store` read
+        -- answers from the connection's `SharedRows`, the rows its writes'
+        -- reducers land in (`store_connection::StoreParts::build`), so a task
+        -- created a moment ago is found.
+        --
+        -- A ROW THAT CANNOT BE UNDERSTOOD IS DROPPED, not defaulted and not
+        -- fatal. A task carrying a status this binary does not know is
+        -- missing from the board rather than sitting on it under a plausible
+        -- wrong one, and the rows beside it are unaffected. A row whose
+        -- status was REMOVED (config.removed_statuses) is dropped too, but
+        -- quietly and by a different rule: see
+        -- RowsWithARemovedStatusAreDropped.
+        --
         -- The counterpart to SubscriptionsCoverOnlyTheOwnBoardAndItsEpics,
         -- which constrains the ASK. This constrains the READ, and the pair is
         -- what makes the containment claim complete: asking only for your own
-        -- rows protects nobody if the reader can also reach the local store's
-        -- copy of everyone else's.
+        -- rows protects nobody if the reader can also reach around the
+        -- subscription to everyone else's.
         --
         -- Not stated as an expression because the two sides — what was
         -- delivered and what is drawn — are sets of every shared entity at
@@ -346,11 +329,10 @@ config {
     mutation_timeout: Duration = 5.seconds
 
     -- Status values a row may still carry in an older store but that this
-    -- binary no longer has (task #16386). A task or epic row whose raw status
-    -- text is on this list is dropped wherever it is read from a store — see
-    -- RowsWithARemovedStatusAreDropped. `archived` is the only one, removed
-    -- with TaskStatus::Archived (task #4971), and the only removed value seen
-    -- in a real old store.
+    -- binary does not have. A task or epic row whose raw status text is on
+    -- this list is dropped wherever it is read from a store — see
+    -- RowsWithARemovedStatusAreDropped. `archived` is the only one, and the
+    -- only removed value seen in a real old store.
     --
     -- A LIST OF WHAT WAS REMOVED, NOT OF WHAT IS UNKNOWN. A status that is
     -- neither current nor on this list is still a row this binary cannot
@@ -363,28 +345,16 @@ config {
     -- Compared for EQUALITY with the rules version the store's module
     -- publishes; see AStoreWithOtherRulesFailsTheAttempt.
     --
-    -- HAND-BUMPED, IN THE COMMIT THAT MOVES A RULE. Every change that moves
-    -- a rule from the board into the module (store-split.allium, S1) bumps
-    -- it. It is held twice, once in the module
-    -- crate and once in the board (the board's release build does not link
-    -- the module crate), and a test fails when the two differ, so both are
-    -- bumped together. A change that moves no rule (a new column, a
-    -- UI change, a bug fix inside a rule) does not. Neither the module's wasm
-    -- hash nor the board's build version is compared: a hash changes on every
-    -- rebuild, and a build version would need a stored minimum that somebody
-    -- also has to bump. The rules version is the one number that changes
-    -- exactly when the answer to "who enforces this?" changes.
-    -- 2 was feed routing; 3 was dispatch request rows and their
-    -- scheduled timeout (store-split.allium: DispatchRequest); 4 was
-    -- (wrap-up and exit-session request rows, the conflict sub_status, the
-    -- close and the epic chain in the module, store-split.allium:
-    -- SessionRequest, W12); 5 was (PR state derived in the module from
-    -- the raw gh status, pr-workflow.allium: ReportPrStatus, P5); 6 was
-    -- (update_tasks' done-path close and its close row, patch_task's
-    -- transition rules, managed-epic provisioning in the module,
-    -- store-split.allium: RequestCloseTask, X6). The module crate and the
-    -- board both hold it.
-    rules_version: Integer = 9
+    -- THE NUMBER LIVES IN THE CODE, NOT HERE. The module holds it as
+    -- spacetime/module/src/rules.rs::RULES_VERSION and the board as
+    -- src/sync/rules_gate.rs::BOARD_RULES_VERSION (the board's release build
+    -- does not link the module crate); a test fails when the two differ, so
+    -- both are bumped together, by hand. What does and does not warrant a
+    -- bump is defined once, in RULES_VERSION's doc comment. Neither the
+    -- module's wasm hash nor the board's build version is compared: a hash
+    -- changes on every rebuild, and a build version would need a stored
+    -- minimum that somebody also has to bump.
+    rules_version: Integer = board_rules_version()
 }
 
 ------------------------------------------------------------
@@ -394,7 +364,7 @@ config {
 -- == Coming up ==
 
 rule OpenBoardConnection {
-    when: StoreConnectionAttemptedAtStartup(operator)
+    when: startup/StoreConnectionAttemptedAtStartup(operator)
 
     requires:
         configured_store_server() != null
@@ -414,15 +384,12 @@ rule OpenBoardConnection {
         -- FirstConnectionLetsTheBoardDraw answers; a first attempt that fails
         -- aborts the launch instead (FirstConnectionFailureAbortsStartup).
         --
-        -- THIS REVERSES A DECISION, deliberately (Phase 12 of the migration,
-        -- task #4916). Until then the board drew first and connected after, so
-        -- that a slow or unreachable store cost a cold start nothing — the board
-        -- showed its local rows meanwhile. With the store mandatory there are no
-        -- local rows: a board drawn before its first connection would be empty,
-        -- would refuse every change (AWriteWithNoConnectionIsRefused), and
-        -- would have read its settings and repo paths from nothing. What is bought back is a board that is right the moment it
-        -- appears. What is paid is one round trip per cold start, bounded by
-        -- config.connect_timeout, and no offline start.
+        -- CONNECT FIRST, DRAW AFTER. There are no local rows: a board drawn
+        -- before its first connection would be empty, would refuse every
+        -- change (AWriteWithNoConnectionIsRefused), and would have read its
+        -- settings and repo paths from nothing. What is bought is a board that
+        -- is right the moment it appears. What is paid is one round trip per
+        -- cold start, bounded by config.connect_timeout, and no offline start.
         --
         -- ONLY THE FIRST ATTEMPT WAITS. Once the board has drawn, a dropped
         -- connection is the ordinary outage the rest of this file describes:
@@ -435,6 +402,10 @@ rule OpenBoardConnection {
 
 rule FirstConnectionLetsTheBoardDraw {
     when: InitialSubscriptionApplied(connection)
+
+    -- The operator is identified by this machine's host (core.allium:
+    -- Operator); the startup events below carry it on to startup.allium.
+    let operator = core/local_host()
 
     requires: not connection.board_drawn
 
@@ -455,6 +426,8 @@ rule FirstConnectionFailureAbortsStartup {
     when: ConnectionAttemptFailed(connection, reason)
         or InitialSubscriptionRefused(connection, reason)
 
+    let operator = core/local_host()
+
     requires: not connection.board_drawn
 
     ensures: StoreUnreachableAtStartup(operator, reason)
@@ -474,6 +447,7 @@ rule IdentityConflictAtStartupAbortsIt {
     when: host/UserIdentityConflict(stored, offered)
 
     let connection = the_board_connection()
+    let operator = core/local_host()
 
     requires: not connection.board_drawn
 
@@ -544,7 +518,7 @@ rule SubscribeOnceIdentityIsSettled {
         --     and the epic-less tasks they own (own_creations); own_tasks
         --     also the tasks run on a host this person owns (a current
         --     agent, or an open dispatch or session request, there), while
-        --     they still see them (task #98911, M12): the host's reactor
+        --     they still see them: the host's reactor
         --     acts on the task a request row names, so the task must
         --     arrive with the row, and its subagent rows with it;
         --   covered_epics, covered_tasks: the epics this person follows and
@@ -568,8 +542,7 @@ rule SubscribeOnceIdentityIsSettled {
         -- THE STORE WALKS THE TREE, THE BOARD DOES NOT. covered_epics is
         -- derived from the Subscription rows on the store's side, so a
         -- follow, an unfollow, a new sub-epic and a reparent change what the
-        -- board receives live, with no widening and no reassert. A refused
-        -- widening or a mid-walk thin subtree no longer exists.
+        -- board receives live, with no widening and no reassert.
         --
         -- Four asks stay narrowed by host, because a view serves every host
         -- this person owns and a request or setting is one machine's:
@@ -579,7 +552,7 @@ rule SubscribeOnceIdentityIsSettled {
         --
         -- WHY own_creations EXISTS, AND WHY IT IS UNCONDITIONAL. A reducer
         -- cannot return a value (see EveryMutationIsAtomicAndAnswered's
-        -- "ANSWERED, not merely performed" clause), so the only way this board
+        -- "a reply, not only an effect" clause), so the only way this board
         -- ever learns the id a create was given is by already being subscribed
         -- to a query that covers the new row once the store applies it — see
         -- CreatesRequireASettledIdentity below. own_tasks, own_epics and
@@ -612,7 +585,7 @@ rule SubscribeToThisHostsSettings {
         )
 
     @guidance
-        -- THE FOURTH ASK, AND THE ONLY ONE SCOPED BY MACHINE. Beside the three
+        -- THE SETTINGS ASK, SCOPED BY MACHINE. Beside the asks
         -- SubscribeOnceIdentityIsSettled makes by person, the board asks for
         -- this host's own core/Setting rows and no other host's
         -- (settings.allium: SettingsAreStoredPerHost). The host id is known
@@ -646,7 +619,7 @@ rule SubscribeToThisHostsDispatchRequests {
         )
 
     @guidance
-        -- THE FIFTH ASK, scoped by machine like the settings ask above: every
+        -- THE DISPATCH-REQUEST ASK, scoped by machine like the settings ask: every
         -- store-split.allium DispatchRequest row whose host is this machine,
         -- in every state. A request's host is always the machine that asked
         -- for it, so this delivers both the work this host must provision
@@ -676,8 +649,9 @@ rule SubscribeToThisHostsSessionRequests {
         )
 
     @guidance
-        -- THE SIXTH ASK, scoped by machine like the fifth, asserted beside
-        -- it: every store-split.allium SessionRequest row whose host is this machine, in every state. A session request
+        -- THE SESSION-REQUEST ASK, scoped by machine like the dispatch-request
+        -- ask and asserted beside it: every store-split.allium SessionRequest
+        -- row whose host is this machine, in every state. A session request
         -- names the host holding the task's worktree and window, which is the
         -- machine whose board the task's agent talks to, so this delivers the
         -- work this host must do (store-split.allium:
@@ -691,7 +665,7 @@ rule SubscribeToThisHostsSessionRequests {
         -- tears down like an exit_session row. The
         -- token check itself is the module's, over its own table
         -- (store-split.allium: RequestExitSession), not over these rows. Finished
-        -- rows are included for the same reason as the fifth ask: a row
+        -- rows are included for the same reason as the dispatch-request ask: a row
         -- leaving a state-filtered query would arrive as a delete, and the
         -- outcome would be lost.
         --
@@ -714,8 +688,8 @@ rule SubscribeToThisHostsFeedRequests {
         )
 
     @guidance
-        -- A HOST-SCOPED ASK (task #98873), scoped by machine like the fifth
-        -- and sixth and asserted beside them: every store-split.allium
+        -- THE FEED-REQUEST ASK, scoped by machine like the dispatch- and
+        -- session-request asks and asserted beside them: every store-split.allium
         -- FeedRequest row whose host is this machine, in every state, read
         -- through the visible_feed_requests view. The view answers a caller
         -- with the rows on the hosts its identity owns; the ask narrows that
@@ -725,7 +699,7 @@ rule SubscribeToThisHostsFeedRequests {
         -- host must do (feeds.allium: FeedTick picks the open rows up,
         -- including those a starting board receives in its initial rows, and
         -- ServeFeedRefreshRequest and ServeFeedTeardownRequest serve them).
-        -- Finished rows are included for the same reason as the fifth ask: a
+        -- Finished rows are included for the same reason as the dispatch-request ask: a
         -- row leaving a state-filtered query would arrive as a delete.
         --
         -- Unlike the dispatch and session asks, a feed request concerns no
@@ -766,17 +740,15 @@ rule SubscribeToAgents {
     ensures: AgentSubscriptionAsserted(connection: connection)
 
     @guidance
-        -- THE SEVENTH ASK (agents.allium, since A1): every Agent row,
-        -- unfiltered. The store's SQL cannot join an agent to the tasks a
-        -- board holds, the way work_package_links cannot be joined to their
-        -- packages. An agent row carries a task id, a name, a host, a window
-        -- and its lifecycle stamps, never the task's title or text, so
-        -- nothing private travels in it; a row whose task this board does not
-        -- hold draws nothing. The board needs every agent, ended ones too,
+        -- THE AGENTS ASK (agents.allium, A1): the Agent rows the
+        -- visible_agents view serves this identity — every agent, ended ones
+        -- too, of a task the caller holds, and every agent on a host the
+        -- caller owns. The board needs ended agents as well as current ones,
         -- because A2 resolves a name to its task on any task the board can
-        -- see. The HandedOutAgentName ledger is NOT asked for: only the
-        -- module's picker reads it. Re-asserted on every connection, like the
-        -- rest.
+        -- see. The owned-hosts leg keeps an agent this host runs on its board
+        -- after its task has left the caller's sight. The HandedOutAgentName
+        -- ledger is NOT asked for: only the module's picker reads it.
+        -- Re-asserted on every connection, like the rest.
         --
         -- A4: the agent row also carries the live-session facts (window, hook
         -- timestamps, subagent count, deferred Stop), and the stored task row
@@ -807,7 +779,7 @@ rule AViewUpdateNeverErasesTheRow {
         -- one: rows that differ only in a column the decoder ignores (such
         -- as pr_learnings_gate_shown_at) must still count as different, or
         -- the delete half of that update erases the row and every read of
-        -- the task answers "not found" until it is next written (task 98793).
+        -- the task answers "not found" until it is next written.
         --
         -- EVERY TABLE THAT MOVES BEHIND A VIEW takes this path, not just
         -- tasks and epics. This rule is built for those two first; each
@@ -913,57 +885,6 @@ rule RegisterHostOnRename {
 
 -- == What the board draws ==
 
-rule BoardReadsFromTheSubscription {
-    when: BoardNeedsRows()
-
-    let connection = the_board_connection()
-
-    requires: connection != null
-
-    ensures:
-        RowsDrawnFromTheSubscription(connection)
-
-    @guidance
-        -- ONE SOURCE. Every drawn board has a connection (OpenBoardConnection
-        -- runs before it draws), so the guard always holds and there is no
-        -- second branch: until task #4916 a board with no store drew from its
-        -- local database, and that install no longer exists.
-        --
-        -- NOT "the subscription, falling back to local". There is no fallback
-        -- and adding one would undo the design: a shared table has exactly one
-        -- copy, so the local rows on a board's disk are not a cache of the
-        -- store — they are whatever that install last wrote
-        -- before it started sharing, which may be months stale and may name
-        -- tasks that no longer exist. Serving them during an outage would put
-        -- a colleague's finished work back on screen as though it were live.
-        --
-        -- WHAT ARRIVES IS WHAT WAS ASKED FOR, and nothing else. The reader has
-        -- no path past the subscription, which is what makes
-        -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics worth anything: an ask
-        -- constrained to your own rows means nothing if the reader can reach
-        -- around it.
-        --
-        -- A ROW THAT CANNOT BE UNDERSTOOD IS DROPPED, not defaulted and not
-        -- fatal. A task carrying a status this binary does not know is missing
-        -- from the board rather than sitting on it under a plausible wrong one,
-        -- and the rows beside it are unaffected. The same bargain the local
-        -- store's bulk reads already make. A row whose status was REMOVED
-        -- (config.removed_statuses) is dropped too, but quietly and by a
-        -- different rule: see RowsWithARemovedStatusAreDropped.
-        --
-        -- EVERY SHARED READ, NOT ONLY THE DRAWING. "Rows" here is every read
-        -- of a shared row the board's own process makes — an MCP tool looking
-        -- up a task, a setting read
-        -- back after it was saved, the subscribed-epic list — and not only the
-        -- reads that put cards on screen. Until task #4916 only the drawing
-        -- (`store::BoardReads`), the knowledge base and usage had a store path,
-        -- and every other read went to a local table that
-        -- BoardWritesThroughTheStore had stopped writing: a task created a
-        -- moment earlier answered "not found". In the implementation every
-        -- `store::Store` read answers from the connection's `SharedRows`, the
-        -- rows its writes' reducers land in (`store_connection::StoreParts::build`).
-}
-
 rule SubscribedRowsArriveUnasked {
     when: StoreDeliversRow(connection, row)
 
@@ -1016,7 +937,7 @@ rule ADisconnectedBoardDrawsNoSharedRows {
 }
 
 rule RowsWithARemovedStatusAreDropped {
-    when: StoreDeliversRow(connection, row) or RowReadForImport(row)
+    when: StoreDeliversRow(connection, row) or seed/RowReadForImport(row)
 
     requires: row_status(row) in config.removed_statuses
 
@@ -1069,7 +990,7 @@ rule RowsWithARemovedStatusAreDropped {
         -- current one nor on config.removed_statuses is not this rule's: it
         -- stays an undecodable row, warned and counted as before
         -- (observability.allium: BulkRowDecodeFailed), and dropped from the
-        -- board as BoardReadsFromTheSubscription says.
+        -- board as AConnectedBoardDrawsOnlyDeliveredRows says.
         --
         -- SubscribedRowsArriveUnasked carries the converse guard, so a
         -- delivered row is either accepted there or dropped here, never both.
@@ -1090,7 +1011,7 @@ rule BoardWritesThroughTheStore {
         MutationSentToStore(connection, mutation)
 
     @guidance
-        -- THE MIRROR OF BoardReadsFromTheSubscription, and it has to be, or the
+        -- THE MIRROR OF AConnectedBoardDrawsOnlyDeliveredRows, and it has to be, or the
         -- two halves disagree about which copy is real. A board that read the
         -- store and wrote its own disk would make every change it performed
         -- invisible to itself the moment it was made: written to a copy nothing
@@ -1098,11 +1019,13 @@ rule BoardWritesThroughTheStore {
         -- as a success.
         --
         -- ONE PATH. Every drawn board has a connection, so there is no local
-        -- branch for a shared write to take instead (task #4916).
+        -- branch for a shared write to take instead. A store that receives
+        -- only some of a board's shared writes is the one state worse than no
+        -- store at all: it looks fine while the two copies drift apart, so no
+        -- shared write may ever be left on a path that skips the store.
         --
         -- NOT EVERY MUTATION IN THE SYSTEM — every mutation of a SHARED row,
-        -- which since Phases 9 to 11 of the migration includes this host's
-        -- settings, the knowledge base with its embeddings
+        -- which includes this host's settings, the knowledge base with its embeddings
         -- and retrievals, and usage telemetry. What stays local is this
         -- install's own identity: its Host row (id and label, mirrored to the
         -- shared registry by RegisterHostOnConnect) and the stored user
@@ -1168,61 +1091,15 @@ rule CreatesRequireASettledIdentity {
         -- itself. So "identity is settled" and "own_creations is already
         -- asked for" become true together, and a create that waits for the
         -- former is guaranteed the latter already holds by the time the store
-        -- answers it — which is the whole reason the read-back this task
-        -- exists to fix can work at all.
+        -- answers it — which is the whole reason a create can read back the
+        -- id it was given.
         --
-        -- ANSWERS sync.allium's own open question about whether a write should
-        -- wait for a settled identity rather than merely a connected transport
-        -- — for creates specifically. Every other mutation is unaffected: a
-        -- patch, a delete, a claim and the rest stamp nobody's name and so
-        -- have nothing here to wait for.
-}
-
-rule RefuseToStartWhereOnlySomeChangesReachTheStore {
-    when: startup/BoardDrawn()
-
-    requires:
-        configured_store_server() != null
-        and not every_shared_change_reaches_the_store()
-
-    ensures:
-        StartupAborted(reason: "some changes would not reach the store")
-        and BoardConnections.count = 0
-
-    @guidance
-        -- THE ONE STATE WORSE THAN NOT HAVING THE FEATURE, and the reason it is
-        -- worth a rule of its own rather than a note in a plan.
-        --
-        -- BoardWritesThroughTheStore says every shared change goes to the
-        -- store. While that is only MOSTLY true — while the migration that
-        -- moves them is part way through — a configured board writes some
-        -- tables to the store and some to its own disk. Nothing looks wrong.
-        -- Creating a task reaches the store; starting an agent on it does not;
-        -- the two disagree from that moment, and the first person to notice is
-        -- a colleague looking at a task with no session on it.
-        --
-        -- REFUSING IS THE SMALLER HARM. The operator finds out at the moment
-        -- they point the board at a store, which is the moment they can still
-        -- change their mind, rather than a week later from somebody else's
-        -- screen.
-        --
-        -- It aborts rather than degrading to a local board, and the difference
-        -- matters: an operator who asked for a shared board and silently got a
-        -- private one would go on believing their work was shared. Same
-        -- reasoning as startup.allium's TheBoardNeverDrawsForAnUnnamedHost.
-        --
-        -- This rule is expected to stop firing. `every_shared_change_reaches_the_store`
-        -- is a property of the implementation rather than of any board's state,
-        -- and the phase that finishes the move makes it true for good. It stays
-        -- in the spec afterwards because the next migration of this shape wants
-        -- the same guard, and because a rule that has been deleted cannot
-        -- explain why the guard existed.
-        --
-        -- IT NOW HOLDS BY CONSTRUCTION (task #4916). With the store mandatory a
-        -- shared mutation has one path — through the store — and no local
-        -- fallback for it to take instead, so there is no longer a
-        -- completeness flag to consult and no branch the guard could catch. The trigger is also gone as written: the board no longer
-        -- draws before its store is known to work (OpenBoardConnection).
+        -- ONLY CREATES WAIT FOR AN IDENTITY. Every other mutation (a patch, a
+        -- delete, a claim, an unsubscribe) stamps nobody's name, so none of
+        -- them waits on anything past a connected transport. The window
+        -- between acceptance and the identity verdict is real for them too,
+        -- but harmless: nothing in the written row could later read as
+        -- belonging to the wrong person.
 }
 
 rule AWriteWithNoConnectionIsRefused {
@@ -1313,7 +1190,7 @@ rule AStoreWithOtherRulesFailsTheAttempt {
         )
 
     @guidance
-        -- THE STARTUP VERSION GATE (store-split.allium, task #53255). It
+        -- THE STARTUP VERSION GATE (store-split.allium). It
         -- runs on every connection attempt, once the store has answered the
         -- connection with an identity but before the board counts the attempt
         -- as accepted (ConnectionAccepted, and the identity handshake it
@@ -1369,11 +1246,10 @@ rule ConnectionAttemptFailed {
         -- all of them — look at the reason — and the reason is carried, so
         -- nothing is lost by not branching.
         --
-        -- NOT THE FIRST-START FAILURE. Until Phase 12 (task #4916) a board whose
-        -- store was never reachable landed here and drew, disconnected, over
-        -- its local rows. With no local rows there is nothing to draw, so the
-        -- first attempt's failure aborts the launch instead
-        -- (FirstConnectionFailureAbortsStartup); this rule is every later one.
+        -- NOT THE FIRST-START FAILURE. A board that has not drawn has nothing
+        -- to draw while disconnected, so the first attempt's failure aborts
+        -- the launch instead (FirstConnectionFailureAbortsStartup); this rule
+        -- is every later one.
         --
         -- The counter increments here and nowhere else, which keeps the backoff
         -- reading one number that means one thing.
@@ -1509,7 +1385,7 @@ rule StopOnAUserIdentityConflict {
         --
         -- The `connected` guard is not a narrowing, it is the only state this
         -- can be reached from. The conflict is decided downstream of
-        -- ConnectionEstablished, which fires on the edge INTO `connected`, so a
+        -- ConnectionAccepted, which moves the connection INTO `connected`, so a
         -- connection that is not up has offered no identity for anyone to
         -- disagree with. Written out rather than left implicit because it is
         -- what makes the `failed` edge one the transition graph above admits.
@@ -1556,27 +1432,30 @@ rule SubscribeToEpic {
 }
 
 rule UnsubscribeFromEpic {
-    when: UnsubscribeFromEpic(operator, epic)
+    when: UnsubscribeFromEpic(operator, followed)
 
-    let subscription = core/Subscription{subscriber: core/local_host().owner, epic: epic}
+    -- The person unfollowing: this install's identity, never an argument.
+    let person = core/local_host().owner
+    let subscription = core/Subscription{subscriber: person, epic: followed}
 
     requires: subscription != null
 
     ensures: not exists subscription
     -- A poll claim must not outlive the coverage that made it workable. Every
     -- feed epic in the unfollowed epic's subtree (itself included) that this
-    -- person no longer covers loses any `core/PollOwner` row held by a host
-    -- this person owns. Atomic with the delete above, in the same store write.
+    -- person no longer covers once the follow is gone loses any
+    -- `core/PollOwner` row held by a host this person owns. Atomic with the
+    -- delete above, in the same store write.
     ensures:
-        for e in epic.subtree_epics:
-            if e.is_feed and not (e in covered_epics_of(operator)):
-                for owner_row in core/PollOwners.where(p =>
-                        p.scope = epic and p.scope_id = e.id
-                            and p.host.owner = operator):
-                    not exists owner_row
+        for e in followed.subtree_epics:
+            if e.is_feed and not (e in covered_epics_of(person)):
+                for claim in core/PollOwners where
+                        claim.scope = epic and claim.scope_id = e.id
+                            and claim.host.owner = person:
+                    not exists claim
 
     @guidance
-        -- THE SUBSCRIBER IS THE CALLER (task #98755, V5). As for
+        -- THE SUBSCRIBER IS THE CALLER. As for
         -- SubscribeToEpic, the store refuses a subscriber that is not the
         -- identity making the call, so a board cannot unfollow someone else
         -- (releasing their hosts' poll claims). The refusal is the same for a
@@ -1587,7 +1466,7 @@ rule UnsubscribeFromEpic {
         -- after losing sight of the epic, so a stale follow cannot become
         -- permanent.
         --
-        -- RELEASING THE CLAIM (task #8196). A feed epic this person no longer
+        -- RELEASING THE CLAIM. A feed epic this person no longer
         -- follows is invisible to their boards (`list_epics` answers from
         -- `covered_epics` UNION the `own_epics`/`own_tasks` views), so a claim they hold on it
         -- would stop the feed for EVERY board with no error: the owner never
@@ -1668,16 +1547,6 @@ invariant SubscriptionsCoverOnlyTheOwnBoardAndItsEpics {
 -- the collection it claims is empty, and naming it is the first half of adding
 -- it. There is nothing here to quantify over, which is exactly the claim.
 
--- A connection that has not settled an identity has not subscribed.
---
--- The ordering guarantee of SubscribeOnceIdentityIsSettled, restated as a
--- property of the state so it survives somebody adding a second path to
--- subscribing later.
-invariant NothingIsSubscribedBeforeAnIdentityExists {
-    for c in BoardConnections:
-        c.subscribed_epics.count > 0 implies c.is_identified
-}
-
 ------------------------------------------------------------
 -- Actor Declarations
 ------------------------------------------------------------
@@ -1706,6 +1575,8 @@ surface StoreBoundary {
     exposes:
         connection.server
         connection.subscribed_epics
+        -- What the store sends by (SendsOnlyWhatWasSubscribedTo).
+        connection.covered_epics
 
     provides:
         ConnectionAccepted(connection, identity)
@@ -1721,6 +1592,15 @@ surface StoreBoundary {
         -- FirstConnectionFailureAbortsStartup and
         -- ASubscriptionTheStoreRefusesIsAnOutage.
         InitialSubscriptionRefused(connection, reason)
+            when connection.status = connected
+        -- The store applied that ask: its rows have arrived. For
+        -- FirstConnectionLetsTheBoardDraw.
+        InitialSubscriptionApplied(connection)
+            when connection.status = connected
+        -- An update of a row served through a per-caller view, which reaches
+        -- the board as an insert and a delete of the same id, in either
+        -- order. For AViewUpdateNeverErasesTheRow.
+        ViewRowUpdated(connection, row_old, row_new)
             when connection.status = connected
         -- The rules version the store's module publishes, read once per attempt
         -- for AStoreWithOtherRulesFailsTheAttempt.
@@ -1763,7 +1643,7 @@ surface StoreBoundary {
         -- StoreRejectsAnInvalidMutation's all-or-nothing claim false, and there
         -- is no query a client could run afterwards to find out which half.
         --
-        -- ANSWERED, not merely performed. Several mutations return something
+        -- A REPLY, NOT ONLY AN EFFECT. Several mutations return something
         -- the caller needs in order to continue — the id of a task it is about
         -- to dispatch, whether a claim was won, what a cleared session was
         -- holding. A store that applied a write and said nothing would leave
@@ -1817,6 +1697,24 @@ surface StoreBoundary {
         -- that cannot report a drop.
 }
 
+-- Where a shared write enters this file. The operator's keys, the MCP tools
+-- and the board's own workers (the feed runner, the dispatch reactor) each
+-- decide WHICH mutation to make (tasks.allium, epics.allium and the rest);
+-- every one of them is sent by this board's process, and this file says only
+-- where it goes.
+surface BoardWrites {
+    facing _: core/BoardProcess
+
+    provides:
+        SharedRowMutationRequested(mutation)
+
+    @guarantee EverySharedWriteTakesThisPath
+        -- A mutation of a shared row reaches the store only as a
+        -- SharedRowMutationRequested, so BoardWritesThroughTheStore,
+        -- CreatesRequireASettledIdentity and AWriteWithNoConnectionIsRefused
+        -- see every one. No caller writes a shared row any other way.
+}
+
 surface ConnectionIndicator {
     facing operator: core/Operator
 
@@ -1845,8 +1743,8 @@ surface ConnectionIndicator {
         -- in the same plain style as the rest of the status bar. A board
         -- connected to the wrong store looks exactly like a healthy one — full
         -- of tasks, updating, quiet — and the address is the one thing that
-        -- tells them apart at a glance (task #28710: a board ran on an old
-        -- store for two days with nothing on screen to say so). The operator
+        -- tells them apart at a glance (a board has run on an old store for
+        -- two days with nothing on screen to say so). The operator
         -- chose this over showing it only for a named store.
 
     @guarantee EveryFailureNamesItself
@@ -1898,39 +1796,12 @@ surface EpicSubscriptionToggle {
 -- Open Questions
 ------------------------------------------------------------
 
--- ANSWERED. It is refused, loudly, and nothing changes anywhere — see
--- AWriteWithNoConnectionIsRefused and NoWriteIsEverQueued. Queueing lost on the
--- argument the question itself set up: a replayed write carries an intent
--- formed against a board state that no longer holds, and the operator was told
--- it had already worked. The refusal reaches somebody who is still looking at
--- the screen.
-
 open question "What is a board supposed to do with a change whose fate is unknown? EveryMutationIsAtomicAndAnswered admits acceptance and rejection, and a transport has a third outcome: the change was SENT and then the connection went, or the store never answered within config.mutation_timeout. It may or may not have been applied, and nothing here says who is told what. Re-sending is the one answer that is definitely wrong — it is the queue NoWriteIsEverQueued refuses, with the added hazard that the original may have landed."
-
--- ANSWERED, for the mutations that need a name to stamp. CreatesRequireASettledIdentity
--- requires a settled identity, not merely a connected transport, for every
--- create — a task or an epic — because each one stamps a creator and
--- there is no honest placeholder for "whoever this turns out to be". Every
--- other mutation (a patch, a delete, a claim, an unsubscribe) stamps nobody's
--- name, so none of them wait on anything past a connected transport: the
--- window the question raised — acceptance coming before the identity verdict —
--- is real for them too, but harmless, because there is nothing in the written
--- row that could later read as belonging to the wrong person.
 
 open question "Does a store that keeps accepting the connection and refusing its initial subscription ever get backed off? ConnectionAccepted resets `attempts` to 0 on acceptance, and ASubscriptionTheStoreRefusesIsAnOutage then adds one, so every cycle of that failure waits config.reconnect_backoff_base and the wait never grows towards config.reconnect_backoff_max — a refusal that lasts an hour is retried roughly every second for an hour, which is the hot loop the ceiling's own comment says the backoff exists to prevent. Should `attempts` reset only once the initial subscription is applied, rather than on acceptance?"
 
 open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 
--- ANSWERED. The board reads from the subscription now, and the round trip from
--- process start to a complete subscription is 4-44 ms on loopback against an
--- empty database, held under a ceiling by a test against a live instance. The
--- cold start is still not BLOCKED on it — OpenBoardConnection fires after the
--- board is drawn — so what the number really bounds is how long a configured
--- board shows nothing before it shows something.
-
 open question "Is a periodic refresh still worth keeping now that rows arrive unasked? It is a backstop against a delivery that never comes — a callback the SDK drops, a subscription that silently stops — and it costs nothing when nothing has changed. But a backstop nobody can observe failing is also a backstop nobody knows has failed, and the board would be quietly polling its way through a broken subscription rather than reporting one."
 
-
 open question "Is `failed` recoverable without restarting the board? It is terminal in the graph, so today an identity conflict is resolved by fixing the credential and starting again. Whether a resolved conflict should be able to re-open the connection in place is undecided, and depends on a remedy flow nobody has designed."
-
-open question "BoardConnection.covered_epics's poll-owner assumption (above, in the BoardConnection entity) is documented but not enforced: core/PollOwner decides which host runs a feed's recurring poll, independent of whether that host's own board follows the feed epic, and nothing releases a PollOwner claim when the claiming host unfollows — the claim is permanent (core.allium: PollOwner). Since task #4916 made the store mandatory and routed FeedRunner's own reads (list_epics, list_tasks_for_epic) through the subscription the same way retired_without_task already was, an unfollowed-but-still-claimed feed epic does not merely see a thinner view: FeedRunner never lists it at all, so it silently stops polling for every board, not just the poll owner's. Should claiming a PollOwner claim for an epic require (or force) following it, should unfollowing release a held claim for that scope, or is a silently-stopped feed an acceptable cost of a poll owner unfollowing?"

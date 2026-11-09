@@ -1,6 +1,6 @@
 //! Turning the shared store's rows into the board's own types.
 //!
-//! Spec: `docs/specs/sync.allium`'s `BoardReadsFromTheSubscription`, and
+//! Spec: `docs/specs/sync.allium`'s `AConnectedBoardDrawsOnlyDeliveredRows`, and
 //! `spacetime/module/README.md`'s "Why almost nothing here is `Option`" for the
 //! sentinels this file undoes.
 //!

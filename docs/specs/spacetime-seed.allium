@@ -935,7 +935,12 @@ rule ImportOldStore {
     requires: no_id_conflict(snapshot, target)
 
     ensures:
-        RowsWithARemovedStatusAreDropped(snapshot)
+        -- Every task and epic row read from the source passes through
+        -- sync.allium: RowsWithARemovedStatusAreDropped, the one removed-status
+        -- predicate the board's subscription decode also asks.
+        for row in snapshot.rows:
+            RowReadForImport(row)
+        ImportDroppedRemovedStatusRows(snapshot)
         DependentsOfDroppedRowsAreDropped(snapshot)
         OrphansLeaveTheirDroppedEpic(operator: operator, snapshot: snapshot)
         BurnIdSequences(snapshot: snapshot)
@@ -1039,7 +1044,7 @@ rule ImportOldStore {
 }
 
 rule DependentsOfDroppedRowsAreDropped {
-    when: RowsWithARemovedStatusAreDropped(snapshot)
+    when: ImportDroppedRemovedStatusRows(snapshot)
 
     ensures:
         for row in snapshot.rows where names_a_dropped_task(row):

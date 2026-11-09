@@ -2013,8 +2013,7 @@ rule StopTheManagedStoreWhenStartupAborts {
         -- store this launch started or adopted is stopped before the launch
         -- reports. It covers every abort that can follow the managed store
         -- coming up — the start timing out, either publish failure, the
-        -- first connection failing (AbortWhenTheStoreCannotBeReached), and
-        -- sync.allium's RefuseToStartWhereOnlySomeChangesReachTheStore — so a
+        -- first connection failing (AbortWhenTheStoreCannotBeReached) — so a
         -- failed launch never leaves a detached store behind it.
         --
         -- Aborts that come before ManagedStoreRequested need no stop: nothing

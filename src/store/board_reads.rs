@@ -1,6 +1,6 @@
 //! Where the board gets the rows it draws.
 //!
-//! Spec: `docs/specs/sync.allium`'s `BoardReadsFromTheSubscription`.
+//! Spec: `docs/specs/sync.allium`'s `AConnectedBoardDrawsOnlyDeliveredRows`.
 //!
 //! # One read path for cards
 //!

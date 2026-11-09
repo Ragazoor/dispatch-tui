@@ -65,7 +65,7 @@ entity DataDirectory {
         -- MCP, not for `repo`, `plan`, `prune-repo-paths`, `agent-tree`,
         -- `agent-diff`, the hooks, `uninstall` or any subcommand added later.
         -- The shared domain is read from and written to the store (sync.allium:
-        -- BoardReadsFromTheSubscription, BoardWritesThroughTheStore); this
+        -- AConnectedBoardDrawsOnlyDeliveredRows, BoardWritesThroughTheStore); this
         -- install's identity is read from and written to the host file
         -- (host.allium: IdentityLivesInHostFile).
         --

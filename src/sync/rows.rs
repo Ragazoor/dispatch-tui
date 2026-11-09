@@ -1,6 +1,6 @@
 //! What the subscription has delivered, as the board's own types.
 //!
-//! Spec: `docs/specs/sync.allium`'s `BoardReadsFromTheSubscription` and
+//! Spec: `docs/specs/sync.allium`'s `AConnectedBoardDrawsOnlyDeliveredRows` and
 //! `SubscribedRowsArriveUnasked`.
 //!
 //! # This is not a cache

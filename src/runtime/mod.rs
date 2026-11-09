@@ -656,7 +656,7 @@ struct TuiRuntime {
     database: Arc<dyn store::TaskReadStore>,
     /// Where the board's CARDS come from — see
     /// [`crate::store::BoardReads`] and `docs/specs/sync.allium`'s
-    /// `BoardReadsFromTheSubscription`.
+    /// `AConnectedBoardDrawsOnlyDeliveredRows`.
     ///
     /// The same `Store` as `database`, typed for drawing: this one answers
     /// "what is on the board?" — the reads the row-change pump and the

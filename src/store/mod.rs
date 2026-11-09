@@ -1230,7 +1230,7 @@ impl<
 ///
 /// - **reads** answer from [`SharedRows`](crate::sync::SharedRows), the live
 ///   view of this connection's subscriptions
-///   (`sync.allium: BoardReadsFromTheSubscription`);
+///   (`sync.allium: AConnectedBoardDrawsOnlyDeliveredRows`);
 /// - **writes** are encoded here and sent as reducer calls through a
 ///   [`ReducerCaller`](crate::sync::ReducerCaller)
 ///   (`sync.allium: BoardWritesThroughTheStore`);

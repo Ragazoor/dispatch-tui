@@ -3,7 +3,7 @@ use super::*;
 
 /// The board's card reads and the store's own reads are one path over one
 /// set of rows: a write through the handle is visible through both, with no
-/// second copy to keep in step (`sync.allium: BoardReadsFromTheSubscription`).
+/// second copy to keep in step (`sync.allium: AConnectedBoardDrawsOnlyDeliveredRows`).
 #[tokio::test]
 async fn the_board_reads_and_the_store_answer_from_the_same_rows() {
     let db = Arc::new(Store::open_in_memory().unwrap());
