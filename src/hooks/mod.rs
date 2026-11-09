@@ -332,12 +332,11 @@ pub enum GateVerdict {
 /// `dispatch pr-gate <id>`: the one hook whose answer the tool call waits on.
 ///
 /// Unlike the observers it cannot simply drop its delivery when no board
-/// answers, because its job *is* to answer. It **fails open** — every outcome
-/// short of a first-attempt verdict returns [`GateVerdict::Allow`], including
-/// an unreachable board, a board that could not decide, and an answer this
-/// version cannot read. An unreachable board still propagates its error to
-/// the caller, so the operator hears about it; what it must not do is stand
-/// between an agent and its submission. The gate is a one-time reminder
+/// answers, because its job *is* to answer. It **fails open**: only a
+/// first-attempt verdict blocks. An unreachable board, a board that could not
+/// decide and an answer this version cannot read all return `Err`, which the
+/// caller reports and exits with a code Claude Code treats as allow; what it
+/// must not do is stand between an agent and its submission. The gate is a one-time reminder
 /// rather than enforcement, which is what makes that trade the right way
 /// round. See `PrLearningsGate` in `docs/specs/pr-workflow.allium`.
 pub async fn run_pr_gate(port: u16, id: TaskId) -> Result<GateVerdict> {

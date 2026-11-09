@@ -142,8 +142,7 @@ impl TaskService {
     }
 
     /// `KillWindowOfFailedExitSession`: a close whose teardown failed — or whose
-    /// row was failed by the backstop, a restart or the task's deletion before
-    /// it ran — still owes its window a kill, because the close already cleared
+    /// row was failed by the backstop or a restart before it ran — still owes its window a kill, because the close already cleared
     /// the window from the task and nothing else would ever kill it. Best
     /// effort, nothing reported: the row is already finished.
     pub async fn tear_down_failed_exit_window(&self, request: &SessionRequest) {

@@ -158,6 +158,8 @@ rule PollPrStatus {
         -- with the first. Only a host-less task (an "open PRs"-style feed
         -- upserted it straight into review with no dispatch, so it never got
         -- a worktree — see feeds.allium: UpsertFeedTasks) needs one.
+        -- Read before the ensures: a guard there sees the resulting state.
+        let was_unreachable = task.sub_status = core/SubStatus.pr_unreachable
         let poll_owner = if task.host = null: core/PollOwner{scope: task, scope_id: task.id} else: null
         let owns = task.host != null or not exists poll_owner or poll_owner.host = local_host()
 
@@ -231,7 +233,11 @@ rule PollPrStatus {
                             consecutive_transient_failures: 0,
                             next_poll_at: null
                         )
-                    if failures >= core/config.pr_poll_permanent_failure_threshold:
+                    -- A task already pr_unreachable (a restart re-polled it
+                    -- and it failed again) is left as it is: no second
+                    -- report or notice, only the failure's own log line.
+                    if failures >= core/config.pr_poll_permanent_failure_threshold
+                        and not was_unreachable:
                         task.sub_status = core/SubStatus.pr_unreachable
                         task.updated_at = now
                         PrPollGaveUp(task: task, reason: outcome.reason)
@@ -451,13 +457,13 @@ rule ClosePrOnDone {
     ensures: PrCloseRequested(task: task, url: task.url.url)
 
     @guidance
-        -- Every route into Done carries this, for the same reason
-        -- PhoenixRespawn (tasks.allium) fires on every route in: the trigger
-        -- is the status transition itself, not any one operator action.
+        -- Every route into Done but one carries this: the trigger is the
+        -- status transition itself, not any one operator action.
         -- transitions_to reaches all five routes — see PhoenixRespawn's
         -- guidance for the full list (ConfirmDone, EditTask's STATUS
         -- section, update_tasks' status="done" path, ExitSession's rebase
-        -- and done branches, and PrMerged).
+        -- and done branches, and PrMerged). PrMerged is the exception: see
+        -- below.
         -- The gh call needs a host. ConfirmDone and EditTask write through
         -- the board's TaskService::update_task (src/service/tasks/crud.rs),
         -- whose module reducer writes a windowless close row when the call
@@ -473,13 +479,10 @@ rule ClosePrOnDone {
         -- a row that fails before its host serves it leaves the PR open,
         -- accepted as built and flagged for user review.
         --
-        -- Fired for PrMerged deliberately, not by oversight. Closing a PR
-        -- that just merged is a no-op `gh` itself refuses, and there is no
-        -- cheap signal at either writer distinguishing "entered done
-        -- because my own PR was just merged" from any other route in —
-        -- threading a new skip flag through every caller to avoid one
-        -- harmless, quietly-logged `gh` error is not worth the seam it
-        -- would add. See below for how that outcome is logged.
+        -- NOT run for PrMerged. The merge reaches Done through its own
+        -- report (store-split.allium: ReportPrStatus), which writes no close
+        -- row, and the host's merge handling kills the window without a gh
+        -- call. A merged PR has nothing to close: `gh` itself refuses.
         --
         -- NOT fired for PrClosed (above): that rule leaves task.status at
         -- review, so it never crosses this trigger — a closed-without-merge
@@ -654,9 +657,10 @@ rule WrapUpRebase {
 rule WrapUpPr {
     when: mcp/WrapUpRequested(task, host, pr)
 
-    -- Available from any running or review task with a worktree, asked by
-    -- the task's own host. The module's RequestWrapUp (store-split.allium)
-    -- owns acceptance and every refusal; these mirror its preconditions.
+    -- Applies only to a request the module accepts: store-split.allium's
+    -- RequestWrapUp owns acceptance and every refusal (a review-tagged task,
+    -- another owner, an open session request). The three requires below are
+    -- the ones this rule's guidance leans on, not the whole set.
     requires: task.status = review or task.status = running
     requires: task.worktree != null
     requires: task.host = host
@@ -722,8 +726,8 @@ rule WrapUpPr {
 rule WrapUpDone {
     when: mcp/WrapUpRequested(task, host, done)
 
-    -- As WrapUpPr: these mirror store-split.allium's RequestWrapUp, which
-    -- owns acceptance and every refusal.
+    -- As WrapUpPr: only an accepted request; store-split.allium's
+    -- RequestWrapUp owns acceptance and every refusal.
     requires: task.status = review or task.status = running
     requires: task.worktree != null
     requires: task.host = host
@@ -773,8 +777,6 @@ rule ExitSession {
     -- for the host's teardown (ExitSessionTeardown below). Everything here
     -- lands in that same transaction, or nothing does.
 
-    let was_running = task.status = running
-
     ensures:
         current_agent(task).tmux_window = null
         if action = pr:
@@ -785,8 +787,7 @@ rule ExitSession {
             task.status = done
             task.sub_status = default_sub_status(done)
             task.completed_at = now
-        if was_running:
-            current_agent(task).stop_pending = false
+        current_agent(task).stop_pending = false
         task.updated_at = now
 
     -- The epic status rollup for the closed task's epic chain, in the same
