@@ -19,6 +19,7 @@
 --           delete_learning) and the dispatch-time injection path.
 
 use "./core.allium" as core
+use "./mcp-task-tools.allium" as mcp
 
 -- Entity and enum definitions live in core.allium:
 --   core/Learning         — persisted knowledge entry (full field set + transition graph)
@@ -482,9 +483,10 @@ rule AugmentDispatchPromptWithLearnings {
 }
 
 rule WrapUpRateLearningNudge {
-    when: WrapUp(task, action)
+    when: mcp/WrapUpRequested(task, host, action)
 
     requires: action = pr
+    requires: task.host = host
 
     ensures: RateLearningNudged(task: task)
 

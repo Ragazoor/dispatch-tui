@@ -589,6 +589,9 @@ surface DispatchCommandLine {
         CliAttachPlanRequested(task_id, path)
         CliPaneRendererStarted(invocation, task_id)
         CliPaneRendererStopped(renderer)
+        -- `dispatch pr-gate <id>`, run by the pr-learnings PreToolUse hook
+        -- (pr-workflow.allium: PrLearningsGate).
+        PrLearningsGateCheck(task)
         -- `dispatch verify-feed <command>` (feeds.allium: VerifyFeed).
         VerifyFeedCommand(command)
 

@@ -110,10 +110,9 @@ pub use worktree::{branch_from_worktree, teardown_task, TeardownFailure};
 // PR types
 // ---------------------------------------------------------------------------
 //
-// PR creation moved to the agent /wrap-up skill — see
+// The agent creates its own PR through the /wrap-up skill — see
 // plugin/skills/wrap-up/SKILL.md and the WrapUpPr rule in
-// docs/specs/tasks.allium. The dispatch-side `create_pr` and `merge_pr`
-// helpers have been removed; only the status-check helper remains here.
+// docs/specs/pr-workflow.allium. Dispatch only reads PR status here.
 
 /// What `gh pr view` printed, untouched: the state word and the review
 /// decision (empty for a repo without branch protection). The board does not
