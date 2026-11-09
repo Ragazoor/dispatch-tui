@@ -266,14 +266,14 @@ rule UpdateTaskViaMcp {
 
     -- sub_status must be valid for the task's current (or new) status
     --
-    -- ENFORCED BY THE STORE (store-split.allium M2, task #53255): the
+    -- ENFORCED BY THE STORE (store-split.allium S1): the
     -- patch_task reducer checks the sub_status against the status the row
     -- will hold after the patch, so the verdict is the same for every client
     -- and is read from the true row, not a subscription view. The service
     -- passes the sub_status through. The refusal reads "sub_status 'x' is not
     -- valid for status 'y'" and reaches the caller as an invalid-params error.
     -- The same table now binds every store writer that moves a sub_status,
-    -- not only this patch (store-split.allium: SubStatusMovesMustBeLegal).
+    -- not only this patch (tasks.allium: SubStatusMovesMustBeLegal).
     -- `sub_status_valid_for(sub_status, status)` is a black box naming the
     -- store's legality table, core.allium's Task.SubStatusFitsStatus.
     requires:
@@ -311,9 +311,8 @@ rule UpdateTaskViaMcp {
         -- moves in tasks.allium do. Without this an agent that moves its own
         -- task out of running and later back in would carry a Stop from the
         -- earlier turn, which the next drain would apply against the new one.
-        -- See core/Task's PendingStopOnlyWhileRunning invariant. Since
-        -- store-split M7 the module's patch_task applies this clear in the
-        -- same write (store-split.allium, X2); the board adds nothing.
+        -- See core/Task's PendingStopOnlyWhileRunning invariant. The
+        -- module's patch_task applies this clear in the same write (store-split.allium, X2); the board adds nothing.
         if status != null and status != running and prior_status = running:
             current_agent(task).stop_pending = false
     ensures:
@@ -448,7 +447,7 @@ rule UpdateTaskViaMcp {
         -- path, through the module's patch_task, which stamps completed_at on
         -- entering Done) and MarkTaskDoneViaMcp below (the MCP path, through
         -- the module's close_task; store-split.allium: RequestCloseTask).
-        -- Since store-split M7 the board stamps nothing itself (X2): a board
+        -- The board stamps nothing itself (store-split X2): a board
         -- that needs the stamp re-reads the task.
         -- The `status` argument's description lists the statuses and nothing
         -- more. It used to carry the resume-a-crashed-task story and an aside
@@ -474,12 +473,12 @@ rule UpdateTaskViaMcp {
         --
         -- ONE CALL. The service sends an explicit epic_id and the patch
         -- (repo_path, sub_status, status, the rest) to the store as one
-        -- update_task call (store-split.allium: UpdateTaskIsOneTransaction),
+        -- update_task call (tasks.allium: UpdateTaskIsOneTransaction),
         -- one transaction: a patch the store refuses leaves the epic, the
         -- repo and every other field as they were. A call that changes both
         -- epic_id (to a grouped root) and repo_path lands where routing by the
         -- NEW repo_path puts it. The epic_id never rides in patch_task, which
-        -- refuses one (store-split.allium: PatchTaskNeverMovesAnEpic).
+        -- refuses one (tasks.allium: PatchTaskNeverMovesAnEpic).
 }
 
 rule MarkTaskDoneViaMcp {
@@ -528,7 +527,7 @@ rule MarkTaskDoneViaMcp {
     -- target statuses. A task with no live tmux_window (never dispatched, or
     -- already detached) closes with nothing to tear down.
 
-    -- Since store-split M7 the tool ASKS and the module closes: one
+    -- The tool ASKS and the module closes: one
     -- close_task call naming this board's host (store-split.allium:
     -- RequestCloseTask, X1). In one transaction the module writes Done (a
     -- done -> done re-close keeps the task's completed_at; every other prior
@@ -546,8 +545,7 @@ rule MarkTaskDoneViaMcp {
     -- No SessionClosed, therefore no epic chain. This is where this path
     -- deliberately diverges from ExitSession: the terminal fields and a tmux
     -- teardown are common to both (applied by the module and torn down by the
-    -- host on both routes, for exit_session since store-split M5 and for this
-    -- path since M7), the chain is not.
+    -- host on both routes), the chain is not.
     --
     -- Why. SessionClosed is the signal AutoDispatchNextSubtask (epics.allium)
     -- keys on, and the chain's whole value is that the successor starts from a
@@ -581,14 +579,8 @@ rule MarkTaskDoneViaMcp {
         -- of the close-only error this rule promises.
         --
         -- From there, this path calls the close_task reducer
-        -- (store-split.allium: RequestCloseTask) and nothing else. Until
-        -- store-split M7 it closed in the board instead, through
-        -- allow-phantom-symbol: removed in M7, history
-        -- close_session and kill_session_window via a `perform_close` helper
-        -- that exit_session shared before M5; between M5 and M7 the two
-        -- closes applied the same terminal fields by two implementations.
-        -- M7 removed that board-side close (close_session, perform_close and
-        -- its close_persisted gate): both closes are now module
+        -- (store-split.allium: RequestCloseTask) and nothing else. The board
+        -- does not close: both closes are module
         -- transactions, and both teardowns are the host's, from a session
         -- request row (pr-workflow.allium: ExitSessionTeardown). Only the
         -- request validation (the two requires above), the response text,
@@ -596,7 +588,7 @@ rule MarkTaskDoneViaMcp {
         -- path.
         --
         -- The chain is not part of this path at all. It is not suppressed by
-        -- a flag: since M5 it runs inside the module's exit_session
+        -- a flag: it runs inside the module's exit_session
         -- transaction (epics.allium: AutoDispatchNextSubtask), which this
         -- path never reaches. See the no-SessionClosed note above for why
         -- this path must not chain.
@@ -668,8 +660,7 @@ rule MarkTaskDoneViaMcp {
         -- is left to its own machine (store-split.allium, X1). Boards learn of
         -- the close through their subscriptions; this board also sends its
         -- own task-changed notification (and epic-changed, for a task in an
-        -- epic) after the call, on either outcome. The response text is
-        -- unchanged by M7. No epic auto-dispatch chain runs on either
+        -- epic) after the call, on either outcome. No epic auto-dispatch chain runs on either
         -- outcome, so the response text never names a chained subtask —
         -- unlike exit_session's, which does.
         --
@@ -719,8 +710,7 @@ rule PrFinalisationReflectionNudge {
         -- action = pr (status -> review plus a pr-typed url, set
         -- unconditionally regardless of any prior url), but that close is the
         -- module's (pr-workflow.allium: ExitSession, run inside
-        -- store-split.allium's RequestExitSession since M5; before M5 the
-        -- board's close_session), which computes no was_pr_finalisation, and
+        -- store-split.allium's RequestExitSession), which computes no was_pr_finalisation, and
         -- handle_exit_session (src/mcp/handlers/tasks/wrap_up.rs) never calls
         -- reflection_nudge. So the nudge only appears when a caller invokes the
         -- update_tasks MCP tool directly to link a PR, bypassing
@@ -1280,7 +1270,7 @@ rule DispatchTaskViaMcp {
         -- (AutoDispatchNextSubtask in epics.allium, keyed on the SessionClosed
         -- that only a close which took effect emits).
         --
-        -- == A request, then a capped wait (store-split M4) ==
+        -- == A request, then a capped wait (store-split.allium: DispatchRequest) ==
         -- The call writes a dispatch request (store-split.allium:
         -- RequestDispatch), which is also the claim: the backlog -> running
         -- transition is taken conditionally in the same transaction, so a
@@ -1295,8 +1285,7 @@ rule DispatchTaskViaMcp {
         -- The call then waits on the request row, for at most
         -- config.dispatch_task_wait_cap, and answers by the row's state:
         --   - dispatched: the worktree path and tmux window, and whether the
-        --     worktree was created or reused (below) — the same success
-        --     shape as before M4.
+        --     worktree was created or reused (below).
         --   - failed: an error carrying the row's reason. The claim has
         --     already been released by the module (store-split.allium:
         --     ReleaseClaimOfFailedRequest), so the task is left in backlog
@@ -1540,7 +1529,7 @@ rule WrapUpViaMcp {
     -- deferred to the single ExitSessionViaMcp call. pr_url is no longer a
     -- wrap_up param — it travels with exit_session instead.
     --
-    -- Since store-split M5 the tool ASKS: one request_wrap_up call naming
+    -- The tool ASKS: one request_wrap_up call naming
     -- this board's host (store-split.allium: RequestWrapUp). For rebase the
     -- host's board then runs the rebase (pr-workflow.allium: WrapUpRebase);
     -- for done and pr the module writes the row
@@ -1563,8 +1552,8 @@ rule WrapUpViaMcp {
         -- removes the old asymmetry where done/pr mutated status inside
         -- wrap_up while rebase deferred to exit_session.
         --
-        -- == The request, then a wait (store-split M5) ==
-        -- The tool checks the request first, in today's order: wrappable
+        -- == The request, then a wait (store-split.allium: SessionRequest) ==
+        -- The tool checks the request first, in this order: wrappable
         -- (running or review, a worktree, ReviewTasksAreNotWrappedUp), then
         -- WrapUpRefusesUnfinishedWork (commit), then for rebase
         -- the branch. Only then does it call request_wrap_up. It subscribes to the request rows' changes BEFORE
@@ -1739,7 +1728,7 @@ rule WrapUpViaMcp {
         -- intended shape: a review agent stops when it has presented its
         -- findings, exactly as build_prompt's review runbooks describe.
         --
-        -- Since store-split M5 the refusal is the MODULE's, by decision with
+        -- The refusal is the MODULE's, by decision with
         -- the user: request_wrap_up refuses a review-tagged task (pr_review,
         -- dependabot or release_please; store-split.allium: RequestWrapUp,
         -- W2), so no client can wrap one
@@ -1763,7 +1752,7 @@ rule ExitSessionViaMcp {
     requires: token != null
     requires: action != null
 
-    -- Since store-split M5 the tool ASKS: one request_exit_session call
+    -- The tool ASKS: one request_exit_session call
     -- (store-split.allium: RequestExitSession). The module checks the token
     -- against the request rows, and in the same transaction applies the
     -- close (pr-workflow.allium: ExitSession), consumes the token, runs the
@@ -1820,7 +1809,7 @@ rule ExitSessionViaMcp {
         -- chained_task), "Session closed. Dispatching next epic subtask #<id>
         -- '<title>'."
         --
-        -- DECISION (with the user, store-split M5): the tool does NOT wait for
+        -- DECISION (with the user, store-split W4): the tool does NOT wait for
         -- the window teardown. It answers as soon as the module accepts the
         -- close. The teardown kills this agent's own window, so a reply that
         -- waited for it would never be read, and a failed teardown does not
@@ -1828,12 +1817,10 @@ rule ExitSessionViaMcp {
         -- outcome is recorded on the exit_session row, not in the response.
         --
         -- Refused: the error above. Nothing changed, the token is still
-        -- valid, and the agent fixes the cause and calls again — CHANGED in
-        -- M5: before, the token was consumed ahead of a terminal write that
-        -- could fail, so a failed close was reported as a success telling the
-        -- agent to stop and hand back to the human. That state no longer
-        -- exists (pr-workflow.allium: ExitSession, "A close that does not
-        -- take effect").
+        -- valid, and the agent fixes the cause and calls again. The token is
+        -- never consumed ahead of a terminal write that could fail
+        -- (pr-workflow.allium: ExitSession, "A close that does not take
+        -- effect").
         --
         -- No answer from the store (a transport error): the call may or may
         -- not have landed. The tool settles it from the rows: an exit_session
@@ -2359,4 +2346,4 @@ surface McpContextResources {
 
 open question "update_tasks' typed-url contract is now to be stated by the schema: url_type as an enum, and url_type required whenever url is non-empty. The second is a conditional requirement (JSON Schema if/then or a top-level combinator), and tool input schemas reaching Claude may not accept one at the top level. If the conditional cannot be expressed, does the url description keep one clause stating the dependency, or does the contract live only in the validation error?"
 
-open question "update_tasks naming a specific repo-group sub-epic in epic_id while also changing repo_path to a different repo: UpdateTaskViaMcp's ensures says the assignment is direct (route_target of a sub-epic is the sub-epic), but since store-split M2 the relink is written first and patch_task's repo change then re-routes the task to the sub-epic for the new repo, so the explicit sub-epic is overridden (and deleted if left empty). Before M2 the explicit sub-epic won. Which is intended: does an explicit sub-epic win over the new repo, or does the repo always decide inside a grouped subtree?"
+open question "update_tasks naming a specific repo-group sub-epic in epic_id while also changing repo_path to a different repo: UpdateTaskViaMcp's ensures says the assignment is direct (route_target of a sub-epic is the sub-epic), but the relink is written first and patch_task's repo change then re-routes the task to the sub-epic for the new repo, so the explicit sub-epic is overridden (and deleted if left empty). Which is intended: does an explicit sub-epic win over the new repo, or does the repo always decide inside a grouped subtree?"

@@ -28,7 +28,7 @@ fn repo_name_from_url_returns_other_for_non_github() {
     assert_eq!(repo_name_from_url("https://gitlab.com/org/repo"), "other");
 }
 
-/// The store decides feed routing now (store-split M3); these are the
+/// The store decides feed routing (`feeds.allium: IngestFeedEmission`); these are the
 /// module's twins of the two URL helpers, and must not drift.
 #[test]
 fn url_helpers_agree_with_the_modules_twins() {

@@ -1,4 +1,4 @@
-//! Dispatch requests (store-split M4): reads from this host's subscribed rows,
+//! Dispatch requests (`store-split.allium: DispatchRequest`): reads from this host's subscribed rows,
 //! writes as the module's request reducers, always naming THIS host.
 
 use anyhow::Result;

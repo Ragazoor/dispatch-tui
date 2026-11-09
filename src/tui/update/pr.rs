@@ -24,7 +24,7 @@ fn transient_backoff(consecutive_transient_failures: u32) -> Duration {
 impl App {
     /// The desktop notification, when notifications are enabled, for a PR event
     /// the module has just recorded. The task write itself is the module's
-    /// (`store-split.allium: ReportPrStatus`); the board's in-memory task moves
+    /// (`pr-workflow.allium: ReportPrStatus`); the board's in-memory task moves
     /// when the store's row arrives, so nothing here mutates it.
     fn pr_notification(&self, title: &str, body: String) -> Option<Command> {
         self.notifications_enabled.then(|| {

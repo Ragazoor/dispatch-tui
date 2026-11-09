@@ -1,6 +1,6 @@
 use super::*;
 
-/// store-split M5 (`store-split.allium`: `RequestWrapUp` and the rules after
+/// Session requests (`store-split.allium`: `RequestWrapUp` and the rules after
 /// it). The in-memory caller serves wrap-up and exit-session requests the way
 /// the real module does: the request and its refusals, the claim that clears a
 /// Conflict, both reports with the module setting the conflict, the token
@@ -9,7 +9,7 @@ use super::*;
 /// calls, with the same outcome on both sides.
 ///
 /// The module's scheduled backstop (`expire_session_request`) is not driven
-/// here, as for M4's: no client may call it. The double's stand-in is pinned
+/// here, as for the dispatch requests': no client may call it. The double's stand-in is pinned
 /// by `src/sync/memory_caller/tests/session_requests.rs`.
 #[test]
 fn memory_caller_serves_session_requests_like_the_real_module() {

@@ -3,12 +3,12 @@ use super::*;
 #[cfg(test)]
 mod task_rows;
 
-/// The data rules of store-split.allium step M2 (task #53255), as the pure
+/// The task and epic data rules (`tasks.allium`, `epics.allium`), as the pure
 /// functions the reducers call. See `rules.rs`.
 #[cfg(test)]
 mod rules;
 
-/// The dispatch-request rules of store-split.allium step M4 (task #53257), as
+/// The dispatch-request rules of store-split.allium (D1-D12), as
 /// the pure functions the reducers call (`dispatch_request.rs`).
 ///
 /// A unit test inside this crate cannot build a `ReducerContext`, so each
@@ -16,7 +16,7 @@ mod rules;
 /// writes, the transaction and the scheduled timer are pinned end to end by the
 /// in-memory reducer tests in `spacetime/module-tests/tests/dispatch_requests.rs`,
 /// which advance `TestClock` past the deadline and run `expire_dispatch_request`,
-/// and by the live-store tests in `tests/spacetime_module.rs` ("store-split M4").
+/// and by the live-store tests in `tests/spacetime_module.rs` (the dispatch request tests).
 /// What the backstop does to a row whose deadline has passed is also pinned HERE,
 /// on the pure pieces it composes ([`dispatch_request_is_open`] and
 /// [`failed_request_row`]), and by the in-memory double's stand-in
@@ -24,15 +24,15 @@ mod rules;
 #[cfg(test)]
 mod dispatch_requests;
 
-/// The session-request rules of store-split.allium step M5 (task #53258), as
+/// The session-request rules of store-split.allium (W1-W13), as
 /// the pure functions the reducers call (`session_request.rs`).
 ///
-/// As for M4's `dispatch_requests` above: a unit test inside this crate cannot
+/// As for `dispatch_requests` above: a unit test inside this crate cannot
 /// build a `ReducerContext`, so each reducer's DECISION is pinned here as a pure
 /// function over rows. The table writes, the transaction and the scheduled timer
 /// are pinned end to end by `spacetime/module-tests/tests/session_requests.rs`
 /// (which time-travels the backstop with `TestClock`) and by the live-store tests
-/// in `tests/spacetime_module.rs` ("store-split M5"). What the backstop does to a
+/// in `tests/spacetime_module.rs` (the session request tests). What the backstop does to a
 /// row whose deadline has passed is also pinned HERE, on the body
 /// `expire_session_request` runs ([`expire_session_request_row`]).
 #[cfg(test)]

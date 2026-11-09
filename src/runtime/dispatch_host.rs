@@ -1,4 +1,4 @@
-//! The board's host reactor for dispatch request rows (store-split M4).
+//! The board's host reactor for dispatch request rows (`store-split.allium: DispatchRequest`).
 //!
 //! Spec: `docs/specs/store-split.allium` — `HostClaimsDispatch`,
 //! `HostRestartFailsInterrupted` and D5 — and `docs/specs/dispatch.allium:

@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Dispatch as request rows — the board's launch paths and its host reactor
-// (store-split M4, task #53257)
+// (`store-split.allium: DispatchRequest`)
 // ---------------------------------------------------------------------------
 //
 // Every launch path writes a request and provisions nothing inline

@@ -122,7 +122,7 @@ async fn wait_for_request(
 
 /// The error for a refused request. "Not in backlog" when the task holds
 /// another status now — the same error a task that was already running
-/// produced before M4 — and the module's own reason otherwise (its worktree
+/// gets — and the module's own reason otherwise (its worktree
 /// is on another machine, or an open request already exists).
 async fn refused_response(
     state: &McpState,

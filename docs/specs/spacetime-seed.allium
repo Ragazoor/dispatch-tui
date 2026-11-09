@@ -67,7 +67,7 @@ use "./core.allium" as core
 -- somebody needs the backup.
 --
 -- The dispatch request tables, `dispatch_requests` and
--- `dispatch_request_timeouts` (store-split.allium: DispatchRequest, M4 D10),
+-- `dispatch_request_timeouts` (store-split.allium: DispatchRequest, D10),
 -- are held by the store and deliberately NOT here: they are in-flight state,
 -- not domain. A restored open request would have no timer to fail it and
 -- would hold its task's claim forever, and a restored timer would fire against
@@ -75,7 +75,7 @@ use "./core.allium" as core
 -- accepted.
 --
 -- The session request tables, `session_requests` and
--- `session_request_timeouts` (store-split.allium: SessionRequest, M5 W10), are
+-- `session_request_timeouts` (store-split.allium: SessionRequest, W10), are
 -- left out for the same reason: a restored open row would have no timer, and
 -- would block its task's next wrap_up (one open session request per task). A
 -- restore also loses every unconsumed exit token, which lives in those rows;

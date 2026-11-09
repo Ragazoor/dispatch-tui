@@ -1,5 +1,5 @@
 //! Feed command authority and poll claims (`feeds.allium:
-//! FeedCommandAuthority`, `FeedCommandRunsOnSettersHost`; `store-split.allium:
+//! FeedCommandAuthority`, `FeedCommandRunsOnSettersHost`; `feeds.allium:
 //! ClaimPollOwner`, `OverridePollOwner`; `workspaces.allium: ClaimsFollowSight`),
 //! run against the in-memory store. Twins of the in-memory caller's
 //! `src/sync/memory_caller/tests/feed_authority.rs`.

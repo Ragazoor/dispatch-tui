@@ -3,7 +3,7 @@ use super::*;
 /// The module's `MAX_EPIC_DEPTH`, which a delete refuses to walk past.
 const MODULE_MAX_EPIC_DEPTH: usize = 64;
 
-/// Store-split M2 (task #53255): the data rules that moved into the reducers
+/// The task and epic data rules the reducers hold
 /// are enforced identically by `MemoryReducerCaller`.
 ///
 /// The twin calls the module's own pure rule functions, so the verdicts agree

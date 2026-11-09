@@ -1,4 +1,4 @@
-//! Dispatch requests (store-split M4): the in-memory twin of
+//! Dispatch requests (`store-split.allium: DispatchRequest`): the in-memory twin of
 //! `spacetime/module/src/dispatch_request.rs`.
 //!
 //! Every decision is the module's own pure function, called directly; what is

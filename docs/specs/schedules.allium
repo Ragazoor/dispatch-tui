@@ -12,7 +12,7 @@
 -- Excludes: How the agent turns "every week" into a cron string (the agent's
 --           own judgement; the tool only takes the cron string); the dispatch
 --           request lifecycle itself (store-split.allium: RequestDispatch and
---           the M4 rules); provisioning (dispatch.allium: ProvisionDispatch);
+--           the rules after it); provisioning (dispatch.allium: ProvisionDispatch);
 --           the card and detail rendering (board-visuals.allium: "Schedule
 --           marker"); the MCP argument contracts (mcp-task-tools.allium).
 -- Dependencies: Task, Host and local_host() from core.allium;
@@ -56,6 +56,7 @@
 
 use "./core.allium" as core
 use "./store-split.allium" as store_split
+use "./tasks.allium" as tasks
 
 ------------------------------------------------------------
 -- Contracts
@@ -203,7 +204,7 @@ rule LeavingBacklogCancelsThePendingRun {
     -- Every status write other than the dispatch claim. The claim moves the
     -- task to running and keeps next_due until the launch ends
     -- (DispatchConsumesTheDueTime, ScheduledLaunchFails).
-    when: store_split/TaskStatusWrittenByHand(task, from, to)
+    when: tasks/TaskStatusWrittenByHand(task, from, to)
 
     requires: from = backlog and to != backlog
 
@@ -222,7 +223,7 @@ rule LeavingBacklogCancelsThePendingRun {
 
 rule EnteringBacklogRearmsAPhoenixTask {
     -- The same writes as LeavingBacklogCancelsThePendingRun, the other way.
-    when: store_split/TaskStatusWrittenByHand(task, from, to)
+    when: tasks/TaskStatusWrittenByHand(task, from, to)
 
     requires: from != backlog and to = backlog
     requires: task.phoenix and task.schedule != null
@@ -269,7 +270,7 @@ rule LeavingRunningCancelsThePendingRun {
     -- A hand status write that takes a task out of running, into review or
     -- backlog (the TUI's moves and editor, update_tasks' status). Into done
     -- is ClosingCancelsThePendingRun.
-    when: store_split/TaskStatusWrittenByHand(task, from, to)
+    when: tasks/TaskStatusWrittenByHand(task, from, to)
 
     requires: from = running and to != running
 

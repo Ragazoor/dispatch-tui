@@ -192,8 +192,8 @@ rule CreateEpic {
         -- CreateEpicViaMcp (below) is not a second implementation: both rules
         -- witness the one service entry point, which is where the
         -- parent-existence check lives. The parent recalculation is the
-        -- module's own, inside create_epic: since store-split M7 the service
-        -- no longer asks for a second one (store-split.allium, X3). The two
+        -- module's own, inside create_epic: the service asks for no second
+        -- one (store-split.allium, X3). The two
         -- rules differ only in which parameters the surface exposes.
         --
         -- Known implementation limitation (not design intent): the current
@@ -201,9 +201,7 @@ rule CreateEpic {
         -- feed_interval_secs, so the service writes them in a follow-up
         -- patch and re-reads. That patch's failure is an error of the whole
         -- creation. The two-write shape is not atomic — a failure between
-        -- them leaves a half-populated epic; making it atomic was decided
-        -- NOT IN M7 and deferred to a follow-up (store-split.allium, X5) —
-        -- and it is not a pattern to
+        -- them leaves a half-populated epic — and it is not a pattern to
         -- extend: a fourth such field wants a single-insert create request
         -- (mirroring core/CreateTaskRequest) rather than another patch line.
         --
@@ -660,8 +658,8 @@ rule UpdateEpicViaMcp {
 
     -- parent_epic_id validation: parent must exist and no cycle may be introduced
     --
-    -- THE STORE ENFORCES THE DATA CHECKS IN THIS RULE (store-split.allium M2,
-    -- task #53255): the patch_epic reducer refuses a parent cycle, a move of a
+    -- THE STORE ENFORCES THE DATA CHECKS IN THIS RULE (store-split.allium
+    -- S1): the patch_epic reducer refuses a parent cycle, a move of a
     -- repo-group sub-epic, and feed_append_only combined with group_by_repo or
     -- a feed role, each with the wording given here, against the rows the
     -- store holds and for every client that patches an epic (this tool,
@@ -871,7 +869,7 @@ rule ManagedFeedConfigViaMcp {
         -- newline-validated (they are shell scripts run via sh -c, matching
         -- feed_command on epics). The interval floor above stays here, at the
         -- request boundary; the provisioning itself is the module's
-        -- ensure_managed_epics reducer since store-split M7 (X4).
+        -- ensure_managed_epics reducer (store-split.allium X4).
         --
         -- Annotations. The tool's MCP hints can say only one thing, and the
         -- no-argument call is a read while any other call is a write. The
@@ -993,7 +991,7 @@ rule AutoDispatchNextSubtask {
             -- refuses one whose next_due is ahead of now, in the same way,
             -- and the chain moves on to its next candidate.
             let next = first_by_order(epic.subtasks where status = backlog and not phoenix)
-            -- A request, as every launch path writes since store-split M4
+            -- A request, as every launch path writes
             -- (store-split.allium: RequestDispatch), naming the closed task's
             -- host — the host of the exit_session row, whose board serves the
             -- agent that closed. No mode: the module derives it from the
@@ -1006,17 +1004,15 @@ rule AutoDispatchNextSubtask {
                 close.chained_task = next
 
     @guidance
-        -- Epic chaining IN THE MODULE since store-split M5
+        -- Epic chaining IN THE MODULE
         -- (store-split.allium, W6). SessionClosed is emitted by the session
         -- close (ExitSession in pr-workflow.allium), which runs inside the
         -- request_exit_session reducer's transaction (store-split.allium:
         -- RequestExitSession), and this rule runs in that same transaction,
         -- after the terminal write. So the next subtask's worktree is always
         -- cut from a base_branch that already contains the finished subtask's
-        -- work. Before M5 the board ran this selection itself
-        -- (auto_dispatch_next, at the MCP exit_session handler's call site);
-        -- its behaviour is kept as below, and nothing of it stays on the
-        -- board except ReportChainedDispatchFailure, unchanged.
+        -- work. Nothing of it runs on the board except
+        -- ReportChainedDispatchFailure.
         -- close is the exit_session request row the close wrote
         -- (store-split.allium: SessionRequest).
         --
@@ -1125,12 +1121,11 @@ rule AutoDispatchNextSubtask {
         -- only ever chosen once the planned subtasks are exhausted.
         --
         -- At most one agent is launched per closed session, even under
-        -- concurrent closes, and never two for one subtask. Since store-split
-        -- M4 the chain claims through the same dispatch request every entry
+        -- concurrent closes, and never two for one subtask. The chain claims through the same dispatch request every entry
         -- point writes (store-split.allium: RequestDispatch): it offers the
         -- candidates one at a time, in the order above, and the module
         -- accepts the first request whose task is still backlog with no open
-        -- request. Since M5 the offers are made inside the close's own
+        -- request. The offers are made inside the close's own
         -- transaction, so a refused candidate rolls back nothing but itself
         -- and the chain moves on. A refused request is ORDINARY — another entry point or a
         -- concurrent close got there first — and the chain moves to the next
@@ -1273,8 +1268,8 @@ rule SurfaceAutoDispatchFailure {
         -- failure can fail the close" paragraph in AutoDispatchNextSubtask.
         --
         -- A chain that stops before a subtask is selected (an unresolvable
-        -- epic, or a store that cannot be reached, which since store-split M5
-        -- fails the whole exit_session call) does not reach this rule, and
+        -- epic, or a store that cannot be reached, which fails the whole
+        -- exit_session call) does not reach this rule, and
         -- that is a scope decision rather than an omission: neither can supply
         -- the task this rule marks.
 }
@@ -1331,7 +1326,7 @@ rule ToggleGroupByRepo {
         -- allow, until the next timed refresh happened to correct it. See
         -- AppendOnlyEpicIndicator.
         -- The flag write and the migration are ONE store reducer
-        -- (store-split.allium: SetEpicGroupByRepoIsOneTransaction), so a
+        -- (SetEpicGroupByRepoIsOneTransaction), so a
         -- refused migration leaves the flag as it was; the board no longer
         -- re-reads the epic between the two.
         -- The task migration (RegroupEpic / FlattenEpic) only runs for
@@ -1361,7 +1356,63 @@ rule ToggleGroupByRepo {
         -- self-healing is poll-driven and symmetric in both directions.
 }
 
--- Repo grouping runs in the store (store-split.allium M2, task #53255).
+rule SetEpicGroupByRepoIsOneTransaction {
+    when: EpicGroupByRepoSetRequested(epic, group_by_repo)
+
+    -- The board's group-by-repo toggle (ToggleGroupByRepo) is ONE
+    -- reducer, set_epic_group_by_repo: it writes the flag and, for a non-feed
+    -- epic, runs RegroupEpic (flag on) or FlattenEpic (flag off) in the same
+    -- transaction, so a failure never leaves the flag set and the tasks
+    -- unmoved.
+    requires: epic.exists
+
+    ensures: EpicPatchAccepted(epic: epic, patch: { group_by_repo: group_by_repo })
+    ensures:
+        if epic.feed_command = null:
+            if group_by_repo:
+                RegroupEpic(epic)
+            else:
+                FlattenEpic(epic)
+
+    @guidance
+        -- The flag write is patch_epic's, so the append-only refusal is
+        -- unchanged, and a refusal of any part leaves the epic and its tasks as
+        -- they were. A missing epic is an error, as in update_epic.
+        -- regroup_epic and flatten_epic stay as reducers: ingest paths and the
+        -- MCP surface call them directly.
+}
+
+rule UpdateEpicIsOneTransaction {
+    when: EpicUpdateRequested(epic, patch, workspace?, visibility?)
+
+    -- The board's update of an epic (field patch, workspace move and
+    -- visibility change) is ONE reducer, update_epic, so a refused part leaves
+    -- nothing applied. A member who is not the creator sends a title and a
+    -- visibility: the visibility is refused and the title is not saved, and the
+    -- caller learns the whole update failed.
+    requires: epic.exists
+
+    ensures: EpicPatchAccepted(epic: epic, patch: patch)
+    -- A patch that names a feed_command is held to feeds.allium's
+    -- FeedCommandAuthority (spacetime/module/src/tasks_epics.rs::may_change_feed_command).
+    ensures:
+        if patch.feed_command != null:
+            EpicFeedCommandSet(epic: epic, command: patch.feed_command)
+    ensures:
+        if workspace != null: epic.workspace = workspace
+    ensures:
+        if visibility != null: epic.visibility = visibility
+
+    @guidance
+        -- workspace and visibility are absent to leave that part alone. The
+        -- parts are patch_epic's, move_epic_to_workspace's and
+        -- set_epic_visibility's, run in that order inside one transaction;
+        -- their refusals are unchanged. A missing epic is an error here ("epic
+        -- <id> does not exist"), unlike patch_epic's silent no-op, and the
+        -- service maps it to NotFound without pre-reading the board's cache.
+}
+
+-- Repo grouping runs in the store (store-split.allium S1).
 -- route_target is the store's. create_task and respawn_phoenix_successor
 -- place a new task, and set_task_epic places a moved one, into the per-repo
 -- sub-epic when the epic named is a grouped non-feed root (creating the
@@ -1588,14 +1639,13 @@ rule ProvisionManagedEpics {
                 )
 
     @guidance
-        -- Where it runs. Since store-split M7 the whole provisioning run is
+        -- Where it runs. The whole provisioning run is
         -- ONE module reducer, ensure_managed_epics(reviews_command,
         -- reviews_interval_secs, cve_command, cve_interval_secs), so every
         -- lookup and create above lands in one transaction (store-split.allium,
         -- X4). The board still reads and writes the four settings, applies the
         -- feed-interval floor to them (request shape; ManagedFeedConfigViaMcp),
-        -- and calls the reducer with the values it read. Before M7 the board
-        -- ran the lookups and creates itself, as separate store calls.
+        -- and calls the reducer with the values it read.
         --
         -- No feed_command on sub-epics — the B3 concurrency guard.
         -- The my_reviews / team_reviews / bots sub-epics deliberately
@@ -1635,14 +1685,11 @@ rule ProvisionManagedEpics {
         -- epic with one role AT THAT SAME PARENT (core.allium:
         -- UniqueFeedRolePerParent; a root's role is unique per creator and
         -- workspace). Two boards starting up concurrently
-        -- therefore cannot both insert the same managed epic: since
-        -- store-split M7 each board's run is one ensure_managed_epics
+        -- therefore cannot both insert the same managed epic: each board's
+        -- run is one ensure_managed_epics
         -- transaction, the store runs the two one after the other, and the
         -- second finds every epic the first created and creates no second
-        -- one (X4). Before M7 the guard was per row — the store's
-        -- create_managed_role_epic (since deleted) inserted feed_role in the same write as
-        -- the row itself, and a second insert re-selected the winner — and
-        -- the board's run as a whole was not one transaction. The one
+        -- one (X4). The one
         -- exception is a database that already held
         -- duplicate managed epics before the index was fixed to be
         -- NULL-safe — that index was never built for it, so its
@@ -1944,7 +1991,7 @@ rule ExitAllEpics {
     -- computed again on each of them. Nor does a board ask for a SEPARATE
     -- recalculation after a mutation: the board-side recalculation calls that
     -- repeated the module's own rollup (after hook events, after patch_epic
-    -- and create_epic, after a close) were removed in store-split M7
+    -- and create_epic, after a close) do not exist
     -- (store-split.allium, X3), and the module is the only place that
     -- recalculates.
     -- It moves both forward and backward to always reflect child reality.

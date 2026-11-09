@@ -113,7 +113,7 @@ pub(in crate::sync) fn subscription_queries(
         // Usage telemetry is NOT subscribed: a view over it would re-run on
         // every recorded event. `query_usage` asks the store on demand
         // (`own_usage_summary`).
-        // Dispatch and session requests (store-split M4, M5). Scoped by HOST
+        // Dispatch and session requests (`store-split.allium: DispatchRequest`, `SessionRequest`). Scoped by HOST
         // as well: the view serves every request on a held task, and a request
         // is provisioned only by the machine that made it. Unfiltered by state
         // on purpose: a row leaving a state-filtered query would arrive as a

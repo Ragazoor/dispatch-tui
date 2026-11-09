@@ -137,6 +137,21 @@ rule UpdateWorkPackage {
         -- ReorderPackage (J/K) and by that tool; there is no way to clear it.
 }
 
+rule UpdateWorkPackageIsOneTransaction {
+    when: WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
+
+    -- update_work_package_with_links takes the visibility change too: the
+    -- patch, the visibility, every unlink and every link are one transaction.
+    -- The visibility's refusals (an unknown value, a caller who is neither the
+    -- creator nor an admin) are raised before the first write, so a refused
+    -- visibility leaves the title, the links and the package as they were.
+    requires: package.exists
+
+    ensures: WorkPackagePatchAccepted(package: package, patch: patch)
+    ensures:
+        if visibility != null: package.visibility = visibility
+}
+
 -- J/K on a package card moves it among the package cards of its column.
 -- Packages sort as one block above every epic and task card, and they have
 -- their own key, so the swap runs over the package block only: the epic and

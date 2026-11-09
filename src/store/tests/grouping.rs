@@ -1,7 +1,5 @@
 //! Repo grouping as the store decides it (`epics.allium`: `RegroupEpic`,
-//! `FlattenEpic`, and the routing note above them; store-split M2, task
-//! #53255). These were `service::grouping`'s tests, when the service made the
-//! decisions over several store calls.
+//! `FlattenEpic`, and the routing note above them). The store makes these decisions in one call.
 
 use crate::models::{EpicId, LearningKind, LearningScope, LearningStatus};
 use crate::store::{

@@ -1,4 +1,4 @@
-//! Session requests (store-split M5): reads from this host's subscribed rows,
+//! Session requests (`store-split.allium: SessionRequest`): reads from this host's subscribed rows,
 //! writes as the module's request reducers, always naming THIS host.
 
 use anyhow::Result;

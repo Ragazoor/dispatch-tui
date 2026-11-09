@@ -1,4 +1,4 @@
-//! The data rules of store-split M2 (task #53255), as the in-memory reducer
+//! The module's task and epic data rules (`tasks.allium`, `epics.allium`), as the in-memory reducer
 //! twin enforces them. `tests/memory_caller_conformance.rs` holds the same
 //! scenario against the real module.
 

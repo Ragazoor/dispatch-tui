@@ -1,4 +1,4 @@
-//! Dispatch request rows reach the board's reads (store-split M4).
+//! Dispatch request rows reach the board's reads (`store-split.allium: DispatchRequest`).
 //!
 //! `docs/specs/sync.allium: SubscribeToThisHostsDispatchRequests` delivers the
 //! rows; these pin that a delivered row decodes into the domain value the

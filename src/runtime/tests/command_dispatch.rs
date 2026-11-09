@@ -150,7 +150,7 @@ impl Harness {
     /// Serve the dispatch requests the arms under test wrote, the way this
     /// host's reactor would once the row pump delivers them
     /// (`store-split.allium: HostClaimsDispatch`), and wait for each to land.
-    /// Since store-split M4 no launch arm provisions inline: it only asks.
+    /// No launch arm provisions inline: it only asks (`store-split.allium` D6).
     async fn serve_requests(&self) {
         for handle in self.rt.serve_dispatch_requests().await {
             handle.await.unwrap();

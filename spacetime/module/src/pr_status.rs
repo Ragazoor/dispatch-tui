@@ -1,6 +1,6 @@
 //! PR state decided in the module.
 //!
-//! Spec: `docs/specs/store-split.allium` (step M6, task #53259):
+//! Spec: `docs/specs/pr-workflow.allium`:
 //! `ReportPrStatus` and `ReportPrUnreadable`. The host runs `gh` and posts
 //! what it read; every task write below is derived here.
 

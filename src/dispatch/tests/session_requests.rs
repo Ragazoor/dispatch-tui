@@ -1,4 +1,4 @@
-//! Which delivered session request rows this host must act on (store-split M5).
+//! Which delivered session request rows this host must act on (`store-split.allium: SessionRequest`).
 //!
 //! [`SessionRequestObserver`](crate::dispatch::SessionRequestObserver) is the
 //! pure decision behind `store-split.allium: HostClaimsSessionRequest`'s
@@ -66,7 +66,7 @@ fn exit(id: i64, host: &str, state: SessionRequestState) -> SessionRequest {
     )
 }
 
-/// The row `update_tasks`' done-path close writes (store-split M7, X1): a
+/// The row `update_tasks`' done-path close writes (`store-split.allium` X1): a
 /// teardown like an exit_session, with no wrap_up behind it.
 fn close(id: i64, host: &str, state: SessionRequestState) -> SessionRequest {
     row(id, host, SessionRequestKind::Close, WrapUpMode::Done, state)

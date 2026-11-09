@@ -85,7 +85,7 @@ pub enum TaskMessage {
     DispatchAbandoned(TaskId),
     MarkDispatching(TaskId),
     /// This host's dispatch request rows, every state, as the latest board
-    /// reload read them (store-split M4). They drive DispatchingFeedback's
+    /// reload read them (`store-split.allium: DispatchRequest`). They drive DispatchingFeedback's
     /// open membership, `FailedRequestReported` and the epic chain's
     /// `ReportChainedDispatchFailure`. The FIRST one an App receives is its
     /// baseline: rows already failed in it are history and raise nothing.

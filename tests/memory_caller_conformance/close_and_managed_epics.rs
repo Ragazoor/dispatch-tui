@@ -1,6 +1,6 @@
 use super::*;
 
-/// store-split M7 (`store-split.allium`: `RequestCloseTask`, X2 and X4). The
+/// The done-path close (`store-split.allium`: `RequestCloseTask`, X2 and X4). The
 /// in-memory caller closes a task the way the real module does: the open
 /// session request failed "task closed", the Done write (a re-close keeping
 /// its completion), `stop_pending` cleared, the epic rolled up, a phoenix task

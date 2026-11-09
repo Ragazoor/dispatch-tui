@@ -794,7 +794,7 @@ impl Default for Task {
 /// `Dispatch` path.
 ///
 /// `Quick` is quick dispatch's own prompt variant (`tasks.allium:
-/// CreateQuickTask`). Since store-split M4 the mode is a column of the
+/// CreateQuickTask`). The mode is a column of the
 /// dispatch request row (`store-split.allium: DispatchRequest`, D3): the host
 /// reads it from the row and never re-derives it, and `Quick` is only ever
 /// named by its caller — [`Self::for_task`] never answers it.

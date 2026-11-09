@@ -1,6 +1,6 @@
 //! Dispatch as request rows, with a scheduled backstop timer.
 //!
-//! Spec: `docs/specs/store-split.allium` (step M4, task #53257):
+//! Spec: `docs/specs/store-split.allium` (D1-D12):
 //! `DispatchRequest`, `RequestDispatch`, `HostClaimsDispatch`,
 //! `HostReportsDispatched`, `HostReportsDispatchFailed`,
 //! `DispatchRequestTimesOut`, `HostRestartFailsInterrupted`,

@@ -1,4 +1,4 @@
-//! Session request rows reach the board's reads (store-split M5).
+//! Session request rows reach the board's reads (`store-split.allium: SessionRequest`).
 //!
 //! `docs/specs/sync.allium: SubscribeToThisHostsSessionRequests` delivers the
 //! rows; these pin that a delivered row decodes into the domain value the

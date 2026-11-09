@@ -934,7 +934,7 @@ fn the_chains_request_refuses_a_phoenix_candidate_and_one_on_another_host() {
     .is_ok());
 }
 
-// -- PR state (store-split.allium: ReportPrStatus, ReportPrUnreadable) ----
+// -- PR state (pr-workflow.allium: ReportPrStatus, ReportPrUnreadable) ----
 
 fn pr_task(sub_status: &str) -> Task {
     Task {
@@ -1035,7 +1035,7 @@ fn an_unreadable_pr_marks_pr_unreachable_once() {
     assert!(apply_pr_unreadable(backlog, LATER).is_none());
 }
 
-// -- RequestCloseTask (store-split.allium, M7 X1) --------------------------
+// -- RequestCloseTask (store-split.allium, X1) --------------------------
 
 #[test]
 fn a_close_row_has_host_work_like_an_exit_session_row() {
@@ -1139,7 +1139,7 @@ fn a_close_row_is_not_an_exit_token_consumer() {
     assert!(check_exit_token(1, 3, &rows, &[]).is_ok());
 }
 
-// -- patch_task's transition rules (M7 X2) -----------------------------------
+// -- patch_task's transition rules (store-split.allium, X2) -----------------------------------
 
 #[test]
 fn leaving_running_clears_a_pending_stop_unless_the_patch_names_it() {

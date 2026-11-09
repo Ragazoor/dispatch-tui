@@ -211,7 +211,7 @@ impl App {
     }
 
     /// This host's dispatch request rows, as the latest board reload read
-    /// them (store-split M4).
+    /// them (`store-split.allium: DispatchRequest`).
     ///
     /// - DispatchingFeedback's OPEN membership is rebuilt from the open rows,
     ///   and an open row supersedes the task's pending entry (`SpansTheClaim`).

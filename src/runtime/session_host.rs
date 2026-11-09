@@ -1,4 +1,4 @@
-//! The board's host reactor for session request rows (store-split M5).
+//! The board's host reactor for session request rows (`store-split.allium: SessionRequest`).
 //!
 //! Spec: `docs/specs/store-split.allium` — `HostClaimsSessionRequest`,
 //! `HostRestartFailsInterruptedSessionRequests` and W8 — and

@@ -1,7 +1,6 @@
-//! The data rules the board used to enforce, as pure functions the reducers call.
+//! The task and epic data rules, as pure functions the reducers call.
 //!
-//! Spec: `docs/specs/store-split.allium` (step M2, task #53255); the rules
-//! themselves are in `mcp-task-tools.allium` (`UpdateTaskViaMcp`) and
+//! Spec: the rules are in `mcp-task-tools.allium` (`UpdateTaskViaMcp`) and
 //! `epics.allium` (`UpdateEpicViaMcp`, `ReparentEpicFromTui`, `RegroupEpic`).
 //!
 //! Pure on purpose, for the reason `derive_epic_status` is: the reducers supply
@@ -25,16 +24,16 @@ use super::*;
 /// moved on, or the reverse. Not bumped for a new column, a UI change or a bug
 /// fix inside a rule: none of those changes who enforces what.
 ///
-/// 1: store-split M2 — sub-status legality, the reparent cycle, repo-group
+/// 1: sub-status legality, the reparent cycle, repo-group
 ///    reparent and append-only checks, and repo grouping.
-/// 2: store-split M3 — feed routing and reconcile (`ingest_feed`).
-/// 3: store-split M4 — dispatch as request rows with a scheduled backstop
+/// 2: feed routing and reconcile (`ingest_feed`).
+/// 3: dispatch as request rows with a scheduled backstop
 ///    timer (`dispatch_request.rs`).
-/// 4: store-split M5 — wrap-up and exit-session as request rows, the close and
+/// 4: wrap-up and exit-session as request rows, the close and
 ///    the epic chain in the module (`session_request.rs`).
-/// 5: store-split M6 — PR state derived from the host's raw `gh` status
+/// 5: PR state derived from the host's raw `gh` status
 ///    (`pr_status.rs`).
-/// 6: store-split M7 — `close_task` (the done-path close and its `close` row),
+/// 6: `close_task` (the done-path close and its `close` row),
 ///    patch_task's stop_pending clear and phoenix respawn, and
 ///    `ensure_managed_epics`.
 ///
@@ -60,7 +59,7 @@ use super::*;
 ///    other hosts' rows alone. A reducer argument an old board does not send.
 /// 45: `set_epic_group_by_repo` — the group-by-repo toggle's flag write and its
 ///    regroup or flatten in one transaction, so a refused move no longer
-///    leaves the flag set (`tasks_epics.rs`; `store-split.allium:
+///    leaves the flag set (`tasks_epics.rs`; `epics.allium:
 ///    SetEpicGroupByRepoIsOneTransaction`). A reducer the board now calls.
 /// 44: `update_task` carries the caller's bookmark (`subscriber`, `bookmarked`)
 ///    and writes it in the same transaction as the fields, and `set_bookmark`
@@ -92,7 +91,7 @@ use super::*;
 ///    `workspaces.allium: ClaimsFollowSight`, `core.allium: Bookmark`).
 /// 40: `create_task` and `create_task_signalled` refuse a row naming a host
 ///    another person owns (`check_new_task_aim`;
-///    `store-split.allium: CreateTaskNeverAimsAnotherHostsTeardown`).
+///    `tasks.allium: CreateTaskNeverAimsAnotherHostsTeardown`).
 /// 39: a task in an epic is detached onto a board by its creator, an admin of
 ///    its workspace or a super-admin (`task_detach_permitted`), no longer by
 ///    nobody; the managed-feed settings are written as one change by
@@ -538,7 +537,7 @@ pub fn check_task_aim(
 ///
 /// A feed teardown asks the host named in the row to remove the worktree named
 /// in it, so a creator who could name another person's host would aim it at a
-/// live worktree (`store-split.allium: CreateTaskNeverAimsAnotherHostsTeardown`).
+/// live worktree (`tasks.allium: CreateTaskNeverAimsAnotherHostsTeardown`).
 /// A host nobody registered has no owner and is not judged.
 pub fn check_new_task_aim(
     row: &Task,

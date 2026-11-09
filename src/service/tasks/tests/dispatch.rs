@@ -5,8 +5,8 @@ use super::*;
 // ---------------------------------------------------------------------------
 //
 // `DispatchClaimExclusive` (`docs/specs/dispatch.allium`) and the host stamp,
-// asserted against the seam every entry point goes through since store-split
-// M4: `request_dispatch` (the claim, in the module) then
+// asserted against the seam every entry point goes through
+// (`store-split.allium` D6): `request_dispatch` (the claim, in the module) then
 // `serve_dispatch_request` (this host's provisioning). The request-row
 // mechanics themselves — deadlines, refused reports, teardown — are pinned in
 // `dispatch_requests.rs` beside this file.

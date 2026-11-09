@@ -111,8 +111,8 @@ fn with_clean_status(
 
 /// This board's host reactor, as the runtime runs it (`store-split.allium`:
 /// `HostClaimsDispatch`, `HostClaimsSessionRequest`): serve every `requested`
-/// dispatch and session row naming this host, once, as the rows arrive. Since
-/// store-split M4 and M5 the tools only WRITE requests — `dispatch_task`, the
+/// dispatch and session row naming this host, once, as the rows arrive. The
+/// tools only WRITE requests (`store-split.allium` D6, W2) — `dispatch_task`, the
 /// epic chain, `wrap_up(rebase)`, the `exit_session` teardown — so a test that
 /// wants an agent launched, a branch rebased or a window killed runs this beside
 /// them, over the same service. Dropped with the test's runtime.

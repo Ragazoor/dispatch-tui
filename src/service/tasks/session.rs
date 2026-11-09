@@ -1,5 +1,5 @@
-//! The session seam: wrap-up, exit-session and close request rows (store-split
-//! M5, task #53258; the close row M7, task #53260).
+//! The session seam: wrap-up, exit-session and close request rows
+//! (`store-split.allium: SessionRequest`, W1-W13; the close row, X1).
 //!
 //! Two halves of one flow, and the only two ways the board takes part in a
 //! wrap-up or a close:

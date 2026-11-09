@@ -60,7 +60,7 @@ async fn dispatching_status_visible_across_lifecycle_success() {
     );
 }
 
-/// Since store-split M4 a failed dispatch reaches the board as its request
+/// A failed dispatch reaches the board as its request
 /// row: the open row keeps the task a member, and the row reaching failed
 /// ends the membership, clears the status and raises the row's reason
 /// (`dispatch.allium: DispatchingFeedback`, `FailedRequestReported`).

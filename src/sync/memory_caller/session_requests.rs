@@ -1,4 +1,4 @@
-//! Session requests (store-split M5): the in-memory twin of
+//! Session requests (`store-split.allium: SessionRequest`): the in-memory twin of
 //! `spacetime/module/src/session_request.rs`.
 //!
 //! As [`super::dispatch_requests`]: every decision is the module's own pure

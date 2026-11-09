@@ -1,5 +1,5 @@
-//! `wrap_up` and `exit_session` on session request rows (store-split M5,
-//! task #53258).
+//! `wrap_up` and `exit_session` on session request rows (`store-split.allium:
+//! SessionRequest`).
 //!
 //! `mcp-task-tools.allium: WrapUpViaMcp` runs the host-local checks, then
 //! WRITES a request (`request_wrap_up`) and, for a rebase, WAITS on the row for
@@ -621,7 +621,7 @@ async fn an_unsent_exit_session_is_an_error_saying_the_token_is_still_valid() {
     assert_eq!(extract_response_text(&retry), "Session closed.");
 }
 
-// -- update_tasks status="done" -----------------------------------------------------------------------
+// -- update_tasks status="done" -------------------------------------------------------------------
 
 /// `update_tasks` status="done" closes in the module (`MarkTaskDoneViaMcp`,
 /// `RequestCloseTask`): the Done write and ONE `close` row for the host's

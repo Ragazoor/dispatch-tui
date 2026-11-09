@@ -177,7 +177,7 @@ impl WorkPackageService {
         };
         // One store call for the patch, the visibility change and the links,
         // so a refused part leaves nothing applied
-        // (store-split.allium: UpdateWorkPackageIsOneTransaction).
+        // (work-packages.allium: UpdateWorkPackageIsOneTransaction).
         self.db
             .update_work_package(
                 params.id,

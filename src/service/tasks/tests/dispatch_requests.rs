@@ -1,4 +1,4 @@
-//! Dispatch as request rows, board side (store-split M4, task #53257).
+//! Dispatch as request rows, board side (`store-split.allium: DispatchRequest`).
 //!
 //! Two halves of one flow, pinned against the in-memory store so the row can
 //! be driven and inspected directly:

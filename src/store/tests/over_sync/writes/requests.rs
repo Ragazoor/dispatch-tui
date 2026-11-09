@@ -31,8 +31,8 @@ async fn a_request_names_the_machine_making_it() {
     );
 }
 
-// The chain's candidate loop moved to the service with store-split M4 and into
-// the module with M5 (`store-split.allium: RequestExitSession` runs
+// The chain's candidate loop runs in the module
+// (`store-split.allium: RequestExitSession` runs
 // `AutoDispatchNextSubtask` in its own transaction): its ordering, phoenix and
 // refusal rules are pinned in `src/sync/memory_caller/tests/session_requests.rs`
 // and the module's own tests.
@@ -128,7 +128,7 @@ async fn session_requests_name_the_machine_and_speak_the_modules_vocabulary() {
         .is_err());
 }
 
-/// `epics.allium: ProvisionManagedEpics` (store-split M7, X4) is one reducer
+/// `epics.allium: ProvisionManagedEpics` (`store-split.allium` X4) is one reducer
 /// call: a disabled feed is `""`, no interval is `0`, and the identity is the
 /// module's to stamp, so nothing but the four settings is sent.
 #[tokio::test]

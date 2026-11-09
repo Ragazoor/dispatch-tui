@@ -57,9 +57,9 @@ async fn close_task_recalculates_the_parent_epic() {
     );
 }
 
-// -- The epic chain (store-split M5) ----------------------------------------------
+// -- The epic chain (`store-split.allium: SessionRequest`) ----------------------------------------
 //
-// Since M5 the chain runs in the module, inside `request_exit_session`'s
+// The chain runs in the module, inside `request_exit_session`'s
 // transaction (`store-split.allium: RequestExitSession`,
 // `epics.allium: AutoDispatchNextSubtask`): it requests the epic's next backlog
 // subtask through the same dispatch request every entry point writes

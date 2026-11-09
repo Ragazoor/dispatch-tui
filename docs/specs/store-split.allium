@@ -1,41 +1,30 @@
 -- allium: 3
 -- store-split.allium
 --
--- Scope: The TARGET split of responsibility between the dispatch TUI process
---        and the SpacetimeDB module (spacetime/module/), and the order the
---        code is migrated in. It says which side owns which kind of
---        behaviour. Migration steps land one at a time: M2, M3, M4, M5, M6 and M7 (below)
---        have landed; M7 (task #53260) was the last step and completes the
---        migration. Until a step lands, the rules in
---        the specs listed under Excludes stay authoritative for what the
---        system does today, and nothing here overrides them. Each step runs
---        its own spec -> tests -> code cycle on the spec that owns the
---        behaviour it moves, and only then rewrites that spec's rules.
---
---        M4's entity and rules (DispatchRequest, below) live here rather than
---        in an owning spec, because the module owns the request row outright.
---        They describe dispatch as it is now; dispatch.allium,
---        mcp-task-tools.allium, epics.allium, tasks.allium and sync.allium
---        are rewritten to match and point back here. M5's entity and rules
---        (SessionRequest, below) live here for the same reason;
---        pr-workflow.allium, mcp-task-tools.allium, epics.allium,
---        tasks.allium, sync.allium and spacetime-seed.allium are rewritten to
---        match and point back here. M7's close (RequestCloseTask, below) and
---        the close kind of SessionRequest live here for the same reason;
---        mcp-task-tools.allium, pr-workflow.allium, tasks.allium,
---        epics.allium, core.allium and sync.allium are rewritten to match
---        and point back here. The feed request row (FeedRequest, below;
---        task #98873, after the epic) lives here for the same reason;
---        feeds.allium and sync.allium point back here.
--- Includes: The split rule, the "host work stays thin" rule, the
---           request-row model for multi-step work, the version gate, the
---           migration order, the dispatch request row and its lifecycle
---           (M4), the session request row (wrap-up and exit-session) and its
---           lifecycle (M5), update_tasks' done-path close and its close row
---           (M7), the feed request row (a refresh asked of an epic's poll
---           owner, a teardown asked of the host holding a feed task the
---           stale delete removed) and its lifecycle (task #98873), and the
---           details still undecided.
+-- Scope: The split of responsibility between the dispatch TUI process and
+--        the SpacetimeDB module (spacetime/module/), and the request rows
+--        through which the module drives work that needs a host's machine.
+--        The module owns each request row outright, so the row's entity and
+--        its lifecycle live here rather than in a domain spec: the dispatch
+--        request (DispatchRequest), the session request for wrap-up,
+--        exit-session and the done-path close (SessionRequest), and the feed
+--        request for a refresh or a teardown (FeedRequest). dispatch.allium,
+--        mcp-task-tools.allium, pr-workflow.allium, epics.allium,
+--        tasks.allium, feeds.allium, sync.allium and spacetime-seed.allium
+--        point back here. The module's other data rules live in the spec of
+--        the data they guard: task writes in tasks.allium, epic and
+--        work-package updates in epics.allium and work-packages.allium, PR
+--        state in pr-workflow.allium, poll ownership in feeds.allium.
+-- Includes: The split rule, the "host work stays thin" rule, the request-row
+--           model for multi-step work, the version gate, the decisions every
+--           request row follows (D1–D12, W1–W13, P1–P5, X1–X6 below), the
+--           dispatch request row and its lifecycle, the session request row
+--           (wrap-up, exit-session and close) and its lifecycle,
+--           update_tasks' done-path close and its close row, the feed
+--           request row (a refresh asked of an epic's poll owner, a teardown
+--           asked of the host holding a feed task the stale delete removed)
+--           and its lifecycle, the owner check on host-scoped setting writes,
+--           and the details still undecided.
 -- Excludes: What a host does to provision a claimed dispatch request — the
 --           worktree, the tmux window, the launch (dispatch.allium:
 --           ProvisionDispatch); what a host does to serve a claimed session
@@ -59,602 +48,370 @@
 --           (startup.allium); the MCP tools (mcp-task-tools.allium).
 -- Dependencies: sync.allium holds the version gate's rule
 --               (AStoreWithOtherRulesFailsTheAttempt) and the rules version
---               itself (config.rules_version). Other entities and rules are
---               added here, or in the owning spec, by the migration step that
---               implements them.
+--               itself (config.rules_version). settings.allium raises the
+--               setting writes this spec owner-checks.
 --
--- Decisions taken with the user (task #53254), recorded so they are not
--- re-litigated:
+-- Decisions. Other specs cite these ids.
+--
 --   - S1, the split rule. A piece of behaviour stays in the TUI process only
 --     if it needs the operator's machine: git, tmux, launching claude, gh,
 --     local repo files, or the local embedding model. Every rule about the
 --     shared data's shape, consistency or state transitions belongs in the
 --     SpacetimeDB module's reducers, so every client gets the same rule
---     rather than each client re-implementing it.
+--     rather than each client re-implementing it. Checks about the request
+--     rather than the data (an empty patch, the feed interval floor, the
+--     typed-url pair, a named epic's existence) stay at the service and MCP
+--     boundary.
 --   - S2, host work stays in the TUI process, and stays thin. The MCP and
---     hook HTTP endpoint, feed script execution and PR polling remain in the
---     TUI process. There is no separate daemon: agents still need a board
---     running. Each of these only performs the local call and forwards the
---     raw result through one reducer call. None of them decides a state
---     change; the module does.
---   - S3, the module drives multi-step work. Dispatch, wrap-up and
---     exit-session start as request rows that any client may write. The
---     module sets each state of the request (for example requested ->
---     provisioning on host X -> running | failed). The host that owns the
+--     hook HTTP endpoint, feed script execution and PR polling run in the
+--     TUI process. There is no separate daemon: agents need a board running.
+--     Each of these only performs the local call and forwards the raw result
+--     through one reducer call. None of them decides a state change; the
+--     module does.
+--   - S3, the module drives multi-step work. Dispatch, wrap-up,
+--     exit-session, the done-path close and feed work start as request rows.
+--     The module sets each state of the request (for example requested ->
+--     provisioning on host X -> dispatched | failed). The host that owns the
 --     work reacts through its subscription, does the local work, and reports
---     the outcome by reducer call. A scheduled reducer fails work that its
---     host never reports. That replaces today's in-memory TUI dispatch
---     watchdog (DISPATCH_WATCHDOG_TIMEOUT; dispatch.allium's
---     DispatchingTimeout), which only the board that started the dispatch
---     can enforce.
---   - Cross-cutting risk: a board on an old build would apply old rules
---     against a newer module, or fail to apply rules the module now expects
---     a host to follow. Every migration step that moves a rule into the
---     module therefore needs a hard startup version gate: a board whose
---     build predates the step refuses to run against the module rather than
---     running with the old rule.
---   - The version gate (decided in task #53255, which landed it). The module
---     publishes a RULES VERSION, one integer in a one-row table of its own
---     (a table, so a module that predates the gate answers "no such table"
---     rather than a row the board cannot decode), stamped by the module from its
---     own constant whenever a client connects. The board compares it
---     for EQUALITY with the version compiled into the board, at every
---     connection attempt, and refuses to run on a difference (sync.allium:
---     AStoreWithOtherRulesFailsTheAttempt). The number is held twice, in the
---     module crate and in the board, with a test that fails when they
---     differ; both are hand-bumped by every migration step that moves a
---     rule, in the commit that moves it, and by nothing else. Why not the other candidates: the wasm hash
---     changes on every rebuild whether or not a rule moved, and a build
---     version needs a stored minimum that someone also has to bump. Limit:
---     a board built before the gate cannot refuse; it still meets the
---     module's own checks.
---   - Migration order, one follow-up task per step:
---       M2  Pure data checks move into reducers: sub-status legality,
---           parameter checks, the reparent cycle check, repo grouping.
---           LANDED (task #53255): patch_task refuses an illegal sub_status;
---           patch_epic refuses a reparent cycle, a repo-group reparent and
---           feed_append_only with grouping or a feed role; create_task,
---           respawn_phoenix_successor and set_task_epic route into
---           repo-group sub-epics, and patch_task re-routes on a repo_path
---           change; regroup_epic and flatten_epic are reducers. The
---           services are pass-through for these. Checks about the request
---           rather than the data (an empty patch, the feed interval floor,
---           the typed-url pair, a named epic's existence) stay at the
---           service and MCP boundary. The version gate landed with it.
---           WIDENED (task #94222): the sub-status check now sits on the
---           module's one task write, so every writer that moves a sub_status
---           is held to it, not only patch_task (SubStatusMovesMustBeLegal,
---           BatchSubStatusPatchSkipsIllegalEntries); patch_task refuses an
---           epic_id, leaving set_task_epic the only move
---           (PatchTaskNeverMovesAnEpic); respawn_phoenix_successor wants the
---           phoenix flag (RespawnPhoenixSuccessorNeedsTheFlag); and an epic
---           delete refuses a subtree nested deeper than the recursive delete
---           reaches (epics.allium: DeleteEpic).
---       M3  Feed routing and reconcile move into the module; the TUI's feed
---           runner posts raw items only.
---           LANDED (task #53256): the ingest_feed reducer takes the parsed
---           items, an additive flag and the caller's identity, and does what
---           src/feed/ingest/ did: pick the strategy from the epic's own
---           feed_role and group_by_repo, filter and route by signals, ensure
---           the role and repo-group sub-epics, group, upsert, delete the stale
---           subtree, clear tasks stranded on the reviews parent, drop closed
---           retired items and recalculate. The board runs the script, resolves
---           repo paths from local clones, and reports the removed worktrees
---           and tmux windows by comparing its view before and after. The board
---           no longer calls the per-step reducers it used to orchestrate
---           (upsert_feed_tasks_additive and, allow-phantom-symbol: deleted in M7,
---           delete_stale_subtree_feed_tasks and drop_closed_retired_feed_items);
---           M3 left them as primitives ingest_feed shared code with, and M7
---           deleted them. The rules version is 2.
---           See feeds.allium: IngestFeedEmission.
---       M4  Dispatch becomes request rows plus the scheduled timeout.
---           LANDED (task #53257): every launch path (the TUI keys,
---           retry-fresh, research, quick dispatch, MCP dispatch_task and the
---           epic chain) calls the request_dispatch reducer, which claims the
---           task, writes a dispatch_requests row naming the requesting host
---           and schedules a dispatch_request_timeouts backstop row. The host's
---           board sees the row through its host-scoped subscription, claims
---           it (claim_dispatch_request), provisions under the row's deadline
---           and reports report_dispatch_provisioned or report_dispatch_failed;
---           the module writes the task's worktree, window and host, or fails
---           the row and releases the claim, and rolls up the epic chain
---           either way. A starting board fails its own provisioning rows
---           (fail_interrupted_dispatch_requests) before serving requested
---           ones; every task delete fails the task's open request. The TUI
---           watchdog (DISPATCH_WATCHDOG_TIMEOUT), the board's own claim
---           release and its post-provision patch are gone. register_host now
---           enforces core.allium's LocalHostOwnerIsWrittenOnce (D11). The
---           rules version is 3. Decided with the user:
---           - D1, the row. A NEW table, dispatch_request, one row per request
---             (DispatchRequest below), not columns on the task. It carries a
---             kind column, "dispatch" for now, so M5 adds wrap_up and
---             exit_session requests without a column change. (M5 departed
---             from this by decision and gave its requests their own table:
---             see W1 under M5. The kind column stays, with its one value.)
---             A task holds at
---             most one OPEN request (requested or provisioning) at a time;
---             finished rows (dispatched or failed) stay as history (bounded
---             since task #94222: RequestRowsArePruned). Columns:
---             id, task_id, kind, host, mode, origin, state, requested_at, claimed_at,
---             finished_at, reason, worktree, tmux_window, reused_worktree,
---             deadline (D4) and requested_by (D11). reused_worktree is the
---             host's report of whether provisioning reused an existing
---             worktree rather than creating one, false until dispatched
---             (mcp-task-tools.allium: DispatchTaskViaMcp names it). An optional column
---             is stored as "" for absent, not as an Option, and every
---             timestamp comes from the module clock.
---           - D2, the flow. Any client calls the request reducer. The module
---             claims the task atomically (backlog -> running, as today's
---             claim, so DispatchClaimExclusive still holds: a second request
---             for a claimed task is refused) and writes the row. The row's
---             host is ALWAYS THE REQUESTING HOST, never the task's: you
---             request work on a task, you provision it on your own machine.
---             So the module still refuses a task whose worktree is on another
---             machine, exactly as today's claim does. The host's board sees
---             the row through its subscription, claims it (requested ->
---             provisioning), provisions the worktree, tmux window and agent,
---             and reports either dispatched (with the worktree and window; the
---             module writes the task's worktree, tmux_window and host) or
---             failed (with a reason; the module releases the claim
---             conditionally, as today).
---           - D3, the mode. mode stays a column (dispatch | research |
---             quick). The requester may pass it; when it does not, the module
---             derives it by today's rule (a plan -> dispatch, else the research
---             tag -> research, else dispatch). quick is never derived: only
---             quick dispatch names it, for its own prompt variant. The host
---             reads the mode from the row and never re-derives it. MCP, the
---             epic chain and retry-fresh name no mode (dispatch.allium:
---             RetryFresh), so a retried research task stays research.
---           - D4, the timeout. ONE deadline per request, 60 seconds
---             (config.dispatch_request_timeout) counted from requested_at,
---             whatever state the row is in, and the row exposes it. THE HOST
---             ENFORCES IT: provisioning stops at the deadline — any subprocess
---             still running is killed, what the attempt made is rolled back
---             exactly as for a provisioning failure, and the host reports
---             failed with reason "deadline passed" (dispatch.allium:
---             ProvisioningStopsAtTheDeadline). The module's timer is only a
---             BACKSTOP for a host that is gone or hung: a SpacetimeDB schedule
---             table, one scheduled row per request, cancelled when the request
---             finishes. It fires 10 seconds after the deadline
---             (config.dispatch_request_backstop_grace), so a live host's stop
---             lands first; when it fires on a row still open the module fails
---             the row with reason "timed out" and releases the claim exactly as
---             a reported failure does.
---             The test that holds the host to this is behavioural: a
---             provisioning whose subprocess stalls fails at the row's
---             deadline. (This replaces an earlier idea of a test that the
---             config value is at least the host's subprocess budget.) M5's
---             requests get their own timeout, decided in M5.
---             A dispatched report arriving after the row has failed is
---             refused, and the host tears down what it made. This replaces
---             the TUI watchdog
---             (DISPATCH_WATCHDOG_TIMEOUT, dispatch.allium's former
---             DispatchingTimeout guarantee) and REVERSES its rule that a
---             timeout does not release the claim: a timed-out request now
---             returns the task to backlog. UnprovisionedIndicator's claim-stamp
---             fallback is re-based on the same config value.
---           - D5, catch-up. A requested row is picked up from its host's
---             initial subscription rows when that host's board starts. A row
---             already provisioning when its host restarts is NOT resumed: the
---             host's startup reports it failed ("host restarted"), which
---             releases the claim. There is one board per host: startup
---             restarts the board inside the single dispatch tmux session
---             (startup.allium), so a starting board's provisioning rows are
---             never a live sibling's.
---           - D6, the callers. EVERY launch path moves onto request rows in
---             M4: the TUI dispatch keys, retry-fresh, research, quick dispatch
---             (tasks.allium: CreateQuickTask creates the task, then requests),
---             MCP dispatch_task and the epic auto-dispatch chain
---             (epics.allium: AutoDispatchNextSubtask, which advances on a
---             refused request and reports AutoDispatchFailed from the row's
---             outcome, not from a direct return). dispatch_task writes the
---             request and waits up to 30 seconds for dispatched or failed,
---             returning today's result shape (worktree, window) or the failure
---             reason; when the wait ends first it returns the request id and
---             its state, and get_task shows the request state. The TUI's
---             DispatchingFeedback follows the row rather than in-memory state
---             alone.
---           - D7, the gate. This moves rules into the module, so the rules
---             version goes from 2 to 3, hand-bumped in the module crate and in
---             the board in the same commit (sync.allium: config.rules_version).
---           - D8, deletion. Deleting a task with an open request fails that
---             request in the same reducer (reason "task deleted") and cancels
---             its timer. The host sees the row fail and tears down whatever it
---             made.
---             Every module reducer that deletes a task row does this:
---             DeleteTask, BatchDelete and the stale-subtree delete in
---             ingest_feed.
---           - D9, origin. The row records which launch path wrote it
---             (user | mcp | epic_chain | quick; user covers the TUI keys,
---             retry-fresh and research). An epic_chain row that fails raises
---             AutoDispatchFailed from the row itself, on the requesting host's
---             board only (epics.allium: ReportChainedDispatchFailure), so a
---             board restart during the chain's wait no longer loses it.
---           - D10, snapshots. dispatch_request and its timer table are
---             in-flight state and are not in any snapshot
---             (spacetime-seed.allium: SharedTable); a restore loses request
---             history, by decision.
---           - D11, who may act for a host. A request makes its host's board
---             run git, tmux and claude, so a client may name a host — as the
---             requester, the claimer or a reporter — only when that host's
---             registry row exists with an owner and the owner is the
---             caller's own identity (caller(), the store's view of who sent
---             the call). A host with no owner yet is refused. The module
---             records the caller on the row as requested_by, and a host's
---             board serves only rows requested_by its own owner, as a second
---             line behind the module's check (dispatch.allium:
---             ProvisionDispatch). The scheduled backstop is the module's own
---             call and keeps its own check. The owner is a fact these checks
---             can rest on because the host registry's own write enforces
---             core.allium's LocalHostOwnerIsWrittenOnce: a caller may name
---             only itself as a host's owner, and an owned host's owner is
---             never rewritten. A NEW host row must name its owner: host ids
---             are public, so an ownerless row would go to whichever caller
---             registered that id next as its own, and a teammate could lock a
---             new machine out of its own host. A legacy row written ownerless
---             before this was enforced may still be adopted by the first
---             caller naming itself. The board registers only once its
---             identity has settled, and always as that identity
---             (sync.allium: RegisterHostOnConnect). LIMIT, by decision: one person's machines
---             share an owner, so one of their machines can still name
---             another of theirs; a teammate cannot. The reducers that take a
---             host argument outside the request tables (poll ownership and
---             the host-scoped settings) make the same check, so a client acts
---             for a host only if it owns it; see "Host-scoped writes" below.
---             The backlog claim reducers no longer exist.
---           - D12, failures while no board ran. A request its host's board
---             was not running to see fail — the backstop fired while the
---             board was closed — is already failed in the starting board's
---             baseline, and the starting board does NOT raise it: neither
---             FailedRequestReported nor epics.allium's
---             ReportChainedDispatchFailure fires for it, epic_chain rows
---             included, and a chain stalled that way gets no
---             ChainStallMarked. The failed card shows it: the task is back in
---             backlog and the row records the reason. Decided with the user
---             after M4 landed (raised by weed).
---           - Deferred, out of M4's scope: how long finished rows are kept,
---             and whether a board sees other hosts' open requests.
---       M5  Wrap-up and exit-session become request rows; the module owns
---           the conflict sub_status and the close, the host runs the rebase
---           and the teardown.
---           LANDED (task #53258): the wrap_up MCP tool still runs its host-local checks
---           first, then calls the request_wrap_up reducer, which writes a
---           session_requests row. A rebase row is claimed by its host's board
---           (claim_session_request, which clears a Conflict sub_status),
---           served by running the rebase under the row's deadline, and
---           reported with report_session_request_done or
---           report_session_request_failed (the module sets Conflict on a
---           conflict report). A done or pr row needs no host work and is
---           written already done. A done wrap_up row's id is the exit token.
---           exit_session calls request_exit_session, which checks the token
---           against the rows, applies the close (pr-workflow.allium:
---           ExitSession), rolls up the epic chain, runs the epic
---           auto-dispatch chain and writes an exit_session row naming the
---           window to tear down, all in one transaction; the host's board
---           tears the window down and reports. A scheduled backstop
---           (session_request_timeouts, expire_session_request) fails rows
---           whose host never reports; a starting board fails its own running
---           rows (fail_interrupted_session_requests); every task delete fails
---           the task's open row. The in-memory exit token
---           (McpState.exit_tokens), the board's optimistic conflict clear and
---           conflict write, the board's close_session call from
---           exit_session and the board-side chain (auto_dispatch_next) go.
---           The rules version becomes 4. Decided with the user:
---           - W1, the row. A NEW table, session_request (accessor
---             session_requests), plus a schedule table for its backstop
---             (session_request_timeouts), one row per wrap_up or exit_session
---             request (SessionRequest below). This DELIBERATELY DEPARTS FROM
---             D1, which gave dispatch_request a kind column so that M5 could
---             add kinds without a column change: these requests fit neither
---             its states nor its columns. Their lifecycle is requested ->
---             running -> done | failed, not provisioning -> dispatched; they
---             carry an action, a pr url and a token, not a mode, an origin, a
---             worktree or reused_worktree; and their failure releases no
---             claim. Folding them in would leave half of every row's columns
---             and states meaningless for its kind, and make every dispatch
---             reader filter by kind. Columns: id, task_id, kind (wrap_up |
---             exit_session), action (rebase | done | pr), host, requested_by
---             (D11), state (requested | running | done | failed),
---             requested_at, claimed_at, finished_at, reason, pr_url and
---             deadline; and three the flow needs, added while writing the
---             spec and ACCEPTED by the user: wrap_up_request (on an
---             exit_session row, the wrap_up row whose token it consumed),
---             tmux_window (on an exit_session row, the window to tear down)
---             and chained_task (on an exit_session row, the subtask the epic
---             chain requested, if any, which exit_session's response names).
---             An optional column is stored as "" for absent, as in D1, and
---             every timestamp comes from the module clock. A task holds at
---             most one OPEN session request (requested or running) of either
---             kind; finished rows stay as history (bounded since task
---             #94222: RequestRowsArePruned).
---           - W2, the wrap_up flow. The MCP handler first runs the
---             host-local checks, BEFORE writing anything: the task is
---             wrappable, its worktree names a branch (rebase only), the
---             worktree is committed
---             (WrapUpRefusesUnfinishedWork). A refusal there writes no row
---             and issues no token. Then it calls request_wrap_up(task, host,
---             action), host being this board's own. The module checks D11,
---             that the task is running or review with a worktree on that
---             host, that it is not review-tagged (pr_review, dependabot or
---             release_please:
---             mcp-task-tools.allium's ReviewTasksAreNotWrappedUp, decided
---             with the user to be the module's; the tool may keep the same
---             check as an early refusal with the same wording), and that the
---             task has no open session request (RequestWrapUp). For action rebase the row is
---             requested; the owning host claims it (requested -> running),
---             which clears a Conflict sub_status in the same transaction, as
---             the optimistic clear does today (HostClaimsSessionRequest);
---             runs the rebase (pr-workflow.allium: WrapUpRebase); and reports
---             done, or failed with a reason and whether the failure was a
---             rebase conflict. THE MODULE sets sub_status = Conflict on a
---             conflict report (HostReportsSessionRequestFailed, then
---             pr-workflow.allium: FinishTaskConflict). For done and pr there
---             is no host work: the module writes the row already done, in
---             the same call, and schedules no timer.
---           - W3, the token. A done wrap_up row is the proof that
---             exit_session needs, and replaces the in-memory exit token: the
---             token shown to the agent is that row's id. Only the task's most
---             recent done wrap_up row is valid, as a newer token replaces an
---             older one today, and each is consumed once. Unlike the
---             in-memory token it survives a board restart. A LATER DISPATCH
---             VOIDS IT (decided with the user): a token is valid only if its
---             wrap_up row finished after the finished_at of the task's latest
---             dispatched request, so a token from an earlier session of a
---             re-dispatched task cannot close the new session. A voided token
---             is refused with "invalid exit token".
---           - W4, the exit_session flow. exit_session calls
---             request_exit_session(task, token, action, pr_url). The module
---             requires a done wrap_up row for the task whose id is the token,
---             that is the task's most recent, that finished after the task's
---             latest dispatched request (W3), whose action matches, and that
---             no exit_session row has consumed; pr_url is required for pr
---             (RequestExitSession). In the same call it applies the terminal
---             state (rebase or done -> Done, pr -> Review with the pr url;
---             completed_at from the store clock; pr-workflow.allium:
---             ExitSession), rolls up the epic chain, consumes the token, and
---             writes an exit_session row naming the task's host and its tmux
---             window for the teardown. The close is one transaction, so it
---             either took effect whole or not at all: today's "close did not
---             persist but the token is spent" case is gone, and a refused or
---             failed call leaves the token valid for a retry. exit_session
---             does NOT wait for the teardown (decided with the user): the
---             teardown kills the calling agent's own window, so a reply that
---             waited for it would never be read (mcp-task-tools.allium:
---             ExitSessionViaMcp).
---           - W5, the teardown. The host's board claims the exit_session row,
---             kills the window and reports done, or failed with a reason. A
---             failed teardown does NOT revert the close; it is recorded on
---             the row and logged, as kill_session_window swallowed it before
---             M5 (pr-workflow.allium: ExitSessionTeardown). The same host also
---             runs ClosePrOnDone's gh pr close for a close that took a task
---             with a pr url into Done, as close_session did before M5
---             (confirmed as the owner in M7; see "ClosePrOnDone's owner"
---             under M7).
---           - W6, the epic chain. The module owns the epic chain's next
---             auto-dispatch: AutoDispatchNextSubtask's selection runs in
---             request_exit_session's transaction and writes a dispatch
---             request with origin epic_chain naming the same host (epics.allium:
---             AutoDispatchNextSubtask), only for a close that had a wrap_up
---             behind it, as today. The exit_session row records the chained
---             subtask for the response. What stays on the requesting board is
---             ReportChainedDispatchFailure, unchanged.
---           - W7, the timeouts. As D4: ONE deadline per row from
---             requested_at, exposed on the row; THE HOST ENFORCES IT, and the
---             module's timer is only a backstop. A wrap_up rebase row has 120
---             seconds (config.wrap_up_rebase_timeout), an exit_session
---             teardown 30 seconds (config.exit_session_teardown_timeout), and
---             the backstop fires 10 seconds after the deadline
---             (config.session_request_backstop_grace). A row the backstop
---             finds open fails with "timed out". A timed-out wrap_up row
---             leaves the task as it was: the Conflict flag is cleared only by
---             the claim, as today, and not restored. Short budgets on
---             purpose: the wrap_up tool waits on the row, and an agent stuck
---             in a call is worse than one told to try again.
---           - W8, catch-up and restart. As D5: a requested row is picked up
---             from its host's initial subscription rows when the board
---             starts, and a row already running when its host restarts is
---             not resumed: the starting board fails it ("host restarted")
---             (HostRestartFailsInterruptedSessionRequests). For an
---             exit_session row the starting board then still kills the
---             window the row names, best effort (pr-workflow.allium:
---             ExitSessionTeardown).
---           - W9, deletion. As D8: deleting a task fails its open session
---             request ("task deleted") in the same reducer and cancels its
---             timer, in every module reducer that deletes a task row
---             (DeleteTask, BatchDelete and the stale-subtree delete in
---             ingest_feed).
---           - W10, snapshots. As D10: session_request and its timer table are
---             in-flight state and are not in any snapshot
---             (spacetime-seed.allium: SharedTable). A restore loses every
---             unconsumed exit token with the rows; the agent calls wrap_up
---             again.
---           - W11, who may act for a host. D11 applies to every reducer that
---             names a host: request_wrap_up (its host argument),
---             request_exit_session (the task's host, which the row names),
---             the claim, both reports and the restart sweep. The row records
---             requested_by, and a board serves only rows requested_by its own
---             owner. The scheduled backstop keeps its own check.
---           - W12, the gate. This moves rules into the module, so the rules
---             version goes from 3 to 4, hand-bumped in the module crate and in
---             the board in the same commit as the code (sync.allium:
---             config.rules_version).
---           - W13, what stays on the board. The host-local pre-checks (W2),
---             the rebase and the teardown, ClosePrOnDone's gh
---             call (W5), the MCP waits and response text. update_tasks'
---             status="done" path (mcp-task-tools.allium: MarkTaskDoneViaMcp)
---             kept its board-side close and teardown UNTIL M7, by decision;
---             M7 moved it into the module (X1).
---           - Deferred, out of M5's scope as out of M4's: how long finished
---             rows are kept.
---       M6  PR state is derived in the module from the raw gh status the
---           host forwards. The watcher half is moot: task watchers were
---           removed (commit e292acb1) and nothing is left to move.
---           Decisions taken with the user (task #53259):
---           - P1, watchers. Dropped. task-watchers.allium, the watcher
---             service and the notice delivery no longer exist; the dead
---             task_watchers table stays in the module only so a publish is
---             not refused.
---           - P2, one reducer. The host runs gh and posts what it read in
---             raw form (report_pr_status: the state and reviewDecision
---             strings as gh printed them) or that it could not read the PR
---             (report_pr_unreadable). The module parses, validates and
---             derives every task write: merged -> done, closed -> pr_closed,
---             open -> the review sub_status, unreadable -> pr_unreachable.
---           - P3, counters stay on the host. The consecutive-failure counters
---             and the backoff are pacing of this machine's gh calls and are
---             session-scoped on purpose (pr-workflow.allium: PrPollState). No new
---             table. The give-up THRESHOLD stays a host constant; the module
---             decides only what a give-up report does to the task.
---           - P4, effects after a merge. The module sets the task Done
---             (completed_at, epic rollup) and clears its window. The host,
---             which read the window before posting, then kills it, sends the
---             desktop notice and respawns a phoenix task's split pane. No
---             teardown row: the work is best-effort and the module needs no
---             answer.
---           - P5, the gate. The rules version goes from 4 to 5, hand-bumped
---             in the module crate and in the board in the same commit.
---       M7  Leftover service logic is removed; MCP handlers call reducers
---           directly.
---           LANDED (task #53260): update_tasks' status="done" path closes in
---           the module, through a new close_task reducer (RequestCloseTask
---           below), and a third session request kind, close, carries the
---           host's teardown. patch_task applies the two transition rules the
---           board's service still added on top of a patch (the stop_pending
---           clear on leaving running, the phoenix respawn on entering Done).
---           The board's own epic recalculations, which repeated the module's
---           rollup, go. Managed-epic provisioning becomes the
---           ensure_managed_epics reducer. The three per-step feed reducers M3
---           left behind (named under M3) are deleted. The board's
---           close_session, its perform_close helper
---           and the close_persisted gate go. The rules version becomes 6.
---           Decided with the user:
---           - X1, the update_tasks done path (mcp-task-tools.allium:
---             MarkTaskDoneViaMcp). The tool keeps its request-shape checks at
---             the MCP boundary (status must be the only field; a dispatched
---             agent may not close its own task) and then calls
---             close_task(task_id, host), host being this board's own
---             (RequestCloseTask). In ONE transaction the module applies the
---             terminal Done write — ExitSession's terminal fields with action
---             done (pr-workflow.allium), except that a done -> done re-close
---             keeps the task's completed_at — clears stop_pending when the
---             task leaves running, clears tmux_window, rolls up the epic chain,
---             and respawns a phoenix task that enters Done (tasks.allium:
---             PhoenixRespawn). It issues, checks and consumes NO exit token and
---             runs NO epic chain. It writes a session request of the new kind
---             close ONLY when there is host work: the task had a live
---             tmux_window or carries a pr-typed url. That row has action done,
---             no wrap_up_request, the window the close cleared (absent when
---             the task had none), and as host the task's host if it has one,
---             else the caller's host argument. The row is written only when
---             that host is owned by the caller (D11); otherwise the task is
---             closed with no teardown row, because a window on a teammate's
---             machine is not ours to kill (as before, where the board's local
---             kill of such a window failed silently). The host serves a close
---             row exactly as an exit_session teardown (pr-workflow.allium:
---             ExitSessionTeardown): it kills the window if there is one, runs
---             gh pr close best-effort for a pr-typed url, and reports done or
---             failed; a failed teardown does not revert the close.
---             KillWindowOfFailedExitSession, the teardown timeout
---             (config.exit_session_teardown_timeout) and its backstop, the
---             restart sweep and the task-deletion failure all apply to close
---             rows as to exit_session rows. An OPEN session request on the
---             task (a wrap_up rebase still running, say) is failed with
---             reason "task closed" in the same transaction rather than
---             refusing the close: a stuck wrap_up must not block closing.
---             W1's one-open-row rule still holds, because the old row is
---             failed before the close row is written. EveryExitSessionHadAWrapUp
---             is restated to apply to exit_session rows only. The tool waits
---             for nothing, and its response text is unchanged. The board no
---             longer closes: close_session, perform_close and the
---             close_persisted gate are removed, since the module's write is
---             one transaction that either landed whole or not at all.
---           - X2, patch_task owns the transition rules. When a patch moves a
---             task out of running the module clears stop_pending in the same
---             write (core.allium: PendingStopOnlyWhileRunning) unless the
---             patch names stop_pending itself, in which case the patch's value
---             stands (no board patch sets it true), and when a
---             patch moves a task into Done from another status it runs the
---             phoenix respawn in the same transaction (tasks.allium:
---             PhoenixRespawn; the trigger is unchanged: the phoenix flag, a
---             task no feed owns, entering Done). completed_at on entering
---             Done was already stamped by the module, and update_task now
---             overwrites a value its patch names (UpdateTaskIsOneTransaction). The board no longer
---             stamps, clears or respawns itself; a board that needs the stamp
---             re-reads the task.
---           - X3, epic rollups. The board-side epic status recalculations that
---             repeated the module's own rollup (after hook events, after
---             patch_epic and create_epic, after a close) are removed. The
---             module is the only place that recalculates (epics.allium:
---             EpicStatusRecalculation).
---           - X4, managed epics. Provisioning (epics.allium:
---             ProvisionManagedEpics) moves into one reducer,
---             ensure_managed_epics(reviews_command, reviews_interval_secs,
---             cve_command, cve_interval_secs), so two boards starting together
---             cannot create duplicates. The board still reads and writes the
---             settings and applies the feed-interval floor, which is request
---             shape, and calls the reducer.
---           - X5, decided: NOT IN M7, deferred to follow-up tasks. The
---             learning create and verdict checks (the summary, the scope
---             shape, the "not retrieved" check); work-package validation and
---             the atomicity of its multi-call update; the atomicity of epic
---             create's two writes; the feed-interval floor and the delete
---             pre-checks in the module. The feed
---             code-citation lint and the embeddings stay on the board: they
---             need the operator's machine (S1).
---             Four reducers nothing in the board called once M7 landed were
---             deleted after it (task #77830), not deferred: upsert_feed_tasks
---             (ingest_feed is the one feed entry), and, allow-phantom-symbol: deleted in #77830,
---             create_repo_group_sub_epic
---             and create_managed_role_epic (ingest_feed and
---             ensure_managed_epics do their work inside the module) and
---             recalculate_epic_status (every mutation rolls the epic up in its
---             own transaction, X3).
---           - X6, the gate. This moves rules into the module, so the rules
---             version goes from 5 to 6, hand-bumped in the module crate and
---             in the board in the same commit as the code (sync.allium:
---             config.rules_version).
---           - ClosePrOnDone's owner, an open question since M5, closed as a
---             decision: the host serving the teardown row (exit_session or
---             close) runs gh pr close (W5), reading the url from the task. A
---             row that fails before its host serves it (the backstop, the
---             restart sweep, the task's deletion, a close that fails an
---             earlier row) leaves the PR open: KillWindowOfFailedExitSession
---             kills the window only. ACCEPTED AS BUILT, FLAGGED FOR USER
---             REVIEW.
---           - Deferred past M7, and so beyond the epic: how long finished
---             request rows are kept, whether a starting board kills the window
---             of a teardown row that failed while no board ran, and whether a
---             board sees other machines' requests (the open questions below).
---             The first is since decided (task #94222): a task's request rows
---             go with the task (DeletingATaskDeletesItsRequestRows), and a
---             finished row older than config.request_retention is pruned when
---             a new request is written (RequestRowsArePruned). The same task
---             had close_task fail an open dispatch request too
---             (CloseFailsOpenRequests).
+--     the outcome by reducer call. A scheduled reducer fails dispatch and
+--     session work that its host never reports, so the timeout holds whether
+--     or not the board that asked is still running.
+--   - The version gate. A board on an older build would apply old rules
+--     against a newer module, or fail to apply rules the module expects a
+--     host to follow. The module publishes a RULES VERSION, one integer in a
+--     one-row table of its own (a table, so a module without the gate answers
+--     "no such table" rather than a row the board cannot decode), stamped by
+--     the module from its own constant whenever a client connects. The board
+--     compares it for EQUALITY with the version compiled into the board, at
+--     every connection attempt, and refuses to run on a difference
+--     (sync.allium: AStoreWithOtherRulesFailsTheAttempt). The number is held
+--     twice, in the module crate and in the board, with a test that fails
+--     when they differ; spacetime/module/src/rules.rs::RULES_VERSION says
+--     what warrants a bump. The wasm hash is not the gate because it changes
+--     on every rebuild whether or not a rule moved; a build version is not,
+--     because it needs a stored minimum that someone also has to bump.
+--     Limit: a board built without the gate cannot refuse; it still meets
+--     the module's own checks.
+--
+--   Dispatch requests (DispatchRequest below):
+--   - D1, the row. One dispatch_request row per request, not columns on the
+--     task. It carries a kind column whose only value is dispatch. A task
+--     holds at most one OPEN request (requested or provisioning) at a time;
+--     finished rows (dispatched or failed) stay as history until
+--     RequestRowsArePruned removes them. An optional column is stored as ""
+--     for absent, not as an Option, and every timestamp comes from the
+--     module clock.
+--   - D2, the flow. Any client calls the request reducer. The module claims
+--     the task atomically (backlog -> running, so DispatchClaimExclusive
+--     holds: a second request for a claimed task is refused) and writes the
+--     row. The row's host is ALWAYS THE REQUESTING HOST, never the task's:
+--     you request work on a task, you provision it on your own machine, so
+--     the module refuses a task whose worktree is on another machine. The
+--     host's board claims the row (requested -> provisioning), provisions the
+--     worktree, tmux window and agent, and reports either dispatched (the
+--     module writes the task's worktree, window and host) or failed (the
+--     module releases the claim conditionally).
+--   - D3, the mode. mode is a column (dispatch | research | quick). The
+--     requester may pass it; when it does not, the module derives it (a plan
+--     -> dispatch, else the research tag -> research, else dispatch). quick
+--     is never derived: only quick dispatch names it, for its own prompt
+--     variant. The host reads the mode from the row and never re-derives it.
+--     MCP, the epic chain and retry-fresh name no mode (dispatch.allium:
+--     RetryFresh), so a retried research task stays research.
+--   - D4, the timeout. ONE deadline per request,
+--     config.dispatch_request_timeout from requested_at, whatever state the
+--     row is in, exposed on the row. THE HOST ENFORCES IT: provisioning stops
+--     at the deadline, any subprocess still running is killed, what the
+--     attempt made is rolled back as for a provisioning failure, and the host
+--     reports failed with reason "deadline passed" (dispatch.allium:
+--     ProvisioningStopsAtTheDeadline). The module's timer is only a BACKSTOP
+--     for a host that is gone or hung: one scheduled row per request,
+--     cancelled when the request finishes, due
+--     config.dispatch_request_backstop_grace after the deadline, so a live
+--     host's stop lands first. When it fires on a row still open the module
+--     fails the row "timed out" and releases the claim. A dispatched report
+--     arriving after the row has failed is refused, and the host tears down
+--     what it made. UnprovisionedIndicator's claim-stamp fallback uses the
+--     same config value.
+--   - D5, catch-up. A requested row is picked up from its host's initial
+--     subscription rows when that host's board starts. A row already
+--     provisioning when its host restarts is NOT resumed: the host's startup
+--     reports it failed ("host restarted"), which releases the claim. There
+--     is one board per host: startup restarts the board inside the single
+--     dispatch tmux session (startup.allium), so a starting board's
+--     provisioning rows are never a live sibling's.
+--   - D6, the callers. Every launch path that provisions writes a request
+--     row: the TUI dispatch keys, retry-fresh, research, quick dispatch
+--     (tasks.allium: CreateQuickTask creates the task, then requests), MCP
+--     dispatch_task, the epic auto-dispatch chain (epics.allium:
+--     AutoDispatchNextSubtask, which advances on a refused request and
+--     reports AutoDispatchFailed from the row's outcome) and a board firing a
+--     due scheduled task (schedules.allium: FireDueTask). dispatch_task writes
+--     the request and waits up to 30 seconds for dispatched or failed; when
+--     the wait ends first it returns the request id and its state, and
+--     get_task shows the request state. The TUI's DispatchingFeedback follows
+--     the row.
+--   - D7, the gate. Every rule the module enforces for dispatch requests is
+--     covered by the version gate above (sync.allium: config.rules_version).
+--   - D8, deletion. Deleting a task with an open request fails that request
+--     in the same reducer (reason "task deleted") and cancels its timer, in
+--     every module reducer that deletes a task row: DeleteTask, BatchDelete
+--     and the stale-subtree delete in ingest_feed. The host sees the row go
+--     and tears down whatever it made.
+--   - D9, origin. The row records which launch path wrote it (user | mcp |
+--     epic_chain | quick | schedule; user covers the TUI keys, retry-fresh
+--     and research; schedule is a board firing a due task). An epic_chain row
+--     that fails raises AutoDispatchFailed from the row itself, on the
+--     requesting host's board only (epics.allium:
+--     ReportChainedDispatchFailure), so a board restart during the chain's
+--     wait does not lose it.
+--   - D10, snapshots. dispatch_request and its timer table are in-flight
+--     state and are not in any snapshot (spacetime-seed.allium:
+--     SharedTable); a restore loses request history, by decision.
+--   - D11, who may act for a host. A request makes its host's board run git,
+--     tmux and claude, so a client may name a host — as the requester, the
+--     claimer or a reporter — only when that host's registry row exists with
+--     an owner and the owner is the caller's own identity (caller(), the
+--     store's view of who sent the call). A host with no owner yet is
+--     refused. The module records the caller on the row as requested_by, and
+--     a host's board serves only rows requested_by its own owner, as a second
+--     line behind the module's check (dispatch.allium: ProvisionDispatch).
+--     The scheduled backstop is the module's own call and keeps its own
+--     check. The owner is a fact these checks can rest on because the host
+--     registry's own write enforces core.allium's
+--     LocalHostOwnerIsWrittenOnce: a caller may name only itself as a host's
+--     owner, and an owned host's owner is never rewritten. A NEW host row
+--     must name its owner: host ids are public, so an ownerless row would go
+--     to whichever caller registered that id next, and a teammate could lock
+--     a new machine out of its own host. A legacy ownerless row may be
+--     adopted by the first caller naming itself. The board registers only
+--     once its identity has settled, and always as that identity
+--     (sync.allium: RegisterHostOnConnect). LIMIT, by decision: one person's
+--     machines share an owner, so one of their machines can name another of
+--     theirs; a teammate cannot. Every other reducer that takes a host
+--     argument makes the same check: poll ownership (feeds.allium:
+--     ClaimPollOwner, OverridePollOwner), PR reports (pr-workflow.allium:
+--     ReportPrStatus), host-scoped settings (SaveSettingForHost below), and
+--     the patch and create checks on a task's host (tasks.allium:
+--     PatchTaskNeverAimsAnotherHostsTeardown).
+--   - D12, failures while no board ran. A request whose backstop fired while
+--     its host's board was closed is already failed in the starting board's
+--     baseline, and the starting board does NOT raise it: neither
+--     FailedRequestReported nor epics.allium's ReportChainedDispatchFailure
+--     fires for it, epic_chain rows included, and a chain stalled that way
+--     gets no ChainStallMarked. The failed card shows it: the task is back in
+--     backlog and the row records the reason.
+--
+--   Session requests: wrap-up, exit-session and close (SessionRequest below):
+--   - W1, the row. One session_request row (accessor session_requests) per
+--     wrap_up, exit_session or close request, plus a schedule table for its
+--     backstop (session_request_timeouts). A table of its own, not a kind of
+--     dispatch_request: its lifecycle is requested -> running -> done |
+--     failed, it carries an action, a pr url and a token rather than a mode,
+--     an origin or a worktree, and its failure releases no claim. Folding it
+--     in would leave half of every row's columns meaningless for its kind and
+--     make every dispatch reader filter by kind. wrap_up_request (the wrap_up
+--     row an exit_session row consumed), tmux_window (the window to tear
+--     down) and chained_task (the subtask the epic chain requested) carry
+--     what the flow needs. An optional column is stored as "" for absent, as
+--     in D1, and every timestamp comes from the module clock. A task holds at
+--     most one OPEN session request (requested or running) of any kind;
+--     finished rows stay as history until RequestRowsArePruned removes them.
+--   - W2, the wrap_up flow. The MCP handler first runs the host-local checks,
+--     BEFORE writing anything: the task is wrappable, its worktree names a
+--     branch (rebase only), the worktree is committed
+--     (WrapUpRefusesUnfinishedWork). A refusal there writes no row and issues
+--     no token. Then it calls request_wrap_up(task, host, action), host being
+--     this board's own. The module checks D11, that the task is running or
+--     review with a worktree on that host, that it is not review-tagged
+--     (mcp-task-tools.allium's ReviewTasksAreNotWrappedUp, the module's by
+--     decision; the tool may keep the same check as an early refusal with
+--     the same wording), and that the task has no open session request
+--     (RequestWrapUp). For action rebase the row is requested; the owning
+--     host claims it (requested -> running), which clears a Conflict
+--     sub_status in the same transaction (HostClaimsSessionRequest); runs the
+--     rebase (pr-workflow.allium: WrapUpRebase); and reports done, or failed
+--     with a reason and whether the failure was a rebase conflict. THE MODULE
+--     sets sub_status = Conflict on a conflict report
+--     (HostReportsSessionRequestFailed, then pr-workflow.allium:
+--     FinishTaskConflict). For done and pr there is no host work: the module
+--     writes the row already done, in the same call, and schedules no timer.
+--   - W3, the token. A done wrap_up row is the proof exit_session needs: the
+--     token shown to the agent is that row's id. Only the task's most recent
+--     done wrap_up row is valid, and each is consumed once. It survives a
+--     board restart. A LATER DISPATCH VOIDS IT (decided with the user): a
+--     token is valid only if its wrap_up row finished after the finished_at
+--     of the task's latest dispatched request, so a token from an earlier
+--     session of a re-dispatched task cannot close the new session. A voided
+--     token is refused with "invalid exit token".
+--   - W4, the exit_session flow. exit_session calls
+--     request_exit_session(task, token, action, pr_url). The module requires
+--     a valid token for the task (W3) whose action matches, and a pr_url for
+--     action pr (RequestExitSession). In the same call it applies the
+--     terminal state (rebase or done -> Done, pr -> Review with the pr url;
+--     completed_at from the store clock; pr-workflow.allium: ExitSession),
+--     rolls up the epic chain, consumes the token, and writes an exit_session
+--     row naming the task's host and its tmux window for the teardown. The
+--     close is one transaction, so it took effect whole or not at all, and a
+--     refused or failed call leaves the token valid for a retry. exit_session
+--     does NOT wait for the teardown (decided with the user): the teardown
+--     kills the calling agent's own window, so a reply that waited for it
+--     would never be read (mcp-task-tools.allium: ExitSessionViaMcp).
+--   - W5, the teardown. The host's board claims the exit_session or close
+--     row, kills the window and reports done, or failed with a reason. A
+--     failed teardown does NOT revert the close; it is recorded on the row
+--     and logged (pr-workflow.allium: ExitSessionTeardown). The host serving
+--     the teardown row also runs ClosePrOnDone's gh pr close for a close that
+--     took a task with a pr-typed url into Done, reading the url from the
+--     task. A row that fails before its host serves it (the backstop, the
+--     restart sweep, the task's deletion, a close that fails an earlier row)
+--     leaves the PR open: KillWindowOfFailedExitSession kills the window
+--     only. Accepted as built.
+--   - W6, the epic chain. The module owns the epic chain's next
+--     auto-dispatch: AutoDispatchNextSubtask's selection runs in
+--     request_exit_session's transaction and writes a dispatch request with
+--     origin epic_chain naming the same host (epics.allium:
+--     AutoDispatchNextSubtask), only for a close that had a wrap_up behind
+--     it. The exit_session row records the chained subtask for the response.
+--     ReportChainedDispatchFailure stays on the requesting board.
+--   - W7, the timeouts. As D4: ONE deadline per row from requested_at,
+--     exposed on the row; THE HOST ENFORCES IT, and the module's timer is
+--     only a backstop. A wrap_up rebase row has
+--     config.wrap_up_rebase_timeout, an exit_session or close teardown
+--     config.exit_session_teardown_timeout, and the backstop fires
+--     config.session_request_backstop_grace after the deadline. A row the
+--     backstop finds open fails "timed out". A timed-out wrap_up row leaves
+--     the task as it was: the Conflict flag is cleared only by the claim and
+--     not restored. Short budgets on purpose: the wrap_up tool waits on the
+--     row, and an agent stuck in a call is worse than one told to try again.
+--   - W8, catch-up and restart. As D5: a requested row is picked up from its
+--     host's initial subscription rows when the board starts, and a row
+--     already running when its host restarts is not resumed: the starting
+--     board fails it ("host restarted")
+--     (HostRestartFailsInterruptedSessionRequests). For an exit_session or
+--     close row the starting board then still kills the window the row
+--     names, best effort (pr-workflow.allium: ExitSessionTeardown).
+--   - W9, deletion. As D8: deleting a task fails its open session request
+--     ("task deleted") in the same reducer and cancels its timer, in every
+--     module reducer that deletes a task row (DeleteTask, BatchDelete and the
+--     stale-subtree delete in ingest_feed).
+--   - W10, snapshots. As D10: session_request and its timer table are
+--     in-flight state and are not in any snapshot (spacetime-seed.allium:
+--     SharedTable). A restore loses every unconsumed exit token with the
+--     rows; the agent calls wrap_up again.
+--   - W11, who may act for a host. D11 applies to every reducer that names a
+--     host: request_wrap_up (its host argument), request_exit_session (the
+--     task's host, which the row names), close_task's row (X1), the claim,
+--     both reports and the restart sweep. The row records requested_by, and
+--     a board serves only rows requested_by its own owner. The scheduled
+--     backstop keeps its own check.
+--   - W12, the gate. Every rule the module enforces for session requests is
+--     covered by the version gate above (sync.allium: config.rules_version).
+--   - W13, what stays on the board. The host-local pre-checks (W2), the
+--     rebase and the teardown, ClosePrOnDone's gh call (W5), the MCP waits
+--     and the response text.
+--
+--   PR state (pr-workflow.allium: ReportPrStatus, ReportPrUnreadable):
+--   - P1, no watchers. There are no task watchers; the dead task_watchers
+--     table stays in the module only so a publish is not refused.
+--   - P2, one reducer. The host runs gh and posts what it read in raw form
+--     (report_pr_status: the state and reviewDecision strings as gh printed
+--     them) or that it could not read the PR (report_pr_unreadable). The
+--     module parses, validates and derives every task write: merged -> done,
+--     closed -> pr_closed, open -> the review sub_status, unreadable ->
+--     pr_unreachable.
+--   - P3, counters stay on the host. The consecutive-failure counters and the
+--     backoff pace this machine's gh calls and are session-scoped on purpose
+--     (pr-workflow.allium: PrPollState). The give-up THRESHOLD is a host
+--     constant; the module decides only what a give-up report does to the
+--     task.
+--   - P4, effects after a merge. The module sets the task Done (completed_at,
+--     epic rollup) and clears its window. The host, which read the window
+--     before posting, then kills it, sends the desktop notice and respawns a
+--     phoenix task's split pane. No teardown row: the work is best-effort and
+--     the module needs no answer.
+--   - P5, the gate. The PR rules are covered by the version gate above.
+--
+--   Rules the module owns outright (no board-side copy):
+--   - X1, the update_tasks done path (mcp-task-tools.allium:
+--     MarkTaskDoneViaMcp). The tool keeps its request-shape checks at the MCP
+--     boundary (status must be the only field; a dispatched agent may not
+--     close its own task) and then calls close_task(task_id, host), host
+--     being this board's own (RequestCloseTask). In ONE transaction the
+--     module applies the terminal Done write — ExitSession's terminal fields
+--     with action done (pr-workflow.allium), except that a done -> done
+--     re-close keeps the task's completed_at — clears stop_pending when the
+--     task leaves running, clears the window, rolls up the epic chain, and
+--     respawns a phoenix task that enters Done (tasks.allium:
+--     PhoenixRespawn). It issues, checks and consumes NO exit token and runs
+--     NO epic chain. It writes a session request of kind close ONLY when
+--     there is host work (a live window or a pr-typed url) and the teardown
+--     host is owned by the caller (D11); otherwise the task closes with no
+--     row, because a window on a teammate's machine is not ours to kill. The
+--     host serves a close row exactly as an exit_session teardown (W5).
+--     KillWindowOfFailedExitSession, the teardown timeout and its backstop,
+--     the restart sweep and the task-deletion failure apply to close rows as
+--     to exit_session rows. An OPEN session or dispatch request on the task
+--     is failed "task closed" in the same transaction rather than refusing
+--     the close (CloseFailsOpenRequests): a stuck wrap_up must not block
+--     closing, and W1's one-open-row rule holds because the old row is
+--     failed before the close row is written. EveryExitSessionHadAWrapUp
+--     applies to exit_session rows only. The tool waits for nothing.
+--   - X2, patch_task owns the transition rules. When a patch moves a task
+--     out of running the module clears stop_pending in the same write
+--     (core.allium: PendingStopOnlyWhileRunning) unless the patch names
+--     stop_pending itself, in which case the patch's value stands; when a
+--     patch moves a task into Done from another status it runs the phoenix
+--     respawn in the same transaction (tasks.allium: PhoenixRespawn). The
+--     module stamps completed_at on entering Done
+--     (tasks.allium: UpdateTaskIsOneTransaction). The board never stamps,
+--     clears or respawns itself; a board that needs the stamp re-reads the
+--     task.
+--   - X3, epic rollups. The module is the only place that recalculates an
+--     epic's status (epics.allium: EpicStatusRecalculation): every mutation
+--     rolls the epic up in its own transaction, and the board never
+--     recalculates.
+--   - X4, managed epics. Provisioning (epics.allium: ProvisionManagedEpics)
+--     is one reducer, ensure_managed_epics(reviews_command,
+--     reviews_interval_secs, cve_command, cve_interval_secs), so two boards
+--     starting together cannot create duplicates. The board reads and writes
+--     the settings and applies the feed-interval floor, which is request
+--     shape, and calls the reducer.
+--   - X5, what stays at the boundary. The learning create checks (the
+--     summary, the scope shape) and the feed-interval floor are request
+--     shape and stay at the service and MCP boundary (S1). The learning
+--     verdict's "not retrieved" check, the work-package checks and their
+--     multi-part update (work-packages.allium:
+--     UpdateWorkPackageIsOneTransaction) and the epic delete pre-checks run
+--     in the module. The feed code-citation lint and the embeddings stay on
+--     the board: they need the operator's machine (S1).
+--   - X6, the gate. The rules in X1–X4 are covered by the version gate above
+--     (sync.allium: config.rules_version).
 --
 -- Design doc: 2026-10-10-tui-store-split-design.md under the superpowers
 -- specs directory (a dated snapshot; this spec is the record).
 
 use "./core.allium" as core
 use "./settings.allium" as settings
+use "./tasks.allium" as tasks
 
 ------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
--- What a dispatch request asks for. Only dispatch exists. M4 meant M5 to add
--- wrap_up and exit_session here; M5 gave them their own table instead (W1),
--- with their own kind (SessionRequestKind below).
+-- What a dispatch request asks for. Only dispatch exists: wrap-up,
+-- exit-session and close have their own table (W1), with their own kind
+-- (SessionRequestKind below).
 enum RequestKind { dispatch }
 
 -- What a session request asks for (W1): a wrap-up, the close that follows
--- it, or (M7, X1) the teardown of update_tasks' done-path close, which has no
+-- it, or (X1) the teardown of update_tasks' done-path close, which has no
 -- wrap-up behind it.
 enum SessionRequestKind { wrap_up | exit_session | close }
 
 enum SessionRequestState { requested | running | done | failed }
 
--- What a feed request asks for (task #98873): one feed cycle run by the
+-- What a feed request asks for: one feed cycle run by the
 -- epic's poll owner, or the release of a removed feed task's worktree and
 -- window by the host that holds them.
 enum FeedRequestKind { refresh | teardown }
@@ -743,7 +500,7 @@ entity DispatchRequest {
         -- writes, not any single state.
 }
 
--- One wrap_up, exit_session (M5) or close (M7) request for one task, from the
+-- One wrap_up, exit_session or close request for one task, from the
 -- moment the module accepts it until it is done or failed, and kept afterwards
 -- as history until it is pruned (RequestRowsArePruned) or its task is deleted
 -- (DeletingATaskDeletesItsRequestRows). Stored as the module's session_request
@@ -842,7 +599,7 @@ entity SessionRequest {
         -- it constrains the order of writes, not any single state.
 }
 
--- One request for a host to do feed work (task #98873), from the moment the
+-- One request for a host to do feed work, from the moment the
 -- module writes it until its host reports it done or failed, and kept
 -- afterwards as history until it is pruned (RequestRowsArePruned). Stored as
 -- the module's feed_requests table: one table, two kinds. A refresh row asks
@@ -942,7 +699,7 @@ config {
     -- than the host's worst-case subprocess budget (several sequential git
     -- calls, each bounded by SUBPROCESS_TIMEOUT) on purpose: the deadline
     -- bounds the dispatch, and a subprocess still running at it is killed.
-    -- Dispatch only; M5's requests get their own.
+    -- Dispatch only; session requests have their own (W7).
     dispatch_request_timeout: Duration = 60.seconds
 
     -- How long after the deadline the module's backstop timer waits before
@@ -963,7 +720,7 @@ config {
     -- How long an exit_session request's teardown may stay open, measured
     -- from requested_at (W7). The close itself is already applied by then;
     -- this bounds only the host's window kill (pr-workflow.allium:
-    -- ExitSessionTeardown). A close row (M7, X1) is held to the same budget.
+    -- ExitSessionTeardown). A close row (X1) is held to the same budget.
     exit_session_teardown_timeout: Duration = 30.seconds
 
     -- How long after a session request's deadline the module's backstop
@@ -979,7 +736,7 @@ config {
     request_retention: Duration = 14.days
 
     -- How long a refresh FeedRequest may sit requested before
-    -- RequestRowsArePruned may remove it (task #98873). A refresh asked of a
+    -- RequestRowsArePruned may remove it. A refresh asked of a
     -- poll owner that has been offline this long is moot: the asker wanted
     -- fresh data then, not whenever the owner returns. The module's
     -- STALE_REFRESH_REQUEST_SECS. A teardown row has no such window.
@@ -999,376 +756,13 @@ config {
 -- Rules
 ------------------------------------------------------------
 
--- == Task data rules at the write seam (M2 follow-up, task #94222) ==
-
--- sub_status_valid_for(sub_status, status) is the black box mcp-task-tools.allium
--- (UpdateTaskViaMcp) names: the store's legality table, core.allium's
--- Task.SubStatusFitsStatus.
-
-rule SubStatusMovesMustBeLegal {
-    when: TaskWriteRequested(task, written)
-
-    -- task is the row as the store holds it, written the row the write would
-    -- leave. ONLY A MOVE IS JUDGED: a write that leaves sub_status as it was
-    -- passes whatever the pair, so a row already holding an odd pair (a
-    -- restore, an older board, a status move that left the old sub_status
-    -- behind) stays writable for its other fields.
-    requires:
-        written.sub_status = task.sub_status
-        or sub_status_valid_for(written.sub_status, written.status)
-
-    ensures: TaskRowWritten(task: task, written: written)
-
-    @guidance
-        -- THE ONE SEAM. Every module reducer that writes an existing task row
-        -- reaches the same write, and the check sits there, so no writer can
-        -- move a sub_status the status does not allow: patch_task, the
-        -- batch sub_status patch (BatchSubStatusPatchSkipsIllegalEntries
-        -- below), and the hook reducers record_pre_tool_use and
-        -- record_notification (agent-health.allium) among them. A refusal
-        -- reads "sub_status 'x' is not valid for status 'y'" and is decided
-        -- before anything is written.
-        --
-        -- patch_task ALSO judges an explicit sub_status that does not move, as
-        -- before (mcp-task-tools.allium: UpdateTaskViaMcp checks the named
-        -- sub_status against the status the row will hold). This rule adds
-        -- the writers that had no check.
-        --
-        -- AN INSERT IS NOT JUDGED (there is no prior row to move from): a seed
-        -- carries whatever the old store held, and every creating rule writes
-        -- default_sub_status of its status anyway.
-}
-
-rule BatchSubStatusPatchSkipsIllegalEntries {
-    when: SubStatusBatchPatched(updates)
-
-    ensures:
-        for update in updates:
-            if exists update.task
-               and (update.sub_status = update.task.sub_status
-                    or sub_status_valid_for(update.sub_status, update.task.status)):
-                update.task.sub_status = update.sub_status
-                update.task.updated_at = now
-
-    @guidance
-        -- batch_patch_sub_status. Each entry goes through the write seam
-        -- (SubStatusMovesMustBeLegal), but an entry it refuses is SKIPPED, not
-        -- fatal: the call succeeds and the other entries land. The batch is
-        -- built from a board snapshot that may be a poll behind, and one stale
-        -- entry must not undo its neighbours. A skipped entry leaves no trace,
-        -- and an entry naming a task that is gone is skipped as before. No
-        -- epic rollup: sub_status is not an input of the epic status.
-}
-
-rule PatchTaskNeverMovesAnEpic {
-    when: TaskPatchRequested(task, patch)
-
-    -- The epic move owns the owner, the repo-group routing and the
-    -- epic-exists check (epics.allium's routing note; set_task_epic), so a
-    -- patch that could change epic_id would skip all three.
-    requires: patch.epic_id = null
-
-    ensures: TaskPatchAccepted(task: task, patch: patch)
-
-    @guidance
-        -- patch_task refuses a patch that names epic_id at all, even one that
-        -- clears it (a detach), with "epic_id cannot
-        -- be changed by patch_task; use set_task_epic", and writes nothing.
-        -- set_task_epic and update_task (UpdateTaskIsOneTransaction) are the ONLY
-        -- ways a task changes epic; the move routes into a
-        -- repo-group sub-epic, sets the owner and rolls up both the old and
-        -- the new epic. No host patch names epic_id: update_tasks sends an
-        -- explicit epic_id through update_task
-        -- (mcp-task-tools.allium: UpdateTaskViaMcp).
-        --
-        -- With the epic fixed, patch_task rolls up the task's epic only when
-        -- the status moved, and still re-routes inside a grouped subtree when
-        -- repo_path changes.
-        --
-        -- set_task_epic holds the epic-exists check: a non-zero epic_id that
-        -- names no epic is refused with "task <id>: epic <n> does not exist"
-        -- and writes nothing, so no task is written with a dangling epic.
-        --
-        -- Decision (task #98310): tightening a refusal inside a rule the module
-        -- already owns (this check, the epic_id refusal, the sub-status check,
-        -- close_task) is not a RULES_VERSION bump. The version records who
-        -- enforces a rule, and the board enforces none of these.
-        --
-        -- The repo-group sweep deletes a sub-epic only when it holds no task and
-        -- no child, so validate_epic_deletable has nothing to refuse there.
-}
-
-rule PatchTaskNeverAimsAnotherHostsTeardown {
-    when: TaskPatchRequested(task, patch)
-
-    -- A feed teardown asks the host named in the task row to remove the
-    -- worktree named in it, in the repo named in it
-    -- (StaleDeleteRequestsTeardownOnTheHoldingHost). A patch that could set
-    -- those three would let anyone who sees the task aim another person's host
-    -- at a live worktree: patch a feed task in somebody's epic to
-    -- host = their-laptop, worktree = a worktree they are working in, and wait
-    -- for the item to leave the feed.
-    -- A host nobody registered has no owner and is never the target of a
-    -- teardown row, so it is not judged.
-    requires: patch.host = null or patch.host = task.host
-        or ((task.host = null or task.host.owner = null or task.host.owner = caller())
-            and (patch.host = "" or patch.host.owner = null
-                 or patch.host.owner = caller()))
-    requires: ((patch.repo_path = null or patch.repo_path = task.repo_path)
-               and (patch.worktree = null or patch.worktree = task.worktree))
-        or task.host = null or task.host.owner = null or task.host.owner = caller()
-
-    ensures: TaskPatchAccepted(task: task, patch: patch)
-
-    @guidance
-        -- patch_task refuses, naming why, and writes nothing. Only a CHANGE is
-        -- judged: the editor sends repo_path on every save, and a repeated
-        -- value is no change. A task no host holds keeps its repo editable by
-        -- anyone who sees it, and may be handed to a host the caller owns or
-        -- to one nobody registered.
-        -- Writes the module makes itself (the dispatch reports, the close, the
-        -- stale delete) do not go through this check, so provisioning and
-        -- teardown are unaffected. Task #98909.
-}
-
-rule CreateTaskNeverAimsAnotherHostsTeardown {
-    when: TaskCreateRequested(row)
-
-    -- The create twin of PatchTaskNeverAimsAnotherHostsTeardown. A new row
-    -- that names another person's host would be torn down by that host when
-    -- the item leaves its feed, against a worktree the creator chose.
-    requires: row.host = "" or row.host.owner = null or row.host.owner = caller()
-
-    ensures: TaskCreated(row: row)
-
-    @guidance
-        -- create_task and create_task_signalled refuse, naming why, and write
-        -- nothing. A host nobody registered has no owner and is not judged.
-        -- Task #98991.
-}
-
-rule UpdateTaskIsOneTransaction {
-    when: TaskUpdateRequested(task, epic?, patch)
-
-    -- The board's update of a task (relink and field patch) is ONE reducer,
-    -- update_task, so it cannot half-apply and does not depend on the board's
-    -- cached rows. A refusal of either half (the epic does not exist, a
-    -- sub_status illegal for the status the row will hold, a schedule the
-    -- module refuses) leaves the task, its epic and its repo as they were.
-    requires: task.exists
-
-    ensures: TaskPatchAccepted(task: task, patch: patch)
-    ensures:
-        if epic != null: task.epic = route_target(epic, task.repo_path)
-
-    @guidance
-        -- epic is absent to leave the epic alone, 0 to detach onto a user
-        -- board (the call carries the owner), n to move into epic n. The move
-        -- is set_task_epic's (routing, owner, epic-exists check, rollups of
-        -- both epics); the patch is patch_task's, and patch_task still refuses
-        -- epic_id. A missing task is an error here ("task <id> not found"),
-        -- unlike patch_task's silent no-op: the board no longer pre-reads a
-        -- possibly stale view to decide that. A missing epic is refused with
-        -- "task <id>: epic <n> does not exist", which the board maps to the
-        -- same NotFound the create and move paths answer.
-        --
-        -- ORDER INSIDE THE CALL. A call that also changes repo_path relinks
-        -- first, then patches, so the repo change re-routes inside the subtree
-        -- the relink named and the task ends where routing by the NEW repo
-        -- puts it. Otherwise it patches first, then relinks. The order no
-        -- longer matters for atomicity: both halves share one transaction.
-        --
-        -- COMPLETION STAMP. Entering Done stamps completed_at from the store
-        -- clock whatever the patch names, in update_task: a board that
-        -- forwarded a stale row's value cannot misorder the Done column, and
-        -- no longer reads its cache to strip the value first. A patch that
-        -- names a completion on a task already done (a manual reorder of the
-        -- Done column) is kept. patch_task and patch_epic are unchanged: a
-        -- completion they are given explicitly (a seed, a feed, an epic's
-        -- manual reorder) still wins over the module's own stamp.
-        --
-        -- RULES_VERSION moves to 18: the board calls update_task, which an
-        -- older module does not have.
-}
-
-rule HandStatusWriteReachesTheSchedule {
-    -- Every accepted patch_task and update_task patch, in the same
-    -- transaction: these are the hand status writes (the TUI's moves and
-    -- editor, update_tasks' status). The dispatch claim and the close are the
-    -- module's own writes and do not pass through here.
-    when: TaskPatchAccepted(task, patch)
-
-    let from = task.status
-
-    ensures:
-        if patch.status != null and patch.status != from:
-            TaskStatusWrittenByHand(task: task, from: from, to: patch.status)
-    -- A write into done is a close, from any prior status.
-    ensures:
-        if patch.status = done:
-            TaskClosed(task: task)
-
-    @guidance
-        -- schedules.allium consumes both: LeavingBacklogCancelsThePendingRun,
-        -- EnteringBacklogRearmsAPhoenixTask, LeavingRunningCancelsThePendingRun
-        -- and ClosingCancelsThePendingRun.
-        -- Implementation: spacetime/module/src/schedule.rs::schedule_after_status_write,
-        -- the one call patch_task and update_task make, and its in-memory twin.
-}
-
-rule UpdateTaskDoneWritesACloseRow {
-    when: TaskUpdateRequested(task, epic?, patch, host)
-
-    -- The store, not the board's cache, decides ClosePrOnDone for an edit
-    -- (pr-workflow.allium). update_task takes the caller's host and, when the
-    -- call moves the task into Done (status was not done, is done after the
-    -- patch) and the task then carries a pr-typed url, writes a close row for
-    -- the host to serve. The close is windowless: an edit to Done never killed
-    -- a window, and still does not.
-    let was_already_done = task.status = done
-    let has_pr_url = task.url != null and task.url.url_type = pr
-    let teardown_host = if task.host != null: task.host else: host
-    let may_tear_down = teardown_host.owner != null and teardown_host.owner = caller()
-
-    ensures:
-        if not was_already_done and patch.status = done and has_pr_url and may_tear_down:
-            SessionRequest.created(
-                task: task,
-                kind: close,
-                action: done,
-                host: teardown_host,
-                requested_by: caller(),
-                state: requested,
-                requested_at: now,
-                tmux_window: null
-            )
-
-    @guidance
-        -- WHY A ROW. A reducer answers only success or failure, so the board
-        -- cannot learn from the call whether it performed the Done transition.
-        -- It used to guess from its subscription cache, which is stale when
-        -- another host already moved the task (a repeat close) or the row has
-        -- just arrived (a missed one). The module reads its own prior row, so
-        -- both are decided where the transition happens. Raised in four
-        -- consecutive reviews (2026-10-22 to 2026-11-03).
-        --
-        -- THE FINAL URL. The url is the task's after the patch, so a call
-        -- that attaches a pr-typed url and moves to Done together is caught.
-        --
-        -- SERVED LIKE ANY CLOSE ROW. The host runs gh pr close best effort
-        -- (pr-workflow.allium: ExitSessionTeardown), reading the task when it
-        -- serves the row and closing only if it is still done. D11 applies as
-        -- in RequestCloseTask: a teammate's host, a host with no owner or an
-        -- unregistered one gets no row, and the task still goes Done. An open
-        -- session request on the task is failed "task closed" first, so
-        -- OneOpenSessionRequestPerTask holds. patch_task writes no row: it
-        -- has no host argument, and no board route uses it for a status
-        -- edit.
-        --
-        -- RULES_VERSION moves to 34: the board passes the new argument.
-}
-
-rule SetEpicGroupByRepoIsOneTransaction {
-    when: EpicGroupByRepoSetRequested(epic, group_by_repo)
-
-    -- The board's group-by-repo toggle (epics.allium: ToggleGroupByRepo) is ONE
-    -- reducer, set_epic_group_by_repo: it writes the flag and, for a non-feed
-    -- epic, runs RegroupEpic (flag on) or FlattenEpic (flag off) in the same
-    -- transaction. Two calls left the flag set and the tasks unmoved when the
-    -- second one failed.
-    requires: epic.exists
-
-    ensures: EpicPatchAccepted(epic: epic, patch: { group_by_repo: group_by_repo })
-    ensures:
-        if epic.feed_command = null:
-            if group_by_repo:
-                RegroupEpic(epic)
-            else:
-                FlattenEpic(epic)
-
-    @guidance
-        -- The flag write is patch_epic's, so the append-only refusal is
-        -- unchanged, and a refusal of any part leaves the epic and its tasks as
-        -- they were. A missing epic is an error, as in update_epic.
-        -- regroup_epic and flatten_epic stay as reducers: ingest paths and the
-        -- MCP surface still call them directly.
-        -- RULES_VERSION moves to 45: the board calls the new reducer.
-}
-
-rule UpdateEpicIsOneTransaction {
-    when: EpicUpdateRequested(epic, patch, workspace?, visibility?)
-
-    -- The board's update of an epic (field patch, workspace move and
-    -- visibility change) is ONE reducer, update_epic, so a refused part leaves
-    -- nothing applied. A member who is not the creator sends a title and a
-    -- visibility: the visibility is refused and the title is not saved, and the
-    -- caller learns the whole update failed.
-    requires: epic.exists
-
-    ensures: EpicPatchAccepted(epic: epic, patch: patch)
-    -- A patch that names a feed_command is held to feeds.allium's
-    -- FeedCommandAuthority (spacetime/module/src/tasks_epics.rs::may_change_feed_command).
-    ensures:
-        if patch.feed_command != null:
-            EpicFeedCommandSet(epic: epic, command: patch.feed_command)
-    ensures:
-        if workspace != null: epic.workspace = workspace
-    ensures:
-        if visibility != null: epic.visibility = visibility
-
-    @guidance
-        -- workspace and visibility are absent to leave that part alone. The
-        -- parts are patch_epic's, move_epic_to_workspace's and
-        -- set_epic_visibility's, run in that order inside one transaction;
-        -- their refusals are unchanged. A missing epic is an error here ("epic
-        -- <id> does not exist"), unlike patch_epic's silent no-op, and the
-        -- service maps it to NotFound without pre-reading the board's cache.
-        --
-        -- RULES_VERSION moves to 27: the board calls update_epic and
-        -- update_work_package_with_links with a visibility argument, which an
-        -- older module does not have.
-}
-
-rule UpdateWorkPackageIsOneTransaction {
-    when: WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
-
-    -- update_work_package_with_links takes the visibility change too: the
-    -- patch, the visibility, every unlink and every link are one transaction.
-    -- The visibility's refusals (an unknown value, a caller who is neither the
-    -- creator nor an admin) are raised before the first write, so a refused
-    -- visibility leaves the title, the links and the package as they were.
-    requires: package.exists
-
-    ensures: WorkPackagePatchAccepted(package: package, patch: patch)
-    ensures:
-        if visibility != null: package.visibility = visibility
-}
-
-rule RespawnPhoenixSuccessorNeedsTheFlag {
-    when: PhoenixSuccessorRequested(predecessor, successor)
-
-    -- tasks.allium's TheFlagIsTheReceipt, enforced: a predecessor without the
-    -- flag is not a phoenix task, or has already respawned.
-    requires: predecessor.phoenix
-
-    ensures: PhoenixSuccessorAccepted(predecessor: predecessor, successor: successor)
-
-    @guidance
-        -- The standalone respawn_phoenix_successor reducer. A refusal reads
-        -- "predecessor task <id> is not a phoenix task, or already respawned"
-        -- and writes nothing, so a repeated call cannot insert a second
-        -- successor. The in-transaction respawns (patch_task, close_task,
-        -- exit_session's close, a merged PR; tasks.allium: PhoenixRespawn)
-        -- were already gated on the flag.
-}
-
--- == Dispatch requests (M4) ==
+-- == Dispatch requests ==
 
 rule RequestDispatch {
     when: DispatchRequested(task, requester, origin, mode?)
 
     requires: task.status = backlog
-    -- Today's claimable_by, unchanged: the request is provisioned on the
+    -- The claimability check: the request is provisioned on the
     -- requester's own machine (D2), so a task whose worktree is on another
     -- machine is refused rather than given a second worktree here.
     requires: task.host = null or task.host = requester
@@ -1392,17 +786,17 @@ rule RequestDispatch {
     -- older than a ClearSchedule.
     requires: origin != schedule or (task.next_due != null and task.next_due <= now)
 
-    -- D3: the caller's mode when it names one, else today's derivation.
+    -- D3: the caller's mode when it names one, else the derivation.
     let chosen_mode =
         if mode != null: mode
         else: if task.has_plan or task.tag != research: dispatch else: research
 
-    -- The claim, as today: one write, conditional on the checks above.
+    -- The claim: one write, conditional on the checks above.
     ensures: task.status = running
     ensures: task.sub_status = default_sub_status(running)
     ensures: current_agent(task).last_pre_tool_use_at = now
-    -- The dispatch-claim subagent clear point (agent-health.allium), moved
-    -- into the same transaction as the claim.
+    -- The dispatch-claim subagent clear point (agent-health.allium), in the
+    -- same transaction as the claim.
     ensures:
         for entry in core/SubagentEntries where task = task:
             not exists entry
@@ -1413,7 +807,7 @@ rule RequestDispatch {
     ensures:
         if task.epic != null:
             RecalculateEpicStatus(task.epic)
-    -- Retention (task #94222), before the new row is written.
+    -- Retention, before the new row is written.
     ensures: PruneRequestRows(at: now)
     ensures: DispatchRequest.created(
         task: task,
@@ -1442,7 +836,7 @@ rule RequestDispatch {
         -- carries it; a client cannot name some other machine as the host.
         --
         -- A refusal is ORDINARY: it is how a caller learns that another entry
-        -- point claimed the task first, as the claim did before M4.
+        -- point claimed the task first.
         -- The refusal names why (not backlog, owned by another machine, an
         -- open request already exists, a phoenix task or a task still
         -- waiting for its scheduled time the epic chain may not take, a
@@ -1509,7 +903,7 @@ rule HostReportsDispatched {
     ensures: request.worktree = worktree
     ensures: request.tmux_window = tmux_window
     ensures: request.reused_worktree = reused_worktree
-    -- The writes today's post-provision patch made, now made by the module.
+    -- The task's provisioning fields, written by the module.
     -- host is written with worktree because core/Task's HostTracksWorktree
     -- invariant pairs the two.
     ensures: request.task.worktree = worktree
@@ -1595,11 +989,10 @@ rule DispatchRequestTimesOut {
         -- the deadline, so a live host's stop and rollback land first. What is
         -- left for this rule is a host that never claimed the row (its board
         -- stopped before it claimed) or one that claimed it and is gone or
-        -- hung; "timed out" names only that case. Unlike the TUI
-        -- watchdog it replaces, it RELEASES
-        -- THE CLAIM (through ReleaseClaimOfFailedRequest): a request past its
-        -- deadline is treated as dead, not slow. That is safe now where it was
-        -- not before, because a late dispatched report is refused
+        -- hung; "timed out" names only that case. It RELEASES THE CLAIM
+        -- (through ReleaseClaimOfFailedRequest): a request past its deadline
+        -- is treated as dead, not slow. That is safe because a late
+        -- dispatched report is refused
         -- (HostReportsDispatched) and the host tears down, so a second
         -- dispatch of the released task cannot meet a first one that still
         -- records its worktree.
@@ -1690,11 +1083,10 @@ rule ReleaseClaimOfFailedRequest {
             RecalculateEpicStatus(task.epic)
 
     @guidance
-        -- The old release_backlog_claim, applied by the module to every
-        -- failure: a reported one, a timeout, a host restart, a delete, a
+        -- The claim release, applied by the module to every failure: a reported one, a timeout, a host restart, a delete, a
         -- close (CloseFailsOpenRequests; the task is already Done by then, so
         -- nothing is released). It is
-        -- conditional, as today: a task that was provisioned or moved on
+        -- conditional: a task that was provisioned or moved on
         -- meanwhile is left alone rather than stomped back to backlog. The
         -- rollup runs in the module so no board has to recalculate an epic
         -- after the module moved its subtask (the backstop and the restart
@@ -1703,7 +1095,7 @@ rule ReleaseClaimOfFailedRequest {
         -- history nothing reads.
 }
 
--- == Session requests: wrap-up and exit-session (M5) ==
+-- == Session requests: wrap-up and exit-session ==
 
 rule RequestWrapUp {
     when: WrapUpRequested(task, host, action)
@@ -1727,7 +1119,7 @@ rule RequestWrapUp {
     -- W1: at most one open session request per task, of either kind.
     requires: not SessionRequests.any(r => r.task = task and r.is_open)
 
-    -- Retention (task #94222), before the new row is written.
+    -- Retention, before the new row is written.
     ensures: PruneRequestRows(at: now)
     ensures:
         if action = rebase:
@@ -1766,8 +1158,7 @@ rule RequestWrapUp {
         -- INVALID_PARAMS error.
         --
         -- No task field is written here. The Conflict clear waits for the
-        -- claim (HostClaimsSessionRequest), as today's clear runs just before
-        -- the rebase, so a request that is never claimed leaves the task as
+        -- claim (HostClaimsSessionRequest), just before the rebase, so a request that is never claimed leaves the task as
         -- it was.
         --
         -- For action rebase the module also schedules the request's timer
@@ -1796,7 +1187,7 @@ rule HostClaimsSessionRequest {
 
     ensures: request.state = running
     ensures: request.claimed_at = now
-    -- Today's optimistic clear, moved into the claim: the card stops showing
+    -- The optimistic clear, in the claim: the card stops showing
     -- the conflict while the rebase runs (pr-workflow.allium: WrapUpRebase).
     ensures:
         if was_conflict:
@@ -1963,8 +1354,8 @@ rule RequestExitSession {
         -- ONE TRANSACTION, SO THE CLOSE IS WHOLE OR ABSENT (W4). A refused
         -- call writes nothing: the task keeps its status and window and the
         -- token stays valid, so the agent may call again once the cause is
-        -- fixed. There is no longer a state in which the token is spent but
-        -- the close did not land.
+        -- fixed. No state exists in which the token is spent but the close
+        -- did not land.
         --
         -- Refusals, which the tool returns as INVALID_PARAMS errors carrying
         -- the module's words, in the order the module checks them:
@@ -1977,14 +1368,13 @@ rule RequestExitSession {
         --     finished_at is not earlier, W3): "invalid exit token";
         --   - action differs from the token's: an error naming both actions;
         --   - current_agent(task).tmux_window is null: "task #<id> has no active session",
-        --     which the /wrap-up skill treats as success, as today;
+        --     which the /wrap-up skill treats as success;
         --   - action pr without a pr_url: "pr_url is required for action
         --     'pr'";
         --   - the host check or an open session request: the reason.
         --
         -- The window to tear down is recorded on the row from the task as
-        -- this transaction read it, so the read and the clear are atomic;
-        -- the earlier "fresh read just before the patch" race is gone.
+        -- this transaction read it, so the read and the clear are atomic.
 }
 
 rule SessionRequestTimesOut {
@@ -2089,7 +1479,7 @@ rule DeletingATaskDeletesItsRequestRows {
         -- rows are history about a task that no longer exists, and every
         -- board downloads every row on connect.
         --
-        -- NOT FEED TEARDOWN ROWS (task #98873). A FeedRequest names no task
+        -- NOT FEED TEARDOWN ROWS. A FeedRequest names no task
         -- row, only a task_id for logs, and a teardown row exists to clean up
         -- AFTER its task is gone. The stale delete inside ingest_feed writes
         -- it once this rule has removed the task's own request rows
@@ -2139,7 +1529,7 @@ rule RequestRowsArePruned {
                 not exists request
     --   * a finished feed request goes on age alone, as a close row does;
     --     an open one is kept, except a refresh row still requested past
-    --     config.stale_refresh_request_window (task #98873). An open
+    --     config.stale_refresh_request_window. An open
     --     teardown row is never pruned, whatever its age.
     ensures:
         for request in FeedRequests:
@@ -2181,7 +1571,7 @@ rule RequestRowsArePruned {
         -- The module's REQUEST_RETENTION_DAYS is config.request_retention.
 }
 
--- == Feed requests: a refresh asked of the poll owner, a teardown asked of the holding host (task #98873) ==
+-- == Feed requests: a refresh asked of the poll owner, a teardown asked of the holding host ==
 
 rule RequestFeedRefresh {
     when: FeedRefreshRequested(epic, host)
@@ -2229,7 +1619,7 @@ rule RequestFeedRefresh {
         -- person's) adds nothing the owner's next cycle would not already
         -- cover (OneRequestedRefreshRequestPerEpic). Once the owner has
         -- claimed that row it read the feed before this ask, so the ask
-        -- writes a new row of its own (task #98909).
+        -- writes a new row of its own.
         --
         -- No deadline and no timer (FeedRequest). The poll owner serves the
         -- row on its next poll tick (feeds.allium: ServeFeedRefreshRequest);
@@ -2248,7 +1638,7 @@ rule HostClaimsFeedRequest {
     -- has passed since its claim: a younger running row is most likely being
     -- served now, perhaps by a second board on the same host id, and serving
     -- it twice would run a teardown twice and end the row failed though it
-    -- succeeded (task #98909).
+    -- succeeded.
     requires: request.is_open
     requires: request.state = requested
         or request.claimed_at < now - config.feed_request_reclaim_grace
@@ -2348,7 +1738,7 @@ rule StaleDeleteRequestsTeardownOnTheHoldingHost {
         -- act for.
         --
         -- WHO GETS A ROW. A task whose host is the ingesting host gets none:
-        -- that board tears it down in the cycle, before notifying, as before
+        -- that board tears it down in the cycle, before notifying
         -- (NoDoubleTeardown). A task with no host was never dispatched and
         -- has nothing to tear down. A task that held neither a worktree nor a
         -- window owes nothing. A task held by a host of another person than
@@ -2359,8 +1749,7 @@ rule StaleDeleteRequestsTeardownOnTheHoldingHost {
         -- THE WINDOW is the current agent's, read BEFORE the delete: the task
         -- row's own window column is always blank (agents.allium: the session
         -- facts live on the agent), and the delete removes the agent rows.
-        -- A task holding a window but no worktree owes a row too (task
-        -- #98909).
+        -- A task holding a window but no worktree owes a row too.
         --
         -- NOBODY AIMS THE ROW. The snapshot is taken from the task's host,
         -- repo_path and worktree columns, so PatchTaskNeverAimsAnotherHostsTeardown
@@ -2375,7 +1764,7 @@ rule StaleDeleteRequestsTeardownOnTheHoldingHost {
         -- the prune never removes it while open.
 }
 
--- == update_tasks' done-path close (M7) ==
+-- == The done-path close: close_task and update_task's close row ==
 
 rule RequestCloseTask {
     when: CloseTaskRequested(task, host)
@@ -2450,9 +1839,8 @@ rule RequestCloseTask {
         -- The close_task reducer, called by update_tasks' dedicated
         -- status="done" path (mcp-task-tools.allium: MarkTaskDoneViaMcp)
         -- with this board's own host. Everything above is ONE transaction, so
-        -- the close took effect whole or not at all; the board's
-        -- close_persisted gate, which guarded a teardown against a close that
-        -- had not landed, has nothing left to guard.
+        -- the close took effect whole or not at all, and the board never
+        -- guards a teardown against a close that did not land.
         --
         -- NO TOKEN AND NO CHAIN. No exit token is issued, checked or
         -- consumed, and SessionClosed is not emitted, so the epic chain
@@ -2473,8 +1861,7 @@ rule RequestCloseTask {
         -- When the teardown host is not the caller's own (a teammate's
         -- machine, a host with no owner, or one not registered at all) there
         -- is no row, and the close is not refused for it: the task closes
-        -- and the window, if any, is left to its own machine, as before M7,
-        -- where the board's local kill of such a window failed silently.
+        -- and the window, if any, is left to its own machine.
         --
         -- FAILING AN OPEN ROW. A wrap_up rebase still running for the task
         -- is failed "task closed"; its host's later report is refused, as for
@@ -2520,130 +1907,64 @@ rule CloseFailsOpenRequests {
         -- Not D11-checked, as for the session row: the row may name a
         -- teammate's machine, and it is the close that fails it.
 }
+rule UpdateTaskDoneWritesACloseRow {
+    -- The same update_task call as tasks.allium: UpdateTaskIsOneTransaction.
+    when: tasks/TaskUpdateRequested(task, epic?, patch, host)
 
-------------------------------------------------------------
--- PR state (M6)
-------------------------------------------------------------
-
-rule ReportPrStatus {
-    when: PrStatusReported(task, host, state, review_decision)
-
-    -- The raw strings gh printed, in any letter case; review_decision is ""
-    -- for a repo without branch protection.
-    requires: state.upper in { "OPEN", "MERGED", "CLOSED" }
-    requires: review_decision.upper in { "", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED" }
-    -- D11: only the host's own owner may speak for it.
-    requires: host.owner != null and host.owner = caller()
-
-    ensures:
-        -- A report for a task that is gone or no longer in review changes
-        -- nothing and is accepted: the host's read raced a close.
-        if task.status = review and task.url.url_type = pr:
-            if state.upper = "MERGED":
-                task.status = done
-                task.sub_status = default_sub_status(done)
-                current_agent(task).tmux_window = null
-                task.completed_at = now
-                task.updated_at = now
-                -- the epic rollup and the phoenix successor follow, as for
-                -- any route into done
-            else if state.upper = "CLOSED":
-                if task.sub_status != pr_closed:
-                    task.sub_status = pr_closed
-                    task.updated_at = now
-            else if task.sub_status != conflict:
-                let new_sub =
-                    if review_decision.upper = "APPROVED": approved
-                    else if review_decision.upper = "CHANGES_REQUESTED": changes_requested
-                    else: awaiting_review
-                if task.sub_status != new_sub:
-                    task.sub_status = new_sub
-                    task.updated_at = now
-
-    @guidance
-        -- The report_pr_status reducer. It replaces the board's own reading
-        -- of gh output (PollPrStatus, PrMerged, PrClosed in
-        -- pr-workflow.allium). An unknown state or review decision is a
-        -- refusal that writes nothing; the host counts any refusal as one
-        -- permanent read failure toward the give-up threshold (P3), and a
-        -- reducer call that fails in transport as a transient one.
-        -- Repeating the same report is a no-op.
-        -- The host that polls a host-less task is chosen by core/PollOwner,
-        -- as before; the module does not check ownership of the poll, only
-        -- that the caller owns the host it names.
-        -- A closed PR overrides conflict, as before: it is the stronger
-        -- signal. An open one never does.
-}
-
-rule ReportPrUnreadable {
-    when: PrUnreadableReported(task, host, reason)
-
-    requires: host.owner != null and host.owner = caller()
+    -- The store, not the board's cache, decides ClosePrOnDone for an edit
+    -- (pr-workflow.allium). update_task takes the caller's host and, when the
+    -- call moves the task into Done (status was not done, is done after the
+    -- patch) and the task then carries a pr-typed url, writes a close row for
+    -- the host to serve. The close is windowless: an edit to Done never killed
+    -- a window, and still does not.
+    let was_already_done = task.status = done
+    let has_pr_url = task.url != null and task.url.url_type = pr
+    let teardown_host = if task.host != null: task.host else: host
+    let may_tear_down = teardown_host.owner != null and teardown_host.owner = caller()
 
     ensures:
-        if task.status = review and task.url.url_type = pr
-           and task.sub_status != pr_unreachable:
-            task.sub_status = pr_unreachable
-            task.updated_at = now
+        if not was_already_done and patch.status = done and has_pr_url and may_tear_down:
+            SessionRequest.created(
+                task: task,
+                kind: close,
+                action: done,
+                host: teardown_host,
+                requested_by: caller(),
+                state: requested,
+                requested_at: now,
+                tmux_window: null
+            )
 
     @guidance
-        -- The report_pr_unreadable reducer. The host counts consecutive
-        -- permanent failures (P3) and posts this once, at the threshold
-        -- (core/config.pr_poll_permanent_failure_threshold). reason is for
-        -- the log line only; nothing stores it. A later successful
-        -- report_pr_status clears pr_unreachable through its open branch,
-        -- merged branch or closed branch, as before.
+        -- WHY A ROW. A reducer answers only success or failure, so the board
+        -- cannot learn from the call whether it performed the Done transition.
+        -- Its subscription cache cannot tell either: it is stale when another
+        -- host already moved the task (a repeat close) or the row has just
+        -- arrived (a missed one). The module reads its own prior row, so
+        -- both are decided where the transition happens.
+        --
+        -- THE FINAL URL. The url is the task's after the patch, so a call
+        -- that attaches a pr-typed url and moves to Done together is caught.
+        --
+        -- SERVED LIKE ANY CLOSE ROW. The host runs gh pr close best effort
+        -- (pr-workflow.allium: ExitSessionTeardown), reading the task when it
+        -- serves the row and closing only if it is still done. D11 applies as
+        -- in RequestCloseTask: a teammate's host, a host with no owner or an
+        -- unregistered one gets no row, and the task still goes Done. An open
+        -- session request on the task is failed "task closed" first, so
+        -- OneOpenSessionRequestPerTask holds. patch_task writes no row: it
+        -- has no host argument, and no board route uses it for a status
+        -- edit.
 }
 
 ------------------------------------------------------------
--- Host-scoped writes (D11 follow-up, task #53266)
+-- Host-scoped setting writes
 ------------------------------------------------------------
 
--- D11 reached the request reducers first. The older reducers that take a
--- caller-supplied host trusted it, so any client could act as another
--- person's machine. They are held to the same check: the host they name must
--- be registered with an owner equal to caller().
-
-rule ClaimPollOwner {
-    when: PollOwnerClaimed(scope, scope_id, host)
-
-    -- D11: only the host's own owner may claim for it.
-    requires: host.owner != null and host.owner = caller()
-    -- Task #98851 (M2): the caller must see the scope. An unseen epic or
-    -- task is refused as "does not exist", so a claim cannot take or stall
-    -- the poll of something its caller cannot read. A feed epic is also
-    -- refused to a host whose owner did not set its command
-    -- (feeds.allium: FeedCommandRunsOnSettersHost).
-    requires: caller().sees(scope, scope_id)
-    let target = Epic{id: scope_id}    -- only read when scope = epic
-    requires: scope != epic or target.feed_command = null
-        or host.owner = (target.feed_command_set_by ?? target.created_by)
-
-    ensures: core/PollOwner.claimed_if_absent(scope, scope_id, host)
-
-    @guidance
-        -- claim_poll_owner. The claim itself is unchanged
-        -- (pr-workflow.allium: PollPrStatus, feeds.allium: FeedTick).
-}
-
-rule OverridePollOwner {
-    when: PollOwnerOverridden(scope, scope_id, host)
-
-    -- D11: a client can move a scope only to a host it owns, never to
-    -- someone else's machine, so a poll cannot be stolen for another host.
-    requires: host.owner != null and host.owner = caller()
-    -- Task #98851 (M2): the same sight and setter checks as ClaimPollOwner.
-    requires: caller().sees(scope, scope_id)
-    let target = Epic{id: scope_id}    -- only read when scope = epic
-    requires: scope != epic or target.feed_command = null
-        or host.owner = (target.feed_command_set_by ?? target.created_by)
-
-    ensures: core/PollOwner.reassigned(scope, scope_id, host)
-
-    @guidance
-        -- override_poll_owner. The reassignment itself is unchanged
-        -- (feeds.allium: OverrideFeedOwner).
-}
+-- D11 holds for every reducer that takes a caller-supplied host: the host it
+-- names must be registered with an owner equal to caller(). The setting writes
+-- are checked here; poll ownership is checked in feeds.allium (ClaimPollOwner,
+-- OverridePollOwner) and PR reports in pr-workflow.allium (ReportPrStatus).
 
 rule SaveSettingForHost {
     when: settings/SettingSaved(host, key, value)
@@ -2701,11 +2022,6 @@ rule SetManagedFeedSettingsForHost {
         -- SetManagedFeedSettings).
 }
 
--- claim_backlog_task and release_backlog_claim are removed, not checked.
--- The board stopped calling them in M4: RequestDispatch and
--- ReleaseClaimOfFailedRequest are the claim and the release now. Left in
--- place they let a client claim a task for any host.
-
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
@@ -2750,7 +2066,7 @@ invariant EveryExitSessionHadAWrapUp {
             and r.wrap_up_request.task = r.task)
 }
 
--- Task #98873, narrowed by task #98909: an epic holds at most one REQUESTED
+-- An epic holds at most one REQUESTED
 -- refresh request per serving host. RequestFeedRefresh writes nothing while one
 -- waits to be claimed, because the owner reads the feed after that ask. A
 -- running row does not count: its owner read the feed before this ask, so the
@@ -2781,32 +2097,14 @@ invariant CloseRowsCarryNoTokenAndNoChain {
 -- Open Questions
 ------------------------------------------------------------
 
--- Resolved in M7 (task #53260), recorded as decisions in the header rather
--- than kept here: how update_tasks' status="done" path moves into the module
--- (X1), and ClosePrOnDone's owner on the module's close routes ("ClosePrOnDone's
--- owner" under M7: the host serving the teardown row; a row that fails before
--- its host serves it leaves the PR open, accepted as built and flagged for
--- user review).
---
--- Resolved in task #94222: the retention of finished request rows (a task's
--- rows go with it, DeletingATaskDeletesItsRequestRows; a finished row older
--- than config.request_retention is pruned on the next request write,
--- RequestRowsArePruned, keeping every row a live exit token depends on), and
--- close_task on a task with an open dispatch request (the close fails it
--- "task closed", as a delete does: CloseFailsOpenRequests).
+open question "Teardown window left alive by a task delete: DeletingATaskDeletesItsRequestRows removes an exit_session or close row in the same transaction that fails it, so a host whose teardown had not yet run sees the row vanish rather than fail, KillWindowOfFailedExitSession never fires, and the delete's own teardown has no window to kill (the close already cleared it from the task). Should a host also kill the window of a teardown row it saw open and then sees removed, should the delete keep an open teardown row until its host has acted on it, or is a surviving window acceptable in this narrow case (a task deleted within the teardown's budget of its close)?"
 
-open question "Teardown window left alive by a task delete (task #94222): DeletingATaskDeletesItsRequestRows removes an exit_session or close row in the same transaction that fails it, so a host whose teardown had not yet run sees the row vanish rather than fail, KillWindowOfFailedExitSession never fires, and the delete's own teardown has no window to kill (the close already cleared it from the task). Before task #94222 the failed row stayed and its host killed the window. Should a host also kill the window of a teardown row it saw open and then sees removed, should the delete keep an open teardown row until its host has acted on it, or is a surviving window acceptable in this narrow case (a task deleted within the teardown's budget of its close)?"
+open question "A close failing a chained dispatch: CloseFailsOpenRequests fails an open epic_chain dispatch request 'task closed', and epics.allium's ReportChainedDispatchFailure raises an auto-dispatch failure for every failed epic_chain row whose task still exists, so closing a subtask while its chained dispatch provisions shows the operator a chain failure for a close someone chose. Should ReportChainedDispatchFailure skip the 'task closed' reason, as it skips a deleted task?"
 
-open question "A close failing a chained dispatch (task #94222): CloseFailsOpenRequests fails an open epic_chain dispatch request 'task closed', and epics.allium's ReportChainedDispatchFailure raises an auto-dispatch failure for every failed epic_chain row whose task still exists, so closing a subtask while its chained dispatch provisions shows the operator a chain failure for a close someone chose. Should ReportChainedDispatchFailure skip the 'task closed' reason, as it skips a deleted task?"
+open question "Window left alive (W5, W7, W8): an exit_session or close row the backstop fails because its board was closed or hung, or one the restart sweep fails, may leave the agent's tmux window alive on a task that is already Done or Review. The starting board kills the window of a row its own sweep failed (a row failed by deletion is removed with it, a separate open question above). Should a starting board also kill the windows of teardown rows that failed 'timed out' while it was not running (W8 otherwise treats them as history, as D12 does), or is a surviving window acceptable?"
 
-open question "Window left alive (W5, W7, W8; deferred past M7, and so beyond the store-split epic): an exit_session or close row the backstop fails because its board was closed or hung, or one the restart sweep fails, may leave the agent's tmux window alive on a task that is already Done or Review. The spec has the starting board kill the window of a row its own sweep failed (a row failed by deletion is now removed with it, a separate open question above). Should a starting board also kill the windows of teardown rows that failed 'timed out' while it was not running (W8 otherwise treats them as history, as D12 does), or is a surviving window acceptable?"
+open question "Seeing other machines' requests: a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
 
-open question "Seeing other machines' requests (deferred past M7, and so beyond the store-split epic): a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
+open question "Feed request prune emitters: RequestRowsArePruned sweeps feed_requests, and the module runs that sweep from request_feed_refresh and from the stale delete that writes a teardown row, but not from request_dispatch or request_wrap_up. A person who dispatches and wraps up but whose feed epics only run on one host therefore prunes finished teardown rows only when a stale delete writes the next one. Should every request write sweep all three tables, or is the sweep at the two feed writers acceptable?"
 
--- Resolved (task #98909): "Feed teardown rows a board never serves". The stale delete writes a teardown row only when the holding host's owner is the caller (StaleDeleteRequestsTeardownOnTheHoldingHost), the first of the three options the question named. The gap that remains, a task another person dispatched, is a KNOWN GAP in that rule; the board warns in its log when it hits one (src/feed/cycle.rs).
-
-open question "Feed request prune emitters (task #98873): RequestRowsArePruned sweeps feed_requests, and the module runs that sweep from request_feed_refresh and from the stale delete that writes a teardown row (task #98909), but not from request_dispatch or request_wrap_up. A person who dispatches and wraps up but whose feed epics only run on one host therefore prunes finished teardown rows only when a stale delete writes the next one. Should every request write sweep all three tables, or is the sweep at the two feed writers acceptable?"
-
--- Resolved: "A refresh row left on a former poll owner". Serving a refresh row requires that the serving host still owns the epic's poll, and fails the row "this host no longer owns the poll" otherwise (feeds.allium: ServeFeedRefreshRequest), so two hosts never reconcile one epic.
-
-open question "M7, update_tasks' done path when close_task gets NO ANSWER (found by weed, not decided): the board treats a no-answer like a refusal and the tool replies that the task could NOT be moved to done and is still in its previous status. The close may in fact have landed. A retry is a done -> done re-close (no restamp, no respawn), but for a task with a pr-typed url it writes a second close row and runs gh pr close again. Should the tool settle a no-answer by re-reading the task, as exit_session settles its own no-answer by looking for the row (mcp-task-tools.allium: ExitSessionViaMcp), or is the 'try again' reply acceptable?"
+open question "update_tasks' done path when close_task gets NO ANSWER: the board treats a no-answer like a refusal and the tool replies that the task could NOT be moved to done and is still in its previous status. The close may in fact have landed. A retry is a done -> done re-close (no restamp, no respawn), but for a task with a pr-typed url it writes a second close row and runs gh pr close again. Should the tool settle a no-answer by re-reading the task, as exit_session settles its own no-answer by looking for the row (mcp-task-tools.allium: ExitSessionViaMcp), or is the 'try again' reply acceptable?"

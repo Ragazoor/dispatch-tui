@@ -1,7 +1,7 @@
 use super::*;
 
-/// Fail subtask `id`'s chained dispatch the way the board learns of it since
-/// store-split M4: its `epic_chain` request row reaching failed
+/// Fail subtask `id`'s chained dispatch the way the board learns of it:
+/// its `epic_chain` request row reaching failed
 /// (`epics.allium: ReportChainedDispatchFailure`). Puts the task in epic 7
 /// first, and delivers the open row before the failed one so the failure is
 /// not mistaken for baseline history.

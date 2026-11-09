@@ -167,7 +167,7 @@ pub fn check_feed_claim_by(epic: &Epic, host_owner: &str) -> Result<(), String> 
     }
 }
 
-/// `store-split.allium: ClaimPollOwner`/`OverridePollOwner`: the caller must
+/// `feeds.allium: ClaimPollOwner`/`OverridePollOwner`: the caller must
 /// see the scope (an unseen one is "does not exist", never which), and a feed
 /// epic may only be claimed for its setter. Checked after the host check, so
 /// the caller is the host's owner.
@@ -182,7 +182,7 @@ fn require_claimable_scope(ctx: &ReducerContext, scope: &str, scope_id: i64) -> 
 }
 
 /// Claim an unowned scope. `core.allium: PollOwner`. Only the host's owner
-/// may name it (D11, `store-split.allium: ClaimPollOwner`).
+/// may name it (D11, `feeds.allium: ClaimPollOwner`).
 #[spacetimedb::reducer]
 pub fn claim_poll_owner(
     ctx: &ReducerContext,
@@ -199,7 +199,7 @@ pub fn claim_poll_owner(
 
 /// Reassign a scope's ownership unconditionally. `pr-workflow.allium:
 /// OverridePrPollOwner`, `feeds.allium: OverrideFeedOwner`. Only the host's
-/// owner may name it (D11, `store-split.allium: OverridePollOwner`).
+/// owner may name it (D11, `feeds.allium: OverridePollOwner`).
 #[spacetimedb::reducer]
 pub fn override_poll_owner(
     ctx: &ReducerContext,

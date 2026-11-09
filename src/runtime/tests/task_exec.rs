@@ -6,7 +6,7 @@ use crate::models::test_tmux_window;
 
 /// Serve the dispatch requests an arm wrote, the way this host's reactor would
 /// once the row pump delivers them (`store-split.allium: HostClaimsDispatch`),
-/// and wait for each to land. Since store-split M4 no launch arm provisions
+/// and wait for each to land. No launch arm provisions
 /// inline.
 async fn serve(rt: &TuiRuntime) {
     for handle in rt.serve_dispatch_requests().await {
@@ -472,7 +472,7 @@ async fn exec_dispatch_agent_lost_claim_provisions_nothing() {
 }
 
 // `exec_release_claim_returns_the_task_to_backlog` pinned
-// `TaskCommand::ReleaseClaim`, retired by store-split M4: a failed request
+// `TaskCommand::ReleaseClaim` is gone: a failed request
 // releases the claim in the module (`ReleaseClaimOfFailedRequest`), which
 // `exec_dispatch_failure_fails_the_request_and_releases_the_claim` below pins
 // from the board's side.

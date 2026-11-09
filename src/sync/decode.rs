@@ -470,10 +470,10 @@ pub fn usage_summary_row(row: &bindings::UsageSummaryRow) -> Decoded<UsageSummar
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch requests (store-split M4)
+// Dispatch requests (`store-split.allium: DispatchRequest`)
 // ---------------------------------------------------------------------------
 
-/// The `kind` every dispatch request row carries. M5's wrap-up and exit-session
+/// The `kind` every dispatch request row carries. Wrap-up and exit-session
 /// requests are their own table (`session_requests`), so any other kind here is
 /// from a newer binary and is refused rather than misread.
 const DISPATCH_REQUEST_KIND: &str = "dispatch";
@@ -568,7 +568,7 @@ pub fn agent(row: &bindings::Agent) -> Decoded<Agent> {
 }
 
 // ---------------------------------------------------------------------------
-// Session requests (store-split M5)
+// Session requests (`store-split.allium: SessionRequest`)
 // ---------------------------------------------------------------------------
 
 /// The store's `session_requests` row as the board's [`SessionRequest`].

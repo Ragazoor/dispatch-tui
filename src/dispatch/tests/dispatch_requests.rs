@@ -1,4 +1,4 @@
-//! Which delivered dispatch request rows this host must serve (store-split M4).
+//! Which delivered dispatch request rows this host must serve (`store-split.allium: DispatchRequest`).
 //!
 //! [`DispatchRequestObserver`](crate::dispatch::DispatchRequestObserver) is
 //! the pure decision behind `store-split.allium: HostClaimsDispatch`'s

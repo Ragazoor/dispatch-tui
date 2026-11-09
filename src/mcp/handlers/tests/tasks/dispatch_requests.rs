@@ -1,5 +1,5 @@
 //! `dispatch_task`, `get_task` and the epic chain on request rows
-//! (store-split M4, task #53257).
+//! (`store-split.allium: DispatchRequest`).
 //!
 //! `mcp-task-tools.allium: DispatchTaskViaMcp` writes a request (origin
 //! `mcp`, no mode) and then WAITS on the row for at most
@@ -365,8 +365,8 @@ async fn subtask(
 }
 
 /// Close a session of `epic` through the real tools — a done wrap-up, then
-/// `exit_session` — which runs the chain in the module (store-split M5,
-/// `RequestExitSession`). Answers the `exit_session` response.
+/// `exit_session` — which runs the chain in the module (`store-split.allium:
+/// RequestExitSession`). Answers the `exit_session` response.
 async fn close_a_session_in(state: &Arc<McpState>, epic: crate::models::EpicId) -> JsonRpcResponse {
     let closing = create_running_task_with_window_in(state, "/repo", Some(epic)).await;
     close_session_via_mcp(

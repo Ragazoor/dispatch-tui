@@ -1,4 +1,4 @@
-//! PR state (store-split M6): the in-memory twin of
+//! PR state (`pr-workflow.allium: ReportPrStatus`): the in-memory twin of
 //! `spacetime/module/src/pr_status.rs`.
 //!
 //! Every decision is the module's own pure function, called directly; what is

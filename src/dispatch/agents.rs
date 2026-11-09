@@ -741,7 +741,7 @@ pub fn run_agent_for_mode(
 /// build a prompt: the epic banner, and the learnings to inject (recording each
 /// retrieval as it goes).
 ///
-/// Since store-split M4 every launch path is a dispatch request row, and the one
+/// Every launch path is a dispatch request row (`store-split.allium` D6), and the one
 /// place that provisions — `TaskService::serve_dispatch_request` — runs this
 /// prologue for all of them.
 ///

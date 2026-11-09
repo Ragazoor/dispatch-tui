@@ -17,6 +17,6 @@ pub enum PrCommand {
     /// `pr-workflow.allium: PollPrStatus`.
     CheckStatusIfOwned { id: TaskId, url: String },
     /// The poll gave up on this task's PR: tell the store, which marks the task
-    /// `pr_unreachable` (`store-split.allium: ReportPrUnreadable`).
+    /// `pr_unreachable` (`pr-workflow.allium: ReportPrUnreadable`).
     ReportUnreadable { id: TaskId, reason: String },
 }

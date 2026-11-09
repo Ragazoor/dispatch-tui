@@ -197,7 +197,7 @@ pub(super) fn matches_created_work_package(
 ///
 /// **`epic_id` is deliberately NOT compared.** The store routes a task created
 /// in a `group_by_repo` epic into that epic's per-repo sub-epic
-/// (`epics.allium`'s routing note, store-split M2), so the row that comes back
+/// (`epics.allium`'s routing note), so the row that comes back
 /// can carry a different epic from the one sent. The creator and the creation
 /// instant, which are ours, are what identify the row.
 pub(super) fn matches_create(candidate: &bindings::Task, sent: &bindings::Task) -> bool {

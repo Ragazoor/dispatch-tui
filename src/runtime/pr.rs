@@ -22,7 +22,7 @@ impl TuiRuntime {
     }
 
     /// `PrCommand::ReportUnreadable`: the poll gave up on this task's PR
-    /// (`store-split.allium: ReportPrUnreadable`). The module marks the task
+    /// (`pr-workflow.allium: ReportPrUnreadable`). The module marks the task
     /// `pr_unreachable`; nothing is decided here.
     pub(super) fn exec_report_pr_unreadable(
         &self,
@@ -110,7 +110,7 @@ impl TuiRuntime {
 /// [`TuiRuntime::exec_check_pr_status`] (unconditional) and
 /// [`TuiRuntime::exec_check_status_if_owned`] (after the ownership check).
 ///
-/// The host interprets nothing (`store-split.allium: ReportPrStatus`): the raw
+/// The host interprets nothing (`pr-workflow.allium: ReportPrStatus`): the raw
 /// strings go to the module, which writes the task. The message sent after an
 /// accepted report only picks the host's own effects (kill the window, notify,
 /// clear the failure counters).

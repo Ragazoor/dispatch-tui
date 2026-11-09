@@ -656,7 +656,7 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
 
 /// Change a task's fields and, in the same call, its epic: one transaction, so
 /// a refusal of either half leaves the task exactly as it was
-/// (`store-split.allium: UpdateTaskIsOneTransaction`).
+/// (`tasks.allium: UpdateTaskIsOneTransaction`).
 ///
 /// `epic_id` is `None` to leave the epic alone, `Some(0)` to detach onto a user
 /// board (taking `owner`), `Some(n)` to move into epic `n`. Unlike
@@ -848,7 +848,7 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
 
 /// Change an epic's fields, its workspace and its visibility in one
 /// transaction: a refusal of any part leaves the epic as it was
-/// (`store-split.allium: UpdateEpicIsOneTransaction`).
+/// (`epics.allium: UpdateEpicIsOneTransaction`).
 ///
 /// `workspace_id` is `None` to leave the workspace alone; `visibility` likewise.
 /// Unlike [`patch_epic`], a missing epic is an error: this is the board's
@@ -879,7 +879,7 @@ pub fn update_epic(
 
 /// Set an epic's `group_by_repo` flag and, for a non-feed epic, move its tasks
 /// to match, in one transaction: regroup when the flag turns on, flatten when
-/// it turns off (`store-split.allium: SetEpicGroupByRepoIsOneTransaction`).
+/// it turns off (`epics.allium: SetEpicGroupByRepoIsOneTransaction`).
 ///
 /// The flag write is [`patch_epic`]'s, so its refusals (append-only) hold, and
 /// a refusal of the move rolls the flag back with it. A missing epic is an

@@ -1,6 +1,6 @@
-//! The in-memory twin of the M6 PR reducers.
+//! The in-memory twin of the PR state reducers.
 //!
-//! Spec: `docs/specs/store-split.allium` — `ReportPrStatus`,
+//! Spec: `docs/specs/pr-workflow.allium` — `ReportPrStatus`,
 //! `ReportPrUnreadable`. The board's tests drive PR state through this double,
 //! so it must write the task exactly where the module does;
 //! `tests/memory_caller_conformance.rs` diffs the two.

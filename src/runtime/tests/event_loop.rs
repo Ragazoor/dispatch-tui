@@ -563,7 +563,7 @@ mod execute_commands {
 }
 
 /// The host reactor's failure arm the old blocking-dispatch panic tests pinned:
-/// a provisioning that panics must not vanish. Since store-split M4 it
+/// a provisioning that panics must not vanish. It
 /// fails the request row, which releases the claim and reaches the App as
 /// the row (`dispatch.allium: FailedRequestReported`).
 mod host_reactor {

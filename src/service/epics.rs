@@ -373,7 +373,7 @@ impl EpicService {
         // The data checks on this update — a parent cycle, moving a repo-group
         // sub-epic, feed_append_only with grouping or a feed role — are the
         // store's: `patch_epic` refuses them against the true rows
-        // (`UpdateEpicViaMcp`, store-split M2). What stays here is what is about
+        // (`mcp-task-tools.allium: UpdateEpicViaMcp`). What stays here is what is about
         // the request, and the not-found answer.
         let mut patch = Self::base_patch(&params);
 
@@ -397,7 +397,7 @@ impl EpicService {
 
         // One store call for the patch, the workspace move and the visibility
         // change, so a refused part leaves nothing applied
-        // (store-split.allium: UpdateEpicIsOneTransaction). It recalculates the
+        // (epics.allium: UpdateEpicIsOneTransaction). It recalculates the
         // epic and its ancestors, and the parent it left, in the same
         // transaction (store-split.allium X3).
         self.db

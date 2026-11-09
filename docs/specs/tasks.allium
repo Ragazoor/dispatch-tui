@@ -14,6 +14,7 @@
 use "./core.allium" as core
 use "./board-layout.allium" as board_layout
 use "./settings.allium" as settings
+use "./store-split.allium" as split
 
 -- The one board-wide multi-selection every batch rule in this file
 -- consumes. See "Multi-Selection".
@@ -329,7 +330,7 @@ rule CreateQuickTask {
             created_at: now,
             updated_at: now
         )
-        -- Since store-split M4 quick dispatch is a request like every other
+        -- Quick dispatch is a request like every other
         -- launch path (store-split.allium: RequestDispatch). It names the
         -- quick mode, which the module never derives on its own, so the
         -- host's provisioning launches the quick-dispatch agent
@@ -514,14 +515,14 @@ rule ConfirmDone {
         -- task INTO done sets task.completed_at = now, computed once from
         -- (prior, next) by the store's module as part of the write — the
         -- patch_task reducer every board status write goes through — so it
-        -- fires without each rule naming it. Since store-split M7 the board
+        -- fires without each rule naming it. The board
         -- stamps nothing itself (store-split.allium, X2); a board that needs
         -- the stamp re-reads the task. The other routes
         -- in: PrMerged and ExitSession's non-pr branch (both in
         -- pr-workflow.allium; ExitSession stamps it from the store clock in
-        -- the module since store-split M5), update_tasks' status="done" path
+        -- the module), update_tasks' status="done" path
         -- (mcp-task-tools.allium: MarkTaskDoneViaMcp, through the module's
-        -- close_task since M7; store-split.allium: RequestCloseTask), and a
+        -- close_task; store-split.allium: RequestCloseTask), and a
         -- feed upsert whose item arrives with status
         -- done (feeds.allium). PrClosed (pr-workflow.allium) is NOT one of
         -- these — a closed PR no longer transitions the task into done.
@@ -572,7 +573,7 @@ rule ConfirmDone {
 --
 -- The store enforces the receipt on its standalone respawn too: a respawn
 -- whose predecessor does not carry the flag is refused, writing nothing
--- (store-split.allium: RespawnPhoenixSuccessorNeedsTheFlag).
+-- (RespawnPhoenixSuccessorNeedsTheFlag).
 --
 -- Two properties fall out of this and neither should be re-derived some other
 -- way. A done -> review -> done round-trip cannot spawn a duplicate, because
@@ -638,7 +639,7 @@ rule PhoenixRespawn {
         -- of value, so a no-op patch that rewrites done over done never
         -- re-fires.
         --
-        -- Where it hooks. Since store-split M7 every route in runs the
+        -- Where it hooks. Every route in runs the
         -- respawn IN THE MODULE, in the SAME transaction as the Done write,
         -- so the successor and the predecessor's flag clear land
         -- with the status write (TheFlagIsTheReceipt holds trivially there):
@@ -647,11 +648,9 @@ rule PhoenixRespawn {
         -- another status (store-split.allium, X2); the close_task reducer of
         -- update_tasks' status="done" path (store-split.allium:
         -- RequestCloseTask, X1); exit_session's close (pr-workflow.allium:
-        -- ExitSession, inside store-split.allium's RequestExitSession, since
-        -- M5); and PrMerged's write (store-split.allium: ReportPrStatus, since
-        -- M6). The board respawns nothing itself: before M7 its service layer
-        -- (TaskService::update_task and close_session) ran the respawn as a
-        -- separate step after the status write. Inside the transaction the
+        -- ExitSession, inside store-split.allium's RequestExitSession); and
+        -- PrMerged's write (pr-workflow.allium: ReportPrStatus). The board
+        -- respawns nothing itself. Inside the transaction the
         -- module inserts the successor before it writes the closed task (so
         -- the predecessor's flag clear rides on that one write); the order is
         -- not observable from outside. What DoneOutranksTheRespawn requires
@@ -2256,8 +2255,7 @@ rule EditTask {
             if edited.status = done and prior != done:
                 task.completed_at = now
             -- And the same leaving-running clear, for the same reason: the
-            -- editor writes through patch_task, which since store-split M7
-            -- applies every rule a transition derives from the prior status
+            -- editor writes through patch_task, which applies every rule a transition derives from the prior status
             -- (store-split.allium, X2). See core/Task's
             -- PendingStopOnlyWhileRunning invariant.
             if prior = running and edited.status != running:
@@ -2325,6 +2323,243 @@ rule EditTask {
 }
 
 ------------------------------------------------------------
+-- Module write rules for tasks
+------------------------------------------------------------
+
+-- The module enforces these at its task writes, so every client gets them
+-- (store-split.allium S1).
+
+-- sub_status_valid_for(sub_status, status) is the black box mcp-task-tools.allium
+-- (UpdateTaskViaMcp) names: the store's legality table, core.allium's
+-- Task.SubStatusFitsStatus.
+
+rule SubStatusMovesMustBeLegal {
+    when: TaskWriteRequested(task, written)
+
+    -- task is the row as the store holds it, written the row the write would
+    -- leave. ONLY A MOVE IS JUDGED: a write that leaves sub_status as it was
+    -- passes whatever the pair, so a row already holding an odd pair (a
+    -- restore, an older board, a status move that left the old sub_status
+    -- behind) stays writable for its other fields.
+    requires:
+        written.sub_status = task.sub_status
+        or sub_status_valid_for(written.sub_status, written.status)
+
+    ensures: TaskRowWritten(task: task, written: written)
+
+    @guidance
+        -- THE ONE SEAM. Every module reducer that writes an existing task row
+        -- reaches the same write, and the check sits there, so no writer can
+        -- move a sub_status the status does not allow: patch_task, the
+        -- batch sub_status patch (BatchSubStatusPatchSkipsIllegalEntries
+        -- below), and the hook reducers record_pre_tool_use and
+        -- record_notification (agent-health.allium) among them. A refusal
+        -- reads "sub_status 'x' is not valid for status 'y'" and is decided
+        -- before anything is written.
+        --
+        -- patch_task ALSO judges an explicit sub_status that does not move
+        -- (mcp-task-tools.allium: UpdateTaskViaMcp checks the named
+        -- sub_status against the status the row will hold). This rule holds
+        -- every other writer to the table.
+        --
+        -- AN INSERT IS NOT JUDGED (there is no prior row to move from): a seed
+        -- carries whatever the old store held, and every creating rule writes
+        -- default_sub_status of its status anyway.
+}
+
+rule BatchSubStatusPatchSkipsIllegalEntries {
+    when: SubStatusBatchPatched(updates)
+
+    ensures:
+        for update in updates:
+            if exists update.task
+               and (update.sub_status = update.task.sub_status
+                    or sub_status_valid_for(update.sub_status, update.task.status)):
+                update.task.sub_status = update.sub_status
+                update.task.updated_at = now
+
+    @guidance
+        -- batch_patch_sub_status. Each entry goes through the write seam
+        -- (SubStatusMovesMustBeLegal), but an entry it refuses is SKIPPED, not
+        -- fatal: the call succeeds and the other entries land. The batch is
+        -- built from a board snapshot that may be a poll behind, and one stale
+        -- entry must not undo its neighbours. A skipped entry leaves no trace,
+        -- and an entry naming a task that is gone is skipped. No
+        -- epic rollup: sub_status is not an input of the epic status.
+}
+
+rule PatchTaskNeverMovesAnEpic {
+    when: TaskPatchRequested(task, patch)
+
+    -- The epic move owns the owner, the repo-group routing and the
+    -- epic-exists check (epics.allium's routing note; set_task_epic), so a
+    -- patch that could change epic_id would skip all three.
+    requires: patch.epic_id = null
+
+    ensures: TaskPatchAccepted(task: task, patch: patch)
+
+    @guidance
+        -- patch_task refuses a patch that names epic_id at all, even one that
+        -- clears it (a detach), with "epic_id cannot
+        -- be changed by patch_task; use set_task_epic", and writes nothing.
+        -- set_task_epic and update_task (UpdateTaskIsOneTransaction) are the ONLY
+        -- ways a task changes epic; the move routes into a
+        -- repo-group sub-epic, sets the owner and rolls up both the old and
+        -- the new epic. No host patch names epic_id: update_tasks sends an
+        -- explicit epic_id through update_task
+        -- (mcp-task-tools.allium: UpdateTaskViaMcp).
+        --
+        -- With the epic fixed, patch_task rolls up the task's epic only when
+        -- the status moved, and still re-routes inside a grouped subtree when
+        -- repo_path changes.
+        --
+        -- set_task_epic holds the epic-exists check: a non-zero epic_id that
+        -- names no epic is refused with "task <id>: epic <n> does not exist"
+        -- and writes nothing, so no task is written with a dangling epic.
+        --
+        -- Tightening a refusal inside a rule the module already owns (this
+        -- check, the epic_id refusal, the sub-status check, close_task) does
+        -- not bump the rules version: the version records who enforces a
+        -- rule, and the board enforces none of these.
+        --
+        -- The repo-group sweep deletes a sub-epic only when it holds no task and
+        -- no child, so validate_epic_deletable has nothing to refuse there.
+}
+
+rule PatchTaskNeverAimsAnotherHostsTeardown {
+    when: TaskPatchRequested(task, patch)
+
+    -- A feed teardown asks the host named in the task row to remove the
+    -- worktree named in it, in the repo named in it
+    -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost). A patch that could set
+    -- those three would let anyone who sees the task aim another person's host
+    -- at a live worktree: patch a feed task in somebody's epic to
+    -- host = their-laptop, worktree = a worktree they are working in, and wait
+    -- for the item to leave the feed.
+    -- A host nobody registered has no owner and is never the target of a
+    -- teardown row, so it is not judged.
+    requires: patch.host = null or patch.host = task.host
+        or ((task.host = null or task.host.owner = null or task.host.owner = caller())
+            and (patch.host = "" or patch.host.owner = null
+                 or patch.host.owner = caller()))
+    requires: ((patch.repo_path = null or patch.repo_path = task.repo_path)
+               and (patch.worktree = null or patch.worktree = task.worktree))
+        or task.host = null or task.host.owner = null or task.host.owner = caller()
+
+    ensures: TaskPatchAccepted(task: task, patch: patch)
+
+    @guidance
+        -- patch_task refuses, naming why, and writes nothing. Only a CHANGE is
+        -- judged: the editor sends repo_path on every save, and a repeated
+        -- value is no change. A task no host holds keeps its repo editable by
+        -- anyone who sees it, and may be handed to a host the caller owns or
+        -- to one nobody registered.
+        -- Writes the module makes itself (the dispatch reports, the close, the
+        -- stale delete) do not go through this check, so provisioning and
+        -- teardown are unaffected.
+}
+
+rule CreateTaskNeverAimsAnotherHostsTeardown {
+    when: TaskCreateRequested(row)
+
+    -- The create twin of PatchTaskNeverAimsAnotherHostsTeardown. A new row
+    -- that names another person's host would be torn down by that host when
+    -- the item leaves its feed, against a worktree the creator chose.
+    requires: row.host = "" or row.host.owner = null or row.host.owner = caller()
+
+    ensures: TaskCreated(row: row)
+
+    @guidance
+        -- create_task and create_task_signalled refuse, naming why, and write
+        -- nothing. A host nobody registered has no owner and is not judged.
+}
+
+rule UpdateTaskIsOneTransaction {
+    -- host is the calling board's own host; store-split.allium's
+    -- UpdateTaskDoneWritesACloseRow reads it from the same call.
+    when: TaskUpdateRequested(task, epic?, patch, host)
+
+    -- The board's update of a task (relink and field patch) is ONE reducer,
+    -- update_task, so it cannot half-apply and does not depend on the board's
+    -- cached rows. A refusal of either half (the epic does not exist, a
+    -- sub_status illegal for the status the row will hold, a schedule the
+    -- module refuses) leaves the task, its epic and its repo as they were.
+    requires: task.exists
+
+    ensures: TaskPatchAccepted(task: task, patch: patch)
+    ensures:
+        if epic != null: task.epic = route_target(epic, task.repo_path)
+
+    @guidance
+        -- epic is absent to leave the epic alone, 0 to detach onto a user
+        -- board (the call carries the owner), n to move into epic n. The move
+        -- is set_task_epic's (routing, owner, epic-exists check, rollups of
+        -- both epics); the patch is patch_task's, and patch_task still refuses
+        -- epic_id. A missing task is an error here ("task <id> not found"),
+        -- unlike patch_task's silent no-op: the board does not pre-read a
+        -- possibly stale view to decide that. A missing epic is refused with
+        -- "task <id>: epic <n> does not exist", which the board maps to the
+        -- same NotFound the create and move paths answer.
+        --
+        -- ORDER INSIDE THE CALL. A call that also changes repo_path relinks
+        -- first, then patches, so the repo change re-routes inside the subtree
+        -- the relink named and the task ends where routing by the NEW repo
+        -- puts it. Otherwise it patches first, then relinks. The order does not
+        -- matter for atomicity: both halves share one transaction.
+        --
+        -- COMPLETION STAMP. Entering Done stamps completed_at from the store
+        -- clock whatever the patch names, in update_task: a board that
+        -- forwarded a stale row's value cannot misorder the Done column, and
+        -- the board does not read its cache to strip the value first. A patch that
+        -- names a completion on a task already done (a manual reorder of the
+        -- Done column) is kept. In patch_task and patch_epic a completion they are given explicitly (a seed, a feed, an epic's
+        -- manual reorder) wins over the module's own stamp.
+}
+
+rule HandStatusWriteReachesTheSchedule {
+    -- Every accepted patch_task and update_task patch, in the same
+    -- transaction: these are the hand status writes (the TUI's moves and
+    -- editor, update_tasks' status). The dispatch claim and the close are the
+    -- module's own writes and do not pass through here.
+    when: TaskPatchAccepted(task, patch)
+
+    let from = task.status
+
+    ensures:
+        if patch.status != null and patch.status != from:
+            TaskStatusWrittenByHand(task: task, from: from, to: patch.status)
+    -- A write into done is a close, from any prior status.
+    ensures:
+        if patch.status = done:
+            split/TaskClosed(task: task)
+
+    @guidance
+        -- schedules.allium consumes both: LeavingBacklogCancelsThePendingRun,
+        -- EnteringBacklogRearmsAPhoenixTask, LeavingRunningCancelsThePendingRun
+        -- and ClosingCancelsThePendingRun.
+        -- Implementation: spacetime/module/src/schedule.rs::schedule_after_status_write,
+        -- the one call patch_task and update_task make, and its in-memory twin.
+}
+
+rule RespawnPhoenixSuccessorNeedsTheFlag {
+    when: PhoenixSuccessorRequested(predecessor, successor)
+
+    -- TheFlagIsTheReceipt, enforced: a predecessor without the
+    -- flag is not a phoenix task, or has already respawned.
+    requires: predecessor.phoenix
+
+    ensures: PhoenixSuccessorAccepted(predecessor: predecessor, successor: successor)
+
+    @guidance
+        -- The standalone respawn_phoenix_successor reducer. A refusal reads
+        -- "predecessor task <id> is not a phoenix task, or already respawned"
+        -- and writes nothing, so a repeated call cannot insert a second
+        -- successor. The in-transaction respawns (patch_task, close_task,
+        -- exit_session's close, a merged PR; PhoenixRespawn) are gated on the
+        -- flag too.
+}
+
+------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
 
@@ -2346,8 +2581,7 @@ rule EditTask {
 --     on a task OTHER than its own — never a dispatched agent closing
 --     itself, which must still go through the first path. No exit token;
 --     applies the same terminal fields in the module, through the close_task
---     reducer (store-split.allium: RequestCloseTask, since store-split M7;
---     before it, the board's close_session), but NOT
+--     reducer (store-split.allium: RequestCloseTask), but NOT
 --     exit_session's epic chaining — only a close that went through
 --     exit_session (and therefore had a wrap_up ahead of it) emits
 --     SessionClosed. See AutoDispatchNextSubtask in epics.allium.
@@ -2389,8 +2623,7 @@ rule EditTask {
 -- store's patch_task reducer before anything is applied (mcp-task-tools.allium:
 -- UpdateTaskViaMcp). The store also holds every OTHER writer to it at its
 -- one task write: a write that moves a task's sub_status must
--- leave one legal for the status (store-split.allium:
--- SubStatusMovesMustBeLegal), and the batch sub_status patch skips an entry
+-- leave one legal for the status (SubStatusMovesMustBeLegal), and the batch sub_status patch skips an entry
 -- that would not (BatchSubStatusPatchSkipsIllegalEntries). Only a move is
 -- judged, so a row already holding an odd pair stays writable for its other
 -- fields, and an insert is not judged.

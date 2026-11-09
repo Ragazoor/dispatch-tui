@@ -162,7 +162,7 @@ impl TaskService {
 
         // The sub-status goes through as given: the store refuses one that is
         // illegal for the status the row will hold (`UpdateTaskViaMcp`,
-        // store-split M2).
+        // `tasks.allium: SubStatusMovesMustBeLegal`).
         let patch = build_task_patch(&params, expanded_repo_path.as_deref(), params.sub_status);
 
         // Snapshot the task before the write, whenever `status` changes: the
@@ -181,7 +181,7 @@ impl TaskService {
             && is_pr_url_set
             && prior.as_ref().is_some_and(|t| t.url.is_none());
 
-        // ONE STORE CALL (store-split.allium: UpdateTaskIsOneTransaction). The
+        // ONE STORE CALL (tasks.allium: UpdateTaskIsOneTransaction). The
         // relink and the patch go to the module's `update_task` together, so a
         // refusal of either leaves the task as it was, and the order between
         // them is the module's. The completion stamp on entering Done is the

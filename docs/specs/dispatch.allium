@@ -19,7 +19,7 @@
 --           TokenBudgetIndicator and ActiveModelIndicator read (see
 --           observability.allium: StatusLineDecorator); the dispatch request
 --           row, its states, its scheduled timeout and the claim and its
---           release, which the store's module owns since store-split M4 (see
+--           release, which the store's module owns (see
 --           store-split.allium: DispatchRequest, RequestDispatch and the rules
 --           after it).
 
@@ -161,7 +161,7 @@ rule DispatchTask {
     -- legitimately create the first worktree" case passes it anyway.
     requires: task.is_locally_owned
 
-    -- Since store-split M4 this rule only ASKS. The claim (backlog ->
+    -- This rule only ASKS. The claim (backlog ->
     -- running, the seeded stamp, the subagent reset) and the request row are
     -- one module transaction (store-split.allium: RequestDispatch), and the
     -- request names this machine as its host, always. The worktree, the tmux
@@ -284,7 +284,7 @@ rule ProvisionDispatch {
     -- HostTracksWorktree forbids and which is_locally_owned then reads as
     -- "unowned" rather than "owned by this machine".
     --
-    -- Since store-split M4 the host is a field of the request row, written by
+    -- The host is a field of the request row, written by
     -- the module when the request is made, and the module stamps task.host
     -- from it when the dispatched report lands (store-split.allium:
     -- HostReportsDispatched). The row names the requesting machine, and only
@@ -579,8 +579,8 @@ rule ProvisionDispatch {
         -- == Subagent state reset ==
         -- A fresh dispatch clears every core/SubagentEntry left over from a
         -- prior run of this task (a backlog task should never carry live
-        -- subagents from before) and resets live_subagents to 0. Since
-        -- store-split M4 the module does this in the claim's own transaction
+        -- subagents from before) and resets live_subagents to 0. The
+        -- module does this in the claim's own transaction
         -- (store-split.allium: RequestDispatch), not this rule. stop_pending
         -- is cleared too, but the HookSubagentStop drain path does NOT run
         -- there even if it was set: the claim moves the task into Running,
@@ -596,7 +596,7 @@ rule ProvisionDispatch {
         -- is the same claim on every entry point (the TUI dispatch key and its
         -- trust-confirmed, retry-fresh and quick-dispatch siblings,
         -- DispatchTaskViaMcp, and AutoDispatchNextSubtask in epics.allium).
-        -- Since store-split M4 the claim IS the request: one module
+        -- The claim IS the request: one module
         -- transaction applies backlog -> running, the default running
         -- sub_status and the seeded last_pre_tool_use_at, conditionally on the
         -- task still being backlog with no open request, and writes the
@@ -1745,8 +1745,7 @@ surface BaseBranchPicker {
 surface DispatchingFeedback {
     facing user: core/Operator
 
-    -- This surface tracks tasks that are mid-dispatch, and since store-split
-    -- M4 it is driven by the dispatch request row (store-split.allium:
+    -- This surface tracks tasks that are mid-dispatch, and it is driven by the dispatch request row (store-split.allium:
     -- DispatchRequest), not by in-memory state alone. A task is a member
     -- while either holds:
     --   - PENDING: this board has asked (the user pressed Enter / Shift+D,
@@ -2165,7 +2164,7 @@ surface SandboxedAgentExecution {
 -- provisioning rather than a status read followed by a status write. The losing
 -- caller provisions nothing; see DispatchTask for what each entry point reports.
 --
--- Since store-split M4 the claim is the module's request reducer
+-- The claim is the module's request reducer
 -- (store-split.allium: RequestDispatch), so it holds across machines as well
 -- as across entry points. Two invariants there carry it into the request row:
 -- OneOpenDispatchRequestPerTask (a second request while one is open is

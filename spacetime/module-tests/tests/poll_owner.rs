@@ -125,7 +125,7 @@ fn claim_poll_owner_rejects_an_unrecognised_scope() {
     assert_eq!(owner_rows(&store), 0);
 }
 
-/// D11 follow-up (`store-split.allium`: ClaimPollOwner, OverridePollOwner,
+/// D11 (`feeds.allium`: ClaimPollOwner, OverridePollOwner; `store-split.allium`:
 /// SaveSettingForHost, ClearSettingForHost): a client may name a host in
 /// these reducers only when it owns it. A teammate's host, and an
 /// unregistered one, are refused and nothing changes.

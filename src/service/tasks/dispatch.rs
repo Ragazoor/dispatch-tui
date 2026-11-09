@@ -1,4 +1,4 @@
-//! The dispatch seam: request rows (store-split M4, task #53257).
+//! The dispatch seam: request rows (`store-split.allium: DispatchRequest`).
 //!
 //! Two halves of one flow, and the only two ways the board takes part in a
 //! dispatch:

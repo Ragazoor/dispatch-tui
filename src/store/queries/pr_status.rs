@@ -1,4 +1,4 @@
-//! PR state (store-split M6): the module's PR reducers, always naming THIS host.
+//! PR state (`pr-workflow.allium: ReportPrStatus`): the module's PR reducers, always naming THIS host.
 
 use anyhow::Result;
 

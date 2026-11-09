@@ -72,7 +72,7 @@ Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log`
 
 The handles and adapters are summarised at the top of [docs/module-map.md](docs/module-map.md).
 
-**Direction of travel:** rules about shared data belong in the SpacetimeDB module's reducers; the TUI keeps only work that needs the operator's machine (git, tmux, claude, gh, local files). Don't add new data rules to `src/service/`. A data rule lives in `spacetime/module/src/`; mirror any change to it in `src/sync/memory_caller/` and cover the pair in `tests/memory_caller_conformance.rs`. `RULES_VERSION` (`spacetime/module/src/rules.rs`) and `BOARD_RULES_VERSION` (`src/sync/rules_gate.rs`) move together, by hand; the module constant says what warrants a bump. The target and its migration steps are in `docs/specs/store-split.allium` (epic #32769).
+**Direction of travel:** rules about shared data belong in the SpacetimeDB module's reducers; the TUI keeps only work that needs the operator's machine (git, tmux, claude, gh, local files). Don't add new data rules to `src/service/`. A data rule lives in `spacetime/module/src/`; mirror any change to it in `src/sync/memory_caller/` and cover the pair in `tests/memory_caller_conformance.rs`. `RULES_VERSION` (`spacetime/module/src/rules.rs`) and `BOARD_RULES_VERSION` (`src/sync/rules_gate.rs`) move together, by hand; the module constant says what warrants a bump. The split, and the request rows through which the module drives host work, are in `docs/specs/store-split.allium`.
 
 ## External Dependencies
 

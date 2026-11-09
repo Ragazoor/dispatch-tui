@@ -1,5 +1,5 @@
-//! Wrap-up and exit-session as request rows, board side (store-split M5,
-//! task #53258).
+//! Wrap-up and exit-session as request rows, board side (`store-split.allium:
+//! SessionRequest`).
 //!
 //! Two halves of one flow, pinned against the in-memory store so the row can
 //! be driven and inspected directly:
@@ -1158,7 +1158,7 @@ async fn a_teardown_that_stalls_past_its_deadline_is_reported_deadline_passed() 
 }
 
 // ===========================================================================
-// update_tasks' done-path close: RequestCloseTask (store-split M7, X1)
+// update_tasks' done-path close: RequestCloseTask (`store-split.allium` X1)
 // ===========================================================================
 
 impl Fx {

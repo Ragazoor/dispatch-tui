@@ -67,7 +67,7 @@ pub enum ReducerOutcome {
 /// a caller (the services, for MCP) can tell "the data rule said no" from "the
 /// store is broken" and pass the reason on in the right class. The reason is
 /// the store's own wording: with the data rules in the reducers
-/// (`store-split.allium`, M2) it is the text an agent reads.
+/// (`tasks.allium`, `epics.allium`) it is the text an agent reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreRefusal(pub String);
 
@@ -187,7 +187,7 @@ pub trait ReducerCaller: Send + Sync {
         bookmarked: bool,
     ) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
-    /// `store-split.allium: UpdateTaskIsOneTransaction`: the relink and the
+    /// `tasks.allium: UpdateTaskIsOneTransaction`: the relink and the
     /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.
     /// `host` is the caller's own host: a move into Done that leaves a pr-typed
     /// url writes a close row for it (`UpdateTaskDoneWritesACloseRow`).
@@ -215,7 +215,7 @@ pub trait ReducerCaller: Send + Sync {
     /// Insert an epic and answer with the id the store generated.
     async fn create_epic(&self, row: bindings::Epic) -> Result<EpicId>;
     async fn patch_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
-    /// `store-split.allium: UpdateEpicIsOneTransaction`: the patch, the
+    /// `epics.allium: UpdateEpicIsOneTransaction`: the patch, the
     /// workspace move and the visibility change in one reducer call. `None`
     /// leaves the workspace or visibility alone. A missing epic is refused,
     /// unlike [`patch_epic`](Self::patch_epic)'s no-op.
@@ -233,7 +233,7 @@ pub trait ReducerCaller: Send + Sync {
     /// `epics.allium: FlattenEpic`, in one transaction: every `repo-group`
     /// sub-epic's tasks move back onto `root` and the emptied sub-epics go.
     async fn flatten_epic(&self, root: EpicId) -> Result<ReducerOutcome>;
-    /// `store-split.allium: SetEpicGroupByRepoIsOneTransaction`: the epic's
+    /// `epics.allium: SetEpicGroupByRepoIsOneTransaction`: the epic's
     /// `group_by_repo` flag and, for a non-feed epic, `RegroupEpic` (on) or
     /// `FlattenEpic` (off), in one transaction. A missing epic is refused.
     async fn set_epic_group_by_repo(
@@ -425,8 +425,8 @@ pub trait ReducerCaller: Send + Sync {
         at: DateTime<Utc>,
     ) -> Result<ReducerOutcome>;
 
-    /// Apply one parsed feed emission to a feed epic (store-split M3,
-    /// `feeds.allium: IngestFeedEmission`). The module picks the strategy,
+    /// Apply one parsed feed emission to a feed epic (`feeds.allium:
+    /// IngestFeedEmission`). The module picks the strategy,
     /// routes, groups, upserts, deletes the stale and recalculates; which rows
     /// it removed is decoded in the `Store`, as for the calls above.
     async fn ingest_feed(
@@ -457,7 +457,7 @@ pub trait ReducerCaller: Send + Sync {
         reason: String,
     ) -> Result<ReducerOutcome>;
 
-    /// `ProvisionManagedEpics` (M7, X4): the whole managed feed-epic tree in
+    /// `ProvisionManagedEpics` (`store-split.allium` X4): the whole managed feed-epic tree in
     /// one transaction. `""` is a disabled feed (nothing created, nothing
     /// removed) and `0` no interval.
     async fn ensure_managed_epics(
@@ -486,7 +486,7 @@ pub trait ReducerCaller: Send + Sync {
     ) -> Result<ReducerOutcome>;
     /// The patch, the visibility change, then every unlink, then every link,
     /// in one transaction (`update_work_package_with_links`;
-    /// `store-split.allium: UpdateWorkPackageIsOneTransaction`).
+    /// `work-packages.allium: UpdateWorkPackageIsOneTransaction`).
     async fn update_work_package_with_links(
         &self,
         id: WorkPackageId,
@@ -542,7 +542,7 @@ pub trait ReducerCaller: Send + Sync {
         owner: String,
     ) -> Result<ReducerOutcome>;
 
-    // -- Dispatch requests (store-split M4) ------------------------------------
+    // -- Dispatch requests (`store-split.allium: DispatchRequest`) --------------------------------
     //
     // `store-split.allium`: `RequestDispatch` and the rules after it. Every
     // refusal is an ordinary answer (`Refused`), not an error: a lost race,
@@ -587,7 +587,7 @@ pub trait ReducerCaller: Send + Sync {
     /// `HostRestartFailsInterrupted`: fail `host`'s provisioning rows.
     async fn fail_interrupted_dispatch_requests(&self, host: String) -> Result<ReducerOutcome>;
 
-    // -- Session requests (store-split M5) ----------------------------------------
+    // -- Session requests (`store-split.allium: SessionRequest`) ----------------------------------
     //
     // `store-split.allium`: `RequestWrapUp` and the rules after it. As for the
     // dispatch requests, every refusal is an ordinary answer (`Refused`): a

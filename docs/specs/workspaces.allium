@@ -567,7 +567,7 @@ rule SetEpicVisibility {
 
     ensures:
         epic.visibility = visibility
-        -- Task #98851 (M4): ClaimsFollowSight, below.
+        -- ClaimsFollowSight, below.
 
     @guidance
         -- An admin can act only on an epic they can see, one with no
@@ -587,7 +587,7 @@ rule ClaimsFollowSight {
     when: SightChanged(epic)    -- RemoveMember, MoveEpicToWorkspace, SetEpicVisibility, a re-parent, the managed-root private flip
        or TaskMoved(task, destination, owner)    -- a move into a private epic, or a detach: the task's own sight changes
 
-    -- Task #98851 (M4). A poll claim must not outlive the sight that made it
+    -- A poll claim must not outlive the sight that made it
     -- workable. After ANY change that can take an epic out of someone's
     -- sight, every epic-scoped core/PollOwner on the epic or its sub-epics
     -- held by a host whose owner no longer sees that epic is released, so

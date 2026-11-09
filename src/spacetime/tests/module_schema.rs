@@ -128,10 +128,10 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// (`spacetime-seed.allium`).
 ///
 /// `dispatch_requests`, `dispatch_request_timeouts`, `session_requests` and
-/// `session_request_timeouts` (store-split M5, W10) are excluded too: they
+/// `session_request_timeouts` (`store-split.allium` W10) are excluded too: they
 /// are in-flight state, not domain, and no snapshot carries them
 /// (`spacetime-seed.allium`'s note on `SharedTable`, and `store-split.allium`
-/// M4's D10). A restored open request would have no timer and would hold its
+/// D10). A restored open request would have no timer and would hold its
 /// task's claim forever.
 ///
 /// `feed_requests` is excluded for the same reason: a restored open teardown

@@ -108,7 +108,7 @@ fn dispatch_different_tasks_both_succeed() {
 
 // `dispatch_failed_clears_mark_dispatching_guard` and
 // `dispatch_failed_releases_the_claim` pinned `TaskMessage::DispatchFailed` and
-// the `ReleaseClaim` it emitted, both retired by store-split M4: a failed
+// the `ReleaseClaim` it emitted, both gone: a failed
 // dispatch reaches the board as its failed request row (pinned above and in
 // `src/tui/tests/dispatch_requests.rs`), and no client releases a claim — the
 // module does, for every failed request (`store-split.allium:
@@ -142,7 +142,7 @@ fn dispatch_claim_lost_clears_the_spinner_without_releasing() {
 // The in-memory watchdog tests that stood here
 // (`dispatch_watchdog_timeout_matches_provision_worst_case`,
 // `dispatching_timeout_does_not_release_the_claim`) pinned
-// `DispatchingTimeout`, which store-split M4 REPLACES with the request row's
+// `DispatchingTimeout`, replaced by the request row's
 // own deadline (`dispatch.allium: FailedRequestReported`). Its successors are in
 // `src/tui/tests/dispatch_requests.rs`.
 

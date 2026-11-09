@@ -1,4 +1,4 @@
-//! The host's side of dispatch request rows (store-split M4).
+//! The host's side of dispatch request rows (`store-split.allium: DispatchRequest`).
 //!
 //! Spec: `docs/specs/store-split.allium` (`HostClaimsDispatch`, D4, D5) and
 //! `docs/specs/dispatch.allium` (`ProvisionDispatch`,
@@ -10,7 +10,7 @@
 //! - [`DeadlineRunner`] bounds every subprocess a provisioning runs by the time
 //!   left to the row's deadline, and refuses to start one past it.
 //!
-//! Store-split M5 adds [`SessionRequestObserver`], the same decision for the
+//! [`SessionRequestObserver`] makes the same decision for the
 //! wrap_up and exit_session rows (`HostClaimsSessionRequest`,
 //! `KillWindowOfFailedExitSession`); [`DeadlineRunner`] bounds their rebase and
 //! teardown too.

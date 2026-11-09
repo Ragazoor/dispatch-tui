@@ -171,11 +171,11 @@ struct Rows {
     /// The raw rows behind `work_package_links`: `retire_work_package_link`
     /// compares these, because the decoded link drops `created_at` and `id`.
     raw_work_package_links: BTreeMap<String, bindings::WorkPackageLink>,
-    /// store-split M4. Arrive scoped to THIS host by the subscription's
+    /// `store-split.allium: DispatchRequest`. Arrive scoped to THIS host by the subscription's
     /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsDispatchRequests`),
     /// in every state, so nothing here filters by host or state.
     dispatch_requests: BTreeMap<i64, DispatchRequest>,
-    /// store-split M5. Arrive scoped to THIS host by the subscription's
+    /// `store-split.allium: SessionRequest`. Arrive scoped to THIS host by the subscription's
     /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsSessionRequests`),
     /// in every state, so nothing here filters by host or state.
     session_requests: BTreeMap<i64, SessionRequest>,
@@ -781,7 +781,7 @@ impl SharedRows {
         });
     }
 
-    /// A dispatch request row (store-split M4). An undecodable one is dropped,
+    /// A dispatch request row (`store-split.allium: DispatchRequest`). An undecodable one is dropped,
     /// as a task is: read as open or as finished it would drive the dispatch
     /// feedback wrongly either way.
     pub fn upsert_dispatch_request(&self, row: &bindings::DispatchRequest) {
@@ -833,7 +833,7 @@ impl SharedRows {
         });
     }
 
-    /// A session request row (store-split M5). An undecodable one is dropped,
+    /// A session request row (`store-split.allium: SessionRequest`). An undecodable one is dropped,
     /// as a dispatch request is: read as open or as finished it would drive the
     /// `wrap_up` wait and the exit token wrongly either way.
     pub fn upsert_session_request(&self, row: &bindings::SessionRequest) {

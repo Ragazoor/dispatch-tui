@@ -347,7 +347,7 @@ Tests seed fixtures via the `#[cfg(test)]` write accessors `McpState::db_write()
 
 Any code that changes a task's **status** or its **epic linkage** (`epic_id`) must recalculate the affected epic(s). An epic's status is derived from its subtasks' statuses, so a task change that doesn't trigger a recalc leaves the parent epic showing a stale rollup.
 
-Since store-split M7 the SpacetimeDB module does this itself: `patch_task`, `patch_epic`, `create_epic`, the hook-event reducers, `close_task` and every request reducer recalculate the affected epic chain in their own transaction, so the board calls nothing. A new module reducer that changes a task's status or epic linkage must recalculate in the same transaction, and when a task moves between epics both the old and the new parent.
+The SpacetimeDB module does this itself (`store-split.allium` X3): `patch_task`, `patch_epic`, `create_epic`, the hook-event reducers, `close_task` and every request reducer recalculate the affected epic chain in their own transaction, so the board calls nothing. A new module reducer that changes a task's status or epic linkage must recalculate in the same transaction, and when a task moves between epics both the old and the new parent.
 
 ## Allium: expressing "on leaving state X"
 
@@ -464,7 +464,7 @@ Two consequences for tests. `stop_pending_at` is stored at millisecond resolutio
 
 ## Reparenting an epic — the store's guards, no immutability
 
-`parent_epic_id` **is** mutable: `EpicPatch` declares it `nullable` (`src/models/patches.rs::EpicPatch`), `patch_epic` writes it (`src/store/queries/epics.rs::patch_epic`), `EpicService::update_epic` implements reparent-and-detach (`src/service/epics.rs::update_epic`), and the TUI has a reparent picker (`src/tui/ui/kanban/popups/reparent_epic.rs`). Since store-split M2 the guards are the store's, in the `patch_epic` reducer (`check_epic_patch` in the module crate), so every client gets them and a bare `patch_epic` call cannot skip them:
+`parent_epic_id` **is** mutable: `EpicPatch` declares it `nullable` (`src/models/patches.rs::EpicPatch`), `patch_epic` writes it (`src/store/queries/epics.rs::patch_epic`), `EpicService::update_epic` implements reparent-and-detach (`src/service/epics.rs::update_epic`), and the TUI has a reparent picker (`src/tui/ui/kanban/popups/reparent_epic.rs`). The guards are the store's, in the `patch_epic` reducer (`check_epic_patch` in the module crate), so every client gets them and a bare `patch_epic` call cannot skip them:
 
 1. **Cycle detection** — the reducer walks the proposed parent's ancestor chain and refuses if the epic being moved appears in it (self-parent included). The refusal reaches callers as `ServiceError::Validation` with the store's wording.
 2. **RepoGroup guard** — an auto-created `EpicOrigin::RepoGroup` sub-epic cannot be reparented *or* detached to root; either would orphan it outside its grouping root.

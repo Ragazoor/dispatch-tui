@@ -1,6 +1,6 @@
 use super::*;
 
-/// store-split M6 (`store-split.allium`: `ReportPrStatus`,
+/// PR state (`pr-workflow.allium`: `ReportPrStatus`,
 /// `ReportPrUnreadable`). The in-memory caller derives the task's PR state from
 /// the host's raw `gh` strings the way the real module does: merged, closed,
 /// open with a review decision, a conflict left alone, an unknown string

@@ -270,7 +270,7 @@ fn test_task() -> Task {
     TaskBuilder::new(1).title("T").build()
 }
 
-/// The store decides repo grouping now (store-split M2); this is the
+/// The store decides repo grouping (`epics.allium: RegroupEpic`); this is the
 /// board's own read of the same predicate, and the two must not drift.
 #[test]
 fn can_auto_group_agrees_with_the_modules_rule() {

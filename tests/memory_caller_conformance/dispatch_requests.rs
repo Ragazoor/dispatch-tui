@@ -33,7 +33,7 @@ fn request_shape(r: &dispatch_tui::models::DispatchRequest) -> RequestShape {
     }
 }
 
-/// store-split M4 (`store-split.allium`: `RequestDispatch` and the rules after
+/// Dispatch requests (`store-split.allium`: `RequestDispatch` and the rules after
 /// it). The in-memory caller serves dispatch requests the way the real module
 /// does: the claim-and-row transaction, the derived mode, the host claim, both
 /// reports, the conditional release, the restart rule, the task-delete rule,
@@ -372,7 +372,7 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
         same_task(interrupted);
         same_task(waiting);
 
-        // -- DeletingATaskFailsItsOpenRequest, then DeletingATaskDeletesItsRequestRows -----------------------------------
+        // -- DeletingATaskFailsItsOpenRequest, then DeletingATaskDeletesItsRequestRows ------------
         // Only a done task may be deleted (`tasks.allium: DeleteTask`): moved
         // to done by hand while its request is still open.
         let done = || bindings::TaskPatch {

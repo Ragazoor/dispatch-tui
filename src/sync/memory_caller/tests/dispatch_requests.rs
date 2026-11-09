@@ -1,4 +1,4 @@
-//! The in-memory twin of the M4 dispatch-request reducers.
+//! The in-memory twin of the dispatch-request reducers.
 //!
 //! Spec: `docs/specs/store-split.allium` — `RequestDispatch`,
 //! `HostClaimsDispatch`, `HostReportsDispatched`, `HostReportsDispatchFailed`,

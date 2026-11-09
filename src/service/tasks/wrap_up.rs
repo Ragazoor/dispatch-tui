@@ -2,9 +2,9 @@
 //! `WrapUpRefusesUnfinishedWork` makes before `wrap_up` writes a request, and
 //! the best-effort window kill a failed teardown row still owes.
 //!
-//! Since store-split M5 the rebase and the exit_session teardown are request
+//! The rebase and the exit_session teardown are request
 //! rows served by this host (`session.rs`), and the Conflict sub_status is the
-//! module's. Since M7 so is `update_tasks`' close (a `close` row).
+//! module's. So is `update_tasks`' close (a `close` row, X1).
 
 use crate::models::{Task, TmuxWindow};
 use crate::service::ServiceError;

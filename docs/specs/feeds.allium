@@ -7,7 +7,7 @@
 --        WHERE it runs: the TUI process runs the feed script and posts the
 --        raw parsed items (IngestFeedEmission); the SpacetimeDB module
 --        applies every rule below that decides what the items do to the
---        store (store-split.allium, M3).
+--        store (store-split.allium, S1).
 -- Includes: FeedItem schema, upsert semantics, status preservation, polling
 --           cadence, error handling, the verify-feed
 --           validator CLI, the role-routed reconcile path that splits a
@@ -36,6 +36,7 @@
 
 use "./core.allium" as core
 use "./store-split.allium" as split
+use "./epics.allium" as epics
 use "./cli.allium" as cli
 use "./startup.allium" as startup
 
@@ -248,7 +249,7 @@ contract RouteSignals {
 
     @guidance
         -- Implementation: spacetime/module/src/rules.rs::route_signals, run by
-        -- the module's ingest_feed (store-split M3). Coverage: the module's
+        -- the module's ingest_feed. Coverage: the module's
         -- own tests (spacetime/module/src/tests.rs).
 }
 
@@ -1365,11 +1366,11 @@ rule OverrideFeedOwner {
     -- even when a different host already holds it. The only way a feed
     -- epic's poll ownership ever moves, since FeedTick's own claim only ever
     -- fills an ABSENT row. The store does the reassignment and its checks
-    -- (store-split.allium: OverridePollOwner, which refuses unless this host
+    -- (OverridePollOwner, which refuses unless this host
     -- is registered to the caller, the caller sees the epic and this host's
     -- owner set the command).
     ensures:
-        split/PollOwnerOverridden(scope: epic, scope_id: epic.id, host: core/local_host())
+        PollOwnerOverridden(scope: epic, scope_id: epic.id, host: core/local_host())
 
     -- The board reports the answer on the status line: "Feed-poll ownership
     -- for epic #<id> reassigned to this host." when the store accepts, and
@@ -1387,10 +1388,50 @@ rule OverrideFeedOwner {
         -- its status, so there is no status in which ownership is moot.
 }
 
+rule ClaimPollOwner {
+    when: PollOwnerClaimed(scope, scope_id, host)
+
+    -- store-split D11: only the host's own owner may claim for it.
+    requires: host.owner != null and host.owner = caller()
+    -- The caller must see the scope. An unseen epic or
+    -- task is refused as "does not exist", so a claim cannot take or stall
+    -- the poll of something its caller cannot read. A feed epic is also
+    -- refused to a host whose owner did not set its command
+    -- (FeedCommandRunsOnSettersHost).
+    requires: caller().sees(scope, scope_id)
+    let target = core/Epic{id: scope_id}    -- only read when scope = epic
+    requires: scope != epic or target.feed_command = null
+        or host.owner = (target.feed_command_set_by ?? target.created_by)
+
+    ensures: core/PollOwner.claimed_if_absent(scope, scope_id, host)
+
+    @guidance
+        -- claim_poll_owner. Its callers are pr-workflow.allium's
+        -- PollPrStatus and FeedTick.
+}
+
+rule OverridePollOwner {
+    when: PollOwnerOverridden(scope, scope_id, host)
+
+    -- store-split D11: a client can move a scope only to a host it owns, never to
+    -- someone else's machine, so a poll cannot be stolen for another host.
+    requires: host.owner != null and host.owner = caller()
+    -- The same sight and setter checks as ClaimPollOwner.
+    requires: caller().sees(scope, scope_id)
+    let target = core/Epic{id: scope_id}    -- only read when scope = epic
+    requires: scope != epic or target.feed_command = null
+        or host.owner = (target.feed_command_set_by ?? target.created_by)
+
+    ensures: core/PollOwner.reassigned(scope, scope_id, host)
+
+    @guidance
+        -- override_poll_owner. Its caller is OverrideFeedOwner.
+}
+
 -- == Serialisation ==
 
 rule FeedCommandAuthority {
-    when: split/EpicFeedCommandSet(epic, command)
+    when: epics/EpicFeedCommandSet(epic, command)
 
     -- A host runs feed_command as a shell command, so changing it is changing
     -- what a person's machine runs. Only the epic's creator and an admin of
@@ -1638,7 +1679,7 @@ rule RunFeedCommand {
 
 -- == Upsert semantics ==
 
--- == Where ingestion runs (store-split M3) ==
+-- == Where ingestion runs ==
 
 rule IngestFeedEmission {
     when: FeedEmissionPosted(epic, items, additive, host)
@@ -3679,7 +3720,7 @@ invariant DefaultFeedIntervalClearsTheFloor {
 -- points, so no single one is the only guard:
 --   1. Module: claim_poll_owner and override_poll_owner refuse a claim on a
 --      feed epic by a host whose owner is not the setter
---      (store-split.allium: ClaimPollOwner), and FeedCommandAuthority drops
+--      (ClaimPollOwner), and FeedCommandAuthority drops
 --      every other host's claim when the command changes hands. That is the
 --      invariant below.
 --   2. FeedTick: src/models/poll_action.rs::decide_feed_poll_action skips an

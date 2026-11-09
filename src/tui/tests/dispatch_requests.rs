@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // DispatchingFeedback, UnprovisionedIndicator and the chain's failure report,
-// driven by this host's dispatch request rows (store-split M4, task #53257)
+// driven by this host's dispatch request rows (`store-split.allium: DispatchRequest`)
 // ---------------------------------------------------------------------------
 //
 // `dispatch.allium: DispatchingFeedback` — a task is a member while a pending

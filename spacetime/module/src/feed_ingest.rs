@@ -1,11 +1,9 @@
 //! Feed ingestion: what one parsed emission does to the store.
 //!
 //! Spec: `docs/specs/feeds.allium` (`IngestFeedEmission`, `FlatFeedReconcile`,
-//! `GroupedFeedUpsert`, `RoleRoutedFeedSync`), moved here by store-split M3
-//! (task #53256). The board's `src/feed/ingest/` used to decide all of this
-//! with a dozen reducer calls, none of them in one transaction; it now runs the
-//! feed script, resolves each item's repo path and posts the items with one
-//! call to [`ingest_feed`].
+//! `GroupedFeedUpsert`, `RoleRoutedFeedSync`). The module decides all of this
+//! in one transaction; the board's `src/feed/ingest/` only runs the feed script, resolves each
+//! item's repo path and posts the items with one call to [`ingest_feed`].
 //!
 //! The strategy comes from the epic's own row, never from the caller, so a
 //! board holding a stale copy of `feed_role` or `group_by_repo` cannot ingest

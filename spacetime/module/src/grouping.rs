@@ -2,10 +2,9 @@
 //! per-repo `repo-group` sub-epics.
 //!
 //! Spec: `docs/specs/epics.allium` (`RegroupEpic`, `FlattenEpic`, and the
-//! routing note above them), moved here by store-split M2 (task #53255). The
-//! board's `service::grouping` used to decide all of this by reading a
-//! subscription view and issuing several reducer calls; a view can be a strict
-//! subset of the store, and the calls were not one transaction.
+//! routing note above them). The module decides this, not the board: a board's
+//! subscription view can be a strict subset of the store, and several reducer
+//! calls would not be one transaction.
 //!
 //! Operations only ever touch `repo-group` sub-epics, never hand-made ones.
 //! Every function that moves a task recalculates the epics it touched, inside

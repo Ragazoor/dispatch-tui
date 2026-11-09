@@ -1,4 +1,4 @@
-//! A session request row (store-split M5).
+//! A session request row (`store-split.allium: SessionRequest`).
 //!
 //! Spec: `docs/specs/store-split.allium`'s `SessionRequest`. One wrap_up or
 //! exit_session or close request for one task, from the moment the module accepts it
@@ -17,7 +17,7 @@ use crate::define_str_enum;
 define_id_newtype!(SessionRequestId, session_request_id_tests);
 
 /// What a session request asks for: a wrap-up, the close that follows it, or
-/// (M7) the teardown of `update_tasks`' done-path close, which has no wrap-up
+/// (X1) the teardown of `update_tasks`' done-path close, which has no wrap-up
 /// behind it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SessionRequestKind {

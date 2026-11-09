@@ -110,7 +110,7 @@ fn wrap_up_skill_does_not_instruct_calling_dispatch_next() {
 
 /// A regression in this guidance is silent: an agent that stops at a refused
 /// close leaves a live tmux window and a task stuck in its old status, when one
-/// more call would have closed it. Since store-split M5 the close is one
+/// more call would have closed it. The close is one
 /// all-or-nothing module step, so it is an ERROR that changed nothing.
 #[test]
 fn wrap_up_skill_says_a_failed_close_is_an_error_that_changed_nothing() {

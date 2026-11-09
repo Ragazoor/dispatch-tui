@@ -143,10 +143,10 @@ struct Tables {
     work_packages: BTreeMap<i64, module::WorkPackage>,
     /// Keyed by the module's derived link id (`module::work_package_link_id`).
     work_package_links: BTreeMap<String, module::WorkPackageLink>,
-    /// store-split M4. The module's timer table has no counterpart: the
+    /// `store-split.allium: DispatchRequest`. The module's timer table has no counterpart: the
     /// backstop is [`MemoryReducerCaller::expire_dispatch_request`].
     dispatch_requests: BTreeMap<i64, module::DispatchRequest>,
-    /// store-split M5. As above, the module's timer table has no counterpart:
+    /// `store-split.allium: SessionRequest`. As above, the module's timer table has no counterpart:
     /// the backstop is [`MemoryReducerCaller::expire_session_request`].
     session_requests: BTreeMap<i64, module::SessionRequest>,
     /// `feed_requests`: no timer, so nothing stands in for a backstop.

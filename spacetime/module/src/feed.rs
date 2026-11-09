@@ -351,7 +351,7 @@ pub(crate) fn drop_retired_feed_items_for_epics(
     }
 }
 
-/// `ProvisionManagedEpics` (M7, X4): the managed feed-epic tree in ONE
+/// `ProvisionManagedEpics` (`store-split.allium` X4): the managed feed-epic tree in ONE
 /// transaction, so two boards starting together cannot create duplicates.
 ///
 /// Each subtree only when its command is non-empty (`""` is the module's

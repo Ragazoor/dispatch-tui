@@ -1,6 +1,6 @@
 //! Wrap-up and exit-session as request rows, with a scheduled backstop timer.
 //!
-//! Spec: `docs/specs/store-split.allium` (step M5, task #53258):
+//! Spec: `docs/specs/store-split.allium` (W1-W13, X1-X2):
 //! `SessionRequest`, `RequestWrapUp`, `HostClaimsSessionRequest`,
 //! `HostReportsSessionRequestDone`, `HostRepeatsSessionRequestDone`,
 //! `HostReportsSessionRequestFailed`, `RequestExitSession`,
@@ -112,7 +112,7 @@ pub const SESSION_REQUEST_BACKSTOP_GRACE_SECS: i64 = 10;
 
 pub const SESSION_KIND_WRAP_UP: &str = "wrap_up";
 pub const SESSION_KIND_EXIT_SESSION: &str = "exit_session";
-/// `update_tasks`' done-path close (M7, X1): a teardown with no wrap_up behind it.
+/// `update_tasks`' done-path close (X1): a teardown with no wrap_up behind it.
 pub const SESSION_KIND_CLOSE: &str = "close";
 
 pub const SESSION_REQUESTED: &str = "requested";
@@ -611,8 +611,8 @@ pub fn new_close_request(
     }
 }
 
-/// `patch_task`'s transition rule that is not the patch's own fields (M7,
-/// X2): leaving running clears the current agent's deferred Stop
+/// `patch_task`'s transition rule that is not the patch's own fields
+/// (X2): leaving running clears the current agent's deferred Stop
 /// (`core.allium: PendingStopOnlyWhileRunning`) unless the patch names
 /// `stop_pending` itself.
 pub fn patch_voids_pending_stop(

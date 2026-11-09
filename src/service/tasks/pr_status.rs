@@ -1,5 +1,5 @@
-//! PR state (store-split M6, task #53259): the board posts what `gh` printed
-//! and the module decides every task write (`store-split.allium:
+//! PR state (`pr-workflow.allium: ReportPrStatus`): the board posts what `gh` printed
+//! and the module decides every task write (`pr-workflow.allium:
 //! ReportPrStatus`, `ReportPrUnreadable`). Nothing here interprets the strings.
 
 use crate::models::TaskId;

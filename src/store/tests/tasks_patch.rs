@@ -526,13 +526,13 @@ async fn mark_pr_learnings_gate_shown_missing_task_is_false() {
         .unwrap());
 }
 
-// -- The dispatch claim, on request rows (store-split M4) ---------------------
+// -- The dispatch claim, on request rows (`store-split.allium: DispatchRequest`) ------------------
 //
-// Since M4 the claim IS the dispatch request (`store-split.allium:
+// The claim IS the dispatch request (`store-split.allium:
 // RequestDispatch`): one module transaction that claims the task and writes
 // the row. These pin the claim's guarantees at the store, through
 // `request_dispatch`, and the epic chain's ordering through the close that now
-// runs it in the module (`request_exit_session`, store-split M5).
+// runs it in the module (`store-split.allium: RequestExitSession`).
 
 /// Helper: a subtask of `epic_id` in `status`, with an explicit `sort_order`.
 async fn subtask(

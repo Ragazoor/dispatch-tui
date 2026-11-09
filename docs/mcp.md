@@ -45,7 +45,7 @@ a rate that does not scale with how busy the agents are. See `HookDelivery` in
 
 ## MCP State Machines
 
-`McpState` holds no multi-call handshake state. The wrap-up handshake that used to live in an in-memory map there is a pair of request rows in the shared store (store-split M5), so it survives a board restart.
+`McpState` holds no multi-call handshake state. The wrap-up handshake that used to live in an in-memory map there is a pair of request rows in the shared store (`store-split.allium: SessionRequest`), so it survives a board restart.
 
 **`wrap_up` → `exit_session` handoff** (`src/mcp/handlers/tasks/wrap_up.rs`; `docs/specs/store-split.allium`: `RequestWrapUp`, `RequestExitSession`, W1-W13):
 
@@ -72,7 +72,7 @@ The close is whole or absent: a refused call changes nothing and **leaves the to
 
 This closes a race that existed when `wrap_up("pr")` used to set `status = review` immediately: that armed PR-merge polling (`PollPrStatus`) before the session was actually closed, so a merge/close could null `tmux_window` while the agent was still working. Now a PR task never becomes poll-visible until the exact same transaction that also ends the session.
 
-A crash before the closing call leaves no stranded state: the task simply hasn't transitioned yet, and the token (a row) stays valid until a newer wrap-up, a dispatch or the close replaces it. A board that restarts mid-rebase fails that row `host restarted` at startup and does not resume it; the agent's waiting `wrap_up` died with the board and it calls `wrap_up` again. `update_tasks(status="done")` closes in the module too (`close_task`, store-split M7): no token and no chain, and a `close` row for the host's teardown when the task has a window or a PR.
+A crash before the closing call leaves no stranded state: the task simply hasn't transitioned yet, and the token (a row) stays valid until a newer wrap-up, a dispatch or the close replaces it. A board that restarts mid-rebase fails that row `host restarted` at startup and does not resume it; the agent's waiting `wrap_up` died with the board and it calls `wrap_up` again. `update_tasks(status="done")` closes in the module too (`close_task`, `store-split.allium: RequestCloseTask`): no token and no chain, and a `close` row for the host's teardown when the task has a window or a PR.
 
 Do not add new ad-hoc state machines on `McpState` without documenting them here.
 

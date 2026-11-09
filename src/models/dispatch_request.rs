@@ -1,4 +1,4 @@
-//! A dispatch request row (store-split M4).
+//! A dispatch request row (`store-split.allium: DispatchRequest`).
 //!
 //! Spec: `docs/specs/store-split.allium`'s `DispatchRequest`. One request to
 //! dispatch one task, from the moment a client asks until its host reports or

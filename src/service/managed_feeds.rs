@@ -9,7 +9,7 @@
 //! `ProvisionManagedEpics` rule in `docs/specs/epics.allium`.
 //!
 //! The provisioning itself is the module's `ensure_managed_epics` reducer
-//! (`epics.allium: ProvisionManagedEpics`, store-split M7 X4): the whole tree
+//! (`epics.allium: ProvisionManagedEpics`, `store-split.allium` X4): the whole tree
 //! in one transaction, so two boards starting together cannot create
 //! duplicates. What stays here is request shape: reading and writing the four
 //! settings, and the feed-interval floor on the two intervals.

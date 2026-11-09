@@ -29,7 +29,7 @@ fn dispatched_sets_fields_and_transitions_to_running() {
             .num_seconds()
             < 5
     );
-    // No commands at all. No Persist: since store-split M4 the module wrote the worktree, window and
+    // No commands at all. No Persist: the module wrote the worktree, window and
     // host when the host's report landed (HostReportsDispatched), so the board
     // only follows. No SeedActivity: the claim already wrote the activity
     // stamp, so re-writing it here would be redundant — and would clobber a

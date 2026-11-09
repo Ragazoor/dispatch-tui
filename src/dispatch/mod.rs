@@ -117,7 +117,7 @@ pub use worktree::{branch_from_worktree, teardown_task, TeardownFailure};
 /// What `gh pr view` printed, untouched: the state word and the review
 /// decision (empty for a repo without branch protection). The board does not
 /// interpret either; the module parses them and writes the task
-/// (`store-split.allium: ReportPrStatus`).
+/// (`pr-workflow.allium: ReportPrStatus`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawPrStatus {
     pub state: String,

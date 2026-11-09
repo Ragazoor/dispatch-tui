@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Wrap-up and exit-session as request rows — the board's session host
-// (store-split M5, task #53258)
+// (`store-split.allium: SessionRequest`)
 // ---------------------------------------------------------------------------
 //
 // The board reacts to the session rows its subscription delivers: it serves

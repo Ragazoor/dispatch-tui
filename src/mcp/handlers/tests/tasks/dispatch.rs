@@ -263,8 +263,8 @@ impl ChainFixture {
 
 // -- update_task(status="done") closes but never chains ----------------------
 //
-// MarkTaskDoneViaMcp (mcp-task-tools.allium) closes in the module since M7
-// (`close_task`, store-split.allium: RequestCloseTask), with no token and no
+// MarkTaskDoneViaMcp (mcp-task-tools.allium) closes in the module
+// (`close_task`, store-split.allium: RequestCloseTask, X1), with no token and no
 // chain; the window is torn down by the host serving the `close` row. The chain
 // is the module's, inside `request_exit_session`'s transaction, and only a
 // close with a wrap_up behind it can say the closed work reached base_branch.
@@ -659,7 +659,7 @@ async fn assert_action_chains(action: WrapUpAction) {
 }
 
 /// A failed dispatch reverts the claim, leaving the subtask dispatchable
-/// exactly as it was before the chain fired. Since store-split M4 the module
+/// exactly as it was before the chain fired. The module
 /// reverts it when the request fails (`ReleaseClaimOfFailedRequest`).
 #[tokio::test]
 async fn exit_session_chain_reverts_claim_when_dispatch_fails() {
@@ -707,7 +707,7 @@ async fn exit_session_chain_reverts_claim_when_dispatch_fails() {
 }
 
 /// A failed chained dispatch must be visible to the operator, not only to
-/// `app.log`. Since store-split M4 the chain's request carries origin
+/// `app.log`. The chain's request carries origin
 /// `epic_chain`, and the board raises AutoDispatchFailed from that row when it
 /// fails (`epics.allium: ReportChainedDispatchFailure`, pinned on the board in
 /// `src/tui/tests/dispatch_requests.rs`). What the chain owes is a row that
@@ -763,11 +763,11 @@ async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
 
 // -- a close that does not take effect ----------------------------------------
 //
-// Since store-split M5 `exit_session`'s close is the module's, in ONE
+// `exit_session`'s close is the module's (`store-split.allium` W4), in ONE
 // transaction with the token, the epic rollup and the chain
-// (`pr-workflow.allium: ExitSession`), and since M7 so is `update_tasks`
-// status="done" (`close_task`): either took effect whole or not at all. The
-// board no longer gates a teardown on a close; the one test below drives a
+// (`pr-workflow.allium: ExitSession`), and so is `update_tasks`
+// status="done" (`close_task`, X1): either took effect whole or not at all. The
+// board does not gate a teardown on a close; the one test below drives a
 // close call that gets no effect.
 
 /// A task service whose `close_task` always fails, so `update_tasks`' close

@@ -1,4 +1,4 @@
-//! The in-memory twin of the M5 session-request reducers.
+//! The in-memory twin of the session-request reducers.
 //!
 //! Spec: `docs/specs/store-split.allium` — `RequestWrapUp`,
 //! `HostClaimsSessionRequest`, `HostReportsSessionRequestDone`,
@@ -13,7 +13,7 @@
 //! `tests/memory_caller_conformance.rs` diffs the two.
 //!
 //! `expire_session_request` is the double's stand-in for the module's
-//! scheduler, as `expire_dispatch_request` is for M4's.
+//! scheduler, as `expire_dispatch_request` is for the dispatch requests.
 
 use super::*;
 use crate::models::{
@@ -1089,7 +1089,7 @@ async fn session_rows_are_pushed_into_shared_rows_for_the_board() {
     assert_eq!(rows.session_requests().len(), 1);
 }
 
-/// An injected transport fault on a session reducer behaves as on M4's: the
+/// An injected transport fault on a session reducer behaves as on a dispatch reducer: the
 /// call is never sent, or applied with its reply lost.
 #[tokio::test]
 async fn an_injected_fault_on_a_session_reducer_is_honoured() {
@@ -1113,7 +1113,7 @@ async fn an_injected_fault_on_a_session_reducer_is_honoured() {
     );
 }
 
-// -- RequestCloseTask (store-split M7, X1) ---------------------------------------------
+// -- RequestCloseTask (`store-split.allium` X1) ---------------------------------------------
 
 async fn close(caller: &MemoryReducerCaller, task: TaskId) -> ReducerOutcome {
     caller.close_task(task, HOST.into()).await.unwrap()
@@ -1312,7 +1312,7 @@ async fn close_task_on_a_missing_task_is_refused() {
     assert!(!close(&caller, TaskId(999)).await.won());
 }
 
-// -- patch_task's transition rules (store-split M7, X2) ---------------------------------
+// -- patch_task's transition rules (`store-split.allium` X2) ---------------------------------
 
 /// Moving a task out of running clears a deferred Stop in the same write,
 /// unless the patch names `stop_pending` itself.
@@ -1380,7 +1380,7 @@ async fn patch_task_into_done_respawns_a_phoenix_task_once() {
     assert!(!rows.task(task).unwrap().phoenix);
 }
 
-// -- ensure_managed_epics (store-split M7, X4) -------------------------------------------
+// -- ensure_managed_epics (`store-split.allium` X4) -------------------------------------------
 
 #[tokio::test]
 async fn ensure_managed_epics_creates_the_tree_once_and_skips_disabled_feeds() {

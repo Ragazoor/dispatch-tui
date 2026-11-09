@@ -201,7 +201,7 @@ pub(in crate::tui) struct InteractionState {
 // DispatchRequestView — this host's dispatch request rows, as the App follows them
 // ---------------------------------------------------------------------------
 
-/// What the App keeps of this host's dispatch request rows (store-split M4),
+/// What the App keeps of this host's dispatch request rows (`store-split.allium: DispatchRequest`),
 /// rebuilt from every `TaskMessage::DispatchRequestsRefreshed`.
 #[derive(Debug, Default)]
 pub(in crate::tui) struct DispatchRequestView {

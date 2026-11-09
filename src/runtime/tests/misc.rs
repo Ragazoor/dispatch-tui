@@ -427,7 +427,7 @@ mod off_board_dispatch {
     use super::*;
 
     // A launch the board did not ask for (the dispatch_task tool, or epic
-    // auto-dispatch chaining). Since store-split M4 every request is
+    // auto-dispatch chaining). Every request is
     // provisioned by this host's reactor, so an off-board request reaches the
     // board as the same `Dispatched` message a key press does.
     #[tokio::test]
@@ -480,8 +480,8 @@ mod off_board_dispatch {
     }
 
     // `apply_loop_event_auto_dispatch_failed_marks_the_subtask` pinned the
-    // `BoardEvent::AutoDispatchFailed` the MCP chain used to send. Since
-    // store-split M4 the chain's failure is raised from its failed
+    // `BoardEvent::AutoDispatchFailed` the MCP chain used to send. The
+    // chain's failure is raised from its failed
     // `epic_chain` request row (`epics.allium: ReportChainedDispatchFailure`);
     // the marker, status line and once-only rule are pinned in
     // `src/tui/tests/dispatch_requests.rs`.

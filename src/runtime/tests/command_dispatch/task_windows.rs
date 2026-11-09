@@ -1,7 +1,7 @@
 use super::*;
 
 // `dispatch_task_release_claim_returns_the_task_to_backlog` pinned
-// `TaskCommand::ReleaseClaim`, which store-split M4 retired: no client releases
+// `TaskCommand::ReleaseClaim`, which is gone: no client releases
 // a claim, a failed request does (`store-split.allium:
 // ReleaseClaimOfFailedRequest`). Its guarantee — a failed dispatch returns the
 // task to backlog with the seeded stamp cleared — is pinned against the

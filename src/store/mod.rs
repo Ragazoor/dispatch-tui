@@ -151,7 +151,7 @@ pub trait TaskCrud: TaskRead {
     async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()>;
     async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
     /// The relink and the patch of one task update as ONE store transaction
-    /// (`store-split.allium: UpdateTaskIsOneTransaction`). `epic` is `None` to
+    /// (`tasks.allium: UpdateTaskIsOneTransaction`). `epic` is `None` to
     /// leave the epic alone, `Some(None)` to detach onto the caller's board,
     /// `Some(Some(id))` to move. A missing task is an error here, unlike
     /// [`patch_task`](Self::patch_task)'s no-op.
@@ -292,8 +292,8 @@ pub trait TaskCrud: TaskRead {
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<UserPromptOutcome>;
-    /// Post one parsed feed emission to the store (store-split M3,
-    /// `feeds.allium: IngestFeedEmission`). The three slices are co-indexed.
+    /// Post one parsed feed emission to the store (`feeds.allium:
+    /// IngestFeedEmission`). The three slices are co-indexed.
     /// The module alone decides what the items do: the strategy from the epic's
     /// own `feed_role` and `group_by_repo`, routing, sub-epics, grouping,
     /// upsert, the stale delete and the status recalculation.
@@ -315,7 +315,7 @@ pub trait TaskCrud: TaskRead {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch requests (store-split M4)
+// Dispatch requests (`store-split.allium: DispatchRequest`)
 // ---------------------------------------------------------------------------
 
 /// What [`DispatchRequestStore::request_dispatch`] answered. A refusal is an
@@ -404,7 +404,7 @@ pub trait DispatchRequestStore: DispatchRequestRead {
 }
 
 // ---------------------------------------------------------------------------
-// Session requests (store-split M5)
+// Session requests (`store-split.allium: SessionRequest`)
 // ---------------------------------------------------------------------------
 
 /// What [`SessionRequestStore::request_wrap_up`] and
@@ -522,7 +522,7 @@ pub trait FeedRequestStore: Send + Sync {
     ) -> Result<bool>;
 }
 
-/// PR state (store-split M6: `ReportPrStatus`, `ReportPrUnreadable`). The host
+/// PR state (`pr-workflow.allium`: `ReportPrStatus`, `ReportPrUnreadable`). The host
 /// runs `gh` and posts what it read; the module writes the task. Every call
 /// names THIS host. A task write, so reachable from the service layer only.
 #[async_trait::async_trait]
@@ -590,7 +590,7 @@ pub struct EpicBirth<'a> {
 }
 
 /// Epic mutations, layered on top of the read surface. The
-/// module's reducers own the epic rollup (store-split M7); reachable only by the service
+/// module's reducers own the epic rollup (`store-split.allium` X3); reachable only by the service
 /// layer and the sanctioned feed subsystem — non-service consumers hold
 /// [`TaskReadStore`].
 #[async_trait::async_trait]
@@ -619,7 +619,7 @@ pub trait EpicCrud: EpicRead {
         birth: &EpicBirth<'_>,
     ) -> Result<Epic>;
     /// `epics.allium: ProvisionManagedEpics`, decided in the module in one
-    /// transaction (store-split M7, X4). `None` is a disabled feed: nothing is
+    /// transaction (`store-split.allium` X4). `None` is a disabled feed: nothing is
     /// created or removed for it. An interval of `None` is no interval.
     async fn ensure_managed_epics(
         &self,
@@ -630,7 +630,7 @@ pub trait EpicCrud: EpicRead {
     ) -> Result<()>;
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
     /// The patch, the workspace move and the visibility change as ONE store
-    /// transaction (`store-split.allium: UpdateEpicIsOneTransaction`): a
+    /// transaction (`epics.allium: UpdateEpicIsOneTransaction`): a
     /// refused part leaves nothing applied. `None` leaves the workspace or
     /// visibility alone. A missing epic is an error here, unlike
     /// [`patch_epic`](Self::patch_epic)'s no-op.
@@ -658,7 +658,7 @@ pub trait EpicCrud: EpicRead {
     /// `epics.allium: FlattenEpic`, likewise: the tasks of every `repo-group`
     /// sub-epic move back onto `root` and the emptied sub-epics are deleted.
     async fn flatten_epic(&self, root: EpicId) -> Result<()>;
-    /// `store-split.allium: SetEpicGroupByRepoIsOneTransaction`: the flag and
+    /// `epics.allium: SetEpicGroupByRepoIsOneTransaction`: the flag and
     /// its regroup or flatten, in one transaction.
     async fn set_epic_group_by_repo(&self, id: EpicId, group_by_repo: bool) -> Result<()>;
 }
@@ -705,7 +705,7 @@ pub trait WorkPackageCrud: WorkPackageRead {
         visibility: crate::models::Visibility,
     ) -> Result<()>;
     /// The patch, the visibility change, then every unlink, then every link,
-    /// in one store transaction (`store-split.allium:
+    /// in one store transaction (`work-packages.allium:
     /// UpdateWorkPackageIsOneTransaction`). `None` leaves a field alone; an
     /// unlink of an item that is not linked is a silent success.
     async fn update_work_package(

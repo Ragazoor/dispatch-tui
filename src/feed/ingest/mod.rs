@@ -1,6 +1,6 @@
 //! Feed ingestion: post an emission's items to the store.
 //!
-//! Since store-split M3 the board does not decide what an emission does to the
+//! The board does not decide what an emission does to the
 //! store. [`ingest_emission`] hands the parsed items to the module's
 //! `ingest_feed` reducer, which picks the strategy from the epic's own row,
 //! routes by signals, makes the role and repo sub-epics, upserts, deletes the

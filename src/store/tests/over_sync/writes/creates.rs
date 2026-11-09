@@ -217,7 +217,7 @@ async fn a_delete_sends_only_the_id() {
 /// THE DISTINCTION THE CLAIM DEPENDS ON. A store that says no is a different
 /// thing from a store that is not there, and only one of them is a failure.
 ///
-/// Since store-split M4 the claim is the dispatch request
+/// The claim is the dispatch request
 /// (`store-split.allium: RequestDispatch`). Losing a race is the ordinary
 /// outcome of two entry points reaching for one task; the caller handles it
 /// by provisioning nothing. A store that is DOWN is an outage the operator

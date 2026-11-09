@@ -397,7 +397,7 @@ macro_rules! task_service_api {
                 &self
             ) -> Result<(), $crate::service::ServiceError>;
 
-            /// `store-split.allium: ReportPrStatus`: post what `gh pr view`
+            /// `pr-workflow.allium: ReportPrStatus`: post what `gh pr view`
             /// printed, raw; the module writes the task. `false` is a refusal
             /// of a string the module does not know.
             async fn report_pr_status(
@@ -407,7 +407,7 @@ macro_rules! task_service_api {
                 review_decision: String
             ) -> Result<bool, $crate::service::ServiceError>;
 
-            /// `store-split.allium: ReportPrUnreadable`: the host gave up
+            /// `pr-workflow.allium: ReportPrUnreadable`: the host gave up
             /// reading the task's PR.
             async fn report_pr_unreadable(
                 &self,
