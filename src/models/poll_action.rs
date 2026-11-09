@@ -16,8 +16,7 @@ pub(crate) enum PollAction {
     /// A different host already owns this scope. Do nothing: no claim call,
     /// no poll/feed-cycle, this tick or any future one — until a human or
     /// agent explicitly reassigns ownership
-    /// (`pr-workflow.allium: OverridePrPollOwner`,
-    /// `feeds.allium: OverrideFeedOwner`).
+    /// (`feeds.allium: OverridePollOwner`, `OverrideFeedOwner`).
     Skip,
     /// No one owns this scope yet. Claim it, then act as this tick's owner.
     ClaimAndProceed,

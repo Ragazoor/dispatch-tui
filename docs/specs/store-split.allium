@@ -60,16 +60,19 @@
 --     SpacetimeDB module's reducers, so every client gets the same rule
 --     rather than each client re-implementing it. Checks about the request
 --     rather than the data (an empty patch, the feed interval floor, the
---     typed-url pair, a named epic's existence) stay at the service and MCP
---     boundary.
+--     typed-url pair) stay at the service and MCP boundary; the module still
+--     refuses a missing epic itself (tasks.allium:
+--     UpdateTaskIsOneTransaction, epics.allium: UpdateEpicIsOneTransaction).
 --   - S2, host work stays in the TUI process, and stays thin. The MCP and
 --     hook HTTP endpoint, feed script execution and PR polling run in the
 --     TUI process. There is no separate daemon: agents need a board running.
 --     Each of these only performs the local call and forwards the raw result
 --     through one reducer call. None of them decides a state change; the
 --     module does.
---   - S3, the module drives multi-step work. Dispatch, wrap-up,
---     exit-session, the done-path close and feed work start as request rows.
+--   - S3, the module drives multi-step work. Dispatch, wrap-up and feed
+--     work start as request rows; exit-session and the done-path close apply
+--     the close in the module and write a request row for the host's
+--     teardown that follows it.
 --     The module sets each state of the request (for example requested ->
 --     provisioning on host X -> dispatched | failed). The host that owns the
 --     work reacts through its subscription, does the local work, and reports
@@ -155,9 +158,13 @@
 --     covered by the version gate above (sync.allium: config.rules_version).
 --   - D8, deletion. Deleting a task with an open request fails that request
 --     in the same reducer (reason "task deleted") and cancels its timer, in
---     every module reducer that deletes a task row: DeleteTask, BatchDelete
---     and the stale-subtree delete in ingest_feed. The host sees the row go
---     and tears down whatever it made.
+--     every module reducer that deletes a task row: DeleteTask, BatchDelete,
+--     an epic delete's subtree and the stale-subtree delete in ingest_feed.
+--     The same transaction then deletes the row
+--     (DeletingATaskDeletesItsRequestRows), so no reader sees the reason. A
+--     host still provisioning learns of it when its dispatched report is
+--     refused, and tears down whatever it made (dispatch.allium:
+--     ProvisionDispatch).
 --   - D9, origin. The row records which launch path wrote it (user | mcp |
 --     epic_chain | quick | schedule; user covers the TUI keys, retry-fresh
 --     and research; schedule is a board firing a due task). An epic_chain row
@@ -189,11 +196,15 @@
 --     (sync.allium: RegisterHostOnConnect). LIMIT, by decision: one person's
 --     machines share an owner, so one of their machines can name another of
 --     theirs; a teammate cannot. Every other reducer that takes a host
---     argument makes the same check: poll ownership (feeds.allium:
+--     argument makes the same check, for example poll ownership (feeds.allium:
 --     ClaimPollOwner, OverridePollOwner), PR reports (pr-workflow.allium:
---     ReportPrStatus), host-scoped settings (SaveSettingForHost below), and
---     the patch and create checks on a task's host (tasks.allium:
---     PatchTaskNeverAimsAnotherHostsTeardown).
+--     ReportPrStatus, ReportPrUnreadable), the feed reducers (ingest_feed and
+--     the FeedRequest rules below), host-scoped settings (SaveSettingForHost
+--     below) and the repo-path and verify-command writes. A task's own host
+--     column gets a weaker, related check: a patch or create may not aim it
+--     at another person's host, but a host nobody owns is not judged
+--     (tasks.allium: PatchTaskNeverAimsAnotherHostsTeardown,
+--     CreateTaskNeverAimsAnotherHostsTeardown).
 --   - D12, failures while no board ran. A request whose backstop fired while
 --     its host's board was closed is already failed in the starting board's
 --     baseline, and the starting board does NOT raise it: neither
@@ -293,8 +304,8 @@
 --     names, best effort (pr-workflow.allium: ExitSessionTeardown).
 --   - W9, deletion. As D8: deleting a task fails its open session request
 --     ("task deleted") in the same reducer and cancels its timer, in every
---     module reducer that deletes a task row (DeleteTask, BatchDelete and the
---     stale-subtree delete in ingest_feed).
+--     module reducer that deletes a task row (DeleteTask, BatchDelete, an
+--     epic delete's subtree and the stale-subtree delete in ingest_feed).
 --   - W10, snapshots. As D10: session_request and its timer table are
 --     in-flight state and are not in any snapshot (spacetime-seed.allium:
 --     SharedTable). A restore loses every unconsumed exit token with the
@@ -363,8 +374,8 @@
 --     stop_pending itself, in which case the patch's value stands; when a
 --     patch moves a task into Done from another status it runs the phoenix
 --     respawn in the same transaction (tasks.allium: PhoenixRespawn). The
---     module stamps completed_at on entering Done
---     (tasks.allium: UpdateTaskIsOneTransaction). The board never stamps,
+--     module stamps completed_at on entering Done unless a patch_task patch
+--     names one (tasks.allium: UpdateTaskIsOneTransaction). The board never stamps,
 --     clears or respawns itself; a board that needs the stamp re-reads the
 --     task.
 --   - X3, epic rollups. The module is the only place that recalculates an
@@ -377,14 +388,14 @@
 --     starting together cannot create duplicates. The board reads and writes
 --     the settings and applies the feed-interval floor, which is request
 --     shape, and calls the reducer.
---   - X5, what stays at the boundary. The learning create checks (the
---     summary, the scope shape) and the feed-interval floor are request
---     shape and stay at the service and MCP boundary (S1). The learning
---     verdict's "not retrieved" check, the work-package checks and their
---     multi-part update (work-packages.allium:
+--   - X5, what stays at the boundary. The learning create's summary check,
+--     its code-citation check and the feed-interval floor are request shape
+--     and stay at the service and MCP boundary (S1). The learning scope shape
+--     is checked at both. The learning verdict's "not retrieved" check, the
+--     work-package checks and their multi-part update (work-packages.allium:
 --     UpdateWorkPackageIsOneTransaction) and the epic delete pre-checks run
---     in the module. The feed code-citation lint and the embeddings stay on
---     the board: they need the operator's machine (S1).
+--     in the module. The embeddings stay on the board: they need the
+--     operator's machine (S1).
 --   - X6, the gate. The rules in X1–X4 are covered by the version gate above
 --     (sync.allium: config.rules_version).
 --
@@ -1963,8 +1974,7 @@ rule UpdateTaskDoneWritesACloseRow {
 
 -- D11 holds for every reducer that takes a caller-supplied host: the host it
 -- names must be registered with an owner equal to caller(). The setting writes
--- are checked here; poll ownership is checked in feeds.allium (ClaimPollOwner,
--- OverridePollOwner) and PR reports in pr-workflow.allium (ReportPrStatus).
+-- are checked here; the other host-checking reducers are listed under D11.
 
 rule SaveSettingForHost {
     when: settings/SettingSaved(host, key, value)

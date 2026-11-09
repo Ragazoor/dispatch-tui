@@ -81,8 +81,7 @@ pub fn register_host(
 /// `force = false` (a claim — `pr-workflow.allium: PollPrStatus`,
 /// `feeds.allium: FeedTick`) fills an ABSENT row and leaves an existing one
 /// alone, whoever it names. `force = true` (an override —
-/// `pr-workflow.allium: OverridePrPollOwner`, `feeds.allium:
-/// OverrideFeedOwner`) unconditionally reassigns an existing row too — the
+/// `feeds.allium: OverridePollOwner`, `OverrideFeedOwner`) unconditionally reassigns an existing row too — the
 /// only way an existing claim ever moves. One function rather than a pair:
 /// the two only ever differed in what happens when a row already exists.
 ///
@@ -197,8 +196,8 @@ pub fn claim_poll_owner(
     Ok(())
 }
 
-/// Reassign a scope's ownership unconditionally. `pr-workflow.allium:
-/// OverridePrPollOwner`, `feeds.allium: OverrideFeedOwner`. Only the host's
+/// Reassign a scope's ownership unconditionally. `feeds.allium:
+/// OverrideFeedOwner`. Only the host's
 /// owner may name it (D11, `feeds.allium: OverridePollOwner`).
 #[spacetimedb::reducer]
 pub fn override_poll_owner(

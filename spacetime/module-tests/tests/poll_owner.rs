@@ -70,7 +70,7 @@ fn claim_poll_owner_fills_an_absent_row_but_not_an_existing_one() {
 }
 
 /// `override_poll_owner` reassigns an EXISTING claim unconditionally — the
-/// only way ownership ever moves. `pr-workflow.allium: OverridePrPollOwner`.
+/// only way ownership ever moves. `feeds.allium: OverridePollOwner`.
 #[test]
 fn override_poll_owner_reassigns_unconditionally() {
     let store = two_hosts();

@@ -156,8 +156,7 @@ impl App {
     }
 
     /// `epics.allium: EditEpic`'s take-over prompt. `feeds.allium:
-    /// OverrideFeedOwner`, `pr-workflow.allium: OverridePrPollOwner`'s
-    /// guidance. Declining leaves ownership untouched — the `feed_command`
+    /// OverrideFeedOwner`. Declining leaves ownership untouched — the `feed_command`
     /// edit itself already applied before this prompt ever showed.
     pub(in crate::tui) fn handle_key_confirm_override_feed_owner(
         &mut self,
