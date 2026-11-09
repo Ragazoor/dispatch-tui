@@ -54,8 +54,11 @@ const MOVE_PATHS: &[(MovePath, &[&str])] = &[
 const COVERED_ELSEWHERE: &[&str] = &[
     // The generic ingest body runs on both sides; `feeds.rs` drives it.
     "feed_ingest.rs::update_task",
-    // The same generic ingest body: it hands the move to `update_task`.
-    "feed_ingest.rs::route_and_move",
+    // The same generic ingest body: the one feed move, shared by the
+    // role-routed path and the grouped migration, hands the row to
+    // `update_task`. `feeds.rs` drives both, the grouped one through
+    // `grouped_ingest_moves_a_task_between_present_sub_epics`.
+    "feed_ingest.rs::move_feed_task",
 ];
 
 /// Both stores plus the helpers every move path needs.

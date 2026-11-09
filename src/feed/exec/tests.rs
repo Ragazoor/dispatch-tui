@@ -183,7 +183,28 @@ async fn exec_feed_command_truncates_long_stderr() {
     );
 }
 
-// truncate_stderr's doc comment promises a character-boundary-safe
+// Notice lines are dropped BEFORE the cap applies: a long run of notices
+// must not push the real error past the cap, or a degraded emission would be
+// classified as trusted and reconcile (feeds.allium: FeedCommandRun).
+#[tokio::test]
+async fn exec_feed_command_keeps_an_error_behind_long_notice_lines() {
+    let out = exec_feed_command(
+        "for i in $(seq 1 100); do echo 'notice: TEAMS is empty, Team Reviews stays empty' >&2; done; \
+         echo 'error: gh auth failed' >&2; printf '[]'",
+        7,
+        "test-epic",
+        TEST_CMD_TIMEOUT,
+    )
+    .await
+    .expect("zero exit must still succeed");
+    assert!(
+        degraded_empty_emission(0, &out.stderr).is_some(),
+        "the error behind the notices must still degrade the emission: {:?}",
+        out.stderr
+    );
+}
+
+// cap_stderr's doc comment promises a character-boundary-safe
 // truncation. 3000 ASCII bytes alone can't distinguish that from a naive
 // `&text[..2000]` byte slice, which would panic on multi-byte input. This
 // drives well over the cap with a repeated non-ASCII character so a

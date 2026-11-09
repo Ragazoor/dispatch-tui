@@ -459,3 +459,142 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         }
     });
 }
+
+/// `feeds.allium: GroupedFeedUpsert`, migration by move. A task whose item
+/// now names another repo moves between two PRESENT sub-epics, and the sub-epic
+/// it leaves is upserted first. Every move runs before any group's stale
+/// delete, so the task survives the move on the real module and the twin alike.
+#[test]
+fn grouped_ingest_moves_a_task_between_present_sub_epics() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+
+    let instance = Instance::start("memory-caller-grouped-move");
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let rows_real = Arc::new(SharedRows::new());
+    let rows_mem = Arc::new(SharedRows::new());
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(async move {
+        let connector = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows_real.clone(),
+        ));
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
+            .with_sender(accepted.identity.clone())
+            .with_workspace_rules();
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                "host-a",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        join_default_workspace(&real, &mem, &accepted.identity).await;
+        let identity = accepted.identity.clone();
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .register_host("host-a".into(), String::new(), identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+
+        let mut woken = rows_real.changed();
+        macro_rules! wait_for {
+            ($cond:expr) => {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !$cond {
+                        woken.changed().await.expect("subscription must deliver");
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| panic!("real store never reached the expected state"))
+            };
+        }
+
+        let grouped = bindings::Epic {
+            title: "Feed".into(),
+            feed_command: "gh-feed".into(),
+            feed_interval_secs: 60,
+            group_by_repo: true,
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let root = real.create_epic(grouped.clone()).await.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(root)).is_some());
+        assert_eq!(mem.create_epic(grouped).await.unwrap().0, root);
+
+        let ingest = |items: Vec<bindings::FeedIngestItem>| {
+            let real = &real;
+            let mem = &mem;
+            let identity = identity.clone();
+            async move {
+                let r = real
+                    .ingest_feed(
+                        EpicId(root),
+                        items.clone(),
+                        false,
+                        identity.clone(),
+                        "host-a".into(),
+                    )
+                    .await
+                    .unwrap();
+                let m = mem
+                    .ingest_feed(EpicId(root), items, false, identity, "host-a".into())
+                    .await
+                    .unwrap();
+                (r, m)
+            }
+        };
+
+        // Two items with no URL: both land in "other".
+        let (r, m) = ingest(vec![
+            ingest_item("x-1", "", &[]),
+            ingest_item("x-2", "", &[]),
+        ])
+        .await;
+        r.applied().unwrap();
+        m.applied().unwrap();
+        let want = feed_layout(&rows_mem, EpicId(root));
+        wait_for!(feed_layout(&rows_real, EpicId(root)) == want);
+        let moving = rows_mem
+            .tasks()
+            .into_iter()
+            .find(|t| t.external_id.as_deref() == Some("x-1"))
+            .unwrap()
+            .id;
+
+        // x-1 now names repo-1; x-2 keeps "other" present, and first.
+        let (r, m) = ingest(vec![
+            ingest_item("x-2", "", &[]),
+            ingest_item("x-1", "https://github.com/org/repo-1/pull/1", &[]),
+        ])
+        .await;
+        r.applied().unwrap();
+        m.applied().unwrap();
+        let want = feed_layout(&rows_mem, EpicId(root));
+        assert_eq!(
+            want,
+            vec![
+                ("x-1".into(), "Feed".into(), "repo-1".into()),
+                ("x-2".into(), "Feed".into(), "other".into()),
+            ]
+        );
+        wait_for!(feed_layout(&rows_real, EpicId(root)) == want);
+        assert!(
+            rows_mem.tasks().iter().any(|t| t.id == moving),
+            "a move keeps the row"
+        );
+    });
+}

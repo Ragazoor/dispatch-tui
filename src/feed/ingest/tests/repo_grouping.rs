@@ -582,3 +582,111 @@ async fn flat_sync_preserves_manual_sub_epic() {
     assert_eq!(manual_tasks.len(), 1, "manual task stays put");
     assert_eq!(manual_tasks[0].id, manual_task);
 }
+
+// --- grouping turned on: migration by move (feeds.allium: GroupedFeedUpsert) ---
+
+/// The sub-epic of `parent` titled `title`.
+async fn sub_named(db: &Store, parent: EpicId, title: &str) -> EpicId {
+    db.list_sub_epics(parent)
+        .await
+        .into_iter()
+        .find(|e| e.title == title)
+        .unwrap_or_else(|| panic!("no sub-epic {title}"))
+        .id
+}
+
+/// Seed a flat feed task for `item` on `parent`, then put it in Running, as a
+/// feed epic looks before `group_by_repo` is switched on.
+async fn seed_flat_task(
+    db: &Store,
+    parent: EpicId,
+    item: &crate::models::FeedItem,
+) -> crate::models::Task {
+    run_feed_sync(
+        db,
+        parent,
+        false,
+        entries(std::slice::from_ref(item), &["/repos/repo-a"], &["main"]),
+    )
+    .await
+    .unwrap();
+    let task = db.list_tasks_for_epic(parent).await.remove(0);
+    db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Running))
+        .await
+        .unwrap();
+    task
+}
+
+/// Turning grouping on MOVES a flat feed task into its repo sub-epic: the same
+/// row, with its status and repo_path kept, and nothing reported for teardown.
+/// A move removes nothing, so an additive cycle moves it too.
+#[tokio::test]
+async fn grouped_sync_moves_a_flat_task_into_its_repo_sub_epic() {
+    for mode in [SyncMode::Reconcile, SyncMode::Additive] {
+        let db = Arc::new(Store::open_in_memory().unwrap());
+        let parent = db.create_epic("Feed", "", None).await.unwrap();
+        let item = make_item("1", "https://github.com/org/repo-a/pull/1");
+        let flat = seed_flat_task(&db, parent.id, &item).await;
+
+        let outcome =
+            sync_grouped_feed_with_mode(&*db, parent.id, entries(&[item], &[""], &["main"]), mode)
+                .await;
+
+        assert!(
+            db.list_tasks_for_epic(parent.id).await.is_empty(),
+            "{mode:?}"
+        );
+        let moved = db
+            .list_tasks_for_epic(sub_named(&db, parent.id, "repo-a").await)
+            .await;
+        assert_eq!(moved.len(), 1, "{mode:?}");
+        assert_eq!(moved[0].id, flat.id, "a move keeps the row ({mode:?})");
+        assert_eq!(moved[0].status, TaskStatus::Running);
+        assert_eq!(moved[0].repo_path, "/repos/repo-a");
+        assert!(
+            outcome.removed.is_empty(),
+            "a moved task is never torn down"
+        );
+    }
+}
+
+/// A task moving between two PRESENT sub-epics is moved before either is
+/// upserted. Here "other" is upserted first (emission order), and its stale
+/// delete must not remove the task that now belongs to repo-a.
+#[tokio::test]
+async fn grouped_sync_moves_between_present_sub_epics_before_any_delete() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = db.create_epic("Feed", "", None).await.unwrap();
+    let first = vec![make_item("1", ""), make_item("2", "")];
+    sync_grouped_feed(
+        &*db,
+        parent.id,
+        entries(&first, &["", ""], &["main", "main"]),
+    )
+    .await;
+    let other = sub_named(&db, parent.id, "other").await;
+    let moving = db
+        .list_tasks_for_epic(other)
+        .await
+        .into_iter()
+        .find(|t| t.external_id.as_deref() == Some("1"))
+        .unwrap();
+
+    // Item 1 now names repo-a; item 2 keeps "other" present and first.
+    let second = vec![
+        make_item("2", ""),
+        make_item("1", "https://github.com/org/repo-a/pull/1"),
+    ];
+    let outcome = sync_grouped_feed(
+        &*db,
+        parent.id,
+        entries(&second, &["", ""], &["main", "main"]),
+    )
+    .await;
+
+    let row = crate::store::TaskRead::get_task(&*db, moving.id)
+        .await
+        .expect("the moved row survives");
+    assert_eq!(row.epic_id, Some(sub_named(&db, parent.id, "repo-a").await));
+    assert!(outcome.removed.is_empty());
+}

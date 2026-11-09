@@ -507,10 +507,15 @@ impl module::IngestStore for TablesIngest<'_> {
     }
 
     fn update_task(&mut self, row: module::Task) {
-        if let Some(prior) = self.tables.tasks.get(&row.id).cloned() {
-            if prior.epic_id != row.epic_id {
-                self.caller.clear_unseen_for_task(self.tables, row.id);
-            }
+        // An update never brings a deleted row back: the module's
+        // `tasks().id().update` aborts the whole ingest on a missing row, so a
+        // twin that re-inserted it would pass where the real store fails.
+        let Some(prior) = self.tables.tasks.get(&row.id).cloned() else {
+            tracing::error!(task = row.id, "feed ingest updated a task it had deleted");
+            return;
+        };
+        if prior.epic_id != row.epic_id {
+            self.caller.clear_unseen_for_task(self.tables, row.id);
         }
         self.tables.tasks.insert(row.id, row.clone());
         self.caller.rows.upsert_task(&row.into());

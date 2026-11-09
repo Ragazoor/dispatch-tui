@@ -59,9 +59,9 @@ pub(crate) const MAX_FEED_STDERR_CHARS: usize = 2000;
 pub(crate) struct FeedOutput {
     /// Raw stdout bytes, to be parsed as a FeedItem JSON array.
     pub(crate) stdout: Vec<u8>,
-    /// Anything the command wrote to stderr while still exiting 0 — trimmed
-    /// and truncated to [`MAX_FEED_STDERR_CHARS`]. Empty when it wrote
-    /// nothing. A non-empty value is the signature of a script that swallowed
+    /// What the command wrote to stderr while still exiting 0, without its
+    /// notice lines ([`FEED_NOTICE_PREFIX`]) — trimmed, then cut to
+    /// [`MAX_FEED_STDERR_CHARS`]. Empty when it wrote nothing else. A non-empty value is the signature of a script that swallowed
     /// an internal error and emitted a degraded array anyway, so it is logged
     /// here and surfaced by the manual-refresh path (feeds.allium:
     /// FeedCommandStderrOnSuccess).
@@ -230,7 +230,8 @@ pub(crate) async fn exec_feed_command(
         }
     };
 
-    let stderr = truncate_stderr(&output.stderr);
+    let raw_stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = cap_stderr(raw_stderr.trim());
 
     if !output.status.success() {
         tracing::warn!(
@@ -256,6 +257,9 @@ pub(crate) async fn exec_feed_command(
         );
     }
 
+    // Notices are dropped BEFORE the cap, so a long run of them cannot push
+    // a real error past it and leave a degraded emission looking trusted.
+    let stderr = cap_stderr(&significant_stderr(&raw_stderr));
     Ok(FeedOutput {
         stdout: output.stdout,
         stderr,
@@ -329,13 +333,10 @@ pub(crate) fn degraded_partial_emission(item_count: usize, stderr: &str) -> Opti
     }
 }
 
-/// Decode stderr bytes lossily, trim surrounding whitespace, and cap the
-/// length at [`MAX_FEED_STDERR_CHARS`]. Truncates on a character boundary, so
-/// multi-byte output cannot panic here.
-fn truncate_stderr(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    let trimmed = text.trim();
-    trimmed.chars().take(MAX_FEED_STDERR_CHARS).collect()
+/// The first [`MAX_FEED_STDERR_CHARS`] characters of `text`. Cuts on a
+/// character boundary, so multi-byte output cannot panic here.
+fn cap_stderr(text: &str) -> String {
+    text.chars().take(MAX_FEED_STDERR_CHARS).collect()
 }
 
 #[cfg(test)]

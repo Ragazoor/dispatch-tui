@@ -238,6 +238,9 @@ rule ProvisionDispatch {
     -- own; a row that somehow carries another requester is ignored and
     -- logged, never provisioned.
     requires: request.requested_by = local_host().owner
+    -- A task with no repo_path has nothing to make a worktree from
+    -- (ProvisioningNeedsARepoPath).
+    requires: task.repo_path != ""
 
     ensures:
         let worktree = core/Worktree.created(
@@ -2334,7 +2337,42 @@ invariant BranchHistoryCapped {
             <= config.max_base_branches_per_repo
 }
 
+rule ProvisioningNeedsARepoPath {
+    when: DispatchProvisioningClaimed(request)
+
+    -- A task can be stored with repo_path = "": a feed item whose URL matches
+    -- no local clone (feeds.allium: UpsertFeedTasks, repo path resolution).
+    -- The task stays on the board and can be edited, but a dispatch of it is
+    -- refused, because there is no repository to make a worktree in. The
+    -- operator sets a repo_path ('e' on the task) and dispatches again. The
+    -- guard covers every task; a non-feed task ordinarily gets a repo_path at
+    -- creation and never reaches it.
+    --
+    -- The refusal comes AFTER the claim, on the host, before anything is
+    -- provisioned. The failure report releases the claim, so the task goes
+    -- back to backlog (store-split.allium: HostReportsDispatchFailed,
+    -- ReleaseClaimOfFailedRequest), and the requesting board shows the reason
+    -- (DispatchingFeedback, FailedRequestReported).
+    requires: request.host = local_host()
+    requires: request.requested_by = local_host().owner
+    requires: request.task.repo_path = ""
+
+    ensures: DispatchProvisioningFailed(
+        request: request,
+        reporter: local_host(),
+        reason: "Repository path is not set. Edit the task (press 'e') to set it before dispatching."
+    )
+
+    @guidance
+        -- Implementation: src/dispatch/agents.rs::dispatch_with_prompt returns
+        -- the error before any worktree or tmux window exists, and
+        -- src/service/tasks/dispatch.rs::TaskService::serve_dispatch_request
+        -- reports it. Test:
+        -- src/dispatch/tests/finish_and_guards.rs::dispatch_agent_fails_fast_with_empty_repo_path.
+}
+
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
 
+open question "ProvisioningNeedsARepoPath refuses a task with no repo_path only after the host has claimed the request. Should the module's request_dispatch refuse it up front instead, so the request is never written and the refusal is immediate?"

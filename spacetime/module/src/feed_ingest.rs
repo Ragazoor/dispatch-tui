@@ -281,6 +281,12 @@ fn ingest_grouped(
         .collect();
     let dropped = retired_without_task(store, epic.id, &candidates);
 
+    // Migration by move: every feed task already in the grouped subtree,
+    // indexed by external_id.
+    let mut placed = grouped_feed_tasks(store, epic.id, &subs);
+    let mut moved_from: HashSet<i64> = HashSet::new();
+    let mut targets: Vec<(i64, Vec<FeedTaskUpsertItem>)> = Vec::new();
+
     let identity = store.identity();
     for (name, group) in &groups {
         let existing = subs.iter().find(|s| s.title == *name).map(|s| s.id);
@@ -310,8 +316,18 @@ fn ingest_grouped(
                 })
             }
         };
+        moved_from.extend(move_into_group(store, &mut placed, sub_id, &group));
+        targets.push((sub_id, group));
+    }
+    // Every move lands before any group's upsert: a group's stale delete would
+    // otherwise remove a task still waiting to move to a later group.
+    for (sub_id, group) in targets {
+        moved_from.remove(&sub_id);
         store.upsert_feed_tasks(sub_id, group, created_by, !additive)?;
         store.recalculate_epic_chain(sub_id);
+    }
+    for source in moved_from {
+        store.recalculate_epic_chain(source);
     }
 
     if !additive {
@@ -385,6 +401,64 @@ fn ensure_role_sub_epic(
         updated_at: now,
         ..blank_epic()
     })
+}
+
+/// Every feed task of a grouped feed epic, by `external_id`. The parent is
+/// indexed last, so on a tie its flat task is the one migrated.
+fn grouped_feed_tasks(
+    store: &impl IngestStore,
+    parent: i64,
+    subs: &[Epic],
+) -> HashMap<String, Task> {
+    let mut placed: HashMap<String, Task> = HashMap::new();
+    for sub in subs {
+        remember_feed_tasks(store, &mut placed, sub.id);
+    }
+    remember_feed_tasks(store, &mut placed, parent);
+    placed
+}
+
+/// `feeds.allium: GroupedFeedUpsert`, migration by move. Each item of `group`
+/// whose feed task sits elsewhere in the grouped subtree is moved into
+/// `target` (`move_feed_task`). A task already in `target` wins and
+/// nothing moves. A move removes nothing, so it runs on an additive cycle too.
+/// Returns the epics a task left.
+fn move_into_group(
+    store: &mut impl IngestStore,
+    placed: &mut HashMap<String, Task>,
+    target: i64,
+    group: &[FeedTaskUpsertItem],
+) -> HashSet<i64> {
+    let in_target: HashSet<String> = store
+        .tasks_in_epic(target)
+        .into_iter()
+        .map(|t| t.external_id)
+        .collect();
+    let mut sources = HashSet::new();
+    for item in group {
+        if in_target.contains(&item.external_id) {
+            continue;
+        }
+        let Some(task) = placed.get_mut(&item.external_id) else {
+            continue;
+        };
+        if task.epic_id == target {
+            continue;
+        }
+        sources.insert(task.epic_id);
+        move_feed_task(store, task, target);
+    }
+    sources
+}
+
+/// Move a feed task to `target`. Only epic_id and updated_at change, so
+/// status, sub_status, repo_path, worktree, tmux_window and sort_order
+/// survive; the upsert that follows refreshes the feed-owned fields. `task`
+/// is updated in place to the row as written.
+fn move_feed_task(store: &mut impl IngestStore, task: &mut Task, target: i64) {
+    task.epic_id = target;
+    task.updated_at = store.now();
+    store.update_task(task.clone());
 }
 
 /// Index `epic_id`'s feed tasks by `external_id` into `existing`.
@@ -476,17 +550,9 @@ fn route_and_move(
 
         all_external_ids.insert(item.external_id.clone());
 
-        // A move touches only epic_id and updated_at, so status, sub_status,
-        // worktree, tmux_window and sort_order survive; the upsert that
-        // follows refreshes the feed-owned fields.
         if let Some(task) = existing.get(&item.external_id) {
             if task.epic_id != target {
-                let updated_at = store.now();
-                store.update_task(Task {
-                    epic_id: target,
-                    updated_at,
-                    ..task.clone()
-                });
+                move_feed_task(store, &mut task.clone(), target);
             }
         } else if role_target == my || role_target == team {
             new_review_requests
