@@ -213,10 +213,10 @@ pub struct SyncSession {
 impl SyncSession {
     /// Open a connection to `server`, in flight and not yet answered.
     ///
-    /// Nothing is attempted here. `OpenBoardConnection` creates the connection
-    /// and returns; the board draws immediately and the first attempt happens
-    /// on the first [`Self::step`]. A constructor that connected would make
-    /// every cold start as slow as the slowest network the board has been on.
+    /// Nothing is attempted here: `OpenBoardConnection` creates the connection
+    /// and the first attempt happens on the first [`Self::step`]. Startup
+    /// drives that step and draws the board only once it has answered
+    /// (`sync.allium: FirstConnectionLetsTheBoardDraw`).
     pub fn open(server: impl Into<String>, connector: Arc<dyn StoreConnector>) -> Self {
         Self {
             connector,

@@ -267,8 +267,13 @@ impl DroppedIds {
             SharedTable::Tasks | SharedTable::Epics => is_dropped_status(row),
             // An agent of a dropped task goes with it; its ledger row stays
             // (`agents.allium: AgentNameIsNeverReused`).
-            SharedTable::TaskSubagents | SharedTable::Agents => {
+            SharedTable::TaskSubagents | SharedTable::Agents | SharedTable::TaskShells => {
                 id_of(row, "task_id").is_some_and(|t| self.tasks.contains(&t))
+            }
+            // A todo hangs off a task or an epic.
+            SharedTable::Todos => {
+                id_of(row, "task_id").is_some_and(|t| self.tasks.contains(&t))
+                    || id_of(row, "epic_id").is_some_and(|e| self.epics.contains(&e))
             }
             SharedTable::TaskWatchers => {
                 [id_of(row, "watcher_task_id"), id_of(row, "target_task_id")]
@@ -280,8 +285,12 @@ impl DroppedIds {
                 id_of(row, "epic_id").is_some_and(|e| self.epics.contains(&e))
             }
             SharedTable::PollOwners => {
-                row.get("scope").and_then(Value::as_str) == Some("epic")
-                    && id_of(row, "scope_id").is_some_and(|e| self.epics.contains(&e))
+                let scope_id = id_of(row, "scope_id");
+                match row.get("scope").and_then(Value::as_str) {
+                    Some("epic") => scope_id.is_some_and(|e| self.epics.contains(&e)),
+                    Some("task") => scope_id.is_some_and(|t| self.tasks.contains(&t)),
+                    _ => false,
+                }
             }
             // A link naming a dropped item names nothing
             // (`work-packages.allium: DeletingAnItemRemovesItsLinks`).

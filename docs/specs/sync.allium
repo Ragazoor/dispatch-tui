@@ -991,9 +991,9 @@ rule RowsWithARemovedStatusAreDropped {
         -- the cheaper answer is the right one here, and the two are not meant
         -- to agree.
         --
-        -- NOT AN ERROR, AND NOT COUNTED. A dropped row is skipped silently: at
-        -- most one debug-level line per pass (one delivery batch, one import
-        -- run) says how many were dropped, and nothing is ever logged at warn.
+        -- NOT AN ERROR, AND NOT COUNTED. A dropped row is skipped silently:
+        -- the board logs it at debug level only, an import counts it in its
+        -- report, and nothing is ever logged at warn.
         -- It does NOT emit observability.allium's DecodeFallbackWarning and
         -- does not bump its counter, which exists to show rows that really
         -- could not be decoded — two thousand expected drops would bury the one

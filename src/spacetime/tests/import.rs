@@ -137,6 +137,70 @@ async fn rows_that_only_describe_a_dropped_task_are_dropped_with_it() {
     assert_eq!(report.dropped(SharedTable::TaskSubagents), 1);
 }
 
+fn push(snapshot: &mut Snapshot, table: SharedTable, row: Value) {
+    let Value::Object(row) = row else {
+        panic!("a row is an object")
+    };
+    snapshot
+        .extracts_mut()
+        .iter_mut()
+        .find(|e| e.table == table)
+        .unwrap()
+        .rows
+        .push(row);
+}
+
+/// `DependentsOfDroppedRowsAreDropped`: a todo, a shell and a task-scoped poll
+/// claim of a dropped task are dropped with it; those of a live task stay.
+#[tokio::test]
+async fn todos_shells_and_claims_of_a_dropped_task_are_dropped_with_it() {
+    use serde_json::json;
+    let mut source = snapshot_of_a_populated_board().await;
+    archive(&mut source, SharedTable::Tasks, 3);
+    push(
+        &mut source,
+        SharedTable::Todos,
+        json!({"id": 1, "task_id": 3, "epic_id": 0}),
+    );
+    push(
+        &mut source,
+        SharedTable::Todos,
+        json!({"id": 2, "task_id": 4, "epic_id": 0}),
+    );
+    push(
+        &mut source,
+        SharedTable::TaskShells,
+        json!({"task_id": 3, "shell_id": "s-3"}),
+    );
+    push(
+        &mut source,
+        SharedTable::TaskShells,
+        json!({"task_id": 4, "shell_id": "s-4"}),
+    );
+    push(
+        &mut source,
+        SharedTable::PollOwners,
+        json!({"id": 1, "scope": "task", "scope_id": 3, "host": "host-1"}),
+    );
+    push(
+        &mut source,
+        SharedTable::PollOwners,
+        json!({"id": 2, "scope": "task", "scope_id": 4, "host": "host-1"}),
+    );
+    let target = store_for(&source);
+
+    let report = import_old_store(&target, &source, OPERATOR).await.unwrap();
+
+    assert_eq!(ids(&rows(&target, SharedTable::Todos).await), vec![2]);
+    let shells = rows(&target, SharedTable::TaskShells).await;
+    assert_eq!(shells.len(), 1);
+    assert_eq!(shells[0].get("task_id").and_then(Value::as_i64), Some(4));
+    assert_eq!(ids(&rows(&target, SharedTable::PollOwners).await), vec![2]);
+    assert_eq!(report.dropped(SharedTable::Todos), 1);
+    assert_eq!(report.dropped(SharedTable::TaskShells), 1);
+    assert_eq!(report.dropped(SharedTable::PollOwners), 1);
+}
+
 /// `DependentsOfDroppedRowsAreDropped`, for agents: an agent of a dropped
 /// task goes with it, and its name stays in the ledger
 /// (`agents.allium: AgentNameIsNeverReused`).

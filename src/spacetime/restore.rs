@@ -159,10 +159,9 @@ pub(super) async fn schema_refusal(
 /// Whether any task or epic row in the snapshot still carries the retired
 /// `archived` status.
 ///
-/// `spacetime-seed.allium: RefuseArchivedRows`. `archived` was retired by task
-/// #4971 (`epics.allium: ArchivedStatusMigration`), which also rebuilds the
-/// status CHECK constraints in SQLite so a live board can never write it back.
-/// A store, though, CAN still hold archived rows: the module refuses new
+/// `spacetime-seed.allium: RefuseArchivedRows`. A live board can no longer
+/// write a removed status (`crate::models::REMOVED_STATUSES`).
+/// A store, though, CAN still hold such rows: the module refuses new
 /// writes with an unknown status, but rows an older module wrote remain, so a
 /// `dump-server` of such a store produces a snapshot carrying them, as does a
 /// snapshot FILE
@@ -175,8 +174,7 @@ pub(super) async fn schema_refusal(
 /// backfilled for it, let its feed cycle re-insert it as if it were new.
 ///
 /// Named row ids rather than a bare "archived rows present", because the
-/// detail is what tells an operator which rows still need to go through
-/// v106.
+/// detail is what tells an operator which rows to resolve.
 fn archived_rows_refusal(snapshot: &Snapshot) -> Option<Refusal> {
     const ARCHIVED_STATUS_TABLES: [SharedTable; 2] = [SharedTable::Tasks, SharedTable::Epics];
 
@@ -188,7 +186,11 @@ fn archived_rows_refusal(snapshot: &Snapshot) -> Option<Refusal> {
         let ids: Vec<i64> = extract
             .rows
             .iter()
-            .filter(|row| row.get("status").and_then(serde_json::Value::as_str) == Some("archived"))
+            .filter(|row| {
+                row.get("status")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(crate::models::is_removed_status)
+            })
             .filter_map(|row| row.get("id").and_then(serde_json::Value::as_i64))
             .collect();
         if !ids.is_empty() {
@@ -208,9 +210,9 @@ fn archived_rows_refusal(snapshot: &Snapshot) -> Option<Refusal> {
     Some(Refusal::new(
         RefusalReason::ArchivedRowsPresent,
         format!(
-            "snapshot carries row(s) with the retired `archived` status: {}. archived was \
-             removed by task #4971; run this snapshot's source through SQLite's v106 migration \
-             and take a fresh dump before restoring or seeding it here",
+            "snapshot carries row(s) with the retired `archived` status: {}. To bring a \
+             store's rows across without them, run `dispatch store import --from <that store>`, \
+             which drops them; or remove those rows from the snapshot by hand",
             offenders.join("; ")
         ),
     ))
