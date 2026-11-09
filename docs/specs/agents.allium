@@ -5,8 +5,9 @@
 --        entity of its own, separate from the Task it works. Its name, when
 --        one starts, when it pauses, when it ends, and how a person or another
 --        agent addresses it.
--- Includes: The Agent lifecycle; the agent name, how it is picked and its
---           uniqueness; the one-current-agent rule; the session name an agent
+-- Includes: The Agent lifecycle, from assignment at task creation; the agent
+--           name, how it is picked and its uniqueness; the task's display
+--           name; the one-current-agent rule; the session name an agent
 --           is launched under; agent-name resolution wherever a task id is
 --           taken.
 -- Excludes: The Agent and SubagentEntry entities themselves (core.allium);
@@ -33,12 +34,21 @@
 --   - A3, the name. Every agent gets a person-like first name from a fixed
 --     list ("ada", "linus", "grace"). The name is the agent's, not the task's:
 --     a task worked by two agents in turn was worked by two people.
---   - A4, names are never reused. A name is unique across every agent there
---     has ever been, ended ones included. When the list runs out a number is
---     appended ("ada2"). So a name always means one agent, and through it one
---     task.
+--   - A4, a name is held while its agent exists. A name is unique across
+--     every Agent row, assigned, current and ended alike. So while a name is
+--     held it means one agent, and through it one task. Deleting a task
+--     deletes its agents (AgentsGoWithTheirTask), and that frees their names
+--     for reuse. When every name in the list is held a number is appended
+--     ("ada2"). Changed 2026-11-09 (task #99056): names used to be handed
+--     out once ever, through a HandedOutAgentName ledger that kept a deleted
+--     task's names taken. With an agent on every task (A17) and feeds
+--     creating and deleting tasks often, that used the list up for nothing.
+--     The ledger is retired: nothing reads or writes it. Its table stays in
+--     the store module only because SpacetimeDB cannot drop a table that
+--     holds rows. The cost, accepted: an old log line or message naming a
+--     freed name can later point at a different task.
 --   - A5, names are fixed. There is no rename. The store picks the name when
---     the agent starts, and it never changes.
+--     the agent is assigned or starts, and it never changes.
 --   - A6, the name is the task's only second name. Tasks have no alias.
 --   - A7, an agent ends when its session can no longer be resumed: a fresh
 --     launch replaces it, its worktree goes, or its task is deleted. Closing
@@ -79,30 +89,64 @@
 --   - A16, an agent that ends takes its SubagentEntry rows with it
 --     (EndedAgentLetsGoOfItsSession), so every entry belongs to a current
 --     agent.
+--   - A17, every task gets an agent when it is created (task #99056). Task
+--     ids grow in jumps (the store reserves them in blocks and drops the
+--     rest of a block on restart), so ids make poor names for people. The
+--     agent is created in state `assigned`, in the same write as the task,
+--     on every create path: create_task, quick dispatch, a feed's insert, a
+--     phoenix respawn. Not on a seed or an import, which restore rows with
+--     their own ids and bring their own agents. The task's first dispatch
+--     claim launches the assigned agent: it becomes current under the same
+--     name. A later fresh launch still starts a new agent (A2).
+--   - A18, the display name. A task is shown to people by the name of its
+--     assigned or current agent, else of the agent that ended last
+--     (core.allium: Task.display_name). A task moved back to backlog keeps
+--     showing its last agent's name until a fresh launch starts a new one.
+--     The id stays the key every tool takes; the display name is what a
+--     person reads.
 
 use "./core.allium" as core
 use "./store-split.allium" as store_split
 use "./dispatch.allium" as dispatch
 
 ------------------------------------------------------------
--- Entities
-------------------------------------------------------------
-
--- The ledger of every agent name ever handed out (A4). One row per name,
--- written in the same transaction that creates the agent, and never deleted:
--- not when the agent ends, and not when its task is deleted and the agent row
--- goes with it (AgentsGoWithTheirTask). The picker reads this ledger, not the
--- Agent rows, which is what keeps a deleted task's agent names out of reuse.
-entity HandedOutAgentName {
-    name: String
-    handed_out_at: Timestamp
-}
-
-------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
--- A fresh launch starts a new agent, and ends the one it replaces.
+-- A new task gets its agent at once (A17). The agent is assigned: it has a
+-- name and has never run.
+rule AssignAgentOnTaskCreated {
+    when: task: core/Task.created
+
+    -- A seed or import restores a row with its own id and brings that row's
+    -- agents with it (spacetime-seed.allium); it is not a creation here.
+    requires: not is_restored(task)
+
+    let name = fresh_agent_name()
+
+    ensures: core/Agent.created(
+        task: task,
+        name: name,
+        state: assigned,
+        live_subagents: 0,
+        stop_pending: false
+    )
+
+    @guidance
+        -- The store creates it in the one task write
+        -- (spacetime/module/src/tasks_epics.rs::store_task), on the insert
+        -- branch with id 0: every reducer that creates a task goes through
+        -- it, feed inserts included. Seeds keep their explicit id and do not.
+        -- `probe_generated_task_id` creates and then removes a probe task, so
+        -- it assigns and frees one name per restore check; harmless.
+        --
+        -- == Black boxes ==
+        -- is_restored(task): the row was written with an explicit id by a
+        -- seed or import, not generated by the store.
+}
+
+-- A fresh launch launches the task's assigned agent if it has one (A17), and
+-- otherwise starts a new agent and ends the one it replaces.
 --
 -- The agent is created inside the dispatch claim (store-split.allium:
 -- RequestDispatch), in the same transaction that moves the task to running.
@@ -122,32 +166,41 @@ rule StartAgentOnFreshLaunch {
     -- store-split.allium: RequestDispatch holds).
 
     let previous = current_agent(task)
+    let waiting = assigned_agent(task)
     -- The mode RequestDispatch derives (its `chosen_mode`): the caller's when
     -- it names one, else research for an unplanned research-tagged task and
     -- dispatch otherwise. A `quick` request starts a `quick` agent.
     let start_mode =
         if mode != null: mode
         else: if task.has_plan or task.tag != research: dispatch else: research
-    let name = fresh_agent_name()
 
     ensures:
         if exists previous:
             previous.state = ended
             previous.ended_at = now
             previous.end_reason = replaced
-    ensures: HandedOutAgentName.created(name: name, handed_out_at: now)
-    ensures: core/Agent.created(
-        task: task,
-        name: name,
-        host: requester,
-        start_mode: start_mode,
-        state: current,
-        started_at: now,
-        tmux_window: null,
-        last_pre_tool_use_at: now,
-        live_subagents: 0,
-        stop_pending: false
-    )
+    ensures:
+        if exists waiting:
+            -- The agent picked at creation runs the work, under its name.
+            waiting.state = current
+            waiting.host = requester
+            waiting.start_mode = start_mode
+            waiting.started_at = now
+            waiting.tmux_window = null
+            waiting.last_pre_tool_use_at = now
+        else:
+            core/Agent.created(
+                task: task,
+                name: fresh_agent_name(),
+                host: requester,
+                start_mode: start_mode,
+                state: current,
+                started_at: now,
+                tmux_window: null,
+                last_pre_tool_use_at: now,
+                live_subagents: 0,
+                stop_pending: false
+            )
 
     @guidance
         -- The new agent starts without a window and turns live when
@@ -161,19 +214,25 @@ rule StartAgentOnFreshLaunch {
         -- request_dispatch reducer and the epic chain inside
         -- request_exit_session share one write
         -- (spacetime/module/src/dispatch_request.rs::create_dispatch_request),
-        -- and the agent is created there. The claim's own task write runs
-        -- first, so a refused claim writes no agent and hands out no name.
+        -- and the agent is created or launched there. The claim's own task
+        -- write runs first, so a refused claim touches no agent and picks no
+        -- name.
+        --
+        -- A task has an assigned agent only until its first claim: a task
+        -- that has launched once has a current or ended agent instead, so a
+        -- later fresh launch (RetryFresh, a dispatch after a move back) takes
+        -- the else branch and starts a new agent (A2). A task with no agent
+        -- at all (an old row the backfill has not reached) also takes it.
         --
         -- == Black boxes ==
+        -- assigned_agent(task) is the task's one agent with state = assigned,
+        -- or null (OneOpenAgentPerTask).
+        --
         -- fresh_agent_name() is the picker
         -- (spacetime/module/src/agent.rs::pick_agent_name). It starts at a
         -- clock-seeded place in the name list (A11) and walks forward to the
-        -- first name the HandedOutAgentName ledger does not hold. When every
-        -- name is taken it appends 2, 3, ... to the name at the seed (A4). It
-        -- reads the ledger, which is what keeps a deleted agent's name taken.
-        -- It also treats a name an Agent row holds as taken, a backstop for a
-        -- row written without its ledger entry; by AgentNameIsNeverReused
-        -- that adds nothing when the store is sound.
+        -- first name no Agent row holds. When every name is held it appends
+        -- 2, 3, ... to the name at the seed (A4).
 }
 
 -- A launch whose request fails before any worktree exists ends its agent
@@ -252,21 +311,30 @@ rule EndedAgentLetsGoOfItsSession {
 
 -- Every task with a worktree and no current agent gets one, with a fresh
 -- name. The repair keeps CurrentAgentTracksWorktree true for rows that were
--- written without an agent. Idempotent: a second run finds nothing to do.
+-- written without an agent. Every task with no agent at all, and no
+-- worktree, gets an assigned one, so every task has a display name (A17,
+-- A18). Idempotent: a second run finds nothing to do.
 rule BackfillCurrentAgents {
     when: AgentBackfillRequested()
 
     ensures:
         for t in core/Tasks where t.worktree != null and not exists current_agent(t):
-            let name = fresh_agent_name()
-            HandedOutAgentName.created(name: name, handed_out_at: now)
             core/Agent.created(
                 task: t,
-                name: name,
+                name: fresh_agent_name(),
                 host: t.host,
                 start_mode: dispatch,
                 state: current,
                 started_at: now
+            )
+    ensures:
+        for t in core/Tasks where t.worktree = null and (core/Agents where task = t).count = 0:
+            core/Agent.created(
+                task: t,
+                name: fresh_agent_name(),
+                state: assigned,
+                live_subagents: 0,
+                stop_pending: false
             )
 
     @guidance
@@ -301,7 +369,8 @@ rule AgentSessionIsNamedAfterTheAgent {
 -- An agent name resolves to its task wherever a tool takes a task id.
 --
 -- The argument is read as an id when it is all digits. Anything else is looked
--- up as an agent name, current or ended, and resolves to that agent's task. A
+-- up as an agent name, assigned, current or ended, and resolves to that
+-- agent's task. A
 -- name that names no agent is the same "not found" an unknown id is.
 rule AgentNameResolvesToTask {
     when: McpToolCalled(task_ref)
@@ -329,10 +398,12 @@ surface AgentIdentity {
     context task: core/Task
 
     exposes:
-        -- get_task and list_tasks show the current agent's name and state
-        -- beside the task. A task with no current agent shows none.
-        current_agent(task).name
-        current_agent(task).is_live
+        -- get_task and list_tasks show the task's display name (A18) and
+        -- the state of the agent it comes from: live, paused, not started
+        -- (assigned) or ended.
+        task.display_name
+        display_agent(task).state
+        display_agent(task).is_live
 
     provides:
         -- Every MCP tool that takes a task id (mcp-task-tools.allium:
@@ -342,8 +413,8 @@ surface AgentIdentity {
     @guarantee ResumeKeepsTheAgent
         -- A resume continues the current agent and never starts one, so the
         -- name a client saw before the resume is the name after it (A2, A7).
-        -- Only StartAgentOnFreshLaunch and BackfillCurrentAgents create an
-        -- agent, and a resume (dispatch.allium: ResumeTask, RetryResume)
+        -- Only AssignAgentOnTaskCreated, StartAgentOnFreshLaunch and
+        -- BackfillCurrentAgents create an agent, and a resume (dispatch.allium: ResumeTask, RetryResume)
         -- emits no DispatchRequested. The resume's window write lands on the
         -- current agent's window: that write is what brings the agent back.
         -- A task with no current agent has nothing to resume into;
@@ -358,6 +429,47 @@ surface AgentIdentity {
         -- (mcp-task-tools.allium: ServerInstructionsStateDispatchConventions),
         -- not in each prompt. Nothing says siblings run as `task-<id>`
         -- (dispatch-prompt.allium).
+}
+
+-- How tasks and epics are named to people (A18, task #99056). Ids stay the
+-- key every tool takes and every row is stored under; they are poor names
+-- for people because they grow in jumps. So what a person reads names a task
+-- by its display name and an epic by its title.
+surface NamesForPeople {
+    facing _: core/Operator
+
+    context task: core/Task
+    context epic: core/Epic
+
+    exposes:
+        task.display_name
+        task.title
+        epic.title
+
+    @guarantee BoardMessagesNameTasksAndEpics
+        -- Every status line, error popup, notice and desktop notification
+        -- the board or the agent tree shows names a task by its display
+        -- name, or by its title when it has none yet, and an epic by its
+        -- title. None shows a bare `#<id>` or `task <id>`: "Bookmarked
+        -- nevena2", not "Bookmarked #99056"; "Auto-dispatch of nevena2
+        -- failed — epic Dispatch stalled", not "#99056 … epic #314". The
+        -- unseen-items admin view is the one exception: it shows ids and no
+        -- titles on purpose (admin-surfaces.allium). Exact wording is each
+        -- message's own spec.
+
+    @guarantee McpRepliesNameWhatTheyTouch
+        -- An MCP reply that names a task keeps its id, as the key, and adds
+        -- the task's display name and title beside it; one that names an
+        -- epic adds the epic's title. That covers the replies that today
+        -- give a bare id — create_task, update_tasks (one, several, done),
+        -- update_epic, dispatch_task, resume_task, wrap_up, exit_session,
+        -- and the work-package replies and their item lists — and the rows
+        -- that name a parent by id alone (list_epics' `(parent:<id>)`).
+        -- Work-package task items show their display name. The exact reply
+        -- strings are in mcp-task-tools.allium, epics.allium and
+        -- work-packages.allium. Epic titles are not unique, and a tool never
+        -- resolves an epic by title: an agent that is given an ambiguous
+        -- title asks which epic was meant.
 }
 
 -- The shared store runs the agent backfill on its own: on the first
@@ -384,6 +496,24 @@ invariant OneCurrentAgentPerTask {
         (core/Agents where task = t and is_current).count <= 1
 }
 
+-- At most one agent per task that is not ended: assigned and current never
+-- sit side by side. The first claim turns the assigned agent current
+-- (StartAgentOnFreshLaunch), and nothing assigns an agent to a task that
+-- already has one (AssignAgentOnTaskCreated fires on creation only; the
+-- backfill assigns only to a task with no agents at all).
+invariant OneOpenAgentPerTask {
+    for t in core/Tasks:
+        (core/Agents where task = t and state != ended).count <= 1
+}
+
+-- An assigned agent has never launched, so its task has no worktree and the
+-- agent holds no session facts.
+invariant AssignedAgentHasNoSession {
+    for a in core/Agents where is_assigned:
+        a.task.worktree = null and a.tmux_window = null
+            and a.live_subagents = 0 and a.stop_pending = false
+}
+
 -- A task has a current agent if and only if it has a worktree, except while
 -- a fresh launch is in flight.
 --
@@ -408,9 +538,8 @@ invariant CurrentAgentTracksWorktree {
 }
 
 -- An agent goes with its task. Removing a task removes every agent it has
--- had, current and ended, whatever the task's status. Their names are not
--- freed: they stay in the HandedOutAgentName ledger, which is what the picker
--- reads.
+-- had, assigned, current and ended, whatever the task's status. That frees
+-- their names (A4).
 --
 -- Every path that removes a task row removes its agents: DeleteTask,
 -- BatchDelete, an epic delete's subtree and a feed's stale-task sweep. They
@@ -422,17 +551,19 @@ invariant AgentsGoWithTheirTask {
         exists a.task
 }
 
--- A name is never handed out twice (A4). Every agent's name is in the
--- ledger, and the ledger holds each name once. Because ledger rows are never
--- deleted, a name freed by a deleted task stays taken.
-invariant AgentNameIsNeverReused {
-    for a in core/Agents:
-        exists HandedOutAgentName{name: a.name}
+-- No two agents hold the same name (A4), whatever their state. A name held
+-- by an ended agent stays held until its task is deleted.
+invariant AgentNamesAreUnique {
+    for x in core/Agents: for y in core/Agents:
+        x.name = y.name implies x = y
 }
 
-invariant HandedOutNamesAreUnique {
-    for x in HandedOutAgentNames: for y in HandedOutAgentNames:
-        x.name = y.name implies x = y
+-- Every task has an agent from the moment it is created (A17), so it always
+-- has a display name (A18). Tasks restored by a seed bring theirs, and the
+-- backfill covers rows written before A17.
+invariant EveryTaskHasAnAgent {
+    for t in core/Tasks:
+        (core/Agents where task = t).count >= 1
 }
 
 -- An agent's name is never only digits, so it can never be read as a task id.

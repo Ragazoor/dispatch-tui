@@ -752,8 +752,8 @@ rule SubscribeToAgents {
         -- caller owns. The board needs ended agents as well as current ones,
         -- because A2 resolves a name to its task on any task the board can
         -- see. The owned-hosts leg keeps an agent this host runs on its board
-        -- after its task has left the caller's sight. The HandedOutAgentName
-        -- ledger is NOT asked for: only the module's picker reads it.
+        -- after its task has left the caller's sight. The retired name ledger
+        -- is NOT asked for: nothing reads it (agents.allium: A4).
         -- Re-asserted on every connection, like the rest.
         --
         -- A4: the agent row also carries the live-session facts (window, hook

@@ -372,13 +372,17 @@ enum Visibility { public | private }
 
 -- == Agents (agents.allium) ==
 
--- Whether an agent's session can still be resumed.
---   current -- it can: the worktree is there and no fresh launch has
---              replaced it. Whether it is running right now is a separate,
---              derived fact (is_live, below): a current agent without a
---              window is paused, and a resume brings it back.
---   ended   -- it never can again. Terminal.
-enum AgentState { current | ended }
+-- Where an agent is in its life.
+--   assigned -- picked for its task when the task was created, and never
+--               launched (A17). It has a name and nothing else: no host, no
+--               start mode, no window. The task's first dispatch claim
+--               launches it and it becomes current.
+--   current  -- its session can still be resumed: the worktree is there and
+--               no fresh launch has replaced it. Whether it is running right
+--               now is a separate, derived fact (is_live, below): a current
+--               agent without a window is paused, and a resume brings it back.
+--   ended    -- it never can again. Terminal.
+enum AgentState { assigned | current | ended }
 
 -- Why an agent ended. Recorded once, when it ends.
 --   replaced       -- a fresh launch started a new agent for the same task.
@@ -670,6 +674,12 @@ entity Task {
     -- The window of the task's current agent, null when it has none or the
     -- agent holds no window (the task's session is not running).
     current_window: current_agent(this).tmux_window
+
+    -- The name people know the task by (A18): its assigned or current
+    -- agent's name, else the name of the agent that ended last. Every task
+    -- gets an agent when it is created (A17), so after the backfill every
+    -- task has one. The id stays the key; this is what a person reads.
+    display_name: display_agent(this).name
     is_detached: worktree != null and current_window = null
                  and status in {running, review}
     -- sub_status is deliberately not part of this condition, the same way it
@@ -803,11 +813,11 @@ entity Task {
 
 entity Agent {
     task: Task
-    name: String              -- picked by the store when the agent starts; never changes (A5)
-    host: Host           -- the machine its session runs on; the task's host when it started
-    start_mode: AgentStartMode
+    name: String              -- picked by the store when the agent is assigned or starts; never changes (A5)
+    host: Host when state in {current, ended}  -- the machine its session runs on; the task's host when it started. An assigned agent has none
+    start_mode: AgentStartMode when state in {current, ended}  -- set when it launches; an assigned agent has none
     state: AgentState
-    started_at: Timestamp
+    started_at: Timestamp when state in {current, ended}  -- when it launched; an assigned agent has not
     ended_at: Timestamp when state = ended
     end_reason: AgentEndReason when state = ended
 
@@ -820,11 +830,13 @@ entity Agent {
     stop_pending_at: Timestamp?  -- when the Stop that stop_pending defers actually fired (the hook's event time, not its write time). Meaningful only while stop_pending holds; the clear points leave it alone because every reader gates on the bit. HookUserPromptSubmit compares against it to tell a Stop deferred by an earlier turn from one deferred by the turn now starting — see its guidance. Null while the bit is set means the Stop predates the field, and reads as "fired before any prompt"
 
     transitions state {
+        assigned -> current
         current -> ended
         terminal: ended
     }
 
     is_current: state = current
+    is_assigned: state = assigned
     -- Live: it holds a window, so its session may be running. A current agent
     -- that is not live is paused — wrap-up, exit_session, a move back to
     -- backlog, a crash or a window killed off-board took its window, and

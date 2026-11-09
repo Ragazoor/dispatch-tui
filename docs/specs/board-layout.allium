@@ -475,20 +475,18 @@ value EpicCardPlacement {
 --     the task card itself: a flattened task card renders exactly as it
 --     does in hierarchical mode, with no epic badge of its own.
 --   - The decorative epic-header row that precedes each epic's task group
---     starts with that epic's own numeric id, `#{id}`, styled the same
---     muted, neutral colour as the id badge on a task card or an epic card —
---     not the row's purple — and a muted rule fills the rest of the row to
---     its right: `#{id} <title> ───`. No rule is drawn to the left of the
---     id, so the row's indent (below) is the first thing it shows. It is
---     the id of the epic the group belongs to: a nested epic's header
---     carries one id, its own.
---   - After the id, the row shows that epic's own title and nothing else —
---     not its ancestors. A nested epic's header names only the epic its
---     tasks sit in directly, root or not: the full ancestor path is long
---     and buries the one title that tells the groups apart. The id still
---     names the epic uniquely when two share a title. The title is
---     bounded by the column width, less the row's indent and the space the
---     id prefix takes — the same reservation task cards and epic cards
+--     shows the title of the epic the group belongs to, and a muted rule
+--     fills the rest of the row to its right: `<title> ───`. It carries no
+--     id (board-visuals.allium: EpicsAreShownByTitleNeverById). No rule is
+--     drawn to the left of the title, so the row's indent (below) is the
+--     first thing it shows.
+--   - The row shows that epic's own title and nothing else — not its
+--     ancestors. A nested epic's header names only the epic its tasks sit
+--     in directly, root or not: the full ancestor path is long and buries
+--     the one title that tells the groups apart. Two epics that share a
+--     title are told apart by their place in the indented tree. The title
+--     is bounded by the column width, less the row's indent — the same
+--     reservation task cards and epic cards
 --     already make for their own id badge before computing their truncation
 --     budget — and truncated with an ellipsis when it does not fit.
 --   - Nesting is carried by order and indent, not by header text (task
@@ -675,12 +673,11 @@ value EpicGroupTree {
 -- HuedSurface.epic_view_panel_ground documents this same panel's hue; this
 -- entry documents what its title says.
 --
--- The title is prefixed with the epic's own numeric id, `#{id}` — the
--- epic being viewed, never an ancestor named later in the breadcrumb —
--- the same prefix and the same "the epic itself, not an ancestor" rule as
--- the flattened epic-header row (see "Flattening"). Unlike that row, the
--- title keeps the whole ancestor path: it says where the user is, while
--- the header row only has to tell one task group from the next.
+-- The title carries no id (board-visuals.allium:
+-- EpicsAreShownByTitleNeverById). Unlike the flattened epic-header row
+-- (see "Flattening"), the title keeps the whole ancestor path: it says
+-- where the user is, while the header row only has to tell one task group
+-- from the next.
 
 -- == Column Section Layout ==
 

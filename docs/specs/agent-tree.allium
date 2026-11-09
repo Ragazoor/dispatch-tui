@@ -3160,11 +3160,12 @@ surface AgentTreeCompanionPane {
         -- detached one (the glyph the board's card puts before "detached").
         -- It leads the row on every row, so it lines up in one column and the
         -- edge never clips it. The name comes first because a word is
-        -- what a person scans fastest. It is the name of the task's current
-        -- agent (agents.allium), which is also the name of the messaging
-        -- session and the word a peer is addressed by. The numeric id is not
-        -- on the row, except for a task with no current agent, which leads
-        -- with `#<id>` instead; the window (`task-<id>`) keeps it. The hooks
+        -- what a person scans fastest. It is the task's display name
+        -- (core.allium: Task.display_name, agents.allium: A18), which is
+        -- also the name of the messaging session and the word a peer is
+        -- addressed by. The numeric id is never on the row; a row the
+        -- backfill has not reached yet leads with its title alone. The
+        -- window (`task-<id>`) keeps the id. The hooks
         -- wire (PaneAgent) carries the agent name for the row, not the task's
         -- alias.
         --
@@ -3184,9 +3185,10 @@ surface AgentTreeCompanionPane {
         -- (board-layout.allium, "Flattening"): each epic's agents sit under a
         -- header row, so the user sees at a glance which agents work on the
         -- same epic. The header is the board's epic header, drawn the same
-        -- way: `#<epic id> <title> ───`, the id and the rule muted and the
-        -- title purple, filling the pane's width, with no rule left of the
-        -- id. The id and the title are the group's own epic, never its
+        -- way: `<title> ───`, the rule muted and the title purple, filling
+        -- the pane's width, with no rule left of the title and no id
+        -- (board-visuals.allium: EpicsAreShownByTitleNeverById). The title
+        -- is the group's own epic, never its
         -- ancestors: a nested epic's header names only the epic its agents
         -- sit in directly. The title is truncated with an ellipsis when the
         -- pane is narrow.

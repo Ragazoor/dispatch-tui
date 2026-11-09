@@ -1046,8 +1046,8 @@ rule DependentsOfDroppedRowsAreDropped {
         -- todo of it, a poll claim on it or on a dropped epic, a todo of a
         -- dropped epic, a subscription to an epic that is gone, an agent of a
         -- dropped task, a work-package link to either.
-        -- A dropped agent's ledger row is kept: names are never reused
-        -- (agents.allium: AgentNameIsNeverReused). They would be dangling
+        -- A dropped agent's name is freed with it (agents.allium: A4). They
+        -- would be dangling
         -- references the board could not draw, and the store has no foreign
         -- keys to refuse them. Measured against the real old store: 14
         -- subagent rows, no watches, subscriptions or poll claims.

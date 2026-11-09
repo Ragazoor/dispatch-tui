@@ -432,8 +432,8 @@ use "./core.allium" as core
 -- == Card stripe ==
 --
 -- Every card carries a one-quarter left block (▎ U+258E) immediately
--- left of the card's lead word (a task card's agent name or id, an epic
--- card's id), in the column's identity colour on a task card and in
+-- left of the card's lead word (a task card's display name, an epic
+-- card's title), in the column's identity colour on a task card and in
 -- PURPLE on an epic card ("Epic cards"). The cursor card
 -- uses the same glyph as every other card. The earlier behaviour — the
 -- cursor card swapping in a half block (▌ U+258C) while resting cards
@@ -559,7 +559,7 @@ use "./core.allium" as core
 -- on chrome; a framed-but-flush card would spend two; the inset framed
 -- card spends four. Every one of those cells comes out of the title
 -- budget, on top of the fixed prefix each card already carries
--- (selection marker, stripe, id).
+-- (selection marker, stripe, lead name).
 --
 -- That trade is accepted, but it is tight rather than comfortable, and it
 -- is tightest in the narrowest column. The board divides four ways, so on
@@ -1728,17 +1728,18 @@ surface TaskCard {
         -- header label for a reader already oriented.
 
     @guarantee CardLeadsWithTheAgentName
-        -- Line 1 reads `<lead> <title>`, where the lead is the name of the
-        -- task's current agent (agents.allium), in muted grey. A name is the
-        -- word a person scans fastest, and it is the word a peer addresses
-        -- the agent by. A task with no current agent — a Backlog card, a Done
-        -- card whose agent has ended — leads with `#<id>` instead. This is
-        -- the same rule as agent-tree.allium's AgentRowShowsAgentName, so a
-        -- task reads the same in both places. The title's budget is what the
-        -- lead leaves, so a name and an id of equal length clip the title
-        -- alike. The task detail popup's title and the desktop
-        -- notifications head the task with both: `<name> · Task #<id>`, or
-        -- `Task #<id>` alone with no current agent.
+        -- Line 1 reads `<lead> <title>`, where the lead is the task's
+        -- display name (core.allium: Task.display_name, agents.allium: A18),
+        -- in muted grey. A name is the word a person scans fastest, and it is
+        -- the word a peer addresses the agent by. Every task has one, a
+        -- Backlog card's assigned agent and a Done card's ended agent
+        -- included, so no card shows its id (task #99056: ids grow in jumps
+        -- and are poor names for people). A row the backfill has not reached
+        -- yet has no name and leads with its title alone. This is the same
+        -- rule as agent-tree.allium's AgentRowShowsAgentName, so a task reads
+        -- the same in both places. The task detail popup's title and the
+        -- desktop notifications head the task with `<name>: <title>`; the
+        -- popup's title is how it shows the task's title.
 
     @guarantee CursorIsTheFrameAndTheBoldTitleIsReinforcement
         -- The cursor card's frame is cursor_white and its title is bold; its
@@ -1799,6 +1800,15 @@ surface EpicCard {
         card.frame_colour
         card.is_cursor
         epic.title
+
+    @guarantee EpicsAreShownByTitleNeverById
+        -- An epic is shown to people by its title alone (task #99056): the
+        -- epic card, a folded epic header, the epic header row in flattened
+        -- view (board-layout.allium, "Flattening"), the epic view's border
+        -- and the board filter's epic list carry no `#<id>`. Titles are not
+        -- unique, and that is accepted: where the tree shows them, their
+        -- place in it tells two "Staging" epics apart. The id stays the key
+        -- every tool takes.
 
     @guarantee PurpleInEveryColumn
         -- The stripe is purple wherever the card sits — in Done it is purple,
