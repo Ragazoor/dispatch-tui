@@ -31,6 +31,12 @@ pub enum SystemMessage {
     OpenInBrowser { url: String },
     /// The repo paths that are not directories, from `CheckRepoPaths`.
     BrokenRepoPathsFound(Vec<String>),
+    /// The shared-store connection changed state (sync.allium:
+    /// ConnectionIndicator).
+    StoreConnectionChanged(crate::tui::StoreConnectionState),
+    /// The store identified this install as somebody else after the board
+    /// drew: the board leaves (sync.allium: StopOnAUserIdentityConflict).
+    StoreIdentityConflict(String),
 }
 
 impl SystemMessage {
@@ -48,6 +54,12 @@ impl SystemMessage {
             SystemMessage::ToggleNotifications => app.handle_toggle_notifications(),
             SystemMessage::OpenInBrowser { url } => app.handle_open_in_browser(url),
             SystemMessage::BrokenRepoPathsFound(paths) => app.handle_broken_repo_paths_found(paths),
+            SystemMessage::StoreConnectionChanged(state) => {
+                app.handle_store_connection_changed(state)
+            }
+            SystemMessage::StoreIdentityConflict(reason) => {
+                app.handle_store_identity_conflict(reason)
+            }
         }
     }
 }

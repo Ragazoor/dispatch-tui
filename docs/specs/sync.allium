@@ -247,14 +247,16 @@ entity BoardConnection {
     -- from every later one, which is an ordinary outage.
     board_drawn: Boolean
 
-    -- The identity handshake has completed and this board may sync.
+    -- A connection of this run has settled the identity and applied its
+    -- initial subscription, so a write may stamp that identity.
     --
-    -- Written as a derivation over the host row rather than as a field here
-    -- because there is exactly one stored identity and it lives on the host
-    -- (core/Host.owner). A second copy on the connection would be a second
-    -- thing to clear on disconnect, and forgetting to clear it is how a board
-    -- keeps syncing as somebody it no longer is.
-    is_identified: core/local_host().owner != null
+    -- THIS RUN'S HANDSHAKE, NOT THE STORED OWNER. core/Host.owner can predate
+    -- this run, and a board must not stamp a name it has not proved on this
+    -- run's connection. Set once the first connection's initial subscription
+    -- is applied and never cleared for the rest of the run: a dropped
+    -- connection does not change the person, and a write during the outage is
+    -- refused by AWriteWithNoConnectionIsRefused anyway.
+    is_identified: identity_settled_this_run()
 
     transitions status {
         connecting -> connected
@@ -304,7 +306,10 @@ config {
     -- repaired the store sees the board recover while still looking at it.
     reconnect_backoff_max: Duration = 60.seconds
 
-    -- How long one attempt may hang before it counts as failed.
+    -- How long one step of an attempt may hang before the attempt counts as
+    -- failed. An attempt has four steps, each bounded on its own: opening the
+    -- connection, the store's identity answer, the rules-version read
+    -- (AStoreWithOtherRulesFailsTheAttempt) and the initial subscription.
     --
     -- Needed because the interesting failure is not refusal, it is silence: a
     -- host that accepts a connection and never answers leaves a board in
@@ -523,7 +528,8 @@ rule SubscribeOnceIdentityIsSettled {
         --     arrive with the row, and its subagent rows with it;
         --   covered_epics, covered_tasks: the epics this person follows and
         --     every descendant, at any depth, and their tasks;
-        --   rows about a held task (learning retrievals, unseen marks),
+        --   rows about a held task (learning retrievals and verdicts, unseen
+        --     marks, bookmarks),
         --     agents and dispatch and session requests (a held task's, plus
         --     every row on a host this person owns, so a request outlives
         --     the person's sight of its task: unfollowing the epic of a
@@ -532,7 +538,7 @@ rule SubscribeOnceIdentityIsSettled {
         --     FeedRequest), which concern no held task, only on the hosts
         --     this person owns; and the links, poll claims,
         --     learnings, settings, workspaces and memberships the caller
-        --     may see.
+        --     may see, and the super-admin's unseen-item listing.
         -- Usage is not a view: the board asks the store on demand
         -- (own_usage_summary). Public tables (hosts, user_profiles, repo
         -- lists) are asked for directly. This person's own follows come
@@ -881,6 +887,10 @@ rule RegisterHostOnRename {
         -- connection comes next. There is no queued retry here: a mirror this
         -- best-effort does not need a second mechanism for the case its first
         -- one already covers.
+        --
+        -- The startup prompt names the host before the first connection, so
+        -- that rename always takes this second path: the guard fails and
+        -- RegisterHostOnConnect sends the row.
 }
 
 -- == What the board draws ==
@@ -889,7 +899,7 @@ rule SubscribedRowsArriveUnasked {
     when: StoreDeliversRow(connection, row)
 
     requires: connection.status = connected
-    requires: not (row_status(row) in config.removed_statuses)
+    requires: not (is_task_or_epic_row(row) and row_status(row) in config.removed_statuses)
 
     ensures:
         SubscribedRowAccepted(connection, row)
@@ -939,6 +949,9 @@ rule ADisconnectedBoardDrawsNoSharedRows {
 rule RowsWithARemovedStatusAreDropped {
     when: StoreDeliversRow(connection, row) or seed/RowReadForImport(row)
 
+    -- Only tasks and epics: other tables have their own statuses (a
+    -- learning may be `archived`, and that is a current status of its own).
+    requires: is_task_or_epic_row(row)
     requires: row_status(row) in config.removed_statuses
 
     ensures:
@@ -1056,6 +1069,7 @@ rule CreatesRequireASettledIdentity {
     requires:
         connection != null
         and mutation.is_a_create
+        and not mutation.is_feed_ingest
         and not connection.is_identified
 
     ensures:
@@ -1072,6 +1086,11 @@ rule CreatesRequireASettledIdentity {
         -- send a patch or a delete (neither names anyone), but a create has
         -- nothing honest to write in that field, so it is refused here instead
         -- of writing an empty one.
+        --
+        -- FEED INGEST IS THE ONE CREATE THAT DOES NOT WAIT. A feed's tasks
+        -- are the feed's, not a person's: ingest stamps an empty created_by
+        -- when no identity is settled (feeds.allium: IngestFeedEmission), so
+        -- there is no name it could get wrong.
         --
         -- NOT GUARDED ON connection.status = connected, DELIBERATELY. An
         -- unidentified board and a disconnected board overlap: identity settles
@@ -1375,7 +1394,18 @@ rule StopOnAUserIdentityConflict {
         -- being a board at all is the difference between a cold start and a
         -- mid-session drop, and it is the same answer for both: the board does
         -- not continue to run as somebody. It reports the conflict, names both
-        -- identities, and stops.
+        -- identities, and stops. Before the board has drawn that is
+        -- IdentityConflictAtStartupAbortsIt. After, the board leaves its run
+        -- loop the way a confirmed quit does (startup.allium: BoardExitCause
+        -- quit), returning a pinned agent to its window first, and prints the
+        -- message once the terminal is handed back, so it is still on screen
+        -- after the board has gone. Not a dismissible popup over an empty
+        -- board: a board that keeps running invites work it can no longer
+        -- save.
+        --
+        -- The message is recorded as last_error before the board goes, so a
+        -- write refused in the moment before it exits quotes the conflict
+        -- (AWriteWithNoConnectionIsRefused), not a bare "not connected".
         --
         -- ONE STATE FOR BOTH ARRIVAL PATHS is what keeps that answer honest. The
         -- tempting design has a fatal cold start and a warning mid-session,
@@ -1679,14 +1709,15 @@ surface StoreBoundary {
         -- See epics.allium: EpicStatusRecalculation.
 
     @guarantee SendsOnlyWhatWasSubscribedTo
-        -- Rows reach this board only for its subscriptions: the connected
-        -- identity's own user board, the epics in `covered_epics` (the
-        -- followed ones and their sub-epic trees), anything that identity
-        -- created (own_creations), and the other rows the per-caller views
-        -- serve that identity (SubscribeOnceIdentityIsSettled: workspaces,
-        -- memberships, learnings, links, poll claims, settings, usage
-        -- events, the super-admin's unseen-item listing), plus the public
-        -- tables it asks for directly.
+        -- Rows reach this board only for its subscriptions: the epics in
+        -- `covered_epics` (the followed ones and their sub-epic trees),
+        -- anything the connected identity created or owns (own_creations),
+        -- and the other rows the per-caller views serve that identity
+        -- (SubscribeOnceIdentityIsSettled: workspaces, memberships,
+        -- learnings, links, poll claims, settings, bookmarks, the
+        -- super-admin's unseen-item listing), plus the public tables it asks
+        -- for directly. Usage is never sent unasked: the board asks for it on
+        -- demand.
         -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics constrains what is
         -- ASKED for; this is the counterpart obligation on what is SENT, and
         -- it is the half a client cannot enforce for itself.

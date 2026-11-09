@@ -743,7 +743,7 @@ enum StartupAbortReason {
 -- which it needs. The checker reports it unused: its only uses are literals
 -- of a provided trigger's parameter, which it does not credit.
 enum BoardExitCause {
-    quit               -- the board left its run loop: the operator confirmed a quit (split-pane.allium: QuitExitsSplitMode and the rules after it), or the loop failed, which exits the same way
+    quit               -- the board left its run loop: the operator confirmed a quit (split-pane.allium: QuitExitsSplitMode and the rules after it), the store identified this install as somebody else (sync.allium: StopOnAUserIdentityConflict), or the loop failed, which exits the same way
     | signalled        -- SIGHUP or SIGTERM: a later launch retired the board's window (RetireTheBoardWindow), or something killed it
     | startup_aborted  -- the launch aborted before the board drew (StartupAborted)
 }

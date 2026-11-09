@@ -219,6 +219,17 @@ pub(in crate::tui) struct DispatchRequestView {
 // App
 // ---------------------------------------------------------------------------
 
+/// What the top row shows about the board's connection to the shared store
+/// (sync.allium: ConnectionIndicator).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreConnectionState {
+    pub status: crate::sync::ConnectionStatus,
+    /// Why the connection is down; present while disconnected or failed.
+    pub last_error: Option<String>,
+    /// Consecutive failed attempts in the current outage.
+    pub attempts: u32,
+}
+
 pub struct App {
     pub(in crate::tui) board: BoardState,
     pub(in crate::tui) status: StatusState,
@@ -268,6 +279,13 @@ pub struct App {
     /// row in every state (sync.allium: ConnectionIndicator,
     /// `TheStoreIsAlwaysNamed`). `None` only before bootstrap sets it.
     pub(in crate::tui) store_server: Option<String>,
+    /// The connection's state, as the sync loop last reported it
+    /// (sync.allium: ConnectionIndicator). `None` until the first report.
+    pub(in crate::tui) store_connection: Option<StoreConnectionState>,
+    /// Why the board is leaving on its own: the store identified this install
+    /// as somebody else (sync.allium: StopOnAUserIdentityConflict). Printed
+    /// once the terminal is handed back.
+    pub(in crate::tui) fatal_exit: Option<String>,
     pub(in crate::tui) ticks_since_budget_poll: u64,
     /// Derived layout state (epic stats, anchor cache, task index, and their
     /// fingerprints) computed from `board.tasks`/`board.epics`. See
@@ -378,6 +396,8 @@ impl App {
             spinner_tick: 0,
             budget: None,
             store_server: None,
+            store_connection: None,
+            fatal_exit: None,
             ticks_since_budget_poll: 0,
             layout: LayoutCache::default(),
             dirty: true,
@@ -589,6 +609,12 @@ impl App {
     /// The store address the top row names.
     pub fn store_server(&self) -> Option<&str> {
         self.store_server.as_deref()
+    }
+
+    /// Why the board quit on its own, when it did: the run loop's caller
+    /// reports it after the terminal is restored.
+    pub fn fatal_exit(&self) -> Option<&str> {
+        self.fatal_exit.as_deref()
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {

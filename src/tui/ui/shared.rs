@@ -215,12 +215,19 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
     // The store this board is connected to, in every state and in the same
     // muted style as the other badges (sync.allium: ConnectionIndicator,
     // `TheStoreIsAlwaysNamed`). A board on the wrong store otherwise looks
-    // exactly like a healthy one (task #28710).
+    // exactly like a healthy one.
     if let Some(server) = app.store_server.as_deref() {
         parts.push(Span::styled(
             format!("store {}  ", store_address_label(server)),
             Style::default().fg(MUTED),
         ));
+    }
+    if let Some(span) = app
+        .store_connection
+        .as_ref()
+        .and_then(connection_status_span)
+    {
+        parts.push(span);
     }
     // Auto dispatch indicator — only in epic view
     if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
@@ -474,6 +481,40 @@ pub(in crate::tui) fn caret_line(
 
 /// The store address as the top row shows it: the scheme and a trailing slash
 /// are noise next to the host and port that tell two stores apart.
+/// The longest connection reason the top row draws before eliding it, so a
+/// long store error cannot push the other badges off the row.
+const CONNECTION_REASON_MAX_CHARS: usize = 60;
+
+/// The connection's state beside the store address (sync.allium:
+/// ConnectionIndicator). Nothing while connected (`ConnectedIsQuiet`); a
+/// warning while an attempt is in flight; an alarm naming the reason, and the
+/// attempt count while retrying, while disconnected or failed
+/// (`DisconnectedIsAlwaysVisible`, `EveryFailureNamesItself`).
+pub(in crate::tui::ui) fn connection_status_span(
+    state: &crate::tui::StoreConnectionState,
+) -> Option<Span<'static>> {
+    use crate::sync::ConnectionStatus;
+    let reason = || {
+        let text = state.last_error.as_deref().unwrap_or("no reason given");
+        if text.chars().count() > CONNECTION_REASON_MAX_CHARS {
+            let cut: String = text.chars().take(CONNECTION_REASON_MAX_CHARS - 1).collect();
+            format!("{cut}\u{2026}")
+        } else {
+            text.to_string()
+        }
+    };
+    let (label, colour) = match state.status {
+        ConnectionStatus::Connected => return None,
+        ConnectionStatus::Connecting => ("connecting  ".to_string(), YELLOW),
+        ConnectionStatus::Disconnected => (
+            format!("disconnected (attempt {}): {}  ", state.attempts, reason()),
+            RED,
+        ),
+        ConnectionStatus::Failed => (format!("failed: {}  ", reason()), RED),
+    };
+    Some(Span::styled(label, Style::default().fg(colour)))
+}
+
 fn store_address_label(server: &str) -> &str {
     let trimmed = server.trim().trim_end_matches('/');
     trimmed

@@ -785,7 +785,7 @@ impl TuiRuntime {
     ///
     /// The loop ends on an identity conflict, which `sync.allium`'s
     /// `StopOnAUserIdentityConflict` makes terminal: continuing to step would
-    /// be a retry the spec refuses, and the error is already on screen.
+    /// be a retry the spec refuses, and the board is told to leave.
     ///
     /// `store` is passed in rather than taken from `self.database`: the session
     /// needs the identity, its credential and the subscription rows, and the
@@ -813,6 +813,7 @@ impl TuiRuntime {
             // every slow attempt. The session owns the backoff either way, so
             // this only makes the loop mean what its name says.
             ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut reported = None;
             loop {
                 ticks.tick().await;
                 let stop = step_shared_store(
@@ -821,6 +822,7 @@ impl TuiRuntime {
                     &settled_identity,
                     &*reducer_caller,
                     &tx,
+                    &mut reported,
                 )
                 .await;
                 if stop {
@@ -1190,7 +1192,36 @@ impl TuiRuntime {
 
 /// One tick of the shared-store connection loop. Returns `true` when the loop
 /// must end: the store identified this install as somebody else, which is fatal.
+///
+/// `reported` is the connection state last sent to the board; a new one is
+/// sent only when it differs (sync.allium: ConnectionIndicator).
 async fn step_shared_store(
+    session: &mut crate::sync::SyncSession,
+    store: &dyn crate::sync::SyncStore,
+    settled_identity: &crate::sync::SettledIdentity,
+    reducer_caller: &dyn crate::sync::ReducerCaller,
+    tx: &tokio::sync::mpsc::UnboundedSender<Message>,
+    reported: &mut Option<crate::tui::StoreConnectionState>,
+) -> bool {
+    let stop = step_session(session, store, settled_identity, reducer_caller, tx).await;
+    if !stop {
+        let connection = session.connection();
+        let state = crate::tui::StoreConnectionState {
+            status: connection.status(),
+            last_error: connection.last_error().map(str::to_string),
+            attempts: connection.attempts(),
+        };
+        if reported.as_ref() != Some(&state) {
+            *reported = Some(state.clone());
+            let _ = tx.send(Message::System(
+                crate::tui::messages::SystemMessage::StoreConnectionChanged(state),
+            ));
+        }
+    }
+    stop
+}
+
+async fn step_session(
     session: &mut crate::sync::SyncSession,
     store: &dyn crate::sync::SyncStore,
     settled_identity: &crate::sync::SettledIdentity,
@@ -1210,9 +1241,12 @@ async fn step_shared_store(
                 .last_error()
                 .unwrap_or("the shared store identified this install as somebody else")
                 .to_string();
-            let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                reason,
-            )));
+            // Recorded first, so a write refused before the board has gone
+            // quotes the conflict (sync.allium: AWriteWithNoConnectionIsRefused).
+            settled_identity.set_last_error(Some(reason.clone()));
+            let _ = tx.send(Message::System(
+                crate::tui::messages::SystemMessage::StoreIdentityConflict(reason),
+            ));
             return true;
         }
         Ok(crate::sync::StepOutcome::Connected) => {
@@ -1280,5 +1314,112 @@ fn cleanup_outcome(
         id,
         worktree,
         error,
+    }
+}
+
+#[cfg(test)]
+mod step_shared_store_tests {
+    use super::step_shared_store;
+    use crate::store::{HostStore, IdentityCredentialStore, Store};
+    use crate::sync::memory_caller::MemoryReducerCaller;
+    use crate::sync::tests::{accepted, ScriptedConnector};
+    use crate::sync::{ConnectionStatus, SettledIdentity, SharedRows, SyncSession};
+    use crate::tui::messages::SystemMessage;
+    use crate::tui::types::Message;
+    use std::sync::Arc;
+
+    fn caller() -> MemoryReducerCaller {
+        let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
+        MemoryReducerCaller::new(Arc::new(SharedRows::new()), clock)
+    }
+
+    fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Message>) -> Vec<SystemMessage> {
+        let mut out = Vec::new();
+        while let Ok(Message::System(m)) = rx.try_recv() {
+            out.push(m);
+        }
+        out
+    }
+
+    /// `sync.allium: StopOnAUserIdentityConflict` — the board is told to
+    /// leave, with the message naming both identities, and the reason is
+    /// recorded so a write refused meanwhile quotes it.
+    #[tokio::test]
+    async fn a_conflict_tells_the_board_to_leave_and_records_the_reason() {
+        let db = Store::open_in_memory().unwrap();
+        db.set_user_identity_token("token-a").await.unwrap();
+        db.adopt_user_identity("user-a").await.unwrap();
+        let connector = ScriptedConnector::new(vec![accepted("user-b", "token-b")]);
+        let mut session = SyncSession::open("store.example", connector);
+        let identity = SettledIdentity::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut reported = None;
+
+        let stop =
+            step_shared_store(&mut session, &db, &identity, &caller(), &tx, &mut reported).await;
+
+        assert!(stop, "the loop ends on a conflict");
+        let messages = drain(&mut rx);
+        let reason = messages
+            .iter()
+            .find_map(|m| match m {
+                SystemMessage::StoreIdentityConflict(r) => Some(r.clone()),
+                _ => None,
+            })
+            .expect("the board is told to leave");
+        assert!(
+            reason.contains("user-a") && reason.contains("user-b"),
+            "{reason}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, SystemMessage::Error(_))),
+            "not a dismissible popup"
+        );
+        assert_eq!(identity.last_error().as_deref(), Some(reason.as_str()));
+    }
+
+    /// `sync.allium: ConnectionIndicator` — the board hears each state once,
+    /// and a drop reaches it with its reason and attempt count.
+    #[tokio::test]
+    async fn the_board_hears_each_connection_state_once() {
+        let db = Store::open_in_memory().unwrap();
+        let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a")]);
+        let mut session = SyncSession::open("store.example", connector);
+        let identity = SettledIdentity::default();
+        let caller = caller();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut reported = None;
+
+        step_shared_store(&mut session, &db, &identity, &caller, &tx, &mut reported).await;
+        let first = drain(&mut rx);
+        assert!(
+            first.iter().any(|m| matches!(
+                m,
+                SystemMessage::StoreConnectionChanged(s) if s.status == ConnectionStatus::Connected
+            )),
+            "{first:?}"
+        );
+
+        step_shared_store(&mut session, &db, &identity, &caller, &tx, &mut reported).await;
+        assert!(
+            drain(&mut rx).is_empty(),
+            "an unchanged state is not re-sent"
+        );
+
+        session.report_drop("connection reset", std::time::Instant::now());
+        step_shared_store(&mut session, &db, &identity, &caller, &tx, &mut reported).await;
+        let after = drain(&mut rx);
+        let state = after
+            .iter()
+            .find_map(|m| match m {
+                SystemMessage::StoreConnectionChanged(s) => Some(s.clone()),
+                _ => None,
+            })
+            .expect("the drop is reported");
+        assert_eq!(state.status, ConnectionStatus::Disconnected);
+        assert_eq!(state.last_error.as_deref(), Some("connection reset"));
+        assert_eq!(state.attempts, 1);
     }
 }

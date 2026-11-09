@@ -6,6 +6,40 @@ use super::super::types::*;
 use super::super::App;
 
 impl App {
+    /// `sync.allium: ConnectionIndicator` — the top row follows the
+    /// connection's state.
+    pub(in crate::tui) fn handle_store_connection_changed(
+        &mut self,
+        state: crate::tui::StoreConnectionState,
+    ) -> Vec<Command> {
+        self.store_connection = Some(state);
+        vec![]
+    }
+
+    /// `sync.allium: StopOnAUserIdentityConflict` after the board has drawn:
+    /// the board does not go on running as somebody else. It leaves the way a
+    /// confirmed quit does, and the reason is printed once the terminal is
+    /// handed back.
+    pub(in crate::tui) fn handle_store_identity_conflict(
+        &mut self,
+        reason: String,
+    ) -> Vec<Command> {
+        self.store_connection = Some(crate::tui::StoreConnectionState {
+            status: crate::sync::ConnectionStatus::Failed,
+            last_error: Some(reason.clone()),
+            attempts: self.store_connection.as_ref().map_or(0, |c| c.attempts),
+        });
+        self.fatal_exit = Some(reason);
+        // A rearrangement in flight performs the quit when it settles, as for
+        // a confirmed quit (split-pane.allium: HoldQuitWhileRearrangementInFlight).
+        if let Some(in_flight) = self.board.split.in_flight.as_mut() {
+            in_flight.pending_quit = true;
+            return vec![];
+        }
+        self.should_quit = true;
+        self.exit_split_if_active()
+    }
+
     pub(in crate::tui) fn handle_error(&mut self, msg: String) -> Vec<Command> {
         self.status.error_popup = Some(msg);
         // A refused create must not move the admin cursor onto a workspace

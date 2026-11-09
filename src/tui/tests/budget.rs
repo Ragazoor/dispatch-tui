@@ -391,3 +391,97 @@ mod store_address_indicator {
         assert!(!row.contains("store "), "got {row:?}");
     }
 }
+
+/// sync.allium: ConnectionIndicator — the connection's state beside the store
+/// address: quiet while connected, an alarm with the reason and the attempt
+/// count while disconnected, and the reason while failed.
+mod connection_state_indicator {
+    use crate::palette::RED;
+    use crate::sync::ConnectionStatus;
+    use crate::tui::messages::SystemMessage;
+    use crate::tui::tests::helpers::{buffer_line, make_app, render_to_buffer};
+    use crate::tui::types::Message;
+    use crate::tui::StoreConnectionState;
+
+    fn state(status: ConnectionStatus, last_error: Option<&str>, attempts: u32) -> Message {
+        Message::System(SystemMessage::StoreConnectionChanged(
+            StoreConnectionState {
+                status,
+                last_error: last_error.map(str::to_string),
+                attempts,
+            },
+        ))
+    }
+
+    #[test]
+    fn connected_adds_nothing() {
+        let mut app = make_app();
+        app.set_store_server(Some("http://127.0.0.1:3000".to_string()));
+        app.update(state(ConnectionStatus::Connected, None, 0));
+        let row = buffer_line(&render_to_buffer(&mut app, 160, 40), 0);
+        assert!(!row.contains("connect"), "got {row:?}");
+        assert!(!row.contains("failed"), "got {row:?}");
+    }
+
+    #[test]
+    fn disconnected_names_the_reason_and_the_attempts_in_red() {
+        let mut app = make_app();
+        app.set_store_server(Some("http://127.0.0.1:3000".to_string()));
+        app.update(state(
+            ConnectionStatus::Disconnected,
+            Some("connection refused"),
+            3,
+        ));
+        let buf = render_to_buffer(&mut app, 160, 40);
+        let row = buffer_line(&buf, 0);
+        assert!(
+            row.contains("disconnected (attempt 3): connection refused"),
+            "got {row:?}"
+        );
+        let col = row.find("disconnected").expect("on the top row");
+        assert_eq!(buf[(col as u16, 0)].fg, RED, "an alarm, not a badge");
+    }
+
+    #[test]
+    fn a_long_reason_is_elided_so_the_badges_stay() {
+        let mut app = make_app();
+        app.update(state(
+            ConnectionStatus::Disconnected,
+            Some(&"x".repeat(200)),
+            1,
+        ));
+        let row = buffer_line(&render_to_buffer(&mut app, 160, 40), 0);
+        assert!(row.contains('\u{2026}'), "got {row:?}");
+        assert!(
+            row.contains("[N]"),
+            "the notification badge is still drawn: {row:?}"
+        );
+    }
+
+    #[test]
+    fn failed_names_the_reason() {
+        let mut app = make_app();
+        app.update(state(ConnectionStatus::Failed, Some("user-a vs user-b"), 0));
+        let row = buffer_line(&render_to_buffer(&mut app, 160, 40), 0);
+        assert!(row.contains("failed: user-a vs user-b"), "got {row:?}");
+    }
+}
+
+/// sync.allium: StopOnAUserIdentityConflict — after the board has drawn, a
+/// conflict makes it leave, keeping the reason for after the terminal is back.
+mod identity_conflict_exit {
+    use crate::tui::messages::SystemMessage;
+    use crate::tui::tests::helpers::make_app;
+    use crate::tui::types::Message;
+
+    #[test]
+    fn a_conflict_quits_the_board_with_its_reason() {
+        let mut app = make_app();
+        app.update(Message::System(SystemMessage::StoreIdentityConflict(
+            "stored user-a, store says user-b".to_string(),
+        )));
+        assert!(app.should_quit(), "the board does not go on running");
+        assert_eq!(app.fatal_exit(), Some("stored user-a, store says user-b"));
+        assert!(app.status.error_popup.is_none(), "not a dismissible popup");
+    }
+}
