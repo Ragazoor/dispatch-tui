@@ -294,14 +294,14 @@ async fn the_pane_view_carries_each_agents_epic_and_own_title() {
     assert_eq!(by_id(bare).epic, None);
 }
 
-/// The board's task carries its current agent's name, for the card's lead
-/// word (board-visuals.allium: CardLeadsWithTheAgentName); with no current
-/// agent it carries none.
+/// The board's task carries its display name, for the card's lead word
+/// (board-visuals.allium: CardLeadsWithTheAgentName): its current agent's
+/// name, and for a task never dispatched its assigned agent's (agents A17).
 #[tokio::test]
-async fn the_boards_task_carries_its_current_agents_name() {
+async fn the_boards_task_carries_its_display_name() {
     let state = test_state().await;
     let (id, name) = task_with_agent(&state).await;
-    let bare = state
+    let fresh = state
         .db_write()
         .create_task(CreateTaskRequest::fixture("U", "/repo"))
         .await
@@ -311,5 +311,13 @@ async fn the_boards_task_carries_its_current_agents_name() {
     let of = |want| tasks.iter().find(|t| t.id == want).unwrap();
 
     assert_eq!(of(id).agent_name.as_deref(), Some(name.as_str()));
-    assert_eq!(of(bare).agent_name, None);
+    let assigned = of(fresh)
+        .agent_name
+        .clone()
+        .expect("a created task has a name");
+    assert_ne!(assigned, name);
+    assert!(
+        state.db.current_agent(fresh).await.is_none(),
+        "not launched"
+    );
 }

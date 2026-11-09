@@ -7,7 +7,6 @@ const NOW: &str = "2026-10-16 12:00:00.000";
 #[derive(Default)]
 struct Rows {
     agents: Vec<Agent>,
-    ledger: Vec<HandedOutAgentName>,
     next_id: i64,
     seed: u64,
     /// `(task_id, agent_row)` of every SubagentEntry.
@@ -23,9 +22,6 @@ impl AgentStore for Rows {
             .filter(|a| a.task_id == task_id)
             .cloned()
             .collect()
-    }
-    fn name_is_handed_out(&self, name: &str) -> bool {
-        self.ledger.iter().any(|r| r.name == name)
     }
     fn name_held_by_agent(&self, name: &str) -> bool {
         self.agents.iter().any(|a| a.name == name)
@@ -58,14 +54,6 @@ impl AgentStore for Rows {
     }
     fn blank_task_session_facts(&mut self, task_id: i64) {
         self.blanked.push(task_id);
-    }
-    fn insert_handed_out_name(&mut self, row: HandedOutAgentName) {
-        assert!(
-            !self.name_is_handed_out(&row.name),
-            "{} handed out twice",
-            row.name
-        );
-        self.ledger.push(row);
     }
     fn now(&self) -> String {
         NOW.into()
@@ -137,7 +125,7 @@ fn the_name_list_leaves_out_tool_names() {
 }
 
 #[test]
-fn the_picker_reads_the_ledger_and_falls_back_to_a_number() {
+fn the_picker_skips_held_names_and_falls_back_to_a_number() {
     assert_eq!(pick_agent_name(0, |_| false), AGENT_NAMES[0]);
     assert_eq!(pick_agent_name(0, |n| n == AGENT_NAMES[0]), AGENT_NAMES[1]);
     let all: std::collections::HashSet<&str> = AGENT_NAMES.iter().copied().collect();
@@ -159,7 +147,7 @@ fn a_picked_name_is_never_only_digits() {
 // -- StartAgentOnFreshLaunch --------------------------------------------------
 
 #[test]
-fn a_fresh_launch_starts_a_current_agent_and_hands_out_its_name() {
+fn a_fresh_launch_of_a_task_with_no_agent_starts_a_current_agent() {
     let mut rows = Rows::default();
     start_agent_on_fresh_launch(&mut rows, &task(1), "host-a", "research");
     let agent = &rows.agents[0];
@@ -168,8 +156,105 @@ fn a_fresh_launch_starts_a_current_agent_and_hands_out_its_name() {
     assert_eq!(agent.host, "host-a");
     assert_eq!(agent.start_mode, "research");
     assert_eq!(agent.started_at, NOW);
-    assert_eq!(rows.ledger.len(), 1);
-    assert_eq!(rows.ledger[0].name, agent.name);
+    assert!(!agent.name.is_empty());
+}
+
+// -- AssignAgentOnTaskCreated (A17) -------------------------------------------
+
+#[test]
+fn a_created_task_gets_an_assigned_agent_with_a_name_and_nothing_else() {
+    let mut rows = Rows::default();
+    assign_agent_on_task_created(&mut rows, 1);
+    assert_eq!(rows.agents.len(), 1);
+    let agent = &rows.agents[0];
+    assert_eq!(agent.task_id, 1);
+    assert_eq!(agent.state, AGENT_ASSIGNED);
+    assert!(validate_agent_name(&agent.name).is_ok());
+    // AssignedAgentHasNoSession: no host, start mode, start or window.
+    assert_eq!(agent.host, "");
+    assert_eq!(agent.start_mode, "");
+    assert_eq!(agent.started_at, "");
+    assert_eq!(agent.tmux_window, "");
+    assert_eq!(agent.last_pre_tool_use_at, "");
+    assert!(current(&rows, 1).is_empty(), "assigned is not current");
+    assert_eq!(assigned_agent(&rows, 1).map(|a| a.id), Some(agent.id));
+}
+
+#[test]
+fn the_first_launch_runs_the_assigned_agent_under_its_name() {
+    // StartAgentOnFreshLaunch, the `waiting` branch.
+    let mut rows = Rows::default();
+    assign_agent_on_task_created(&mut rows, 1);
+    let name = rows.agents[0].name.clone();
+    start_agent_on_fresh_launch(&mut rows, &task(1), "host-a", "quick");
+    assert_eq!(rows.agents.len(), 1, "no second agent");
+    let agent = &rows.agents[0];
+    assert_eq!(agent.name, name);
+    assert_eq!(agent.state, AGENT_CURRENT);
+    assert_eq!(agent.host, "host-a");
+    assert_eq!(agent.start_mode, "quick");
+    assert_eq!(agent.started_at, NOW);
+    assert_eq!(agent.last_pre_tool_use_at, NOW, "watchdog measures from the claim");
+    assert!(assigned_agent(&rows, 1).is_none());
+}
+
+#[test]
+fn a_later_fresh_launch_starts_a_new_agent_as_before() {
+    // A2 is unchanged after the first launch.
+    let mut rows = Rows::default();
+    assign_agent_on_task_created(&mut rows, 1);
+    start_agent_on_fresh_launch(&mut rows, &with_worktree(1, ""), "host-a", "dispatch");
+    start_agent_on_fresh_launch(&mut rows, &with_worktree(1, ""), "host-a", "dispatch");
+    assert_eq!(rows.agents.len(), 2);
+    assert_eq!(rows.agents[0].state, AGENT_ENDED);
+    assert_eq!(rows.agents[0].end_reason, AGENT_END_REPLACED);
+    assert_eq!(current(&rows, 1).len(), 1);
+    assert_ne!(rows.agents[0].name, rows.agents[1].name);
+}
+
+#[test]
+fn a_failed_first_launch_ends_the_assigned_agent() {
+    let mut rows = Rows::default();
+    assign_agent_on_task_created(&mut rows, 1);
+    start_agent_on_fresh_launch(&mut rows, &task(1), "host-a", "dispatch");
+    end_current_agent(&mut rows, 1, AGENT_END_LAUNCH_FAILED);
+    assert_eq!(rows.agents[0].state, AGENT_ENDED);
+    assert_eq!(rows.agents[0].end_reason, AGENT_END_LAUNCH_FAILED);
+}
+
+#[test]
+fn ending_or_session_writes_leave_an_assigned_agent_alone() {
+    // Only the claim moves an assigned agent; it has no session to touch.
+    let mut rows = Rows::default();
+    assign_agent_on_task_created(&mut rows, 1);
+    end_current_agent(&mut rows, 1, AGENT_END_WORKTREE_GONE);
+    assert!(!update_current_agent(&mut rows, 1, |a| Agent {
+        tmux_window: "task-1".into(),
+        ..a
+    }));
+    assert_eq!(rows.agents[0].state, AGENT_ASSIGNED);
+    assert_eq!(rows.agents[0].tmux_window, "");
+}
+
+// -- the display name (A18) -----------------------------------------------------
+
+#[test]
+fn the_display_agent_is_the_open_one_else_the_one_that_ended_last() {
+    let mut rows = Rows::default();
+    assert!(display_agent(&rows.agents_of_task(1)).is_none());
+    assign_agent_on_task_created(&mut rows, 1);
+    let first = rows.agents[0].name.clone();
+    assert_eq!(display_agent(&rows.agents_of_task(1)).unwrap().name, first);
+    start_agent_on_fresh_launch(&mut rows, &with_worktree(1, ""), "host-a", "dispatch");
+    assert_eq!(display_agent(&rows.agents_of_task(1)).unwrap().name, first);
+    // A move back to backlog that releases the worktree ends it; the name stays.
+    end_current_agent(&mut rows, 1, AGENT_END_WORKTREE_GONE);
+    assert_eq!(display_agent(&rows.agents_of_task(1)).unwrap().name, first);
+    // Two ended agents: the one that ended last wins.
+    start_agent_on_fresh_launch(&mut rows, &with_worktree(1, ""), "host-a", "dispatch");
+    let second = rows.agents[1].name.clone();
+    rows.agents[1] = ended_agent(rows.agents[1].clone(), AGENT_END_WORKTREE_GONE, "2026-10-17 09:00:00.000");
+    assert_eq!(display_agent(&rows.agents_of_task(1)).unwrap().name, second);
 }
 
 #[test]
@@ -227,17 +312,28 @@ fn a_replaced_agent_takes_its_subagent_entries_and_pending_stop_with_it() {
 }
 
 #[test]
-fn a_name_freed_by_a_deleted_task_is_never_handed_out_again() {
-    // AgentNameIsNeverReused: the picker reads the ledger, which a delete
-    // does not touch.
+fn a_name_freed_by_a_deleted_task_can_be_picked_again() {
+    // A4 since task #99056: a name is held while an Agent row holds it. The
+    // seed is fixed, so the picker starts at the same name both times.
     let mut rows = Rows::default();
-    start_agent_on_fresh_launch(&mut rows, &task(1), "host-a", "dispatch");
+    assign_agent_on_task_created(&mut rows, 1);
     let first = rows.agents[0].name.clone();
     delete_agents_of(&mut rows, 1);
     assert!(rows.agents.is_empty());
-    start_agent_on_fresh_launch(&mut rows, &task(2), "host-a", "dispatch");
-    assert_ne!(rows.agents[0].name, first);
-    assert_eq!(rows.ledger.len(), 2);
+    assign_agent_on_task_created(&mut rows, 1);
+    assert_eq!(rows.agents[0].name, first);
+}
+
+#[test]
+fn a_name_held_by_an_ended_agent_is_not_picked() {
+    // AgentNamesAreUnique, whatever the state.
+    let mut rows = Rows::default();
+    assign_agent_on_task_created(&mut rows, 1);
+    let held = rows.agents[0].name.clone();
+    start_agent_on_fresh_launch(&mut rows, &task(1), "host-a", "dispatch");
+    end_current_agent(&mut rows, 1, AGENT_END_WORKTREE_GONE);
+    assign_agent_on_task_created(&mut rows, 1);
+    assert_ne!(rows.agents[1].name, held);
 }
 
 // -- session facts live on the agent (A4) ----------------------------------------
@@ -386,14 +482,15 @@ fn a_failed_launch_ends_the_agent_as_launch_failed() {
 // -- AgentsGoWithTheirTask ----------------------------------------------------
 
 #[test]
-fn deleting_a_task_removes_every_agent_it_had_and_keeps_the_names() {
+fn deleting_a_task_removes_every_agent_it_had() {
     let mut rows = Rows::default();
     start_agent_on_fresh_launch(&mut rows, &task(1), "host-a", "dispatch");
     start_agent_on_fresh_launch(&mut rows, &task(1), "host-a", "dispatch");
     start_agent_on_fresh_launch(&mut rows, &task(2), "host-a", "dispatch");
+    assign_agent_on_task_created(&mut rows, 3);
     delete_agents_of(&mut rows, 1);
+    delete_agents_of(&mut rows, 3);
     assert!(rows.agents.iter().all(|a| a.task_id == 2));
-    assert_eq!(rows.ledger.len(), 3);
 }
 
 // -- BackfillCurrentAgents ----------------------------------------------------
@@ -416,7 +513,9 @@ fn the_backfill_names_every_task_with_a_worktree_and_no_current_agent() {
     for id in [1, 3, 4] {
         assert_eq!(current(&rows, id).len(), 1, "task {id}");
     }
-    assert!(current(&rows, 2).is_empty(), "no worktree, no agent");
+    assert!(current(&rows, 2).is_empty(), "no worktree, no current agent");
+    // A17: a task with no agent at all and no worktree gets an assigned one.
+    assert!(assigned_agent(&rows, 2).is_some());
     let backfilled = current(&rows, 1)[0];
     assert_eq!(backfilled.host, "host-a");
     assert_eq!(backfilled.start_mode, AGENT_BACKFILL_START_MODE);
@@ -425,6 +524,17 @@ fn the_backfill_names_every_task_with_a_worktree_and_no_current_agent() {
     let before = rows.agents.len();
     backfill_agents_into(&mut rows, tasks);
     assert_eq!(rows.agents.len(), before);
+}
+
+#[test]
+fn the_backfill_assigns_nothing_to_a_task_whose_agent_has_ended() {
+    // A18: the ended agent's name is the display name; no new name is used.
+    let mut rows = Rows::default();
+    start_agent_on_fresh_launch(&mut rows, &task(1), "host-a", "dispatch");
+    end_current_agent(&mut rows, 1, AGENT_END_WORKTREE_GONE);
+    backfill_agents_into(&mut rows, vec![task(1)]);
+    assert_eq!(rows.agents.len(), 1);
+    assert!(assigned_agent(&rows, 1).is_none());
 }
 
 #[test]
@@ -470,7 +580,8 @@ fn the_backfill_drops_the_session_facts_of_a_task_with_no_agent_to_hold_them() {
         ..task(1)
     };
     backfill_agents_into(&mut rows, vec![stale]);
-    assert!(rows.agents.is_empty());
+    assert!(current(&rows, 1).is_empty());
+    assert!(assigned_agent(&rows, 1).is_some(), "A17");
     assert!(rows.entries.is_empty());
     assert_eq!(rows.blanked, vec![1]);
 }
@@ -510,7 +621,26 @@ fn seeded(state: &str, end_reason: &str, window: &str, name: &str) -> Agent {
 fn a_seeded_agent_must_keep_the_row_invariants() {
     assert!(validate_seeded_agent(&seeded("current", "", "task-1", "ada")).is_ok());
     assert!(validate_seeded_agent(&seeded("ended", "replaced", "", "ada")).is_ok());
+    let assigned = Agent {
+        start_mode: String::new(),
+        ..seeded("assigned", "", "", "ada")
+    };
+    assert!(validate_seeded_agent(&assigned).is_ok());
     for bad in [
+        // AssignedAgentHasNoSession.
+        Agent {
+            tmux_window: "task-1".into(),
+            ..assigned.clone()
+        },
+        Agent {
+            start_mode: "dispatch".into(),
+            ..assigned.clone()
+        },
+        seeded("assigned", "replaced", "", "ada"),
+        Agent {
+            start_mode: String::new(),
+            ..seeded("current", "", "", "ada")
+        },
         seeded("ended", "replaced", "task-1", "ada"),
         seeded("ended", "", "", "ada"),
         seeded("current", "replaced", "", "ada"),

@@ -79,7 +79,15 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
         follow_task_write(&mut AgentTables(ctx), prior.as_ref(), &row);
         Ok(row)
     } else {
-        Ok(ctx.db.tasks().insert(row))
+        let created = row.id == 0;
+        let row = ctx.db.tasks().insert(row);
+        // `agents.allium`: AssignAgentOnTaskCreated (A17), in the same
+        // transaction as the insert. Only a generated id is a creation: a
+        // seed keeps its id and brings its own agents.
+        if created {
+            assign_agent_on_task_created(&mut AgentTables(ctx), row.id);
+        }
+        Ok(row)
     }
 }
 
@@ -547,7 +555,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
     clear_task_marks(ctx, task_id);
-    // agents.allium: AgentsGoWithTheirTask. Their names stay in the ledger.
+    // agents.allium: AgentsGoWithTheirTask. That frees their names (A4).
     delete_agents_of(&mut AgentTables(ctx), task_id);
     detach_learnings_from_task(ctx, task_id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);

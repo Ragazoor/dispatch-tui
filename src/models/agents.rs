@@ -15,14 +15,17 @@ use crate::define_str_enum;
 
 define_id_newtype!(AgentId, agent_id_tests);
 
-/// Whether an agent's session can still be resumed (`AgentState`).
+/// Where an agent is in its life (`AgentState`): assigned at task creation and
+/// never launched (A17), current while its session can be resumed, or ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentState {
+    Assigned,
     Current,
     Ended,
 }
 
 define_str_enum!(AgentState, "agent state" {
+    Assigned => "assigned",
     Current => "current",
     Ended => "ended",
 });
@@ -50,9 +53,11 @@ pub struct Agent {
     pub task_id: TaskId,
     pub name: String,
     pub host: String,
-    pub start_mode: DispatchMode,
+    /// `None` while assigned: it has not launched.
+    pub start_mode: Option<DispatchMode>,
     pub state: AgentState,
-    pub started_at: DateTime<Utc>,
+    /// `None` while assigned: it has not launched.
+    pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
     pub end_reason: Option<AgentEndReason>,
     // The live-session facts, moved off the task by agents A4. Each keeps the
@@ -65,14 +70,30 @@ pub struct Agent {
     pub stop_pending: bool,
 }
 
-/// `task` as the board shows it: the live-session facts and the name read off its
-/// current agent (agents A4). The stored Task row holds none of them, so the
-/// board's `Task` keeps the field names as a derived view, and every reader of
-/// `task.tmux_window`, `is_detached` and the rest reads the agent without
-/// knowing it. A task with no current agent has no session: no window, no
-/// hook timestamps, no subagents, no pending Stop.
-pub fn with_session_of(task: &Task, agent: Option<&Agent>) -> Task {
+/// `display_agent(task)` over the task's agents (agents A18): the one not
+/// ended (assigned or current), else the one that ended last.
+pub fn display_agent<'a>(agents: impl IntoIterator<Item = &'a Agent>) -> Option<&'a Agent> {
+    let mut last_ended: Option<&Agent> = None;
+    for agent in agents {
+        if agent.state != AgentState::Ended {
+            return Some(agent);
+        }
+        if last_ended.is_none_or(|l| agent.ended_at > l.ended_at) {
+            last_ended = Some(agent);
+        }
+    }
+    last_ended
+}
+
+/// `task` as the board shows it: the live-session facts read off its current
+/// agent (agents A4), and its display name (A18). The stored Task row holds
+/// none of them, so the board's `Task` keeps the field names as a derived
+/// view, and every reader of `task.tmux_window`, `is_detached` and the rest
+/// reads the agent without knowing it. A task with no current agent has no
+/// session: no window, no hook timestamps, no subagents, no pending Stop.
+pub fn with_session_of(task: &Task, agent: Option<&Agent>, display_name: Option<&str>) -> Task {
     let mut task = task.clone();
+    task.agent_name = display_name.map(str::to_string);
     match agent {
         Some(agent) => {
             task.tmux_window = agent.tmux_window.clone();
@@ -80,7 +101,6 @@ pub fn with_session_of(task: &Task, agent: Option<&Agent>) -> Task {
             task.last_notification_at = agent.last_notification_at;
             task.live_subagents = agent.live_subagents;
             task.stop_pending = agent.stop_pending;
-            task.agent_name = Some(agent.name.clone());
         }
         None => {
             task.tmux_window = None;
@@ -88,7 +108,6 @@ pub fn with_session_of(task: &Task, agent: Option<&Agent>) -> Task {
             task.last_notification_at = None;
             task.live_subagents = 0;
             task.stop_pending = false;
-            task.agent_name = None;
         }
     }
     task

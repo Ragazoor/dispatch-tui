@@ -3,8 +3,7 @@
 //! Every agent rule is the module's own generic function, run here over
 //! [`MemAgentStore`]; what is reimplemented is only the row storage. Each
 //! write is pushed into `SharedRows`, as a real agent row would arrive over
-//! the subscription (`sync.allium: SubscribeToAgents`). The ledger is not
-//! pushed: no board subscribes to it.
+//! the subscription (`sync.allium: SubscribeToAgents`).
 
 use dispatch_spacetime_module as module;
 
@@ -26,9 +25,6 @@ impl module::AgentStore for MemAgentStore<'_> {
             .filter(|a| a.task_id == task_id)
             .cloned()
             .collect()
-    }
-    fn name_is_handed_out(&self, name: &str) -> bool {
-        self.tables.handed_out_agent_names.contains_key(name)
     }
     fn name_held_by_agent(&self, name: &str) -> bool {
         self.tables.agents.values().any(|a| a.name == name)
@@ -67,11 +63,6 @@ impl module::AgentStore for MemAgentStore<'_> {
             self.tables.tasks.insert(task_id, task.clone());
             self.caller.rows.upsert_task(&task.into());
         }
-    }
-    fn insert_handed_out_name(&mut self, row: module::HandedOutAgentName) {
-        self.tables
-            .handed_out_agent_names
-            .insert(row.name.clone(), row);
     }
     fn now(&self) -> String {
         self.caller.now()
@@ -112,11 +103,5 @@ impl MemoryReducerCaller {
             &task.host,
             "dispatch",
         );
-    }
-
-    /// Every name the ledger holds, sorted: the conformance suite's view of a
-    /// table no board subscribes to.
-    pub fn handed_out_agent_names(&self) -> Vec<String> {
-        self.lock().handed_out_agent_names.keys().cloned().collect()
     }
 }

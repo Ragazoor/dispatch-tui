@@ -150,7 +150,8 @@ pub async fn handle_pane_view(
             });
         }
     }
-    // The task row already carries its current agent's name and window.
+    // The task row already carries its display name (agents A18) and its
+    // current agent's window.
     let pane_agent = |task: crate::models::Task| PaneAgent {
         id: task.id,
         agent_name: task.agent_name.unwrap_or_default(),

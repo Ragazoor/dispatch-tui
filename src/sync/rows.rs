@@ -193,25 +193,52 @@ struct Rows {
     /// session facts over the task (`models::with_session_of`), so the lookup
     /// must not scan.
     current_agent_by_task: BTreeMap<i64, i64>,
+    /// `task id -> ids of every agent it has`, kept in step with `agents`
+    /// like the index above. The display name (agents A18) is chosen among
+    /// them; a task has only a handful, so the choice is a short walk.
+    agents_by_task: BTreeMap<i64, std::collections::BTreeSet<i64>>,
 }
 
 impl Rows {
     /// Drop `agent` from the current-agent index, if it is what it holds.
     fn index_agent_out(&mut self, agent: i64) {
         if let Some(old) = self.agents.get(&agent) {
-            if self.current_agent_by_task.get(&old.task_id.0) == Some(&agent) {
-                self.current_agent_by_task.remove(&old.task_id.0);
+            let task = old.task_id.0;
+            if self.current_agent_by_task.get(&task) == Some(&agent) {
+                self.current_agent_by_task.remove(&task);
+            }
+            if let Some(ids) = self.agents_by_task.get_mut(&task) {
+                ids.remove(&agent);
+                if ids.is_empty() {
+                    self.agents_by_task.remove(&task);
+                }
             }
         }
     }
 
-    /// `task` as the board shows it: with its current agent's session facts.
+    /// Put `agent`, already in `agents`, into both indexes.
+    fn index_agent_in(&mut self, agent: &Agent) {
+        if agent.is_current() {
+            self.current_agent_by_task
+                .insert(agent.task_id.0, agent.id.0);
+        }
+        self.agents_by_task
+            .entry(agent.task_id.0)
+            .or_default()
+            .insert(agent.id.0);
+    }
+
+    /// `task` as the board shows it: with its current agent's session facts
+    /// and its display name.
     fn view(&self, task: &Task) -> Task {
         let agent = self
             .current_agent_by_task
             .get(&task.id.0)
             .and_then(|id| self.agents.get(id));
-        crate::models::with_session_of(task, agent)
+        let display = self.agents_by_task.get(&task.id.0).and_then(|ids| {
+            crate::models::display_agent(ids.iter().filter_map(|id| self.agents.get(id)))
+        });
+        crate::models::with_session_of(task, agent, display.map(|a| a.name.as_str()))
     }
 
     /// The window of `task`'s current agent, without cloning anything.
@@ -806,10 +833,7 @@ impl SharedRows {
         match decode::agent(row) {
             Ok(agent) => self.write(|rows| {
                 rows.index_agent_out(agent.id.0);
-                if agent.is_current() {
-                    rows.current_agent_by_task
-                        .insert(agent.task_id.0, agent.id.0);
-                }
+                rows.index_agent_in(&agent);
                 rows.raw_agents.insert(agent.id.0, row.clone());
                 rows.agents.insert(agent.id.0, agent);
                 true

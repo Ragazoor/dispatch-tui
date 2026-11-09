@@ -57,6 +57,12 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 46: every created task gets an `assigned` agent in the same transaction
+///    (`agents.allium: AssignAgentOnTaskCreated`, A17), the first dispatch
+///    claim launches it under its name, and a name is free again once no
+///    agent row holds it (A4; the name ledger is retired). The backfill on
+///    the first connection after the publish assigns an agent to every task
+///    with none. An old board cannot read the `assigned` state.
 /// 45: `set_epic_group_by_repo` — the group-by-repo toggle's flag write and its
 ///    regroup or flatten in one transaction, so a refused move no longer
 ///    leaves the flag set (`tasks_epics.rs`; `epics.allium:
@@ -240,7 +246,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 45;
+pub const RULES_VERSION: i64 = 46;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first

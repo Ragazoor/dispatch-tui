@@ -1,12 +1,12 @@
-//! Agents: the Claude Code session that works a task, as rows of their own,
-//! and the ledger of every agent name ever handed out.
+//! Agents: the Claude Code session that works a task, as rows of their own.
 //!
 //! Spec: `docs/specs/agents.allium` (step A1, task #90115):
 //! `StartAgentOnFreshLaunch`, `EndAgentWhenLaunchFails`,
 //! `ResumeKeepsTheAgent`, `EndAgentWhenWorktreeGoes`, `AgentsGoWithTheirTask`,
 //! `BackfillCurrentAgents` and the invariants `OneCurrentAgentPerTask`,
-//! `CurrentAgentTracksWorktree`,
-//! `AgentNameIsNeverReused` and `AgentNameIsNotAnId`.
+//! `CurrentAgentTracksWorktree`, `AgentNamesAreUnique` and
+//! `AgentNameIsNotAnId`. Since task #99056 also `AssignAgentOnTaskCreated`
+//! (A17), the display name (A18) and `OneOpenAgentPerTask`.
 //!
 //! Every rule is written ONCE, generic over [`AgentStore`]: the module runs it
 //! over its live tables ([`AgentTables`]) and the board's in-memory twin
@@ -34,20 +34,22 @@ pub struct Agent {
     /// Indexed: every task write looks up the task's current agent.
     #[index(btree)]
     pub task_id: i64,
-    /// Picked by the store when the agent starts and never changed (A5).
-    /// Unique across every agent there is; the ledger keeps it unique across
-    /// every agent there has ever been.
+    /// Picked by the store when the agent is assigned or starts, and never
+    /// changed (A5). Unique across every agent row (A4); deleting a task frees
+    /// its agents' names.
     #[unique]
     pub name: String,
     /// The machine its session runs on: the requester of the claim that
-    /// started it, or the task's host for a backfilled agent. Indexed: the
+    /// started it, or the task's host for a backfilled agent. `""` while
+    /// assigned. Indexed: the
     /// per-caller view serves a person the agents on the hosts they own.
     #[index(btree)]
     pub host: String,
-    /// [`AGENT_START_MODES`].
+    /// [`AGENT_START_MODES`], `""` while assigned.
     pub start_mode: String,
-    /// [`AGENT_CURRENT`] or [`AGENT_ENDED`].
+    /// [`AGENT_ASSIGNED`], [`AGENT_CURRENT`] or [`AGENT_ENDED`].
     pub state: String,
+    /// When it launched, `""` while assigned.
     pub started_at: String,
     pub ended_at: String,
     /// [`AGENT_END_REASONS`] once ended, `""` while current.
@@ -68,10 +70,11 @@ pub struct Agent {
     pub stop_pending_at: String,
 }
 
-/// One name ever handed out to an agent (`agents.allium: HandedOutAgentName`).
-/// Written in the transaction that creates the agent and never deleted, not
-/// even when the agent goes with its task: the picker reads this table, which
-/// is what keeps a deleted task's agent names out of reuse.
+/// RETIRED (`agents.allium`, A4, task #99056): the ledger that once kept every
+/// agent name handed out ever. Nothing reads or writes it now; a name is held
+/// while an Agent row holds it. The table stays only because SpacetimeDB
+/// cannot drop a table that holds rows, and `seed_handed_out_agent_names`
+/// still accepts an old snapshot's rows so an import does not fail.
 #[spacetimedb::table(accessor = handed_out_agent_names, public)]
 #[derive(Clone, Debug)]
 pub struct HandedOutAgentName {
@@ -82,6 +85,8 @@ pub struct HandedOutAgentName {
 
 // -- Vocabulary ---------------------------------------------------------------
 
+/// Picked at task creation and never launched (A17).
+pub const AGENT_ASSIGNED: &str = "assigned";
 pub const AGENT_CURRENT: &str = "current";
 pub const AGENT_ENDED: &str = "ended";
 
@@ -349,17 +354,18 @@ pub fn agent_follow_up(prior: Option<&Task>, row: &Task) -> AgentFollowUp {
 /// end reason exactly when the agent has ended.
 pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
     let id = row.id;
+    let ended = match row.state.as_str() {
+        AGENT_ASSIGNED => return validate_seeded_assigned_agent(row),
+        AGENT_CURRENT => false,
+        AGENT_ENDED => true,
+        other => return Err(format!("agent {id}: unknown state {other:?}")),
+    };
     if !AGENT_START_MODES.contains(&row.start_mode.as_str()) {
         return Err(format!(
             "agent {id}: unknown start mode {:?}",
             row.start_mode
         ));
     }
-    let ended = match row.state.as_str() {
-        AGENT_CURRENT => false,
-        AGENT_ENDED => true,
-        other => return Err(format!("agent {id}: unknown state {other:?}")),
-    };
     // AgentNameIsNotAnId, by the format rule every picked name already passes.
     validate_agent_name(&row.name).map_err(|why| format!("agent {id}: {why}"))?;
     if ended != AGENT_END_REASONS.contains(&row.end_reason.as_str()) {
@@ -379,6 +385,29 @@ pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
     Ok(())
 }
 
+/// `AssignedAgentHasNoSession`: an assigned agent has a valid name and
+/// nothing else — no start mode, host, start, end or session fact.
+fn validate_seeded_assigned_agent(row: &Agent) -> Result<(), String> {
+    let id = row.id;
+    validate_agent_name(&row.name).map_err(|why| format!("agent {id}: {why}"))?;
+    let launched = !row.start_mode.is_empty()
+        || !row.host.is_empty()
+        || !row.started_at.is_empty()
+        || !row.ended_at.is_empty()
+        || !row.end_reason.is_empty();
+    let session = !row.tmux_window.is_empty()
+        || !row.last_pre_tool_use_at.is_empty()
+        || !row.last_notification_at.is_empty()
+        || row.live_subagents != 0
+        || row.stop_pending;
+    if launched || session {
+        return Err(format!(
+            "agent {id}: an assigned agent has never launched and holds no session"
+        ));
+    }
+    Ok(())
+}
+
 // -- The store seam -----------------------------------------------------------
 
 /// The row operations the agent rules need, implemented by the module over its
@@ -387,11 +416,7 @@ pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
 pub trait AgentStore {
     /// Every agent `task_id` has had, current and ended.
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent>;
-    /// Whether the ledger holds `name`.
-    fn name_is_handed_out(&self, name: &str) -> bool;
-    /// Whether an agent row holds `name`. The picker treats it as taken too:
-    /// a backstop for a row written without its ledger entry, so the insert
-    /// cannot fail on the unique name.
+    /// Whether an agent row holds `name` (A4: a held name is taken).
     fn name_held_by_agent(&self, name: &str) -> bool;
     /// Insert with a generated id.
     fn insert_agent(&mut self, row: Agent);
@@ -405,7 +430,6 @@ pub trait AgentStore {
     /// Blank the six session facts on `task_id`'s Task row, bypassing the
     /// task write seam: the backfill's own write.
     fn blank_task_session_facts(&mut self, task_id: i64);
-    fn insert_handed_out_name(&mut self, row: HandedOutAgentName);
     /// The transaction's timestamp, in the store's spelling.
     fn now(&self) -> String;
     /// Where the name picker starts; the module seeds it from its clock.
@@ -421,21 +445,45 @@ pub fn current_agent<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> Option<
         .find(|a| a.state == AGENT_CURRENT)
 }
 
-/// Pick a fresh name for `task_id` and write its ledger row
-/// (`AgentNameIsNeverReused`). The task id is mixed into the store's seed: the
-/// clock does not move inside one reducer, so a backfill naming many tasks
-/// would otherwise start every pick at the same name and walk past all the
-/// names it had just handed out.
-fn hand_out_agent_name<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) -> String {
+/// `assigned_agent(task)`: the task's one assigned agent, or `None`
+/// (`OneOpenAgentPerTask`).
+pub fn assigned_agent<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> Option<Agent> {
+    store
+        .agents_of_task(task_id)
+        .into_iter()
+        .find(|a| a.state == AGENT_ASSIGNED)
+}
+
+/// `display_agent(task)` over the task's agents (A18): the one not ended
+/// (assigned or current), else the one that ended last. The store's
+/// timestamps sort as text, so the latest `ended_at` is the greatest.
+pub fn display_agent(agents: &[Agent]) -> Option<&Agent> {
+    agents
+        .iter()
+        .find(|a| a.state != AGENT_ENDED)
+        .or_else(|| agents.iter().max_by(|a, b| a.ended_at.cmp(&b.ended_at)))
+}
+
+/// Pick a fresh name for `task_id`: the first one no Agent row holds (A4).
+/// The task id is mixed into the store's seed: the clock does not move inside
+/// one reducer, so a backfill naming many tasks would otherwise start every
+/// pick at the same name and walk past all the names it had just picked.
+fn hand_out_agent_name<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> String {
     let seed = store.name_seed().wrapping_add(task_id as u64);
-    let name = pick_agent_name(seed, |n| {
-        store.name_is_handed_out(n) || store.name_held_by_agent(n)
+    pick_agent_name(seed, |n| store.name_held_by_agent(n))
+}
+
+/// `AssignAgentOnTaskCreated` (A17): give a newly created task its assigned
+/// agent. Called by the one task write seam on each side, on a true create
+/// (generated id) only — a seed brings its own agents.
+pub fn assign_agent_on_task_created<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) {
+    let name = hand_out_agent_name(store, task_id);
+    store.insert_agent(Agent {
+        task_id,
+        name,
+        state: AGENT_ASSIGNED.into(),
+        ..blank_agent()
     });
-    store.insert_handed_out_name(HandedOutAgentName {
-        name: name.clone(),
-        handed_out_at: store.now(),
-    });
-    name
 }
 
 /// Start a new current agent for `task`, with a fresh name and the task's
@@ -461,9 +509,10 @@ pub fn end_current_agent<S: AgentStore + ?Sized>(store: &mut S, task_id: i64, re
     }
 }
 
-/// `StartAgentOnFreshLaunch`: end the task's current agent as replaced and
-/// start a new one. Called by the dispatch claim, after the claim's task write
-/// succeeded; `task` is the claimed row.
+/// `StartAgentOnFreshLaunch`: launch the task's assigned agent if it has one
+/// (A17); otherwise end its current agent as replaced and start a new one.
+/// Called by the dispatch claim, after the claim's task write succeeded;
+/// `task` is the claimed row.
 pub fn start_agent_on_fresh_launch<S: AgentStore + ?Sized>(
     store: &mut S,
     task: &Task,
@@ -471,9 +520,18 @@ pub fn start_agent_on_fresh_launch<S: AgentStore + ?Sized>(
     start_mode: &str,
 ) {
     end_current_agent(store, task.id, AGENT_END_REPLACED);
-    // The claim stamps the new agent's activity, so the dispatch watchdog
+    // The claim stamps the agent's activity, so the dispatch watchdog
     // measures from the claim (`agent-health.allium`, `DispatchTask`).
     let claimed_at = store.now();
+    if let Some(waiting) = assigned_agent(store, task.id) {
+        let launched = new_agent(task.id, &waiting.name, requester, start_mode, &claimed_at);
+        store.update_agent(Agent {
+            id: waiting.id,
+            last_pre_tool_use_at: claimed_at,
+            ..launched
+        });
+        return;
+    }
     create_agent(store, task.id, requester, start_mode, |agent| Agent {
         last_pre_tool_use_at: claimed_at,
         ..agent
@@ -508,8 +566,8 @@ pub fn update_current_agent<S: AgentStore + ?Sized>(
     }
 }
 
-/// `AgentsGoWithTheirTask`: delete every agent `task_id` has had. Their names
-/// stay in the ledger.
+/// `AgentsGoWithTheirTask`: delete every agent `task_id` has had, which frees
+/// their names (A4).
 pub fn delete_agents_of<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) {
     for agent in store.agents_of_task(task_id) {
         store.delete_agent(agent.id);
@@ -519,8 +577,9 @@ pub fn delete_agents_of<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) {
 /// `BackfillCurrentAgents`: give every task in `tasks` that has a worktree and
 /// no current agent one, with a fresh name; move the session facts a Task row
 /// still holds onto its current agent and blank them there; point its
-/// subagent entries at that agent. Idempotent: a second run finds the Task
-/// facts blank and the entries owned.
+/// subagent entries at that agent. A task with no worktree and no agent at
+/// all gets an assigned one (A17). Idempotent: a second run finds the Task
+/// facts blank, the entries owned and every task with an agent.
 pub fn backfill_agents_into<S: AgentStore + ?Sized>(
     store: &mut S,
     tasks: impl IntoIterator<Item = Task>,
@@ -547,6 +606,9 @@ pub fn backfill_agents_into<S: AgentStore + ?Sized>(
         if holds {
             store.blank_task_session_facts(task.id);
         }
+        if task.worktree.is_empty() && store.agents_of_task(task.id).is_empty() {
+            assign_agent_on_task_created(store, task.id);
+        }
     }
 }
 
@@ -558,14 +620,6 @@ pub(crate) struct AgentTables<'a>(pub(crate) &'a ReducerContext);
 impl AgentStore for AgentTables<'_> {
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent> {
         self.0.db.agents().task_id().filter(&task_id).collect()
-    }
-    fn name_is_handed_out(&self, name: &str) -> bool {
-        self.0
-            .db
-            .handed_out_agent_names()
-            .name()
-            .find(&name.to_string())
-            .is_some()
     }
     fn name_held_by_agent(&self, name: &str) -> bool {
         self.0.db.agents().name().find(&name.to_string()).is_some()
@@ -604,9 +658,6 @@ impl AgentStore for AgentTables<'_> {
         if let Some(task) = self.0.db.tasks().id().find(task_id) {
             self.0.db.tasks().id().update(without_session_facts(task));
         }
-    }
-    fn insert_handed_out_name(&mut self, row: HandedOutAgentName) {
-        self.0.db.handed_out_agent_names().insert(row);
     }
     fn now(&self) -> String {
         now(self.0)

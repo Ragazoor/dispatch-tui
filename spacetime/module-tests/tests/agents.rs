@@ -1,5 +1,5 @@
-//! Agent rows, the name ledger and the live-session facts that live on the
-//! current agent (`agents.allium`, agents A1 and A4), run against the in-memory
+//! Agent rows, their names and the live-session facts that live on the
+//! current agent (`agents.allium`, agents A1, A4 and A17), run against the in-memory
 //! store. Each test drives the reducers a board calls and reads the rows back.
 
 mod common;
@@ -34,8 +34,11 @@ fn current_count(store: &Store, task: i64) -> usize {
         .count()
 }
 
-fn ledger_count(store: &Store) -> usize {
-    store.db().handed_out_agent_names().iter().count()
+fn assigned_name(store: &Store, task: i64) -> String {
+    let agents = agents_of(store, task);
+    assert_eq!(agents.len(), 1, "one agent: {agents:?}");
+    assert_eq!(agents[0].state, AGENT_ASSIGNED);
+    agents[0].name.clone()
 }
 
 fn subagent_rows(store: &Store, task: i64) -> Vec<TaskSubagent> {
@@ -153,14 +156,38 @@ fn subagent_start_call(store: &Store, task: i64) {
         .expect("subagent_start");
 }
 
-// -- agents A1: agent rows and the name ledger ---------------------------------
+// -- agents A1 and A17: agent rows and their names ------------------------------
 
-/// `StartAgentOnFreshLaunch`: the claim creates a current agent and its ledger
-/// row in the same transaction, and the provisioned report's window is written
-/// on the agent, never on the Task row (agents A4).
+/// `AssignAgentOnTaskCreated`: a created task has an assigned agent from the
+/// same transaction, with a name and nothing else.
+#[test]
+fn a_created_task_has_an_assigned_agent() {
+    let (store, id) = backlog_task();
+    let name = assigned_name(&store, id);
+    assert!(AGENT_NAMES.contains(&name.as_str()), "{name}");
+    let agent = agents_of(&store, id).remove(0);
+    assert_eq!(agent.host, "");
+    assert_eq!(agent.start_mode, "");
+    assert_eq!(agent.started_at, "");
+    assert_eq!(current_count(&store, id), 0);
+}
+
+/// A seed restores rows with their own ids: it assigns nothing.
+#[test]
+fn a_seeded_task_gets_no_assigned_agent() {
+    let store = Store::new();
+    store.register_host_for(HOST_A, "alice");
+    seed_tasks_call(&store, vec![legacy_task(1, "backlog", "")]);
+    assert!(agents_of(&store, 1).is_empty());
+}
+
+/// `StartAgentOnFreshLaunch`: the first claim launches the assigned agent
+/// under its name, and the provisioned report's window is written on the
+/// agent, never on the Task row (agents A4).
 #[test]
 fn a_dispatch_starts_a_named_agent_that_holds_the_window() {
     let (store, id) = backlog_task();
+    let name = assigned_name(&store, id);
 
     dispatch(&store, id, "research").expect("request_dispatch");
     assert_eq!(current_count(&store, id), 1);
@@ -168,17 +195,7 @@ fn a_dispatch_starts_a_named_agent_that_holds_the_window() {
     assert_eq!(agent.host, HOST_A);
     assert_eq!(agent.start_mode, "research");
     assert_eq!(agent.tmux_window, "");
-    let name = agent.name;
-    assert!(AGENT_NAMES.contains(&name.as_str()), "{name}");
-    assert_eq!(
-        store
-            .db()
-            .handed_out_agent_names()
-            .iter()
-            .filter(|n| n.name == name)
-            .count(),
-        1
-    );
+    assert_eq!(agent.name, name, "the assigned agent runs the work");
 
     let request = open_request(&store, id);
     claim(&store, request);
@@ -194,15 +211,15 @@ fn a_dispatch_starts_a_named_agent_that_holds_the_window() {
     assert_eq!(agents_of(&store, id).len(), 1);
 }
 
-/// A refused claim starts no agent and hands out no name.
+/// A refused claim launches nothing: the assigned agent stays as it was.
 #[test]
 fn a_refused_dispatch_starts_no_agent() {
     let (store, id) = backlog_task();
+    let name = assigned_name(&store, id);
     move_task(&store, id, "review", "awaiting_review");
 
     assert!(dispatch(&store, id, "").is_err());
-    assert!(agents_of(&store, id).is_empty());
-    assert_eq!(ledger_count(&store), 0);
+    assert_eq!(assigned_name(&store, id), name);
 }
 
 /// `EndAgentWhenLaunchFails`: a failed request that releases the bare claim
@@ -272,10 +289,10 @@ fn a_dispatch_over_a_kept_worktree_replaces_the_agent() {
     assert_eq!(current_count(&store, id), 1);
 }
 
-/// `AgentsGoWithTheirTask`: a delete removes every agent the task had, and
-/// their names stay in the ledger.
+/// `AgentsGoWithTheirTask`: a delete removes every agent the task had, which
+/// frees their names (A4).
 #[test]
-fn deleting_a_task_removes_its_agents_and_keeps_their_names() {
+fn deleting_a_task_removes_its_agents() {
     let (store, id) = backlog_task();
     dispatch_and_provision(&store, id);
     move_task(&store, id, "done", "none");
@@ -284,7 +301,7 @@ fn deleting_a_task_removes_its_agents_and_keeps_their_names() {
         .call("alice", |ctx| delete_task(ctx, id))
         .expect("delete_task");
     assert!(agents_of(&store, id).is_empty());
-    assert_eq!(ledger_count(&store), 1);
+    assert_eq!(store.db().agents().iter().count(), 0);
 }
 
 /// A task as a store published before agents held it: it has a worktree and
@@ -315,7 +332,8 @@ fn backfill(store: &Store) {
 }
 
 /// `BackfillCurrentAgents`: every task with a worktree and no current agent
-/// gets one, once.
+/// gets one, once; a task with no agent at all and no worktree gets an
+/// assigned one (A17).
 #[test]
 fn the_backfill_names_every_task_with_a_worktree() {
     let store = Store::new();
@@ -334,14 +352,14 @@ fn the_backfill_names_every_task_with_a_worktree() {
     assert_eq!(current_count(&store, 1), 1);
     assert_eq!(current_agent(&store, 1).host, HOST_A);
     assert_eq!(current_agent(&store, 1).start_mode, "dispatch");
-    assert!(agents_of(&store, 2).is_empty());
-    assert_eq!(ledger_count(&store), 1);
+    assert_eq!(agents_of(&store, 1).len(), 1);
+    assigned_name(&store, 2);
 }
 
-/// A seeded agent's name enters the ledger, so the picker never hands it out
-/// again (`AgentNameIsNeverReused`).
+/// A seeded agent keeps its name, and a second open agent for its task is
+/// refused (`OneOpenAgentPerTask`).
 #[test]
-fn a_seeded_agent_takes_its_name_out_of_the_pool() {
+fn a_seeded_agent_keeps_its_name_and_one_open_agent_per_task() {
     let store = Store::new();
     let agent = Agent {
         id: 5,
@@ -361,17 +379,32 @@ fn a_seeded_agent_takes_its_name_out_of_the_pool() {
         stop_pending_at: String::new(),
     };
     store
-        .call_as_scheduler(|ctx| seed_agents(ctx, vec![agent]))
+        .call_as_scheduler(|ctx| seed_agents(ctx, vec![agent.clone()]))
         .expect("seed_agents");
-    assert_eq!(
-        store
-            .db()
-            .handed_out_agent_names()
-            .iter()
-            .filter(|n| n.name == "ada")
-            .count(),
-        1
-    );
+    assert_eq!(agents_of(&store, 9)[0].name, "ada");
+
+    let assigned = Agent {
+        id: 6,
+        name: "linus".into(),
+        host: String::new(),
+        start_mode: String::new(),
+        state: AGENT_ASSIGNED.into(),
+        started_at: String::new(),
+        ended_at: String::new(),
+        end_reason: String::new(),
+        ..agent.clone()
+    };
+    store
+        .call_as_scheduler(|ctx| seed_agents(ctx, vec![assigned.clone()]))
+        .expect("an assigned agent beside an ended one");
+    let second = Agent {
+        id: 7,
+        name: "grace".into(),
+        ..assigned
+    };
+    assert!(store
+        .call_as_scheduler(|ctx| seed_agents(ctx, vec![second]))
+        .is_err());
 }
 
 // -- agents A4: the live-session facts move onto the agent ---------------------
@@ -455,15 +488,17 @@ fn a_replaced_agent_holds_nothing_and_the_new_one_starts_clean() {
 }
 
 /// A hook for a task with no current agent writes no agent fact and starts no
-/// agent (decision A15); a patch that SETS a fact is refused, one that clears
-/// is a no-op.
+/// agent (decision A15): its assigned agent (A17) is left as it was. A patch
+/// that SETS a fact is refused, one that clears is a no-op.
 #[test]
 fn a_session_fact_for_a_task_with_no_agent_is_refused_or_ignored() {
     let (store, id) = backlog_task();
+    let before = format!("{:?}", agents_of(&store, id));
 
     subagent_start_call(&store, id);
     assert_eq!(store.db().task_subagents().iter().count(), 0);
-    assert!(agents_of(&store, id).is_empty());
+    assert_eq!(format!("{:?}", agents_of(&store, id)), before);
+    assert_eq!(current_count(&store, id), 0);
 
     assert!(patch(
         &store,

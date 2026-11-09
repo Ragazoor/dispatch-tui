@@ -153,9 +153,6 @@ struct Tables {
     feed_requests: BTreeMap<i64, module::FeedRequest>,
     /// agents A1.
     agents: BTreeMap<i64, module::Agent>,
-    /// The name ledger, keyed by name. Never pushed into `SharedRows`: no
-    /// board subscribes to it.
-    handed_out_agent_names: BTreeMap<String, module::HandedOutAgentName>,
     next_task_id: i64,
     next_epic_id: i64,
     next_repo_path_id: i64,

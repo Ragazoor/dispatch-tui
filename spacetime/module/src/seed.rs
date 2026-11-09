@@ -116,9 +116,7 @@ pub fn seed_work_package_links(
 }
 
 /// Agents keep their ids, like every seeded row; a name already held by a
-/// different agent is refused rather than overwritten, and every seeded name
-/// is written to the ledger if it is not there yet, so the picker can never
-/// hand it out again (`AgentNameIsNeverReused`).
+/// different agent is refused rather than overwritten (`AgentNamesAreUnique`).
 #[spacetimedb::reducer]
 pub fn seed_agents(ctx: &ReducerContext, rows: Vec<Agent>) -> Result<(), String> {
     require_restore_authority(ctx)?;
@@ -135,30 +133,19 @@ pub fn seed_agents(ctx: &ReducerContext, rows: Vec<Agent>) -> Result<(), String>
             }
         }
         validate_seeded_agent(&row)?;
-        if row.state == AGENT_CURRENT
+        // OneOpenAgentPerTask: assigned and current never sit side by side.
+        if row.state != AGENT_ENDED
             && ctx
                 .db
                 .agents()
                 .task_id()
                 .filter(&row.task_id)
-                .any(|a| a.id != row.id && a.state == AGENT_CURRENT)
+                .any(|a| a.id != row.id && a.state != AGENT_ENDED)
         {
             return Err(format!(
-                "agent {}: task {} already has a current agent",
+                "agent {}: task {} already has an open agent",
                 row.id, row.task_id
             ));
-        }
-        if ctx
-            .db
-            .handed_out_agent_names()
-            .name()
-            .find(&row.name)
-            .is_none()
-        {
-            ctx.db.handed_out_agent_names().insert(HandedOutAgentName {
-                name: row.name.clone(),
-                handed_out_at: row.started_at.clone(),
-            });
         }
         if ctx.db.agents().id().find(row.id).is_some() {
             ctx.db.agents().id().update(row);

@@ -33,6 +33,7 @@ impl MemoryReducerCaller {
         }
         // The six live-session facts are the current agent's since A4.
         let mut row = module::without_session_facts(row);
+        let created = row.id == 0;
         let id = Self::assign_id(row.id, &mut tables.next_task_id);
         row.id = id;
         let prior = tables.tasks.insert(id, row.clone());
@@ -43,6 +44,10 @@ impl MemoryReducerCaller {
         // Mirrors the module's `write_task`: EndAgentWhenWorktreeGoes
         // (agents.allium).
         module::follow_task_write(&mut self.agent_store(tables), prior.as_ref(), &row);
+        // Mirrors the module's `store_task`: AssignAgentOnTaskCreated (A17).
+        if created {
+            module::assign_agent_on_task_created(&mut self.agent_store(tables), id);
+        }
         self.rows.upsert_task(&row.into());
         Ok(())
     }

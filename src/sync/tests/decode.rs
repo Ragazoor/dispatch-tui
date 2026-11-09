@@ -253,7 +253,7 @@ fn an_agent_row_decodes_with_its_vocabulary() {
     let agent = decode::agent(&agent_row()).unwrap();
     assert_eq!(agent.task_id, TaskId(9));
     assert_eq!(agent.name, "ada");
-    assert_eq!(agent.start_mode, DispatchMode::Research);
+    assert_eq!(agent.start_mode, Some(DispatchMode::Research));
     assert_eq!(agent.state, AgentState::Ended);
     assert_eq!(agent.end_reason, Some(AgentEndReason::WorktreeGone));
     assert!(agent.ended_at.is_some());

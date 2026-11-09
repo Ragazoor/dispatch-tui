@@ -522,15 +522,33 @@ pub fn dispatch_request(row: &bindings::DispatchRequest) -> Decoded<DispatchRequ
 
 /// The store's `agents` row as the board's [`Agent`]. An unknown start mode,
 /// state or end reason refuses the row rather than guessing: read as current
-/// or as ended, a row from a newer binary would name the wrong session.
+/// or as ended, a row from a newer binary would name the wrong session. An
+/// assigned agent (A17) has never launched, so it has no start mode and no
+/// start; any other state needs both.
 pub fn agent(row: &bindings::Agent) -> Decoded<Agent> {
     const T: &str = "agents";
     let refuse = |detail: String| DecodeError::new(T, row.id, detail);
 
-    let start_mode = DispatchMode::parse(&row.start_mode)
-        .ok_or_else(|| refuse(format!("unknown start mode {:?}", row.start_mode)))?;
     let state = AgentState::parse(&row.state)
         .ok_or_else(|| refuse(format!("unknown state {:?}", row.state)))?;
+    let launched = state != AgentState::Assigned;
+    let start_mode = match text(&row.start_mode) {
+        None if !launched => None,
+        mode => Some(
+            DispatchMode::parse(mode.unwrap_or_default())
+                .ok_or_else(|| refuse(format!("unknown start mode {:?}", row.start_mode)))?,
+        ),
+    };
+    let started_at = if launched {
+        Some(required_timestamp(
+            T,
+            row.id,
+            "started_at",
+            &row.started_at,
+        )?)
+    } else {
+        timestamp(T, row.id, "started_at", &row.started_at)?
+    };
     let end_reason = match text(&row.end_reason) {
         None => None,
         Some(reason) => Some(
@@ -546,7 +564,7 @@ pub fn agent(row: &bindings::Agent) -> Decoded<Agent> {
         host: row.host.clone(),
         start_mode,
         state,
-        started_at: required_timestamp(T, row.id, "started_at", &row.started_at)?,
+        started_at,
         ended_at: timestamp(T, row.id, "ended_at", &row.ended_at)?,
         end_reason,
         tmux_window: tmux_window(&row.tmux_window),

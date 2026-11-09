@@ -9,6 +9,7 @@
 mod connection;
 mod decode;
 mod dispatch_requests;
+mod display_name;
 mod encode;
 mod identity;
 mod offline_connector;

@@ -8,7 +8,7 @@ use super::*;
 struct AgentShape {
     task_id: TaskId,
     host: String,
-    start_mode: dispatch_tui::models::DispatchMode,
+    start_mode: Option<dispatch_tui::models::DispatchMode>,
     state: dispatch_tui::models::AgentState,
     end_reason: Option<dispatch_tui::models::AgentEndReason>,
     tmux_window: Option<String>,
@@ -30,11 +30,12 @@ fn agent_shapes(rows: &SharedRows) -> Vec<AgentShape> {
         .collect()
 }
 
-/// agents A1 (`agents.allium`). The in-memory caller starts, mirrors, ends and
-/// deletes agents the way the real module does, on the same calls: the claim
-/// starts one, the provisioned report and a window clear mirror the window, a
-/// failed launch and a worktree clear end one, a relaunch replaces one, and a
-/// delete takes every agent of the task.
+/// agents A1 and A17 (`agents.allium`). The in-memory caller assigns, starts,
+/// mirrors, ends and deletes agents the way the real module does, on the same
+/// calls: a create assigns one, the first claim launches it, the provisioned
+/// report and a window clear mirror the window, a failed launch and a worktree
+/// clear end one, a relaunch starts a new one, and a delete takes every agent
+/// of the task.
 #[test]
 fn memory_caller_serves_agents_like_the_real_module() {
     if !spacetime_available_or_skip() {
@@ -141,6 +142,22 @@ fn memory_caller_serves_agents_like_the_real_module() {
         assert_eq!(failing, mem.create_task(mine()).await.unwrap());
         wait_for!(rows_real.task(failing).is_some());
 
+        // -- AssignAgentOnTaskCreated: a name before any launch ---------------------
+        wait_for!(rows_real.agents().len() == 2);
+        same_agents();
+        let assigned_name = |rows: &SharedRows| {
+            let agents: Vec<_> = rows
+                .agents()
+                .into_iter()
+                .filter(|a| a.task_id == task)
+                .collect();
+            assert_eq!(agents.len(), 1, "one assigned agent");
+            assert_eq!(agents[0].state, dispatch_tui::models::AgentState::Assigned);
+            agents[0].name.clone()
+        };
+        let named_real = assigned_name(&rows_real);
+        let named_mem = assigned_name(&rows_mem);
+
         // -- StartAgentOnFreshLaunch, then the provisioned window ------------------
         let dispatch = |task: TaskId, mode: &'static str| {
             let real = &real;
@@ -172,6 +189,9 @@ fn memory_caller_serves_agents_like_the_real_module() {
         let (r, m) = dispatch(task, "research").await;
         wait_for!(rows_real.current_agent(task).is_some());
         same_agents();
+        // The first launch runs the assigned agent, under its name.
+        assert_eq!(rows_real.current_agent(task).unwrap().name, named_real);
+        assert_eq!(rows_mem.current_agent(task).unwrap().name, named_mem);
         for (caller, id) in [
             (&real as &dyn ReducerCaller, r),
             (&mem as &dyn ReducerCaller, m),
@@ -254,7 +274,7 @@ fn memory_caller_serves_agents_like_the_real_module() {
         wait_for!(rows_real.current_agent(task).is_some());
         same_agents();
 
-        // -- BackfillCurrentAgents: nothing to do on either side -----------------------
+        // -- BackfillCurrentAgents: every task has an agent, nothing to do -------------
         let backfilled = instance.call("backfill_agents", &[]);
         assert!(backfilled.status.success(), "{}", describe(&backfilled));
         mem.backfill_agents().unwrap().applied().unwrap();
@@ -277,10 +297,6 @@ fn memory_caller_serves_agents_like_the_real_module() {
         mem.delete_task(task).await.unwrap().applied().unwrap();
         wait_for!(rows_real.agents().iter().all(|a| a.task_id != task));
         same_agents();
-        assert_eq!(
-            mem.handed_out_agent_names().len(),
-            3,
-            "deleted agents keep their names"
-        );
+        assert!(rows_mem.agents().iter().all(|a| a.task_id != task));
     });
 }
