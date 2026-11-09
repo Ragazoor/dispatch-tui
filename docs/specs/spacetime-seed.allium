@@ -699,8 +699,9 @@ rule StoreRefusesUnknownStatus {
         -- single seam, and create_epic, patch_epic and seed_epics each make
         -- the same check on the row they would leave
         -- (spacetime/module/src/support.rs::validate_status). A few writes
-        -- bypass both because they never set a status: the feed's update of
-        -- an existing task and its epic upserts, the owner backfill, the
+        -- bypass both because none takes a status from the caller: the
+        -- feed's update of an existing task and its epic upserts (a new
+        -- feed epic's status is the module's own), the owner backfill, the
         -- agent-state write and the phoenix predecessor's flag clear. The known statuses are exactly
         -- core/TaskStatus's four (backlog, running, review, done), which is
         -- the type both core/Task.status and core/Epic.status declare; the
