@@ -308,16 +308,8 @@ fn a_second_feed_role_under_one_parent_is_refused() {
 #[test]
 fn root_feed_roles_are_unique_per_creator() {
     let roots = [epic(1, 0, "PR Reviews", "reviews_parent", "manual", "a")];
-    assert!(check_epic_unique_among(
-        &epic(2, 0, "PR Reviews", "reviews_parent", "manual", "b"),
-        &roots
-    )
-    .is_ok());
-    assert!(check_epic_unique_among(
-        &epic(2, 0, "PR Reviews", "reviews_parent", "manual", "a"),
-        &roots
-    )
-    .is_err());
+    assert!(check_epic_unique_among(&epic(2, 0, "PR Reviews", "reviews_parent", "manual", "b"), &roots).is_ok());
+    assert!(check_epic_unique_among(&epic(2, 0, "PR Reviews", "reviews_parent", "manual", "a"), &roots).is_err());
 }
 
 /// The candidate itself is not its own duplicate (a patch re-checks the row).
@@ -333,19 +325,11 @@ fn an_epic_is_not_its_own_duplicate() {
 fn a_second_repo_group_with_one_title_is_refused() {
     let siblings = [epic(1, 7, "dispatch", "none", "repo-group", "a")];
     assert_eq!(
-        check_epic_unique_among(
-            &epic(2, 7, "dispatch", "none", "repo-group", "a"),
-            &siblings
-        )
-        .unwrap_err(),
+        check_epic_unique_among(&epic(2, 7, "dispatch", "none", "repo-group", "a"), &siblings).unwrap_err(),
         "a repo-group epic titled 'dispatch' already exists under this parent"
     );
-    assert!(
-        check_epic_unique_among(&epic(2, 7, "dispatch", "none", "manual", "a"), &siblings).is_ok()
-    );
-    assert!(
-        check_epic_unique_among(&epic(2, 7, "other", "none", "repo-group", "a"), &siblings).is_ok()
-    );
+    assert!(check_epic_unique_among(&epic(2, 7, "dispatch", "none", "manual", "a"), &siblings).is_ok());
+    assert!(check_epic_unique_among(&epic(2, 7, "other", "none", "repo-group", "a"), &siblings).is_ok());
 }
 
 /// Uniqueness is per workspace: a person's root in a workspace they have

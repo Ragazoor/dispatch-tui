@@ -63,8 +63,7 @@ pub fn rows_of_the_repository_at<'a>(rows: &'a [RepoPath], path: &str) -> Vec<&'
 /// GitHub group of each, so a row with no GitHub path still reaches the rest of
 /// its group (`core.allium: VerifyCommandIsPerRepository`).
 pub fn rows_of_the_repository_of<'a>(rows: &'a [RepoPath], named: &RepoPath) -> Vec<&'a RepoPath> {
-    let sibling =
-        |r: &RepoPath| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path);
+    let sibling = |r: &RepoPath| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path);
     let groups: Vec<&str> = rows
         .iter()
         .filter(|r| sibling(r))
@@ -73,9 +72,7 @@ pub fn rows_of_the_repository_of<'a>(rows: &'a [RepoPath], named: &RepoPath) -> 
         .filter(|g| !g.is_empty())
         .collect();
     rows.iter()
-        .filter(|r| {
-            sibling(r) || (!r.github_path.is_empty() && groups.contains(&r.github_path.as_str()))
-        })
+        .filter(|r| sibling(r) || (!r.github_path.is_empty() && groups.contains(&r.github_path.as_str())))
         .collect()
 }
 

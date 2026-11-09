@@ -395,8 +395,11 @@ pub fn task_detach_refusal(task_id: i64) -> String {
 /// or session request, sits on a host `caller` does not own. Shared with
 /// `MemoryReducerCaller`.
 pub fn task_detach_strands_a_host(r: &impl StoreReads, task_id: i64, caller: &str) -> bool {
-    let mine: std::collections::HashSet<String> =
-        r.hosts_owned_by(caller).into_iter().map(|h| h.id).collect();
+    let mine: std::collections::HashSet<String> = r
+        .hosts_owned_by(caller)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
     r.agents_of(task_id)
         .iter()
         .any(|a| a.state == AGENT_CURRENT && !mine.contains(&a.host))
@@ -410,9 +413,7 @@ pub fn task_detach_strands_a_host(r: &impl StoreReads, task_id: i64, caller: &st
 
 /// The refusal for a detach that would strand another person's host.
 pub fn task_detach_strands_refusal(task_id: i64) -> String {
-    format!(
-        "task {task_id}: another person's host is running it; detach it once that agent has ended"
-    )
+    format!("task {task_id}: another person's host is running it; detach it once that agent has ended")
 }
 
 pub fn check_task_move(ctx: &ReducerContext, task: &Task, epic_id: i64) -> Result<(), String> {

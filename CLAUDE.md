@@ -44,7 +44,7 @@ The pre-push hook (`.githooks/pre-push`) runs `scripts/gates.sh --fix`: the form
 
 **Commit subjects must be Conventional Commits** (`feat(tui): ...`, `fix: ...`). The tracked `.githooks/commit-msg` hook rejects anything else at `git commit`, so write the subject in this form from the start. Types, exemptions and why: [docs/conventions.md](docs/conventions.md) ("Conventional commits").
 
-**That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op.
+**That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op. Run it at the repo root only: inside `spacetime/module/` it reformats module files you did not touch, which `main` keeps as they are, and stales `module.wasm`'s source hash.
 
 **`./scripts/verify.sh` is what the verify command runs** (still read the command itself from `get_task`). It runs `scripts/gates.sh --check` (the same sequence the pre-push hook runs, with `cargo fmt --check`) and then `cargo test --no-fail-fast`. A wrap-up rebase lands commits on `main` without a push, so the hook never sees them; verify is what holds them to the gates. It fails when the host `rustc` is not the version `rust-toolchain.toml` pins (`scripts/check-toolchain.sh`), like the hook. With rustup the pin governs the toolchain, so this cannot drift; a distro `rustc` is accepted only while its version equals the pin.
 
