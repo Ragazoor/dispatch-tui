@@ -186,11 +186,7 @@ fn archived_rows_refusal(snapshot: &Snapshot) -> Option<Refusal> {
         let ids: Vec<i64> = extract
             .rows
             .iter()
-            .filter(|row| {
-                row.get("status")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(crate::models::is_removed_status)
-            })
+            .filter(|row| super::import::is_dropped_status(row))
             .filter_map(|row| row.get("id").and_then(serde_json::Value::as_i64))
             .collect();
         if !ids.is_empty() {

@@ -822,9 +822,9 @@ impl TuiRuntime {
                     &settled_identity,
                     &*reducer_caller,
                     &tx,
-                    &mut reported,
                 )
                 .await;
+                report_connection(&session, &tx, &mut reported);
                 if stop {
                     return;
                 }
@@ -1190,35 +1190,25 @@ impl TuiRuntime {
     }
 }
 
-/// One tick of the shared-store connection loop. Returns `true` when the loop
-/// must end: the store identified this install as somebody else, which is fatal.
-///
-/// `reported` is the connection state last sent to the board; a new one is
-/// sent only when it differs (sync.allium: ConnectionIndicator).
-async fn step_shared_store(
-    session: &mut crate::sync::SyncSession,
-    store: &dyn crate::sync::SyncStore,
-    settled_identity: &crate::sync::SettledIdentity,
-    reducer_caller: &dyn crate::sync::ReducerCaller,
+/// Send the board the connection's state when it differs from `reported`, the
+/// state last sent (sync.allium: ConnectionIndicator).
+fn report_connection(
+    session: &crate::sync::SyncSession,
     tx: &tokio::sync::mpsc::UnboundedSender<Message>,
     reported: &mut Option<crate::tui::StoreConnectionState>,
-) -> bool {
-    let stop = step_session(session, store, settled_identity, reducer_caller, tx).await;
-    if !stop {
-        let connection = session.connection();
-        let state = crate::tui::StoreConnectionState {
-            status: store_connection_status(connection.status()),
-            last_error: connection.last_error().map(str::to_string),
-            attempts: connection.attempts(),
-        };
-        if reported.as_ref() != Some(&state) {
-            *reported = Some(state.clone());
-            let _ = tx.send(Message::System(
-                crate::tui::messages::SystemMessage::StoreConnectionChanged(state),
-            ));
-        }
+) {
+    let connection = session.connection();
+    let state = crate::tui::StoreConnectionState {
+        status: store_connection_status(connection.status()),
+        last_error: connection.last_error().map(str::to_string),
+        attempts: connection.attempts(),
+    };
+    if reported.as_ref() != Some(&state) {
+        *reported = Some(state.clone());
+        let _ = tx.send(Message::System(
+            crate::tui::messages::SystemMessage::StoreConnectionChanged(state),
+        ));
     }
-    stop
 }
 
 /// The sync layer's connection status as the board draws it.
@@ -1235,7 +1225,9 @@ fn store_connection_status(
     }
 }
 
-async fn step_session(
+/// One tick of the shared-store connection loop. Returns `true` when the loop
+/// must end: the store identified this install as somebody else, which is fatal.
+async fn step_shared_store(
     session: &mut crate::sync::SyncSession,
     store: &dyn crate::sync::SyncStore,
     settled_identity: &crate::sync::SettledIdentity,
@@ -1333,7 +1325,7 @@ fn cleanup_outcome(
 
 #[cfg(test)]
 mod step_shared_store_tests {
-    use super::step_shared_store;
+    use super::{report_connection, step_shared_store};
     use crate::store::{HostStore, IdentityCredentialStore, Store};
     use crate::sync::memory_caller::MemoryReducerCaller;
     use crate::sync::tests::{accepted, ScriptedConnector};
@@ -1370,8 +1362,8 @@ mod step_shared_store_tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut reported = None;
 
-        let stop =
-            step_shared_store(&mut session, &db, &identity, &caller(), &tx, &mut reported).await;
+        let stop = step_shared_store(&mut session, &db, &identity, &caller(), &tx).await;
+        report_connection(&session, &tx, &mut reported);
 
         assert!(stop, "the loop ends on a conflict");
         let messages = drain(&mut rx);
@@ -1407,7 +1399,8 @@ mod step_shared_store_tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut reported = None;
 
-        step_shared_store(&mut session, &db, &identity, &caller, &tx, &mut reported).await;
+        step_shared_store(&mut session, &db, &identity, &caller, &tx).await;
+        report_connection(&session, &tx, &mut reported);
         let first = drain(&mut rx);
         assert!(
             first.iter().any(|m| matches!(
@@ -1417,14 +1410,16 @@ mod step_shared_store_tests {
             "{first:?}"
         );
 
-        step_shared_store(&mut session, &db, &identity, &caller, &tx, &mut reported).await;
+        step_shared_store(&mut session, &db, &identity, &caller, &tx).await;
+        report_connection(&session, &tx, &mut reported);
         assert!(
             drain(&mut rx).is_empty(),
             "an unchanged state is not re-sent"
         );
 
         session.report_drop("connection reset", std::time::Instant::now());
-        step_shared_store(&mut session, &db, &identity, &caller, &tx, &mut reported).await;
+        step_shared_store(&mut session, &db, &identity, &caller, &tx).await;
+        report_connection(&session, &tx, &mut reported);
         let after = drain(&mut rx);
         let state = after
             .iter()

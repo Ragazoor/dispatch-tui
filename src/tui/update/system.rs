@@ -24,14 +24,24 @@ impl App {
         &mut self,
         reason: String,
     ) -> Vec<Command> {
-        self.store_connection = Some(crate::tui::StoreConnectionState {
-            status: crate::tui::StoreConnectionStatus::Failed,
-            last_error: Some(reason.clone()),
-            attempts: self.store_connection.as_ref().map_or(0, |c| c.attempts),
-        });
         self.fatal_exit = Some(reason);
-        // A rearrangement in flight performs the quit when it settles, as for
-        // a confirmed quit (split-pane.allium: HoldQuitWhileRearrangementInFlight).
+        self.request_quit()
+    }
+
+    /// Leave the board: a confirmed quit, or a quit the board decides on
+    /// itself.
+    ///
+    /// Quitting with a task pinned restores that agent to a standalone
+    /// window, and a rearrangement in flight makes that impossible to do now.
+    /// During an entry there is nothing to restore from yet — the join is
+    /// still running and `active` is still false, so the exit below would
+    /// issue nothing and dispatch would go away leaving the agent's pane in
+    /// the board's own window. During a swap the panes have been exchanged but
+    /// the outgoing task's window may not have been renamed back yet, so
+    /// quitting leaves two windows sharing a name. Either way, hold the quit;
+    /// the rearrangement's own settle performs it. See
+    /// `HoldQuitWhileRearrangementInFlight` in docs/specs/split-pane.allium.
+    pub(in crate::tui) fn request_quit(&mut self) -> Vec<Command> {
         if let Some(in_flight) = self.board.split.in_flight.as_mut() {
             in_flight.pending_quit = true;
             return vec![];

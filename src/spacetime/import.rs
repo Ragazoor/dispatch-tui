@@ -106,7 +106,7 @@ fn id_of(row: &Row, column: &str) -> Option<i64> {
     row.get(column).and_then(Value::as_i64)
 }
 
-fn is_dropped_status(row: &Row) -> bool {
+pub(super) fn is_dropped_status(row: &Row) -> bool {
     row.get("status")
         .and_then(Value::as_str)
         .is_some_and(crate::models::is_removed_status)
@@ -268,30 +268,19 @@ impl DroppedIds {
             // An agent of a dropped task goes with it; its ledger row stays
             // (`agents.allium: AgentNameIsNeverReused`).
             SharedTable::TaskSubagents | SharedTable::Agents | SharedTable::TaskShells => {
-                id_of(row, "task_id").is_some_and(|t| self.tasks.contains(&t))
+                self.task_in(row, "task_id")
             }
             // A todo hangs off a task or an epic.
-            SharedTable::Todos => {
-                id_of(row, "task_id").is_some_and(|t| self.tasks.contains(&t))
-                    || id_of(row, "epic_id").is_some_and(|e| self.epics.contains(&e))
-            }
+            SharedTable::Todos => self.task_in(row, "task_id") || self.epic_in(row, "epic_id"),
             SharedTable::TaskWatchers => {
-                [id_of(row, "watcher_task_id"), id_of(row, "target_task_id")]
-                    .into_iter()
-                    .flatten()
-                    .any(|t| self.tasks.contains(&t))
+                self.task_in(row, "watcher_task_id") || self.task_in(row, "target_task_id")
             }
-            SharedTable::Subscriptions => {
-                id_of(row, "epic_id").is_some_and(|e| self.epics.contains(&e))
-            }
-            SharedTable::PollOwners => {
-                let scope_id = id_of(row, "scope_id");
-                match row.get("scope").and_then(Value::as_str) {
-                    Some("epic") => scope_id.is_some_and(|e| self.epics.contains(&e)),
-                    Some("task") => scope_id.is_some_and(|t| self.tasks.contains(&t)),
-                    _ => false,
-                }
-            }
+            SharedTable::Subscriptions => self.epic_in(row, "epic_id"),
+            SharedTable::PollOwners => match row.get("scope").and_then(Value::as_str) {
+                Some("epic") => self.epic_in(row, "scope_id"),
+                Some("task") => self.task_in(row, "scope_id"),
+                _ => false,
+            },
             // A link naming a dropped item names nothing
             // (`work-packages.allium: DeletingAnItemRemovesItsLinks`).
             SharedTable::WorkPackageLinks => {
@@ -309,6 +298,16 @@ impl DroppedIds {
             }
             _ => false,
         }
+    }
+
+    /// Whether `row`'s `column` names a dropped task.
+    fn task_in(&self, row: &Row, column: &str) -> bool {
+        id_of(row, column).is_some_and(|t| self.tasks.contains(&t))
+    }
+
+    /// Whether `row`'s `column` names a dropped epic.
+    fn epic_in(&self, row: &Row, column: &str) -> bool {
+        id_of(row, column).is_some_and(|e| self.epics.contains(&e))
     }
 
     /// Point a kept row whose epic was dropped at the root instead: a task

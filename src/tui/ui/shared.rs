@@ -479,8 +479,6 @@ pub(in crate::tui) fn caret_line(
     Line::from(spans)
 }
 
-/// The store address as the top row shows it: the scheme and a trailing slash
-/// are noise next to the host and port that tell two stores apart.
 /// The longest connection reason the top row draws before eliding it, so a
 /// long store error cannot push the other badges off the row.
 const CONNECTION_REASON_MAX_CHARS: usize = 60;
@@ -495,13 +493,10 @@ pub(in crate::tui::ui) fn connection_status_span(
 ) -> Option<Span<'static>> {
     use crate::tui::StoreConnectionStatus as ConnectionStatus;
     let reason = || {
-        let text = state.last_error.as_deref().unwrap_or("no reason given");
-        if text.chars().count() > CONNECTION_REASON_MAX_CHARS {
-            let cut: String = text.chars().take(CONNECTION_REASON_MAX_CHARS - 1).collect();
-            format!("{cut}\u{2026}")
-        } else {
-            text.to_string()
-        }
+        truncate(
+            state.last_error.as_deref().unwrap_or("no reason given"),
+            CONNECTION_REASON_MAX_CHARS,
+        )
     };
     let (label, colour) = match state.status {
         ConnectionStatus::Connected => return None,
@@ -515,6 +510,8 @@ pub(in crate::tui::ui) fn connection_status_span(
     Some(Span::styled(label, Style::default().fg(colour)))
 }
 
+/// The store address as the top row shows it: the scheme and a trailing slash
+/// are noise next to the host and port that tell two stores apart.
 fn store_address_label(server: &str) -> &str {
     let trimmed = server.trim().trim_end_matches('/');
     trimmed
