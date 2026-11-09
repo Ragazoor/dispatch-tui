@@ -1191,6 +1191,31 @@ rule UpdateTaskIsOneTransaction {
         -- older module does not have.
 }
 
+rule HandStatusWriteReachesTheSchedule {
+    -- Every accepted patch_task and update_task patch, in the same
+    -- transaction: these are the hand status writes (the TUI's moves and
+    -- editor, update_tasks' status). The dispatch claim and the close are the
+    -- module's own writes and do not pass through here.
+    when: TaskPatchAccepted(task, patch)
+
+    let from = task.status
+
+    ensures:
+        if patch.status != null and patch.status != from:
+            TaskStatusWrittenByHand(task: task, from: from, to: patch.status)
+    -- A write into done is a close, from any prior status.
+    ensures:
+        if patch.status = done:
+            TaskClosed(task: task)
+
+    @guidance
+        -- schedules.allium consumes both: LeavingBacklogCancelsThePendingRun,
+        -- EnteringBacklogRearmsAPhoenixTask, LeavingRunningCancelsThePendingRun
+        -- and ClosingCancelsThePendingRun.
+        -- Implementation: spacetime/module/src/schedule.rs::schedule_after_status_write,
+        -- the one call patch_task and update_task make, and its in-memory twin.
+}
+
 rule UpdateTaskDoneWritesACloseRow {
     when: TaskUpdateRequested(task, epic?, patch, host)
 
@@ -2404,6 +2429,9 @@ rule RequestCloseTask {
     ensures:
         if task.epic != null:
             RecalculateEpicStatus(task.epic)
+
+    -- schedules.allium: ClosingCancelsThePendingRun.
+    ensures: TaskClosed(task: task)
 
     ensures:
         if needs_teardown and may_tear_down:

@@ -19,8 +19,7 @@
 --               DispatchRequest and DispatchRequestOrigin from
 --               store-split.allium; PhoenixRespawn from tasks.allium.
 --
--- Decisions taken with the user (task #98394), recorded so they are not
--- re-litigated:
+-- Decisions taken with the user, recorded so they are not re-litigated:
 --   - S1, a fire DISPATCHES. When a schedule comes due the task gets an agent,
 --     through the same dispatch request every other launch path writes
 --     (origin = schedule). Nothing else happens at the due time.
@@ -46,8 +45,7 @@
 --     is shared between teammates, so a scheduled task in a shared epic is
 --     work any of them may run. A task that must not run on a teammate's
 --     machine belongs on its owner's own board or a private epic, where no
---     one else's board sees it. Raised by a security review and confirmed
---     with the user; not to be re-litigated.
+--     one else's board sees it.
 --   - S7, a failed scheduled launch is marked, not retried. The task stays in
 --     backlog with the failure reason. A one-off stops there; a phoenix task
 --     moves on to its next due time.
@@ -59,37 +57,61 @@
 use "./core.allium" as core
 use "./store-split.allium" as store_split
 
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The cron schedule the store accepts and the instants it matches. The store
+-- computes every due time through it; a board's clock only compares against
+-- the stored next_due (FireDueTask).
+contract CronSchedule {
+    cron_is_valid: (cron: String) -> Boolean
+    next_match: (cron: String, after: Timestamp) -> Timestamp
+    cron_matches: (cron: String, at: Timestamp) -> Boolean
+
+    @invariant FiveFieldGrammar
+        -- A cron is five whitespace-separated fields: minute (0-59), hour
+        -- (0-23), day of month (1-31), month (1-12), day of week (0-6,
+        -- 0 = Sunday; 7 also means Sunday). Each field takes `*`, a number, a
+        -- range `a-b`, a list `a,b,c` and a step `*/n` or `a-b/n`; month and
+        -- weekday also take their three-letter English names. Nothing else is
+        -- valid: no seconds field, no year field, no `@weekly` macros, no
+        -- `L`/`W`/`#`. Every instant is read in UTC.
+
+    @invariant StrictlyAfter
+        -- next_match(cron, after) is the first whole UTC minute STRICTLY after
+        -- `after` that the cron matches.
+
+    @invariant DayFieldsCombineAsVixieCron
+        -- When both day of month and day of week are restricted (neither
+        -- field starts with `*`, so `*/2` counts as unrestricted), a day
+        -- matches if EITHER does. Otherwise both must match.
+
+    @invariant AValidCronAlwaysRecurs
+        -- cron_is_valid refuses a cron that matches no minute at all
+        -- (e.g. "0 0 31 2 *"), so next_match answers for every stored
+        -- schedule from any instant. The search window is longer than the
+        -- longest gap between two matches of any accepted cron. That gap is
+        -- measured, not derived: over every (month, day of month, weekday)
+        -- triple in the 400-year Gregorian cycle it is 14609 days (about
+        -- 40 years). E.g. "0 0 29 2 */7" (29 February when it is a Sunday;
+        -- AND, as the weekday field starts with `*`) matches in 2088 and next
+        -- in 2128, across the leap day 2100 skips.
+
+    @guidance
+        -- Implementation: spacetime/module/src/schedule.rs::next_cron_match
+        -- and spacetime/module/src/schedule.rs::validate_cron.
+}
+
+------------------------------------------------------------
+-- Configuration
+------------------------------------------------------------
+
 config {
     -- How long a board waits after asking to dispatch a due task before it
     -- may ask again for the same task (FireDueTask).
     schedule_refire_after: Duration = 30.seconds
 }
-
-------------------------------------------------------------
--- Value
-------------------------------------------------------------
-
--- The cron grammar the store accepts. Five whitespace-separated fields:
--- minute (0-59), hour (0-23), day of month (1-31), month (1-12), day of week
--- (0-6, 0 = Sunday; 7 also means Sunday). Each field takes `*`, a number, a
--- range `a-b`, a list `a,b,c` and a step `*/n` or `a-b/n`; month and weekday
--- also take their three-letter English names. Nothing else: no seconds field,
--- no year field, no `@weekly` macros, no `L`/`W`/`#`.
---
--- next_match(cron, after) is the first whole UTC minute STRICTLY after
--- `after` that the cron matches. Day of month and day of week combine the
--- standard way: when both are restricted (neither field starts with `*`, so
--- `*/2` counts as unrestricted, as in Vixie cron), a day matches if EITHER
--- does. A cron that matches no minute at all (e.g. "0 0 31 2 *") is
--- refused when it is set, so next_match always has an answer for a stored
--- schedule, searched from any instant: a cron accepted today keeps
--- recurring. The store searches a bounded window ahead, longer than the
--- longest gap between two matches of any cron the grammar accepts. That gap
--- is measured, not derived: over every (month, day of month, weekday) triple
--- in the 400-year Gregorian cycle it is 14609 days (about 40 years). E.g.
--- "0 0 29 2 */7" (29 February when it is a Sunday; AND, as the weekday field
--- starts with `*`) matches in 2088 and next in 2128, across the leap day 2100
--- skips.
 
 ------------------------------------------------------------
 -- Setting and clearing
@@ -145,7 +167,12 @@ rule FireDueTask {
     -- S6: only a board whose machine holds the repo fires. Another board
     -- leaves the task due for one that does.
     requires: task.repo_path != "" and directory_exists_locally(task.repo_path)
-    requires: not store_split/DispatchRequests.any(r => r.task = task and r.is_open)
+    requires: not exists store_split/DispatchRequest{task: task, is_open: true}
+    -- This board's own memory of when it last asked for this task: the
+    -- round trip in which the claim moves the task out of backlog repeats no
+    -- request.
+    requires: board_last_asked_to_fire(task) = null
+        or now - board_last_asked_to_fire(task) >= config.schedule_refire_after
 
     ensures: store_split/DispatchRequested(
         task: task,
@@ -164,11 +191,11 @@ rule FireDueTask {
         -- (OneOpenDispatchRequestPerTask, and the claim moves the task out of
         -- backlog) and refuses the other, which is an ordinary refusal the
         -- board ignores. A refusal for any other reason is logged, and so is a
-        -- task skipped for its repo. Either way the board asks again for the
-        -- same task only after config.schedule_refire_after, and only while
-        -- it is still due: the gap covers the round trip in which the claim
-        -- moves the task out of backlog, so the ticks in between repeat no
-        -- request.
+        -- task skipped for its repo. Either way board_last_asked_to_fire
+        -- records the ask, so the board asks again for the same task only
+        -- after config.schedule_refire_after, and only while it is still due.
+        -- The record is the board's memory, not a stored field: a refused
+        -- request writes no row (src/tui/update/agent.rs::tick_due_schedules).
         -- mode is left to RequestDispatch's own derivation (D3).
 }
 
@@ -176,7 +203,7 @@ rule LeavingBacklogCancelsThePendingRun {
     -- Every status write other than the dispatch claim. The claim moves the
     -- task to running and keeps next_due until the launch ends
     -- (DispatchConsumesTheDueTime, ScheduledLaunchFails).
-    when: TaskStatusWrittenByHand(task, from, to)
+    when: store_split/TaskStatusWrittenByHand(task, from, to)
 
     requires: from = backlog and to != backlog
 
@@ -195,7 +222,7 @@ rule LeavingBacklogCancelsThePendingRun {
 
 rule EnteringBacklogRearmsAPhoenixTask {
     -- The same writes as LeavingBacklogCancelsThePendingRun, the other way.
-    when: TaskStatusWrittenByHand(task, from, to)
+    when: store_split/TaskStatusWrittenByHand(task, from, to)
 
     requires: from != backlog and to = backlog
     requires: task.phoenix and task.schedule != null
@@ -203,8 +230,7 @@ rule EnteringBacklogRearmsAPhoenixTask {
     ensures: task.next_due = next_match(task.schedule, after: now)
 
     @guidance
-        -- Decided with the user (task #98505, review 2026-10-23 C4): a phoenix
-        -- run that fired, was abandoned and is moved back to backlog would
+        -- Decided with the user: a phoenix run that fired, was abandoned and is moved back to backlog would
         -- otherwise sit there with a schedule and no due time, never firing
         -- and showing nothing wrong. Computed from now, so a slot that passed
         -- while the task was out of backlog is not fired late (S4).
@@ -214,10 +240,13 @@ rule EnteringBacklogRearmsAPhoenixTask {
 }
 
 rule ClosingCancelsThePendingRun {
-    -- Every close, from any prior status: ExitSession (pr-workflow.allium),
-    -- either action, RequestCloseTask (store-split.allium), and a hand status
-    -- write into done (the TUI's moves and editor), which is a close too.
-    when: TaskClosed(task)
+    -- Every close, from any prior status. store-split.allium owns the trigger
+    -- and raises it from RequestCloseTask and from a hand status write into
+    -- done (HandStatusWriteReachesTheSchedule: the TUI's moves and editor,
+    -- update_tasks' status); pr-workflow.allium's ExitSession raises it for
+    -- every action, pr included, since the module's close clears next_due
+    -- whichever way the session ends.
+    when: store_split/TaskClosed(task)
 
     ensures: task.next_due = null
 
@@ -235,15 +264,14 @@ rule LeavingRunningCancelsThePendingRun {
     -- A hand status write that takes a task out of running, into review or
     -- backlog (the TUI's moves and editor, update_tasks' status). Into done
     -- is ClosingCancelsThePendingRun.
-    when: TaskStatusWrittenByHand(task, from, to)
+    when: store_split/TaskStatusWrittenByHand(task, from, to)
 
     requires: from = running and to != running
 
     ensures: task.next_due = null
 
     @guidance
-        -- Decided with the user (task #98509, from review 2026-10-23 C5): a
-        -- user-origin dispatch claim keeps a one-off's due time until the
+        -- Decided with the user: a user-origin dispatch claim keeps a one-off's due time until the
         -- launch ends, so a hand move out of running on a still-bare claim
         -- would leave a passed time behind, and a later move back to backlog
         -- would fire the one-off at once. Any hand write that leaves running
@@ -288,7 +316,7 @@ rule ScheduledLaunchFails {
         (task.status = backlog or (task.status = running and task.worktree = null))
 
     ensures:
-        if exists task and task.schedule != null:
+        if task.schedule != null:
             task.schedule_error = request.reason
             task.next_due =
                 if task.phoenix: next_match(task.schedule, after: now) else: null
@@ -332,4 +360,25 @@ invariant DueTimeIsAMatch {
     -- next_due is always a minute the stored cron matches.
     for task in core/Tasks:
         task.next_due = null or cron_matches(task.schedule, task.next_due)
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- The schedule half of create_task's and update_tasks' arguments. Setting
+-- and clearing are MCP-only (S9). mcp-task-tools.allium's CreateTaskViaMcp
+-- and UpdateTaskViaMcp hand the argument on; this surface is where the
+-- triggers enter this spec, since mcp-task-tools.allium already uses this
+-- file and a `use` back would make the emission a cycle.
+surface ScheduleArguments {
+    facing _: core/McpClient
+
+    context task: core/Task
+
+    provides:
+        -- `schedule` set to a cron string.
+        ScheduleSet(task, cron)
+        -- update_tasks with `schedule` set to the empty string.
+        ScheduleCleared(task)
 }

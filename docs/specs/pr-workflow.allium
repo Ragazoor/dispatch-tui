@@ -811,6 +811,11 @@ rule ExitSession {
         if task.epic != null:
             RecalculateEpicStatus(task.epic)
 
+    -- Every action cancels a pending scheduled run, pr included: the session
+    -- has ended whichever way it closed (schedules.allium:
+    -- ClosingCancelsThePendingRun; spacetime/module/src/session_request.rs::apply_session_close).
+    ensures: split/TaskClosed(task: task)
+
     -- A close whose action is rebase or done takes task.status to done, so a
     -- phoenix task closing through this rule respawns (tasks.allium:
     -- PhoenixRespawn), in the same transaction. The action = pr branch does
