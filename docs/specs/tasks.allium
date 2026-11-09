@@ -1471,8 +1471,9 @@ rule BookmarkEndsWithTheTaskFinishing {
 -- TaskRowDeleted(task): the task row is gone, whichever route removed it.
 -- Raised by every rule that deletes a task row, in the same transaction:
 -- DeleteTask and BatchDelete below, an epic delete's subtree (epics.allium:
--- DeleteEpic) and the feed stale delete (feeds.allium: UpsertFeedTasks,
--- RoleRoutedFeedSync). What the store owes a removed row beyond the row
+-- DeleteEpic, which a super-admin's delete of an unseen epic also runs,
+-- workspaces.allium: SuperAdminDeletesUnseenItem) and the feed stale delete
+-- (feeds.allium: UpsertFeedTasks, RoleRoutedFeedSync). What the store owes a removed row beyond the row
 -- itself listens for it (store-split.allium: DeletingATaskFailsItsOpenRequest,
 -- DeletingATaskFailsItsOpenSessionRequest, DeletingATaskDeletesItsRequestRows).
 -- The module runs that list from one function every such reducer calls

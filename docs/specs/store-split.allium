@@ -1092,8 +1092,9 @@ rule DeletingATaskFailsItsOpenRequest {
         -- D8. In the SAME reducer that deletes the task row, and it cancels
         -- the request's scheduled timer. TaskRowDeleted is raised by every
         -- rule that deletes a task row: DeleteTask and BatchDelete
-        -- (tasks.allium), an epic delete's subtree (epics.allium: DeleteEpic)
-        -- and the feed stale delete (feeds.allium: UpsertFeedTasks,
+        -- (tasks.allium), an epic delete's subtree (epics.allium: DeleteEpic,
+        -- the super-admin's delete of an unseen epic among them) and the feed
+        -- stale delete (feeds.allium: UpsertFeedTasks,
         -- RoleRoutedFeedSync). The module runs all three delete rules from
         -- one list of side effects every such reducer calls
         -- (spacetime/module/src/tasks_epics.rs::delete_task_side_effects).
@@ -1543,8 +1544,12 @@ rule RequestRowsArePruned {
 
     -- What check_exit_token still reads, and must outlive the prune (the
     -- proviso the retention question set):
-    --   * a done wrap_up row no exit_session consumed is a live token;
+    --   * a task's newest done wrap_up row (by requested_at, ties broken by
+    --     row id), when no exit_session consumed it, is a live token;
     let live_tokens = SessionRequests where kind = wrap_up and state = done
+        and not SessionRequests.any(r =>
+            r.task = task and r.kind = wrap_up and r.state = done
+            and r.requested_at > requested_at)
         and not SessionRequests.any(r => r.kind = exit_session and r.wrap_up_request = this)
     -- A finished row's age runs from finished_at, or from requested_at for a
     -- row that never recorded one.
@@ -1595,9 +1600,10 @@ rule RequestRowsArePruned {
         -- SessionRequest.is_valid_token reads for a live token is kept: the
         -- token row itself, and any dispatched row that voids it. A consumed
         -- token's wrap_up row and the exit_session row that consumed it go
-        -- together. "Live" here means unconsumed: an unconsumed done wrap_up
-        -- row a newer one has superseded is kept as well, so the prune never
-        -- decides supersession and cannot get it wrong.
+        -- together. "Live" means the task's newest done wrap_up, unconsumed:
+        -- an older one is superseded, is no token (is_valid_token, which
+        -- check_exit_token reads the same way), and prunes like any row. So
+        -- does a dispatched row newer only than a superseded one.
         --
         -- The module's REQUEST_RETENTION_DAYS is config.request_retention.
         -- Implementation: spacetime/module/src/request_retention.rs::prune_terminal_requests.

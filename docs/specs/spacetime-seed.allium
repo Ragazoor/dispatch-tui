@@ -694,10 +694,14 @@ rule StoreRefusesUnknownStatus {
         -- create_task, patch_task, create_epic, patch_epic, seed_tasks,
         -- seed_epics (which restore and import write through, despite the
         -- name) and the feed upserts — any path, present or future, that
-        -- leaves a row in `tasks` or `epics`. Every task write passes the
-        -- seam above; the epic writes have no single seam, and create_epic,
-        -- patch_epic and seed_epics each make the same check on the row they
-        -- would leave (spacetime/module/src/support.rs::validate_status). The known statuses are exactly
+        -- leaves a row in `tasks` or `epics` with a status it chose. Every
+        -- such task write passes the seam above; the epic writes have no
+        -- single seam, and create_epic, patch_epic and seed_epics each make
+        -- the same check on the row they would leave
+        -- (spacetime/module/src/support.rs::validate_status). A few writes
+        -- bypass both because they never set a status: the feed's update of
+        -- an existing task and its epic upserts, the owner backfill, the
+        -- agent-state write and the phoenix predecessor's flag clear. The known statuses are exactly
         -- core/TaskStatus's four (backlog, running, review, done), which is
         -- the type both core/Task.status and core/Epic.status declare; the
         -- retired `archived` is unknown like any other string.
