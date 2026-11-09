@@ -236,27 +236,6 @@ fn ending_or_session_writes_leave_an_assigned_agent_alone() {
     assert_eq!(rows.agents[0].tmux_window, "");
 }
 
-// -- the display name (A18) -----------------------------------------------------
-
-#[test]
-fn the_display_agent_is_the_open_one_else_the_one_that_ended_last() {
-    let mut rows = Rows::default();
-    assert!(display_agent(&rows.agents_of_task(1)).is_none());
-    assign_agent_on_task_created(&mut rows, 1);
-    let first = rows.agents[0].name.clone();
-    assert_eq!(display_agent(&rows.agents_of_task(1)).unwrap().name, first);
-    start_agent_on_fresh_launch(&mut rows, &with_worktree(1, ""), "host-a", "dispatch");
-    assert_eq!(display_agent(&rows.agents_of_task(1)).unwrap().name, first);
-    // A move back to backlog that releases the worktree ends it; the name stays.
-    end_current_agent(&mut rows, 1, AGENT_END_WORKTREE_GONE);
-    assert_eq!(display_agent(&rows.agents_of_task(1)).unwrap().name, first);
-    // Two ended agents: the one that ended last wins.
-    start_agent_on_fresh_launch(&mut rows, &with_worktree(1, ""), "host-a", "dispatch");
-    let second = rows.agents[1].name.clone();
-    rows.agents[1] = ended_agent(rows.agents[1].clone(), AGENT_END_WORKTREE_GONE, "2026-10-17 09:00:00.000");
-    assert_eq!(display_agent(&rows.agents_of_task(1)).unwrap().name, second);
-}
-
 #[test]
 fn a_second_fresh_launch_ends_the_first_agent_as_replaced() {
     let mut rows = Rows::default();

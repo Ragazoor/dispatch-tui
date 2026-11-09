@@ -216,7 +216,7 @@ impl Rows {
         }
     }
 
-    /// Put `agent`, already in `agents`, into both indexes.
+    /// Put `agent` into both indexes.
     fn index_agent_in(&mut self, agent: &Agent) {
         if agent.is_current() {
             self.current_agent_by_task
@@ -235,8 +235,12 @@ impl Rows {
             .current_agent_by_task
             .get(&task.id.0)
             .and_then(|id| self.agents.get(id));
-        let display = self.agents_by_task.get(&task.id.0).and_then(|ids| {
-            crate::models::display_agent(ids.iter().filter_map(|id| self.agents.get(id)))
+        // The current agent is the display agent when there is one
+        // (OneOpenAgentPerTask); walk the task's agents only otherwise.
+        let display = agent.or_else(|| {
+            self.agents_by_task.get(&task.id.0).and_then(|ids| {
+                crate::models::display_agent(ids.iter().filter_map(|id| self.agents.get(id)))
+            })
         });
         crate::models::with_session_of(task, agent, display.map(|a| a.name.as_str()))
     }

@@ -178,12 +178,10 @@ pub const AGENT_NAMES: &[&str] = &[
 
 // -- Pure rules ---------------------------------------------------------------
 
-/// Pick a name no agent has ever had: the shared walk over [`AGENT_NAMES`],
-/// with the numbered fallback once every name is taken (A4). `is_handed_out`
-/// must answer from the ledger, which keeps a deleted agent's name taken; the
-/// stores also count the agent rows' names, as a backstop.
-pub fn pick_agent_name(seed: u64, is_handed_out: impl Fn(&str) -> bool) -> String {
-    pick_word(AGENT_NAMES, seed, is_handed_out)
+/// Pick a name no agent row holds: the shared walk over [`AGENT_NAMES`], with
+/// the numbered fallback once every name is taken (A4).
+pub fn pick_agent_name(seed: u64, is_taken: impl Fn(&str) -> bool) -> String {
+    pick_word(AGENT_NAMES, seed, is_taken)
 }
 
 /// `Agent.created(...)` as every rule that starts one writes it.
@@ -212,6 +210,17 @@ pub fn ended_agent(agent: Agent, reason: &str, now: &str) -> Agent {
         stop_pending: false,
         ..agent
     }
+}
+
+/// Whether `agent` holds any of the six session facts. An assigned agent
+/// holds none (`AssignedAgentHasNoSession`).
+pub fn agent_holds_session_facts(agent: &Agent) -> bool {
+    !agent.tmux_window.is_empty()
+        || !agent.last_pre_tool_use_at.is_empty()
+        || !agent.last_notification_at.is_empty()
+        || agent.live_subagents != 0
+        || agent.stop_pending
+        || !agent.stop_pending_at.is_empty()
 }
 
 /// Whether `task` still carries any of the six session facts A4 moved off it:
@@ -354,6 +363,8 @@ pub fn agent_follow_up(prior: Option<&Task>, row: &Task) -> AgentFollowUp {
 /// end reason exactly when the agent has ended.
 pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
     let id = row.id;
+    // AgentNameIsNotAnId, by the format rule every picked name already passes.
+    validate_agent_name(&row.name).map_err(|why| format!("agent {id}: {why}"))?;
     let ended = match row.state.as_str() {
         AGENT_ASSIGNED => return validate_seeded_assigned_agent(row),
         AGENT_CURRENT => false,
@@ -366,8 +377,6 @@ pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
             row.start_mode
         ));
     }
-    // AgentNameIsNotAnId, by the format rule every picked name already passes.
-    validate_agent_name(&row.name).map_err(|why| format!("agent {id}: {why}"))?;
     if ended != AGENT_END_REASONS.contains(&row.end_reason.as_str()) {
         return Err(format!(
             "agent {id}: end reason {:?} does not fit state {}",
@@ -385,24 +394,18 @@ pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
     Ok(())
 }
 
-/// `AssignedAgentHasNoSession`: an assigned agent has a valid name and
-/// nothing else — no start mode, host, start, end or session fact.
+/// `AssignedAgentHasNoSession`: an assigned agent has a name and nothing
+/// else — no start mode, host, start, end or session fact.
 fn validate_seeded_assigned_agent(row: &Agent) -> Result<(), String> {
-    let id = row.id;
-    validate_agent_name(&row.name).map_err(|why| format!("agent {id}: {why}"))?;
     let launched = !row.start_mode.is_empty()
         || !row.host.is_empty()
         || !row.started_at.is_empty()
         || !row.ended_at.is_empty()
         || !row.end_reason.is_empty();
-    let session = !row.tmux_window.is_empty()
-        || !row.last_pre_tool_use_at.is_empty()
-        || !row.last_notification_at.is_empty()
-        || row.live_subagents != 0
-        || row.stop_pending;
-    if launched || session {
+    if launched || agent_holds_session_facts(row) {
         return Err(format!(
-            "agent {id}: an assigned agent has never launched and holds no session"
+            "agent {}: an assigned agent has never launched and holds no session",
+            row.id
         ));
     }
     Ok(())
@@ -436,39 +439,30 @@ pub trait AgentStore {
     fn name_seed(&self) -> u64;
 }
 
-/// `current_agent(task)`: the task's one current agent, or `None`
-/// (`OneCurrentAgentPerTask`).
+/// The task's one agent in `state`, or `None`. One per task for current
+/// (`OneCurrentAgentPerTask`) and assigned (`OneOpenAgentPerTask`).
+fn agent_in_state<S: AgentStore + ?Sized>(store: &S, task_id: i64, state: &str) -> Option<Agent> {
+    store
+        .agents_of_task(task_id)
+        .into_iter()
+        .find(|a| a.state == state)
+}
+
+/// `current_agent(task)`: the task's one current agent, or `None`.
 pub fn current_agent<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> Option<Agent> {
-    store
-        .agents_of_task(task_id)
-        .into_iter()
-        .find(|a| a.state == AGENT_CURRENT)
+    agent_in_state(store, task_id, AGENT_CURRENT)
 }
 
-/// `assigned_agent(task)`: the task's one assigned agent, or `None`
-/// (`OneOpenAgentPerTask`).
+/// `assigned_agent(task)`: the task's one assigned agent, or `None`.
 pub fn assigned_agent<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> Option<Agent> {
-    store
-        .agents_of_task(task_id)
-        .into_iter()
-        .find(|a| a.state == AGENT_ASSIGNED)
+    agent_in_state(store, task_id, AGENT_ASSIGNED)
 }
 
-/// `display_agent(task)` over the task's agents (A18): the one not ended
-/// (assigned or current), else the one that ended last. The store's
-/// timestamps sort as text, so the latest `ended_at` is the greatest.
-pub fn display_agent(agents: &[Agent]) -> Option<&Agent> {
-    agents
-        .iter()
-        .find(|a| a.state != AGENT_ENDED)
-        .or_else(|| agents.iter().max_by(|a, b| a.ended_at.cmp(&b.ended_at)))
-}
-
-/// Pick a fresh name for `task_id`: the first one no Agent row holds (A4).
+/// Pick a free name for `task_id`: the first one no Agent row holds (A4).
 /// The task id is mixed into the store's seed: the clock does not move inside
 /// one reducer, so a backfill naming many tasks would otherwise start every
-/// pick at the same name and walk past all the names it had just picked.
-fn hand_out_agent_name<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> String {
+/// pick at the same name and walk past the names just picked.
+fn free_agent_name<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> String {
     let seed = store.name_seed().wrapping_add(task_id as u64);
     pick_agent_name(seed, |n| store.name_held_by_agent(n))
 }
@@ -477,7 +471,7 @@ fn hand_out_agent_name<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> Strin
 /// agent. Called by the one task write seam on each side, on a true create
 /// (generated id) only — a seed brings its own agents.
 pub fn assign_agent_on_task_created<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) {
-    let name = hand_out_agent_name(store, task_id);
+    let name = free_agent_name(store, task_id);
     store.insert_agent(Agent {
         task_id,
         name,
@@ -486,7 +480,7 @@ pub fn assign_agent_on_task_created<S: AgentStore + ?Sized>(store: &mut S, task_
     });
 }
 
-/// Start a new current agent for `task`, with a fresh name and the task's
+/// Start a new current agent for `task`, with a free name and the task's
 /// window.
 fn create_agent<S: AgentStore + ?Sized>(
     store: &mut S,
@@ -495,7 +489,7 @@ fn create_agent<S: AgentStore + ?Sized>(
     start_mode: &str,
     shape: impl FnOnce(Agent) -> Agent,
 ) {
-    let name = hand_out_agent_name(store, task_id);
+    let name = free_agent_name(store, task_id);
     let now = store.now();
     store.insert_agent(shape(new_agent(task_id, &name, host, start_mode, &now)));
 }
@@ -520,22 +514,25 @@ pub fn start_agent_on_fresh_launch<S: AgentStore + ?Sized>(
     start_mode: &str,
 ) {
     end_current_agent(store, task.id, AGENT_END_REPLACED);
+    let waiting = assigned_agent(store, task.id);
+    let name = match &waiting {
+        Some(agent) => agent.name.clone(),
+        None => free_agent_name(store, task.id),
+    };
     // The claim stamps the agent's activity, so the dispatch watchdog
     // measures from the claim (`agent-health.allium`, `DispatchTask`).
     let claimed_at = store.now();
-    if let Some(waiting) = assigned_agent(store, task.id) {
-        let launched = new_agent(task.id, &waiting.name, requester, start_mode, &claimed_at);
-        store.update_agent(Agent {
-            id: waiting.id,
-            last_pre_tool_use_at: claimed_at,
+    let launched = Agent {
+        last_pre_tool_use_at: claimed_at.clone(),
+        ..new_agent(task.id, &name, requester, start_mode, &claimed_at)
+    };
+    match waiting {
+        Some(agent) => store.update_agent(Agent {
+            id: agent.id,
             ..launched
-        });
-        return;
+        }),
+        None => store.insert_agent(launched),
     }
-    create_agent(store, task.id, requester, start_mode, |agent| Agent {
-        last_pre_tool_use_at: claimed_at,
-        ..agent
-    });
 }
 
 /// What every task write owes the task's current agent, decided by

@@ -533,22 +533,19 @@ pub fn agent(row: &bindings::Agent) -> Decoded<Agent> {
         .ok_or_else(|| refuse(format!("unknown state {:?}", row.state)))?;
     let launched = state != AgentState::Assigned;
     let start_mode = match text(&row.start_mode) {
-        None if !launched => None,
-        mode => Some(
-            DispatchMode::parse(mode.unwrap_or_default())
-                .ok_or_else(|| refuse(format!("unknown start mode {:?}", row.start_mode)))?,
+        None => None,
+        Some(mode) => Some(
+            DispatchMode::parse(mode)
+                .ok_or_else(|| refuse(format!("unknown start mode {mode:?}")))?,
         ),
     };
-    let started_at = if launched {
-        Some(required_timestamp(
-            T,
-            row.id,
-            "started_at",
-            &row.started_at,
-        )?)
-    } else {
-        timestamp(T, row.id, "started_at", &row.started_at)?
-    };
+    let started_at = timestamp(T, row.id, "started_at", &row.started_at)?;
+    if launched && (start_mode.is_none() || started_at.is_none()) {
+        return Err(refuse(format!(
+            "a {} agent needs a start mode and a start",
+            row.state
+        )));
+    }
     let end_reason = match text(&row.end_reason) {
         None => None,
         Some(reason) => Some(
