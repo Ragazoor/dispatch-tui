@@ -499,13 +499,13 @@ pub async fn run_tui(
 
     leave_tui_terminal(&mut terminal)?;
 
-    result?;
     // `sync.allium: StopOnAUserIdentityConflict`: the board left on its own,
-    // and the reason is printed now the terminal is back.
+    // and the reason is printed now the terminal is back. It wins over a loop
+    // error, which is the less useful thing to show.
     if let Some(reason) = app.fatal_exit() {
         anyhow::bail!("{reason}");
     }
-    Ok(())
+    result
 }
 
 /// Take over the terminal: raw mode, alternate screen, focus events.
