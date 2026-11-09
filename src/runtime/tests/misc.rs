@@ -47,6 +47,7 @@ mod browser_and_tmux_window {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(
             MockProcessRunner::new(vec![
+                MockProcessRunner::ok(), // tmux show-options: no awaiting tag
                 MockProcessRunner::ok(), // tmux kill-window
             ])
             .with_windows(&["task-1"]),
@@ -57,11 +58,11 @@ mod browser_and_tmux_window {
             .await
             .unwrap();
         let calls = mock.recorded_calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "tmux");
-        assert!(calls[0].1.contains(&"kill-window".to_string()));
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].0, "tmux");
+        assert!(calls[1].1.contains(&"kill-window".to_string()));
         // Targeted by resolved pane ID, not by name — see `tmux::window_target`.
-        assert!(calls[0].1.contains(&mock.pane_id_of("task-1").to_string()));
+        assert!(calls[1].1.contains(&mock.pane_id_of("task-1").to_string()));
     }
 
     /// Clearing subagent entries for a task that no longer exists is moot, not
@@ -92,9 +93,10 @@ mod browser_and_tmux_window {
     async fn exec_kill_tmux_window_failure_is_best_effort() {
         let db = test_db().await;
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
-            "no such window",
-        )]));
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // tmux show-options: no awaiting tag
+            MockProcessRunner::fail("no such window"),
+        ]));
         let rt = make_runtime(db, tx, mock).await;
 
         rt.exec_kill_tmux_window(test_tmux_window("gone-window"))

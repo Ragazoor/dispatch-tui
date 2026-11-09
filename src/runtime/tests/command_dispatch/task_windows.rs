@@ -143,9 +143,11 @@ async fn dispatch_task_resume_relaunches_the_agent_window() {
 
 #[tokio::test]
 async fn dispatch_task_jump_to_tmux_selects_the_window() {
-    let mut h =
-        harness(MockProcessRunner::new(vec![MockProcessRunner::ok()]).with_windows(&["task-1"]))
-            .await;
+    let mut h = harness(
+        MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()])
+            .with_windows(&["task-1"]),
+    )
+    .await;
 
     h.dispatch(Command::Task(TaskCommand::JumpToTmux {
         window: test_tmux_window("task-1"),
@@ -228,9 +230,12 @@ async fn dispatch_task_cleanup_carries_its_follow_up_back_on_success() {
 /// runner announcement is the only signal this arm produces.
 #[tokio::test]
 async fn dispatch_task_kill_tmux_window_kills_the_window() {
-    let mut h =
-        harness(MockProcessRunner::new(vec![MockProcessRunner::ok()]).with_windows(&["task-1"]))
-            .await;
+    // The first response answers the awaiting-tag lookup, the second the kill.
+    let mut h = harness(
+        MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()])
+            .with_windows(&["task-1"]),
+    )
+    .await;
 
     h.dispatch(Command::Task(TaskCommand::KillTmuxWindow {
         window: test_tmux_window("task-1"),

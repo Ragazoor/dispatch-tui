@@ -99,7 +99,8 @@ pub use request_host::{
     EXIT_SESSION_TEARDOWN_TIMEOUT, WRAP_UP_REBASE_TIMEOUT,
 };
 pub use split_panes::{
-    join_task_window_into_pane, restore_pinned_pane, swap_task_window_into_pane, SwapFailure,
+    join_task_window_into_pane, kill_task_window, restore_pinned_pane, swap_task_window_into_pane,
+    SwapFailure,
 };
 pub(crate) use trust::{is_trusted_at, trust_at};
 pub(crate) use worktree::rollback_failed_provisioning;

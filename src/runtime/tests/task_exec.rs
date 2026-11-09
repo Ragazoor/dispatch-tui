@@ -1625,6 +1625,7 @@ async fn exec_kill_tmux_window_failure_does_not_send_error() {
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux show-options: no awaiting tag
         MockProcessRunner::fail("no such window"), // tmux kill-window fails
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;

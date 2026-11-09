@@ -960,6 +960,38 @@ fn exit_rejoins_the_pinned_pane_into_the_window_awaiting_it() {
 }
 
 #[test]
+fn clearing_the_pinned_task_spares_the_leftover_window_and_clears_its_tag() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let users_pane = fx.split_unmarked_pane(&window);
+    fx.pin(&window);
+
+    dispatch::kill_task_window(&window, &fx.server.runner()).expect("clear the task's window");
+
+    assert!(
+        fx.server.pane_exists(&users_pane),
+        "the user's pane is not dispatch's to kill"
+    );
+    assert_eq!(fx.server.count_windows_named(window.as_str()), 1);
+    assert_eq!(
+        fx.server
+            .window_option(window.as_str(), tmux::AWAITS_PANE_OPTION),
+        "",
+        "the pane it waited for is gone, so the tag must not linger"
+    );
+}
+
+#[test]
+fn clearing_a_task_window_with_no_awaiting_tag_still_kills_it() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+
+    dispatch::kill_task_window(&window, &fx.server.runner()).expect("kill");
+
+    assert_eq!(fx.server.count_windows_named(window.as_str()), 0);
+}
+
+#[test]
 fn exit_without_a_leftover_window_breaks_the_pane_out() {
     let Some(fx) = setup_or_skip() else { return };
     let window = fx.bare_agent_window(TASK_ID);

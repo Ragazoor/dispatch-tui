@@ -129,6 +129,18 @@ fn awaits_pane(window: &TmuxWindow, pane_id: &PaneId, runner: &dyn ProcessRunner
     tmux::window_awaits_pane(window, pane_id, runner).unwrap_or(false)
 }
 
+/// Kill the task's `window`, unless a pane dispatch did not mark keeps it alive
+/// as the leftover a pin tagged (see [`tmux::AWAITS_PANE_OPTION`]). That window
+/// holds the user's own pane, so it is spared and its tag cleared: the pane it
+/// waited for is being respawned and will not rejoin. An absent window is not an
+/// error here. See "Leftover window" in docs/specs/split-pane.allium.
+pub fn kill_task_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
+    if tmux::window_awaits_any_pane(window, runner).unwrap_or(false) {
+        return tmux::clear_window_awaits_pane(window, runner);
+    }
+    tmux::kill_window(window, runner)
+}
+
 /// Return the pinned `pane_id` to a standalone window named `window`.
 ///
 /// Breaks the pane out into a new window when the name is free. When a window

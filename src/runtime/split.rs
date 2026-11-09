@@ -193,7 +193,7 @@ impl TuiRuntime {
         let runner = self.runner.clone();
 
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = tmux::kill_window(&window, &*runner) {
+            if let Err(e) = dispatch::kill_task_window(&window, &*runner) {
                 // An already-absent window is the outcome this call wanted, so
                 // it is logged at debug. Only a kill that was attempted and
                 // failed leaves a real window behind and warrants a warning.

@@ -871,9 +871,12 @@ rule SplitPaneRespawnOnWindowCleared {
         -- occur from a kill-then-recreate sequence.
         --
         -- Handlers that also emit KillTmuxWindow for the old window name
-        -- are harmless — the window no longer exists as a standalone window
-        -- (it was absorbed into the pane via join-pane), so the kill is a
-        -- no-op. The respawn handles the actual cleanup.
+        -- are harmless when the pin left no window behind — the window no
+        -- longer exists as a standalone window (it was absorbed into the
+        -- pane via join-pane), so the kill is a no-op. The respawn handles
+        -- the actual cleanup. When a pane dispatch did not mark kept the
+        -- window alive (PinTaskInSplitPane's "Leftover window"), the kill
+        -- spares that window and clears its awaiting tag.
         --
         -- If the pane was already closed externally (a failed respawn
         -- followed by a pane listing that no longer holds it), the respawn
@@ -1194,6 +1197,18 @@ rule PinTaskInSplitPane {
         -- Tagged, not killed: killing the window would take the user's pane
         -- and its scrollback with it to settle a naming question, the same
         -- trade RefuseExitSplitModeOntoLiveWindow rejects.
+        --
+        -- The same holds when the board clears the pinned task's window
+        -- (SplitPaneRespawnOnWindowCleared's paths: detach, confirm done, a
+        -- move back, an epic to Done, retry). The KillTmuxWindow those
+        -- handlers emit names the task's window, and a leftover window is
+        -- the one live window under that name. The kill therefore skips a
+        -- window carrying the awaiting tag (any value) and clears the tag
+        -- instead: the pane it waited for is being respawned, so nothing
+        -- will rejoin, and a stale tag must not let some other pane in
+        -- later. The window stays, holding only the user's pane. A failed
+        -- tag lookup counts as "not awaiting" and the kill proceeds, as it
+        -- does for any window.
         --
         -- == Home tag on the pinned pane ==
         -- The pinned pane itself is tagged with the window it was pinned from

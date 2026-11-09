@@ -1495,6 +1495,23 @@ pub fn window_awaits_pane(
     Ok(window_option(window, AWAITS_PANE_OPTION, runner)?.as_deref() == Some(pane_id.as_str()))
 }
 
+/// Whether the live window `window` carries an [`AWAITS_PANE_OPTION`] tag,
+/// whichever pane it names.
+pub fn window_awaits_any_pane(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<bool> {
+    Ok(window_option(window, AWAITS_PANE_OPTION, runner)?.is_some())
+}
+
+/// Remove `window`'s [`AWAITS_PANE_OPTION`] tag without moving any pane.
+pub fn clear_window_awaits_pane(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
+    let target = window_target(window.as_str(), runner)?;
+    run_checked_timeout(
+        runner,
+        &["set-option", "-w", "-u", "-t", &target, AWAITS_PANE_OPTION],
+        "set-option",
+    )?;
+    Ok(())
+}
+
 /// Join `pane_id` back into `window` as its left-hand pane and clear the
 /// window's [`AWAITS_PANE_OPTION`] tag. Assigns no name, so it needs no
 /// duplicate check: the window already carries the name.
