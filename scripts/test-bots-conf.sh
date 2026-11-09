@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# test-bots-conf.sh — shell test for the BOT_AUTHORS validation both readers
-# of bots.conf perform after sourcing it.
+# test-bots-conf.sh — shell test for the BOT_AUTHORS validation every reader
+# of bots.conf (fetch-reviews.sh, fetch-dependabot.sh, fetch-cve.sh) performs
+# after sourcing it.
 #
 # bots.conf documents exactly one entry form, gh search's app form
-# "app/<slug>". An entry written the other natural way ("dependabot[bot]") used
-# to be misread silently by BOTH readers — fetch-reviews.sh appended a second
-# "[bot]" and matched no author, and the gh queries returned nothing — and the
-# symptom was indistinguishable from "this bot has no open PRs". Both readers
-# now reject a malformed entry outright. See "A malformed BOT_AUTHORS entry is
-# fatal, not silently misread" in docs/specs/feed-scripts.allium.
+# "app/<slug>". An entry written the other natural way ("dependabot[bot]") is
+# misread silently otherwise: fetch-reviews.sh appends a second "[bot]" and
+# matches no author, and the gh queries return nothing, a symptom
+# indistinguishable from "this bot has no open PRs". So every reader rejects
+# a malformed entry outright. See BotsConf in docs/specs/feed-scripts.allium.
 #
-# Asserts, for fetch-reviews.sh and fetch-dependabot.sh alike:
+# Asserts, for fetch-reviews.sh, fetch-dependabot.sh and fetch-cve.sh alike:
 #   - a malformed entry exits non-zero, names itself on stderr, and emits no
 #     items on stdout
 #   - EVERY malformed entry is named, not just the first
@@ -21,8 +21,9 @@
 # And for RELEASE_BOT_AUTHORS (task 53281):
 #   - fetch-reviews.sh validates its form exactly like BOT_AUTHORS, naming the
 #     list on each offender's line, and walks both lists before exiting
-#   - fetch-dependabot.sh does not validate its form and never queries by it
-#   - an entry on both lists is fatal in BOTH readers, compared
+#   - fetch-dependabot.sh and fetch-cve.sh do not validate its form;
+#     fetch-dependabot.sh never queries by it
+#   - an entry on both lists is fatal in EVERY reader, compared
 #     case-insensitively, every overlap named, nothing emitted
 #   - lists are compared as configured: an empty BOT_AUTHORS overlaps nothing
 #   - empty lists, an old conf without the array, and the shipped conf pass
@@ -42,7 +43,16 @@ cat >"$WORKDIR/gh" <<'STUB'
 #!/usr/bin/env bash
 args="$*"
 printf '%s\n' "$args" >>"$(dirname "$0")/gh-args.log"
-if [[ "$args" == *"api user"* ]]; then
+# fetch-cve.sh's calls: one authenticated account, no alerts, no links.
+if [[ "$args" == "auth status"* ]]; then
+  printf '%s\n' '{"hosts":{"github.com":[{"login":"ragge"}]}}'
+elif [[ "$args" == "auth token"* ]]; then
+  printf '%s\n' 'tok'
+elif [[ "$args" == *"dependabot/alerts"* ]]; then
+  printf '%s\n' '[]'
+elif [[ "$args" == *"vulnerabilityAlerts"* ]]; then
+  printf '%s\n' '{"data":{"repository":{"vulnerabilityAlerts":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}'
+elif [[ "$args" == *"api user"* ]]; then
   printf '%s\n' 'ragge'
 elif [[ "$args" == *"api graphql"* ]]; then
   printf '%s\n' '{"data":{"nodes":[]}}'
@@ -54,8 +64,8 @@ fi
 STUB
 chmod +x "$WORKDIR/gh"
 
-cp "$SCRIPT_DIR/fetch-reviews.sh" "$SCRIPT_DIR/fetch-dependabot.sh" "$WORKDIR/"
-chmod +x "$WORKDIR/fetch-reviews.sh" "$WORKDIR/fetch-dependabot.sh"
+cp "$SCRIPT_DIR/fetch-reviews.sh" "$SCRIPT_DIR/fetch-dependabot.sh" "$SCRIPT_DIR/fetch-cve.sh" "$WORKDIR/"
+chmod +x "$WORKDIR/fetch-reviews.sh" "$WORKDIR/fetch-dependabot.sh" "$WORKDIR/fetch-cve.sh"
 echo 'REPOS=("testorg/repo")' >"$WORKDIR/repos.conf"
 
 fail() {
@@ -72,9 +82,9 @@ run_reader() {
   err="$(cat "$WORKDIR/stderr.txt")"
 }
 
-READERS=("fetch-reviews.sh" "fetch-dependabot.sh")
+READERS=("fetch-reviews.sh" "fetch-dependabot.sh" "fetch-cve.sh")
 
-# --- A malformed entry is fatal for both readers ---------------------------
+# --- A malformed entry is fatal for every reader ---------------------------
 
 for script in "${READERS[@]}"; do
   echo 'BOT_AUTHORS=("dependabot[bot]")' >"$WORKDIR/bots.conf"
@@ -143,9 +153,8 @@ for script in "${READERS[@]}"; do
 done
 
 # ===========================================================================
-# RELEASE_BOT_AUTHORS (task 53281). See "Release bots get their own tag",
-# "A malformed BOT_AUTHORS entry is fatal, not silently misread" and "A bot
-# on both lists is fatal" in docs/specs/feed-scripts.allium.
+# RELEASE_BOT_AUTHORS. See BotsConf and FetchReviews.TagFromAuthorConfig in
+# docs/specs/feed-scripts.allium.
 # ===========================================================================
 
 # Is stdout empty of items? A refused cycle emits NOTHING, not even "[]".
@@ -209,19 +218,21 @@ done
   fail "a well-formed release entry must not be reported as an offender" "$err"
 emitted_nothing || fail "fetch-reviews.sh emitted items despite malformed entries" "$out"
 
-# --- fetch-dependabot.sh does not validate the release list's form ---------
-# It reads RELEASE_BOT_AUTHORS for the overlap check alone; a malformed release
+# --- fetch-dependabot.sh and fetch-cve.sh do not validate the release list -
+# They read RELEASE_BOT_AUTHORS for the overlap check alone; a malformed release
 # entry is fetch-reviews.sh's to report.
 
 cat >"$WORKDIR/bots.conf" <<'CONF'
 BOT_AUTHORS=("app/kognic-renovate")
 RELEASE_BOT_AUTHORS=("kognic-gha-release-bot[bot]")
 CONF
-run_reader "fetch-dependabot.sh"
-[[ $rc -eq 0 ]] ||
-  fail "fetch-dependabot.sh must not validate RELEASE_BOT_AUTHORS' form" "$err"
+for script in "fetch-dependabot.sh" "fetch-cve.sh"; do
+  run_reader "$script"
+  [[ $rc -eq 0 ]] ||
+    fail "$script must not validate RELEASE_BOT_AUTHORS' form" "$err"
+done
 
-# --- A bot on both lists is fatal, in BOTH readers -------------------------
+# --- A bot on both lists is fatal, in EVERY reader -------------------------
 # Compared case-insensitively, as an author is matched. Every overlapping entry
 # is named, the exit is non-zero and nothing is emitted.
 
@@ -269,7 +280,7 @@ for script in "${READERS[@]}"; do
     fail "$script treated its empty-list fallback as a listing and refused the conf" "$err"
 done
 
-# --- Well-formed, disjoint lists pass both readers -------------------------
+# --- Well-formed, disjoint lists pass every reader -------------------------
 
 cat >"$WORKDIR/bots.conf" <<'CONF'
 BOT_AUTHORS=("app/kognic-renovate" "app/dependabot")
@@ -303,7 +314,7 @@ done
 
 # --- An old conf without the release array still works --------------------
 # The conf is installed create-new-only, so an existing deployment's copy has
-# no RELEASE_BOT_AUTHORS. Both readers pre-declare it, so this reads as empty
+# no RELEASE_BOT_AUTHORS. Every reader pre-declares it, so this reads as empty
 # rather than tripping an unbound-variable error.
 
 echo 'BOT_AUTHORS=("app/kognic-renovate")' >"$WORKDIR/bots.conf"

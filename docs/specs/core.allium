@@ -114,7 +114,7 @@ value TaskUrl {
 -- those meanings at once, so a tag joins it only when all of them are true.
 --
 -- release_please is a release PR opened by a configured release bot
--- (feed-scripts.allium: "Release bots get their own tag"). Its agent reads
+-- (feed-scripts.allium: FetchReviews.TagFromAuthorConfig). Its agent reads
 -- the changelog, checks CI, merges only on a green CI and never authors the
 -- PR (dispatch-prompt.allium: RenderReleasePrRunbook).
 enum TaskTag { bug | feature | chore | pr_review | research | fix | dependabot | release_please }

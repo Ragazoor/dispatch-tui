@@ -42,8 +42,8 @@ if [[ -f "$SCRIPT_DIR/bots.conf" ]]; then
 fi
 
 # Validate BOT_AUTHORS before anything uses it. bots.conf documents exactly
-# ONE entry form -- gh search's app form, "app/<slug>" -- and both readers of
-# that file misread any other form SILENTLY: an entry written the other
+# ONE entry form -- gh search's app form, "app/<slug>" -- and every reader of
+# that file misreads any other form SILENTLY: an entry written the other
 # natural way, "dependabot[bot]", matches no PR author and returns nothing
 # from gh, and the symptom is indistinguishable from "this bot has no open
 # PRs". A malformed entry is a typo in a hand-edited config file: it will not
@@ -53,8 +53,7 @@ fi
 # offender is reported, so a conf with three typos costs one fix round-trip.
 # The check lives HERE rather than in bots.conf because the conf is installed
 # create-new-only and an existing deployment's copy is never rewritten by
-# setup. See "A malformed BOT_AUTHORS entry is fatal, not silently misread" in
-# docs/specs/feed-scripts.allium.
+# setup. See BotsConf.AMalformedEntryIsFatal in docs/specs/feed-scripts.allium.
 bad_bot_authors=0
 if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
   for author in "${BOT_AUTHORS[@]}"; do
@@ -69,7 +68,7 @@ if [[ $bad_bot_authors -ne 0 ]]; then
 fi
 # A bot on both lists is fatal: the two lists claim opposite things about it.
 # Compared as configured (before the fallback below), case-insensitively. See
-# "A bot on both lists is fatal" in docs/specs/feed-scripts.allium.
+# BotsConf.ABotOnBothListsIsFatal in docs/specs/feed-scripts.allium.
 bad_overlap=0
 if [[ ${#BOT_AUTHORS[@]} -gt 0 && ${#RELEASE_BOT_AUTHORS[@]} -gt 0 ]]; then
   for author in "${BOT_AUTHORS[@]}"; do

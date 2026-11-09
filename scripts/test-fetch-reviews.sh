@@ -390,7 +390,7 @@ assert "team-inclusive org-scoped query never runs (PR8 absent)" \
   '[.[] | select(.url | endswith("/pull/8"))] | length == 0'
 
 # --- Team-scoped pass (teams.conf) -----------------------------------------
-# "Team Reviews is the PRs requested from the listed teams" in
+# FetchReviews.TeamPassIsTheOnlyTeamRequestProducer in
 # docs/specs/feed-scripts.allium.
 
 # PR11 is only returned by a repo-scoped review-requested:@me — a request to a
@@ -642,7 +642,7 @@ if grep -q -- '--author app/' "$WORKDIR/gh-args.log"; then
 fi
 
 # ===========================================================================
-# RELEASE_BOT_AUTHORS (task 53281): "Release bots get their own tag" in
+# RELEASE_BOT_AUTHORS: FetchReviews.TagFromAuthorConfig in
 # docs/specs/feed-scripts.allium.
 # ===========================================================================
 

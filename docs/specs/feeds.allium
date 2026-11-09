@@ -314,8 +314,8 @@ contract RouteSignals {
 -- list. Its one genuine use would be an org-wide re-request, and that is
 -- served where the signal is produced: the org-scoped pass keeps its
 -- personal-request qualifier as its own signal rather than folding it into
--- org_review (feed-scripts.allium: "The org-scoped personal-request qualifier
--- keeps its own signal"). Re-deriving the fact here would buy a second
+-- org_review (feed-scripts.allium: FetchReviews.OrgScopedReviewQueries).
+-- Re-deriving the fact here would buy a second
 -- source, a bounded list scan and a truncation failure mode.
 --
 -- == Limit of the mechanism ==
@@ -578,13 +578,13 @@ contract ShippedFeedScriptFiles {
 -- the ExcludeFromReviews contract above, and route ignores approved
 -- completely.
 --
--- approved means the user's latest OPINIONATED review on the PR (one that
--- approves or requests changes — a plain comment is neither) is an approval.
+-- What approved means is defined once, in the ExcludeFromReviews notes above
+-- (WHAT APPROVED MEANS); fetch-reviews.sh only attaches it.
 --
 -- direct_request means a review is currently requested from the user
 -- PERSONALLY; team_request means one is requested from a team the user
--- lists in teams.conf (feed-scripts.allium, "Team Reviews is the PRs
--- requested from the listed teams"). That distinction is why both rescue an approved PR: a
+-- lists in teams.conf (feed-scripts.allium:
+-- FetchReviews.TeamPassIsTheOnlyTeamRequestProducer). That distinction is why both rescue an approved PR: a
 -- re-request can take either shape.
 enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me | org_review | approved }
 

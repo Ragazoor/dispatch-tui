@@ -411,9 +411,9 @@ Both scripts are installed into `<data_dir>/scripts/` by the startup configurati
 read their real configuration from the `.conf` files beside them — edit those,
 not the scripts.
 
-**Bot logins live in one file, `scripts/bots.conf`.** Both `fetch-reviews.sh`'s
-bot-author pass and `fetch-dependabot.sh` read its `BOT_AUTHORS` array, so a
-deployment spells its bots once. Use `gh`'s app form (`app/<slug>`); the slug is
+**Bot logins live in one file, `scripts/bots.conf`.** `fetch-reviews.sh`'s
+bot-author pass, `fetch-dependabot.sh` and `fetch-cve.sh` (to pick a fix PR) all
+read its `BOT_AUTHORS` array, so a deployment spells its bots once. Use `gh`'s app form (`app/<slug>`); the slug is
 deployment-specific, and a repo mid-migration carries PRs from more than one bot
 at a time, so list every bot you want on the board. `fetch-dependabot.sh` runs
 one `gh pr list` pass per entry and falls back to `app/kognic-renovate` when the
@@ -425,18 +425,17 @@ bot-author pass queries both lists, and a PR authored by a release bot gets tag
 `release-please`, never derived from the `[bot]` suffix. The agent for that tag
 reads the changelog, checks live CI and approves and merges only on green CI;
 a major bump or breaking-change entry stops it for the user. A bot on both lists
-is a fatal configuration error in both readers (every overlap named on stderr,
-non-zero exit, nothing emitted); `fetch-dependabot.sh` reads
+is a fatal configuration error in every reader (every overlap named on stderr,
+non-zero exit, nothing emitted); `fetch-dependabot.sh` and `fetch-cve.sh` read
 `RELEASE_BOT_AUTHORS` for that check alone.
 
-**The app form is enforced, and a bad entry stops the script.** Both readers
-validate every `BOT_AUTHORS` entry (`fetch-reviews.sh` also `RELEASE_BOT_AUTHORS`) against `^app/[A-Za-z0-9._-]+$` right after
+**The app form is enforced, and a bad entry stops the script.** Every reader
+validates every `BOT_AUTHORS` entry (`fetch-reviews.sh` also `RELEASE_BOT_AUTHORS`) against `^app/[A-Za-z0-9._-]+$` right after
 sourcing `bots.conf`; anything else — `dependabot[bot]` is the natural wrong
-guess — names itself on stderr and exits non-zero, emitting nothing. It used to
-be misread silently, and the symptom was indistinguishable from "this bot has no
-open PRs". A bot running under a plain user account is deliberately not
-expressible. See "A malformed BOT_AUTHORS entry is fatal, not silently misread"
-in `docs/specs/feed-scripts.allium`.
+guess — names itself on stderr and exits non-zero, emitting nothing. Unchecked,
+it would be misread silently, and the symptom would be indistinguishable from
+"this bot has no open PRs". A bot running under a plain user account is deliberately not
+expressible. See the BotsConf contract in `docs/specs/feed-scripts.allium`.
 
 **PRs you authored never appear** in any of the three review sub-epics. The
 runtime drops every emitted item carrying the `author-me` signal before routing

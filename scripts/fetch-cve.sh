@@ -31,14 +31,50 @@ fi
 # The bots whose PRs may be linked as an alert's fix: Dependabot always, plus
 # bots.conf's BOT_AUTHORS, falling back to app/kognic-renovate when that list
 # is empty, as fetch-dependabot.sh does. Only a known dependency bot's PR is
-# offered for merging; any other app's PR, or a person's, is not. bots.conf's
-# validation is fetch-reviews.sh's and fetch-dependabot.sh's to report: a
-# malformed entry here simply matches no author.
+# offered for merging; any other app's PR, or a person's, is not.
 BOT_AUTHORS=()
+# Read only for the overlap check below; never used to link a PR.
+RELEASE_BOT_AUTHORS=()
 if [[ -f "$SCRIPT_DIR/bots.conf" ]]; then
   # shellcheck source=bots.conf
   source "$SCRIPT_DIR/bots.conf"
 fi
+
+# Validate BOT_AUTHORS before anything uses it, as every reader of bots.conf
+# does. A malformed entry ("dependabot[bot]") matches no PR author, so the
+# alert's fix PR goes silently unlinked; that is indistinguishable from "no fix
+# PR is open", so it fails the whole run instead. Every offender is reported.
+# See BotsConf.AMalformedEntryIsFatal in docs/specs/feed-scripts.allium.
+bad_bot_authors=0
+if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
+  for author in "${BOT_AUTHORS[@]}"; do
+    if [[ ! "$author" =~ ^app/[A-Za-z0-9._-]+$ ]]; then
+      echo "fetch-cve: bots.conf - BOT_AUTHORS entry \"$author\" is not in gh's app form (\"app/<slug>\"), so it matches no PR author. Write it as \"app/<slug>\", e.g. \"app/dependabot\"." >&2
+      bad_bot_authors=1
+    fi
+  done
+fi
+if [[ $bad_bot_authors -ne 0 ]]; then
+  exit 1
+fi
+# A bot on both lists is fatal: the two lists claim opposite things about it.
+# Compared as configured (before the fallback below), case-insensitively. See
+# BotsConf.ABotOnBothListsIsFatal in docs/specs/feed-scripts.allium.
+bad_overlap=0
+if [[ ${#BOT_AUTHORS[@]} -gt 0 && ${#RELEASE_BOT_AUTHORS[@]} -gt 0 ]]; then
+  for author in "${BOT_AUTHORS[@]}"; do
+    for rel in "${RELEASE_BOT_AUTHORS[@]}"; do
+      if [[ "${author,,}" == "${rel,,}" ]]; then
+        echo "fetch-cve: bots.conf - \"$author\" is listed in both BOT_AUTHORS and RELEASE_BOT_AUTHORS (as \"$rel\"); a bot opens either dependency bumps or releases. Remove it from one list." >&2
+        bad_overlap=1
+      fi
+    done
+  done
+fi
+if [[ $bad_overlap -ne 0 ]]; then
+  exit 1
+fi
+
 if [[ ${#BOT_AUTHORS[@]} -eq 0 ]]; then
   BOT_AUTHORS=("app/kognic-renovate")
 fi
@@ -92,8 +128,7 @@ PR_LIMIT=200
 # on any page fails the whole repo rather than emitting a partial list.
 #
 # Each alert is then linked to an open PR that already fixes it, when one
-# exists — see "scripts/fetch-cve.sh: an alert names the open PR that fixes it"
-# in docs/specs/feed-scripts.allium. A failed link lookup never drops an alert:
+# exists — see FetchCve in docs/specs/feed-scripts.allium. A failed link lookup never drops an alert:
 # it only leaves that repo's alerts unlinked.
 
 for repo in "${REPOS[@]}"; do

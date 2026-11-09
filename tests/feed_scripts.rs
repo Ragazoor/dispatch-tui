@@ -78,9 +78,9 @@ fn dependabot_prompt_does_not_re_check_the_author_the_feed_already_filtered() {
     );
 }
 
-/// `bots.conf` has two readers with two DIFFERENT empty-value behaviours:
+/// `bots.conf` has three readers with DIFFERENT empty-value behaviours:
 /// `fetch-reviews.sh` skips its bot-author pass, while `fetch-dependabot.sh`
-/// falls back to `app/kognic-renovate`. A user editing the file sees only the
+/// and `fetch-cve.sh` fall back to `app/kognic-renovate`. A user editing the file sees only the
 /// file, so the file has to say both — and each reader's own comment has to say
 /// the list is shared, or the next author will add a second bot list.
 #[test]
@@ -99,7 +99,11 @@ fn bots_conf_and_both_its_readers_say_the_list_is_shared() {
          since that is the shipped state of the file"
     );
 
-    for reader in ["scripts/fetch-reviews.sh", "scripts/fetch-dependabot.sh"] {
+    for reader in [
+        "scripts/fetch-reviews.sh",
+        "scripts/fetch-dependabot.sh",
+        "scripts/fetch-cve.sh",
+    ] {
         let body = repo_file(reader);
         assert!(
             body.contains("bots.conf"),
@@ -107,7 +111,7 @@ fn bots_conf_and_both_its_readers_say_the_list_is_shared() {
         );
         assert!(
             !body.contains("bot-author pass ONLY"),
-            "{reader} must not claim sole ownership of a list two scripts read"
+            "{reader} must not claim sole ownership of a list three scripts read"
         );
     }
 }
@@ -141,7 +145,7 @@ fn log_warning_feed_script_defaults_wrap_up_mode_to_rebase() {
     );
 }
 
-/// feed-scripts.allium "Release bots get their own tag": bots.conf carries a
+/// feed-scripts.allium BotsConf.TheShippedStateNeverFails: bots.conf carries a
 /// second list, RELEASE_BOT_AUTHORS, documenting `app/kognic-gha-release-bot`
 /// as the example and shipping the list EMPTY. The example lives only in
 /// prose: an uncommented entry would arm the release runbook on every fresh
@@ -174,12 +178,16 @@ fn bots_conf_documents_release_bot_authors_and_ships_it_empty() {
 }
 
 /// An existing bots.conf is never rewritten (InstallShippedFeedConfigs), so an
-/// old conf has no RELEASE_BOT_AUTHORS. Both readers pre-declare it empty
+/// old conf has no RELEASE_BOT_AUTHORS. Every reader pre-declares it empty
 /// BEFORE sourcing the conf, as they do BOT_AUTHORS, so an old conf reads as
 /// an empty list rather than tripping `set -u`.
 #[test]
 fn both_readers_pre_declare_release_bot_authors_before_sourcing_bots_conf() {
-    for reader in ["scripts/fetch-reviews.sh", "scripts/fetch-dependabot.sh"] {
+    for reader in [
+        "scripts/fetch-reviews.sh",
+        "scripts/fetch-dependabot.sh",
+        "scripts/fetch-cve.sh",
+    ] {
         let code = feed_script_code(reader);
         let declare = code
             .find("RELEASE_BOT_AUTHORS=()")
@@ -194,8 +202,8 @@ fn both_readers_pre_declare_release_bot_authors_before_sourcing_bots_conf() {
     }
 }
 
-/// feed-scripts.allium: "THE TAG COMES FROM THE AUTHOR CONFIG, NEVER FROM THE
-/// "[bot]" SUFFIX". fetch-reviews.sh emits the release-please tag, and the
+/// feed-scripts.allium: FetchReviews.TagFromAuthorConfig (the tag comes from the
+/// author config, never from the "[bot]" suffix). fetch-reviews.sh emits the release-please tag, and the
 /// emitted tag must be the wire string the board parses.
 #[test]
 fn fetch_reviews_emits_the_release_please_wire_tag() {
@@ -378,7 +386,7 @@ fn run_with_bots_conf(script_rel: &str, bots_conf: &str) -> (bool, String, Strin
 
 /// A bad `bots.conf` is fatal, not a warning: the run fails with no emission,
 /// so the feed runner keeps the last good board instead of reconciling a
-/// partial one (feed-scripts.allium, "A malformed BOT_AUTHORS entry is fatal").
+/// partial one (feed-scripts.allium: BotsConf.AMalformedEntryIsFatal).
 /// That is why these warnings carry no `notice:` prefix: a notice means
 /// "emitted fine, here is a hint".
 #[test]

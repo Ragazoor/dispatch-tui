@@ -585,8 +585,8 @@ use "./core.allium" as core
 -- not compete with the indicator to its left for the eye.
 --
 -- CI status is the ONE exception. Three label texts are a shared vocabulary
--- between the feed and this renderer (see "CI status label" in
--- feed-scripts.allium) and take a state colour instead of the muted grey:
+-- between the feed and this renderer (feed-scripts.allium: CiLabel and
+-- FetchReviews.CiLabelOnEveryPr) and take a state colour instead of the muted grey:
 --
 --   [ci:pass]     green
 --   [ci:fail]     red

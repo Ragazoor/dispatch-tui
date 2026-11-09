@@ -3,8 +3,7 @@
 #
 # Puts a fake `gh` first on PATH that returns canned alerts, GraphQL alert
 # links and open PRs, runs fetch-cve.sh against it, and asserts the fix-PR
-# linking contract ("scripts/fetch-cve.sh: an alert names the open PR that
-# fixes it" in docs/specs/feed-scripts.allium):
+# linking contract (FetchCve in docs/specs/feed-scripts.allium):
 #   - the alert's own open Dependabot update PR wins over every other match
 #   - a merged Dependabot update PR links nothing, so the match falls through
 #   - a bot PR naming the advisory id beats a newer one naming the package
