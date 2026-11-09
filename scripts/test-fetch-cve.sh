@@ -34,6 +34,7 @@ trap 'rm -rf "$WORKDIR"' EXIT
 cat >"$WORKDIR/gh" <<'STUB'
 #!/usr/bin/env bash
 args="$*"
+printf '%s\n' "$args" >>"$(dirname "$0")/gh-args.log"
 
 if [[ "$args" == "auth status"* ]]; then
   echo '{"hosts":{"github.com":[{"login":"me"}]}}'
@@ -51,6 +52,10 @@ alert() { # number pkg ghsa cve
 }
 
 if [[ "$args" == *"dependabot/alerts"* ]]; then
+  if [[ "$args" == *"/repos/acme/broken/"* ]]; then
+    echo "stub: HTTP 404: Not Found" >&2
+    exit 1
+  fi
   if [[ "$args" == *"/repos/acme/app/"* ]]; then
     REPO=app
     echo "[$(alert 1 tokio GHSA-aaaa '"CVE-2026-0001"'),"
@@ -156,6 +161,8 @@ assert "the Fix PR paragraph names the PR title" \
   "[$(item 'acme/app#1') | .description | endswith(\"Fix PR: https://github.com/acme/app/pull/10 (Bump tokio from 1.0 to 1.2), matched by the alert's Dependabot link\")] == [true]"
 assert "the url stays the alert" \
   "[$(item 'acme/app#1') | .url] == [\"https://github.com/acme/app/security/dependabot/1\"]"
+assert "every item declares url_type security_alert" \
+  'all(.[]; .url_type == "security_alert")'
 
 assert "a merged Dependabot PR falls through; the advisory-id PR beats a newer package match" \
   "$(linked_to 'acme/app#2' 21)"
@@ -175,5 +182,32 @@ grep -q "acme/lib" "$WORKDIR/err" || fail "a failed lookup must warn on stderr n
 echo 'REPOS=("acme/full")' >"$WORKDIR/repos.conf"
 output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-cve.sh" 2>"$WORKDIR/err")"
 grep -q "acme/full" "$WORKDIR/err" || fail "a PR list at its limit must warn on stderr"
+
+# A release bot is never the fallback dependency bot
+# (BotsConf.TheFallbackNeverNamesAReleaseBot): with BOT_AUTHORS empty and
+# RELEASE_BOT_AUTHORS naming app/kognic-renovate, a Renovate PR is not a fix.
+echo 'REPOS=("acme/app")' >"$WORKDIR/repos.conf"
+printf '%s\n' 'BOT_AUTHORS=()' 'RELEASE_BOT_AUTHORS=("app/kognic-renovate")' >"$WORKDIR/bots.conf"
+output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-cve.sh" 2>"$WORKDIR/err")"
+assert "the fallback skips a bot the release list names" "$(unlinked 'acme/app#2')"
+assert "app/dependabot's own PRs still link" "$(linked_to 'acme/app#1' 10)"
+rm "$WORKDIR/bots.conf"
+
+# --- fetch-security.sh (FetchSecurity) --------------------------------------
+# Same alerts, no links. Every page is fetched, and a repo it cannot read is
+# skipped LOUDLY so the cycle keeps its cards instead of reading "no alerts".
+cp "$SCRIPT_DIR/fetch-security.sh" "$WORKDIR/fetch-security.sh"
+echo 'REPOS=("acme/app" "acme/broken")' >"$WORKDIR/repos.conf"
+: >"$WORKDIR/gh-args.log"
+rc=0
+output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-security.sh" 2>"$WORKDIR/err")" || rc=$?
+[[ $rc -eq 0 ]] || fail "fetch-security.sh failed because one repo was unreadable"
+assert "fetch-security emits every alert of the readable repo" \
+  'type == "array" and length == 5 and all(.[]; .external_id | startswith("dependabot:acme/app#"))'
+assert "fetch-security items declare url_type security_alert and carry no fix link" \
+  'all(.[]; .url_type == "security_alert" and (.description | contains("Fix PR:") | not))'
+grep -q "acme/broken" "$WORKDIR/err" || fail "fetch-security.sh must warn on stderr naming an unreadable repo"
+grep -q -- '--paginate.*acme/app/dependabot/alerts' "$WORKDIR/gh-args.log" ||
+  fail "fetch-security.sh must fetch every page of alerts"
 
 echo "test-fetch-cve: OK"

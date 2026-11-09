@@ -32,7 +32,8 @@
 --   - teams.conf     TEAMS, "<org>/<team-slug>" entries. Read only by
 --                    fetch-reviews.sh's team pass.
 --   - bots.conf      BOT_AUTHORS and RELEASE_BOT_AUTHORS (BotsConf).
---   - log-warnings.conf  LOG_FILE and REPO_URL. Read only by
+--   - log-warnings.conf  LOG_FILE and REPO_URL (LEVELS and SAMPLES may be
+--                    set there too). Read only by
 --                    fetch-log-warnings.sh.
 -- Each scope is its own file so that widening one query (my reviews to whole
 -- orgs, say) cannot widen another (the team or bot passes).
@@ -127,12 +128,21 @@ contract BotsConf {
     @invariant ListsAreComparedAsConfigured
         -- The overlap check runs before any fallback. A fallback
         -- (config.fallback_dependency_bot, fetch-reviews.sh's "[bot]" suffix
-        -- tagging) is a default, not a listing, so it never overlaps.
+        -- tagging) is a default, not a listing, so it never makes a conf
+        -- fatal.
+
+    @invariant TheFallbackNeverNamesAReleaseBot
+        -- When BOT_AUTHORS is empty and RELEASE_BOT_AUTHORS names
+        -- config.fallback_dependency_bot (compared case-insensitively), the
+        -- fallback is skipped: fetch-dependabot.sh lists no PRs and
+        -- fetch-cve.sh links only app/dependabot's. So every reader agrees
+        -- that a release bot is a release bot, and the conf still passes.
 
     @invariant EveryOffenderIsNamed
-        -- The checks walk every entry of both lists before exiting and write
-        -- one stderr line per offender, naming the entry and the list it sits
-        -- in. A conf with three typos costs one fix round-trip, not three.
+        -- A reader runs both checks over every entry it checks before it
+        -- exits, and writes one stderr line per offender, naming the entry and
+        -- the list it sits in. A conf with three typos and an overlap costs
+        -- one fix round-trip, not four.
 
     @invariant TheShippedStateNeverFails
         -- An absent bots.conf, an empty list, and an old conf without
@@ -170,7 +180,18 @@ contract FetchDependabot {
         -- what it emitted before bots.conf existed.
 
     @invariant EveryItemIsTaggedDependabot
-        -- Every emitted item carries tag dependabot, whoever its author is.
+        -- Every emitted item carries tag dependabot, whoever its author is:
+        -- external_id "dep:<repo>#<n>", title "#<n> <title>", the body cut to
+        -- 500 characters as description, the repo name as its one label.
+
+    @invariant BoundedAndLoudPerBot
+        -- Each (repo x bot) call passes `--limit config.dependabot_prs_per_bot`
+        -- and writes a stderr line when it returns that many, since a PR past
+        -- the cut goes missing. Each repo is first probed with
+        -- `gh api /repos/<repo>`. An unreachable repo, a failed call for one
+        -- bot or an unparsable answer is reported on stderr and skipped, so
+        -- the cycle syncs additively and keeps those cards; the other bots and
+        -- repos still emit. The script exits 0 once its checks pass.
 }
 
 -- == scripts/fetch-cve.sh and scripts/fetch-security.sh ==
@@ -202,8 +223,15 @@ contract FetchCve {
         -- One item per open Dependabot vulnerability alert in each repo of
         -- REPOS, read through the `gh api` Dependabot endpoint with every page
         -- fetched, tried with each authenticated token in turn. A repo no token
-        -- can read is skipped with a stderr warning. Feeds the managed CVE
-        -- epic ("Managed review & CVE feeds" in docs/reference.md).
+        -- can read is skipped with a stderr warning; no authenticated account
+        -- at all is a stderr error and exit 1. Feeds the managed CVE epic
+        -- ("Managed review & CVE feeds" in docs/reference.md).
+
+    @invariant AlertItemShape
+        -- external_id "cve:<repo>#<n>"; title "[<SEVERITY>] <repo name>:
+        -- <CVE id, else GHSA id, else #n>"; description the advisory summary
+        -- and description; url the alert, url_type security_alert; tag fix;
+        -- labels the repo name; sort_order 1-4 by severity, critical first.
 
     @invariant FixPrPrecedence
         -- An alert is linked to at most one open PR. The first source that
@@ -222,9 +250,11 @@ contract FetchCve {
     @invariant KnownDependencyBots
         -- Sources 2 and 3 accept only app/dependabot plus BOT_AUTHORS, which
         -- falls back to config.fallback_dependency_bot when empty, compared
-        -- case-insensitively. Source 1 needs no allowlist: GitHub itself names
-        -- the PR. fetch-cve.sh reads bots.conf as a full reader
-        -- (BotsConf.AMalformedEntryIsFatal, BotsConf.ABotOnBothListsIsFatal).
+        -- case-insensitively (BotsConf.TheFallbackNeverNamesAReleaseBot).
+        -- Source 1 needs no allowlist: GitHub itself names the PR. fetch-cve.sh
+        -- reads bots.conf as a full reader (BotsConf.AMalformedEntryIsFatal,
+        -- BotsConf.ABotOnBothListsIsFatal). Source 2's id match is
+        -- case-sensitive.
 
     @invariant ALinkedItemSaysHowStrongTheLinkIs
         -- A linked item's description ends with the paragraph
@@ -235,7 +265,7 @@ contract FetchCve {
         -- labels gain "fix-pr" and its wrap_up_mode is done, since merging
         -- another author's PR leaves no commits of the agent's own to open a
         -- PR for. An unlinked item has wrap_up_mode pr. The url stays the
-        -- alert, url_type security_alert.
+        -- alert either way.
 
     @invariant LinksFollowEveryPoll
         -- Description and labels are re-applied on every poll, so a PR that
@@ -267,6 +297,18 @@ contract FetchSecurity {
         -- PR: its tasks sit on an ordinary epic, which never renders the CVE
         -- runbook (dispatch-prompt.allium: CveRemediationSkipsTheDesignStep),
         -- so a "Fix PR" line there would come with no instruction to act on.
+
+    @invariant EveryPageOrALoudSkip
+        -- Every page of a repo's alerts is fetched, with gh's default
+        -- account. A repo it cannot read is reported on stderr and skipped, so
+        -- the cycle syncs additively and keeps that repo's cards rather than
+        -- reading as "no open alerts".
+
+    @invariant SecurityItemShape
+        -- external_id "dependabot:<repo>#<n>"; title the advisory summary;
+        -- description the advisory description; url the alert, url_type
+        -- security_alert; tag fix; wrap_up_mode pr; labels the repo name;
+        -- sort_order 1-4 by severity.
 }
 
 -- == scripts/fetch-reviews.sh ==
@@ -356,14 +398,23 @@ contract FetchReviews {
     -- The wire string a CiLabel is written as in an item's labels.
     ci_label_text: (label: CiLabel) -> String
 
+    @invariant ReviewSearchesAreBoundedAndLoud
+        -- Each review qualifier is ONE `gh search prs --state=open` call over
+        -- every repo of REPOS (or, for the org pass, every org of ORGS) with
+        -- `--limit config.review_search_limit`. A call that returns that many
+        -- writes a stderr line, since a PR past the cut would otherwise read
+        -- as gone; the line makes the cycle sync additively and keep cards.
+        -- One call per qualifier, not per repo, keeps the passes inside
+        -- GitHub's search rate limit.
+
     @invariant RepoScopedReviewQueries
-        -- Per repo in REPOS, `gh search prs --state=open`:
+        -- Over the repos in REPOS:
         --   user-review-requested:@me    -> direct_request
         --   reviewed-by:@me              -> reviewed
         --   commenter:@me -author:@me    -> commented
 
     @invariant OrgScopedReviewQueries
-        -- The same three qualifiers per org in ORGS:
+        -- The same three qualifiers over the orgs in ORGS:
         --   reviewed-by:@me | commenter:@me -author:@me -> org_review
         --   user-review-requested:@me                    -> direct_request
         -- Every org-scoped match routes to my_reviews, never Team or Bots.
@@ -380,8 +431,10 @@ contract FetchReviews {
         -- RELEASE_BOT_AUTHORS together: `gh pr list --repo <repo> --author
         -- <bot> --state open --limit config.bot_prs_per_repo --search
         -- sort:created-desc` -> author_bot. Each repo is first probed with
-        -- `gh api repos/<repo>`; a failed probe is reported on stderr and the
-        -- repo skipped. Only when BOTH lists are empty is the pass skipped. Its
+        -- `gh api repos/<repo>`; a failed probe, or a failed call for one
+        -- (repo x author), is reported on stderr and skipped, so those PRs
+        -- drop from the emission and the cycle syncs additively. Only when
+        -- BOTH lists are empty is the pass skipped. Its
         -- `app/<slug>` authors are rewritten to `<slug>[bot]`, and the
         -- missing `repository` field is filled from the repo queried, so an
         -- item is identical whichever pass found the PR.
@@ -435,6 +488,11 @@ contract FetchReviews {
         -- "ci:pending"; a card colours exactly these (board-visuals.allium:
         -- "Card label badges").
 
+    @invariant ReviewItemShape
+        -- external_id "review:<owner>/<repo>#<n>"; title "#<n> <title>";
+        -- description the body cut to 500 characters; labels "@<author>",
+        -- the repo name, then "draft" and the ci label when they apply.
+
     @invariant DraftsAreLabelled
         -- Draft PRs are included and carry a "draft" entry in labels, which
         -- the card renders as a badge like any other label.
@@ -475,20 +533,31 @@ contract FetchLogWarnings {
         -- (core/Epic.feed_append_only; feeds.allium: AppendOnlyFeed).
 
     @invariant OneItemPerDistinctRecord
-        -- One item per distinct WARN or ERROR record in the tracing-formatted
-        -- LOG_FILE. A record's fingerprint, and so its external_id, is its
-        -- module target plus the static head of its message (up to the first
-        -- ":" or " key="). Everything after the head is per-occurrence detail.
+        -- One item per distinct record at one of the LEVELS (default WARN and
+        -- ERROR) in the tracing-formatted LOG_FILE. A record's fingerprint is
+        -- its level, its module target and the static head of its message (up
+        -- to the first ":" or " key=", digit runs collapsed to N and
+        -- "<org>/<repo>" pairs to R); external_id is
+        -- "log:<level>:<target>:<head>". Everything after the head is
+        -- per-occurrence detail. An empty LOG_FILE emits an empty list; an
+        -- unreadable one is a stderr error and exit 1.
+
+    @invariant RecordItemShape
+        -- title "[<LEVEL>] <last two target segments>: <head>"; tag bug;
+        -- labels the lowercased level; sort_order the rank by occurrence
+        -- count, the noisiest first.
 
     @invariant UrlIsTheRepoRoot
-        -- url is the repo root "https://github.com/<org>/<repo>", a form
-        -- extract_github_repo accepts, so the task resolves a repo_path and is
-        -- dispatchable. A log record has no upstream url of its own.
+        -- url is REPO_URL, the repo root "https://github.com/<org>/<repo>", a
+        -- form extract_github_repo accepts, so the task resolves a repo_path
+        -- and is dispatchable. A log record has no upstream url of its own.
+        -- An empty REPO_URL leaves url empty and the task without a repo.
 
     @invariant DescriptionStaysCurrent
         -- The description carries the occurrence count, first and last seen
-        -- timestamps and a sample of raw lines, re-applied on every poll, so
-        -- an open card keeps a current count.
+        -- timestamps, the triage instructions and up to SAMPLES (default 3)
+        -- raw lines, re-applied on every poll, so an open card keeps a
+        -- current count.
 
     @invariant RebaseOnInsert
         -- Every item sets wrap_up_mode rebase, applied on insert only
@@ -519,6 +588,10 @@ config {
     -- fetch-reviews.sh's bot-author pass: the newest open PRs kept per
     -- (repo x bot author).
     bot_prs_per_repo: Integer = 20
+    -- fetch-reviews.sh: the results one review search returns.
+    review_search_limit: Integer = 100
+    -- fetch-dependabot.sh: the open PRs listed per (repo x bot).
+    dependabot_prs_per_bot: Integer = 100
     -- fetch-cve.sh: the open PRs listed per repo when looking for a fix PR.
     fix_pr_list_limit: Integer = 200
     -- fetch-cve.sh: a linked PR's title is cut to this many characters.

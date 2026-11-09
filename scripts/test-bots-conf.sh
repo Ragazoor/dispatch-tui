@@ -52,6 +52,9 @@ elif [[ "$args" == *"dependabot/alerts"* ]]; then
   printf '%s\n' '[]'
 elif [[ "$args" == *"vulnerabilityAlerts"* ]]; then
   printf '%s\n' '{"data":{"repository":{"vulnerabilityAlerts":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}'
+elif [[ "$args" == "pr list"* && -n "${STUB_PR_COUNT:-}" ]]; then
+  # fetch-dependabot.sh's per-(repo x bot) listing, filled to a given size.
+  jq -nc --argjson n "$STUB_PR_COUNT" '[range($n) | {number: ., title: "t", body: "", url: ("https://github.com/testorg/repo/pull/" + tostring)}]'
 elif [[ "$args" == *"api user"* ]]; then
   printf '%s\n' 'ragge'
 elif [[ "$args" == *"api graphql"* ]]; then
@@ -267,18 +270,59 @@ for script in "${READERS[@]}"; do
 done
 
 # --- Lists are compared as configured, before any fallback -----------------
-# An empty BOT_AUTHORS overlaps nothing: fetch-dependabot.sh's app/kognic-renovate
-# default is a default, not a listing, so a release list naming it is legal.
+# An empty BOT_AUTHORS overlaps nothing: the app/kognic-renovate default is a
+# default, not a listing, so a release list naming it is legal. And the
+# fallback then skips that bot (BotsConf.TheFallbackNeverNamesAReleaseBot):
+# fetch-dependabot.sh must not list a release bot's PRs as dependency bumps.
 
 cat >"$WORKDIR/bots.conf" <<'CONF'
 BOT_AUTHORS=()
-RELEASE_BOT_AUTHORS=("app/kognic-renovate")
+RELEASE_BOT_AUTHORS=("app/Kognic-Renovate")
 CONF
 for script in "${READERS[@]}"; do
+  : >"$WORKDIR/gh-args.log"
   run_reader "$script"
   [[ $rc -eq 0 ]] ||
     fail "$script treated its empty-list fallback as a listing and refused the conf" "$err"
 done
+: >"$WORKDIR/gh-args.log"
+run_reader "fetch-dependabot.sh"
+if grep -qi -- '--author app/kognic-renovate' "$WORKDIR/gh-args.log"; then
+  fail "fetch-dependabot.sh fell back to a bot RELEASE_BOT_AUTHORS names" "$(cat "$WORKDIR/gh-args.log")"
+fi
+
+# --- A typo and an overlap are both named in one run -----------------------
+# Every reader runs both checks before it exits (BotsConf.EveryOffenderIsNamed).
+
+cat >"$WORKDIR/bots.conf" <<'CONF'
+BOT_AUTHORS=("dependabot[bot]" "app/twice-bot")
+RELEASE_BOT_AUTHORS=("app/twice-bot")
+CONF
+for script in "${READERS[@]}"; do
+  run_reader "$script"
+  [[ $rc -ne 0 ]] || fail "$script accepted a conf with a typo and an overlap" "$out"
+  [[ "$err" == *'dependabot[bot]'* ]] || fail "$script did not name the typo" "$err"
+  [[ "$err" == *'app/twice-bot'* ]] ||
+    fail "$script exited on the typo before naming the overlap" "$err"
+  emitted_nothing || fail "$script emitted items despite a typo and an overlap" "$out"
+done
+
+# --- fetch-dependabot.sh bounds each listing and warns at the bound --------
+# gh's default cap (30) would drop PRs silently; the script names its own limit
+# and says so on stderr when a listing fills it.
+
+cat >"$WORKDIR/bots.conf" <<'CONF'
+BOT_AUTHORS=("app/dependabot")
+CONF
+: >"$WORKDIR/gh-args.log"
+run_reader "fetch-dependabot.sh"
+grep -q -- 'pr list.*--limit 100' "$WORKDIR/gh-args.log" ||
+  fail "fetch-dependabot.sh must pass an explicit --limit 100" "$(cat "$WORKDIR/gh-args.log")"
+[[ "$err" != *'limit'* ]] || fail "fetch-dependabot.sh warned below its limit" "$err"
+STUB_PR_COUNT=100 run_reader "fetch-dependabot.sh"
+[[ $rc -eq 0 ]] || fail "fetch-dependabot.sh failed at its limit" "$err"
+grep -q 'testorg/repo.*limit' <<<"$err" ||
+  fail "fetch-dependabot.sh must warn on stderr, naming the repo, when a listing reaches its limit" "$err"
 
 # --- Well-formed, disjoint lists pass every reader -------------------------
 

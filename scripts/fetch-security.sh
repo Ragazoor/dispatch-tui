@@ -11,7 +11,7 @@
 # Note: when used as a dispatch feed_command, use the absolute path to this
 # script. Relative paths only work if dispatch is launched from the project root.
 #
-# To add/remove repos, edit the REPOS array below.
+# To add/remove repos, edit repos.conf beside this script.
 
 set -euo pipefail
 
@@ -32,14 +32,17 @@ if [[ ${#REPOS[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# NOTE: per_page=100 is the GitHub REST API maximum per request. Repos with
-# more than 100 open Dependabot alerts will be silently truncated. This is
-# acceptable for most projects; if you need full pagination use:
-#   gh api --paginate "/repos/$repo/dependabot/alerts?state=open&per_page=100"
-# (requires a different jq pipeline to flatten paginated responses).
-
+# Every page is fetched: a truncated list would read as closed alerts and
+# delete their tasks. A repo that cannot be read is skipped LOUDLY: the stderr
+# line makes the cycle sync additively and keep that repo's cards, where an
+# empty list would read as "no open alerts". See FetchSecurity in
+# docs/specs/feed-scripts.allium.
 for repo in "${REPOS[@]}"; do
-  gh api "/repos/$repo/dependabot/alerts?state=open&per_page=100" 2>/dev/null \
+  if ! pages=$(gh api --paginate "/repos/$repo/dependabot/alerts?state=open&per_page=100"); then
+    echo "warning: skipping $repo: could not read its Dependabot alerts" >&2
+    continue
+  fi
+  jq -s 'add // []' <<<"$pages" \
     | jq --arg repo "$repo" '[.[] | {
         external_id: ("dependabot:\($repo)#" + (.number | tostring)),
         title: .security_advisory.summary,
@@ -55,6 +58,5 @@ for repo in "${REPOS[@]}"; do
             .security_advisory.severity // "low"
           ] // 4
         )
-      }]' \
-    || echo '[]'
+      }]'
 done | jq -s '[.[][]]'

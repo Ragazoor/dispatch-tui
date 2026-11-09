@@ -258,6 +258,11 @@ rule ClosingCancelsThePendingRun {
         -- move back to backlog would fire it at once. A closed one-off is
         -- spent. A phoenix task the close moves to done hands its schedule to
         -- the successor its respawn creates, armed there.
+        -- A merged PR moving a task from review to done (pr-workflow.allium:
+        -- PrMerged) raises no TaskClosed and needs none: no write leaves a
+        -- due time on a task in review (ExitSession, a hand move out of
+        -- running and the dispatch claim's end all clear it, and SetSchedule
+        -- arms only a backlog task).
 }
 
 rule LeavingRunningCancelsThePendingRun {

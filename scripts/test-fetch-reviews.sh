@@ -204,6 +204,14 @@ JSON
   exit 0
 fi
 
+# A review search that fills its --limit (ReviewSearchesAreBoundedAndLoud).
+if [[ -n "${STUB_SEARCH_FULL:-}" && "$args" == "search prs"* && "$args" == *"commenter:@me"* && "$args" != *"--owner"* ]]; then
+  jq -nc '[range(100) | 1000 + . | {id: ("PR_F" + tostring), number: ., title: "Full", body: "",
+    url: ("https://github.com/testorg/repo/pull/" + tostring),
+    repository: {name: "repo", nameWithOwner: "testorg/repo"}, isDraft: false, author: {login: "zed"}}]'
+  exit 0
+fi
+
 # Team-scoped pass (teams.conf): the ONLY producer of team-request. Checked
 # before the org-scoped branch because it is also --owner scoped.
 # "team-review-requested:" does not contain "review-requested:@me", so the
@@ -811,5 +819,20 @@ assert "without teams.conf, no item carries team-request" \
 if grep -q 'team-review-requested:' "$WORKDIR/gh-args.log"; then
   fail "team-scoped pass ran without teams.conf"
 fi
+
+# --- A review search at its limit warns -------------------------------------
+# One call per qualifier over every repo is capped at 100; a PR past the cut
+# would read as gone, so the script says so on stderr (the cycle then syncs
+# additively instead of deleting cards).
+
+output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh" 2>"$WORKDIR/below.err")"
+if grep -q "limit" "$WORKDIR/below.err"; then
+  fail "a review search below its limit must not warn"
+fi
+output="$(STUB_SEARCH_FULL=1 PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh" 2>"$WORKDIR/full.err")"
+grep -q "commenter:@me.*limit" "$WORKDIR/full.err" ||
+  fail "a review search that fills its limit must warn on stderr, naming the qualifier"
+assert "a full search still emits its PRs" \
+  '[.[] | select(.title == "#1000 Full")] | length == 1'
 
 echo "test-fetch-reviews: all assertions passed"

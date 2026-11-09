@@ -61,8 +61,9 @@
 #                                  repos.conf) -> signal "author-bot"
 #   Bot logins go in bots.conf (the BOT_AUTHORS array) because they are
 #   deployment-specific: a self-hosted Renovate app is named after the org
-#   that installed it (e.g. app/kognic-renovate, not app/renovate). Absent or
-#   empty BOT_AUTHORS skips the pass. It emits "author-bot" rather than a new
+#   that installed it (e.g. app/kognic-renovate, not app/renovate). The pass
+#   also queries RELEASE_BOT_AUTHORS, and is skipped only when both lists are
+#   absent or empty. It emits "author-bot" rather than a new
 #   signal because dispatch's router already maps {author-bot} to Bots, and a
 #   bot PR you HAVE reviewed still merges to one item and stays in My Reviews
 #   (engagement wins over the bot rule). Repo-scoped only — org-wide bot
@@ -234,8 +235,8 @@ fi
 # when it is.
 #
 # WHY the tag follows this list rather than the "[bot]" suffix, and why an
-# empty list falls back: "Which bot earns the dependency runbook" in
-# docs/specs/feeds.allium, which is the source of truth for it.
+# empty list falls back: FetchReviews.TagFromAuthorConfig and "WHICH BOT EARNS
+# WHICH RUNBOOK" in docs/specs/feed-scripts.allium.
 DEP_BOT_LOGINS='[]'
 if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
   DEP_BOT_LOGINS="$(jq -nc \
@@ -279,6 +280,10 @@ fi
 # shape as DEP_BOT_LOGINS above.
 ME_LC="$(printf '%s' "$ME" | tr '[:upper:]' '[:lower:]')"
 
+# The results one review search returns. One call spans every repo (or org),
+# keeping the review passes inside GitHub's search rate limit.
+SEARCH_LIMIT=100
+
 # Run one `gh search prs` query for the given qualifier, scoped by the given
 # scope flags (repo_flags or owner_flags), and print a FeedItem JSON array on
 # stdout, tagging every PR with the supplied signal plus any per-PR author
@@ -306,13 +311,19 @@ search_prs() {
     --state=open \
     "${scope_flags[@]}" \
     --json id,number,title,body,url,repository,isDraft,author \
-    --limit 100 \
+    --limit "$SEARCH_LIMIT" \
     -- $qualifier); then
     # Fail the whole emission: an empty array here would read as "no PRs" and
     # the reconcile would delete tasks that a rate-limited cycle merely could
     # not see. The non-zero exit trips the degraded-emission guards instead.
     echo "fetch-reviews: gh search prs ($qualifier) failed" >&2
     return 1
+  fi
+  # One call covers every repo (or org), so a full page means PRs past the cut
+  # are missing. Say so: the stderr line makes the cycle sync additively, so
+  # their cards are kept. Not a "notice:", which would not taint the cycle.
+  if [[ $(printf '%s' "$raw" | jq length) -ge $SEARCH_LIMIT ]]; then
+    echo "fetch-reviews: gh search prs ($qualifier) returned $SEARCH_LIMIT PRs, the limit; PRs past it are missing" >&2
   fi
 
   printf '%s' "$raw" | to_feed_items "$signal"
@@ -457,7 +468,7 @@ search_bot_prs() {
 # Note what this query does NOT ask for: the PR's pending-reviewer list. "A
 # review is currently requested from me" is already a fact the searches
 # produce — direct-request from user-review-requested:@me, team-request from
-# review-requested:@me — so fetching it again here would be a second
+# the teams.conf pass's team-review-requested — so fetching it again here would be a second
 # derivation of one fact, bought with a bounded list scan that multiplies the
 # rate-limit cost of every batch.
 #

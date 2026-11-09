@@ -63,9 +63,6 @@ if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
     fi
   done
 fi
-if [[ $bad_bot_authors -ne 0 ]]; then
-  exit 1
-fi
 # A bot on both lists is fatal: the two lists claim opposite things about it.
 # Compared as configured (before the fallback below), case-insensitively. See
 # BotsConf.ABotOnBothListsIsFatal in docs/specs/feed-scripts.allium.
@@ -80,12 +77,24 @@ if [[ ${#BOT_AUTHORS[@]} -gt 0 && ${#RELEASE_BOT_AUTHORS[@]} -gt 0 ]]; then
     done
   done
 fi
-if [[ $bad_overlap -ne 0 ]]; then
+# Both checks have run, so a conf with a typo and an overlap names both.
+if [[ $bad_bot_authors -ne 0 || $bad_overlap -ne 0 ]]; then
   exit 1
 fi
 
 if [[ ${#BOT_AUTHORS[@]} -eq 0 ]]; then
-  BOT_AUTHORS=("app/kognic-renovate")
+  # The fallback never names a bot RELEASE_BOT_AUTHORS lists: a release bot's
+  # PRs are not dependency bumps, whatever the empty list defaults to. See
+  # BotsConf.TheFallbackNeverNamesAReleaseBot in docs/specs/feed-scripts.allium.
+  fallback_is_release_bot=0
+  for rel in "${RELEASE_BOT_AUTHORS[@]}"; do
+    if [[ "${rel,,}" == "app/kognic-renovate" ]]; then
+      fallback_is_release_bot=1
+    fi
+  done
+  if [[ $fallback_is_release_bot -eq 0 ]]; then
+    BOT_AUTHORS=("app/kognic-renovate")
+  fi
 fi
 # ---------------------------------------------------------------------------
 
@@ -95,6 +104,8 @@ if [[ ${#REPOS[@]} -eq 0 ]]; then
 fi
 
 result="[]"
+# Open PRs listed per (repo x bot). gh's own default (30) would cut silently.
+PR_LIMIT=100
 
 for repo in "${REPOS[@]}"; do
   # Probe repo existence/auth first — `gh pr list --author <bot>` silently
@@ -115,11 +126,17 @@ for repo in "${REPOS[@]}"; do
       --repo "$repo" \
       --author "$author" \
       --state open \
+      --limit "$PR_LIMIT" \
       --json number,title,body,url 2>&1)
     status=$?
     if [ $status -ne 0 ]; then
       echo "fetch-dependabot: $repo ($author) — gh pr list failed (exit $status): $raw" >&2
       continue
+    fi
+    # A listing that fills its limit has dropped PRs past the cut; say so, so
+    # the cycle syncs additively instead of removing their cards.
+    if [[ $(printf '%s' "$raw" | jq length 2>/dev/null || echo 0) -ge $PR_LIMIT ]]; then
+      echo "fetch-dependabot: $repo ($author) — $PR_LIMIT open PRs listed, the limit; PRs past it are missing" >&2
     fi
 
     items=$(printf '%s' "$raw" | jq --arg repo "$repo" '[.[] | {

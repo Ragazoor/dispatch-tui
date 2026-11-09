@@ -12,7 +12,7 @@
 # Note: when used as a dispatch feed_command, use the absolute path to this
 # script. Relative paths only work if dispatch is launched from the project root.
 #
-# To add/remove repos, edit the REPOS array below.
+# To add/remove repos, edit repos.conf beside this script.
 
 set -euo pipefail
 
@@ -54,9 +54,6 @@ if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
     fi
   done
 fi
-if [[ $bad_bot_authors -ne 0 ]]; then
-  exit 1
-fi
 # A bot on both lists is fatal: the two lists claim opposite things about it.
 # Compared as configured (before the fallback below), case-insensitively. See
 # BotsConf.ABotOnBothListsIsFatal in docs/specs/feed-scripts.allium.
@@ -71,14 +68,26 @@ if [[ ${#BOT_AUTHORS[@]} -gt 0 && ${#RELEASE_BOT_AUTHORS[@]} -gt 0 ]]; then
     done
   done
 fi
-if [[ $bad_overlap -ne 0 ]]; then
+# Both checks have run, so a conf with a typo and an overlap names both.
+if [[ $bad_bot_authors -ne 0 || $bad_overlap -ne 0 ]]; then
   exit 1
 fi
 
 if [[ ${#BOT_AUTHORS[@]} -eq 0 ]]; then
-  BOT_AUTHORS=("app/kognic-renovate")
+  # The fallback never names a bot RELEASE_BOT_AUTHORS lists: a release bot's
+  # PRs are not dependency bumps, whatever the empty list defaults to. See
+  # BotsConf.TheFallbackNeverNamesAReleaseBot in docs/specs/feed-scripts.allium.
+  fallback_is_release_bot=0
+  for rel in "${RELEASE_BOT_AUTHORS[@]}"; do
+    if [[ "${rel,,}" == "app/kognic-renovate" ]]; then
+      fallback_is_release_bot=1
+    fi
+  done
+  if [[ $fallback_is_release_bot -eq 0 ]]; then
+    BOT_AUTHORS=("app/kognic-renovate")
+  fi
 fi
-FIX_PR_AUTHORS=$(printf '%s\n' "app/dependabot" "${BOT_AUTHORS[@]}" | jq -R 'ascii_downcase' | jq -s .)
+FIX_PR_AUTHORS=$(printf '%s\n' "app/dependabot" ${BOT_AUTHORS[@]+"${BOT_AUTHORS[@]}"} | jq -R 'ascii_downcase' | jq -s .)
 
 if [[ ${#REPOS[@]} -eq 0 ]]; then
   echo '[]'
@@ -203,6 +212,7 @@ for repo in "${REPOS[@]}"; do
          end)
       ),
       url: .html_url,
+      url_type: "security_alert",
       status: "backlog",
       tag: "fix",
       wrap_up_mode: (if $fix_pr != null then "done" else "pr" end),

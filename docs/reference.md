@@ -416,8 +416,9 @@ bot-author pass, `fetch-dependabot.sh` and `fetch-cve.sh` (to pick a fix PR) all
 read its `BOT_AUTHORS` array, so a deployment spells its bots once. Use `gh`'s app form (`app/<slug>`); the slug is
 deployment-specific, and a repo mid-migration carries PRs from more than one bot
 at a time, so list every bot you want on the board. `fetch-dependabot.sh` runs
-one `gh pr list` pass per entry and falls back to `app/kognic-renovate` when the
-array is absent or empty.
+one `gh pr list` pass per entry (at most 100 PRs each, with a stderr warning at
+the limit) and falls back to `app/kognic-renovate` when the array is absent or
+empty, unless `RELEASE_BOT_AUTHORS` names that bot.
 
 **Release bots go in `RELEASE_BOT_AUTHORS`, in the same file** (shipped empty;
 `app/kognic-gha-release-bot` is the documented example). `fetch-reviews.sh`'s
