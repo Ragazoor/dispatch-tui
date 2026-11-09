@@ -25,7 +25,7 @@ impl App {
         reason: String,
     ) -> Vec<Command> {
         self.store_connection = Some(crate::tui::StoreConnectionState {
-            status: crate::sync::ConnectionStatus::Failed,
+            status: crate::tui::StoreConnectionStatus::Failed,
             last_error: Some(reason.clone()),
             attempts: self.store_connection.as_ref().map_or(0, |c| c.attempts),
         });

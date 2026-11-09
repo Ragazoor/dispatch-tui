@@ -397,11 +397,11 @@ mod store_address_indicator {
 /// count while disconnected, and the reason while failed.
 mod connection_state_indicator {
     use crate::palette::RED;
-    use crate::sync::ConnectionStatus;
     use crate::tui::messages::SystemMessage;
     use crate::tui::tests::helpers::{buffer_line, make_app, render_to_buffer};
     use crate::tui::types::Message;
     use crate::tui::StoreConnectionState;
+    use crate::tui::StoreConnectionStatus as ConnectionStatus;
 
     fn state(status: ConnectionStatus, last_error: Option<&str>, attempts: u32) -> Message {
         Message::System(SystemMessage::StoreConnectionChanged(

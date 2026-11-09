@@ -223,11 +223,22 @@ pub(in crate::tui) struct DispatchRequestView {
 /// (sync.allium: ConnectionIndicator).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreConnectionState {
-    pub status: crate::sync::ConnectionStatus,
+    pub status: StoreConnectionStatus,
     /// Why the connection is down; present while disconnected or failed.
     pub last_error: Option<String>,
     /// Consecutive failed attempts in the current outage.
     pub attempts: u32,
+}
+
+/// The connection's lifecycle state as the board draws it — sync.allium's
+/// BoardConnection.status. The runtime maps the sync layer's own status onto
+/// this, so the TUI does not depend on the sync layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreConnectionStatus {
+    Connecting,
+    Connected,
+    Disconnected,
+    Failed,
 }
 
 pub struct App {

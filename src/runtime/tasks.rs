@@ -1207,7 +1207,7 @@ async fn step_shared_store(
     if !stop {
         let connection = session.connection();
         let state = crate::tui::StoreConnectionState {
-            status: connection.status(),
+            status: store_connection_status(connection.status()),
             last_error: connection.last_error().map(str::to_string),
             attempts: connection.attempts(),
         };
@@ -1219,6 +1219,20 @@ async fn step_shared_store(
         }
     }
     stop
+}
+
+/// The sync layer's connection status as the board draws it.
+fn store_connection_status(
+    status: crate::sync::ConnectionStatus,
+) -> crate::tui::StoreConnectionStatus {
+    use crate::sync::ConnectionStatus as S;
+    use crate::tui::StoreConnectionStatus as T;
+    match status {
+        S::Connecting => T::Connecting,
+        S::Connected => T::Connected,
+        S::Disconnected => T::Disconnected,
+        S::Failed => T::Failed,
+    }
 }
 
 async fn step_session(
@@ -1323,9 +1337,10 @@ mod step_shared_store_tests {
     use crate::store::{HostStore, IdentityCredentialStore, Store};
     use crate::sync::memory_caller::MemoryReducerCaller;
     use crate::sync::tests::{accepted, ScriptedConnector};
-    use crate::sync::{ConnectionStatus, SettledIdentity, SharedRows, SyncSession};
+    use crate::sync::{SettledIdentity, SharedRows, SyncSession};
     use crate::tui::messages::SystemMessage;
     use crate::tui::types::Message;
+    use crate::tui::StoreConnectionStatus as ConnectionStatus;
     use std::sync::Arc;
 
     fn caller() -> MemoryReducerCaller {

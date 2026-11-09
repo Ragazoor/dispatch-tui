@@ -493,7 +493,7 @@ const CONNECTION_REASON_MAX_CHARS: usize = 60;
 pub(in crate::tui::ui) fn connection_status_span(
     state: &crate::tui::StoreConnectionState,
 ) -> Option<Span<'static>> {
-    use crate::sync::ConnectionStatus;
+    use crate::tui::StoreConnectionStatus as ConnectionStatus;
     let reason = || {
         let text = state.last_error.as_deref().unwrap_or("no reason given");
         if text.chars().count() > CONNECTION_REASON_MAX_CHARS {
