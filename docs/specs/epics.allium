@@ -6,6 +6,7 @@
 
 use "./core.allium" as core
 use "./store-split.allium" as split
+use "./tasks.allium" as tasks
 use "./settings.allium" as settings
 
 ------------------------------------------------------------
@@ -348,6 +349,7 @@ rule DeleteEpic {
     ensures:
         for task in epic.subtree_tasks:
             not exists task
+            tasks/TaskRowDeleted(task: task)
     ensures:
         for item in core/RetiredFeedItems where doomed_epics.contains(item.feed_epic):
             not exists item
@@ -998,7 +1000,7 @@ rule AutoDispatchNextSubtask {
             -- subtask. A refused request moves the chain to the next
             -- candidate (see the guidance).
             if next != null:
-                DispatchRequested(task: next, requester: close.host, origin: epic_chain)
+                split/DispatchRequested(task: next, requester: close.host, origin: epic_chain)
                 -- Recorded for exit_session's response, which names the
                 -- subtask (mcp-task-tools.allium: ExitSessionViaMcp).
                 close.chained_task = next
@@ -1354,6 +1356,16 @@ rule ToggleGroupByRepo {
         --     sub-epics (feeds.allium), the OFF-side mirror of that migration.
         -- The toggle handler itself stays a pure flag flip for feed epics; the
         -- self-healing is poll-driven and symmetric in both directions.
+}
+
+-- The module's epic-write reducers this spec guards, which any store client
+-- may call (set_epic_group_by_repo, update_epic).
+surface EpicWriteReducers {
+    facing _: core/StoreClient
+
+    provides:
+        EpicGroupByRepoSetRequested(epic, group_by_repo)
+        EpicUpdateRequested(epic, patch, workspace?, visibility?)
 }
 
 rule SetEpicGroupByRepoIsOneTransaction {

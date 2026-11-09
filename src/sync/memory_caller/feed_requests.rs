@@ -38,7 +38,7 @@ impl MemoryReducerCaller {
         id
     }
 
-    /// Mirrors the module's `prune_feed_requests`.
+    /// Mirrors the module's `prune_feed_requests` (`FeedRequestRowsArePruned`).
     fn prune_feed_requests(&self, tables: &mut Tables) {
         let micros = self.clock.now().timestamp_micros();
         let rows: Vec<module::FeedRequest> = tables.feed_requests.values().cloned().collect();

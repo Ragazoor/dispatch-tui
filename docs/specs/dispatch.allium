@@ -168,7 +168,7 @@ rule DispatchTask {
     -- window and the launch follow when this host's board claims the row
     -- (ProvisionDispatch below). The requires above are checked again by
     -- the module, which is what makes them hold across machines.
-    ensures: DispatchRequested(task: task, requester: local_host(), origin: user, mode: dispatch)
+    ensures: split/DispatchRequested(task: task, requester: local_host(), origin: user, mode: dispatch)
 
     @guarantee OneNameForStartingATask
         -- The action-hint label for this key on a BACKLOG task is
@@ -264,7 +264,7 @@ rule ProvisionDispatch {
         -- reused_worktree is whether the worktree directory already existed,
         -- measured before acting, and was reused rather than created (see
         -- "Fresh vs reused" below).
-        DispatchProvisioned(
+        split/DispatchProvisioned(
             request: request,
             reporter: local_host(),
             worktree: worktree,
@@ -1158,7 +1158,7 @@ rule ProvisioningStopsAtTheDeadline {
     requires: request.host = local_host()
     requires: request.state = provisioning
 
-    ensures: DispatchProvisioningFailed(
+    ensures: split/DispatchProvisioningFailed(
         request: request,
         reporter: local_host(),
         reason: "deadline passed"
@@ -1207,7 +1207,7 @@ rule DispatchResearchTask {
     -- ProvisionDispatch's, which reads research from the row. A research
     -- agent runs in a worktree on one machine exactly like any other agent;
     -- nothing about the mode changes who owns the directory.
-    ensures: DispatchRequested(task: task, requester: local_host(), origin: user, mode: research)
+    ensures: split/DispatchRequested(task: task, requester: local_host(), origin: user, mode: research)
 
     @guidance
         -- Research mode: the agent investigates the topic in the task
@@ -2356,7 +2356,7 @@ rule ProvisioningNeedsARepoPath {
     requires: request.requested_by = local_host().owner
     requires: request.task.repo_path = ""
 
-    ensures: DispatchProvisioningFailed(
+    ensures: split/DispatchProvisioningFailed(
         request: request,
         reporter: local_host(),
         reason: "Repository path is not set. Edit the task (press 'e') to set it before dispatching."

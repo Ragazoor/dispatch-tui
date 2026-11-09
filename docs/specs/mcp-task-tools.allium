@@ -18,6 +18,7 @@
 
 use "./core.allium" as core
 use "./schedules.allium" as schedules
+use "./store-split.allium" as split
 
 ------------------------------------------------------------
 -- Config
@@ -540,7 +541,7 @@ rule MarkTaskDoneViaMcp {
     -- prior status, sub_status, completed_at and any live window. (No
     -- SessionClosed is emitted on this path on either outcome — see the note
     -- after the ensures.)
-    ensures: CloseTaskRequested(task: task, host: core/local_host())
+    ensures: split/CloseTaskRequested(task: task, host: core/local_host())
 
     -- No SessionClosed, therefore no epic chain. This is where this path
     -- deliberately diverges from ExitSession: the terminal fields and a tmux
@@ -1256,7 +1257,7 @@ rule DispatchTaskViaMcp {
     -- No mode: the module derives it from the task (store-split.allium:
     -- RequestDispatch), by the same rule dispatch.allium's two entry rules
     -- encode. The request names this board's host, so this board provisions.
-    ensures: DispatchRequested(task: task, requester: core/local_host(), origin: mcp)
+    ensures: split/DispatchRequested(task: task, requester: core/local_host(), origin: mcp)
 
     @guidance
         -- Returns an error if task.status != backlog.
@@ -1534,7 +1535,7 @@ rule WrapUpViaMcp {
     -- host's board then runs the rebase (pr-workflow.allium: WrapUpRebase);
     -- for done and pr the module writes the row
     -- already done.
-    ensures: WrapUpRequested(task: task, host: core/local_host(), action: action)
+    ensures: split/WrapUpRequested(task: task, host: core/local_host(), action: action)
 
     @guidance
         -- wrap_up is the mandatory step before exit_session for ALL three
@@ -1759,7 +1760,7 @@ rule ExitSessionViaMcp {
     -- epic chain (epics.allium: AutoDispatchNextSubtask) and writes the
     -- exit_session row whose host tears the window down
     -- (pr-workflow.allium: ExitSessionTeardown).
-    ensures: ExitSessionRequested(task: task, token: token, action: action, pr_url: pr_url)
+    ensures: split/ExitSessionRequested(task: task, token: token, action: action, pr_url: pr_url)
 
     @guidance
         -- Single-call session close for all three wrap-up actions. The old

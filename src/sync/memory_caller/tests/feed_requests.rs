@@ -338,3 +338,57 @@ async fn a_patch_may_not_move_a_task_onto_or_rewrite_another_persons_host() {
         .applied()
         .unwrap();
 }
+
+// -- FeedRequestRowsArePruned (store-split.allium) -----------------------------
+
+/// The dispatch and session writes sweep only their own two tables
+/// (RequestRowsArePruned): an old finished feed row survives a new dispatch
+/// request, and the next feed write sweeps it (FeedRequestRowsArePruned).
+#[tokio::test]
+async fn only_a_feed_write_prunes_an_old_finished_feed_request() {
+    let (caller, rows, clock) = super::dispatch_requests::caller_with_clock();
+    let (caller, rows, epic) = world_on(caller, rows).await;
+    caller
+        .claim_poll_owner(PollScopeId::Epic(epic), "laptop".into())
+        .await
+        .unwrap();
+    caller
+        .request_feed_refresh(epic, "desktop".into())
+        .await
+        .unwrap();
+    let old = rows.feed_requests()[0].id;
+    caller
+        .claim_feed_request(old, "laptop".into())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+    caller
+        .report_feed_request_done(old, "laptop".into())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+
+    clock.advance(chrono::Duration::days(15));
+    let task = caller.create_task(blank_task()).await.unwrap();
+    super::dispatch_requests::request(&caller, task, "laptop", "user", "dispatch")
+        .await
+        .applied()
+        .unwrap();
+    assert!(
+        rows.feed_request(old).is_some(),
+        "a dispatch request does not sweep feed_requests"
+    );
+
+    caller
+        .request_feed_refresh(epic, "desktop".into())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+    assert!(
+        rows.feed_request(old).is_none(),
+        "the next feed write sweeps the 15-day-old finished row"
+    );
+}

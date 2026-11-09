@@ -137,6 +137,15 @@ rule UpdateWorkPackage {
         -- ReorderPackage (J/K) and by that tool; there is no way to clear it.
 }
 
+-- The module's work-package update reducer (update_work_package), which any
+-- store client may call.
+surface WorkPackageWriteReducers {
+    facing _: core/StoreClient
+
+    provides:
+        WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
+}
+
 rule UpdateWorkPackageIsOneTransaction {
     when: WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
 

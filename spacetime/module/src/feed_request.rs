@@ -3,7 +3,7 @@
 //! Spec: `docs/specs/store-split.allium`: `FeedRequest`, `RequestFeedRefresh`,
 //! `HostClaimsFeedRequest`, `HostReportsFeedRequestDone`,
 //! `HostReportsFeedRequestFailed`, `StaleDeleteRequestsTeardownOnTheHoldingHost`
-//! and `RequestRowsArePruned`; `docs/specs/feeds.allium`: `SerialisedFeedCycle`
+//! and `FeedRequestRowsArePruned`; `docs/specs/feeds.allium`: `SerialisedFeedCycle`
 //! (scope across hosts).
 //!
 //! Two kinds share one table. A `refresh` row asks the epic's poll owner to run
@@ -295,7 +295,7 @@ pub fn failed_feed_request_row(row: FeedRequest, reason: &str, now: &str) -> Fee
     }
 }
 
-/// `RequestRowsArePruned` for feed requests: a terminal row finished before
+/// `FeedRequestRowsArePruned`: a terminal row finished before
 /// `cutoff`, and a `requested` refresh row requested before `stale_cutoff`. An
 /// open teardown row is never selected: an offline host must still find it.
 pub fn prunable_feed_requests(cutoff: &str, stale_cutoff: &str, rows: &[FeedRequest]) -> Vec<i64> {

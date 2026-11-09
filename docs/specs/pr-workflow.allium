@@ -449,6 +449,16 @@ rule PrClosed {
         -- status line when the report changed the task.
 }
 
+-- The module's PR-report reducers (report_pr_status, report_pr_unreadable),
+-- called by the board of the host that polled gh.
+surface PrReportReducers {
+    facing _: core/StoreClient
+
+    provides:
+        PrStatusReported(task, host, state, review_decision)
+        PrUnreadableReported(task, host, reason)
+}
+
 rule ReportPrStatus {
     when: PrStatusReported(task, host, state, review_decision)
 
@@ -724,7 +734,7 @@ rule WrapUpRebase {
 }
 
 rule WrapUpPr {
-    when: mcp/WrapUpRequested(task, host, pr)
+    when: split/WrapUpRequested(task, host, pr)
 
     -- Applies only to a request the module accepts: store-split.allium's
     -- RequestWrapUp owns acceptance and every refusal (a review-tagged task,
@@ -793,7 +803,7 @@ rule WrapUpPr {
 }
 
 rule WrapUpDone {
-    when: mcp/WrapUpRequested(task, host, done)
+    when: split/WrapUpRequested(task, host, done)
 
     -- As WrapUpPr: only an accepted request; store-split.allium's
     -- RequestWrapUp owns acceptance and every refusal.

@@ -49,6 +49,7 @@
 -- is not obvious.
 
 use "./core.allium" as core
+use "./tasks.allium" as tasks
 
 ------------------------------------------------------------
 -- Enumerations
@@ -679,19 +680,24 @@ rule RefuseArchivedRows {
 -- == The store's own check ==
 
 rule StoreRefusesUnknownStatus {
-    when: StoreRowsWriteRequested(caller, table, rows)
+    -- The module's one task-write seam, the same write tasks.allium's
+    -- SubStatusMovesMustBeLegal judges: written is the row the write would
+    -- leave.
+    when: tasks/TaskWriteRequested(task, written)
 
-    requires: table in {tasks, epics}
-    requires: rows.any(r => resulting_status(r) not in {"backlog", "running", "review", "done"})
+    requires: written.status not in {"backlog", "running", "review", "done"}
 
-    ensures: StoreWriteRefused(caller: caller, table: table, detail: unknown_status_detail(rows))
+    ensures: StoreWriteRefused(caller: caller(), table: tasks, detail: unknown_status_detail(written))
 
     @guidance
         -- WHAT "A WRITE" IS. Every reducer that writes a task or epic row:
         -- create_task, patch_task, create_epic, patch_epic, seed_tasks,
         -- seed_epics (which restore and import write through, despite the
         -- name) and the feed upserts — any path, present or future, that
-        -- leaves a row in `tasks` or `epics`. The known statuses are exactly
+        -- leaves a row in `tasks` or `epics`. Every task write passes the
+        -- seam above; the epic writes have no single seam, and create_epic,
+        -- patch_epic and seed_epics each make the same check on the row they
+        -- would leave (spacetime/module/src/support.rs::validate_status). The known statuses are exactly
         -- core/TaskStatus's four (backlog, running, review, done), which is
         -- the type both core/Task.status and core/Epic.status declare; the
         -- retired `archived` is unknown like any other string.

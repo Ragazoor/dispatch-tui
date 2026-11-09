@@ -37,6 +37,7 @@
 use "./core.allium" as core
 use "./store-split.allium" as split
 use "./epics.allium" as epics
+use "./tasks.allium" as tasks
 use "./cli.allium" as cli
 use "./startup.allium" as startup
 
@@ -1388,6 +1389,17 @@ rule OverrideFeedOwner {
         -- its status, so there is no status in which ownership is moot.
 }
 
+-- The module's poll-owner reducers (claim_poll_owner, override_poll_owner),
+-- which any store client may call; each checks the host argument against
+-- caller() (store-split.allium D11).
+surface PollOwnerReducers {
+    facing _: core/StoreClient
+
+    provides:
+        PollOwnerClaimed(scope, scope_id, host)
+        PollOwnerOverridden(scope, scope_id, host)
+}
+
 rule ClaimPollOwner {
     when: PollOwnerClaimed(scope, scope_id, host)
 
@@ -1749,7 +1761,7 @@ rule IngestFeedEmission {
     -- because the module does not say which of them it wrote to
     -- (src/store/mod.rs::FeedIngestOutcome). A failed run sends none.
     ensures:
-        FeedIngested(epic: epic, items: items, additive: additive)
+        FeedIngested(epic: epic, items: items, additive: additive, host: host)
 
     @guidance
         -- WHO DECIDES. UpsertFeedTasks, GroupedFeedUpsert, FlatFeedReconcile
@@ -1770,7 +1782,7 @@ rule IngestFeedEmission {
 }
 
 rule UpsertFeedTasks {
-    when: UpsertFeedItems(epic, items, additive)
+    when: UpsertFeedItems(epic, items, additive, host)
 
     -- Items are matched against existing tasks by (epic_id, external_id).
     --
@@ -1962,6 +1974,8 @@ rule UpsertFeedTasks {
             for task in core/Tasks where task.epic = epic and task.external_id != null:
                 if not items.any(i => i.external_id = task.external_id):
                     not exists task
+                    tasks/TaskRowDeleted(task: task)
+                    FeedTaskRemovedAsStale(task: task, ingest_host: host)
                     TaskTeardown(task)
 
     @guidance
@@ -2038,7 +2052,7 @@ rule UpsertFeedTasks {
 }
 
 rule GroupedFeedUpsert {
-    when: FeedIngested(epic, items, additive)
+    when: FeedIngested(epic, items, additive, host)
 
     requires: epic.group_by_repo = true
     requires: epic.feed_role != reviews_parent
@@ -2115,7 +2129,7 @@ rule GroupedFeedUpsert {
         -- to a later group.
         for name in repo_names(admitted):
             UpsertFeedItems(core/Epic{parent: epic, title: name},
-                            admitted where repo_name(url) = name, additive)
+                            admitted where repo_name(url) = name, additive, host)
         -- Reconcile sub-epics absent from this emission. A sub-epic
         -- whose title no current item maps to has its feed tasks cleared
         -- (manual tasks survive, per UpsertFeedTasks). When items is empty,
@@ -2123,8 +2137,8 @@ rule GroupedFeedUpsert {
         if not additive:
             for sub_epic in epic.sub_epics:
                 if not admitted.any(item => repo_name(item.url) = sub_epic.title):
-                    UpsertFeedItems(sub_epic, {}, additive)
-            UpsertFeedItems(epic, {}, additive)
+                    UpsertFeedItems(sub_epic, {}, additive, host)
+            UpsertFeedItems(epic, {}, additive, host)
 
     @guidance
         -- `admitted`'s retired-without-task filter, AS IMPLEMENTED, only
@@ -2175,7 +2189,7 @@ rule GroupedFeedUpsert {
 -- == Flat reconcile (un-grouped feed epic) ==
 
 rule FlatFeedReconcile {
-    when: FeedIngested(epic, items, additive)
+    when: FeedIngested(epic, items, additive, host)
 
     requires: epic.group_by_repo = false
     requires: epic.feed_role != reviews_parent
@@ -2231,7 +2245,7 @@ rule FlatFeedReconcile {
             -- sub.subtasks.count is the post-move count: true only when the
             -- sub-epic had no nested sub-epics and all its tasks just moved out.
             if sub.subtasks.count = 0 and sub.sub_epics.count = 0: DeleteEpic(sub)
-        UpsertFeedItems(epic, items, additive)
+        UpsertFeedItems(epic, items, additive, host)
 
     @guidance
         -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_flat
@@ -2260,7 +2274,7 @@ rule FlatFeedReconcile {
 -- == Role-routed reconcile (PR-review feed) ==
 
 rule RoleRoutedFeedSync {
-    when: FeedIngested(epic, items, additive)
+    when: FeedIngested(epic, items, additive, host)
 
     requires: epic.feed_role = reviews_parent
 
@@ -2468,7 +2482,7 @@ rule RoleRoutedFeedSync {
                 -- resolved identically, and a retired id refused the same
                 -- way — though the filter on this loop has already dropped it).
                 -- Insert only: this rule runs its own stale delete below.
-                UpsertFeedItems(target, {item}, true)
+                UpsertFeedItems(target, {item}, true, host)
 
         -- Subtree-scoped delete with the union of all emitted ids: removes
         -- merged/closed PRs and clears buckets absent from this emission,
@@ -2493,6 +2507,8 @@ rule RoleRoutedFeedSync {
                                 and task.external_id != null:
                 if not kept.any(i => i.external_id = task.external_id):
                     not exists task
+                    tasks/TaskRowDeleted(task: task)
+                    FeedTaskRemovedAsStale(task: task, ingest_host: host)
                     TaskTeardown(task)
 
         -- Parent sweep: the reviews_parent epic must hold NO feed task directly
@@ -2508,6 +2524,8 @@ rule RoleRoutedFeedSync {
         if not additive:
             for task in core/Tasks where task.epic = epic and task.external_id != null:
                 not exists task
+                tasks/TaskRowDeleted(task: task)
+                FeedTaskRemovedAsStale(task: task, ingest_host: host)
                 TaskTeardown(task)
 
         -- Recalculate bottom-up through all three levels: repo-group sub-epics
@@ -2667,7 +2685,7 @@ rule RoleRoutedFeedSync {
 -- == New PRs in My Reviews and Team Reviews are signalled ==
 
 rule NewReviewRequestIsSignalled {
-    when: FeedIngested(epic, items, additive)
+    when: FeedIngested(epic, items, additive, host)
 
     requires: epic.feed_role = reviews_parent
 
@@ -3391,7 +3409,7 @@ rule AppendOnlyFeed {
 -- (IngestFeedEmission).
 
 rule DropClosedRetiredFeedItems {
-    when: FeedIngested(epic, items, additive)
+    when: FeedIngested(epic, items, additive, host)
 
     -- Only a trusted, mirroring cycle is evidence that an item closed.
     requires: not additive

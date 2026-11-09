@@ -335,7 +335,7 @@ rule CreateQuickTask {
         -- quick mode, which the module never derives on its own, so the
         -- host's provisioning launches the quick-dispatch agent
         -- (dispatch.allium: ProvisionDispatch).
-        DispatchRequested(task: task, requester: core/local_host(), origin: quick, mode: quick)
+        split/DispatchRequested(task: task, requester: core/local_host(), origin: quick, mode: quick)
 
     @guidance
         -- Reached only through QuickDispatchTrustGate, i.e. once the repo
@@ -1468,6 +1468,16 @@ rule BookmarkEndsWithTheTaskFinishing {
 
 -- == Delete ==
 
+-- TaskRowDeleted(task): the task row is gone, whichever route removed it.
+-- Raised by every rule that deletes a task row, in the same transaction:
+-- DeleteTask and BatchDelete below, an epic delete's subtree (epics.allium:
+-- DeleteEpic) and the feed stale delete (feeds.allium: UpsertFeedTasks,
+-- RoleRoutedFeedSync). What the store owes a removed row beyond the row
+-- itself listens for it (store-split.allium: DeletingATaskFailsItsOpenRequest,
+-- DeletingATaskFailsItsOpenSessionRequest, DeletingATaskDeletesItsRequestRows).
+-- The module runs that list from one function every such reducer calls
+-- (spacetime/module/src/tasks_epics.rs::delete_task_side_effects).
+
 -- TaskTeardown (conceptual): the single named account of what it means to
 -- release a task's live resources. It is NOT a new behaviour — it is the
 -- behaviour DeleteTask already specifies, stated once here so
@@ -1822,6 +1832,7 @@ rule DeleteTask {
     ensures:
         if released:
             not exists task
+            TaskRowDeleted(task: task)
             if retires and not core/RetiredFeedItems.any(r => r.feed_epic = feed_epic and r.external_id = task.external_id):
                 core/RetiredFeedItem.created(
                     feed_epic:   feed_epic,
@@ -2011,6 +2022,7 @@ rule BatchDelete {
             -- A task inside a selected epic's subtree went with that epic.
             for task in tasks where not epics.any(e => e.subtree_tasks.contains(task)):
                 not exists task
+                TaskRowDeleted(task: task)
                 if task.external_id != null
                    and task.epic != null
                    and task.epic.nearest_feed_epic != null
@@ -2333,6 +2345,21 @@ rule EditTask {
 -- (UpdateTaskViaMcp) names: the store's legality table, core.allium's
 -- Task.SubStatusFitsStatus.
 
+-- The module's task-write reducers, which any store client may call. Each is
+-- named in its rule's guidance; TaskWriteRequested is the write every one of
+-- them reaches (spacetime/module/src/tasks_epics.rs::store_task).
+surface TaskWriteReducers {
+    facing _: core/StoreClient
+
+    provides:
+        TaskWriteRequested(task, written)
+        SubStatusBatchPatched(updates)
+        TaskPatchRequested(task, patch)
+        TaskCreateRequested(row)
+        TaskUpdateRequested(task, epic?, patch, host)
+        PhoenixSuccessorRequested(predecessor, successor)
+}
+
 rule SubStatusMovesMustBeLegal {
     when: TaskWriteRequested(task, written)
 
@@ -2365,6 +2392,9 @@ rule SubStatusMovesMustBeLegal {
         -- AN INSERT IS NOT JUDGED (there is no prior row to move from): a seed
         -- carries whatever the old store held, and every creating rule writes
         -- default_sub_status of its status anyway.
+        --
+        -- The same write refuses an unknown status, insert or not
+        -- (spacetime-seed.allium: StoreRefusesUnknownStatus).
 }
 
 rule BatchSubStatusPatchSkipsIllegalEntries {

@@ -1718,6 +1718,14 @@ actor SharedStore {
     identified_by: Host where this = local_host()
 }
 
+-- Any client that calls the shared store's reducers: a board, the CLI, a
+-- restore. The module knows it only by the identity its connection carries
+-- (caller()), and each spec that owns a reducer rule faces it with a surface
+-- of its own (store-split.allium: ModuleRequestReducers).
+actor StoreClient {
+    identified_by: UserIdentity where this = caller()
+}
+
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
