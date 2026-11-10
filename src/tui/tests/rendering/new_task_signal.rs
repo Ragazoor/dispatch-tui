@@ -232,6 +232,21 @@ async fn a_key_with_the_cursor_on_an_unseen_task_clears_it() {
 }
 
 #[tokio::test]
+async fn a_key_in_an_overlay_sees_nothing() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::UnseenRefreshed(vec![TaskId(1)]),
+    ));
+    app.input.mode = InputMode::Help;
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('j')));
+
+    assert!(matches!(app.input.mode, InputMode::Help));
+    assert!(app.board.unseen_tasks.contains(&TaskId(1)));
+    assert!(!any_mark_seen_sent(&cmds));
+}
+
+#[tokio::test]
 async fn cursor_on_a_marked_epic_clears_nothing() {
     let mut app = app_with_task_two_epics_deep();
     app.board.unseen_tasks.insert(TaskId(1));

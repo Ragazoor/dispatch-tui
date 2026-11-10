@@ -1317,7 +1317,10 @@ rule SeeTaskByLandingOnIt {
         -- the card the cursor returns to when a view is left. A key that does
         -- not move the cursor counts too: the operator is at the board, so the
         -- card under their cursor is in front of them. The board checks after
-        -- every key, so one check covers all of them.
+        -- every key, so one check covers all of them. Only a key handled on the
+        -- plain board counts: a key in an overlay, a prompt, the detail view
+        -- or another screen (help, admin, a picker) sees nothing, because the
+        -- board's cards may not be on screen then.
         --
         -- A REFRESH SEES NOTHING. A card that a pull, a fold or a filter
         -- change slides under a cursor that did not move keeps its mark until
@@ -1342,8 +1345,8 @@ rule SeeTaskByLandingOnIt {
         -- epic had something new but not which card it was. Clearing per
         -- task keeps the ◆ on the new card until the cursor reaches it.
         --
-        -- Opening the task detail is not needed: the cursor reaching the card
-        -- already cleared it.
+        -- Opening the task detail is not needed: the key that brought the
+        -- cursor to the card already cleared it.
         --
         -- The row is removed for the viewing person only. Anyone else's mark
         -- stays until their own cursor lands on the card. The same person on

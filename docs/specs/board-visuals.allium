@@ -685,7 +685,7 @@ use "./core.allium" as core
 --     card below it; selecting or entering an epic clears nothing itself.
 --
 -- The task card's own ◆ is what tells the operator WHICH card is new once
--- they are inside a marked epic. It stays until the cursor reaches that card.
+-- they are inside a marked epic. It stays until a key on the board leaves the cursor on that card.
 --
 -- An epic card ALSO draws its stripe (▎) in SIGNAL instead of PURPLE while
 -- marked. The stripe is one cell on the title line, so there is no "lower
@@ -695,7 +695,7 @@ use "./core.allium" as core
 -- already learnt (see "Message flash") what recolouring a channel that means
 -- something else costs. A task card is marked by the glyph alone.
 --
--- The signal is steady, not a blink. It lasts until the cursor reaches the
+-- The signal is steady, not a blink. It lasts until a key leaves the cursor on the
 -- card, which is the same reason the message flash is a notice rather than a
 -- blink: a person whose attention is elsewhere must still catch it on their
 -- next glance, and a timer-driven toggle would add a periodic redraw to a
@@ -968,6 +968,8 @@ use "./core.allium" as core
 --   a_key_with_the_cursor_on_an_unseen_task_clears_it
 --                                                the next key after such a
 --                                                refresh sees it
+--   a_key_in_an_overlay_sees_nothing             a key outside the plain
+--                                                board clears no mark
 --   bookmarked_task_card_shows_bookmark_glyph    a task with a Bookmark row
 --                                                for the viewer draws ◆ in
 --                                                BOOKMARK on its title line
