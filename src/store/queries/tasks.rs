@@ -18,7 +18,7 @@ impl super::super::TaskRead for Store {
         self.rows.has_task(id)
     }
 
-    async fn undecodable_task_reason(&self, id: TaskId) -> Option<String> {
+    async fn get_undecodable_task_reason(&self, id: TaskId) -> Option<String> {
         self.rows.undecodable_task_reason(id)
     }
 

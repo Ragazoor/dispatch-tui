@@ -509,7 +509,7 @@ impl TaskService {
         // A task the store holds but this board cannot decode is not a missing
         // one: say so, or an agent may recreate it (observability.allium:
         // `ReadByIdReportsAnUndecodableTask`).
-        match self.db.undecodable_task_reason(task_id).await {
+        match self.db.get_undecodable_task_reason(task_id).await {
             Some(reason) => Err(ServiceError::Internal(anyhow::anyhow!(
                 "task {} is in the shared store but this board cannot decode it: \
                  {reason}. A newer dispatch probably wrote it; update this board, \
