@@ -1,4 +1,4 @@
-//! `OpenInMemoryAttachesStoreOnceComplete` (docs/specs/spacetime-memory-store.allium).
+//! `OpenInMemoryAttachesTheStore` (docs/specs/spacetime-memory-store.allium).
 use super::*;
 
 /// The board's card reads and the store's own reads are one path over one

@@ -198,9 +198,8 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
         --
         -- `dump-server` and `restore` do not come through here: they talk to
         -- the server they are given through the `spacetime` CLI
-        -- (spacetime-seed.allium). There is no `spacetime dump` (of a local
-        -- database) or `spacetime seed` any more (spacetime-seed.allium:
-        -- "Seeding (removed)").
+        -- (spacetime-seed.allium). Nothing dumps or seeds from a local
+        -- database (storage.allium: NoSqlite).
         --
         -- == Black boxes ==
         -- host_file_present() asks whether host.allium's HostFile exists in

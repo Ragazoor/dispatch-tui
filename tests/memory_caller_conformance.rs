@@ -35,14 +35,9 @@
 //! missing CLI fails the test instead. CI's Test and Coverage jobs install and
 //! pin it — see `tests/spacetime_module.rs`'s own header for the full picture.
 //!
-//! **Every `ReducerDomain` now covered**: tasks_and_epics/repo_config/
-//! subscriptions (task #4975), usage/agent_state (task #5004), learnings
-//! (task #5003), settings (task #5002), and work packages (task #45061).
-//! Extend the
-//! scenario in `memory_caller_conformance/scenario.rs`, rather than starting a
-//! new one, for any future
-//! `ReducerDomain` — `spacetime-memory-store.allium`'s `ConformanceIsCiGated`
-//! guarantee.
+//! **Every reducer is covered.** A new reducer adds its scenarios under
+//! `memory_caller_conformance/` rather than starting a new suite —
+//! `spacetime-memory-store.allium`'s `ConformanceIsCiGated` guarantee.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

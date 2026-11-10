@@ -9,11 +9,9 @@
 -- Includes: taking a snapshot of a store; restoring one; the id-sequence
 --           burn that must follow a restore; what makes a second restore of
 --           the same snapshot a no-op; importing an old store; the store's
---           own refusal of a task or epic row with an unknown status.
--- Retired: seeding a store from a board's local SQLite database, and dumping
---          that database to a snapshot (`dispatch spacetime seed` and
---          `dispatch spacetime dump`), removed with task #16755 — see
---          "Seeding (removed)" below.
+--           own refusal of a task or epic row with an unknown status. Rows
+--           only ever move between stores; nothing reads a board's local
+--           database (storage.allium: NoSqlite).
 -- Excludes: the shared schema itself and the shape of every row in it (see
 --           core.allium, which owns Task, Epic, Host, SavedRepoPath and the
 --           rest); which store is authoritative and why (see
@@ -38,9 +36,6 @@
 --   store, or an import from an old one — with their task and epic ids carried
 --   over unchanged, so that every id already written into a worktree name, a
 --   branch name, a plan path or a person's memory still means what it meant.
---   (This job was once "the seed": the shared store starting from one board's
---   local database. Every board has been on the store since task #4916, and
---   the seed was removed with task #16755.)
 --
 -- One artefact serves all three because the three want the same guarantees:
 -- everything, unaltered, and restorable onto a store that then behaves as if
@@ -82,6 +77,16 @@ use "./tasks.allium" as tasks
 -- restore also loses every unconsumed exit token, which lives in those rows;
 -- an agent mid-wrap-up calls wrap_up again.
 --
+-- `feed_requests` (store-split.allium: FeedRequest) is in-flight state too,
+-- and is left out for the same reason: a restored open request would hold its
+-- feed epic's refresh with nobody serving it.
+--
+-- `store_owner`, `schema_version` and `rules_version` describe the store,
+-- not the domain, and are left out. `store_owner` records who may call the
+-- seed_* reducers (StorePublisher), so a restore must never be able to
+-- rewrite it. The two version rows are stamped by the running module from
+-- its own constants and are never taken from a caller.
+--
 -- `unseen_tasks` (core.allium: UnseenTask, the new-task signal) is left out
 -- as well: a mark says "you have not looked yet", and a restore would invent
 -- that for people who may have looked since. Losing the marks on a restore is
@@ -92,7 +97,8 @@ use "./tasks.allium" as tasks
 -- again, and a restore is a rare disaster path. Losing them on a restore is
 -- accepted; carrying them would need a seed reducer and a snapshot table of
 -- their own, which can be added later without changing anything else. These
--- are the only exceptions to "every table it holds" below.
+-- are the only exceptions to "every table it holds" below; the module's
+-- views are not tables and hold nothing of their own.
 --
 -- `user_profiles`, `workspaces` and `memberships` (workspaces.allium) ARE
 -- here, because epics, work packages and learnings now point at a workspace
@@ -113,20 +119,17 @@ use "./tasks.allium" as tasks
 -- IdentityLivesInHostFile). Not an oversight; that split is the table
 -- partition in the migration design.
 --
--- Three members are dead: `task_shells` (shell tracking, removed in #4965),
--- `todos` (the TODO overlay, removed in #4970), and `filter_presets` (saved
--- repo-filter presets, removed in #4972). The store automigrates a removed
--- table only while it is empty: a table holding any row refuses the publish
--- ("table contains data"), and even an empty one disconnects every client
--- (checked on SpacetimeDB 2.10.1 in task #4972). So all three stay in the
--- module, never written, and a dump of any of them is always empty. They stay
--- in this list because the store still holds them and
--- "complete" means every table it holds.
+-- Three members are dead: `task_shells` (shell tracking), `todos` (the TODO
+-- overlay) and `filter_presets` (saved repo-filter presets). The store
+-- automigrates a removed table only while it is empty: a table holding any
+-- row refuses the publish ("table contains data"), and even an empty one
+-- disconnects every client. So all three stay in the module, never written,
+-- and a dump of any of them is always empty. They stay in this list because
+-- the store still holds them and "complete" means every table it holds.
 --
--- A fourth, `task_watchers`, went dead with the watch_task MCP tool (task
--- #53250). It stays for the same reason, but unlike the other three it may
--- still hold rows written before the tool was removed: nothing reads or writes
--- them any more, and a dump or import carries them across like any other row.
+-- A fourth, `task_watchers`, is dead too (there is no watch tool). It stays
+-- for the same reason, but it may still hold old rows: nothing reads or
+-- writes them, and a dump or import carries them across like any other row.
 enum SharedTable {
     tasks
     epics
@@ -163,9 +166,6 @@ enum SharedTable {
 -- here. It never becomes a Snapshot, so no rule below can bind it, and giving
 -- it a reason code would describe a refusal this spec does not govern. It is
 -- an ordinary unreadable-input failure of whatever loads the file.
---
--- store_not_empty was the seed's own refusal (a seed into a store that
--- already held tasks or epics) and went with the seed (task #16755).
 enum RefusalReason {
     format_unsupported    -- written by a version of the tool this one cannot read
     schema_mismatch       -- the rows describe a schema this store does not have
@@ -317,6 +317,24 @@ entity IdSequence {
 }
 
 ------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- What a restore or import needs from the target store to move a counter.
+-- The sequence names its table (SnapshotTarget::advance_id_sequence_past in
+-- src/spacetime/snapshot_target.rs takes the table).
+contract IdSequenceCounter {
+    -- Generate and discard ids until the sequence's next value passes
+    -- `ceiling`. A no-op for a table that does not generate ids, and for a
+    -- counter already past the ceiling.
+    advance_past: (sequence: IdSequence, ceiling: Integer) -> Boolean
+
+    @invariant AdvancesPastTheCeiling
+        -- After advance_past(s, c) succeeds, s.next_value > c. This is what
+        -- BurnIdSequences relies on.
+}
+
+------------------------------------------------------------
 -- Config
 ------------------------------------------------------------
 
@@ -418,9 +436,13 @@ rule RestoreSnapshot {
     ensures:
         BurnIdSequences(snapshot: snapshot)
         for extract in snapshot.extracts:
-            restore_rows_preserving_ids(extract)
+            TableRowsWriteRequested(table: extract.table, rows: extract.rows)
 
     @guidance
+        -- The rows cross the store boundary through
+        -- spacetime-snapshot.allium's WriteRowsToTheStore, which sends them in
+        -- bounded batches and translates absence into the store's sentinels.
+        --
         -- IDS ARE DATA, NOT ADDRESSES. Every row is written with the id it had.
         -- Not a fresh id, not a remapped one, not a dense renumbering that
         -- closes the gaps left by deleted tasks. Task ids are quoted in
@@ -478,10 +500,6 @@ rule RestoreSnapshot {
         -- rejected aborts. There is no way to advance a counter past a row
         -- without generating that row's id, so burning a loaded table is not
         -- slow, it is impossible. Against an empty table it is neither.
-        --
-        -- This contradicts the migration design, which says to burn after
-        -- loading. The design is wrong on this point and this file is the
-        -- correction; it was found by writing the restore, not by reading it.
 }
 
 rule BurnIdSequences {
@@ -650,13 +668,13 @@ rule RefuseArchivedRows {
         -- CHECKED AFTER SCHEMA AND COMPLETENESS, BEFORE THE BURN. Reading a
         -- row's `status` column presumes the schema already matches and the
         -- table is the one this store expects — asking it any earlier would
-        -- report a false positive against a snapshot that RefuseSchemaMismatch
+        -- report a false positive against a snapshot that RefuseMismatchedSchema
         -- or RefuseIncompleteSnapshot would have refused for an unrelated
         -- reason. Like every refusal here, it still runs before the burn and
         -- before the first row, so the store stays untouched.
         --
-        -- THE CLIENT-SIDE EARLY REFUSAL, NOT THE LAST LINE. Since task #16734
-        -- the store itself refuses any task or epic row whose status is not
+        -- THE CLIENT-SIDE EARLY REFUSAL, NOT THE LAST LINE. The store itself
+        -- refuses any task or epic row whose status is not
         -- one it knows (StoreRefusesUnknownStatus, below), so a snapshot this
         -- rule missed could still not land an `archived` row. This rule stays
         -- because it refuses earlier and better: before the burn, for the
@@ -712,18 +730,14 @@ rule StoreRefusesUnknownStatus {
         -- status. Deleting such a row is not a write of a row and is not
         -- refused.
         --
-        -- WHY THE MODULE AND NOT ONLY THE CLIENT. On 2026-10-05 the store
-        -- held 1,785 tasks and 165 epics with status `archived`, which is
-        -- what blocked deleting epic #100. Every client path already refused
-        -- them — RefuseArchivedRows on restore (and on the since-removed
-        -- seed), ImportOldStore's
-        -- RowsWithARemovedStatusAreDropped — but the module accepted any
-        -- string, so an older binary, an old snapshot fed through a raw
-        -- reducer call, or anybody calling a reducer directly could write
-        -- one. The module is the only layer every write must pass through,
-        -- so it is the only place the check cannot be bypassed. The client
-        -- checks stay as the earlier, friendlier refusal; this is the
-        -- guarantee.
+        -- WHY THE MODULE AND NOT ONLY THE CLIENT. Every client path refuses
+        -- such rows — RefuseArchivedRows on restore, ImportOldStore through
+        -- sync.allium's RowsWithARemovedStatusAreDropped — but an older
+        -- binary, an old snapshot fed through a raw reducer call, or anybody
+        -- calling a reducer directly reaches the module without them. The
+        -- module is the only layer every write must pass through, so it is
+        -- the only place the check cannot be bypassed. The client checks stay
+        -- as the earlier, friendlier refusal; this is the guarantee.
 }
 
 rule RefuseImplausibleCeiling {
@@ -766,35 +780,8 @@ rule RefuseImplausibleCeiling {
         -- CHECKED LAST, STILL BEFORE THE BURN. It runs after
         -- RefuseArchivedRows (src/spacetime/restore.rs::restore checks in
         -- this order), and like every refusal here it runs before the burn and
-        -- before the first row, so the store stays untouched. Predates task
-        -- #4971; it was given its own rule in the spec only after
-        -- RefuseArchivedRows was added beside it.
+        -- before the first row, so the store stays untouched.
 }
-
--- == Seeding (removed) ==
-
--- REMOVED with task #16755: SeedSharedStore, RefuseSeedingANonEmptyStore,
--- BackfillTaskOwner and BackfillCreatedBy, with `dispatch spacetime seed`
--- that reached them, and `dispatch spacetime dump` (a snapshot of a board's
--- own SQLite file) beside them.
---
--- What they did: seeding took a snapshot of ONE board's local database and
--- restored it into an empty store, first stamping every epic-less task's
--- owner and every task's and epic's created_by with the seeding person's
--- identity — the backfills a database with no people in it needed before the
--- store, whose rows all name a person, would accept them. It refused a store
--- that already held a task or epic, because it attributed every row to the
--- seeder.
---
--- Why they are gone rather than kept as an escape hatch: they read SQLite,
--- and no production path does any more (storage.allium:
--- NoSqlite). Every board has been on the store since task
--- #4916, so there is no board left whose rows exist only in its local file —
--- a leftover tasks.db is a stale copy of what the store already holds
--- (storage.allium: CodeNeverTouchesLegacyDatabase), and seeding from it would
--- resurrect old state, or be refused by a non-empty store. Moving rows between
--- stores is dump-server, restore and ImportOldStore, which all work on
--- stores.
 
 ------------------------------------------------------------
 -- Invariants
@@ -836,7 +823,7 @@ invariant OneSequencePerTable {
 -- rebuilding the shared store, and an operation whose failure mode is "the
 -- team's board is now half a board" should require a human to have typed it.
 --
--- WHO MAY CALL THE seed_* REDUCERS (task #98743). The seed reducers write rows
+-- WHO MAY CALL THE seed_* REDUCERS. The seed reducers write rows
 -- with the ids, owners and visibilities they already have, so they skip every
 -- permission rule on purpose. The module therefore lets only two callers use
 -- them: the store itself (the database identity, as a scheduled call), and the
@@ -848,7 +835,7 @@ invariant OneSequencePerTable {
 -- recorded publisher and refuses every board: failing closed is the point, as
 -- a board could otherwise claim the role by being first to ask.
 --
--- A STORE PUBLISHED BEFORE THAT ROW EXISTED (tasks #98755, #98850). Its
+-- A STORE PUBLISHED BEFORE THAT ROW EXISTED. Its
 -- publisher is recorded by `claim_store_owner`, a reducer with no arguments:
 -- the caller becomes the publisher, but ONLY while no row exists, and the call
 -- is refused once one does. The managed bring-up runs it as the CLI login
@@ -894,8 +881,6 @@ actor StorePublisher {
 --   A restore overwrites by key: re-run after a week on the managed store and
 --   it erases the week.
 --   A restore does not know the retired `archived` status is to be dropped.
---   (The seed, removed with task #16755, was no better: it refused any store
---   that held a task or epic, and re-attributed every row to the seeder.)
 --
 -- ImportOldStore is the other thing: an ADD-ONLY copy. It is read-only on its
 -- source, never overwrites or deletes a row in its target, and can be run
@@ -932,9 +917,11 @@ rule ImportOldStore {
         DependentsOfDroppedRowsAreDropped(snapshot)
         OrphansLeaveTheirDroppedEpic(operator: operator, snapshot: snapshot)
         BurnIdSequences(snapshot: snapshot)
-        ImportWrote(
-            snapshot.rows where not target.has_key(row) and not target.has_natural_key(row)
-        )
+        for extract in snapshot.extracts:
+            TableRowsWriteRequested(
+                table: extract.table,
+                rows: extract.rows where not target.has_key(row) and not target.has_natural_key(row)
+            )
         ImportReported(
             imported: per_table_counts_written,
             kept: per_table_counts_already_present,
@@ -982,15 +969,14 @@ rule ImportOldStore {
         -- hosts, settings, task_watchers, task_subagents, poll_owners,
         -- subscriptions, learnings (with their embeddings and upvotes),
         -- learning_retrievals, learning_verdicts, usage_events, retired_feed_items,
-        -- work_packages, work_package_links, agents and
-        -- handed_out_agent_names cross as well as tasks and epics. A table that cannot be imported is a
+        -- work_packages, work_package_links, agents, handed_out_agent_names,
+        -- user_profiles, workspaces and memberships cross as well as tasks
+        -- and epics. A table that cannot be imported is a
         -- refusal (incomplete), not a quiet omission.
         --
         -- OWNERSHIP IS NOT RE-STAMPED. The old store's rows already carry
         -- `owner` and `created_by`, and the same install's identity signs for
-        -- both stores, so they are written exactly as read. This is unlike
-        -- the removed seed, which existed because a SQLite board had no
-        -- people in it. The one exception is OrphansLeaveTheirDroppedEpic, which has
+        -- both stores, so they are written exactly as read. The one exception is OrphansLeaveTheirDroppedEpic, which has
         -- to give a task an owner.
         --
         -- THE ORDER IS THE RESTORE'S. Every refusal and the schema check come
@@ -1088,6 +1074,9 @@ rule OrphansLeaveTheirDroppedEpic {
 surface SnapshotCommandLine {
     facing operator: StorePublisher
 
+    contracts:
+        demands IdSequenceCounter
+
     exposes:
         for sequence in IdSequences:
             sequence.table
@@ -1137,10 +1126,7 @@ surface SnapshotCommandLine {
         -- mistype than a word.
         --
         -- TakeSnapshot is `dispatch spacetime dump-server` — a dump of a
-        -- store. There is no longer a dump of a board's own database
-        -- (`dispatch spacetime dump`) or a seed from one (`dispatch spacetime
-        -- seed`); both were removed with task #16755, and an invocation of
-        -- either is an unknown subcommand.
+        -- store. There is no dump of a board's own database.
         --
         -- The dump side is the half that should be boring and frequent: it
         -- reads, it refuses nothing, and running it more often than necessary
@@ -1156,24 +1142,3 @@ surface SnapshotCommandLine {
 open question "Should a restore be able to DELETE rows the snapshot does not contain, making the store exactly equal to the snapshot? Recovering from a corrupting write needs it; every other use is one typo away from erasing a colleague's work. Not specified either way here."
 
 open question "Who takes the dump, on what cadence, and where does it go? The design leaves server hosting and backup cadence open, and a backup tool with no scheduled caller is a backup nobody has."
-
--- Resolved 2026-09-20 (single-storage-simplification revision), landed Phase
--- 11 (task #4915): "Are task_usage and usage_events shared or local?" —
--- usage_events is shared. task_usage never reached this decision at all: it
--- was removed outright in an earlier, unrelated change (table, model and MCP
--- tool all deleted 2026-05-20), so there was nothing left to migrate for it.
---
--- Resolved 2026-09-27 (a weed pass during task #4971): `poll_owners`,
--- `settings`, `filter_presets`, `learnings`, `learning_retrievals` and
--- `usage_events` had each joined `SharedTable` in `src/spacetime/snapshot.rs`
--- over several earlier phases without this spec's own `enum SharedTable` or
--- `shared_table_count` being updated to match — left as found at the time,
--- since reconciling it was a dedicated weed pass rather than a side effect of
--- whichever table prompted the note. Task #4971 added a seventh,
--- `retired_feed_items`, which is what that pass was for; `enum SharedTable`
--- and `shared_table_count` above now list all seventeen and are back in sync
--- with `src/spacetime/snapshot.rs::SharedTable::ALL`.
---
--- Resolved 2026-10-16 (task #90115): `work_packages` and `work_package_links`
--- had joined `SharedTable::ALL` without this spec following; they are listed
--- now, beside A1's `agents` and `handed_out_agent_names`, for twenty-one.

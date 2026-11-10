@@ -1321,8 +1321,8 @@ impl Store {
     }
 
     /// A handle attached to a fresh in-memory store, which covers every
-    /// reducer domain (spec: `spacetime-memory-store.allium`,
-    /// `OpenInMemoryAttachesStoreOnceComplete`).
+    /// reducer (spec: `spacetime-memory-store.allium`,
+    /// `OpenInMemoryAttachesTheStore`).
     #[cfg(any(test, feature = "test-support"))]
     pub fn open_in_memory() -> Result<Self> {
         // Identity lives in a host file, as in production, so the handle gets

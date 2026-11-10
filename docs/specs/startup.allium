@@ -1564,6 +1564,17 @@ rule BringUpTheManagedStoreOnceTheHostIsNamed {
         -- earlier (AbortWhenTheManagedStoreHasNoCli), because it costs nothing.
 }
 
+rule LocateTheManagedStore {
+    when: ManagedStoreRequested(operator)
+
+    ensures: ManagedStoreLocated(launch_data_dir: data_dir())
+
+    @guidance
+        -- Where the store's data, module-hash record and log live is
+        -- spacetime-snapshot.allium's ManagedStoreDataIgnoresTheBoardDatabase.
+        -- A board launch and an import both locate it, before the probe.
+}
+
 rule AdoptAStoreAlreadyOnTheManagedAddress {
     when: ManagedStoreRequested(operator)
     let state = probe_managed_address()
@@ -1958,7 +1969,7 @@ rule StopTheManagedStoreWhenTheBoardExits {
     requires: cause != startup_aborted
     requires: managed_store_held_by_this_board()
 
-    ensures: ManagedStoreStopped()
+    ensures: ManagedStoreStopRequested()
 
     @guidance
         -- THE MANAGED STORE LIVES AS LONG AS THE BOARD, whether this board
@@ -2006,7 +2017,7 @@ rule StopTheManagedStoreWhenStartupAborts {
     when: StartupAborted(reason)
     requires: managed_store_held_by_this_board()
 
-    ensures: ManagedStoreStopped()
+    ensures: ManagedStoreStopRequested()
 
     @guidance
         -- The abort is an exit like any other, so the same rule applies: a

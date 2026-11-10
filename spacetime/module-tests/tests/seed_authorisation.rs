@@ -1,4 +1,4 @@
-//! Who may call the `seed_*` reducers (`spacetime-seed.allium: SeedRequiresTheOperator`).
+//! Who may call the `seed_*` reducers (`spacetime-seed.allium: StorePublisher`).
 //!
 //! The restore path writes rows with the ids and owners they already have, so
 //! it is the one door that skips every permission rule. Only the store's own

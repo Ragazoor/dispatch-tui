@@ -14,13 +14,8 @@
 --           per-row column backstop; the store each snapshot command targets
 --           and whether it brings the managed store up; where the managed
 --           store's data, module-hash record and log live; and that a board
---           process stops its managed store at most once.
--- Retired: the local (SQLite) dump and its per-table extract sources
---          (DumpLocalBoard, ExtractSource, LocalTableSource and the rules that
---          read each table), and the seed's store selection — removed with
---          `dispatch spacetime dump` and `dispatch spacetime seed` in task
---          #16755 (spacetime-seed.allium: "Seeding (removed)"). Every snapshot
---          is now a dump of a store.
+--           process stops its managed store at most once. Every snapshot is a
+--           dump of a store.
 -- Excludes: what a snapshot must contain, the restore's refusals, the
 --           id-sequence burn, idempotent restore and the import's add-only
 --           semantics (all spacetime-seed.allium — not
@@ -47,6 +42,7 @@
 -- appears and disappears with the board.
 
 use "./spacetime-seed.allium" as seed
+use "./startup.allium" as startup
 
 ------------------------------------------------------------
 -- Enumerations
@@ -76,17 +72,24 @@ enum StoreTarget {
     | cli_default_server -- whatever server the operator's `spacetime` CLI is configured for
 }
 
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
 -- One column the store keeps non-optional with a sentinel standing for
 -- absence. The full list is src/spacetime/snapshot.rs's sentinel_columns.
+--
+-- The workspace columns (workspaces.allium: epics, work_packages and
+-- learnings each carry workspace_id) are zero-sentinel columns: 0 is "in no
+-- workspace", which is a user-scoped learning's real state and an epic's
+-- state until the migration places it. The visibility columns are plain
+-- text, never absent. user_profiles.is_super_admin is a canonical boolean
+-- like every other.
 entity SentinelColumn {
     table: seed/SharedTable
     column: String
     sentinel: Sentinel
 }
-
-------------------------------------------------------------
--- Entities
-------------------------------------------------------------
 
 -- Which store one invocation of a command resolved to.
 entity StoreSelection {
@@ -113,6 +116,29 @@ entity ManagedStoreLocation {
 entity ManagedStoreHold {
     held: Boolean              -- startup.allium: managed_store_held_by_this_board()
     stop_requested: Boolean    -- a stop has already been asked for by this process
+}
+
+-- A process holds the managed store at most once, so there is one hold.
+given {
+    hold: ManagedStoreHold
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The sentinel translation at the store boundary. Both directions take the
+-- column they translate, because the sentinel depends on it.
+contract SentinelTranslation {
+    -- Absence becomes the column's sentinel on the way in.
+    to_store: (column: SentinelColumn, value: Any?) -> Any
+    -- The column's sentinel becomes absence on the way out.
+    from_store: (column: SentinelColumn, value: Any) -> Any?
+
+    @invariant RoundTrip
+        -- from_store(c, to_store(c, v)) = v for every value v of column c,
+        -- absence included. This is what SentinelsNeverReachTheSnapshot
+        -- needs from the two ends of one conversion.
 }
 
 ------------------------------------------------------------
@@ -176,7 +202,7 @@ rule DumpAStore {
 }
 
 rule WriteRowsToTheStore {
-    when: WriteRows(store, table, rows)
+    when: seed/TableRowsWriteRequested(table, rows)
 
     ensures:
         for row in rows:
@@ -185,7 +211,8 @@ rule WriteRowsToTheStore {
     @guidance
         -- The write half of the boundary, used by seed/RestoreSnapshot and
         -- seed/ImportOldStore alike. Absence in the
-        -- snapshot becomes the column's sentinel; a value the store's schema
+        -- snapshot becomes the column's sentinel (SentinelTranslation's
+        -- to_store); a value the store's schema
         -- marks optional is wrapped as present. Which columns are optional is
         -- asked of the store's published schema, not hard-coded: wrapping a
         -- column that is not optional fails as loudly as not wrapping one that
@@ -199,7 +226,7 @@ rule WriteRowsToTheStore {
 }
 
 rule RefuseARowTooLargeForOneWrite {
-    when: WriteRows(store, table, rows)
+    when: seed/TableRowsWriteRequested(table, rows)
     requires: rows.any(r => encoded_size(table, r) > config.max_bytes_per_store_write)
 
     ensures: StoreWriteFailed(table: table, detail: oversized_row_detail(table, rows))
@@ -216,7 +243,7 @@ rule RefuseARowTooLargeForOneWrite {
 }
 
 rule RefuseAColumnTheStoreDoesNotHave {
-    when: WriteRows(store, table, rows)
+    when: seed/TableRowsWriteRequested(table, rows)
     requires: rows.any(r => carries_column_not_in_store(table, r) or lacks_column_in_store(table, r))
 
     ensures: StoreWriteFailed(table: table, detail: column_drift_detail(table, rows))
@@ -295,15 +322,20 @@ rule BoardTargetsTheNamedStoreOrBringsUpTheManagedOne {
 ------------------------------------------------------------
 
 rule ManagedStoreDataIgnoresTheBoardDatabase {
-    when: ManagedStoreLocated(location, board_database)
+    when: startup/ManagedStoreLocated(launch_data_dir)
 
-    ensures: location.data_dir = default_data_dir() + "/" + config.managed_store_data_dir_name
-    ensures: location.module_hash_record = location.data_dir + "/" + config.module_hash_file_name
-    ensures: location.log_file = directory_of(board_database) + "/" + config.managed_store_log_name
+    let store_data_dir = default_data_dir() + "/" + config.managed_store_data_dir_name
+
+    ensures:
+        ManagedStoreLocation.created(
+            data_dir: store_data_dir,
+            module_hash_record: store_data_dir + "/" + config.module_hash_file_name,
+            log_file: launch_data_dir + "/" + config.managed_store_log_name
+        )
 
     @guidance
-        -- `board_database` is the path --data-dir names; only its directory is
-        -- used (storage.allium: DataDirectory) — no database is opened.
+        -- `launch_data_dir` is the directory --data-dir names, where this
+        -- launch's app.log goes (storage.allium: DataDirectory).
         --
         -- THE DATA FOLLOWS THE MACHINE, THE LOG FOLLOWS THE LAUNCH. A
         -- throwaway --data-dir (a worktree build, a scratch run) must not start a
@@ -322,7 +354,7 @@ rule ManagedStoreDataIgnoresTheBoardDatabase {
 }
 
 rule StopTheManagedStoreAtMostOnce {
-    when: ManagedStoreStopRequested(hold)
+    when: startup/ManagedStoreStopRequested()
     requires: hold.held
     requires: not hold.stop_requested
 
@@ -330,11 +362,13 @@ rule StopTheManagedStoreAtMostOnce {
     ensures: StopSignalSent(to: processes_serving_the_managed_address())
 
     @guidance
-        -- startup.allium decides WHEN a held store is stopped; this pins that
-        -- a process stops it at most once. An abort inside bring-up followed
-        -- by the exit path, or a termination signal racing a quit, would
-        -- otherwise ask twice, and the second ask could land on a store a
-        -- NEW board has started on the same address in between.
+        -- startup.allium decides WHEN a held store is stopped
+        -- (StopTheManagedStoreWhenTheBoardExits,
+        -- StopTheManagedStoreWhenStartupAborts); this pins that a process
+        -- stops it at most once. An abort inside bring-up followed by the
+        -- exit path, or a termination signal racing a quit, would otherwise
+        -- ask twice, and the second ask could land on a store a NEW board has
+        -- started on the same address in between.
         --
         -- The stop is a termination signal to every process listening on the
         -- managed address and to the store this process spawned, then a wait
@@ -342,6 +376,12 @@ rule StopTheManagedStoreAtMostOnce {
         -- them to be gone. Listening processes are found by asking the
         -- operating system who holds the port, because an adopted store was
         -- not this process's child.
+        --
+        -- ONE GUARD FOR BOTH KINDS OF STOP. A failed start stops only the
+        -- child this process spawned (startup.allium:
+        -- StartTheManagedStoreWhenNothingAnswers, stop_spawned_store), never
+        -- the port. That stop counts against the same once-only guard, so a
+        -- later exit does not signal the port either.
 }
 
 ------------------------------------------------------------
@@ -354,11 +394,20 @@ invariant StopOnlyWhatIsHeld {
         h.stop_requested implies h.held
 }
 
--- The workspace columns (workspaces.allium: epics, work_packages and learnings
--- each carry workspace_id) are zero-sentinel columns: 0 is "in no workspace",
--- which is a user-scoped learning's real state and an epic's state until the
--- migration places it. The visibility columns are plain text, never absent.
--- user_profiles.is_super_admin is a canonical boolean like every other.
+-- One entry per column: a column with two sentinels would have no single
+-- absence to translate back.
+invariant OneSentinelPerColumn {
+    for a in SentinelColumns:
+        for b in SentinelColumns:
+            a != b implies (a.table != b.table or a.column != b.column)
+}
+
+-- Zero stands for absence only in integer columns, and the empty string only
+-- in text columns: a sentinel is a value of the column's own type.
+invariant SentinelMatchesColumnType {
+    for c in SentinelColumns:
+        (c.sentinel = zero) = is_integer_column(c.table, c.column)
+}
 
 -- sort_order is never given a sentinel: zero is a real sort order there, and
 -- absence means "fall back to the id" (see SentinelsNeverReachTheSnapshot).
@@ -413,12 +462,13 @@ invariant SortOrderHasNoSentinel {
 
 surface SnapshotTargets {
     facing operator: seed/StorePublisher
+    -- One command run, and the store it resolved to.
+    context selection: StoreSelection
 
     exposes:
-        for selection in StoreSelections:
-            selection.command
-            selection.target
-            selection.brings_up_managed_store
+        selection.command
+        selection.target
+        selection.brings_up_managed_store
         for location in ManagedStoreLocations:
             location.data_dir
             location.module_hash_record

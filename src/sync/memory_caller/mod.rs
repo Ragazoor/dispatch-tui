@@ -26,7 +26,7 @@
 //!
 //! Every mutation below pushes its resulting rows into the same
 //! [`super::rows::SharedRows`] a real board's `Store` reads from —
-//! `ReducerCallReachesSharedRows`. That is what lets every downstream read
+//! `TestBoardReadsShareTheHandlesRows`. That is what lets every downstream read
 //! (the store traits, `decode`, the board itself) run unchanged against this
 //! store: nothing downstream of `SharedRows` can tell the difference between a
 //! row that arrived over a subscription and one this caller just wrote.
@@ -226,7 +226,7 @@ pub struct MemoryReducerCaller {
 
 impl MemoryReducerCaller {
     /// `rows` is the SAME `SharedRows` a board's reads run against — pushing
-    /// into it here is what `ReducerCallReachesSharedRows` means. `clock`
+    /// into it here is what `TestBoardReadsShareTheHandlesRows` means. `clock`
     /// supplies every timestamp a real reducer would take from
     /// `ctx.timestamp`.
     pub fn new(rows: Arc<SharedRows>, clock: Arc<dyn Clock>) -> Self {
