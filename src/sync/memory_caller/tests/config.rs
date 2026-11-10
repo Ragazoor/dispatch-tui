@@ -264,6 +264,44 @@ async fn record_base_branch_upserts_by_repo_and_branch() {
     );
 }
 
+/// dispatch.allium: RecordBaseBranch, BranchHistoryCapped — a write prunes
+/// that path's history to the most recently used
+/// `MAX_BASE_BRANCHES_PER_REPO`, and leaves other paths alone.
+#[tokio::test]
+async fn record_base_branch_prunes_the_paths_history_to_the_cap() {
+    let (caller, rows) = caller();
+    caller
+        .record_base_branch(
+            "/other".into(),
+            "keep".into(),
+            at("2026-01-01 00:00:00.000"),
+        )
+        .await
+        .unwrap();
+    for i in 0..12 {
+        caller
+            .record_base_branch(
+                "/repo".into(),
+                format!("b{i:02}"),
+                at(&format!("2026-01-02 00:00:{i:02}.000")),
+            )
+            .await
+            .unwrap();
+    }
+    let mut kept: Vec<String> = rows
+        .base_branches()
+        .into_iter()
+        .filter(|(path, _)| path == "/repo")
+        .map(|(_, branch)| branch)
+        .collect();
+    kept.sort();
+    let expected: Vec<String> = (2..12).map(|i| format!("b{i:02}")).collect();
+    assert_eq!(kept, expected, "the two least recently used go");
+    assert!(rows
+        .base_branches()
+        .contains(&("/other".to_string(), "keep".to_string())));
+}
+
 // -- Subscriptions ------------------------------------------------------------
 
 #[tokio::test]

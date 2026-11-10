@@ -397,12 +397,19 @@ impl MemoryReducerCaller {
                     &mut tables,
                     module::RepoBaseBranch {
                         id: 0,
-                        repo_path,
+                        repo_path: repo_path.clone(),
                         branch,
                         last_used,
                     },
                 );
             }
+        }
+        // The module's own cap rule (dispatch.allium: BranchHistoryCapped).
+        let rows: Vec<module::RepoBaseBranch> =
+            tables.repo_base_branches.values().cloned().collect();
+        for id in module::base_branches_beyond_cap(&rows, &repo_path) {
+            tables.repo_base_branches.remove(&id);
+            self.rows.remove_repo_base_branch(id);
         }
         Ok(ReducerOutcome::Applied(vec![]))
     }

@@ -63,7 +63,8 @@ pub fn rows_of_the_repository_at<'a>(rows: &'a [RepoPath], path: &str) -> Vec<&'
 /// GitHub group of each, so a row with no GitHub path still reaches the rest of
 /// its group (`core.allium: VerifyCommandIsPerRepository`).
 pub fn rows_of_the_repository_of<'a>(rows: &'a [RepoPath], named: &RepoPath) -> Vec<&'a RepoPath> {
-    let sibling = |r: &RepoPath| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path);
+    let sibling =
+        |r: &RepoPath| is_sibling(&r.path, &r.github_path, &named.path, &named.github_path);
     let groups: Vec<&str> = rows
         .iter()
         .filter(|r| sibling(r))
@@ -72,7 +73,9 @@ pub fn rows_of_the_repository_of<'a>(rows: &'a [RepoPath], named: &RepoPath) -> 
         .filter(|g| !g.is_empty())
         .collect();
     rows.iter()
-        .filter(|r| sibling(r) || (!r.github_path.is_empty() && groups.contains(&r.github_path.as_str())))
+        .filter(|r| {
+            sibling(r) || (!r.github_path.is_empty() && groups.contains(&r.github_path.as_str()))
+        })
         .collect()
 }
 
@@ -349,12 +352,33 @@ pub fn record_base_branch(
         }),
         None => ctx.db.repo_base_branches().insert(RepoBaseBranch {
             id: 0,
-            repo_path,
+            repo_path: repo_path.clone(),
             branch,
             last_used,
         }),
     };
+    let rows: Vec<RepoBaseBranch> = ctx.db.repo_base_branches().iter().collect();
+    for id in base_branches_beyond_cap(&rows, &repo_path) {
+        ctx.db.repo_base_branches().id().delete(id);
+    }
     Ok(())
+}
+
+/// `dispatch.allium: config.max_base_branches_per_repo` — how many base
+/// branches one repo path remembers (`BranchHistoryCapped`).
+pub const MAX_BASE_BRANCHES_PER_REPO: usize = 10;
+
+/// The ids of `repo_path`'s base-branch rows beyond the cap: all but the
+/// [`MAX_BASE_BRANCHES_PER_REPO`] most recently used, newer id first on a tie.
+/// `record_base_branch` deletes them after its upsert; `MemoryReducerCaller`
+/// calls this too, so the two prune the same rows.
+pub fn base_branches_beyond_cap(rows: &[RepoBaseBranch], repo_path: &str) -> Vec<i64> {
+    let mut own: Vec<&RepoBaseBranch> = rows.iter().filter(|r| r.repo_path == repo_path).collect();
+    own.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(b.id.cmp(&a.id)));
+    own.into_iter()
+        .skip(MAX_BASE_BRANCHES_PER_REPO)
+        .map(|r| r.id)
+        .collect()
 }
 
 // -- Settings (Phase 9) -------------------------------------------------------

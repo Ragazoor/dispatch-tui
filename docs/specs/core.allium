@@ -1061,7 +1061,7 @@ entity SavedRepoPath {
 --       later deleted.
 --
 -- Identity is the (repo_path, branch) pair (UniqueBranchPerRepo). Recency
--- ordering (most-recent-first) and the per-repo cap are
+-- ordering (most-recent-first) and the per-path cap are
 -- governed by the write operation (see dispatch.allium: RecordBaseBranch and
 -- the BranchHistoryCapped invariant).
 entity SavedRepoBranch {

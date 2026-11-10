@@ -86,3 +86,53 @@ fn clearing_an_unset_setting_is_a_no_op() {
         })
         .expect("clearing an unset key must succeed");
 }
+
+/// dispatch.allium: RecordBaseBranch, BranchHistoryCapped — `record_base_branch`
+/// prunes the path's history to the most recently used
+/// `MAX_BASE_BRANCHES_PER_REPO` rows, and touches no other path's rows.
+#[test]
+fn record_base_branch_prunes_the_paths_history_to_the_cap() {
+    let store = two_hosts();
+    let record = |path: &str, branch: &str, stamp: &str| {
+        store
+            .call("alice", |ctx| {
+                record_base_branch(ctx, path.into(), branch.into(), stamp.into())
+            })
+            .expect("record_base_branch");
+    };
+    record("/other", "keep", "2026-01-01 00:00:00.000");
+    for i in 0..12 {
+        record(
+            "/repo",
+            &format!("b{i:02}"),
+            &format!("2026-01-02 00:00:{i:02}.000"),
+        );
+    }
+    // Re-recording an old branch makes it the most recent, so it survives.
+    record("/repo", "b02", "2026-01-03 00:00:00.000");
+    record("/repo", "b12", "2026-01-03 00:00:01.000");
+
+    let mut kept: Vec<String> = store
+        .db()
+        .repo_base_branches()
+        .iter()
+        .filter(|r| r.repo_path == "/repo")
+        .map(|r| r.branch)
+        .collect();
+    kept.sort();
+    let mut expected: Vec<String> = (2..13)
+        .filter(|i| *i != 3)
+        .map(|i| format!("b{i:02}"))
+        .collect();
+    expected.sort();
+    assert_eq!(kept, expected);
+    assert_eq!(
+        store
+            .db()
+            .repo_base_branches()
+            .iter()
+            .filter(|r| r.repo_path == "/other")
+            .count(),
+        1
+    );
+}
