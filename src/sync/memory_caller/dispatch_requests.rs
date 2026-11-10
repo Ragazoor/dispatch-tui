@@ -94,6 +94,27 @@ impl MemoryReducerCaller {
         Ok(())
     }
 
+    /// Mirrors the module's `fail_dispatch_requests_of`: fail every request
+    /// of the task that `selected` picks.
+    fn fail_dispatch_requests_of(
+        &self,
+        tables: &mut Tables,
+        task_id: i64,
+        selected: impl Fn(&module::DispatchRequest) -> bool,
+        reason: &str,
+    ) -> Result<(), String> {
+        let rows: Vec<module::DispatchRequest> = tables
+            .dispatch_requests
+            .values()
+            .filter(|r| r.task_id == task_id && selected(r))
+            .cloned()
+            .collect();
+        for row in rows {
+            self.fail_dispatch_request(tables, row, reason)?;
+        }
+        Ok(())
+    }
+
     /// Mirrors the module's `fail_open_dispatch_requests_of`
     /// (`DeletingATaskFailsItsOpenRequest`): called by every task delete,
     /// after the task row is gone.
@@ -103,15 +124,12 @@ impl MemoryReducerCaller {
         task_id: i64,
         reason: &str,
     ) {
-        let open: Vec<module::DispatchRequest> = tables
-            .dispatch_requests
-            .values()
-            .filter(|r| r.task_id == task_id && module::dispatch_request_is_open(&r.state))
-            .cloned()
-            .collect();
-        for row in open {
-            let _ = self.fail_dispatch_request(tables, row, reason);
-        }
+        let _ = self.fail_dispatch_requests_of(
+            tables,
+            task_id,
+            |r| module::dispatch_request_is_open(&r.state),
+            reason,
+        );
     }
 
     /// Mirrors the module's `fail_waiting_dispatch_requests_of`
@@ -123,16 +141,7 @@ impl MemoryReducerCaller {
         task_id: i64,
         reason: &str,
     ) -> Result<(), String> {
-        let waiting: Vec<module::DispatchRequest> = tables
-            .dispatch_requests
-            .values()
-            .filter(|r| r.task_id == task_id && module::is_waiting_dispatch_request(r))
-            .cloned()
-            .collect();
-        for row in waiting {
-            self.fail_dispatch_request(tables, row, reason)?;
-        }
-        Ok(())
+        self.fail_dispatch_requests_of(tables, task_id, module::is_waiting_dispatch_request, reason)
     }
 
     /// Mirrors the module's `delete_request_rows_of`

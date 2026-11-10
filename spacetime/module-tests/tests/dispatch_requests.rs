@@ -953,6 +953,25 @@ fn the_owner_may_relabel_but_not_disown_its_host() {
     assert_eq!(row.owner, me);
 }
 
+/// One task, requested by `HOST_A` and claimed by it: its id and the request's.
+fn provisioning(store: &Store) -> (i64, i64) {
+    let id = host_and_task(store);
+    request(store, id).expect("request");
+    let req = only_request(store).id;
+    claim(store, "alice", req, HOST_A).expect("claim");
+    (id, req)
+}
+
+/// The agent the dispatch claim started for `task`, current or ended.
+fn claims_agent(store: &Store, task: i64) -> Agent {
+    store
+        .db()
+        .agents()
+        .iter()
+        .find(|a| a.task_id == task)
+        .expect("the agent the claim started")
+}
+
 #[test]
 fn moving_back_to_backlog_fails_a_request_still_waiting_for_its_host() {
     let store = Store::new();
@@ -966,12 +985,7 @@ fn moving_back_to_backlog_fails_a_request_still_waiting_for_its_host() {
     assert_eq!(row.reason, "task moved back to backlog");
     assert_eq!(timer_count(&store, req), 0);
     assert_eq!(store.task(id).status, "backlog");
-    let agent = store
-        .db()
-        .agents()
-        .iter()
-        .find(|a| a.task_id == id)
-        .expect("the agent the claim started");
+    let agent = claims_agent(&store, id);
     assert_eq!(agent.state, "ended");
     assert_eq!(agent.end_reason, "launch_failed");
 
@@ -982,10 +996,7 @@ fn moving_back_to_backlog_fails_a_request_still_waiting_for_its_host() {
 #[test]
 fn moving_back_to_backlog_keeps_a_provisioning_request_open() {
     let store = Store::new();
-    let id = host_and_task(&store);
-    request(&store, id).expect("request");
-    let req = only_request(&store).id;
-    claim(&store, "alice", req, HOST_A).expect("claim");
+    let (id, req) = provisioning(&store);
     patch(&store, id, status_patch("backlog"));
 
     assert_eq!(only_request(&store).state, DISPATCH_PROVISIONING);
@@ -996,10 +1007,7 @@ fn moving_back_to_backlog_keeps_a_provisioning_request_open() {
 #[test]
 fn a_dispatched_report_for_a_task_moved_back_to_backlog_is_refused() {
     let store = Store::new();
-    let id = host_and_task(&store);
-    request(&store, id).expect("request");
-    let req = only_request(&store).id;
-    claim(&store, "alice", req, HOST_A).expect("claim");
+    let (id, req) = provisioning(&store);
     patch(&store, id, status_patch("backlog"));
 
     let refused = report_dispatched(&store, "alice", req, HOST_A, "/wt/1-t").unwrap_err();
@@ -1014,22 +1022,14 @@ fn a_dispatched_report_for_a_task_moved_back_to_backlog_is_refused() {
 #[test]
 fn the_failure_report_after_a_move_back_ends_the_agent_and_frees_the_task() {
     let store = Store::new();
-    let id = host_and_task(&store);
-    request(&store, id).expect("request");
-    let req = only_request(&store).id;
-    claim(&store, "alice", req, HOST_A).expect("claim");
+    let (id, req) = provisioning(&store);
     patch(&store, id, status_patch("backlog"));
     report_failed(&store, "alice", req, HOST_A).expect("report failed");
 
     assert_eq!(only_request(&store).state, DISPATCH_FAILED);
     let task = store.task(id);
     assert_eq!(task.status, "backlog");
-    let agent = store
-        .db()
-        .agents()
-        .iter()
-        .find(|a| a.task_id == id)
-        .expect("the agent the claim started");
+    let agent = claims_agent(&store, id);
     assert_eq!(agent.state, "ended");
     assert_eq!(agent.end_reason, "launch_failed");
     request(&store, id).expect("the old request is finished, so it can be requested again");
@@ -1038,10 +1038,7 @@ fn the_failure_report_after_a_move_back_ends_the_agent_and_frees_the_task() {
 #[test]
 fn a_move_on_to_review_keeps_the_launch() {
     let store = Store::new();
-    let id = host_and_task(&store);
-    request(&store, id).expect("request");
-    let req = only_request(&store).id;
-    claim(&store, "alice", req, HOST_A).expect("claim");
+    let (id, req) = provisioning(&store);
     patch(&store, id, status_patch("review"));
 
     report_dispatched(&store, "alice", req, HOST_A, "/wt/1-t").expect("accepted");
@@ -1057,13 +1054,8 @@ fn moving_to_done_fails_a_waiting_request_and_refuses_a_provisioning_report() {
     request(&store, provisioning).expect("request");
     let req = request_for(&store, provisioning).id;
     claim(&store, "alice", req, HOST_A).expect("claim");
-    let done = || TaskPatch {
-        status: Some("done".into()),
-        sub_status: Some("none".into()),
-        ..TaskPatch::default()
-    };
-    patch(&store, waiting, done());
-    patch(&store, provisioning, done());
+    patch(&store, waiting, status_patch("done"));
+    patch(&store, provisioning, status_patch("done"));
 
     let row = request_for(&store, waiting);
     assert_eq!(row.state, DISPATCH_FAILED);
@@ -1075,11 +1067,6 @@ fn moving_to_done_fails_a_waiting_request_and_refuses_a_provisioning_report() {
     assert_eq!(task.worktree, "");
     assert_eq!(task.status, "done");
     report_failed(&store, "alice", req, HOST_A).expect("report failed");
-    let agent = store
-        .db()
-        .agents()
-        .iter()
-        .find(|a| a.task_id == provisioning && a.state != "assigned")
-        .expect("the agent the claim started");
+    let agent = claims_agent(&store, provisioning);
     assert_eq!(agent.end_reason, "launch_failed");
 }

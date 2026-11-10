@@ -457,32 +457,37 @@ pub fn release_claim_after_failure(task: Task) -> Option<Task> {
     is_bare_claim(&task).then(|| released_task(task))
 }
 
+/// `GivingUpTheLaunchCancelsTheDispatch`: the reason a task in `status` has
+/// given up its launch, or `None` when the status keeps it. Backlog and done
+/// give it up; running and review keep it.
+pub fn launch_given_up_in(status: &str) -> Option<&'static str> {
+    match status {
+        BACKLOG => Some(DISPATCH_REASON_MOVED_TO_BACKLOG),
+        DONE => Some(DISPATCH_REASON_MOVED_TO_DONE),
+        _ => None,
+    }
+}
+
 /// `HostReportsDispatched`'s check of the task: a task moved to backlog or
-/// done while its host provisioned has given up the launch
-/// (`GivingUpTheLaunchCancelsTheDispatch`), so its report is refused and the
-/// host tears down what it made.
+/// done while its host provisioned has given up the launch, so its report is
+/// refused and the host tears down what it made.
 pub fn validate_dispatched_report_for_task(task: &Task) -> Result<(), String> {
-    if task.status == BACKLOG || task.status == DONE {
-        return Err(format!(
+    match launch_given_up_in(&task.status) {
+        Some(_) => Err(format!(
             "task {} was moved to {}, so the dispatched report is refused",
             task.id, task.status
-        ));
+        )),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// `GivingUpTheLaunchCancelsTheDispatch`'s trigger: a hand status write into
 /// backlog or done. The reason its waiting requests fail with, or `None` when
 /// the write gives up no launch.
 pub fn launch_given_up_by(prior_status: &str, status: &str) -> Option<&'static str> {
-    if prior_status == status {
-        return None;
-    }
-    match status {
-        BACKLOG => Some(DISPATCH_REASON_MOVED_TO_BACKLOG),
-        DONE => Some(DISPATCH_REASON_MOVED_TO_DONE),
-        _ => None,
-    }
+    (prior_status != status)
+        .then(|| launch_given_up_in(status))
+        .flatten()
 }
 
 /// `GivingUpTheLaunchCancelsTheDispatch`'s selection: the requests still
@@ -603,6 +608,26 @@ pub(crate) fn fail_dispatch_request(
     Ok(())
 }
 
+/// Fail every dispatch request of a task that `selected` picks, with `reason`.
+fn fail_dispatch_requests_of(
+    ctx: &ReducerContext,
+    task_id: i64,
+    selected: impl Fn(&DispatchRequest) -> bool,
+    reason: &str,
+) -> Result<(), String> {
+    let rows: Vec<DispatchRequest> = ctx
+        .db
+        .dispatch_requests()
+        .task_id()
+        .filter(&task_id)
+        .filter(|r| selected(r))
+        .collect();
+    for row in rows {
+        fail_dispatch_request(ctx, row, reason)?;
+    }
+    Ok(())
+}
+
 /// Fail every open dispatch request of a task with `reason`.
 ///
 /// `DeletingATaskFailsItsOpenRequest`: called by every path that deletes a
@@ -610,18 +635,9 @@ pub(crate) fn fail_dispatch_request(
 /// `CloseFailsOpenRequests`: called by `close_task` after the Done write, so
 /// the release finds a task that is no longer a bare claim and leaves it alone.
 pub(crate) fn fail_open_dispatch_requests_of(ctx: &ReducerContext, task_id: i64, reason: &str) {
-    let open: Vec<DispatchRequest> = ctx
-        .db
-        .dispatch_requests()
-        .task_id()
-        .filter(&task_id)
-        .filter(|r| dispatch_request_is_open(&r.state))
-        .collect();
-    for row in open {
-        // The task row is already deleted, so the release (the only fallible
-        // write) has nothing to write.
-        let _ = fail_dispatch_request(ctx, row, reason);
-    }
+    // The task row is already deleted or Done, so the release (the only
+    // fallible write) has nothing to write.
+    let _ = fail_dispatch_requests_of(ctx, task_id, |r| dispatch_request_is_open(&r.state), reason);
 }
 
 /// `GivingUpTheLaunchCancelsTheDispatch`: fail the task's requests still
@@ -634,17 +650,7 @@ pub(crate) fn fail_waiting_dispatch_requests_of(
     task_id: i64,
     reason: &str,
 ) -> Result<(), String> {
-    let waiting: Vec<DispatchRequest> = ctx
-        .db
-        .dispatch_requests()
-        .task_id()
-        .filter(&task_id)
-        .filter(is_waiting_dispatch_request)
-        .collect();
-    for row in waiting {
-        fail_dispatch_request(ctx, row, reason)?;
-    }
-    Ok(())
+    fail_dispatch_requests_of(ctx, task_id, is_waiting_dispatch_request, reason)
 }
 
 // -- Reducers -----------------------------------------------------------------

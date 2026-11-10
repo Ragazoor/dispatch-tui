@@ -786,9 +786,10 @@ async fn claims_reports_and_the_sweep_are_refused_for_a_host_the_caller_does_not
 
 // -- GivingUpTheLaunchCancelsTheDispatch ---------------------------------------
 
-fn to_backlog() -> bindings::TaskPatch {
+/// A hand status write to `status`, with its default sub-status.
+fn to_status(status: &str) -> bindings::TaskPatch {
     bindings::TaskPatch {
-        status: Some("backlog".into()),
+        status: Some(status.into()),
         sub_status: Some("none".into()),
         ..blank_task_patch()
     }
@@ -802,7 +803,7 @@ async fn moving_back_to_backlog_fails_a_waiting_request() {
     let task = caller.create_task(blank_task()).await.unwrap();
     let id = request_id(request(&caller, task, HOST, "user", "dispatch").await);
 
-    caller.patch_task(task, to_backlog()).await.unwrap();
+    caller.patch_task(task, to_status("backlog")).await.unwrap();
 
     let row = rows.dispatch_request(id).unwrap();
     assert_eq!(row.state, DispatchRequestState::Failed);
@@ -822,7 +823,7 @@ async fn moving_back_to_backlog_refuses_the_provisioning_report() {
     let (caller, rows) = caller();
     let (task, id) = provisioning_request(&caller).await;
 
-    caller.patch_task(task, to_backlog()).await.unwrap();
+    caller.patch_task(task, to_status("backlog")).await.unwrap();
     assert_eq!(
         rows.dispatch_request(id).unwrap().state,
         DispatchRequestState::Provisioning
@@ -863,13 +864,11 @@ async fn moving_to_done_gives_up_the_launch() {
     let waiting = caller.create_task(blank_task()).await.unwrap();
     let waiting_id = request_id(request(&caller, waiting, HOST, "user", "dispatch").await);
     let (provisioning, id) = provisioning_request(&caller).await;
-    let done = || bindings::TaskPatch {
-        status: Some("done".into()),
-        sub_status: Some("none".into()),
-        ..blank_task_patch()
-    };
-    caller.patch_task(waiting, done()).await.unwrap();
-    caller.patch_task(provisioning, done()).await.unwrap();
+    caller.patch_task(waiting, to_status("done")).await.unwrap();
+    caller
+        .patch_task(provisioning, to_status("done"))
+        .await
+        .unwrap();
 
     let row = rows.dispatch_request(waiting_id).unwrap();
     assert_eq!(row.reason.as_deref(), Some("task moved to done"));
