@@ -2672,12 +2672,17 @@ surface OperatorConfigurationLocations {
         --
         -- An empty home directory counts as unavailable, not as the root: a
         -- shell spells "unset" both by omitting the variable and by setting
-        -- it to nothing. The same rule holds for the other readers of the
-        -- home directory that compose a path from it (the tmux configuration,
-        -- tilde expansion, the default data directory); one without a way to
-        -- report an absence keeps its input unexpanded instead. Tilde
-        -- expansion matters most: the trust store keys on it, so without the
-        -- rule the store's path and its key would disagree.
+        -- it to nothing. The same rule holds for tilde expansion, which has
+        -- no way to report an absence and so keeps its input unexpanded; it
+        -- matters because the trust store keys on it, and without the rule
+        -- the store's path and its key would disagree.
+        --
+        -- A board launch checks the home directory first, on the operator's
+        -- own terminal, before it enters tmux or writes anything. The default
+        -- data directory is composed from the home directory too, and with
+        -- none it would land under the working directory with the board's
+        -- log in it; checking first means an unusable home stops the launch
+        -- before that directory exists.
 
     @guarantee SpawnSitesAndStartupNameTheSameConfigurationDirectory
         -- The decorator's settings file and the plugin directory each have

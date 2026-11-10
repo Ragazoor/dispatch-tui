@@ -1372,3 +1372,36 @@ fn the_old_db_option_is_rejected() {
         "clap names the unknown argument: {out:?}"
     );
 }
+
+/// startup.allium: `AnUnavailableHomeDirectoryIsAFailureNotAPath`. A board
+/// launch with no usable home directory stops on the operator's terminal
+/// before it enters tmux or writes anything; in particular the default data
+/// directory, which would otherwise land under the working directory, is never
+/// created. The explicit store keeps the launch off the managed-store check.
+#[test]
+fn a_board_launch_without_a_home_directory_stops_before_writing() {
+    let cwd = tempfile::tempdir().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_dispatch"))
+        .current_dir(cwd.path())
+        .env("HOME", "")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("TMUX")
+        // Should the check ever regress, tmux gets a private socket directory
+        // rather than the operator's server.
+        .env("TMUX_TMPDIR", cwd.path())
+        .env_remove("DISPATCH_SPACETIME_SERVER")
+        .args(["--spacetime-server", "http://127.0.0.1:9", "tui"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "the launch must stop");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("HOME"),
+        "the error names the cause: {stderr}"
+    );
+    assert!(
+        !cwd.path().join(".local").exists(),
+        "no data directory may be created under the working directory"
+    );
+}

@@ -802,6 +802,11 @@ fn main() -> Result<()> {
     // replaced outright, and every one of those would be work done on behalf of
     // a process that is about to cease to exist. See docs/specs/startup.allium.
     if matches!(cli.command, Commands::Tui { .. }) {
+        // An unusable home directory stops the launch here, before tmux and
+        // before anything is written: the default data directory would
+        // otherwise land under the working directory — see startup.allium:
+        // AnUnavailableHomeDirectoryIsAFailureNotAPath.
+        runtime::StartupPaths::resolve()?;
         // A launch that names no store runs dispatch's own, which needs the
         // `spacetime` CLI; that is checked here, on the operator's own
         // terminal, before a tmux session is supplied -- see startup.allium:
