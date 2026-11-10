@@ -503,23 +503,7 @@ impl TaskService {
     }
 
     pub async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
-        match self.db.get_task(task_id).await {
-            Some(task) => Ok(task),
-            None => Err(self.task_missing(task_id).await),
-        }
-    }
-
-    /// The answer for a task id the board does not hold. A task the store
-    /// holds but this board cannot decode is not a missing one: say so, or an
-    /// agent may recreate it (observability.allium:
-    /// `ReadByIdReportsAnUndecodableTask`).
-    async fn task_missing(&self, id: TaskId) -> ServiceError {
-        match self.db.get_undecodable_task_reason(id).await {
-            Some(reason) => {
-                ServiceError::UndecodableTask(crate::service::undecodable_task_message(id, &reason))
-            }
-            None => Self::task_not_found(id),
-        }
+        crate::service::read_task(&*self.db, task_id).await
     }
 
     /// Batch-update `sub_status` for many tasks in a single transaction.
@@ -744,7 +728,7 @@ impl TaskService {
         sender_id: TaskId,
     ) -> Result<chrono::DateTime<chrono::Utc>, ServiceError> {
         if !self.db.task_exists(sender_id).await {
-            return Err(self.task_missing(sender_id).await);
+            return Err(crate::service::task_missing(&*self.db, sender_id).await);
         }
         let now = self.clock.now();
         self.db
@@ -789,7 +773,7 @@ impl TaskService {
         event: SubagentEvent,
     ) -> Result<(), ServiceError> {
         if !self.db.task_exists(id).await {
-            return Err(self.task_missing(id).await);
+            return Err(crate::service::task_missing(&*self.db, id).await);
         }
 
         // Whether a deferred Stop applied is decided inside the same
@@ -820,9 +804,8 @@ impl TaskService {
         Ok(())
     }
 
-    /// The service's one spelling of "that task id doesn't exist". Callers that
-    /// need the row use [`get_task`](Self::get_task), which produces the same
-    /// error; this is for the existence-only checks, which have no row to fail on.
+    /// "That task id doesn't exist", for a module refusal that says so; the
+    /// service's own misses go through [`crate::service::task_missing`].
     fn task_not_found(id: TaskId) -> ServiceError {
         ServiceError::NotFound(format!("Task {} not found", id.0))
     }
@@ -892,7 +875,7 @@ impl TaskService {
     /// about to be wiped. The single transaction rules that out.
     pub async fn clear_subagents_no_drain(&self, id: TaskId) -> Result<(), ServiceError> {
         if !self.db.task_exists(id).await {
-            return Err(self.task_missing(id).await);
+            return Err(crate::service::task_missing(&*self.db, id).await);
         }
         self.db.subagent_clear_and_void_pending_stop(id).await?;
         Ok(())

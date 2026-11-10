@@ -99,16 +99,10 @@ impl Drop for EditorSession {
             let _ = std::fs::remove_file(&path);
         }
         if let Some(runner) = self.cleanup_runner.take() {
-            // observability.allium: an absent window is the state wanted
-            // (AlreadyDoneTeardownIsNotAFailure); a kill that failed leaves a
-            // real window behind (TeardownFailureIsWarned).
-            if let Err(e) = tmux::kill_window(&self.window_name, &*runner) {
-                if tmux::is_window_absent_error(&e) {
-                    tracing::debug!(window = %self.window_name, "editor window was already gone");
-                } else {
-                    tracing::warn!(window = %self.window_name, "failed to kill editor window: {e:#}");
-                }
-            }
+            tmux::log_best_effort_kill(
+                self.window_name.as_str(),
+                tmux::kill_window(&self.window_name, &*runner),
+            );
         }
     }
 }

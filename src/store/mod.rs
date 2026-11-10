@@ -1332,21 +1332,6 @@ impl Store {
     /// reducer (spec: `spacetime-memory-store.allium`,
     /// `OpenInMemoryAttachesTheStore`).
     #[cfg(any(test, feature = "test-support"))]
-    /// Plant task `id` as a row this board cannot decode (a status a newer
-    /// binary wrote), as the subscription would deliver it.
-    #[cfg(test)]
-    pub(crate) fn plant_undecodable_task(&self, id: i64) {
-        let mut row = crate::sync::encode::create_task_row(
-            &CreateTaskRequest::fixture("From the future", "/repo"),
-            "",
-            "u",
-            "2026-10-11 12:00:00.000",
-        );
-        row.id = id;
-        row.status = "teleported".into();
-        self.rows.upsert_task(&row);
-    }
-
     pub fn open_in_memory() -> Result<Self> {
         // Identity lives in a host file, as in production, so the handle gets
         // a private data directory holding one. It carries the host id the
@@ -1370,6 +1355,21 @@ impl Store {
         let mut db = Self::in_memory_with_host_file(host_dir.path());
         db._memory_host_dir = Some(host_dir);
         Ok(db)
+    }
+
+    /// Plant task `id` as a row this board cannot decode (a status a newer
+    /// binary wrote), as the subscription would deliver it.
+    #[cfg(test)]
+    pub(crate) fn plant_undecodable_task(&self, id: i64) {
+        let mut row = crate::sync::encode::create_task_row(
+            &CreateTaskRequest::fixture("From the future", "/repo"),
+            "",
+            "u",
+            "2026-10-11 12:00:00.000",
+        );
+        row.id = id;
+        row.status = "teleported".into();
+        self.rows.upsert_task(&row);
     }
 
     /// A handle over a fresh, private in-process store — one `SharedRows` and

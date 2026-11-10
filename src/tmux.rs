@@ -718,6 +718,20 @@ pub fn is_window_absent_error(err: &anyhow::Error) -> bool {
     err.to_string().contains("no tmux window named")
 }
 
+/// Log how a best-effort window kill ended. An absent window is the state the
+/// caller wanted, so it is debug; a kill that was attempted and failed leaves
+/// a real window behind, so it is warned (observability.allium:
+/// `AlreadyDoneTeardownIsNotAFailure`, `TeardownFailureIsWarned`).
+pub fn log_best_effort_kill(window: &str, outcome: Result<()>) {
+    if let Err(e) = outcome {
+        if is_window_absent_error(&e) {
+            tracing::debug!(%window, "tmux window was already gone, nothing to kill");
+        } else {
+            tracing::warn!(%window, "failed to kill tmux window (best-effort): {e:#}");
+        }
+    }
+}
+
 /// Switch the active tmux window to the one with the given name.
 pub fn select_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
     let target = window_target(window.as_str(), runner)?;

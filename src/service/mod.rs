@@ -37,15 +37,44 @@ pub use work_packages::{
 // Service error
 // ---------------------------------------------------------------------------
 
-/// What a read by id says about a task the shared store holds but this board
-/// cannot decode (observability.allium: `ReadByIdReportsAnUndecodableTask`).
-pub fn undecodable_task_message(id: crate::models::TaskId, reason: &str) -> String {
-    format!(
-        "task {} is in the shared store but this board cannot decode it: {reason}. \
-         A newer dispatch probably wrote it; update this board, and do not recreate \
-         the task.",
-        id.0
-    )
+/// Read task `id`, or say why it cannot be read: `UndecodableTask` when the
+/// shared store holds it but this board cannot decode it, `NotFound`
+/// otherwise (observability.allium: `ReadByIdReportsAnUndecodableTask`).
+pub async fn read_task<D: crate::store::TaskRead + ?Sized>(
+    db: &D,
+    id: crate::models::TaskId,
+) -> Result<crate::models::Task, ServiceError> {
+    match db.get_task(id).await {
+        Some(task) => Ok(task),
+        None => Err(task_missing(db, id).await),
+    }
+}
+
+/// The failure reason a request row records when its task cannot be read:
+/// "task deleted", or why an undecodable task cannot be read.
+pub fn unreadable_task_reason(err: ServiceError) -> String {
+    match err {
+        ServiceError::UndecodableTask(msg) => msg,
+        _ => "task deleted".to_string(),
+    }
+}
+
+/// The answer for a task id the board does not hold. A task the store holds
+/// but this board cannot decode is not a missing one: say so, or an agent may
+/// recreate it.
+pub async fn task_missing<D: crate::store::TaskRead + ?Sized>(
+    db: &D,
+    id: crate::models::TaskId,
+) -> ServiceError {
+    match db.get_undecodable_task_reason(id).await {
+        Some(reason) => ServiceError::UndecodableTask(format!(
+            "task {} is in the shared store but this board cannot decode it: {reason}. \
+             A newer dispatch probably wrote it; update this board, and do not recreate \
+             the task.",
+            id.0
+        )),
+        None => ServiceError::NotFound(format!("Task {} not found", id.0)),
+    }
 }
 
 #[derive(Debug)]

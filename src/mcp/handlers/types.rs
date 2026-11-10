@@ -525,14 +525,9 @@ pub(super) async fn fetch_caller_task(
     id: &Option<serde_json::Value>,
     caller_id: crate::models::TaskId,
 ) -> Result<crate::models::Task, JsonRpcResponse> {
-    if let Some(task) = db.get_task(caller_id).await {
-        return Ok(task);
-    }
-    let message = match db.get_undecodable_task_reason(caller_id).await {
-        Some(reason) => crate::service::undecodable_task_message(caller_id, &reason),
-        None => format!("Task {} not found", caller_id.0),
-    };
-    Err(tool_error(id.clone(), message))
+    crate::service::read_task(db, caller_id)
+        .await
+        .map_err(|e| tool_error(id.clone(), e.to_string()))
 }
 
 /// The reference a reply uses for task `id` (`Task 5 (ada, "Fix it")`), read

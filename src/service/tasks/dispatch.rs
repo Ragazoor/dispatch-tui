@@ -115,8 +115,13 @@ impl TaskService {
         if self.deadline_passed(&request) {
             return self.report_failure(&request, DEADLINE_PASSED).await;
         }
-        let Some(task) = self.db.get_task(request.task_id).await else {
-            return self.report_failure(&request, "task deleted").await;
+        let task = match crate::service::read_task(&*self.db, request.task_id).await {
+            Ok(task) => task,
+            Err(e) => {
+                return self
+                    .report_failure(&request, &crate::service::unreadable_task_reason(e))
+                    .await
+            }
         };
 
         // The prologue runs a local embedding inference and several writes, so

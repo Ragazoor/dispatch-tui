@@ -182,10 +182,12 @@ impl TaskService {
                 .report_session_failure(request, DEADLINE_PASSED, false)
                 .await;
         }
-        let Some(task) = self.db.get_task(request.task_id).await else {
-            return self
-                .report_session_failure(request, "task deleted", false)
-                .await;
+        let task = match crate::service::read_task(&*self.db, request.task_id).await {
+            Ok(task) => task,
+            Err(e) => {
+                let reason = crate::service::unreadable_task_reason(e);
+                return self.report_session_failure(request, &reason, false).await;
+            }
         };
         let Some(worktree) = task.worktree.clone() else {
             return self
