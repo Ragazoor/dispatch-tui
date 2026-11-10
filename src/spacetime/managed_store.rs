@@ -1023,8 +1023,6 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 // The orchestrator
 // ---------------------------------------------------------------------------
 
-/// The orchestrator: `BringUpTheManagedStoreOnceTheHostIsNamed` through
-/// `StopTheManagedStoreWhenStartupAborts`.
 /// Who runs a bring-up, which decides what an abort inside it stops.
 #[derive(Clone, Copy)]
 enum Holder {
@@ -1034,6 +1032,8 @@ enum Holder {
     Import,
 }
 
+/// The orchestrator: `BringUpTheManagedStoreOnceTheHostIsNamed` through
+/// `StopTheManagedStoreWhenStartupAborts`.
 pub struct ManagedStore {
     ports: Arc<dyn ManagedStorePorts>,
     hashes: Arc<dyn ModuleHashRecord>,

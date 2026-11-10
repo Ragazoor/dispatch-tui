@@ -1392,7 +1392,7 @@ impl SharedRows {
             let mut out: Vec<String> = rows
                 .repo_paths
                 .values()
-                .filter(|row| row.host.is_empty() || row.host != host)
+                .filter(|row| row.host != host)
                 .map(|row| row.path.clone())
                 .collect();
             out.sort();

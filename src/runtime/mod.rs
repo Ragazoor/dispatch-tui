@@ -157,7 +157,6 @@ fn setup_tmux_for_tui(session: &str, self_pane: Option<&PaneId>, runner: &dyn Pr
     let _ = tmux::bind_key(AGENT_TREE_TOGGLE_KEY, AGENT_TREE_TOGGLE_COMMAND, runner);
 }
 
-/// Tear down tmux TUI state: unbind the keys and restore the original window name.
 /// Remove the server-wide key bindings [`wire_tmux_for_tui`] made.
 fn unbind_board_keys(runner: &dyn ProcessRunner) {
     let _ = tmux::unbind_key(JUMP_BACK_KEY, runner);
@@ -174,6 +173,7 @@ pub(super) fn unbind_keys_on_termination(keys_bound: &AtomicBool, runner: &dyn P
     }
 }
 
+/// Tear down tmux TUI state: unbind the keys and restore the original window name.
 fn teardown_tmux_for_tui(
     session: &str,
     self_pane: Option<&PaneId>,
