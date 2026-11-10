@@ -846,6 +846,40 @@ rule ProvisionDispatch {
         -- AgentLaunched event this rule emits.
 }
 
+rule ProvisioningNeedsARepoPath {
+    when: split/DispatchProvisioningClaimed(request)
+
+    -- A task can be stored with repo_path = "": a feed item whose URL matches
+    -- no local clone (feeds.allium: UpsertFeedTasks, repo path resolution).
+    -- The task stays on the board and can be edited, but a dispatch of it is
+    -- refused, because there is no repository to make a worktree in. The
+    -- operator sets a repo_path ('e' on the task) and dispatches again. The
+    -- guard covers every task; a non-feed task ordinarily gets a repo_path at
+    -- creation and never reaches it.
+    --
+    -- The refusal comes AFTER the claim, on the host, before anything is
+    -- provisioned. The failure report releases the claim, so the task goes
+    -- back to backlog (store-split.allium: HostReportsDispatchFailed,
+    -- ReleaseClaimOfFailedRequest), and the requesting board shows the reason
+    -- (DispatchingFeedback, FailedRequestReported).
+    requires: request.host = local_host()
+    requires: request.requested_by = local_host().owner
+    requires: request.task.repo_path = ""
+
+    ensures: split/DispatchProvisioningFailed(
+        request: request,
+        reporter: local_host(),
+        reason: "Repository path is not set. Edit the task (press 'e') to set it before dispatching."
+    )
+
+    @guidance
+        -- Implementation: src/dispatch/agents.rs::dispatch_with_prompt returns
+        -- the error before any worktree or tmux window exists, and
+        -- src/service/tasks/dispatch.rs::TaskService::serve_dispatch_request
+        -- reports it. Test:
+        -- src/dispatch/tests/finish_and_guards.rs::dispatch_agent_fails_fast_with_empty_repo_path.
+}
+
 rule ProvisioningStopsAtTheDeadline {
     when: request: split/DispatchRequest.deadline <= now
 
@@ -2300,40 +2334,6 @@ invariant BranchHistoryCapped {
     for b in core/SavedRepoBranches:
         (core/SavedRepoBranches where repo_path = b.repo_path).count
             <= config.max_base_branches_per_repo
-}
-
-rule ProvisioningNeedsARepoPath {
-    when: split/DispatchProvisioningClaimed(request)
-
-    -- A task can be stored with repo_path = "": a feed item whose URL matches
-    -- no local clone (feeds.allium: UpsertFeedTasks, repo path resolution).
-    -- The task stays on the board and can be edited, but a dispatch of it is
-    -- refused, because there is no repository to make a worktree in. The
-    -- operator sets a repo_path ('e' on the task) and dispatches again. The
-    -- guard covers every task; a non-feed task ordinarily gets a repo_path at
-    -- creation and never reaches it.
-    --
-    -- The refusal comes AFTER the claim, on the host, before anything is
-    -- provisioned. The failure report releases the claim, so the task goes
-    -- back to backlog (store-split.allium: HostReportsDispatchFailed,
-    -- ReleaseClaimOfFailedRequest), and the requesting board shows the reason
-    -- (DispatchingFeedback, FailedRequestReported).
-    requires: request.host = local_host()
-    requires: request.requested_by = local_host().owner
-    requires: request.task.repo_path = ""
-
-    ensures: split/DispatchProvisioningFailed(
-        request: request,
-        reporter: local_host(),
-        reason: "Repository path is not set. Edit the task (press 'e') to set it before dispatching."
-    )
-
-    @guidance
-        -- Implementation: src/dispatch/agents.rs::dispatch_with_prompt returns
-        -- the error before any worktree or tmux window exists, and
-        -- src/service/tasks/dispatch.rs::TaskService::serve_dispatch_request
-        -- reports it. Test:
-        -- src/dispatch/tests/finish_and_guards.rs::dispatch_agent_fails_fast_with_empty_repo_path.
 }
 
 ------------------------------------------------------------

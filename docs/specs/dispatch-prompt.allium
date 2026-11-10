@@ -6,11 +6,10 @@
 --        three review runbooks — dependency bump, PR review and release PR —
 --        together with the classifier that picks the one branch a bump
 --        runbook renders.
--- Excludes: The claim, provisioning and the launch command that carries the
---           prompt (see dispatch.allium: DispatchTask); the launch flags,
---           permission mode and caller identity (see dispatch.allium:
---           EveryTaskAgentLaunchesInAutoMode, AgentCarriesItsOwnCallerIdentity,
---           PromptIsSeparatedFromTheLaunchFlags); the rebase and worktree
+-- Excludes: The claim and provisioning (see dispatch.allium: DispatchTask,
+--           ProvisionDispatch); the launch command that carries the prompt,
+--           its flags, permission mode and caller identity (see
+--           dispatch.allium: AgentLaunchCommand); the rebase and worktree
 --           preambles, whose wording is decided by fresh-vs-reused and
 --           start-point selection rather than here (see dispatch.allium:
 --           "Fresh vs reused decides how hard the fetch tries" and
@@ -24,13 +23,16 @@
 --           tool-description standard at the head of mcp-task-tools.allium).
 
 use "./core.allium" as core
+use "./dispatch.allium" as dispatch
 
 ------------------------------------------------------------
 -- Value Types
 ------------------------------------------------------------
 
 -- What ClassifyDependencyBump reads out of a dependency-bump task, and what
--- the Bump line of the rendered runbook states. package, from and to are each
+-- the Bump line of the rendered runbook states. Used only as the return type
+-- of PromptComposer.classify_bump, which the checker does not count as a use
+-- (definition.unused is expected). package, from and to are each
 -- present only when actually read: a Renovate major title names a package and
 -- a target but no source version, and a grouped title names a package and
 -- neither version.
@@ -56,6 +58,85 @@ value Bump {
 }
 
 ------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The three black boxes the rules below read. Each is stated here rather than
+-- inline because each is a pure function of what the task already carries, and
+-- because the cost of getting one wrong is silent: a mis-read repository names
+-- the wrong design step, and a mis-read bump renders a branch that does not
+-- apply.
+contract PromptComposer {
+    -- True when task.repo_path (tilde-expanded) holds at least one
+    -- `docs/specs/*.allium` file. One directory read per dispatch, against the
+    -- parent repo rather than the freshly provisioned worktree, never
+    -- persisted — see DesignStepMatchesTheReposSpecs.
+    holds_allium_specs: (repo_path: String) -> Boolean
+
+    -- True when the task hangs under the managed CVE feed root: its own epic
+    -- carries feed_role = cve, or any ancestor of that epic does. The walk to
+    -- the root is the whole of the definition, not an optimisation — with
+    -- group_by_repo on, a CVE feed's tasks land on a repo-group SUB-epic whose
+    -- own feed_role is none, so reading the task's immediate epic alone answers
+    -- false for every task on a grouped CVE board. Pure: no read outside the
+    -- epic chain the task already points at. A task with no epic answers false.
+    --
+    -- Total, with no error arm, for the same reason holds_allium_specs has
+    -- none: a failed or missing read mid-walk answers false. The consequence is
+    -- a CVE task that gets the ordinary design step, which is the answer it got
+    -- before this branch existed; failing the dispatch over it would be worse.
+    -- An epic already visited on the walk answers false too — the service layer
+    -- forbids a parent cycle, but a dispatch must terminate on one that got in
+    -- anyway. There is deliberately no depth limit: the chain is as long as the
+    -- board's own hierarchy, and a number here would bound a legitimate tree to
+    -- guard against a malformed one.
+    under_cve_feed: (epic: core/Epic?) -> Boolean
+
+    -- What precedes the trailing block, from the three questions that decide
+    -- it. Total and order-INDEPENDENT: each reachable input combination has a
+    -- Preceding literal of its own, so no question shadows another. A task with
+    -- a plan attached in a repo that keeps no specs resolves to
+    -- plan_without_specs — not to brainstorm, which is the no-plan spec-less
+    -- state, and not to plan_with_specs. An order-sensitive form of this
+    -- function, answering holds_specs first, would drop
+    -- {plan_not_a_stopping_point_instruction} from the plan path in every
+    -- spec-less repo; see enum Preceding.
+    --
+    -- is_cve COLLAPSES holds_specs rather than multiplying by it: both CVE
+    -- states drop {allium_instruction}, which is the only line holds_specs
+    -- reaches, so the eight combinations resolve to six literals. That is a
+    -- deliberate collapse and not the order-sensitivity above — holds_specs has
+    -- no line left to decide once is_cve holds.
+    preceding: (has_plan: Boolean, holds_specs: Boolean, is_cve: Boolean) -> Preceding
+
+    -- What the task's own title and description say the dependency bump was.
+    -- Total: every input yields a Bump, and the one that says nothing yields
+    -- kind = unknown — see TheBumpKindIsReadInOneOrderedPass.
+    classify_bump: (title: String, description: String) -> Bump
+
+    @invariant NoReadFailureIsItsOwnAnswer
+        -- holds_allium_specs has no error arm. A missing docs/specs directory,
+        -- an empty one, one holding no .allium file and an unreadable one all
+        -- answer false, so the prompt an agent receives never depends on which
+        -- way a read failed.
+
+    @invariant TheCveAnswerIsStructuralNotTextual
+        -- under_cve_feed reads epic ancestry and nothing else. It does not
+        -- match "CVE" or "GHSA" in the title, does not read task.external_id's
+        -- `cve:` prefix, and does not read task.tag. A title-matching form
+        -- would fire on a task merely DISCUSSING a CVE, and the tag form was
+        -- rejected because `fix` is a kanban label with no routing meaning (see
+        -- the closing note of ComposeAgentPrompt's guidance). Where the task
+        -- sits on the board is what the user controls and what the feed sets.
+
+    @invariant ClassificationNeverReachesTheNetwork
+        -- classify_bump reads the title and the description and nothing else:
+        -- no `gh` invocation, no fetch of the PR, nothing the feed did not
+        -- already put on the task. A kind it cannot read is unknown, which is
+        -- a routable answer rather than a failure.
+}
+
+------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
@@ -70,23 +151,19 @@ value Bump {
 -- collapses into the other. The enum therefore covers exactly the ground a
 -- pair of booleans would, and is kept for the naming, not for narrowing.
 --
--- An earlier three-state form collapsed the two spec-less states into one,
--- resolving the spec question first and the plan question only within it. That
--- put a PLAN-carrying task in a spec-less repo in the same state as a NO-plan
--- one, and cost it {plan_not_a_stopping_point_instruction}: the line was gated
--- on plan_with_specs, so the one path that hands an agent a plan and no design
--- step never told it a plan-only state is unfinished. The collapse was
--- justified as refusing an unreachable fourth state, but the unreachable
--- combination is spec-first WITHOUT specs — a plan without specs occurs in
--- every repository that keeps no docs/specs/, which is most of them. Splitting
--- them apart is not reintroducing the state the collapse refused.
+-- Collapsing the two spec-less states into one would put a PLAN-carrying task
+-- in a spec-less repo in the same state as a NO-plan one, and cost it
+-- {plan_not_a_stopping_point_instruction}. The unreachable combination is
+-- spec-first WITHOUT specs; a plan without specs occurs in every repository
+-- that keeps no docs/specs/.
 --
 -- The two no-plan literals are named after the design step the prompt gives,
 -- because that is what the trailing block de-duplicates against. The two plan
 -- literals are named after the plan, because that path has no design step to
--- name. `no_specs` was the earlier name of `brainstorm`, and read as though it
--- covered every spec-less repo when it covered only the no-plan half — which
--- is the misreading the dropped line came from.
+-- name.
+--
+-- Used only as the return type of PromptComposer.preceding, which the checker
+-- does not count as a use (definition.unused is expected).
 enum Preceding {
     spec_first          -- no plan, and the repo keeps specs: the design step is
                         -- one sentence naming allium:elicit, allium:tend,
@@ -131,94 +208,15 @@ enum BumpKind {
 }
 
 ------------------------------------------------------------
--- Contracts
-------------------------------------------------------------
-
--- The three black boxes the rules below read. Each is stated here rather than
--- inline because each is a pure function of what the task already carries, and
--- because the cost of getting one wrong is silent: a mis-read repository names
--- the wrong design step, and a mis-read bump renders a branch that does not
--- apply.
-contract PromptComposer {
-    -- True when task.repo_path (tilde-expanded) holds at least one
-    -- `docs/specs/*.allium` file. One directory read per dispatch, against the
-    -- parent repo rather than the freshly provisioned worktree, never
-    -- persisted — see DesignStepMatchesTheReposSpecs.
-    holds_allium_specs: (repo_path: String) -> Boolean
-
-    -- True when the task hangs under the managed CVE feed root: its own epic
-    -- carries feed_role = cve, or any ancestor of that epic does. The walk to
-    -- the root is the whole of the definition, not an optimisation — with
-    -- group_by_repo on, a CVE feed's tasks land on a repo-group SUB-epic whose
-    -- own feed_role is none, so reading the task's immediate epic alone answers
-    -- false for every task on a grouped CVE board. Pure: no read outside the
-    -- epic chain the task already points at. A task with no epic answers false.
-    --
-    -- Total, with no error arm, for the same reason holds_allium_specs has
-    -- none: a failed or missing read mid-walk answers false. The consequence is
-    -- a CVE task that gets the ordinary design step, which is the answer it got
-    -- before this branch existed; failing the dispatch over it would be worse.
-    -- An epic already visited on the walk answers false too — the service layer
-    -- forbids a parent cycle, but a dispatch must terminate on one that got in
-    -- anyway. There is deliberately no depth limit: the chain is as long as the
-    -- board's own hierarchy, and a number here would bound a legitimate tree to
-    -- guard against a malformed one.
-    under_cve_feed: (epic: core/Epic?) -> Boolean
-
-    -- What precedes the trailing block, from the three questions that decide
-    -- it. Total and order-INDEPENDENT: each reachable input combination has a
-    -- Preceding literal of its own, so no question shadows another. A task with
-    -- a plan attached in a repo that keeps no specs resolves to
-    -- plan_without_specs — not to brainstorm, which is the no-plan spec-less
-    -- state, and not to plan_with_specs. An order-sensitive form of this
-    -- function, answering holds_specs first, is what dropped
-    -- {plan_not_a_stopping_point_instruction} from the plan path in every
-    -- spec-less repo; see enum Preceding.
-    --
-    -- is_cve COLLAPSES holds_specs rather than multiplying by it: both CVE
-    -- states drop {allium_instruction}, which is the only line holds_specs
-    -- reaches, so the eight combinations resolve to six literals. That is a
-    -- deliberate collapse and not the order-sensitivity above — holds_specs has
-    -- no line left to decide once is_cve holds.
-    preceding: (has_plan: Boolean, holds_specs: Boolean, is_cve: Boolean) -> Preceding
-
-    -- What the task's own title and description say the dependency bump was.
-    -- Total: every input yields a Bump, and the one that says nothing yields
-    -- kind = unknown — see TheBumpKindIsReadInOneOrderedPass.
-    classify_bump: (title: String, description: String) -> Bump
-
-    @invariant NoReadFailureIsItsOwnAnswer
-        -- holds_allium_specs has no error arm. A missing docs/specs directory,
-        -- an empty one, one holding no .allium file and an unreadable one all
-        -- answer false, so the prompt an agent receives never depends on which
-        -- way a read failed.
-
-    @invariant TheCveAnswerIsStructuralNotTextual
-        -- under_cve_feed reads epic ancestry and nothing else. It does not
-        -- match "CVE" or "GHSA" in the title, does not read task.external_id's
-        -- `cve:` prefix, and does not read task.tag. A title-matching form
-        -- would fire on a task merely DISCUSSING a CVE, and the tag form was
-        -- rejected because `fix` is a kanban label with no routing meaning (see
-        -- the closing note of ComposeAgentPrompt's guidance). Where the task
-        -- sits on the board is what the user controls and what the feed sets.
-
-    @invariant ClassificationNeverReachesTheNetwork
-        -- classify_bump reads the title and the description and nothing else:
-        -- no `gh` invocation, no fetch of the PR, nothing the feed did not
-        -- already put on the task. A kind it cannot read is unknown, which is
-        -- a routable answer rather than a failure.
-}
-
-------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
--- Every rule here fires on AgentLaunched. Four emitters reach these rules:
--- dispatch.allium's DispatchTask and RetryFresh (mode standard) and
--- DispatchResearchTask (research), and tasks.allium's CreateQuickTask (quick).
--- The other two emitters, ResumeTask and RetryResume, carry mode resume and
--- compose no prompt at all — they hand Claude Code `--continue` — which is what
--- ComposeAgentPrompt's mode guard below excludes.
+-- Every rule here fires on dispatch.allium's AgentLaunched. ProvisionDispatch
+-- raises it with the mode the request row names (standard, research or quick)
+-- for every dispatch, retry-fresh and quick dispatch alike. ResumeTask and
+-- RetryResume raise it with mode resume, which composes no prompt: they hand
+-- Claude Code `--continue`. Each rule below therefore names the modes it
+-- serves.
 --
 -- Composing the text is not a separate step a launcher may skip: the prompt is
 -- a function of the task and the mode, and these rules are that function.
@@ -228,16 +226,322 @@ contract PromptComposer {
 -- == The skeleton ==
 
 rule ComposeAgentPrompt {
-    when: AgentLaunched(task, mode)
+    -- What the agent is owed: AgentPrompt (EveryPromptHasTheSameSkeleton,
+    -- ThePromptCarriesNoVerifyCommand, ThePromptNamesNoToolMerelyToSayItExists,
+    -- TestFirstHasOneOwner, TheResearchPromptGivesItsReasonNotARule).
+
+    when: dispatch/AgentLaunched(task, mode)
 
     -- The three modes that compose a prompt. resume composes none: it hands
     -- Claude Code `--continue` and no positional text at all, so there is no
-    -- skeleton to fill and nothing here is owed to it. Inside rule DispatchTask
-    -- that scope came for free, from the rule's own trigger; standing alone the
-    -- guard has to be stated.
+    -- skeleton to fill and nothing here is owed to it.
     requires: mode in {standard, research, quick}
 
     ensures: AgentPromptComposed(task: task, mode: mode)
+
+    @guidance
+        -- == The variants ==
+        -- DispatchTask emits one of three variants of build_prompt. The
+        -- no-plan one is the design step, specified by NameTheDesignStep
+        -- below; the other two are:
+        --   * has_plan = true and task.auto_run_plan = false (default):
+        --     preamble "Your task is:" and the addendum references the
+        --     plan path with a "review and ask permission before
+        --     implementing" instruction.
+        --   * has_plan = true and task.auto_run_plan = true: preamble
+        --     "Your task is:" and the addendum references the plan path
+        --     with an instruction to implement it immediately, no summary
+        --     or confirmation step. Set by decompose-review on its
+        --     generated work packages, since those plans already went
+        --     through a human confirmation step before being written.
+        -- CreateQuickTask (build_quick_dispatch_prompt) is the exception:
+        -- its preamble is "You are working interactively with the user."
+        -- rather than "Your task is:" — quick dispatch begins as an
+        -- interactive conversation where the agent establishes the goal
+        -- and renames the task, then follows the same
+        -- spec_first_instruction sentence as the no-plan variant
+        -- (NameTheDesignStep below).
+        -- The instruction text is shared verbatim between the two, so the
+        -- design step cannot drift apart between them.
+        -- The rule that a design artefact is not a standalone stopping point
+        -- is its own line, {plan_not_a_stopping_point_instruction},
+        -- emitted whenever a plan is attached and placed immediately above
+        -- wrap_up_instruction, whose subject it qualifies. Both design steps
+        -- already state it, so on their paths it would be the restatement
+        -- NoLineRestatesTheDesignStep rules out; the plan path has no design
+        -- step, and is the case the rule was written for. Whether that repo
+        -- keeps specs does not enter into it — the wording names no spec
+        -- directory, so plan_with_specs and plan_without_specs both carry it.
+        -- It names only the plan, not "a spec or a plan", because no
+        -- spec-writing step runs on the path that emits it.
+        -- task_block does NOT include a Tag: line — tag is metadata for
+        -- the kanban board, not for prompt context (it would invite the
+        -- agent to over-fit on labels rather than the description).
+        -- wrap_up_instruction is shared by every dispatched agent so the
+        -- whole task lifecycle terminates the same way regardless of mode.
+        -- The two stopping points it names are finishing implementation
+        -- and, for an epic-decomposition task only, creating work packages
+        -- for its subtasks (that task's job is delegation, not
+        -- implementation, so stopping there is legitimate).
+        -- DispatchResearchTask is an exception to the unified trailing
+        -- block: its prompt includes only {learning_tools_instruction} and
+        -- omits tdd, allium, and wrap_up. The research agent
+        -- presents findings interactively and does not terminate via
+        -- the standard wrap-up flow; its addendum says so as reasoning,
+        -- not as a prohibition (TheResearchPromptGivesItsReasonNotARule).
+        -- The fix tag falls through to this rule and uses the full trailing
+        -- block — it is purely a kanban-board label, not a routing key. The
+        -- security feeds set it on every CVE task they create, and that is
+        -- still not what diverts one: RenderCveRunbook reads the task's epic
+        -- ancestry, never its tag. See CveRemediationSkipsTheDesignStep.
+}
+
+-- == The design step ==
+
+rule NameTheDesignStep {
+    -- What the agent is owed: AgentPrompt (DesignStepMatchesTheReposSpecs,
+    -- NoLineRestatesTheDesignStep, TheDesignStepNamesSkillsNotProcedure).
+
+    when: dispatch/AgentLaunched(task, mode)
+
+    -- Only the two prompts that ask for a design step reach this rule.
+    -- build_research_prompt names none, and the three review runbooks below
+    -- replace the addendum outright whatever the plan state.
+    requires: mode in {standard, quick}
+    requires: task.has_plan = false
+    requires: task.tag not in {research, dependabot, pr_review, release_please}
+
+    -- A CVE task names no design step either: RenderCveRunbook below claims
+    -- the addendum, and its runbook rules the spec-first sequence out by name.
+    requires: under_cve_feed(task.epic) = false
+
+    -- One directory read against the parent repo, per dispatch, never
+    -- persisted. Every failure to see a `docs/specs/*.allium` file — a missing
+    -- directory, an empty one, one holding no .allium file, an unreadable one
+    -- — answers false.
+    let repo_keeps_specs = holds_allium_specs(task.repo_path)
+
+    -- The same resolver every other reader of the branch calls, so this rule
+    -- cannot disagree with the trailing block about which branch was taken.
+    -- has_plan is false here by precondition, so only two of its four answers
+    -- are reachable from this rule: spec_first and brainstorm.
+    ensures: DesignStepNamed(
+        task: task,
+        step: preceding(has_plan: false, holds_specs: repo_keeps_specs, is_cve: false)
+    )
+
+    @guidance
+        -- == The spec-first sentence ==
+        -- What build_prompt's no-plan variant emits when repo_keeps_specs is
+        -- true:
+        --   * has_plan = false: preamble "Your task is:" and the addendum
+        --     is the design step for a repo that keeps Allium specs (see
+        --     DesignStepMatchesTheReposSpecs for the other branch) —
+        --     spec_first_instruction, the sentence
+        --     TheDesignStepNamesSkillsNotProcedure describes. The Allium spec,
+        --     not a prose design doc, is the design artefact this variant
+        --     asks for; a plan-shaped artefact is not the expected output of
+        --     the design step at all.
+        --     The sentence does not name /allium-loop: that skill's own
+        --     description says when to reach for it, and naming it here
+        --     would be a second trigger for one skill.
+        --     There is no vague-vs-clear branch: the same sentence is
+        --     named however well-specified the description is, because the
+        --     elicit step is what establishes whether it was.
+        --     The addendum is explicit that the spec is not the end of the
+        --     task: implementation (TDD) must follow in the same session,
+        --     not a separate dispatch — except for an epic-decomposition
+        --     task, for which creating work packages for its subtasks is
+        --     named as the alternative (the same carve-out wrap_up_instruction
+        --     applies to calling the skill; there is no tag or field that
+        --     identifies such a task, so both name the exception in prose
+        --     rather than branching on task state — which is also why the
+        --     phrase survives on both lines where the stopping-point rule
+        --     around it does not). This wording is
+        --     otherwise NOT tag-conditional — Bug, Feature, Chore, Fix, and
+        --     no-tag all reach this same addendum. Whether the design step
+        --     applies is the agent's judgement, stated in the sentence's own
+        --     "If the task changes what the system does" condition, not a
+        --     per-tag branch. Research is excluded without a branch here:
+        --     DispatchResearchTask already diverts a no-plan
+        --     research-tagged task to build_research_prompt before
+        --     build_prompt's addendum is ever selected (see
+        --     dispatch.allium: DispatchResearchTask, whose own preconditions
+        --     claim that task first), and Dependabot/PrReview/ReleasePlease
+        --     are overridden with their own review addenda regardless of
+        --     plan state (see RenderDependencyBumpRunbook,
+        --     RenderPrReviewRunbook and RenderReleasePrRunbook below).
+        --     This closes a gap where a bug/feature/chore-tagged agent read
+        --     "write and attach a plan" plus the (then-universal) wrap-up
+        --     wording as license to stop at a plan-only state instead of
+        --     implementing it.
+}
+
+-- == The CVE runbook ==
+
+rule RenderCveRunbook {
+    -- What the agent is owed: AgentPrompt (CveRemediationSkipsTheDesignStep).
+
+    when: dispatch/AgentLaunched(task, mode)
+
+    -- The same two prompts NameTheDesignStep serves, and deliberately the same
+    -- exclusion list. The review tags carry their own runbook — a CVE-epic
+    -- task retagged pr_review, dependabot or release_please reviews someone
+    -- else's PR, which is
+    -- different work from remediating the alert, so the review runbook wins.
+    --
+    -- research is named rather than left to the divert that usually handles it.
+    -- DispatchResearchTask claims a research task before any addendum is
+    -- selected, but only while it has no plan: DispatchMode routes ANY planned
+    -- task to the standard mode, research tag included. So a planned
+    -- research task under the CVE root does reach this rule, and a research
+    -- task is not remediating anything.
+    requires: mode in {standard, quick}
+    requires: task.tag not in {research, dependabot, pr_review, release_please}
+
+    -- Structural, not textual: the task hangs under the managed CVE feed root
+    -- (see under_cve_feed above).
+    requires: under_cve_feed(task.epic) = true
+
+    -- The runbook replaces the DESIGN step, and a task with a plan attached has
+    -- no design step to replace: the plan wins the addendum, and only the
+    -- trailing block still differs (Preceding = cve_with_plan). Without this
+    -- precondition the rule would claim the runbook text is emitted on the plan
+    -- path, which it is not — see HOW IT COMPOSES below.
+    requires: task.has_plan = false
+
+    ensures: CveRunbookRendered(task: task)
+}
+
+-- == Review runbooks ==
+
+-- Where a review runbook's next step is a function of what the task
+-- already carries, the harness computes it and renders one branch.
+-- The agent is never handed a decision table and asked to walk it.
+
+-- No review runbook prohibits /wrap-up. wrap_up refuses a review-tagged task
+-- outright (mcp-task-tools.allium: ReviewTasksAreNotWrappedUp), so the prompt
+-- need not ask. The runbooks state instead the end state that makes wrap-up
+-- unnecessary ("the task is auto-cleaned on merge", "stop and wait for the
+-- user's reply").
+
+rule ClassifyDependencyBump {
+    -- What the agent is owed: AgentPrompt (TheBumpKindIsReadInOneOrderedPass,
+    -- TheBumpKindIsNotDeclaredByTheFeed).
+
+    when: dispatch/AgentLaunched(task, mode)
+
+    -- A resume composes no prompt (ComposeAgentPrompt).
+    requires: mode in {standard, quick}
+    requires: task.tag = dependabot
+
+    -- Read from the task's own title and description, before the prompt is
+    -- built. No network call, no `gh` invocation, nothing the feed did not
+    -- already fetch.
+    ensures: BumpClassified(
+        task: task,
+        bump: classify_bump(title: task.title, description: task.description)
+    )
+}
+
+-- Chained to ClassifyDependencyBump rather than sharing its trigger: the
+-- classification happens ONCE and the runbook renders from that one value. Two
+-- rules on AgentLaunched, each calling classify_bump for itself, would model
+-- one call as two and leave nothing ordering them.
+rule RenderDependencyBumpRunbook {
+    -- What the agent is owed: AgentPrompt
+    -- (AReviewRunbookCarriesOnlyTheBranchThatApplies,
+    -- TheRunbookStatesThePrItWasHandedRatherThanAskingForIt,
+    -- OnlyStepsWhoseInputsTheTaskAlreadyCarriesMoveToTheHarness,
+    -- TheRunbookStatesThePolicyNotItsMechanics, TheAppsVerdictGatesTheMerge).
+
+    when: BumpClassified(task, bump)
+
+    ensures: DependencyBumpRunbookRendered(task: task, kind: bump.kind)
+
+    @guidance
+        -- Dependabot exception: when task.tag = dependabot, build_prompt
+        -- replaces the spec_first addendum with a dependabot review
+        -- runbook. The bump is classified from the task's title and
+        -- description first, and the runbook is rendered around that
+        -- verdict — see AReviewRunbookCarriesOnlyTheBranchThatApplies
+        -- above. Its shared steps are: identify the PR and record its url,
+        -- judge whether the PR changes only dependency manifests and
+        -- lockfiles (see TheRunbookStatesThePolicyNotItsMechanics above), and
+        -- check CI. Its shared terminals are approve + squash auto-merge, and
+        -- ask the user (one direct question, plus sub_status = needs_input).
+        -- The merge terminal opens with a check of the `kognic-github-app`
+        -- verdict: unless the app's latest review is APPROVED, the agent asks
+        -- the user instead, naming the app's reason or its absence — see
+        -- TheAppsVerdictGatesTheMerge above. Between
+        -- them sits the one decision body the bump kind selected. The
+        -- trailing block is reduced to just {learning_tools_instruction} —
+        -- no tdd, no allium, and no wrap_up_instruction, because the
+        -- dependabot task is auto-cleaned when its PR merges (or the user
+        -- takes over).
+}
+
+rule RenderPrReviewRunbook {
+    -- What the agent is owed: AgentPrompt
+    -- (TheReviewCommandMakesTheSizeChoiceItself).
+
+    when: dispatch/AgentLaunched(task, mode)
+
+    -- A resume composes no prompt (ComposeAgentPrompt).
+    requires: mode in {standard, quick}
+    requires: task.tag = pr_review
+
+    ensures: PrReviewRunbookRendered(task: task)
+
+    @guidance
+        -- PrReview exception: when task.tag = pr_review, build_prompt
+        -- replaces the spec_first addendum with a minimal PR review
+        -- runbook: find the PR, run the review command on it, present the
+        -- findings and wait. One command, no diff-size branch. The trailing
+        -- block is reduced the same way, because the PR review agent
+        -- presents findings and waits for the user's instructions.
+}
+
+rule RenderReleasePrRunbook {
+    -- What the agent is owed: AgentPrompt (AReleasePrMergesOnlyOnGreenCi,
+    -- TheAuthorIsCheckedUnlessAFeedFilteredIt, ABreakingReleaseIsNeverMerged,
+    -- TheReleaseRunbookTreatsPrTextAsUntrustedData,
+    -- TheReleaseAgentNeverAuthorsThePr).
+
+    when: dispatch/AgentLaunched(task, mode)
+
+    -- A resume composes no prompt (ComposeAgentPrompt).
+    requires: mode in {standard, quick}
+    requires: task.tag = release_please
+
+    ensures: ReleasePrRunbookRendered(task: task)
+
+    @guidance
+        -- ReleasePlease exception: when task.tag = release_please,
+        -- build_prompt replaces the addendum with the release-PR runbook
+        -- above, regardless of plan state. The PR is stated from the task's
+        -- pr-typed url when it carries one, as the dependency runbook does
+        -- (TheRunbookStatesThePrItWasHandedRatherThanAskingForIt); otherwise
+        -- the agent is told to find it. The same match picks the author
+        -- variant: the "Do not re-check the PR author" bullet, or the step-0
+        -- author check (TheAuthorIsCheckedUnlessAFeedFilteredIt). The
+        -- trailing block is reduced to
+        -- {learning_tools_instruction} alone, as for the other two review
+        -- runbooks: the task ends when its PR merges or the user takes it
+        -- over, never through /wrap-up (ReviewTasksAreNotWrappedUp in
+        -- mcp-task-tools.allium).
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- What a dispatched agent's prompt owes it, whichever rule above renders the
+-- part in question. Grouped by that rule.
+surface AgentPrompt {
+    facing _: core/DispatchedAgent
+
+    -- == ComposeAgentPrompt ==
 
     @guarantee EveryPromptHasTheSameSkeleton
         -- Every task-agent prompt produced by build_prompt /
@@ -301,8 +605,8 @@ rule ComposeAgentPrompt {
         --                                    for the CVE one)
         --   {learning_tools_instruction}   (shared verbatim — one line
         --                                    pointing at the /learnings skill.
-        --                                    Names no MCP tool: the three it
-        --                                    used to name each say their own
+        --                                    Names no MCP tool: the learning
+        --                                    tools each say their own
         --                                    WHEN, see
         --                                    ThePromptNamesNoToolMerelyToSayItExists)
         --   {plan_not_a_stopping_point_instruction}
@@ -318,8 +622,8 @@ rule ComposeAgentPrompt {
         -- The prompt deliberately carries no verify command. Even when
         -- task.repo_path has a SavedRepoPath row with verify_command = Some(c),
         -- no "## Verification" section is emitted and c appears nowhere in the
-        -- prompt. Carrying it there as well as in the surfaces below would be
-        -- duplicated context, so the prompt-side copy was removed.
+        -- prompt. Carrying it there as well as in get_task's response would
+        -- be duplicated context.
         --
         -- The command reaches the agent through get_task's response (see
         -- GetTaskViaMcp in mcp-task-tools.allium), so it can run the check while
@@ -338,33 +642,22 @@ rule ComposeAgentPrompt {
         -- title. What a tool does belongs in that tool's own description; see
         -- the tool-description standard at the head of mcp-task-tools.allium.
         --
-        -- {learning_tools_instruction} was the second example this guarantee
-        -- gave, on the grounds that only the prompt said WHEN to reach for
-        -- query_learnings. That stopped being true in the same commit that
-        -- wrote the carve-out: the accuracy pass that lifted six tool
-        -- descriptions over the three-sentence floor ended query_learnings
-        -- with "Call it when something is unclear, before guessing or asking",
-        -- which is the prompt clause word for word. rate_learning ("Call any
-        -- time you act on a retrieved learning") and delete_learning ("Use it
-        -- for an entry that is wrong or has gone stale, rather than only
-        -- downvoting it") absorbed the other two clauses the same way. So the
-        -- line now names three tools to restate three schemas, and the
-        -- carve-out no longer covers it: it names the /learnings SKILL and
-        -- nothing else. Trigger text for a skill is the one thing here with no
-        -- schema to shadow — skills under-trigger, and a skill listing carries
-        -- a description, not a nudge to invoke it.
+        -- {learning_tools_instruction} names the /learnings SKILL and no tool:
+        -- query_learnings, rate_learning and delete_learning each say in
+        -- their own description when to call them. Trigger text for a skill
+        -- is the one thing here with no schema to shadow — skills
+        -- under-trigger, and a skill listing carries a description, not a
+        -- nudge to invoke it.
         --
-        -- {epic sibling-communication} falls under the same rule. It used to
-        -- tell the agent to call list_tasks with the epic id to find its
-        -- siblings — a sentence that restates list_tasks' epic_id filter, which
-        -- the schema already carries. The section keeps only what is about
-        -- this task: the epic's id and title. That a sibling agent is
-        -- reachable with ListAgents/SendMessage by its agent name, which each
-        -- task's details and listing show, is dispatch's convention for every
-        -- task alike, so it moved to the MCP server instructions
-        -- (mcp-task-tools.allium: ServerInstructionsStateDispatchConventions),
-        -- which every session connected to dispatch already loads. Stating it
-        -- in each epic task's prompt as well was a second copy of one fact.
+        -- {epic sibling-communication} falls under the same rule. It does not
+        -- tell the agent to call list_tasks with the epic id, which would
+        -- restate list_tasks' epic_id filter. The section keeps only what is
+        -- about this task: the epic's id and title. That a sibling agent is
+        -- reachable with ListAgents/SendMessage by its agent name is
+        -- dispatch's convention for every task alike, so it is in the MCP
+        -- server instructions (mcp-task-tools.allium:
+        -- ServerInstructionsStateDispatchConventions), which every session
+        -- connected to dispatch loads.
         --
         -- The section also invites coordination: when the agent needs help,
         -- or a running sibling in the epic works on a similar problem, it
@@ -410,93 +703,7 @@ rule ComposeAgentPrompt {
         -- EveryTaskAgentLaunchesInAutoMode) — so it must keep both halves:
         -- no code changes, no wrap-up, until the user says otherwise.
 
-    @guidance
-        -- == The variants ==
-        -- DispatchTask emits one of three variants of build_prompt. The
-        -- no-plan one is the design step, specified by NameTheDesignStep
-        -- below; the other two are:
-        --   * has_plan = true and task.auto_run_plan = false (default):
-        --     preamble "Your task is:" and the addendum references the
-        --     plan path with a "review and ask permission before
-        --     implementing" instruction.
-        --   * has_plan = true and task.auto_run_plan = true: preamble
-        --     "Your task is:" and the addendum references the plan path
-        --     with an instruction to implement it immediately, no summary
-        --     or confirmation step. Set by decompose-review on its
-        --     generated work packages, since those plans already went
-        --     through a human confirmation step before being written.
-        -- CreateQuickTask (build_quick_dispatch_prompt) is the exception:
-        -- its preamble is "You are working interactively with the user."
-        -- rather than "Your task is:" — quick dispatch begins as an
-        -- interactive conversation where the agent establishes the goal
-        -- and renames the task, then follows the same
-        -- spec_first_instruction sentence as the no-plan variant
-        -- (NameTheDesignStep below).
-        -- The instruction text is shared verbatim between the two, so the
-        -- design step cannot drift apart between them.
-        -- The rule that a design artefact is not a standalone stopping point
-        -- is now its own line, {plan_not_a_stopping_point_instruction},
-        -- emitted whenever a plan is attached and placed immediately above
-        -- wrap_up_instruction, whose subject it qualifies. Both design steps
-        -- already state it, so on their paths it would be the restatement
-        -- NoLineRestatesTheDesignStep rules out; the plan path has no design
-        -- step, and is the case the rule was written for. Whether that repo
-        -- keeps specs does not enter into it — the wording names no spec
-        -- directory, so plan_with_specs and plan_without_specs both carry it.
-        -- It names only the plan, not "a spec or a plan", because no
-        -- spec-writing step runs on the path that emits it.
-        -- task_block does NOT include a Tag: line — tag is metadata for
-        -- the kanban board, not for prompt context (it would invite the
-        -- agent to over-fit on labels rather than the description).
-        -- wrap_up_instruction is shared by every dispatched agent so the
-        -- whole task lifecycle terminates the same way regardless of mode.
-        -- The two stopping points it names are finishing implementation
-        -- and, for an epic-decomposition task only, creating work packages
-        -- for its subtasks (that task's job is delegation, not
-        -- implementation, so stopping there is legitimate).
-        -- DispatchResearchTask is an exception to the unified trailing
-        -- block: its prompt includes only {learning_tools_instruction} and
-        -- omits tdd, allium, and wrap_up. The research agent
-        -- presents findings interactively and does not terminate via
-        -- the standard wrap-up flow; its addendum says so as reasoning,
-        -- not as a prohibition (TheResearchPromptGivesItsReasonNotARule).
-        -- The fix tag falls through to this rule and uses the full trailing
-        -- block — it is purely a kanban-board label, not a routing key. The
-        -- security feeds set it on every CVE task they create, and that is
-        -- still not what diverts one: RenderCveRunbook reads the task's epic
-        -- ancestry, never its tag. See CveRemediationSkipsTheDesignStep.
-}
-
--- == The design step ==
-
-rule NameTheDesignStep {
-    when: AgentLaunched(task, mode)
-
-    -- Only the two prompts that ask for a design step reach this rule.
-    -- build_research_prompt names none, and the three review runbooks below
-    -- replace the addendum outright whatever the plan state.
-    requires: mode in {standard, quick}
-    requires: task.has_plan = false
-    requires: task.tag not in {research, dependabot, pr_review, release_please}
-
-    -- A CVE task names no design step either: RenderCveRunbook below claims
-    -- the addendum, and its runbook rules the spec-first sequence out by name.
-    requires: under_cve_feed(task.epic) = false
-
-    -- One directory read against the parent repo, per dispatch, never
-    -- persisted. Every failure to see a `docs/specs/*.allium` file — a missing
-    -- directory, an empty one, one holding no .allium file, an unreadable one
-    -- — answers false.
-    let repo_keeps_specs = holds_allium_specs(task.repo_path)
-
-    -- The same resolver every other reader of the branch calls, so this rule
-    -- cannot disagree with the trailing block about which branch was taken.
-    -- has_plan is false here by precondition, so only two of its four answers
-    -- are reachable from this rule: spec_first and brainstorm.
-    ensures: DesignStepNamed(
-        task: task,
-        step: preceding(has_plan: false, holds_specs: repo_keeps_specs, is_cve: false)
-    )
+    -- == NameTheDesignStep ==
 
     @guarantee DesignStepMatchesTheReposSpecs
         -- The design step a prompt names depends on whether the task's
@@ -535,10 +742,7 @@ rule NameTheDesignStep {
         -- the trailing line would be the weaker restatement
         -- NoLineRestatesTheDesignStep rules out. Keeping
         -- specs is a necessary condition for the line, not a sufficient one:
-        -- plan_with_specs is the only state that carries it. This paragraph
-        -- read "and the trailing block carries {allium_instruction}" until
-        -- #4763, and was the last description of a gating on holds_specs
-        -- alone.
+        -- plan_with_specs is the only state that carries it.
         --
         -- When the repo has NO specs: the no-plan addendum instead names
         -- the `superpowers:brainstorming` skill as the design step, and
@@ -557,8 +761,7 @@ rule NameTheDesignStep {
         -- {plan_not_a_stopping_point_instruction} and {wrap_up_instruction}
         -- name no spec directory, so none of them is dropped for want of
         -- one. plan_without_specs is therefore plan_with_specs minus exactly
-        -- one line. A spec-less repo losing the stopping-point line too was
-        -- the bug this guarantee's scope is now explicit to prevent.
+        -- one line. A spec-less repo keeps the stopping-point line.
         --
         -- The fallback names the skill and stops. It does not restate
         -- brainstorming's own process, and it does not restate TDD —
@@ -610,9 +813,7 @@ rule NameTheDesignStep {
         -- {tdd_instruction}. Only plan_with_specs also keeps
         -- {allium_instruction}: the two spec-less states drop it for a reason
         -- of their own, which is that there is no docs/specs/ to point at (see
-        -- DesignStepMatchesTheReposSpecs above). This paragraph read "the other
-        -- two paths keep both lines" until the two guarantees were brought into
-        -- one file and the clash became visible.
+        -- DesignStepMatchesTheReposSpecs).
         --
         -- The same rule reaches one line further, on a different axis. BOTH
         -- design steps close by saying the design is not the end of the task
@@ -659,9 +860,8 @@ rule NameTheDesignStep {
         -- system does". A task that changes no behaviour — an audit, a
         -- research-shaped chore, a docs edit — skips the design step rather
         -- than tending a spec with no subject. Tags cannot make this call: a
-        -- chore tag covers both a refactor and "read this article and report",
-        -- and task #49159 was the second kind yet was told to elicit, tend and
-        -- propagate. The brainstorm step (DesignStepMatchesTheReposSpecs)
+        -- chore tag covers both a refactor and "read this article and report".
+        -- The brainstorm step (DesignStepMatchesTheReposSpecs)
         -- carries the same condition, so the two design steps stay alike.
         --
         -- It does not tell the agent to interview the user. Who is there to
@@ -678,86 +878,7 @@ rule NameTheDesignStep {
         -- subtasks instead — and a docs/plans/ doc attached via update_tasks is
         -- the agent's judgement call, not a requirement.
 
-    @guidance
-        -- == The spec-first sentence ==
-        -- What build_prompt's no-plan variant emits when repo_keeps_specs is
-        -- true:
-        --   * has_plan = false: preamble "Your task is:" and the addendum
-        --     is the design step for a repo that keeps Allium specs (see
-        --     DesignStepMatchesTheReposSpecs for the other branch) —
-        --     spec_first_instruction, the sentence
-        --     TheDesignStepNamesSkillsNotProcedure describes. The Allium spec,
-        --     not a prose design doc, is the design artefact this variant
-        --     asks for; a plan-shaped artefact is not the expected output of
-        --     the design step at all.
-        --     The sentence no longer names /allium-loop as an alternative
-        --     way to run the propagate/implement/weed steps. That skill's own
-        --     description says when to reach for it, and naming it here was
-        --     a second trigger for one skill.
-        --     There is no vague-vs-clear branch: the same sentence is
-        --     named however well-specified the description is, because the
-        --     elicit step is what establishes whether it was.
-        --     The addendum is explicit that the spec is not the end of the
-        --     task: implementation (TDD) must follow in the same session,
-        --     not a separate dispatch — except for an epic-decomposition
-        --     task, for which creating work packages for its subtasks is
-        --     named as the alternative (the same carve-out wrap_up_instruction
-        --     applies to calling the skill; there is no tag or field that
-        --     identifies such a task, so both name the exception in prose
-        --     rather than branching on task state — which is also why the
-        --     phrase survives on both lines where the stopping-point rule
-        --     around it does not). This wording is
-        --     otherwise NOT tag-conditional — Bug, Feature, Chore, Fix, and
-        --     no-tag all reach this same addendum. Whether the design step
-        --     applies is the agent's judgement, stated in the sentence's own
-        --     "If the task changes what the system does" condition, not a
-        --     per-tag branch. Research is excluded without a branch here:
-        --     DispatchResearchTask already diverts a no-plan
-        --     research-tagged task to build_research_prompt before
-        --     build_prompt's addendum is ever selected (see
-        --     dispatch.allium: DispatchResearchTask, whose own preconditions
-        --     claim that task first), and Dependabot/PrReview/ReleasePlease
-        --     are overridden with their own review addenda regardless of
-        --     plan state (see RenderDependencyBumpRunbook,
-        --     RenderPrReviewRunbook and RenderReleasePrRunbook below).
-        --     This closes a gap where a bug/feature/chore-tagged agent read
-        --     "write and attach a plan" plus the (then-universal) wrap-up
-        --     wording as license to stop at a plan-only state instead of
-        --     implementing it.
-}
-
--- == The CVE runbook ==
-
-rule RenderCveRunbook {
-    when: AgentLaunched(task, mode)
-
-    -- The same two prompts NameTheDesignStep serves, and deliberately the same
-    -- exclusion list. The review tags carry their own runbook — a CVE-epic
-    -- task retagged pr_review, dependabot or release_please reviews someone
-    -- else's PR, which is
-    -- different work from remediating the alert, so the review runbook wins.
-    --
-    -- research is named rather than left to the divert that usually handles it.
-    -- DispatchResearchTask claims a research task before any addendum is
-    -- selected, but only while it has no plan: DispatchMode routes ANY planned
-    -- task to the standard mode, research tag included. So a planned
-    -- research task under the CVE root does reach this rule, and a research
-    -- task is not remediating anything.
-    requires: mode in {standard, quick}
-    requires: task.tag not in {research, dependabot, pr_review, release_please}
-
-    -- Structural, not textual: the task hangs under the managed CVE feed root
-    -- (see under_cve_feed above).
-    requires: under_cve_feed(task.epic) = true
-
-    -- The runbook replaces the DESIGN step, and a task with a plan attached has
-    -- no design step to replace: the plan wins the addendum, and only the
-    -- trailing block still differs (Preceding = cve_with_plan). Without this
-    -- precondition the rule would claim the runbook text is emitted on the plan
-    -- path, which it is not — see HOW IT COMPOSES below.
-    requires: task.has_plan = false
-
-    ensures: CveRunbookRendered(task: task)
+    -- == RenderCveRunbook ==
 
     @guarantee CveRemediationSkipsTheDesignStep
         -- A CVE task is a targeted dependency fix, not a feature to design.
@@ -854,43 +975,8 @@ rule RenderCveRunbook {
         -- same reason TaskTag::is_review is untouched: adding a CVE routing key
         -- there would tell ColumnSection::for_task this task reviews someone
         -- else's PR, which is false of every one of them.
-}
 
--- == Review runbooks ==
-
--- Where a review runbook's next step is a function of what the task
--- already carries, the harness computes it and renders one branch.
--- The agent is never handed a decision table and asked to walk it.
-
--- No review runbook prohibits /wrap-up. The dependency-bump and PR-review
--- runbooks both used to open with the prohibition, and their terminal
--- branches used to repeat it — three times in one and twice in the other;
--- the release-PR runbook was written after the refusal and never carried it. The repeats went first,
--- replaced by positive statements of the end state that makes
--- wrap-up unnecessary ("the task is auto-cleaned on merge", "stop
--- and wait for the user's reply"), which the runbooks still carry.
--- The opening prohibition went when the rule became enforceable:
--- wrap_up refuses a review-tagged task outright, so the prompt no
--- longer has to ask. See ReviewTasksAreNotWrappedUp in
--- mcp-task-tools.allium.
---
--- The shorter restatement of the paragraph above, which stood in
--- AReviewRunbookCarriesOnlyTheBranchThatApplies and said the same thing with
--- the same citation, was dropped when the two became adjacent. Nothing else
--- left with it.
-
-rule ClassifyDependencyBump {
-    when: AgentLaunched(task, mode)
-
-    requires: task.tag = dependabot
-
-    -- Read from the task's own title and description, before the prompt is
-    -- built. No network call, no `gh` invocation, nothing the feed did not
-    -- already fetch.
-    ensures: BumpClassified(
-        task: task,
-        bump: classify_bump(title: task.title, description: task.description)
-    )
+    -- == ClassifyDependencyBump ==
 
     @guarantee TheBumpKindIsReadInOneOrderedPass
         -- Classification is best-effort and says so. It reads, in order:
@@ -1053,16 +1139,8 @@ rule ClassifyDependencyBump {
         -- somewhere less testable and less reachable, and buy a FeedItem field
         -- and a Task column to do it. It would also not reach a hand-created
         -- dependabot task, which the harness classifier does.
-}
 
--- Chained to ClassifyDependencyBump rather than sharing its trigger: the
--- classification happens ONCE and the runbook renders from that one value. Two
--- rules on AgentLaunched, each calling classify_bump for itself, would model
--- one call as two and leave nothing ordering them.
-rule RenderDependencyBumpRunbook {
-    when: BumpClassified(task, bump)
-
-    ensures: DependencyBumpRunbookRendered(task: task, kind: bump.kind)
+    -- == RenderDependencyBumpRunbook ==
 
     @guarantee AReviewRunbookCarriesOnlyTheBranchThatApplies
         -- Dependabot. The bump kind is read from the task's own title and
@@ -1107,9 +1185,8 @@ rule RenderDependencyBumpRunbook {
     @guarantee TheRunbookStatesThePrItWasHandedRatherThanAskingForIt
         -- The PR itself is rendered too, when the task carries a pr-typed url.
         -- The feed sets one at insert time, so the number and the owner/repo
-        -- the runbook used to ask the agent to extract were already on the
-        -- task — and the description it was told to extract them from is the
-        -- 500-character slice ClassifyDependencyBump reads. `gh` accepts a URL wherever it accepts a number,
+        -- are already on the task; the agent does not extract them from the
+        -- description. `gh` accepts a URL wherever it accepts a number,
         -- and a URL names its own repository, so one rendered line replaces
         -- both the extract-and-record step and the five `--repo <owner/repo>`
         -- spellings that followed it. A task with no pr-typed url keeps the
@@ -1193,12 +1270,12 @@ rule RenderDependencyBumpRunbook {
         -- lockfiles and pinned GitHub Action versions in workflow files, and
         -- nothing in the changelog suggests a breaking change; otherwise ask
         -- the human one direct question. Naming the action-pin case keeps
-        -- Action bumps from all escalating to the human (operator decision,
-        -- #16685). Agent judgement is the accepted approval criterion: the
+        -- Action bumps from all escalating to the human (an operator
+        -- decision). Agent judgement is the accepted approval criterion: the
         -- kognic-github-app verdict and green CI are the only deterministic
-        -- gates, and no code-level path check backs it (operator decision,
-        -- #16685). It replaced four pieces
-        -- of mechanics, each of which the agent had to execute rather than
+        -- gates, and no code-level path check backs it (an operator
+        -- decision). The runbook carries none of these four pieces of
+        -- mechanics, each of which the agent would execute rather than
         -- understand:
         --
         --   - a path allowlist of sixteen globs for "dependency files only".
@@ -1218,7 +1295,7 @@ rule RenderDependencyBumpRunbook {
         --     ONE direct question that says why the agent did not approve. The
         --     agent picks what the human needs to answer it.
         --
-        -- What stays structural is unchanged: the classifier reads the bump
+        -- What stays structural: the classifier reads the bump
         -- kind before the prompt is built, the runbook carries the one branch
         -- that kind selects (AReviewRunbookCarriesOnlyTheBranchThatApplies),
         -- and the app's verdict gates every merge (TheAppsVerdictGatesTheMerge).
@@ -1266,34 +1343,7 @@ rule RenderDependencyBumpRunbook {
         -- app approval never stands in for a failed or skipped agent check,
         -- and an agent check never stands in for a missing app approval.
 
-    @guidance
-        -- Dependabot exception: when task.tag = dependabot, build_prompt
-        -- replaces the spec_first addendum with a dependabot review
-        -- runbook. The bump is classified from the task's title and
-        -- description first, and the runbook is rendered around that
-        -- verdict — see AReviewRunbookCarriesOnlyTheBranchThatApplies
-        -- above. Its shared steps are: identify the PR and record its url,
-        -- judge whether the PR changes only dependency manifests and
-        -- lockfiles (see TheRunbookStatesThePolicyNotItsMechanics above), and
-        -- check CI. Its shared terminals are approve + squash auto-merge, and
-        -- ask the user (one direct question, plus sub_status = needs_input).
-        -- The merge terminal opens with a check of the `kognic-github-app`
-        -- verdict: unless the app's latest review is APPROVED, the agent asks
-        -- the user instead, naming the app's reason or its absence — see
-        -- TheAppsVerdictGatesTheMerge above. Between
-        -- them sits the one decision body the bump kind selected. The
-        -- trailing block is reduced to just {learning_tools_instruction} —
-        -- no tdd, no allium, and no wrap_up_instruction, because the
-        -- dependabot task is auto-cleaned when its PR merges (or the user
-        -- takes over).
-}
-
-rule RenderPrReviewRunbook {
-    when: AgentLaunched(task, mode)
-
-    requires: task.tag = pr_review
-
-    ensures: PrReviewRunbookRendered(task: task)
+    -- == RenderPrReviewRunbook ==
 
     @guarantee TheReviewCommandMakesTheSizeChoiceItself
         -- PR review. There is no diff-size branch. The runbook named one
@@ -1304,21 +1354,7 @@ rule RenderPrReviewRunbook {
         -- already makes. Deleting the branch is the harness absorbing it — the
         -- routing does not move, it stops existing.
 
-    @guidance
-        -- PrReview exception: when task.tag = pr_review, build_prompt
-        -- replaces the spec_first addendum with a minimal PR review
-        -- runbook: find the PR, run the review command on it, present the
-        -- findings and wait. One command, no diff-size branch. The trailing
-        -- block is reduced the same way, because the PR review agent
-        -- presents findings and waits for the user's instructions.
-}
-
-rule RenderReleasePrRunbook {
-    when: AgentLaunched(task, mode)
-
-    requires: task.tag = release_please
-
-    ensures: ReleasePrRunbookRendered(task: task)
+    -- == RenderReleasePrRunbook ==
 
     @guarantee AReleasePrMergesOnlyOnGreenCi
         -- Release PR. The task is a release PR a configured release bot opened
@@ -1485,19 +1521,4 @@ rule RenderReleasePrRunbook {
         -- (core.allium: "THE REVIEW SET"): every review tag reviews a PR
         -- someone else authored, which is what the by-me sections, the
         -- PR-branch worktree and the wrap-up refusal all assume.
-
-    @guidance
-        -- ReleasePlease exception: when task.tag = release_please,
-        -- build_prompt replaces the addendum with the release-PR runbook
-        -- above, regardless of plan state. The PR is stated from the task's
-        -- pr-typed url when it carries one, as the dependency runbook does
-        -- (TheRunbookStatesThePrItWasHandedRatherThanAskingForIt); otherwise
-        -- the agent is told to find it. The same match picks the author
-        -- variant: the "Do not re-check the PR author" bullet, or the step-0
-        -- author check (TheAuthorIsCheckedUnlessAFeedFilteredIt). The
-        -- trailing block is reduced to
-        -- {learning_tools_instruction} alone, as for the other two review
-        -- runbooks: the task ends when its PR merges or the user takes it
-        -- over, never through /wrap-up (ReviewTasksAreNotWrappedUp in
-        -- mcp-task-tools.allium).
 }
