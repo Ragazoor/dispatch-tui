@@ -1057,12 +1057,13 @@ surface HookDelivery {
 
     @guarantee DispatchMcpToolsAreTransparent
         -- Dispatch's own MCP tool calls (get_task, wrap_up, update_tasks and
-        -- the rest) never move a task's status: they are management, not
-        -- implementation work. The PreToolUse hook filters them out before
-        -- `dispatch hook` is called. Other tools (Bash, Read, ...) do reach
-        -- the hook, but cannot move a review task either: HookPreToolUse is
-        -- gated to tasks already running. Review -> Running happens only
-        -- through HookUserPromptSubmit, when the human sends a new prompt.
+        -- the rest) trigger no hook-driven status transition: they are
+        -- management, not implementation work. The hook filters them out of
+        -- PreToolUse and PostToolUse before `dispatch hook` is called. Other
+        -- tools (Bash, Read, ...) do reach the hook, but cannot move a review
+        -- task either: HookPreToolUse is gated to tasks already running.
+        -- Among hook events, Review -> Running happens only through
+        -- HookUserPromptSubmit, when the human sends a new prompt.
 
     @guarantee HooksWriteThroughTheBoard
         -- A hook delivers its event to the running board and never to the

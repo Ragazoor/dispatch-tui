@@ -460,9 +460,7 @@ impl App {
 
     /// `tasks.allium: ClearBuildOutputOfDoneTask`: hand the host every Done task
     /// it holds a worktree for, once per board run. A task that left Done is
-    /// forgotten here, so it is cleared again when it returns. A worktree that
-    /// a task not yet Done also names is skipped without being marked, so a
-    /// later tick picks it up. The guard reads the current task list.
+    /// forgotten here, so it is cleared again when it returns.
     fn tick_build_output_cleanup(&mut self) -> Vec<Command> {
         let Some(local) = self.local_host_id.as_deref() else {
             return vec![];

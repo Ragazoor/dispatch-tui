@@ -502,7 +502,7 @@ rule ConfirmDone {
         -- Reached from forward movement only when the next status is Done
         -- (i.e. from Review). The 'x' key reaches it from *any* non-Done
         -- status, moving the task straight to Done rather than one step
-        -- forward — see the DeleteKeyRouting guidance on DeleteTask.
+        -- forward — see DeleteKeyRouting on the Board surface.
         --
         -- A task sent to Done while its dispatch is still in flight gives up
         -- that launch, as a move back to backlog does: it holds no window yet,
@@ -1197,11 +1197,13 @@ rule MoveTaskToEpic {
         if new_epic != null: exists new_epic
 
     let target = route_target(new_epic, task.repo_path)
+    -- The epic before the move; an ensures-block `if` reads the post-move one.
+    let prior_epic = task.epic
 
     ensures: task.epic = target
     ensures: task.updated_at = now
     ensures:
-        if target != task.epic: TaskRelinked(task: task)
+        if target != prior_epic: TaskRelinked(task: task)
 
     @guidance
         -- Triggered from the kanban board or an epic view by pressing `m`
@@ -1359,9 +1361,8 @@ rule UnseenMarkEndsWithTheTaskLeavingItsEpic {
         -- MoveTaskToEpic and update_tasks (UpdateTaskIsOneTransaction): a
         -- feed routing move (feeds.allium), and the store's repo-group
         -- relinks: RegroupEpic into a per-repo sub-epic, FlattenEpic back to
-        -- the parent, and the reroute after a repo_path change. All of them
-        -- go through the store's one relink, which clears the marks with the
-        -- move.
+        -- the parent, and the reroute after a repo_path change. Each of them
+        -- clears the marks in the same write as the move.
 }
 
 -- == Bookmark ==
@@ -1528,7 +1529,9 @@ contract TaskTeardown {
         -- immediate re-dispatch derives the same worktree path), DeleteEpic
         -- (epics.allium; it removes the subtask rows in one operation, leaving
         -- nothing to hold a pointer), and BatchDelete, for the same reason over
-        -- every item it deletes.
+        -- every item it deletes. The feed path owes none of (a), (b) or (c):
+        -- the stale delete has already removed the row, and its failures are
+        -- warn-logged only (FeedTeardownsAreSerialPerRepo).
         --
         -- The gate is keyed on step 2 ONLY. A task with no worktree has
         -- nothing to release, so the requesting operation's follow-up (the
@@ -1544,8 +1547,9 @@ contract TaskTeardown {
 
     @invariant WorktreeDirectoryMustNotSurviveTeardown
         -- Step 2 releases a DIRECTORY, not a git registration, and the two
-        -- come apart. A task whose worktree was removed out of band tears down
-        -- cleanly, and "removed" means the directory is gone. Step 2 succeeds
+        -- come apart. A task whose worktree or window was removed out of band
+        -- tears down cleanly, and for the worktree "removed" means the
+        -- directory is gone. Step 2 succeeds
         -- only once nothing remains at the worktree path. `git worktree remove
         -- --force <path>` has three outcomes:
         --   * registration and directory both valid -> git deletes the whole
@@ -1623,7 +1627,10 @@ contract TaskTeardown {
         -- stored path. Every value that sets task.worktree comes from
         -- provisioning, and the board writes back only the value it read.
         -- CopyTask, the MCP update_tasks schema, the feed upsert and the CLI
-        -- never set it. Do NOT add a shared-worktree check on any path.
+        -- never set it. A store client that patches task.worktree by hand
+        -- (patch_task accepts it, PatchTaskNeverAimsAnotherHostsTeardown)
+        -- could fabricate two rows on one path; that is not a supported
+        -- input. Do NOT add a shared-worktree check on any path.
 
     @invariant FeedTeardownsAreSerialPerRepo
         -- The feed path tears down the tasks a stale delete removed. A repo's
@@ -1762,6 +1769,8 @@ rule BatchDelete {
     -- subtree_depth(e) is epics.allium DeleteEpic's black box: an epic
     -- subtree nested deeper than the recursive delete reaches is refused,
     -- by the batch_delete reducer only (the pre-check does not measure it).
+    -- The reducer also refuses an epic whose subtree holds an epic the caller
+    -- cannot see (workspaces.allium: UnseenIsAsMissing's named exception).
     let all_pass =
         tasks.all(t => t.status = done)
         and epics.all(e => e.subtree_tasks.all(t => t.status = done))
@@ -1968,16 +1977,22 @@ rule EditTask {
     -- not reverted by a description-only save. A refused write (the store
     -- answers an error) is reported and nothing else happens: the board does
     -- not show the edit and the repo path is not saved. The epic editor
-    -- follows the same rule for title, description, feed command and interval.
+    -- follows the same rule for title, description, feed command, interval and
+    -- visibility.
 
     let prior = task.status
+    -- The task as the editor opened it. The change guards below compare with
+    -- it, not with the row as it stands at save time.
+    let opened = editor_snapshot(task)
 
     ensures:
         let edited = EditorSession(task)
         if edited.title != "": task.title = edited.title
         if edited.description != "": task.description = edited.description
         if edited.repo_path != "": task.repo_path = edited.repo_path
-        if edited.status != null:
+        -- A STATUS section that repeats the opened status is no change, so
+        -- the sub_status is kept.
+        if edited.status != null and edited.status != opened.status:
             task.status = edited.status
             task.sub_status = default_sub_status(edited.status)
             -- Entering done via the STATUS field carries the same
@@ -2004,9 +2019,9 @@ rule EditTask {
         -- The two preference writes are SetWrapUpMode and SetModel, raised
         -- only for a section the user changed (see "Only fields the user
         -- changed are written" above).
-        if edited.wrap_up_mode != task.wrap_up_mode:
+        if edited.wrap_up_mode != opened.wrap_up_mode:
             SetWrapUpMode(task: task, mode: edited.wrap_up_mode)
-        if edited.model != task.model:
+        if edited.model != opened.model:
             SetModel(task: task, model: edited.model)
         task.phoenix = edited.phoenix ?? false
         -- url updated from the URL/URL_TYPE sections per the semantics
@@ -2120,7 +2135,9 @@ surface Board {
         --     over the tasks not in Done, the Done ones left untouched;
         --   * a tasks-only selection all in Done, or any selection holding an
         --     epic -> BatchDelete, after a count prompt;
-        --   * one epic -> ConfirmDeleteEpic (epics.allium).
+        --   * one epic -> ConfirmDeleteEpic (epics.allium);
+        --   * one work package -> DeletePackageFromBoard's prompt
+        --     (work-packages.allium).
         ConfirmDone(task) when task.status != done
         DeleteTask(task) when task.status = done
         BatchDelete(tasks, epics)
@@ -2297,10 +2314,9 @@ rule PatchTaskNeverAimsAnotherHostsTeardown {
 
     @guidance
         -- patch_task refuses, naming why, and writes nothing. Only a CHANGE is
-        -- judged: the editor sends repo_path on every save, and a repeated
-        -- value is no change. A task no host holds keeps its repo editable by
-        -- anyone who sees it, and may be handed to a host the caller owns or
-        -- to one nobody registered.
+        -- judged: a patch that repeats the stored value is no change. A task
+        -- no host holds keeps its repo editable by anyone who sees it, and may
+        -- be handed to a host the caller owns or to one nobody registered.
         -- Writes the module makes itself (the dispatch reports, the close, the
         -- stale delete) do not go through this check, so provisioning and
         -- teardown are unaffected.
@@ -2333,12 +2349,15 @@ rule UpdateTaskIsOneTransaction {
     -- module refuses) leaves the task, its epic and its repo as they were.
     requires: task.exists
 
+    -- The epic before the call; an ensures-block `if` reads the post-call one.
+    let prior_epic = task.epic
+
     ensures: TaskPatchAccepted(task: task, patch: patch)
     ensures:
         if epic != null:
             let target = route_target(epic, task.repo_path)
             task.epic = target
-            if target != task.epic: TaskRelinked(task: task)
+            if target != prior_epic: TaskRelinked(task: task)
 
     @guidance
         -- epic is absent to leave the epic alone, 0 to detach onto a user
@@ -2432,7 +2451,7 @@ rule RespawnPhoenixSuccessorNeedsTheFlag {
 -- (core/Task.SubStatusFitsStatus). The store's task write keeps it so: a write
 -- that changes status and names no sub_status resets it to
 -- default_sub_status(the new status); a write that repeats the current status
--- keeps it (the editor sends the status on every save). A rule that changes
+-- keeps it. A rule that changes
 -- status without naming sub_status gets the reset for free; the sub_status
 -- lines in the rules above document the resulting state. A write that sets a
 -- specific sub_status overrides the default (HookNotification keeps running
