@@ -18,6 +18,7 @@
 
 use "./core.allium" as core
 use "./schedules.allium" as schedules
+use "./settings.allium" as settings
 use "./store-split.allium" as split
 
 ------------------------------------------------------------
@@ -1930,6 +1931,35 @@ rule SetVerifyCommandViaMcp {
         -- the description, not a second opinion.
         -- Handled by handle_set_verify_command in
         -- src/mcp/handlers/tasks/verify.rs.
+}
+
+rule SetReviewCommandViaMcp {
+    when: McpSetReviewCommand(command?)
+
+    -- A command is one line, like a verify command.
+    requires:
+        if command != null:
+            not (command.contains("\n") or command.contains("\r"))
+
+    -- Omitting `command` is a read: nothing is written and the reply names
+    -- the command in effect. A blank command restores the default.
+    ensures:
+        if command != null:
+            settings/SaveSetting(
+                key: settings/config.review_command_key,
+                value: if is_blank(command): "" else: command
+            )
+
+    @guidance
+        -- set_review_command names the command a pr_review task's runbook
+        -- runs (dispatch-prompt.allium: RenderPrReviewRunbook), for this host.
+        -- The reply always names the command now in effect, either the saved
+        -- one or settings/config.default_review_command. A command
+        -- containing "\n" or "\r" is rejected at the handler with -32602.
+        -- The tool exists so the operator and agents can set a personal
+        -- skill such as `/review-pr` without a TUI surface: an
+        -- interactive capability needs an MCP twin. Handled by
+        -- handle_set_review_command in src/mcp/handlers/review_command.rs.
 }
 
 -- == MCP context resources ==

@@ -1000,3 +1000,7 @@ A SKILL.md carries the flow every invocation walks; detail only one branch needs
 **Frontmatter is gated too, not just bodies** — and for both skill directories at once, in `tests/repo_skills.rs`. Every skill must declare a `name:` matching its directory and a description containing a sentence that starts `Use `, saying *when* to invoke it rather than only what it does; a description with no trigger clause is unreachable except by typing the slash command. A skill that does not fit that convention should gain the clause, not the check gain a branch. Body assertions stay in `src/setup/plugins/tests.rs`, which reads the embedded copy.
 
 `.claude/skills/` is a separate, unrelated path: a plain tracked directory Claude Code auto-discovers for any session inside this repo, with no build or install step, held to the same frontmatter contract by the same code. **A skill in either must be a directory containing `SKILL.md`** — a bare `.md` file directly under the skills directory is never loaded, and nothing about it looks wrong.
+
+## Review Command
+
+The command a `pr_review` task's prompt tells its agent to run on the PR. It is the per-host `review_command` setting, `/code-review` when unset or blank. Read or set it with the `set_review_command` MCP tool (no arguments reads; a blank command restores the default). It is read when a task launches, so a change reaches the next launch, not a running agent. See `RenderPrReviewRunbook` in `docs/specs/dispatch-prompt.allium` and `SetReviewCommandViaMcp` in `docs/specs/mcp-task-tools.allium`.

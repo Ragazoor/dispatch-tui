@@ -154,6 +154,7 @@ lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling.
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |
 | `src/mcp/handlers/learnings.rs` | Knowledge base tool handlers |
 | `src/mcp/handlers/managed_feeds.rs` | Managed feed config tool handlers (`managed_feed_config`) |
+| `src/mcp/handlers/review_command.rs` | Review command tool handler (`set_review_command`) |
 | `src/mcp/handlers/types.rs` | JSON-RPC request/response types, flexible integer deserializer |
 | `src/mcp/handlers/tests/mod.rs` | MCP handler integration tests entry point |
 | `src/mcp/handlers/tests/tasks/mod.rs` | Task test entry point: module declarations and shared helpers |

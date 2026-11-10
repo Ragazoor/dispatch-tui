@@ -299,6 +299,50 @@ mod prepare_inputs {
     }
 }
 
+/// `RenderPrReviewRunbook` reads the host's `review_command` setting through
+/// the dispatch prologue; unset and blank both mean `/code-review`.
+mod review_command_input {
+    use super::*;
+
+    async fn prologue_review_command(saved: Option<&str>) -> String {
+        use crate::embeddings::EmbeddingService;
+
+        let (rt, _app) = test_runtime().await;
+        let db = rt.db_write().clone();
+        let task_id = db
+            .create_task(CreateTaskRequest::fixture("title", "/repo/a"))
+            .await
+            .unwrap();
+        let task = db.get_task(task_id).await.unwrap();
+        give_current_agent(&rt, task.id).await;
+        if let Some(v) = saved {
+            db.set_setting_string("review_command", v).await.unwrap();
+        }
+        crate::dispatch::prepare_inputs(&*db, &task, &EmbeddingService::new_test())
+            .await
+            .unwrap()
+            .review_command
+    }
+
+    #[tokio::test]
+    async fn unset_is_the_default() {
+        assert_eq!(prologue_review_command(None).await, "/code-review");
+    }
+
+    #[tokio::test]
+    async fn a_saved_command_is_read() {
+        assert_eq!(
+            prologue_review_command(Some("/review-pr")).await,
+            "/review-pr"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_blank_command_is_the_default() {
+        assert_eq!(prologue_review_command(Some("")).await, "/code-review");
+    }
+}
+
 mod backfill_embeddings {
     use super::*;
 

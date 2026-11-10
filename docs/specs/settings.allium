@@ -48,7 +48,17 @@ config {
     managed_feed_setting_keys: Set<String> = {"reviews_feed_command", "reviews_feed_interval_secs", "cve_feed_command", "cve_feed_interval_secs"}
     -- The two of them whose value is a whole number of seconds.
     managed_feed_interval_keys: Set<String> = {"reviews_feed_interval_secs", "cve_feed_interval_secs"}
+    -- The review command a pr_review task's runbook runs
+    -- (dispatch-prompt.allium: RenderPrReviewRunbook), and what it is when
+    -- the setting is absent.
+    review_command_key: String = "review_command"
+    default_review_command: String = "/code-review"
 }
+
+-- `review_command()` (used by dispatch-prompt.allium: RenderPrReviewRunbook)
+-- is the review command in effect on this host: this host's saved
+-- `review_command` Setting when present and not blank, else
+-- config.default_review_command. See ReviewCommandIsASetting below.
 
 ------------------------------------------------------------
 -- Rules
@@ -145,4 +155,21 @@ surface SettingWrites {
         -- machine. core/Setting's SettingIsUniquePerHostAndKey is the
         -- expression form of the key; this guarantee is the claim about
         -- where the rows are.
+}
+
+rule ReviewCommandIsASetting {
+    when: SaveSetting(key, value)
+    requires: key = config.review_command_key
+
+    ensures: SettingSaved(host: core/local_host(), key: key, value: value)
+
+    @guidance
+        -- The review command is an ordinary per-host Setting row, written
+        -- through SaveSetting (mcp-task-tools.allium:
+        -- SetReviewCommandViaMcp is its only emitter). It follows
+        -- SettingsAreStoredPerHost: one machine's `/review-pr` never reaches
+        -- another's board. A blank value is the same as no row: the command
+        -- in effect is config.default_review_command. A blank is saved rather
+        -- than the row deleted, because no board path clears a row yet
+        -- (ClearSetting).
 }

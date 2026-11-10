@@ -83,7 +83,7 @@ pub use agents::{
     agent_tree_pane_id, companion_pane_ids, current_agent_name, dispatch_agent,
     fetch_verify_command, prepare_inputs, quick_dispatch_agent, research_agent, resume_agent,
     resume_agent_with_message, resync_agent_tree_pane, run_agent_for_mode, toggle_agent_tree_pane,
-    DispatchInputs,
+    DispatchInputs, REVIEW_COMMAND_KEY,
 };
 pub(crate) use build_jobs::cargo_config_sets_jobs;
 pub use build_output::{clear_build_output, BuildOutputCleared, CACHEDIR_TAG_SIGNATURE};
@@ -93,7 +93,9 @@ pub use finish::{finish_task, finish_task_with_abort_runner, FinishContext, Fini
 // prove `DispatchMode::Research` reached `build_research_prompt`.
 #[cfg(test)]
 pub(crate) use prompts::RESEARCH_AGENT_INTRO;
-pub use prompts::{build_and_record_injections, EpicContext, LearningInjections};
+pub use prompts::{
+    build_and_record_injections, effective_review_command, EpicContext, LearningInjections,
+};
 pub use request_host::{
     DeadlineRunner, DispatchRequestObserver, SessionRequestObserver, SessionWork, DEADLINE_PASSED,
     EXIT_SESSION_TEARDOWN_TIMEOUT, WRAP_UP_REBASE_TIMEOUT,

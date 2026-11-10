@@ -687,7 +687,7 @@ pub(super) fn build_prompt(
         (Some(TaskTag::Dependabot), _) => {
             dependabot_review_addendum(task_id, title, description, ctx.pr_url, ctx.from_feed)
         }
-        (Some(TaskTag::PrReview), _) => pr_review_addendum().to_string(),
+        (Some(TaskTag::PrReview), _) => pr_review_addendum(ctx.review_command),
         (Some(TaskTag::ReleasePlease), _) => {
             release_please_addendum(task_id, ctx.pr_url, ctx.from_feed)
         }
@@ -800,8 +800,23 @@ fn dependabot_decision(kind: BumpKind) -> (&'static str, &'static str) {
 /// One command: the diff-size branch that used to pick between two was a proxy
 /// for an effort level the command takes itself. Nothing here forbids
 /// `/wrap-up` — `wrap_up` refuses a review-tagged task (`Task::wrap_up_block`).
-fn pr_review_addendum() -> &'static str {
-    include_str!("prompts/pr-review.md").trim_end_matches('\n')
+fn pr_review_addendum(review_command: &str) -> String {
+    include_str!("prompts/pr-review.md")
+        .trim_end_matches('\n')
+        .replace("{review_command}", review_command)
+}
+
+/// What a `pr_review` task runs when the host has no `review_command`
+/// setting (`config.default_review_command` in `docs/specs/settings.allium`).
+pub const DEFAULT_REVIEW_COMMAND: &str = "/code-review";
+
+/// The review command in effect for a saved `review_command` setting: the
+/// trimmed value, or [`DEFAULT_REVIEW_COMMAND`] when it is absent or blank.
+pub fn effective_review_command(saved: Option<String>) -> String {
+    match saved.as_deref().map(str::trim) {
+        Some(c) if !c.is_empty() => c.to_string(),
+        _ => DEFAULT_REVIEW_COMMAND.to_string(),
+    }
 }
 
 /// CVE remediation guidance, loaded from `prompts/cve.md`.
@@ -1118,6 +1133,11 @@ pub struct PromptContext<'a> {
     /// description's `Fix PR:` line, is the signal, so rewording that line
     /// cannot silently change the branch.
     pub fix_pr_linked: bool,
+    /// The command a `pr_review` task runs on its PR: this host's
+    /// `review_command` setting, resolved by [`effective_review_command`].
+    /// Read only by [`pr_review_addendum`]
+    /// (`RenderPrReviewRunbook` in `docs/specs/dispatch-prompt.allium`).
+    pub review_command: &'a str,
 }
 
 /// `Default` is hand-written for one field: `has_allium_specs` defaults to
@@ -1135,6 +1155,7 @@ impl Default for PromptContext<'_> {
             pr_url: None,
             from_feed: false,
             fix_pr_linked: false,
+            review_command: DEFAULT_REVIEW_COMMAND,
         }
     }
 }

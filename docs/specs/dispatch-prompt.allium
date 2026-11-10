@@ -24,6 +24,7 @@
 
 use "./core.allium" as core
 use "./dispatch.allium" as dispatch
+use "./settings.allium" as settings
 
 ------------------------------------------------------------
 -- Value Types
@@ -495,13 +496,21 @@ rule RenderPrReviewRunbook {
     requires: mode = standard
     requires: task.tag = pr_review
 
-    ensures: PrReviewRunbookRendered(task: task)
+    ensures: PrReviewRunbookRendered(
+        task: task,
+        review_command: settings/review_command()
+    )
 
     @guidance
         -- PrReview exception: when task.tag = pr_review, build_prompt
         -- replaces the spec_first addendum with a minimal PR review
         -- runbook: find the PR, run the review command on it, present the
-        -- findings and wait. One command, no diff-size branch. The trailing
+        -- findings and wait. One command, no diff-size branch. The command
+        -- is this host's `review_command` setting (settings.allium:
+        -- ReviewCommandSetting), `/code-review` when none is set; the
+        -- runbook names it in step 2 and nowhere else. The dispatching host
+        -- reads it when it builds the prompt, so a change reaches the next
+        -- launch and never an agent already running. The trailing
         -- block is reduced the same way, because the PR review agent
         -- presents findings and waits for the user's instructions.
 }

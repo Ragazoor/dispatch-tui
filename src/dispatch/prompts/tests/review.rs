@@ -890,3 +890,61 @@ fn a_pr_url_alone_does_not_make_a_task_feed_created() {
         "but a recorded url is not evidence a feed filtered the author: {text}"
     );
 }
+
+/// `RenderPrReviewRunbook`: the runbook runs the host's `review_command`
+/// setting, and `/code-review` when none is set.
+#[test]
+fn build_prompt_with_pr_review_tag_runs_the_default_review_command() {
+    let ctx = PromptContext {
+        tag: Some(TaskTag::PrReview),
+        ..PromptContext::default()
+    };
+    let text = build_prompt(
+        TaskId(42),
+        "Review PR: Add new login flow",
+        "https://github.com/example/repo/pull/99",
+        None,
+        None,
+        &ctx,
+    );
+    assert!(
+        text.contains("Run `/code-review` on that PR."),
+        "default review command must be /code-review, got: {text}"
+    );
+}
+
+#[test]
+fn build_prompt_with_pr_review_tag_runs_the_configured_review_command() {
+    let ctx = PromptContext {
+        tag: Some(TaskTag::PrReview),
+        review_command: "/review-pr",
+        ..PromptContext::default()
+    };
+    let text = build_prompt(
+        TaskId(42),
+        "Review PR: Add new login flow",
+        "https://github.com/example/repo/pull/99",
+        None,
+        None,
+        &ctx,
+    );
+    assert!(
+        text.contains("Run `/review-pr` on that PR."),
+        "configured command must be rendered, got: {text}"
+    );
+    assert!(
+        !text.contains("/code-review"),
+        "the default must not appear beside a configured command, got: {text}"
+    );
+}
+
+#[test]
+fn effective_review_command_falls_back_for_unset_and_blank() {
+    assert_eq!(effective_review_command(None), "/code-review");
+    assert_eq!(effective_review_command(Some("  ".into())), "/code-review");
+    assert_eq!(effective_review_command(Some("".into())), "/code-review");
+    assert_eq!(
+        effective_review_command(Some(" /review-pr ".into())),
+        "/review-pr"
+    );
+}

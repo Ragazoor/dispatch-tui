@@ -11,10 +11,14 @@ use crate::tmux;
 use super::allium_specs::repo_has_allium_specs;
 use super::prompts::{
     build_and_record_injections, build_prompt, build_quick_dispatch_prompt, build_research_prompt,
-    compose_prompt_head, select_preamble, EpicContext, LearningInjections, PromptContext,
-    DISPATCH_PLUGIN_DIR,
+    compose_prompt_head, effective_review_command, select_preamble, EpicContext,
+    LearningInjections, PromptContext, DEFAULT_REVIEW_COMMAND, DISPATCH_PLUGIN_DIR,
 };
 use super::worktree::{provision_worktree, rollback_failed_provisioning, BaseRef, StartPoint};
+
+/// The settings key of the review command (`config.review_command_key` in
+/// `docs/specs/settings.allium`).
+pub const REVIEW_COMMAND_KEY: &str = "review_command";
 
 /// The `--name` flag Claude Code's native cross-session messaging addresses
 /// this task's agent by (`ListAgents`/`SendMessage`/`@mention`), e.g.
@@ -600,6 +604,28 @@ pub fn dispatch_agent(
     epic: Option<&EpicContext>,
     injections: &LearningInjections<'_>,
 ) -> Result<DispatchResult> {
+    dispatch_agent_with_review_command(
+        task,
+        agent_name,
+        runner,
+        teardown,
+        epic,
+        injections,
+        DEFAULT_REVIEW_COMMAND,
+    )
+}
+
+/// [`dispatch_agent`] with the host's configured review command, which a
+/// `pr_review` task's prompt runs (`RenderPrReviewRunbook`).
+pub fn dispatch_agent_with_review_command(
+    task: &Task,
+    agent_name: &str,
+    runner: &dyn ProcessRunner,
+    teardown: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+    injections: &LearningInjections<'_>,
+    review_command: &str,
+) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
         agent_name,
@@ -624,6 +650,7 @@ pub fn dispatch_agent(
                 // feed created.
                 from_feed: task.external_id.is_some(),
                 fix_pr_linked: task.labels.iter().any(|l| l == "fix-pr"),
+                review_command,
             };
             build_prompt(
                 task.id,
@@ -712,16 +739,18 @@ pub fn run_agent_for_mode(
         epic_ctx,
         injected,
         agent_name,
+        review_command,
     } = inputs;
     let injections = LearningInjections::from(injected.as_slice());
     match mode {
-        crate::models::DispatchMode::Dispatch => dispatch_agent(
+        crate::models::DispatchMode::Dispatch => dispatch_agent_with_review_command(
             task,
             &agent_name,
             runner,
             teardown,
             epic_ctx.as_ref(),
             &injections,
+            &review_command,
         ),
         crate::models::DispatchMode::Research => {
             research_agent(task, &agent_name, runner, teardown, epic_ctx.as_ref())
@@ -752,6 +781,9 @@ pub struct DispatchInputs {
     /// The task's current agent's name: the session's `--name` and what the
     /// prompt tells the agent it is called.
     pub agent_name: String,
+    /// This host's review command, resolved at dispatch time
+    /// (`effective_review_command`); only a `pr_review` prompt renders it.
+    pub review_command: String,
 }
 
 /// Run the dispatch prologue for `task`, reading its epic context from the DB.
@@ -771,10 +803,19 @@ pub async fn prepare_inputs(
     let agent_name = current_agent_name(db, task.id).await?;
     let epic_ctx = EpicContext::from_db(task, db).await;
     let injected = build_and_record_injections(db, task, emb_svc).await;
+    // A failed read falls back to the default: a settings hiccup must not
+    // block a launch, and the default is what an unset host runs.
+    let review_command = effective_review_command(
+        db.get_setting_string(REVIEW_COMMAND_KEY)
+            .await
+            .ok()
+            .flatten(),
+    );
     Ok(DispatchInputs {
         epic_ctx,
         injected,
         agent_name,
+        review_command,
     })
 }
 
