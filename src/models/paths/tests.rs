@@ -193,7 +193,7 @@ fn expand_tilde_bare() {
     assert_eq!(expand_tilde("~"), home);
 }
 
-/// docs/specs/observability.allium: StatusLineDecorator,
+/// docs/specs/startup.allium: OperatorConfigurationLocations,
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
 ///
 /// `~` has no meaning without a home directory, so it must stay literal

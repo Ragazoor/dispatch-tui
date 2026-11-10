@@ -918,7 +918,7 @@ pub fn set_focus_events(runner: &dyn ProcessRunner) -> Result<()> {
 /// Owned here so callers don't re-derive the `$HOME`-relative location, and
 /// takes the home directory rather than reading it so this is not a second
 /// reader with its own idea of what an unavailable `$HOME` means — see
-/// `crate::setup::home_dir` and docs/specs/dispatch.allium:
+/// `crate::setup::home_dir` and docs/specs/startup.allium:
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`. This one *writes* the file
 /// it names, so an empty `$HOME` resolving here would drop a `.tmux.conf` into
 /// whatever directory the process happened to be started from.

@@ -83,7 +83,7 @@ Schema enum values may be added in a migration before all rows are upgraded. Nev
 **Row level — the decode-failure policy.** The board's rows arrive from the subscription (or from the in-memory store a test handle owns) and are decoded in `src/sync/decode.rs`; which reads tolerate an undecodable row is deliberate, not incidental:
 
 - **A row that fails to decode is dropped and counted, not fatal.** `SharedRows::upsert_task`, `upsert_epic` and the other `upsert_*` calls (`src/sync/rows.rs`) pass the failure to `drop_undecodable` (`src/sync/decode_support.rs`), which logs it with a `tracing::warn!` and bumps the counter below. One corrupt row degrades the board instead of blanking it. A dropped task is remembered by id and epic (`undecodable_tasks`) so a delete pre-check can still count it.
-- **Single-entity reads see only what decoded.** `get_task` and `list_epics` with `epic_id` answer from the decoded rows, so a dropped row reads as "not found"; the warning in the log and the counter are how a dropped row stays diagnosable.
+- **A read of a dropped task by its id says why.** `TaskService::get_task` asks `undecodable_task_reason` when the decoded rows lack the id, and answers "in the store but this board cannot decode it" with the reason rather than "not found", so an agent does not recreate a task a newer binary wrote (`docs/specs/observability.allium`: `ReadByIdReportsAnUndecodableTask`). Epics keep no such record: a dropped epic reads as "not found", and the warning in the log and the counter are how it stays diagnosable.
 
 **Decode-fallback counter:** every field-level default and every row dropped by `drop_undecodable` bumps a process-wide `AtomicU64` exposed as `crate::sync::decode_fallback_count()`. The value is included in the `tracing::warn!` (`count=N`) so the warns are greppable in aggregate, and the accessor lets tests and ad-hoc debugging detect slow-bleeding decode bugs without chasing log lines. It is monotonic and never reset — assert on deltas, since the test suite shares one process. When you add a new soft-fail branch, bump it via `sync::bump_decode_fallback()` (or call `sync::drop_undecodable` for a dropped row).
 
@@ -442,7 +442,7 @@ Which of the two shapes you want depends on *when* the value is needed.
 
 The two compose: `claude_json_path` is a `TuiRuntime` field *and* comes from `StartupPaths`, because the trust-gated `TaskCommand` arms read it long after bootstrap set it.
 
-Getting this wrong is not a style problem. `TuiRuntime::bootstrap` resolved `$HOME/.claude` internally for a while, so every `cargo test` rewrote the developer's own Claude Code settings file. Nothing failed and nothing reported it. See docs/specs/dispatch.allium: StatusLineDecorator, `SettingsLocationIsAnExplicitStartupInput`.
+Getting this wrong is not a style problem. `TuiRuntime::bootstrap` resolved `$HOME/.claude` internally for a while, so every `cargo test` rewrote the developer's own Claude Code settings file. Nothing failed and nothing reported it. See docs/specs/startup.allium: OperatorConfigurationLocations, `SettingsLocationIsAnExplicitStartupInput`.
 
 ## `unsafe`
 

@@ -576,9 +576,9 @@ fn apply_config_update_writes_everything() {
     assert_eq!(
         statusline_json["statusLine"]["command"], expected_command,
         "command must point at the machine-wide snapshot location, which is \
-         independent of the database's own directory"
+         independent of the process's own data directory"
     );
-    // `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase` used to need an
+    // `SnapshotLocationIsFixedPerMachine` used to need an
     // assertion here that the open database's directory never reached the
     // settings file. It is now enforced by the signature instead: the apply
     // path takes no database and no data directory, so there is nothing for
@@ -669,7 +669,7 @@ fn apply_config_update_is_idempotent_on_second_run() {
     );
 }
 
-/// docs/specs/observability.allium: StatusLineDecorator,
+/// docs/specs/startup.allium: OperatorConfigurationLocations,
 /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`. The writing
 /// side's half of the layout, pinned to written-out expectations.
 ///
@@ -708,7 +708,7 @@ fn the_configuration_layout_is_what_the_spawn_constant_names() {
     );
 }
 
-/// docs/specs/observability.allium: StatusLineDecorator,
+/// docs/specs/startup.allium: OperatorConfigurationLocations,
 /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`. The plugin
 /// directory's writer-side link.
 ///
@@ -744,7 +744,7 @@ fn setup_paths_compose_the_shared_configuration_layout() {
     );
 }
 
-/// docs/specs/observability.allium: StatusLineDecorator,
+/// docs/specs/startup.allium: OperatorConfigurationLocations,
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`. The failure half.
 ///
 /// Both spellings of "no home directory" a shell has must land in the same
@@ -765,7 +765,7 @@ fn an_unavailable_home_directory_is_a_failure_not_a_path() {
     }
 }
 
-/// docs/specs/observability.allium: StatusLineDecorator,
+/// docs/specs/startup.allium: OperatorConfigurationLocations,
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`. The layout half.
 ///
 /// The home directory is a parameter here rather than the process's own.

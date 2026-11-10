@@ -75,11 +75,11 @@ fn data_dir_from(
 
 /// The one budget-snapshot location on this machine.
 ///
-/// Takes no database argument, deliberately. The Claude subscription windows it
-/// holds are account-global, so publisher and reader must agree on a single
-/// location that does not vary with whichever task database the current process
-/// happens to have open — see `docs/specs/observability.allium`:
-/// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
+/// Takes no data-directory argument, deliberately. The Claude subscription
+/// windows it holds are account-global, so publisher and reader must agree on a
+/// single location that does not vary with the data directory the current
+/// process was started with — see `docs/specs/observability.allium`:
+/// `SnapshotLocationIsFixedPerMachine`.
 pub(crate) fn budget_snapshot_path() -> std::path::PathBuf {
     default_data_dir().join(crate::setup::statusline::RATE_LIMITS_FILE_NAME)
 }

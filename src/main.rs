@@ -390,7 +390,7 @@ async fn cmd_tui(
     // The one place the TUI path resolves the operator's `$HOME`-derived
     // locations. Both the configuration check below and `run_tui` are handed
     // the result, so neither can reach the operator's real config on its own —
-    // see docs/specs/dispatch.allium: SettingsLocationIsAnExplicitStartupInput.
+    // see docs/specs/startup.allium: SettingsLocationIsAnExplicitStartupInput.
     let paths = runtime::StartupPaths::resolve()?;
 
     // Resolve configuration drift before the board takes the screen, so the

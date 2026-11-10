@@ -13,10 +13,12 @@
 --           keypress is recorded (every keypress that takes effect, once),
 --           when it is not (a keypress that changes nothing), and how the
 --           event log stays bounded (oldest-first eviction at a row cap);
---           DecodeFallbackWarning value type and the three rules deciding what
---           an undecodable row costs: bulk reads skip it and warn, single-entity
---           reads fail, and errors that are not row-decode failures always
---           propagate;
+--           DecodeFallbackWarning value type and the two rules deciding what
+--           an undecodable row costs: every read leaves it out and it is
+--           warned once, and a read of an undecodable task by its id says the
+--           task exists but cannot be decoded;
+--           the ObservedFailures surface through which the producers of
+--           these failures report them;
 --           StatusLineDecorator, the `dispatch statusline` process wired as
 --           the statusLine command of every dispatch-spawned session — it
 --           records the subscription windows and the active model from the
@@ -34,7 +36,9 @@
 --           owning that behaviour (core, tasks, epics, split-pane, …), not
 --           here.
 --           Dispatch has no local database to time (storage.allium:
---           NoSqlite), so there is no slow-DB-call warning.
+--           NoSqlite), so there is no slow-query warning. Where the operator's
+--           Claude Code configuration lives, and how startup is handed it
+--           (startup.allium: OperatorConfigurationLocations).
 
 use "./core.allium" as core
 
@@ -64,9 +68,9 @@ value TrajectoryEntry {
     duration_ms:    Integer    -- wall-clock time from dispatch to response
 }
 
--- A single warn-level log record emitted when a row read back from the
--- database cannot be decoded into its domain type, or when an unknown enum
--- value is defaulted rather than failing the row. This is a tracing event, not
+-- A single warn-level log record emitted when a row the shared store delivers
+-- cannot be decoded into its domain type, or when an unknown enum value is
+-- defaulted rather than failing the row. This is a tracing event, not
 -- a persisted entity: no identity, no lifecycle. Its durable capture depends
 -- on the running process having a subscriber configured (only the TUI writes
 -- <data_dir>/app.log).
@@ -145,10 +149,9 @@ rule TrajectoryAppend {
     -- Only Task-kind callers are logged. Session callers are silently dropped.
     requires: caller_identity.kind = task
 
-    -- The caller's task must exist in the DB. Entries are written regardless
-    -- of whether the task has a worktree — the write path is independent of
-    -- the worktree field.
-    requires: core/Task.exists(caller_identity.task_id)
+    -- The caller's task must exist in the shared store. Entries are written
+    -- whether or not the task has a worktree.
+    requires: exists core/Task{id: caller_identity.task_id}
 
     ensures: append_jsonl(
         path: dispatch_data_dir
@@ -167,34 +170,23 @@ rule TrajectoryAppend {
 
     @guidance
         -- dispatch_data_dir is the data directory (storage.allium:
-        -- DataDirectory): the data directory, e.g.
-        -- ~/.local/share/dispatch/. It is not task-specific.
-        -- append_jsonl opens the file in append mode (O_APPEND | O_CREAT),
-        -- writes one JSON-encoded TrajectoryEntry followed by "\n", flushes,
-        -- and closes the file. The flush is required, not incidental: the
-        -- underlying async file write can report success while the bytes
-        -- are still in-process and not yet visible to a subsequent
-        -- open/read of the same path — an un-awaited flush would let entries
-        -- disappear under concurrent load with no error anywhere. The
-        -- trajectories/ subdirectory is created with
-        -- create_dir_all if absent — unlike the old worktree-relative path,
-        -- the parent directory is auto-created so there is no noop-on-missing-
-        -- dir behaviour.
-        -- Implementation lives behind the MCP handler dispatch boundary so
-        -- that every tool call (create_task, update_tasks, query_learnings,
-        -- record_learning, query_usage, dispatch_task,
-        -- list_tasks, list_epics, …) is captured uniformly. A native
-        -- SendMessage call between agents never reaches this boundary at
-        -- all — see HookPeerMessageSent in agent-health.allium for how that
-        -- gets its own trajectory entry instead.
-        -- The duration_ms field measures the wall-clock interval from the
-        -- moment the handler receives the parsed JSON-RPC request to the
-        -- moment it returns a response (success or error). The timestamp
-        -- field records the start of the call (before dispatch_tool runs),
-        -- not the time of writing.
-        -- For failed handler invocations, the result string is the JSON
-        -- object {"error": "<msg>"} where <msg> is the JSON-RPC error
-        -- message; the duration_ms still reflects time-to-error.
+        -- DataDirectory), e.g. ~/.local/share/dispatch/. It is not
+        -- task-specific. The trajectories/ subdirectory is created when it is
+        -- missing.
+        -- append_jsonl appends one JSON-encoded TrajectoryEntry and a
+        -- newline, and the entry is visible to the next reader of the file
+        -- once the append returns: a write that reports success while the
+        -- bytes are still buffered would let entries vanish under load with
+        -- no error anywhere.
+        -- Every tool call is captured the same way, whatever the tool. A
+        -- native SendMessage call between agents never reaches the MCP server
+        -- — see HookPeerMessageSent in agent-health.allium for how that gets
+        -- its own trajectory entry instead.
+        -- duration_ms runs from the moment the server receives the parsed
+        -- request to the moment it answers, success or error. timestamp is
+        -- the start of the call, not the time of writing. For a failed call,
+        -- result is the JSON object {"error": "<msg>"} with the error message,
+        -- and duration_ms is the time to the error.
 }
 
 -- == Fire-and-forget error handling ==
@@ -379,8 +371,8 @@ rule KeypressRecordsFeatureUsage {
         -- Recording is best-effort and off the critical path: the event is
         -- written asynchronously and a failed write is not retried, though it
         -- is logged — see UsageWriteFailureIsSilent. A dropped event costs one
-        -- count; blocking the key handler on the database would cost the user
-        -- their keystroke.
+        -- count; blocking the key handler on the store write would cost the
+        -- operator their keystroke.
         -- Agent-driven MCP tool calls record into the same log under the
         -- mcp_tool category, so the two are queried together but never
         -- conflated: category and actor both separate them.
@@ -413,7 +405,7 @@ rule FeatureUsageLogStaysBounded {
 
 rule BulkReadSkipsUndecodableRow {
     -- A read that answers "all the tasks/epics matching X" must stay useful
-    -- when one stored row cannot be decoded. The offending row is omitted from
+    -- when one stored row cannot be decoded. The offending row is left out of
     -- the result, every other row is returned, and the omission is warned.
     -- Blanking the whole board because one row is corrupt is not an acceptable
     -- failure mode: the corrupt row is one card, the board is the product.
@@ -430,82 +422,97 @@ rule BulkReadSkipsUndecodableRow {
         )
 
     @guidance
-        -- "Bulk read" means any read whose contract is a collection: the task
-        -- board load, the per-status column loads, the epic lists, and the
-        -- per-epic task lists. Skipping is applied once, at the point the row
-        -- iterator is collected, rather than in each field decoder — so a row
-        -- that fails for any reason (unknown status, unknown sub-status, an
-        -- unparseable timestamp, an inconsistent url/url_type pair) is handled
-        -- identically.
+        -- Rows are decoded once, when the shared store delivers them to the
+        -- board (sync.allium), not on each read. A row that does not decode
+        -- is dropped there and warned once, so every later read, bulk or by
+        -- id, is answered without it: the task board, the column loads, the
+        -- epic lists and the per-epic task lists. A row that fails for any
+        -- reason (unknown status, unknown sub-status, an unparseable
+        -- timestamp, an inconsistent url/url_type pair) is handled the same
+        -- way. A later copy of the row that decodes replaces it.
+        -- Refusing beats guessing: a row a newer binary wrote is missing from
+        -- the board rather than sitting on it under a plausible wrong status.
         -- fallback_total is the value of the process-wide counter *after* this
         -- fallback, exposed for tests and ad-hoc debugging so a slow bleed of
         -- skipped rows is detectable without chasing log lines. It is bumped
-        -- eagerly, before the warn event is constructed: a counter incremented
-        -- as a log field value would stop counting entirely in processes with
-        -- no tracing subscriber.
+        -- before the warning is built: a counter bumped as a log field value
+        -- would stop counting in a process with no tracing subscriber.
         -- The same counter covers field-level fallbacks (an unknown feed_role
         -- or epic origin defaulting rather than failing its row), so the total
         -- reads as "decode surprises seen", not "rows dropped".
 }
 
-rule SingleEntityReadFailsOnUndecodableRow {
-    -- A read that names one specific row reports the decode failure instead of
-    -- answering "not found". The caller asked for that row: pretending it does
-    -- not exist would turn a corrupt row into a silent absence, and would
-    -- remove the only remaining way to diagnose a row the bulk reads have
-    -- stopped surfacing.
-    when: SingleRowDecodeFailed(reason)
+rule ReadByIdReportsAnUndecodableTask {
+    -- A read that names one task by its id, when the store holds that task
+    -- but the board cannot decode it, says so instead of answering "not
+    -- found". The likely cause is a newer dispatch that wrote the row: "not
+    -- found" would tell an agent the task is gone, and it might recreate it
+    -- or give up on it. It is also the one remaining way to see why a task
+    -- the bulk reads leave out is missing.
+    when: SingleRowDecodeFailed(task_id, reason)
 
-    ensures: ReadFailed(reason: reason)
-
-    @guidance
-        -- Covers reads keyed to one row: fetching a task or epic by id, and
-        -- finding the task owning a given plan path. Deliberately asymmetric
-        -- with BulkReadSkipsUndecodableRow — the two rules answer different
-        -- questions, so they earn different failure modes.
-}
-
-rule QueryFailurePropagatesFromBulkRead {
-    -- Only row-content failures are skippable. An error raised by the query
-    -- itself — I/O failure, interrupt, or a mismatch between the selected
-    -- columns and the decoder — fails the whole read.
-    when: BulkQueryFailed(reason)
-
-    ensures: ReadFailed(reason: reason)
+    ensures: ReadFailed(
+        reason: "task " + str(task_id)
+                + " is in the shared store but this board cannot decode it: "
+                + reason
+    )
 
     @guidance
-        -- The distinction matters because the two error classes look alike at
-        -- the row iterator: both arrive as a failed row. Treating a mid-iteration
-        -- I/O error as one bad row would silently truncate an otherwise healthy
-        -- result set — the caller would see a short list and no error, which is
-        -- strictly worse than the blank board this policy exists to prevent.
-        -- A column-name mismatch is likewise a code defect, not data corruption,
-        -- and must not be absorbed into a warn line.
-}
-
-------------------------------------------------------------
--- Invariants
-------------------------------------------------------------
-
--- Every persisted TrajectoryEntry must carry the current schema version.
--- Readers use this field to dispatch between format versions; an entry
--- without a schema_version is unreadable.
-invariant TrajectoryEntryHasSchemaVersion {
-    for e in TrajectoryEntries:
-        e.schema_version != ""
-}
-
--- A trajectory entry's task_id must identify a real task. Entries are only
--- ever produced by TrajectoryAppend, which guards on Task.exists, so this
--- holds by construction.
-invariant TrajectoryEntryReferencesRealTask {
-    for e in TrajectoryEntries:
-        core/Task.exists(e.task_id)
+        -- The board keeps the raw row of each task it could not decode, by
+        -- id, until a copy that decodes or a removal replaces it; the same
+        -- record lets an epic delete count that task (epics.allium:
+        -- DeleteEpicRefused). A read by id decodes the kept row again to name
+        -- the reason. The message says the board is likely older than the
+        -- writer and that the task should not be recreated.
+        -- Tasks only: the board keeps no record of an undecodable epic, so a
+        -- read of one by its id answers "not found". Existence checks
+        -- (whether a task id is held) are not reads of the row and also
+        -- answer "not found".
 }
 
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
+
+-- The MCP server's side of every tool call: each call a client makes reaches
+-- TrajectoryAppend once the server has answered it.
+surface McpToolCalls {
+    facing _: core/McpClient
+
+    provides:
+        McpToolCall(caller_identity, method, args, result, duration_ms)
+
+    @guarantee TrajectoryEntriesCarryASchemaVersion
+        -- Every trajectory entry carries config.trajectory_schema_version,
+        -- which is never empty. Readers use it to tell format versions apart;
+        -- an entry without one is unreadable.
+
+    @guarantee TrajectoryEntriesNameARealTask
+        -- A trajectory entry's task_id names a task the shared store held
+        -- when the entry was written. TrajectoryAppend writes every entry and
+        -- requires the task to exist, so this holds by construction.
+}
+
+-- Where the failures this spec decides about come from. Each is reported by
+-- the board code that met it: the trajectory append, a teardown, a usage
+-- write, and the decoding of a row the shared store delivered.
+surface ObservedFailures {
+    facing _: core/BoardProcess
+
+    provides:
+        TrajectoryWriteFailed(task_id, error)
+        TeardownTargetAlreadyGone(target)
+        TeardownAttemptFailed(target, error)
+        FeatureUsageWriteFailed(event, error)
+        BulkRowDecodeFailed(entity_kind, reason, fallback_total)
+        SingleRowDecodeFailed(task_id, reason)
+
+    @guarantee FailuresNeverReachTheCaller
+        -- None of these failures changes the answer the operator or an MCP
+        -- client gets for the action that met it, except ReadFailed for a
+        -- read by id of an undecodable task (ReadByIdReportsAnUndecodableTask).
+        -- Each is reported to the log at the level its rule names.
+}
 
 surface StatusLineDecorator {
     facing operator: core/Operator
@@ -554,17 +561,17 @@ surface StatusLineDecorator {
         -- snapshot, with the model populated and the windows absent, rather
         -- than nothing at all.
 
-    @guarantee NeverReadsOrWritesTheDatabase
-        -- The decorator never touches the task database — not to read it, and
-        -- not by bringing it into existence. At this invocation rate, across
-        -- every session, database work here would be pure waste.
+    @guarantee NeverTouchesTheStoreOrTheDataDirectory
+        -- The decorator never connects to the shared store and never creates
+        -- the data directory. At this invocation rate, across every session,
+        -- store work here would be pure waste.
 
     @guarantee StartsNoAsyncRuntime
         -- The decorator does no asynchronous work, and starts none of the
         -- machinery for it: no worker-thread pool, no reactor. At several
         -- invocations a second in every session, concurrently, setup it cannot
-        -- use is the same waste as database work (see
-        -- NeverReadsOrWritesTheDatabase).
+        -- use is the same waste as store work (see
+        -- NeverTouchesTheStoreOrTheDataDirectory).
 
     @guarantee PublishedSnapshotIsAlwaysWholeAndFromOneWriter
         -- Every session publishes to the same snapshot location concurrently. A
@@ -602,134 +609,22 @@ surface StatusLineDecorator {
         -- operator's own command meant to say would be a worse outcome than
         -- showing none of it.
 
-    @guarantee SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase
+    @guarantee SnapshotLocationIsFixedPerMachine
         -- The subscription windows and the active model are both
         -- account-global, so the snapshot has exactly one location per
-        -- machine. Both sides agree on it unconditionally: the location the
-        -- decorator is told to publish to, and the location
-        -- dispatch.allium's TokenBudgetIndicator and ActiveModelIndicator
-        -- read. Neither varies with which task database the process that
-        -- computed it happened to be running against.
+        -- machine: the default data directory. Both sides agree on it
+        -- unconditionally: the location the decorator is told to publish to,
+        -- and the location dispatch.allium's TokenBudgetIndicator and
+        -- ActiveModelIndicator read. Neither varies with the data directory a
+        -- process was started with.
         --
         -- The decorator's settings are written by whichever dispatch process
-        -- notices they are missing or wrong, and they then govern every Claude
-        -- session started afterwards. Deriving the location from the open
-        -- database instead let one run against a throwaway database — a
-        -- developer's scratch database, or a test that boots the runtime
-        -- against a temporary one — silently repoint every later session at a
-        -- directory belonging to that run. Sessions kept publishing, the
-        -- indicator kept reading its own unchanged location, and the result
-        -- was a permanently stale readout with no failure reported anywhere:
-        -- indistinguishable, to the operator, from an account that had simply
-        -- stopped reporting.
-
-    @guarantee SettingsLocationIsAnExplicitStartupInput
-        -- Startup is told where the operator's Claude Code configuration
-        -- lives — the directory the decorator's settings file goes in, and
-        -- the trust store beside it. It goes looking for neither. The
-        -- operator's own session is handed the operator's locations. A run
-        -- that is not the operator's session — a test booting the runtime —
-        -- is handed locations of its own, and so cannot reach theirs.
-        --
-        -- One resolved set of locations rather than a parameter per file, so
-        -- the next operator-owned path startup learns about is added where
-        -- the others already are, and cannot arrive as a fresh lookup.
-        --
-        -- Resolving the directory inside startup instead made every run that
-        -- boots the runtime a writer of the operator's real configuration,
-        -- whatever else that run was for. The written content happened to be
-        -- machine-correct, so the rewrite showed up nowhere; the next key
-        -- baked into that file need not be. Unlike
-        -- SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase, no path is
-        -- derived from anything here — the lookup itself is the hazard, so
-        -- being handed the directory is the whole of the fix.
-
-    @guarantee AnUnavailableHomeDirectoryIsAFailureNotAPath
-        -- Every operator-owned location startup is handed is found under the
-        -- home directory, and each is resolved from one reading of it. When
-        -- that reading yields nothing usable, resolution reports that and
-        -- startup stops. It never yields a location anyway.
-        --
-        -- Two locations sit beside each other there — the configuration
-        -- directory, and the trust store next to it — and they are resolved
-        -- the same way, because they are the same kind of thing. A resolution
-        -- that failed for one and quietly succeeded for the other would leave
-        -- which of the two a run consulted deciding whether the operator was
-        -- told anything at all.
-        --
-        -- The hazard is specific to the answer being a path. An absent home
-        -- directory composes into a perfectly well-formed location — one at
-        -- the root of the filesystem, or one relative to whatever directory
-        -- the process happens to be running in — and everything downstream
-        -- then treats it as the operator's own. A trust store read there holds
-        -- no record of any repository, so every repository reads as untrusted;
-        -- the operator sees dispatch declining to launch, with nothing naming
-        -- the home directory anywhere. Granting trust would write the file
-        -- into existence, at that location, and the next read would find it.
-        -- Nothing in that sequence is an error, which is why the resolution
-        -- has to be the thing that refuses.
-        --
-        -- An empty home directory counts as unavailable, not as the root: a
-        -- shell spells "unset" both by omitting the variable and by setting it
-        -- to nothing, and only one of those spellings failing is the same
-        -- split again, one level down.
-
-    @guarantee SpawnSitesAndStartupNameTheSameConfigurationDirectory
-        -- Dispatch owns two things inside the operator's Claude Code
-        -- configuration directory: the decorator's settings file, and the
-        -- directory holding dispatch's own agent-facing plugin. Each has
-        -- exactly one location, and both halves of the system agree on it.
-        -- The directory the writing side is handed is the same directory
-        -- every spawned session is pointed at when it is launched.
-        --
-        -- The writing side is two flows, not one: startup keeps the settings
-        -- file current, and installation puts the plugin in place. Neither
-        -- looks the directory up; each is handed it (see
-        -- SettingsLocationIsAnExplicitStartupInput). The reading side is the
-        -- text that launches a session, which names both locations outright,
-        -- identically for every session, because that text is assembled once
-        -- and is not free to vary per run.
-        --
-        -- Those two mechanisms stay separate, but they are not two
-        -- definitions. The names of the directory and of what sits inside it
-        -- are written down once, and both halves are built from that one
-        -- statement — the launch text by embedding it, the writing side by
-        -- appending it to a resolved location. Renaming any of them is
-        -- therefore a single edit that necessarily moves both halves at once:
-        -- neither half holds a copy the edit could miss. Both are still
-        -- pinned, separately, to expectations written out by hand, so a
-        -- rename fails visibly on each side rather than quietly carrying
-        -- through. Agent-facing copy that merely quotes a location for a human
-        -- to read stands outside this — it is prose, not a half of the
-        -- agreement, and nothing is launched from it.
-        --
-        -- What is left over, and it is one thing. The launch text names the
-        -- directory relative to the home directory, and a shell resolves it
-        -- there. The agreement therefore also needs the configuration
-        -- directory to be found under the home directory — which is not a
-        -- name, so it is not covered by the shared statement above, and is
-        -- asserted instead. That assertion has a limit worth stating plainly:
-        -- a lookup which consulted some further input alongside the home
-        -- directory would keep matching everywhere that input was absent,
-        -- which is everywhere the assertion runs, and part only for the
-        -- operators who set it. So making the directory operator-configurable
-        -- is a change that must move both halves in the same commit and give
-        -- up naming the location outright. Nothing can catch that one after
-        -- the fact, and no structure prevents it either: the lookup is one
-        -- small function, and a second input is a short edit inside it. What
-        -- stands there instead is a written warning at that exact spot. That
-        -- is weaker than everything else in this guarantee, and is said
-        -- plainly so nobody mistakes it for more.
-        --
-        -- Leaving the agreement to hold by coincidence meant a change on
-        -- either side split the two in silence: a settings file written where
-        -- no session ever loaded it, a plugin installed where no session ever
-        -- found it, and every session launched against a location nothing had
-        -- written. A session refuses to start at all without that settings
-        -- file, so every dispatch failed at the moment of spawning, and
-        -- nothing anywhere named the cause. The failure is total and says
-        -- nothing about its own origin, which is why the agreement is worth
-        -- making structural rather than assuming.
+        -- notices they are missing or wrong, and they govern every Claude
+        -- session started afterwards. A location that followed a process's
+        -- own data directory would let one run against a throwaway directory
+        -- (a developer's scratch run, a test booting the runtime) repoint
+        -- every later session there, and leave the readout stale with no
+        -- failure reported anywhere.
 
     @guarantee NeverChainsToItself
         -- When the status line the decorator would stand in for is itself a
@@ -739,55 +634,13 @@ surface StatusLineDecorator {
 
     @guidance
         -- Implemented by src/cli/statusline.rs. The command string, including
-        -- the discovered chain and the quoted snapshot location, is generated by
-        -- src/setup/statusline.rs into a dispatch-owned settings file that every
-        -- spawn site passes to `claude` — deliberately never the operator's own
-        -- settings file. src/runtime/mod.rs rewrites that file at startup
-        -- whenever its content differs from what the current build would
-        -- write — absence is only the commonest such difference, and `claude`
-        -- refuses to start without it. The locations it writes into arrive as
-        -- `StartupPaths`, resolved once in src/main.rs; the same shape
-        -- src/setup/mod.rs already uses for setup and uninstall. The path
-        -- segments are stated once, in src/claude_paths.rs, as macros rather
-        -- than consts because the reading side assembles them with concat!,
-        -- which takes literals and macro expansions but not a const item. The
-        -- reader is src/dispatch/prompts.rs::DISPATCH_PLUGIN_DIR; the writers
-        -- are src/setup/mod.rs::claude_dir,
-        -- src/setup/statusline.rs::settings_path and
-        -- src/setup/plugins.rs::plugin_dir_under. Both halves are pinned to
-        -- hand-written expectations — src/dispatch/tests.rs for the constant,
-        -- src/setup/mod.rs's own tests for the layout, which also carry the
-        -- home-directory link. Each writer's resolution is pinned too:
-        -- `StartupPaths::resolve` in src/runtime/tests/misc.rs,
-        -- `SetupPaths::resolve` in src/setup/mod.rs's tests.
-        -- src/main.rs::cmd_tui needs no test: `StartupPaths`' fields are
-        -- private to src/runtime/mod.rs, so `resolve` is the only way to
-        -- obtain one.
-        --
-        -- AnUnavailableHomeDirectoryIsAFailureNotAPath is
-        -- src/setup/mod.rs::home_dir, the one reader of `$HOME` behind both
-        -- src/setup/mod.rs::claude_dir and
-        -- src/setup/mod.rs::user_global_config_path. Startup reads it once,
-        -- in `StartupPaths::resolve`, and composes both locations from that
-        -- one reading. The joining half of each is a separate function taking
-        -- the home directory as an argument (`claude_dir_in`,
-        -- `user_global_config_path_in`), so a test can vary it — comparing two
-        -- locations both derived from the real `$HOME` cancels it out of both
-        -- sides and asserts nothing. The same shape as
-        -- src/editor.rs::resolve_editor, and for the same reason:
-        -- `std::env::set_var` is unsafe in edition 2024 and races the test
-        -- harness's threads regardless.
-        --
-        -- The empty-is-unavailable rule reaches past the locations startup is
-        -- handed, because the same spelling composes just as quietly
-        -- elsewhere: src/tmux.rs::tmux_conf_path resolves through the same
-        -- reader, and src/models/paths.rs::expand_tilde and
-        -- src/lib.rs::default_data_dir apply the rule to their own fallbacks —
-        -- neither has a Result to report an absence through, so each stays
-        -- put instead. expand_tilde is the one that matters most: it is what
-        -- src/dispatch/trust.rs::project_key keys the trust store on, so
-        -- without it the store's path and its key would disagree about an
-        -- empty home directory.
+        -- the discovered chain and the quoted snapshot location, is written by
+        -- src/setup/statusline.rs into a dispatch-owned settings file that
+        -- every spawn site passes to `claude`, never the operator's own
+        -- settings file. Startup rewrites that file whenever its content
+        -- differs from what the current build would write; `claude` refuses
+        -- to start without it. Where that file lives is startup's
+        -- (startup.allium: OperatorConfigurationLocations).
 }
 
 ------------------------------------------------------------

@@ -204,8 +204,8 @@ fn teardown_tmux_for_tui(
 /// Startup never looks these up itself: it is handed them. That is what keeps
 /// a run which is not the operator's own session — a test booting the runtime
 /// above all — off the operator's real configuration, with no lookup left
-/// inside `bootstrap` to reach it. See docs/specs/dispatch.allium:
-/// StatusLineDecorator, `SettingsLocationIsAnExplicitStartupInput`.
+/// inside `bootstrap` to reach it. See docs/specs/startup.allium:
+/// OperatorConfigurationLocations, `SettingsLocationIsAnExplicitStartupInput`.
 ///
 /// The same shape, and the same reason, as `setup::SetupPaths` and
 /// `setup::UninstallPaths`.
@@ -227,7 +227,7 @@ impl StartupPaths {
     ///
     /// The home directory is read once here — the outermost edge of the flow —
     /// and both locations are composed from that one reading, so they cannot
-    /// disagree about whether it was available. See docs/specs/dispatch.allium:
+    /// disagree about whether it was available. See docs/specs/startup.allium:
     /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
     pub fn resolve() -> Result<Self> {
         let home = crate::setup::home_dir()?;
@@ -1047,10 +1047,10 @@ impl TuiRuntime {
             emb_svc: emb_svc.clone(),
             last_change_count: Arc::new(AtomicI64::new(-1)),
             // Deliberately not derived from `data_dir`: the subscription windows
-            // are account-global, so a run against a throwaway database must
+            // are account-global, so a run against a throwaway data directory must
             // publish and read the same location as every other session. See
             // docs/specs/observability.allium:
-            // SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase.
+            // SnapshotLocationIsFixedPerMachine.
             budget_snapshot_path: crate::budget_snapshot_path(),
             claude_json_path: inputs.paths.claude_json_path.clone(),
             split_restores: std::sync::Mutex::new(Vec::new()),

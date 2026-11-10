@@ -86,6 +86,10 @@ pub trait TaskRead: Send + Sync {
     /// before a mutation — where [`get_task`](Self::get_task) would decode every
     /// column and discard the result.
     async fn task_exists(&self, id: TaskId) -> bool;
+    /// Why the store's row for `id` does not decode on this board, when the
+    /// store holds that task but [`get_task`](Self::get_task) answers `None`
+    /// for it (observability.allium: `ReadByIdReportsAnUndecodableTask`).
+    async fn undecodable_task_reason(&self, id: TaskId) -> Option<String>;
     async fn list_all(&self) -> Vec<Task>;
     /// The tasks [`Task::is_live_agent`] accepts and the tasks
     /// [`Task::is_detached`] accepts, each ordered by id — the agent-tree

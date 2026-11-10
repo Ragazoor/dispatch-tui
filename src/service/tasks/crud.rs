@@ -503,10 +503,24 @@ impl TaskService {
     }
 
     pub async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
-        self.db
-            .get_task(task_id)
-            .await
-            .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))
+        if let Some(task) = self.db.get_task(task_id).await {
+            return Ok(task);
+        }
+        // A task the store holds but this board cannot decode is not a missing
+        // one: say so, or an agent may recreate it (observability.allium:
+        // `ReadByIdReportsAnUndecodableTask`).
+        match self.db.undecodable_task_reason(task_id).await {
+            Some(reason) => Err(ServiceError::Internal(anyhow::anyhow!(
+                "task {} is in the shared store but this board cannot decode it: \
+                 {reason}. A newer dispatch probably wrote it; update this board, \
+                 and do not recreate the task.",
+                task_id.0
+            ))),
+            None => Err(ServiceError::NotFound(format!(
+                "Task {} not found",
+                task_id.0
+            ))),
+        }
     }
 
     /// Batch-update `sub_status` for many tasks in a single transaction.

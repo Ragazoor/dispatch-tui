@@ -16,7 +16,7 @@
 /// path that nothing downstream can tell from a real one, and this expansion
 /// feeds durable state (repo paths recorded in the database, and the v18/v31
 /// migrations that rewrite them). Same rule as `crate::setup::home_dir`; see
-/// docs/specs/dispatch.allium:
+/// docs/specs/startup.allium:
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
 ///
 /// Takes the value as a parameter so the unavailable cases are testable:

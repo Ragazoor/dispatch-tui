@@ -25,8 +25,7 @@
 -- Audience: anyone curious — a new teammate, a friend, a GitHub visitor. Most
 -- only look briefly, so the guide has to work the moment the page opens.
 --
--- Decisions taken with the user (task #86018), recorded so they are not
--- re-litigated:
+-- Design decisions:
 --   - One self-contained HTML page, docs/guide/index.html, served by GitHub
 --     Pages. No build step, no external scripts, no network fetches; opening
 --     the file straight from disk works the same.
@@ -45,13 +44,11 @@
 --     without JavaScript, so an agent reading the file or a visitor who
 --     prefers reading gets the whole story.
 --   - The README links to the guide.
---
--- Decision taken with the user (task #98503):
 --   - The guide answers only to the keys its tour teaches (see
 --     GuideKeyRunsItsDeclaredAction), plus z, U and Space's other card
---     actions. Keys that only showed a toast or that a first visit does not
---     need (n, E, D, [ ] gg G, L, H) were cut, so the banner fits on one line.
---     Add a key back only when the tour gains a step that uses it.
+--     actions, so the banner fits on one line. Keys that only show a toast
+--     or that a first visit does not need (n, E, D, [ ] gg G, L, H) are left
+--     out. A key joins only when the tour gains a step that uses it.
 
 use "./keybindings.allium" as keybindings
 
@@ -74,7 +71,8 @@ external entity TestSuite {}
 -- deletion.
 contract GuideKeyParityGate {
     -- For one entry of the page's dispatch-keys block: whether every key it
-    -- declares is listed by a real row with the entry's namespace and action.
+    -- declares is listed by a real row with the entry's namespace and action,
+    -- and whether its description is that action's description in the table.
     entry_is_real_binding: (entry: GuideBinding) -> Boolean
 
     @invariant GuideBlockIsCheckedAgainstTheRealTable
@@ -84,9 +82,12 @@ contract GuideKeyParityGate {
         -- <script type="application/json" id="dispatch-keys"> block, and
         -- asserts, for every entry and every key in it, that some
         -- KEY_BINDINGS row has that namespace (by its published dotted name)
-        -- and that action, and lists that key. This is
-        -- GuideKeysAreRealBindings checked over the real page and the real
-        -- table, not over a fixture.
+        -- and that action, and lists that key; and, for every entry, that
+        -- some row with that namespace and action has the entry's
+        -- description, word for word. This is GuideKeysAreRealBindings and
+        -- GuideDescriptionsAreTheTables checked over the real page and the
+        -- real table, not over a fixture. An entry without a description
+        -- fails.
 
     @invariant GuideBlockIsPresentAndNonEmpty
         -- Non-vacuity: the test fails if the page has no dispatch-keys
@@ -97,6 +98,8 @@ contract GuideKeyParityGate {
     @invariant OnlyThisDirectionIsChecked
         -- The test does not require the guide to declare every row. A row
         -- the guide leaves out is fine; a guide entry the table lacks fails.
+        -- The entry's applies_in and label are the guide's own and are not
+        -- checked against the table.
 }
 
 ------------------------------------------------------------
@@ -112,19 +115,30 @@ enum GuideStep { explore_board | graph }
 
 -- One entry of the page's dispatch-keys block:
 --   <script type="application/json" id="dispatch-keys">
--- The block is a JSON array of objects {namespace, action, keys}:
---   namespace  the published dotted name of a KeyNamespace (board.normal,
---              board.detail, board.help, tmux.global, …)
---   action     the keybinding table's action id (navigate_row, exit_epic,
---              toggle_help, jump_to_dispatch, …)
---   keys       the keys, written exactly as the table writes them ("j",
---              "Space", "Esc", "Prefix+Space")
+-- The block is a JSON array of objects
+-- {namespace, action, keys, when, label, description}:
+--   namespace    the published dotted name of a KeyNamespace (board.normal,
+--                board.detail, board.help, tmux.global, …)
+--   action       the keybinding table's action id (navigate_row, exit_epic,
+--                toggle_help, jump_to_dispatch, …)
+--   keys         the keys, written exactly as the table writes them ("j",
+--                "Space", "Esc", "Prefix+Space")
+--   when         the guide's own imitation of the row's context: where on
+--                the example board the entry applies ("any", "nested",
+--                "taskCard", "foldedSection", …). The page decides it; the
+--                table's KeyContext is not copied.
+--   label        the short word the banner shows for the entry ("card",
+--                "back", "fold")
+--   description  the table's description of the action, word for word
 -- The block is the guide's one list of keys. The page's key handling and its
 -- banner both read it; there is no second list in the page's script.
 entity GuideBinding {
-    namespace: keybindings/KeyNamespace
-    action:    String
-    keys:      Set<String>
+    namespace:   keybindings/KeyNamespace
+    action:      String
+    keys:        Set<String>
+    applies_in:  String    -- the JSON key "when"
+    label:       String
+    description: String
 
     invariant DeclaresAtLeastOneKey {
         keys.count >= 1
@@ -189,21 +203,29 @@ rule GuideKeyRunsItsDeclaredAction {
     -- The guide answers a key only through the dispatch-keys block: it finds
     -- the entry in the namespace the imitation is in that lists the key, and
     -- imitates that entry's action as the real board would.
-    when: GuideKeyPressed(visit, namespace, key)
+    when: GuideKeyPressed(visit, pressed_in, key)
 
     requires: visit.step = explore_board
 
-    let binding = GuideBindings.any(g => g.namespace = namespace and key in g.keys)
+    let matches = GuideBindings where namespace = pressed_in and key in keys
+                                      and applies_at_cursor(visit, applies_in)
 
-    requires: binding != null
+    requires: matches.count >= 1
 
-    ensures: GuideActionImitated(visit: visit, namespace: namespace, action: binding.action, key: key)
+    let binding = matches.first
+
+    ensures: GuideActionImitated(visit: visit, namespace: pressed_in, action: binding.action, key: key)
 
     @guidance
         -- The namespace is the mode the imitation is in, decided as on the
         -- real board: board.normal on the board, board.detail with the
         -- detail panel open, board.help with the ? overlay open, tmux.global
-        -- inside the fake agent window.
+        -- inside the fake agent window. Within a namespace,
+        -- applies_at_cursor keeps the entries whose applies_in fits where the
+        -- cursor is (a folded section, a task card, inside an epic). Where
+        -- more than one entry is left, the first in block order wins, which
+        -- is why a folded section's entry for Enter and Space comes before
+        -- the card entries for the same keys.
         -- The tour, as agreed: move around the board; enter epics and work
         -- packages with Space and leave them with q / Esc / Q; open the
         -- detail panel; open a fake agent window for a running task with
@@ -214,7 +236,7 @@ rule GuideKeyRunsItsDeclaredAction {
         -- row's context, so q is exit_epic inside a view and quit (shown as
         -- a note, never acted on) on the top-level board, as on the real
         -- board. The parity test checks namespace, action, key and
-        -- description, not that context.
+        -- description, not that context (the entry's applies_in).
 }
 
 rule GuideKeyOutsideTheBlockDoesNothing {
@@ -222,12 +244,13 @@ rule GuideKeyOutsideTheBlockDoesNothing {
     -- does nothing, as on the real board (keybindings.allium:
     -- KeyWithoutARowCannotAct). The Graph step declares no keys, so every key
     -- does nothing there.
-    when: GuideKeyPressed(visit, namespace, key)
+    when: GuideKeyPressed(visit, pressed_in, key)
 
     requires: visit.step != explore_board
-              or not GuideBindings.any(g => g.namespace = namespace and key in g.keys)
+              or (GuideBindings where namespace = pressed_in and key in keys
+                                      and applies_at_cursor(visit, applies_in)).count = 0
 
-    ensures: GuideKeyIgnored(visit: visit, namespace: namespace, key: key)
+    ensures: GuideKeyIgnored(visit: visit, namespace: pressed_in, key: key)
 }
 
 ------------------------------------------------------------
@@ -241,11 +264,21 @@ rule GuideKeyOutsideTheBlockDoesNothing {
 -- GuideKeyParityGate.
 invariant GuideKeysAreRealBindings {
     for g in GuideBindings:
-        g.keys.all(k =>
-            keybindings/KeyBindings.any(b =>
-                b.namespace = g.namespace
-                and b.action = g.action
-                and k in b.keys))
+        for k in g.keys:
+            (keybindings/KeyBindings
+                where namespace = g.namespace and action = g.action and k in keys
+            ).count >= 1
+}
+
+-- The guide's description of an action is the table's, word for word, so the
+-- banner and walkthrough never explain a key differently from the [?] overlay.
+-- Checked by GuideKeyParityGate.
+invariant GuideDescriptionsAreTheTables {
+    for g in GuideBindings:
+        (keybindings/KeyBindings
+            where namespace = g.namespace and action = g.action
+                  and description = g.description
+        ).count >= 1
 }
 
 ------------------------------------------------------------
@@ -271,12 +304,15 @@ surface OnboardingGuidePage {
             binding.namespace
             binding.action
             binding.keys
+            binding.applies_in
+            binding.label
+            binding.description
 
     provides:
         GuideOpened(reader)
         GuideNextPressed(visit) when visit.step = explore_board
         GuideBackPressed(visit) when visit.step = graph
-        GuideKeyPressed(visit, namespace, key)
+        GuideKeyPressed(visit, pressed_in, key)
 
     @guarantee OnePageNoBuildNoNetwork
         -- The guide is one HTML file, docs/guide/index.html, served by

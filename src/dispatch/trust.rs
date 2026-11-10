@@ -15,7 +15,7 @@ fn project_key(repo_path: &str) -> String {
 /// resolved once by `runtime::StartupPaths::resolve` — one resolution shared
 /// with the configuration directory beside it, so an absent `$HOME` is
 /// reported rather than composed into a location at the filesystem root. See
-/// docs/specs/dispatch.allium:
+/// docs/specs/startup.allium:
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
 pub(crate) fn is_trusted_at(claude_json: &Path, repo_path: &str) -> Result<bool> {
     if !claude_json.exists() {

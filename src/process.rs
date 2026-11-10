@@ -567,7 +567,7 @@ fn is_executable_file(path: &std::path::Path) -> bool {
 /// `claude_json` is HANDED IN, never looked up here. Startup resolves the
 /// operator's `$HOME`-derived locations once (`runtime::StartupPaths`) and
 /// passes them down; a fresh lookup buried in a launcher is exactly what
-/// `SettingsLocationIsAnExplicitStartupInput` (docs/specs/dispatch.allium)
+/// `SettingsLocationIsAnExplicitStartupInput` (docs/specs/startup.allium)
 /// rules out, and it is what would let a run that is not the operator's own
 /// session reach the operator's configuration. [`Default`] leaves it unset, so
 /// a runner built for work that never launches an agent names no file at all.

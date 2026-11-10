@@ -1300,7 +1300,7 @@ surface AgentLaunchCommand {
         --
         -- Where that entry lives is HANDED to the launch, not looked up by it,
         -- on the same terms and for the same reason as
-        -- observability.allium: SettingsLocationIsAnExplicitStartupInput: startup resolves the
+        -- startup.allium: SettingsLocationIsAnExplicitStartupInput: startup resolves the
         -- operator's locations once and passes them down, so a run that is not
         -- the operator's own session is handed locations of its own and cannot
         -- reach theirs. A launch told about no such location writes no

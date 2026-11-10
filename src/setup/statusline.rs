@@ -43,7 +43,7 @@ pub(crate) fn settings_path(claude_dir: &Path) -> std::path::PathBuf {
 /// function is what makes them agree: if they ever disagreed the badge would
 /// silently go stale — indistinguishable from "no subscription data". See
 /// `docs/specs/observability.allium`:
-/// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
+/// `SnapshotLocationIsFixedPerMachine`.
 ///
 /// Tests deliberately keep their own literal instead of importing this: an
 /// expectation derived from the same constant as the code under test asserts

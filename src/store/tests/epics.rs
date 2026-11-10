@@ -839,11 +839,6 @@ async fn row_to_epic_auto_dispatch_defaults_to_false() {
 }
 
 // ---------------------------------------------------------------------------
-// Decode-failure policy (docs/conventions.md): bulk epic reads skip
-// undecodable rows; `get_epic` fails loudly.
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // DeleteEpic and retired feed items (epics.allium: DeleteEpic;
 // core.allium: RetiredFeedItem)
 // ---------------------------------------------------------------------------

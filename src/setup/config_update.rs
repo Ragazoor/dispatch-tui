@@ -66,9 +66,9 @@ pub struct SetupPaths {
     pub tmux_conf_path: PathBuf,
     pub statusline_path: PathBuf,
     /// Where the statusLine decorator is told to publish the budget snapshot.
-    /// Fixed per machine and independent of `--db` — see
+    /// Fixed per machine and independent of `--data-dir` — see
     /// `docs/specs/observability.allium`:
-    /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
+    /// `SnapshotLocationIsFixedPerMachine`.
     pub budget_snapshot_path: PathBuf,
 }
 
@@ -86,7 +86,7 @@ impl SetupPaths {
     /// configuration check performs no `$HOME` lookup of its own. The two
     /// remaining values are fixed per machine rather than per configuration
     /// directory, so they are resolved here — see
-    /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`. The MCP entry's
+    /// `SnapshotLocationIsFixedPerMachine`. The MCP entry's
     /// helper command used to be a third: it is now composed at compile time
     /// (`config::CALLER_HEADERS_COMMAND`), so there is nothing to resolve and
     /// nothing to hand onward — see `startup.allium`'s

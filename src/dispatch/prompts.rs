@@ -26,7 +26,7 @@ use super::worktree::StartPoint;
 ///
 /// The path *segments* are not written out here — they expand from
 /// `crate::claude_paths`, which is also where the writing side gets them and
-/// where the reasoning lives. See docs/specs/dispatch.allium:
+/// where the reasoning lives. See docs/specs/startup.allium:
 /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`.
 ///
 /// Built with `concat!` rather than a backslash line-continuation inside the

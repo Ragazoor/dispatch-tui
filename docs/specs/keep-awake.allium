@@ -14,7 +14,7 @@
 --           store row (KeepAwakeIsNeverStored); platforms other than Linux
 --           (KeepAwakeIsLinuxOnly).
 --
--- Decided with the operator on 2026-11-03 (task #98768):
+-- Design decisions:
 --   - It blocks all three idle effects: screen lock, screen blanking and
 --     suspend. Blocking one alone does not replace the video.
 --   - It always starts off. It ends on toggle-off or when the board exits,
@@ -26,6 +26,13 @@
 
 use "./core.allium" as core
 use "./startup.allium" as startup
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- The idle effects a keep-awake hold blocks. A request names all three.
+enum IdleEffect { screen_lock | screen_blank | suspend }
 
 ------------------------------------------------------------
 -- Entities
@@ -76,7 +83,7 @@ rule RequestKeepAwake {
     requires: platform_is_linux()
 
     ensures: keep_awake.status = requesting
-    ensures: KeepAwakeRequested(blocks: {screen_lock, screen_blank, suspend})
+    ensures: KeepAwakeRequested(blocks: {IdleEffect.screen_lock, IdleEffect.screen_blank, IdleEffect.suspend})
 
     @guidance
         -- The request asks the operating system to hold off all three idle
@@ -194,7 +201,7 @@ rule ReleaseKeepAwakeOnExit {
 ------------------------------------------------------------
 
 surface KeepAwakeToggle {
-    facing operator: core/Operator
+    facing _: core/Operator
 
     exposes:
         keep_awake.shows_badge
@@ -230,7 +237,7 @@ surface KeepAwakeToggle {
 }
 
 surface KeepAwakeHold {
-    facing system: core/OperatingSystem
+    facing _: core/OperatingSystem
 
     -- The operating system's side of the hold. The board asks
     -- (KeepAwakeRequested) and lets go (KeepAwakeReleased); the system

@@ -1239,13 +1239,13 @@ fn run_statusline(db: &Path, snapshot: &Path, chain: Option<&str>) -> std::proce
 }
 
 /// The decorator runs several times a second in every dispatch-spawned Claude
-/// session, so any database work there would be pure waste. The module keeps no
+/// session, so any store work there would be pure waste. The module keeps no
 /// `Store` import, but that is a source property; this asserts the observable
-/// one — running the subcommand brings no database into existence. See
-/// docs/specs/dispatch.allium: StatusLineDecorator
-/// (`@guarantee NeverReadsOrWritesTheDatabase`).
+/// one — running the subcommand creates no data directory. See
+/// docs/specs/observability.allium: StatusLineDecorator
+/// (`@guarantee NeverTouchesTheStoreOrTheDataDirectory`).
 #[test]
-fn statusline_creates_no_database_file() {
+fn statusline_creates_no_data_directory() {
     let tmp = tempfile::tempdir().unwrap();
     let data_dir = tmp.path().join("data");
     let snapshot = tmp.path().join("rate-limits.json");
@@ -1255,11 +1255,11 @@ fn statusline_creates_no_database_file() {
     assert!(out.status.success(), "the decorator must always exit 0");
     assert!(
         snapshot.exists(),
-        "the snapshot must have been published, or this proves nothing about the DB"
+        "the snapshot must have been published, or this proves nothing about the data directory"
     );
     assert!(
         !data_dir.exists(),
-        "the statusline subcommand must not create a database file"
+        "the statusline subcommand must not create the data directory"
     );
 }
 

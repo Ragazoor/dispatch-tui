@@ -814,7 +814,7 @@ mod bootstrap {
 
     /// Temp-backed `StartupPaths` plus a database path, the fixture every
     /// test here needs. A bootstrap test must never be handed the operator's
-    /// real locations — see docs/specs/observability.allium: StatusLineDecorator,
+    /// real locations — see docs/specs/startup.allium: OperatorConfigurationLocations,
     /// `SettingsLocationIsAnExplicitStartupInput` — so this is the only shape
     /// a new one should use.
     ///
@@ -865,11 +865,11 @@ mod bootstrap {
     }
 
     /// The budget snapshot location is account-global and fixed per machine, so
-    /// booting against a throwaway database must not move it into that
-    /// database's directory (docs/specs/observability.allium:
-    /// SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase). Deriving it from
-    /// the open database is what let a single `cargo test` run silently
-    /// repoint every later Claude session at a temp directory.
+    /// booting against a throwaway data directory must not move it there
+    /// (docs/specs/observability.allium: SnapshotLocationIsFixedPerMachine).
+    /// Deriving it from the process's own data directory would let a single
+    /// `cargo test` run silently repoint every later Claude session at a temp
+    /// directory.
     #[tokio::test]
     async fn budget_snapshot_path_ignores_the_open_database() {
         let (dir, data_dir, paths) = fixture().await;
@@ -1014,7 +1014,7 @@ mod bootstrap {
 mod startup_paths {
     use super::*;
 
-    /// docs/specs/observability.allium: StatusLineDecorator,
+    /// docs/specs/startup.allium: OperatorConfigurationLocations,
     /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`. The writer-side
     /// link for the settings file: `src/dispatch/tests.rs` binds the spawn
     /// constant's literal to the configuration-directory layout, and this binds
@@ -1042,7 +1042,7 @@ mod startup_paths {
         );
     }
 
-    /// docs/specs/observability.allium: StatusLineDecorator,
+    /// docs/specs/startup.allium: OperatorConfigurationLocations,
     /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`. The trust store's
     /// writer-side link.
     ///

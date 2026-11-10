@@ -50,7 +50,7 @@ pub use uninstall::*;
 /// second input here (an operator-settable configuration directory, say) parts
 /// them silently for whoever sets it, and the spawn constant would have to stop
 /// naming the location outright in the same change. See
-/// docs/specs/dispatch.allium:
+/// docs/specs/startup.allium:
 /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`.
 pub(super) fn claude_dir() -> Result<PathBuf> {
     Ok(claude_dir_in(&home_dir()?))
@@ -68,7 +68,7 @@ pub(super) fn claude_dir_in(home: &std::path::Path) -> PathBuf {
 /// Claude Code's trust store, which is what the trust-gated dispatch arms read
 /// and write through `TuiRuntime::claude_json_path`; the two consumers share
 /// this one resolution rather than each deriving the location. See
-/// docs/specs/dispatch.allium:
+/// docs/specs/startup.allium:
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
 pub(super) fn user_global_config_path() -> Result<PathBuf> {
     Ok(user_global_config_path_in(&home_dir()?))
@@ -106,7 +106,7 @@ pub(super) fn home_dir_from_value(home: Option<&str>) -> Result<PathBuf> {
 /// The one reader of `$HOME` behind every location `SetupPaths`,
 /// `UninstallPaths` and `runtime::StartupPaths` are built from, so an absent
 /// home directory is reported the same way whichever of them a run asked for.
-/// Nothing downstream can name the cause — see docs/specs/dispatch.allium:
+/// Nothing downstream can name the cause — see docs/specs/startup.allium:
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
 ///
 /// Not every `$HOME` reader in the crate: `crate::models::expand_tilde` and

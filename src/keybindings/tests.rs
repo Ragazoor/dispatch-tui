@@ -798,12 +798,13 @@ fn guide_declares_only_real_bindings() {
         let action = entry["action"].as_str().expect("action");
         let ns =
             KeyNamespace::parse(ns_name).unwrap_or_else(|| panic!("{ns_name}: no such namespace"));
-        if let Some(description) = entry["description"].as_str() {
-            assert!(
-                bindings_in(ns).any(|b| b.action == action && b.description == description),
-                "guide's description of {ns_name}/{action} is not the table's"
-            );
-        }
+        let description = entry["description"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{ns_name}/{action}: guide entry has no description"));
+        assert!(
+            bindings_in(ns).any(|b| b.action == action && b.description == description),
+            "guide's description of {ns_name}/{action} is not the table's"
+        );
         for key in entry["keys"].as_array().expect("keys") {
             let key = key.as_str().expect("key is a string");
             assert!(

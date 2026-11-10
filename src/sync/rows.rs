@@ -1170,6 +1170,16 @@ impl SharedRows {
         })
     }
 
+    /// Why the task row the store delivered for `id` did not decode, when it
+    /// did not. The kept raw row is decoded again to name the reason
+    /// (observability.allium: `ReadByIdReportsAnUndecodableTask`).
+    pub fn undecodable_task_reason(&self, id: TaskId) -> Option<String> {
+        self.read(|rows| {
+            let row = rows.undecodable_tasks.get(&id.0)?;
+            decode::task(row).err().map(|e| e.to_string())
+        })
+    }
+
     /// Whether `id` is held, without cloning it.
     pub fn has_task(&self, id: TaskId) -> bool {
         self.read(|rows| rows.tasks.contains_key(&id.0))

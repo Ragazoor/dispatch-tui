@@ -362,6 +362,53 @@ async fn get_task_not_found() {
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
+/// observability.allium: `ReadByIdReportsAnUndecodableTask`. The store holds
+/// the task but this board cannot decode it (a newer binary wrote a status it
+/// does not know): a read by id says so and names the reason, rather than
+/// answering "not found".
+#[tokio::test]
+async fn get_task_reports_a_task_the_board_cannot_decode() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    let mut row = crate::sync::encode::create_task_row(
+        &crate::store::CreateTaskRequest::fixture("From the future", "/repo"),
+        "",
+        "u",
+        "2026-10-11 12:00:00.000",
+    );
+    row.id = 42;
+    row.status = "teleported".into();
+    rows.upsert_task(&row);
+    let offline = crate::sync::SdkReducerCaller::new(
+        Arc::new(crate::sync::SpacetimeSdkConnector::new(
+            "offline",
+            rows.clone(),
+        )),
+        Arc::new(crate::sync::SettledIdentity::default()),
+    );
+    let host_dir = tempfile::tempdir().unwrap();
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::new(
+        rows,
+        Arc::new(offline),
+        Arc::new(crate::sync::SettledIdentity::default()),
+        Arc::new(crate::clock::SystemClock),
+        "test-host".to_string(),
+        host_dir.path(),
+    ));
+    let svc = task_svc(&db);
+
+    let err = svc.get_task(TaskId(42)).await.unwrap_err();
+
+    assert!(
+        matches!(err, ServiceError::Internal(_)),
+        "an undecodable task is not a missing one: {err}"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("task 42"), "{msg}");
+    assert!(msg.contains("cannot decode"), "{msg}");
+    assert!(msg.contains("teleported"), "the reason is named: {msg}");
+    assert!(msg.contains("do not recreate"), "{msg}");
+}
+
 #[tokio::test]
 async fn update_task_with_epic_linkage() {
     let db = test_db().await;

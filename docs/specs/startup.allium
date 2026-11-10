@@ -2355,8 +2355,8 @@ rule AbortWhenTheAgentPortIsTaken {
 -- does not ask whether anybody can answer, because no answer exists: the
 -- remedy is repairing the store, not naming the machine.
 --
--- Two conditions outside this spec's scope still abort, and neither weakens the
--- above: an unavailable home directory, which observability.allium's
+-- Two conditions outside the rules above still abort, and neither weakens the
+-- above: an unavailable home directory, which
 -- `AnUnavailableHomeDirectoryIsAFailureNotAPath` requires to fail rather than
 -- compose into a path, and a data directory that cannot be created, which is
 -- the board's own substrate rather than a step on the way to it. Both precede
@@ -2623,6 +2623,98 @@ surface HostLabelPrompt {
         -- worktrees that other people's boards will attribute to it — rather
         -- than presenting an unexplained text field on the one launch the
         -- operator has least context for.
+}
+
+-- Where the operator's Claude Code configuration lives, as startup is handed
+-- it. Dispatch owns two things there: the settings file of the status-line
+-- decorator (observability.allium: StatusLineDecorator) and the directory of
+-- dispatch's own agent-facing plugin. Beside the configuration directory sits
+-- the trust store.
+surface OperatorConfigurationLocations {
+    facing _: core/BoardProcess
+
+    @guarantee SettingsLocationIsAnExplicitStartupInput
+        -- Startup is told where the operator's Claude Code configuration
+        -- lives: the directory the decorator's settings file goes in, and
+        -- the trust store beside it. It goes looking for neither. The
+        -- operator's own session is handed the operator's locations. A run
+        -- that is not the operator's session, such as a test booting the
+        -- runtime, is handed locations of its own, and so cannot reach
+        -- theirs.
+        --
+        -- Startup is handed one resolved set of locations rather than a
+        -- parameter per file, so the next operator-owned path it needs is
+        -- added beside the others and cannot arrive as a fresh lookup. The
+        -- lookup itself is the hazard: a startup that resolved the directory
+        -- would make every run that boots the runtime a writer of the
+        -- operator's real configuration.
+
+    @guarantee AnUnavailableHomeDirectoryIsAFailureNotAPath
+        -- Every operator-owned location startup is handed is found under the
+        -- home directory, and all of them are resolved from one reading of
+        -- it. When that reading yields nothing usable, resolution reports
+        -- that and startup stops. It never yields a location anyway.
+        --
+        -- The configuration directory and the trust store beside it are
+        -- resolved the same way. A resolution that failed for one and
+        -- succeeded for the other would let the choice of location decide
+        -- whether the operator is told anything at all.
+        --
+        -- The hazard is that an absent home directory composes into a
+        -- well-formed path: one at the filesystem root, or one relative to
+        -- the working directory. A trust store read there holds no record of
+        -- any repository, so every repository reads as untrusted and dispatch
+        -- declines to launch, with nothing naming the home directory.
+        -- Granting trust would write the file there. Nothing in that sequence
+        -- is an error, which is why the resolution has to refuse.
+        --
+        -- An empty home directory counts as unavailable, not as the root: a
+        -- shell spells "unset" both by omitting the variable and by setting
+        -- it to nothing. The same rule holds for the other readers of the
+        -- home directory that compose a path from it (the tmux configuration,
+        -- tilde expansion, the default data directory); one without a way to
+        -- report an absence keeps its input unexpanded instead. Tilde
+        -- expansion matters most: the trust store keys on it, so without the
+        -- rule the store's path and its key would disagree.
+
+    @guarantee SpawnSitesAndStartupNameTheSameConfigurationDirectory
+        -- The decorator's settings file and the plugin directory each have
+        -- exactly one location, and both halves of the system agree on it:
+        -- the directory the writing side is handed is the directory every
+        -- spawned session is pointed at when it is launched.
+        --
+        -- The writing side is two flows: startup keeps the settings file
+        -- current, and installation puts the plugin in place. Neither looks
+        -- the directory up; each is handed it
+        -- (SettingsLocationIsAnExplicitStartupInput). The reading side is the
+        -- text that launches a session, which names both locations outright,
+        -- identically for every session.
+        --
+        -- The names of the directory and of what sits inside it are written
+        -- down once, and both halves are built from that one statement, so a
+        -- rename moves both at once. Each half is also pinned, separately, to
+        -- expectations written out by hand, so a rename fails visibly on
+        -- each side. Agent-facing copy that quotes a location for a human to
+        -- read is prose, not a half of the agreement.
+        --
+        -- One thing is not covered by the shared names: the launch text names
+        -- the directory relative to the home directory, so the writing side
+        -- must also find it there. That is asserted, not structural. Making
+        -- the directory operator-configurable must move both halves in the
+        -- same change and give up naming the location outright; a written
+        -- warning at the lookup says so.
+        --
+        -- When the halves disagree, a session refuses to start without its
+        -- settings file, so every dispatch fails at spawn and nothing names
+        -- the cause. That is why the agreement is structural.
+
+    @guidance
+        -- The shared names are src/claude_paths.rs; the reader is
+        -- src/dispatch/prompts.rs::DISPATCH_PLUGIN_DIR; the writers are
+        -- src/setup/mod.rs::claude_dir, src/setup/statusline.rs::settings_path
+        -- and src/setup/plugins.rs::plugin_dir_under. The one reader of the
+        -- home directory is src/setup/mod.rs::home_dir; startup reads it
+        -- once, in `StartupPaths::resolve`.
 }
 
 -- The board's life, as one start and one exit. The start is BoardDrawn,

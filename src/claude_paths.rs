@@ -31,13 +31,13 @@
 //! What this does NOT settle: whether the configuration directory is found
 //! under the home directory at all. `~` is resolved by the launching shell, so
 //! the two halves agree only while the lookup reads nothing but `$HOME` — see
-//! `crate::setup::claude_dir` and docs/specs/dispatch.allium:
+//! `crate::setup::claude_dir` and docs/specs/startup.allium:
 //! `SpawnSitesAndStartupNameTheSameConfigurationDirectory`.
 //!
 //! Nor does it settle what happens when there is no home directory to find it
 //! under. That is `crate::setup::home_dir`, the one place `$HOME` is read and
 //! the one definition of what makes it unavailable — see
-//! docs/specs/dispatch.allium:
+//! docs/specs/startup.allium:
 //! `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
 //!
 //! Note that these tokens are not simply "names inside `~/.claude`":
