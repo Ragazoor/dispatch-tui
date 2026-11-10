@@ -229,7 +229,13 @@ async fn a_port_always_held_by_a_foreign_store_fails_without_dumping() {
     )
     .await
     .unwrap_err();
-    assert!(format!("{err:#}").contains("not the copy"), "{err:#}");
+    // The last attempt can instead lose its port to an unrelated process on
+    // the machine: the fake's bind then fails with "address in use". That is
+    // the same held-port outcome, and nothing was dumped either way.
+    assert!(
+        format!("{err:#}").contains("not the copy") || lost_the_port(&err),
+        "{err:#}"
+    );
 }
 
 #[tokio::test]
