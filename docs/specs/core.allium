@@ -1724,6 +1724,13 @@ actor HookRunner {
     identified_by: Agent where state = current
 }
 
+-- A Claude Code agent dispatch launched into a task's worktree: what its
+-- launch command carries and what its prompt says face it
+-- (dispatch.allium: AgentLaunchCommand, dispatch-prompt.allium: AgentPrompt).
+actor DispatchedAgent {
+    identified_by: Agent where state = current
+}
+
 -- The far side of the board's connection to the shared store, as seen from
 -- this machine (sync.allium: StoreBoundary).
 actor SharedStore {

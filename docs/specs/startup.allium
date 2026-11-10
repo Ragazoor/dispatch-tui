@@ -1449,7 +1449,7 @@ rule AbortWhenTheHostIdentityStoreIsUnusable {
         -- CLAIM STILL SUCCEEDS on exactly the tasks a first dispatch acts on.
         -- Dispatch then goes on to provision a worktree, while the step that
         -- stamps the owning host onto the task skips itself for want of an id
-        -- to stamp (dispatch.allium: DispatchTask's best-effort host stamp).
+        -- to stamp (dispatch.allium: ProvisionDispatch, "THE HOST IS FIXED").
         -- What is left behind is a task row with a worktree and no host — a
         -- direct, silent violation of
         -- core.allium's HostTracksWorktree, written to the database and

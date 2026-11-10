@@ -120,6 +120,14 @@ config {
     -- is several months of recording at observed rates, which is the horizon
     -- pruning decisions are taken over.
     usage_event_row_cap: Integer = 100_000
+
+    -- Wall-clock budget for the command the status-line decorator chains to
+    -- (StatusLineDecorator). Covers both the chained
+    -- command producing its output and its exit: the decorator abandons it at
+    -- the deadline rather than waiting on either. Deliberately short — Claude Code re-runs the
+    -- decorator on a sub-second debounce, and the chained command in practice
+    -- shells out to git, which can block on a lock, NFS or a network remote.
+    statusline_chain_timeout: Duration = 2.seconds
 }
 
 ------------------------------------------------------------

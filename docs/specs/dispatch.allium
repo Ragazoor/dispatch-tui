@@ -31,19 +31,11 @@ use "./store-split.allium" as split
 ------------------------------------------------------------
 
 config {
-    -- Per-repo cap on remembered base branches. RecordBaseBranch prunes a
-    -- repo's history down to the most-recently-used max_base_branches_per_repo
+    -- Per-path cap on remembered base branches. RecordBaseBranch prunes a
+    -- path's history down to the most-recently-used max_base_branches_per_repo
     -- entries on every write; callers never manage the cap (see the
     -- BranchHistoryCapped invariant).
     max_base_branches_per_repo: Integer = 10
-
-    -- Wall-clock budget for the command the status-line decorator chains to
-    -- (see observability.allium: StatusLineDecorator). Covers both the chained
-    -- command producing its output and its exit: the decorator abandons it at
-    -- the deadline rather than waiting on either. Deliberately short — Claude Code re-runs the
-    -- decorator on a sub-second debounce, and the chained command in practice
-    -- shells out to git, which can block on a lock, NFS or a network remote.
-    statusline_chain_timeout: Duration = 2.seconds
 
     -- Most parallel build jobs an agent's cargo runs when neither the board's
     -- own environment nor a cargo config names any (see
@@ -68,30 +60,23 @@ config {
 rule RecordRepoPath {
     when: RepoPathUsed(path)
 
+    -- One row per (path, host) (core/SavedRepoPath): the save takes this
+    -- host's own row of the path, else adopts a row of the path that no host
+    -- owns, else inserts a row for this host.
     ensures: core/SavedRepoPath.created_or_updated(
         path: path,
         last_used: now,
-        host: this_host
+        host: local_host()
     )
 
     @guidance
-        -- Fires whenever a repo path is used to create or edit a task
-        -- through the TUI:
-        --   - TUI task creation (after InputBaseBranch submission)
-        --   - TUI quick-dispatch (Shift+D)
-        --   - TUI task edit (EditTask) when repo_path changes to a
-        --     non-empty value, so sibling feed items (e.g. other
-        --     Dependabot PRs in the same repo) can be auto-resolved
-        --     by resolve_feed_item_repo_paths on subsequent feed syncs
-        -- The path is first expand_tilde'd. If a SavedRepoPath with
-        -- the same path already exists, last_used is bumped to now;
-        -- otherwise a new record is created. Either way host is stamped with
-        -- this install, adopting a row saved before hosts were recorded.
-        -- Not fired for MCP task creation (create_task tool) — that
-        -- skips repo path persistence. (There is no CLI for task
-        -- creation; tasks are created exclusively via MCP.) Cap
-        -- enforcement (maximum stored paths) is an implementation
-        -- detail and not specified here.
+        -- RepoPathUsed comes from the board only (RepoPathPicker, and the
+        -- task edit form when it sets a non-empty repo_path): task creation
+        -- through the new-task form, quick dispatch, and an edit, so that
+        -- sibling feed items in the same repo resolve to it on the next feed
+        -- sync (feeds.allium). The path is tilde-expanded first. MCP
+        -- create_task saves no repo path. The number of saved paths is not
+        -- capped.
 }
 
 -- == Base Branch History ==
@@ -104,45 +89,35 @@ rule RecordBaseBranch {
         branch: branch,
         last_used: now
     )
-    -- Prune the repo's history down to the cap, dropping the least-recently-used
-    -- rows so at most config.max_base_branches_per_repo remain for this repo.
-    -- Pruning is part of this write; callers never manage the cap.
+    -- Prune this path's history down to the cap, dropping the
+    -- least-recently-used rows so at most config.max_base_branches_per_repo
+    -- remain for it. Pruning is part of this write; callers never manage
+    -- the cap.
     ensures:
         let history = core/SavedRepoBranches where repo_path = repo
         for stale in history where rank_by_recency(stale, history) > config.max_base_branches_per_repo:
             not exists stale
 
     @guidance
-        -- Records a base_branch into a repo's most-recently-used history so
-        -- it can be offered by the BaseBranchPicker next time a task is
-        -- created for the same repo. If a SavedRepoBranch with the same
-        -- (repo_path, branch) already exists, last_used is bumped to now
-        -- (upsert); otherwise a new row is created. After the upsert the
-        -- repo's rows are pruned to the config.max_base_branches_per_repo
-        -- most-recently-used, keeping the history bounded. This preserves the
-        -- BranchHistoryCapped invariant as a property of the write itself, so
-        -- no caller has to enforce the cap.
+        -- History is RECORDED per path and OFFERED per repository. A row is
+        -- keyed by (repo_path, branch), and the cap applies to one path's
+        -- rows. BaseBranchPicker offers a path the branches of every path
+        -- that shares its github_path (core/SavedRepoPath), so a repository
+        -- with clones on two machines can offer up to twice the cap.
         --
-        -- == Recording scope (deliberately narrow) ==
-        -- BaseBranchUsed is emitted from EXACTLY ONE entry point: the manual
-        -- TUI "new task" form, when it is finished (finish_task_creation),
-        -- alongside the existing RepoPathUsed emission. It is NOT emitted by:
-        --   - quick dispatch (CreateQuickTask / Shift+D), which resolves its
-        --     base branch from origin/HEAD detection and bypasses the form; or
-        --   - the MCP create_task tool, which never goes through the TUI form.
-        -- This keeps the history a record of branches the user deliberately
-        -- typed/selected, not an incidental log of every branch the system
-        -- has ever targeted. The copy-task flow needs no special-casing: it
-        -- flows through the same InputRepoPath -> InputBaseBranch ->
-        -- finish_task_creation path, so it records for free.
+        -- == Recording scope ==
+        -- BaseBranchUsed comes from exactly one entry point: confirming the
+        -- manual "new task" form (BaseBranchPicker), alongside RepoPathUsed.
+        -- Quick dispatch resolves its base branch from origin/HEAD and skips
+        -- the form, and MCP create_task never reaches it, so neither records.
+        -- The history is the branches the operator chose, not every branch
+        -- the system targeted. The copy-task flow goes through the same form
+        -- and records like any other.
         --
-        -- On write failure the error is surfaced through the status bar (the
-        -- same path RecordRepoPath uses), not silently swallowed.
+        -- A failed write is shown in the status bar, as RecordRepoPath's is.
         --
-        -- rank_by_recency(row, history) is a black-box ranking helper: the
-        -- 1-based position of row within history ordered by last_used
-        -- descending (1 = most recent). Rows ranked beyond the cap are the
-        -- least-recently-used and are removed.
+        -- rank_by_recency(row, history) is the 1-based position of row in
+        -- history ordered by last_used descending (1 = most recent).
 }
 
 -- == Dispatch ==
@@ -169,22 +144,6 @@ rule DispatchTask {
     -- (ProvisionDispatch below). The requires above are checked again by
     -- the module, which is what makes them hold across machines.
     ensures: split/DispatchRequested(task: task, requester: local_host(), origin: user, mode: dispatch)
-
-    @guarantee OneNameForStartingATask
-        -- The action-hint label for this key on a BACKLOG task is
-        -- "dispatch", unconditionally — it does not vary on whether the task
-        -- has a plan attached. "Dispatch" is the name of the act of starting
-        -- a task, and that act is identical either way: the same worktree,
-        -- the same tmux window, the same agent. What the plan changes is only
-        -- what the prompt tells that agent to do first (see
-        -- dispatch-prompt.allium: ComposeAgentPrompt), which is not something
-        -- the user is choosing between when they press the key.
-        -- The no-plan label previously read "brainstorm", after the design
-        -- skill the no-plan prompt used to name. That made a prompt-internal
-        -- detail into a second user-facing verb for one action, and it
-        -- outlived the skill itself: the design step is now an Allium-first
-        -- elicit-and-spec sequence, so the label named a workflow that no
-        -- longer existed.
 
     @guidance
         -- WHY THE LOCALITY GATE IS FREE HERE, despite this being the one
@@ -226,7 +185,7 @@ rule DispatchTask {
 }
 
 rule ProvisionDispatch {
-    when: DispatchProvisioningClaimed(request)
+    when: split/DispatchProvisioningClaimed(request)
 
     let task = request.task
 
@@ -276,8 +235,8 @@ rule ProvisionDispatch {
     -- is the whole reason the host stamp needs no degraded arm.
     --
     -- The tempting shape is to read this install's Host id at the write that
-    -- records task.worktree/tmux_window, next to the value it stamps. That was
-    -- the original shape and it was wrong, because by then the agent is
+    -- records task.worktree/tmux_window, next to the value it stamps. That shape
+    -- is wrong, because by then the agent is
     -- launched and the worktree is a real directory: a failed read leaves the
     -- only two options both bad — withhold the write and orphan a provisioned
     -- worktree, or record task.worktree with task.host null, which
@@ -307,273 +266,8 @@ rule ProvisionDispatch {
     -- a dependency-bump runbook renders, and the dep-only path allowlist that
     -- runbook checks against are all in dispatch-prompt.allium. Its rules fire
     -- on the AgentLaunched event this rule emits, so every guarantee there is
-    -- owed by this dispatch. What stays below is the provisioning and the
-    -- launch command that carries the text.
-
-    @guarantee EveryTaskAgentLaunchesOnItsModel
-        -- Every task-agent launch passes `--model <alias>`, where alias is
-        -- task.model, or sonnet when task.model is null (core/TaskModel).
-        -- This holds for DispatchTask, DispatchResearchTask, quick dispatch
-        -- and ResumeTask alike — the flag is part of the launch flags every
-        -- launcher shares, so ResumeTask's `--continue` carries it too, and a
-        -- model changed while the agent was stopped takes effect on resume.
-        -- The flag is always passed, never left to Claude Code's own
-        -- configured default: "sonnet unless the task says otherwise" must
-        -- hold whatever the operator's ~/.claude settings choose for their own
-        -- sessions. The alias goes before `--mcp-config`, which is variadic
-        -- and stays last (PromptIsSeparatedFromTheLaunchFlags).
-
-    @guarantee EveryTaskAgentLaunchesInAutoMode
-        -- Every task-agent launch starts Claude in auto mode — i.e.
-        -- with no --permission-mode flag at all — with no exceptions.
-        -- This holds for DispatchTask, DispatchResearchTask, quick
-        -- dispatch and ResumeTask alike: an agent edits files without a
-        -- per-edit approval prompt, so an unattended launch is not left
-        -- blocked on a dialog nobody is watching.
-        -- ResumeTask is named deliberately. It does not share the
-        -- dispatch launch path — it composes its own claude command —
-        -- so it is the one launcher the guarantee reaches only by
-        -- assertion, not by construction.
-        -- What differentiates the modes is the prompt content, never the
-        -- permission flag. A mode that must not change code says so in
-        -- its prompt — see DispatchResearchTask, whose addendum says that
-        -- findings are presented interactively and that code changes and
-        -- wrap-up are the user's call (dispatch-prompt.allium:
-        -- TheResearchPromptGivesItsReasonNotARule).
-        -- Research was formerly the sole exception, launching with
-        -- --permission-mode plan to make investigation read-only by
-        -- construction. That traded an unattended agent for an enforced
-        -- one: plan mode parks the agent on an approval dialog for work
-        -- the research prompt already forbids, and a research session
-        -- that must ask before every read is slower without being safer.
-        -- The instruction now carries the whole constraint.
-
-    @guarantee AgentCarriesItsOwnCallerIdentity
-        -- Every agent launch hands Claude Code a per-task MCP configuration
-        -- that declares the dispatch server with a FIXED
-        -- `X-Caller-Task-Id: <task.id>` header. The agent's identity travels
-        -- with the launch, decided by the launcher that already knows which
-        -- task it is starting.
-        --
-        -- It cannot be derived at the agent's end. The
-        -- `dispatch caller-headers` headersHelper that the startup
-        -- configuration check (startup.allium) installs in Claude Code's
-        -- user-global config reads its own working
-        -- directory to recognise a `.worktrees/<id>-<slug>` path — and Claude
-        -- Code runs a helper declared there from ITS OWN config directory, not
-        -- from the session's. The helper therefore answers "session" for every
-        -- dispatched agent, correctly for the directory it was handed and
-        -- uselessly for the question being asked. Nothing in the environment it
-        -- receives names the session's workspace, so no amount of repair to the
-        -- helper can recover the answer.
-        --
-        -- Where that entry lives is HANDED to the launch, not looked up by it,
-        -- on the same terms and for the same reason as
-        -- SettingsLocationIsAnExplicitStartupInput below: startup resolves the
-        -- operator's locations once and passes them down, so a run that is not
-        -- the operator's own session is handed locations of its own and cannot
-        -- reach theirs. A launch told about no such location writes no
-        -- configuration, which is the best-effort arm below.
-        --
-        -- The per-task configuration is DERIVED FROM the user's own `dispatch`
-        -- entry rather than composed from scratch: the entry is copied, its
-        -- headersHelper dropped, and the fixed header put in its place. So the
-        -- transport and the URL — including a non-default port — cannot drift
-        -- from what the startup configuration check wrote, and there is no
-        -- second place that
-        -- has to be taught the port.
-        --
-        -- The configuration is ADDITIVE, never exclusive. It overrides the
-        -- same-named user entry and leaves every other MCP server the operator
-        -- has configured available to the agent; an agent launched with only
-        -- the dispatch server would silently lose tools the task may need.
-        --
-        -- It lives in the worktree's own git administrative directory. That
-        -- keeps it out of `git status`, so an agent cannot commit it into the
-        -- repository it is working on, and it is removed by the
-        -- `git worktree remove` that TaskTeardown already performs — see
-        -- CallerIdentityConfigGoesWithTheWorktree in tasks.allium. Nothing
-        -- else deletes it and nothing needs to.
-        --
-        -- BEST-EFFORT, and it degrades in one direction only: if the
-        -- configuration cannot be written the agent is launched WITHOUT it,
-        -- never with a path that does not exist. The failure is warn-logged and
-        -- costs the caller-identity surfaces (see
-        -- CallerIdentityDependsOnTheLaunch in mcp-task-tools.allium) — exactly
-        -- the state the system was already in — which is not worth trading a
-        -- launched agent for.
-        --
-        -- Owed by every launch, not only by provisioning: resuming into an
-        -- existing worktree (ResumeTask) launches an agent and therefore owes
-        -- it too. Both launches compose their flags through one seam, so a
-        -- third launcher that bypassed it would lose the plugin directory and
-        -- the session name along with the identity — a loud failure in place of
-        -- the silent one this guarantee exists to prevent.
-
-    @guarantee DispatchedAgentsShareASccacheNotATargetDir
-        -- Every agent launch sets RUSTC_WRAPPER=sccache in the tmux window's
-        -- environment — DispatchTask, DispatchResearchTask, quick dispatch
-        -- and ResumeTask alike, through the same one seam
-        -- AgentCarriesItsOwnCallerIdentity above already requires each
-        -- launcher to share, so a launch composing its own flags cannot
-        -- forget the var independently of the identity header.
-        --
-        -- Task #4883 measured this against the alternative — one shared
-        -- CARGO_TARGET_DIR across worktrees — and found it unsafe, not
-        -- merely slower: two worktrees with different in-flight source,
-        -- built concurrently against one shared target dir, produced a
-        -- binary where the second build reported success but silently
-        -- contained the first worktree's compiled code, not its own.
-        -- sccache does not have this failure mode because each worktree
-        -- keeps its OWN target/ directory; only the compiler-object cache
-        -- (~/.cache/sccache) is shared, and that cache is keyed by
-        -- preprocessed source content, not by directory mtime bookkeeping,
-        -- so a lookup cannot cross-contaminate between worktrees' independent
-        -- source. This is also why spacetime/module — the separate wasm32
-        -- workspace excluded from the main cargo workspace — needs no config
-        -- of its own: it inherits the same environment variable, and a plain
-        -- environment variable reaches a `cd spacetime/module && cargo check`
-        -- invocation with nothing further to wire up.
-        --
-        -- BEST-EFFORT in one direction only, unlike
-        -- AgentCarriesItsOwnCallerIdentity's best-effort config write: the
-        -- var is set only when `sccache` resolves on PATH at dispatch time.
-        -- Absent, the launch proceeds without it — exactly today's
-        -- behaviour — never blocking or failing the dispatch over a missing
-        -- optional tool. sccache is a build-time speedup, not something any
-        -- agent's correctness depends on, so this follows the same
-        -- convention as this repo's other optional external tools
-        -- (bubblewrap, socat) rather than its required ones (tmux, git, gh,
-        -- claude), which have no such fallback.
-
-    @guarantee AgentBuildsRunFewerParallelJobs
-        -- Every agent launch decides CARGO_BUILD_JOBS in the tmux window's
-        -- environment, through the same seam as RUSTC_WRAPPER above, so no
-        -- launcher can set one without the other. The value is the board's
-        -- own CARGO_BUILD_JOBS when its environment carries one — that is
-        -- how an operator chooses another number. Otherwise it is
-        -- min(config.agent_cargo_build_jobs, the machine's cores), EXCEPT
-        -- that the variable is left unset when a cargo config sets
-        -- build.jobs, in the worktree's `.cargo/` or any parent's, or in
-        -- CARGO_HOME (default ~/.cargo). Cargo ranks the environment above
-        -- config files, so setting it would raise a repo or user that chose
-        -- `jobs = 2` to save memory back to the default. Detection is a text
-        -- scan for the key; a miss only costs the default.
-        --
-        -- Why (task #98833): cargo's default is one job per core. One
-        -- `cargo test` in this repo links 34+ test binaries, each link
-        -- peaking at ~1.1 GB, so on a 22-core machine two agents testing at
-        -- once held ~45 linkers and ~50 GB, filled RAM and swap, and froze
-        -- the machine. At 8 jobs four concurrent agents peak near 38 GB.
-        -- This is prevention; AgentsShareOneMemoryCap is the backstop.
-
-    @guarantee AgentsShareOneMemoryCap
-        -- Every agent launch runs the agent's `claude` command in its own
-        -- transient systemd user scope inside config.agent_slice, with
-        -- OOMPolicy=continue, so the agent and everything it starts (cargo,
-        -- rustc, linkers, test binaries) count against one memory cap
-        -- shared by all agents on this machine. The cap bounds the total,
-        -- not each agent: a lone agent may use all of it, and no number of
-        -- agents can take the memory the desktop and the board need.
-        --
-        -- Before each launch dispatch reads the slice's MemoryMax from the
-        -- user service manager. When none is set, it sets, for the runtime
-        -- of the manager only, MemoryHigh = config.agent_slice_memory_high,
-        -- MemoryMax = config.agent_slice_memory_max and MemorySwapMax =
-        -- config.agent_slice_swap_max. When one is set — by an earlier
-        -- launch or by the operator — it is kept unchanged: that is how an
-        -- operator chooses another cap.
-        --
-        -- At the cap the kernel kills the largest process in the slice,
-        -- which in practice is a linker or rustc. OOMPolicy=continue is
-        -- load-bearing: without it systemd stops the whole scope after the
-        -- kill, ending the agent's session along with its build (measured
-        -- in task #98833). With it the agent sees one failed build command
-        -- and every other agent is untouched. The swap bound exists because
-        -- a full swap is what froze the machine, not the full RAM alone.
-        --
-        -- BEST-EFFORT in the same direction as RUSTC_WRAPPER: when the
-        -- user service manager cannot be reached, or the read or the write
-        -- of the slice fails, the launch proceeds unwrapped — today's
-        -- behaviour — and dispatch logs why. A wrapper that cannot start
-        -- would leave a window with no agent in it and nothing on the board
-        -- saying so, which is worse than an uncapped agent.
-        --
-        -- "Can be reached" is checked twice, because the board and the pane
-        -- can see different buses (a tmux server started over ssh or from a
-        -- TTY has no user bus, and systemd-run may not be on its PATH). The
-        -- board probes with `systemd-run --user --scope -- true` before it
-        -- reads the cap, and decides once per board run, not per launch. The
-        -- wrapped command probes again in the pane and runs the bare command
-        -- when the probe fails, as an if/else so a failing agent is never
-        -- run twice.
-        --
-        -- Both steps run inside the dispatch deadline (ProvisioningStopsAtTheDeadline):
-        -- a launch past it skips both. The scope probe is also skipped, and
-        -- not cached, when less than its worst case remains (30 seconds:
-        -- `PREPARE_SCOPE_WORST_CASE`, the probe, the cap read and the cap
-        -- write together), so a launch short of time runs unwrapped now and
-        -- may probe on a later launch. An answer already decided costs
-        -- nothing and is used whatever time is left. The sccache start is
-        -- bounded by the time left and by 5 seconds, whichever is shorter.
-        --
-        -- == The child environment (non_interactive_env) ==
-        -- Every bounded subprocess (`run_bounded`: git, gh, tmux) runs in its
-        -- own session with no controlling terminal, and gets
-        -- `GIT_TERMINAL_PROMPT=0` so git never prompts. `SSH_ASKPASS_REQUIRE=never`
-        -- is added unless the user already set a non-blank value, because
-        -- without a tty ssh would otherwise open a GUI askpass dialog when a
-        -- display is set; `force` with a keyring askpass is how some users
-        -- unlock keys. A `GIT_SSH_COMMAND` the user set stays, with
-        -- `-o BatchMode=yes` appended (git ranks it above `core.sshCommand`,
-        -- so one is never invented). The user's own ssh config is not touched.
-
-    @guarantee SccacheServerStartsOutsideTheCap
-        -- When RUSTC_WRAPPER=sccache is set, dispatch starts the sccache
-        -- server itself before the launch, from the board's own process,
-        -- with its idle timeout off; a server that is already running is
-        -- left as it is. sccache's server is spawned by its first client
-        -- and stays in that client's cgroup, so without this it would live
-        -- inside the first agent's scope, count against the shared cap, and
-        -- at ~750 MB be a likely kill — breaking every agent's build at
-        -- once. The idle timeout is off so the server does not exit and get
-        -- respawned by some agent inside the cap. Failure to start it is
-        -- logged and never blocks the launch.
-
-    @guarantee DevBuildsKeepLineTablesNotFullDebugInfo
-        -- The dev profile in Cargo.toml sets `debug = "line-tables-only"`.
-        -- Task #16776 measured it: this repo links ~30 test binaries, each
-        -- carrying full DWARF, and the target dir reached 11G. Line tables
-        -- cut a cold build from 3m25s to 2m24s and a one-file rebuild from
-        -- 50s to 29s, and the target dir to 8.2G. Panics and backtraces keep
-        -- file:line. What is lost is variable inspection in a debugger, which
-        -- no agent loop uses. Dropping debug info entirely (`debug = 0`) was
-        -- measured too and bought almost nothing more on the rebuild (28s),
-        -- while losing backtrace line numbers, so it is not the setting.
-
-    @guarantee PromptIsSeparatedFromTheLaunchFlags
-        -- A launch that passes the prompt as a positional argument puts a bare
-        -- `--` between the flags and the prompt. The prompt is then the
-        -- program's operand, whatever the flags in front of it are.
-        --
-        -- Without it the launch is only accidentally correct. Claude Code's
-        -- `--mcp-config` is VARIADIC (`<configs...>`): it keeps consuming
-        -- following words until the next `-`-prefixed one. Ending the flags
-        -- with it — which AgentCarriesItsOwnCallerIdentity above is exactly
-        -- what made happen — hands the prompt to `--mcp-config` as a second
-        -- configuration. Claude Code then resolves the prompt as a file path
-        -- relative to the worktree and refuses to start: "Invalid MCP
-        -- configuration: Failed to read file". Every dispatch fails, and the
-        -- error names a path made of the worktree and the first line of the
-        -- prompt.
-        --
-        -- So the separator is normative, not a reordering of the flags. Putting
-        -- a single-valued flag last would also work today and would break
-        -- silently the next time the flag order changed or a variadic flag was
-        -- added; nothing about the flag string would say why the order mattered.
-        --
-        -- Only the prompt-carrying launch needs it. ResumeTask passes
-        -- `--continue`, a `-`-prefixed word, which ends the variadic by itself.
+    -- owed by this dispatch. The launch command that carries the text is
+    -- AgentLaunchCommand; what stays below is the provisioning.
 
     @guidance
         -- == Subagent state reset ==
@@ -841,7 +535,7 @@ rule ProvisionDispatch {
         -- `git worktree add` is the whole of the reuse path, so a path that
         -- cannot be worked in produces no error of its own downstream: tmux
         -- accepts an unresolvable start directory and silently starts the pane
-        -- in the operator's HOME (probed against tmux 3.7c, #4889 — the
+        -- in the operator's HOME (probed against tmux 3.7c: the
         -- `-c` argument is not validated and `new-window` exits 0). Reuse
         -- without this check therefore does not fail; it launches an agent
         -- outside any worktree, with the task recording the unusable path as
@@ -869,15 +563,15 @@ rule ProvisionDispatch {
         -- A dangling symlink at the worktree path is therefore present but not
         -- usable: the dispatch aborts, and the link survives. It is still
         -- there for the operator to see, rather than silently unlinked by a
-        -- rollback that did not create it — which is what deciding presence by
-        -- a link-following `exists()` used to license.
+        -- rollback that did not create it, as deciding presence by a
+        -- link-following `exists()` would.
         --
         -- == A reused branch with no work of its own is fast-forwarded ==
         -- ReusedBranchWithNoOwnWorkIsFastForwarded. Skipping `git worktree
         -- add` also skips the one step that places the branch, so a worktree
         -- left by an earlier failed dispatch keeps the branch where that
-        -- attempt made it — possibly many commits behind the base (#40984: 60
-        -- behind, noticed by the agent only by chance). On the reuse path,
+        -- attempt made it — possibly many commits behind the base, which the
+        -- agent notices only by chance. On the reuse path,
         -- when a base branch is known and is not a PR head, the branch is
         -- therefore reconciled with the start point the selection above chose
         -- (the same ref a fresh worktree would have been created from):
@@ -906,13 +600,13 @@ rule ProvisionDispatch {
         -- describes (tasks.allium): a `.git/worktrees/<name>` entry whose
         -- directory is gone still claims the branch, and the next
         -- `git worktree add` for the same task fails with "'<branch>' is
-        -- already used by worktree at ..." (probed against git 2.55, #4882).
+        -- already used by worktree at ..." (probed against git 2.55).
         -- Teardown prunes the records it personally witnessed, and must
         -- continue to — it prunes before its own step-3 branch delete, which
         -- fails while the record still claims the branch. But teardown only
         -- runs for the husks teardown made. A record left by an operator's
         -- `rm -rf`, by a crashed dispatch, or by a husk deleted by hand
-        -- (104 of them in #4877) has no teardown behind it, and blocks
+        -- has no teardown behind it, and blocks
         -- re-dispatch forever. Pruning here covers every cause, including
         -- that existing backlog, and makes teardown's prune belt-and-braces
         -- rather than the only guard.
@@ -1487,10 +1181,329 @@ rule RetryFresh {
 -- That buffer is a surface of its own and lives in board-layout.allium:
 -- TextInputField — every bare mention of it in this section names that one.
 
+-- The command every task-agent launch runs: DispatchTask,
+-- DispatchResearchTask, quick dispatch (ProvisionDispatch) and ResumeTask.
+-- The launchers compose their flags and environment through one seam, so
+-- each guarantee here holds for all of them. What the prompt says is in
+-- dispatch-prompt.allium: AgentPrompt.
+surface AgentLaunchCommand {
+    facing _: core/DispatchedAgent
+
+    @guarantee EveryTaskAgentLaunchesOnItsModel
+        -- Every task-agent launch passes `--model <alias>`, where alias is
+        -- task.model, or sonnet when task.model is null (core/TaskModel).
+        -- This holds for DispatchTask, DispatchResearchTask, quick dispatch
+        -- and ResumeTask alike — the flag is part of the launch flags every
+        -- launcher shares, so ResumeTask's `--continue` carries it too, and a
+        -- model changed while the agent was stopped takes effect on resume.
+        -- The flag is always passed, never left to Claude Code's own
+        -- configured default: "sonnet unless the task says otherwise" must
+        -- hold whatever the operator's ~/.claude settings choose for their own
+        -- sessions. The alias goes before `--mcp-config`, which is variadic
+        -- and stays last (PromptIsSeparatedFromTheLaunchFlags).
+
+    @guarantee EveryTaskAgentLaunchesInAutoMode
+        -- Every task-agent launch starts Claude in auto mode — i.e.
+        -- with no --permission-mode flag at all — with no exceptions.
+        -- This holds for DispatchTask, DispatchResearchTask, quick
+        -- dispatch and ResumeTask alike: an agent edits files without a
+        -- per-edit approval prompt, so an unattended launch is not left
+        -- blocked on a dialog nobody is watching.
+        -- ResumeTask is named deliberately. It does not share the
+        -- dispatch launch path — it composes its own claude command —
+        -- so it is the one launcher the guarantee reaches only by
+        -- assertion, not by construction.
+        -- What differentiates the modes is the prompt content, never the
+        -- permission flag. A mode that must not change code says so in
+        -- its prompt — see DispatchResearchTask, whose addendum says that
+        -- findings are presented interactively and that code changes and
+        -- wrap-up are the user's call (dispatch-prompt.allium:
+        -- TheResearchPromptGivesItsReasonNotARule).
+        -- Research is no exception: plan mode would park the agent on an
+        -- approval dialog for work the research prompt already forbids, and
+        -- a session that must ask before every read is slower without being
+        -- safer. The instruction carries the whole constraint.
+
+    @guarantee AgentCarriesItsOwnCallerIdentity
+        -- Every agent launch hands Claude Code a per-task MCP configuration
+        -- that declares the dispatch server with a FIXED
+        -- `X-Caller-Task-Id: <task.id>` header. The agent's identity travels
+        -- with the launch, decided by the launcher that already knows which
+        -- task it is starting.
+        --
+        -- It cannot be derived at the agent's end. The
+        -- `dispatch caller-headers` headersHelper that the startup
+        -- configuration check (startup.allium) installs in Claude Code's
+        -- user-global config reads its own working
+        -- directory to recognise a `.worktrees/<id>-<slug>` path — and Claude
+        -- Code runs a helper declared there from ITS OWN config directory, not
+        -- from the session's. The helper therefore answers "session" for every
+        -- dispatched agent, correctly for the directory it was handed and
+        -- uselessly for the question being asked. Nothing in the environment it
+        -- receives names the session's workspace, so no amount of repair to the
+        -- helper can recover the answer.
+        --
+        -- Where that entry lives is HANDED to the launch, not looked up by it,
+        -- on the same terms and for the same reason as
+        -- observability.allium: SettingsLocationIsAnExplicitStartupInput: startup resolves the
+        -- operator's locations once and passes them down, so a run that is not
+        -- the operator's own session is handed locations of its own and cannot
+        -- reach theirs. A launch told about no such location writes no
+        -- configuration, which is the best-effort arm below.
+        --
+        -- The per-task configuration is DERIVED FROM the user's own `dispatch`
+        -- entry rather than composed from scratch: the entry is copied, its
+        -- headersHelper dropped, and the fixed header put in its place. So the
+        -- transport and the URL — including a non-default port — cannot drift
+        -- from what the startup configuration check wrote, and there is no
+        -- second place that
+        -- has to be taught the port.
+        --
+        -- The configuration is ADDITIVE, never exclusive. It overrides the
+        -- same-named user entry and leaves every other MCP server the operator
+        -- has configured available to the agent; an agent launched with only
+        -- the dispatch server would silently lose tools the task may need.
+        --
+        -- It lives in the worktree's own git administrative directory. That
+        -- keeps it out of `git status`, so an agent cannot commit it into the
+        -- repository it is working on, and it is removed by the
+        -- `git worktree remove` that TaskTeardown already performs — see
+        -- CallerIdentityConfigGoesWithTheWorktree in tasks.allium. Nothing
+        -- else deletes it and nothing needs to.
+        --
+        -- BEST-EFFORT, and it degrades in one direction only: if the
+        -- configuration cannot be written the agent is launched WITHOUT it,
+        -- never with a path that does not exist. The failure is warn-logged and
+        -- costs the caller-identity surfaces (see
+        -- CallerIdentityDependsOnTheLaunch in mcp-task-tools.allium) — exactly
+        -- which is not worth trading a launched agent for.
+        --
+        -- Owed by every launch, not only by provisioning: resuming into an
+        -- existing worktree (ResumeTask) launches an agent and therefore owes
+        -- it too. Both launches compose their flags through one seam, so a
+        -- third launcher that bypassed it would lose the plugin directory and
+        -- the session name along with the identity — a loud failure in place of
+        -- the silent one this guarantee exists to prevent.
+
+    @guarantee DispatchedAgentsShareASccacheNotATargetDir
+        -- Every agent launch sets RUSTC_WRAPPER=sccache in the tmux window's
+        -- environment — DispatchTask, DispatchResearchTask, quick dispatch
+        -- and ResumeTask alike, through the same one seam
+        -- AgentCarriesItsOwnCallerIdentity above already requires each
+        -- launcher to share, so a launch composing its own flags cannot
+        -- forget the var independently of the identity header.
+        --
+        -- The alternative — one shared CARGO_TARGET_DIR across worktrees —
+        -- was measured and found unsafe, not
+        -- merely slower: two worktrees with different in-flight source,
+        -- built concurrently against one shared target dir, produced a
+        -- binary where the second build reported success but silently
+        -- contained the first worktree's compiled code, not its own.
+        -- sccache does not have this failure mode because each worktree
+        -- keeps its OWN target/ directory; only the compiler-object cache
+        -- (~/.cache/sccache) is shared, and that cache is keyed by
+        -- preprocessed source content, not by directory mtime bookkeeping,
+        -- so a lookup cannot cross-contaminate between worktrees' independent
+        -- source. This is also why spacetime/module — the separate wasm32
+        -- workspace excluded from the main cargo workspace — needs no config
+        -- of its own: it inherits the same environment variable, and a plain
+        -- environment variable reaches a `cd spacetime/module && cargo check`
+        -- invocation with nothing further to wire up.
+        --
+        -- BEST-EFFORT in one direction only, unlike
+        -- AgentCarriesItsOwnCallerIdentity's best-effort config write: the
+        -- var is set only when `sccache` resolves on PATH at dispatch time.
+        -- Absent, the launch proceeds without it,
+        -- never blocking or failing the dispatch over a missing
+        -- optional tool. sccache is a build-time speedup, not something any
+        -- agent's correctness depends on, so this follows the same
+        -- convention as this repo's other optional external tools
+        -- (bubblewrap, socat) rather than its required ones (tmux, git, gh,
+        -- claude), which have no such fallback.
+
+    @guarantee AgentBuildsRunFewerParallelJobs
+        -- Every agent launch decides CARGO_BUILD_JOBS in the tmux window's
+        -- environment, through the same seam as RUSTC_WRAPPER above, so no
+        -- launcher can set one without the other. The value is the board's
+        -- own CARGO_BUILD_JOBS when its environment carries one — that is
+        -- how an operator chooses another number. Otherwise it is
+        -- min(config.agent_cargo_build_jobs, the machine's cores), EXCEPT
+        -- that the variable is left unset when a cargo config sets
+        -- build.jobs, in the worktree's `.cargo/` or any parent's, or in
+        -- CARGO_HOME (default ~/.cargo). Cargo ranks the environment above
+        -- config files, so setting it would raise a repo or user that chose
+        -- `jobs = 2` to save memory back to the default. Detection is a text
+        -- scan for the key; a miss only costs the default.
+        --
+        -- Why: cargo's default is one job per core. One
+        -- `cargo test` in this repo links 34+ test binaries, each link
+        -- peaking at ~1.1 GB, so on a 22-core machine two agents testing at
+        -- once held ~45 linkers and ~50 GB, filled RAM and swap, and froze
+        -- the machine. At 8 jobs four concurrent agents peak near 38 GB.
+        -- This is prevention; AgentsShareOneMemoryCap is the backstop.
+
+    @guarantee AgentsShareOneMemoryCap
+        -- Every agent launch runs the agent's `claude` command in its own
+        -- transient systemd user scope inside config.agent_slice, with
+        -- OOMPolicy=continue, so the agent and everything it starts (cargo,
+        -- rustc, linkers, test binaries) count against one memory cap
+        -- shared by all agents on this machine. The cap bounds the total,
+        -- not each agent: a lone agent may use all of it, and no number of
+        -- agents can take the memory the desktop and the board need.
+        --
+        -- Before each launch dispatch reads the slice's MemoryMax from the
+        -- user service manager. When none is set, it sets, for the runtime
+        -- of the manager only, MemoryHigh = config.agent_slice_memory_high,
+        -- MemoryMax = config.agent_slice_memory_max and MemorySwapMax =
+        -- config.agent_slice_swap_max. When one is set — by an earlier
+        -- launch or by the operator — it is kept unchanged: that is how an
+        -- operator chooses another cap.
+        --
+        -- At the cap the kernel kills the largest process in the slice,
+        -- which in practice is a linker or rustc. OOMPolicy=continue is
+        -- load-bearing: without it systemd stops the whole scope after the
+        -- kill, ending the agent's session along with its build. With it the agent sees one failed build command
+        -- and every other agent is untouched. The swap bound exists because
+        -- a full swap is what froze the machine, not the full RAM alone.
+        --
+        -- BEST-EFFORT in the same direction as RUSTC_WRAPPER: when the
+        -- user service manager cannot be reached, or the read or the write
+        -- of the slice fails, the launch proceeds unwrapped and dispatch
+        -- logs why. A wrapper that cannot start
+        -- would leave a window with no agent in it and nothing on the board
+        -- saying so, which is worse than an uncapped agent.
+        --
+        -- "Can be reached" is checked twice, because the board and the pane
+        -- can see different buses (a tmux server started over ssh or from a
+        -- TTY has no user bus, and systemd-run may not be on its PATH). The
+        -- board probes with `systemd-run --user --scope -- true` before it
+        -- reads the cap, and decides once per board run, not per launch. The
+        -- wrapped command probes again in the pane and runs the bare command
+        -- when the probe fails, as an if/else so a failing agent is never
+        -- run twice.
+        --
+        -- Both steps run inside the dispatch deadline (ProvisioningStopsAtTheDeadline):
+        -- a launch past it skips both. The scope probe is also skipped, and
+        -- not cached, when less than its worst case remains (30 seconds:
+        -- `PREPARE_SCOPE_WORST_CASE`, the probe, the cap read and the cap
+        -- write together), so a launch short of time runs unwrapped now and
+        -- may probe on a later launch. An answer already decided costs
+        -- nothing and is used whatever time is left. The sccache start is
+        -- bounded by the time left and by 5 seconds, whichever is shorter.
+        --
+        -- == The child environment (non_interactive_env) ==
+        -- Every bounded subprocess (`run_bounded`: git, gh, tmux) runs in its
+        -- own session with no controlling terminal, and gets
+        -- `GIT_TERMINAL_PROMPT=0` so git never prompts. `SSH_ASKPASS_REQUIRE=never`
+        -- is added unless the user already set a non-blank value, because
+        -- without a tty ssh would otherwise open a GUI askpass dialog when a
+        -- display is set; `force` with a keyring askpass is how some users
+        -- unlock keys. A `GIT_SSH_COMMAND` the user set stays, with
+        -- `-o BatchMode=yes` appended (git ranks it above `core.sshCommand`,
+        -- so one is never invented). The user's own ssh config is not touched.
+
+    @guarantee SccacheServerStartsOutsideTheCap
+        -- When RUSTC_WRAPPER=sccache is set, dispatch starts the sccache
+        -- server itself before the launch, from the board's own process,
+        -- with its idle timeout off; a server that is already running is
+        -- left as it is. sccache's server is spawned by its first client
+        -- and stays in that client's cgroup, so without this it would live
+        -- inside the first agent's scope, count against the shared cap, and
+        -- at ~750 MB be a likely kill — breaking every agent's build at
+        -- once. The idle timeout is off so the server does not exit and get
+        -- respawned by some agent inside the cap. Failure to start it is
+        -- logged and never blocks the launch.
+
+    @guarantee DevBuildsKeepLineTablesNotFullDebugInfo
+        -- The dev profile in Cargo.toml sets `debug = "line-tables-only"`.
+        -- Measured: this repo links ~30 test binaries, each
+        -- carrying full DWARF, and the target dir reached 11G. Line tables
+        -- cut a cold build from 3m25s to 2m24s and a one-file rebuild from
+        -- 50s to 29s, and the target dir to 8.2G. Panics and backtraces keep
+        -- file:line. What is lost is variable inspection in a debugger, which
+        -- no agent loop uses. Dropping debug info entirely (`debug = 0`) was
+        -- measured too and bought almost nothing more on the rebuild (28s),
+        -- while losing backtrace line numbers, so it is not the setting.
+
+    @guarantee PromptIsSeparatedFromTheLaunchFlags
+        -- A launch that passes the prompt as a positional argument puts a bare
+        -- `--` between the flags and the prompt. The prompt is then the
+        -- program's operand, whatever the flags in front of it are.
+        --
+        -- Without it the launch is only accidentally correct. Claude Code's
+        -- `--mcp-config` is VARIADIC (`<configs...>`): it keeps consuming
+        -- following words until the next `-`-prefixed one. Ending the flags
+        -- with it, as AgentCarriesItsOwnCallerIdentity does, hands the prompt to `--mcp-config` as a second
+        -- configuration. Claude Code then resolves the prompt as a file path
+        -- relative to the worktree and refuses to start: "Invalid MCP
+        -- configuration: Failed to read file". Every dispatch fails, and the
+        -- error names a path made of the worktree and the first line of the
+        -- prompt.
+        --
+        -- So the separator is normative, not a reordering of the flags. Putting
+        -- a single-valued flag last would also work today and would break
+        -- silently the next time the flag order changed or a variadic flag was
+        -- added; nothing about the flag string would say why the order mattered.
+        --
+        -- Only the prompt-carrying launch needs it. ResumeTask passes
+        -- `--continue`, a `-`-prefixed word, which ends the variadic by itself.
+}
+
+-- The label the board shows for starting a task.
+surface DispatchActionLabel {
+    facing _: core/Operator
+
+    @guarantee OneNameForStartingATask
+        -- The action-hint label for this key on a BACKLOG task is
+        -- "dispatch", unconditionally — it does not vary on whether the task
+        -- has a plan attached. "Dispatch" is the name of the act of starting
+        -- a task, and that act is identical either way: the same worktree,
+        -- the same tmux window, the same agent. What the plan changes is only
+        -- what the prompt tells that agent to do first (see
+        -- dispatch-prompt.allium: ComposeAgentPrompt), which is not something
+        -- the user is choosing between when they press the key.
+        -- A second label for the no-plan case would turn a prompt-internal
+        -- detail into a second user-facing verb for one action.
+}
+
+-- The ways an operator relaunches an agent into a task's existing worktree,
+-- or starts over. MCP resume_task reaches ResumeTask through its own rule
+-- (mcp-task-tools.allium: ResumeTaskViaMcp).
+surface AgentRelaunch {
+    facing _: core/Operator
+
+    provides:
+        -- Space on a detached card, or on a detached row in an agent-tree
+        -- pane (agent-tree.allium: ResumeDetachedAgentFromThePane); also
+        -- split-pane.allium's activation of a detached task.
+        ResumeTask(task, message?)
+        -- The retry dialog's "resume" answer (confirm_retry_resume).
+        RetryResume(task)
+        -- The retry dialog's "fresh" answer (confirm_retry_fresh).
+        RetryFresh(task)
+}
+
+-- The two writes the board makes when the operator uses a repo path or a
+-- base branch. Nothing else records either: MCP create_task saves no path and
+-- records no branch.
+surface RepoHistoryWrites {
+    facing _: core/Operator
+
+    provides:
+        -- Finishing the new-task form (BaseBranchPicker's Confirm), a quick
+        -- dispatch (RepoPathPicker's Confirm in QuickDispatch), and a task
+        -- edit that sets a non-empty repo_path (RecordRepoPath).
+        RepoPathUsed(path)
+        -- Finishing the new-task form only (RecordBaseBranch).
+        BaseBranchUsed(repo, branch)
+}
+
 surface RepoPathPicker {
     facing user: core/Operator
 
-    let saved = core/SavedRepoPaths
+    -- Each path once: rows of one path on several hosts (core/SavedRepoPath)
+    -- are listed at the place of the path's most recent row.
+    let saved = core/SavedRepoPaths where not (exists o in core/SavedRepoPaths where o.path = path and o.last_used > last_used)
     let query = ""
     let cursor = 0
 
@@ -1559,9 +1572,9 @@ surface RepoPathPicker {
         -- is appended to query via TypeChar; navigation goes through
         -- the arrow keys; selection goes through Enter. This contract
         -- is shared by every InputMode that renders this picker —
-        -- in particular it forbids the historical j/k nav alias and
-        -- the historical 1-9 instant-select shortcut, both of which
-        -- broke fuzzy filtering on paths containing those characters.
+        -- in particular it forbids a j/k nav alias and a 1-9
+        -- instant-select shortcut, both of which would break fuzzy
+        -- filtering on paths containing those characters.
 
     @guidance
         -- This surface appears during task creation (InputRepoPath),
@@ -1596,14 +1609,14 @@ surface BaseBranchPicker {
     -- earlier in the same flow, rather than the global set of repo paths.
     --
     -- selected_repo is the repo_path confirmed at the preceding InputRepoPath
-    -- step; the picker scopes its history to that repo. history is the
-    -- per-repo most-recently-used list, ordered most-recent-first. The whole
-    -- board's history is preloaded once at startup (a single
-    -- list-all-base-branches read, mirroring the repo-path preload) and kept
-    -- in memory keyed by repo_path; this surface reads the slice for
-    -- selected_repo.
+    -- step. history is the branches recorded through selected_repo or
+    -- through any path of the same repository (same_repository: the two
+    -- paths have SavedRepoPath rows that share a non-null github_path), most
+    -- recent first, each (path, branch) once. The board reads the whole
+    -- history from its subscription and keeps it by repo_path; this surface
+    -- reads the entry for selected_repo.
     let selected_repo = ""
-    let history = core/SavedRepoBranches where repo_path = selected_repo
+    let history = core/SavedRepoBranches where repo_path = selected_repo or same_repository(repo_path, selected_repo)
 
     -- query starts prefilled with the most-recently-used branch for
     -- selected_repo (history.first.branch), falling back to the form's prior
@@ -1726,8 +1739,7 @@ surface BaseBranchPicker {
     @guidance
         -- This surface is the base-branch counterpart of RepoPathPicker, shown
         -- during the manual task-creation form's InputBaseBranch step (and the
-        -- copy-task flow, which reuses the same step). It replaces the former
-        -- plain text field that defaulted to "main". Interaction is identical
+        -- copy-task flow, which reuses the same step). Interaction is identical
         -- to RepoPathPicker: typing fuzzy-filters the repo's remembered
         -- branches live, arrow keys move through the list, Enter selects (or
         -- free-types a new branch when nothing matches).
@@ -1739,10 +1751,10 @@ surface BaseBranchPicker {
         -- place via the TextInputField surface. Text-caret motion does not
         -- reset the list cursor; only query edits do.
         --
-        -- Confirming this step emits BaseBranchUsed(selected_repo, <branch>)
-        -- as part of finish_task_creation, recording the chosen branch into
-        -- the repo's history (see RecordBaseBranch). Quick dispatch and MCP
-        -- create_task never render this surface and never record history.
+        -- Confirming this step finishes the form, which records the chosen
+        -- branch and the path (RepoHistoryWrites: BaseBranchUsed and
+        -- RepoPathUsed). Quick dispatch and MCP create_task never render this
+        -- surface and never record branch history.
 }
 
 surface DispatchingFeedback {
@@ -2069,74 +2081,24 @@ surface ActiveModelIndicator {
 }
 
 surface SandboxedAgentExecution {
-    facing operator: core/Operator
-    -- prose: The same dispatch-owned settings file that carries the
-    -- statusLine decorator (see observability.allium: StatusLineDecorator)
-    -- used to also enable
-    -- Claude Code's sandbox mode — a Bash-tool-only, OS-enforced jail — for
-    -- every dispatch-spawned session. As of SandboxDisabledForDockerAndUnixSockets
-    -- below, the sandbox is disabled entirely: sandbox_enabled is the only
-    -- key dispatch's settings file still writes under "sandbox". This
-    -- surface previously carried a growing set of per-ecosystem exceptions
-    -- (Gradle, gh, git-SSH, GCP Artifact Registry) to keep the sandbox on
-    -- while unblocking one command pattern at a time; see
-    -- SandboxDisabledForDockerAndUnixSockets for why that approach was
-    -- abandoned in favour of disabling the sandbox outright.
-
-    let sandbox_enabled = false
-
-    exposes:
-        sandbox_enabled
+    facing _: core/Operator
 
     @guarantee SandboxDisabledForDockerAndUnixSockets
-        -- Docker-based test suites (Testcontainers etc.) don't shell out to
-        -- a `docker` CLI command a sandbox exception could pattern-match —
-        -- the test process (mvn, ./gradlew test, go test, pytest, npm test,
-        -- ...) talks to the Docker daemon directly over its Unix socket.
-        -- That's the same class of gap the sandbox always had for gh's
-        -- D-Bus keyring access (AF_UNIX sockets aren't domain traffic, and
-        -- historically weren't matched by excludedCommands either), except
-        -- here the invoking command isn't a single enumerable string across
-        -- ecosystems the way gh's was, so an excludedCommands-style fix
-        -- can't generalize. Claude Code's sandbox schema has exactly one
-        -- Linux-wide knob for this: network.allowAllUnixSockets, an
-        -- all-or-nothing switch for local socket access with no narrower
-        -- per-socket scoping. Given the choice between that (still a global
-        -- IPC loosening, and one more ecosystem-specific carve-out on top of
-        -- an already-growing list) and disabling the sandbox outright, the
-        -- sandbox was disabled outright. This also resolves, as a side
-        -- effect, an unreproduced `git checkout`/
-        -- `.git/worktrees/<name>/index.lock` "Read-only file system"
-        -- failure from task #4367 and the `apply-seccomp:
-        -- unshare(CLONE_NEWUSER)` flaky-startup failures — both were
-        -- sandbox-caused, so removing the sandbox removes the failure
-        -- class. Per-command permission prompts (Claude Code's own approval
-        -- flow, entirely separate from the OS-level sandbox) are unaffected
-        -- and are now the sole review layer for a dispatched agent's shell
-        -- commands. The exceptions this surface used to carry —
-        -- FilesystemLeftAtDefaults, GitHubPreAllowedNetworkOtherwiseUnrestricted,
-        -- CredentialsDeniedNotMasked, FailsOpenOnMissingDependencies,
-        -- GradleDaemonExcludedFromSandbox, GhCliExcludedFromSandboxKeyring,
-        -- GitSshFetchPushExcludedFromSandbox,
-        -- GcpArtifactRegistryPreAllowedForGradle, and
-        -- GcloudCredentialsUnrestrictedForArtifactRegistry — described
-        -- sandbox-on behaviour that is now entirely moot; their reasoning
-        -- stays discoverable via git history and
-        -- docs/plans/2026-08-17-4250-sandbox-github-network-allowlist.md,
-        -- docs/plans/2026-08-17-4256-gradle-sandbox-clone-newuser.md,
-        -- docs/plans/2026-08-18-4287-gh-cli-sandbox-keyring.md,
-        -- docs/plans/2026-08-19-4289-git-ssh-sandbox-exclusion.md, and
-        -- docs/plans/2026-08-24-4355-artifact-registry-sandbox.md. See
-        -- docs/plans/2026-08-25-4373-disable-sandbox-for-dispatch-sessions.md
-        -- for this decision.
-
-    @guidance
-        -- Baked into the same JSON object write_settings_file
-        -- (src/setup/statusline.rs) produces for the statusLine key, so
-        -- every dispatch-spawned Claude session gets it automatically —
-        -- dispatch_agent, quick_dispatch_agent, research_agent, and resume
-        -- all pass --settings through the same DISPATCH_PLUGIN_DIR constant
-        -- (src/dispatch/prompts.rs). No change needed at any spawn site.
+        -- Every dispatch-spawned session runs with Claude Code's sandbox off:
+        -- the dispatch-owned settings file that carries the statusLine
+        -- decorator (observability.allium: StatusLineDecorator) writes
+        -- `"sandbox": {"enabled": false}` and no other sandbox key. Every
+        -- launcher (dispatch, quick dispatch, research, resume) passes that
+        -- file through `--settings`, so no spawn site sets it on its own.
+        --
+        -- Why off rather than on with exceptions: a Docker-based test suite
+        -- talks to the Docker daemon over its Unix socket, not through a
+        -- command a sandbox exception can name, and the sandbox's only
+        -- Linux knob for that (network.allowAllUnixSockets) opens every
+        -- local socket. Claude Code's own permission handling, separate
+        -- from the sandbox, stays the review layer for an agent's shell
+        -- commands. The decision record:
+        -- docs/plans/2026-08-25-4373-disable-sandbox-for-dispatch-sessions.md.
 }
 
 ------------------------------------------------------------
@@ -2225,8 +2187,8 @@ surface SandboxedAgentExecution {
 -- Refuse, never reattach — with ResumeTask the one exception, and the reason
 -- it is one says where the line falls. Reattaching is a decision only a caller
 -- that knows what the window is FOR can make, and a live "task-<id>" window is
--- by definition the agent ResumeTask was going to resume. Neither of the two
--- paths this invariant used to leave open is in that position: a dispatch
+-- by definition the agent ResumeTask was going to resume. Neither of the other two
+-- paths is in that position: a dispatch
 -- would be handing a fresh prompt to a session it knows nothing about, and an
 -- exiting split pane has a live pane that must go somewhere, so there is
 -- nothing to reattach TO. What each then leaves behind: the dispatch rolls its
@@ -2329,10 +2291,11 @@ surface SandboxedAgentExecution {
 -- does not have -- naming a branch that does not exist yet is legitimate, and
 -- the refusal at provisioning time is where that gets caught.
 
--- BranchHistoryCapped: no repo retains more than
+-- BranchHistoryCapped: no repo path retains more than
 -- config.max_base_branches_per_repo remembered base branches. This is a
 -- property of the write operation (RecordBaseBranch prunes on every write),
--- not something any caller enforces.
+-- not something any caller enforces. A repository with several paths can
+-- offer more in BaseBranchPicker (see RecordBaseBranch).
 invariant BranchHistoryCapped {
     for b in core/SavedRepoBranches:
         (core/SavedRepoBranches where repo_path = b.repo_path).count
@@ -2340,7 +2303,7 @@ invariant BranchHistoryCapped {
 }
 
 rule ProvisioningNeedsARepoPath {
-    when: DispatchProvisioningClaimed(request)
+    when: split/DispatchProvisioningClaimed(request)
 
     -- A task can be stored with repo_path = "": a feed item whose URL matches
     -- no local clone (feeds.allium: UpsertFeedTasks, repo path resolution).
