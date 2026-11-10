@@ -384,11 +384,16 @@ impl MemoryReducerCaller {
         let closed_task =
             (close_host.is_some() && finished && module::close_has_host_work(&row, ""))
                 .then(|| row.clone());
+        let moved_back = module::moves_back_to_backlog(&prior_status, &row.status);
         if let Err(why) = self.write_task(&mut tables, row) {
             return Ok(ReducerOutcome::Refused(why));
         }
         if let (Some(task), Some(host)) = (closed_task, close_host) {
             self.request_close_teardown(&mut tables, &task, "", host, &self.now());
+        }
+        // Mirrors the module: `MovingBackToBacklogCancelsTheDispatch`.
+        if moved_back {
+            self.fail_waiting_dispatch_requests_of(&mut tables, id.0);
         }
 
         if status_changed {

@@ -19,9 +19,10 @@
 
 use std::sync::Arc;
 
-use crate::dispatch::{self, DeadlineRunner, DEADLINE_PASSED};
+use crate::dispatch::{self, DeadlineRunner, DEADLINE_PASSED, MOVED_BACK_TO_BACKLOG};
 use crate::models::{
     DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchResult, TaskId,
+    TaskStatus,
 };
 use crate::service::ServiceError;
 use crate::store::RequestDispatchAnswer;
@@ -181,6 +182,11 @@ impl TaskService {
             // before the report landed — the module's clock decides
             // (`HostReportsDispatched`). Nothing was recorded on the task.
             Ok(false) if self.deadline_passed(&request) => DEADLINE_PASSED.to_string(),
+            // The operator gave up the launch (`HostReportsDispatched`'s
+            // backlog check, `MovingBackToBacklogCancelsTheDispatch`).
+            Ok(false) if self.moved_back_to_backlog(&request).await => {
+                MOVED_BACK_TO_BACKLOG.to_string()
+            }
             Ok(false) => "the dispatched report was refused".to_string(),
             // Still unknown after the retry. The failure report below lands
             // while the row is still provisioning and releases the claim now,
@@ -208,6 +214,15 @@ impl TaskService {
                 provisioned.reused_worktree,
             )
             .await
+    }
+
+    /// Whether the request's task is back in backlog, as this host's view
+    /// reads it now.
+    async fn moved_back_to_backlog(&self, request: &DispatchRequest) -> bool {
+        self.db
+            .get_task(request.task_id)
+            .await
+            .is_some_and(|t| t.status == TaskStatus::Backlog)
     }
 
     fn deadline_passed(&self, request: &DispatchRequest) -> bool {

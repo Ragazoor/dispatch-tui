@@ -595,9 +595,12 @@ fn a_phoenix_task_moved_from_running_to_backlog_is_still_rearmed() {
 fn a_schedule_request_failed_after_a_hand_move_back_to_backlog_still_marks() {
     // Moved back by hand while the launch was open: no claim left to
     // release, but the one-off must not fire again on its passed due time.
-    let (row, released) = task_after_failed_request(due_task(), "schedule", "boom", NOW);
-    assert!(!released);
+    // The launch left no worktree, so its agent ends
+    // (`agents.allium: EndAgentWhenLaunchFails`).
+    let (row, left_no_worktree) = task_after_failed_request(due_task(), "schedule", "boom", NOW);
+    assert!(left_no_worktree);
     let row = row.expect("marked");
+    assert_eq!(row.status, "backlog");
     assert_eq!(row.schedule_error, "boom");
     assert_eq!(row.next_due, "");
 }

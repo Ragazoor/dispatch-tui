@@ -236,13 +236,15 @@ rule StartAgentOnFreshLaunch {
 }
 
 -- A launch whose request fails before any worktree exists ends its agent
--- (A12). Fires with ReleaseClaimOfFailedRequest, in the same write, and only
--- when that rule's release applies: the task is still the bare claim
--- (running, no worktree). A request that fails after its task got a worktree
+-- (A12). Fires with ReleaseClaimOfFailedRequest, in the same write, when the
+-- failure leaves the task with no worktree: the release applies (the task is
+-- still the bare claim, running with no worktree), or the operator already
+-- moved the bare claim back to backlog (store-split.allium:
+-- MovingBackToBacklogCancelsTheDispatch). A request that fails after its task got a worktree
 -- (a dispatch that reused a kept one) leaves the agent current, because the
 -- worktree it works in is still there.
 rule EndAgentWhenLaunchFails {
-    when: store_split/FailedDispatchReleasedClaim(task)
+    when: store_split/FailedDispatchLeftNoWorktree(task)
 
     let agent = current_agent(task)
 

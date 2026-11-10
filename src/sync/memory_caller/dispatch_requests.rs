@@ -68,7 +68,7 @@ impl MemoryReducerCaller {
         // (`schedules.allium: ScheduledLaunchFails`), is the one write that can
         // refuse; ask before the failed row is written, so a refusal leaves the
         // request as it was.
-        let (marked, was_released) = match tables.tasks.get(&task_id).cloned() {
+        let (marked, left_no_worktree) = match tables.tasks.get(&task_id).cloned() {
             Some(task) => module::task_after_failed_request(task, &origin, reason, &stamp),
             None => (None, false),
         };
@@ -81,7 +81,7 @@ impl MemoryReducerCaller {
             if let Some(marked) = marked {
                 self.write_task(tables, marked)?;
             }
-            if was_released {
+            if left_no_worktree {
                 // agents.allium: EndAgentWhenLaunchFails.
                 module::end_current_agent(
                     &mut self.agent_store(tables),
@@ -111,6 +111,22 @@ impl MemoryReducerCaller {
             .collect();
         for row in open {
             let _ = self.fail_dispatch_request(tables, row, reason);
+        }
+    }
+
+    /// Mirrors the module's `fail_waiting_dispatch_requests_of`
+    /// (`MovingBackToBacklogCancelsTheDispatch`): called by `patch_task` after
+    /// the status write.
+    pub(super) fn fail_waiting_dispatch_requests_of(&self, tables: &mut Tables, task_id: i64) {
+        let waiting: Vec<module::DispatchRequest> = tables
+            .dispatch_requests
+            .values()
+            .filter(|r| r.task_id == task_id && module::is_waiting_dispatch_request(r))
+            .cloned()
+            .collect();
+        for row in waiting {
+            let _ =
+                self.fail_dispatch_request(tables, row, module::DISPATCH_REASON_MOVED_TO_BACKLOG);
         }
     }
 
@@ -294,6 +310,7 @@ impl MemoryReducerCaller {
         let Some(task) = tables.tasks.get(&row.task_id).cloned() else {
             return Err(format!("task {} no longer exists", row.task_id));
         };
+        module::validate_dispatched_report_for_task(&task)?;
         let row =
             module::dispatched_request_row(row, worktree, tmux_window, reused_worktree, &stamp);
         let epic_id = task.epic_id;

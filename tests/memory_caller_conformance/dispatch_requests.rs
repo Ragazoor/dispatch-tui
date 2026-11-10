@@ -328,6 +328,89 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
         same_request(r_fail, m_fail);
         same_task(failing);
 
+        // -- MovingBackToBacklogCancelsTheDispatch ---------------------------------
+        // A request still waiting fails at once; a provisioning one stays open,
+        // its dispatched report is refused, and the host's failure report
+        // finishes it.
+        let to_backlog = || bindings::TaskPatch {
+            status: Some("backlog".into()),
+            sub_status: Some("none".into()),
+            ..blank_task_patch()
+        };
+        let unclaimed = create(mine("")).await;
+        let claimed = create(mine("")).await;
+        wait_for!(rows_real.task(claimed).is_some());
+        let mut moved = Vec::new();
+        for task in [unclaimed, claimed] {
+            let r = applied_id(
+                real.request_dispatch(task, "host-a".into(), "user".into(), "dispatch".into())
+                    .await
+                    .unwrap(),
+            );
+            let m = applied_id(
+                mem.request_dispatch(task, "host-a".into(), "user".into(), "dispatch".into())
+                    .await
+                    .unwrap(),
+            );
+            wait_for!(rows_real.dispatch_request(r).is_some());
+            moved.push((r, m));
+        }
+        real.claim_dispatch_request(moved[1].0, "host-a".into())
+            .await
+            .unwrap();
+        mem.claim_dispatch_request(moved[1].1, "host-a".into())
+            .await
+            .unwrap();
+        for task in [unclaimed, claimed] {
+            real.patch_task(task, to_backlog())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+            mem.patch_task(task, to_backlog())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        wait_for!(rows_real
+            .dispatch_request(moved[0].0)
+            .is_some_and(|r| r.reason.is_some()));
+        wait_for!(rows_real
+            .task(claimed)
+            .is_some_and(|t| t.status == TaskStatus::Backlog));
+        for (r, m) in &moved {
+            same_request(*r, *m);
+        }
+        same_task(unclaimed);
+        let (id, who, wt, win) = report(moved[1].0);
+        both_refuse(
+            real.report_dispatch_provisioned(id, who, wt, win, false)
+                .await
+                .unwrap(),
+            {
+                let (id, who, wt, win) = report(moved[1].1);
+                mem.report_dispatch_provisioned(id, who, wt, win, false)
+                    .await
+                    .unwrap()
+            },
+        );
+        assert!(real
+            .report_dispatch_failed(moved[1].0, "host-a".into(), "refused".into())
+            .await
+            .unwrap()
+            .won());
+        assert!(mem
+            .report_dispatch_failed(moved[1].1, "host-a".into(), "refused".into())
+            .await
+            .unwrap()
+            .won());
+        wait_for!(rows_real
+            .dispatch_request(moved[1].0)
+            .is_some_and(|r| r.reason.is_some()));
+        same_request(moved[1].0, moved[1].1);
+        same_task(claimed);
+
         // -- HostRestartFailsInterrupted ------------------------------------------
         let interrupted = create(mine("")).await;
         let waiting = create(mine("")).await;

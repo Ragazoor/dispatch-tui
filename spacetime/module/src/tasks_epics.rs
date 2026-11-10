@@ -489,9 +489,14 @@ fn patch_task_row(
     // runs `gh pr close` and nothing else.
     let closed_task =
         (close_host.is_some() && finished && close_has_host_work(&row, "")).then(|| row.clone());
+    let moved_back = moves_back_to_backlog(&prior_status, &row.status);
     write_task(ctx, row)?;
     if let (Some(task), Some(host)) = (closed_task, close_host) {
         request_close_teardown(ctx, &task, "", host, &now(ctx));
+    }
+    // `MovingBackToBacklogCancelsTheDispatch`, after the status write.
+    if moved_back {
+        fail_waiting_dispatch_requests_of(ctx, id);
     }
 
     // ONLY WHEN THE DERIVATION'S INPUT MOVED. `derive_epic_status` reads the

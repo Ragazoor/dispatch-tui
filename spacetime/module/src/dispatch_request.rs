@@ -127,6 +127,9 @@ pub const DISPATCH_REASON_HOST_RESTARTED: &str = "host restarted";
 pub const DISPATCH_REASON_TASK_DELETED: &str = "task deleted";
 /// A closed task's reason (`CloseFailsOpenRequests`).
 pub const DISPATCH_REASON_TASK_CLOSED: &str = "task closed";
+/// A waiting request's reason when its task is moved back to backlog
+/// (`MovingBackToBacklogCancelsTheDispatch`).
+pub const DISPATCH_REASON_MOVED_TO_BACKLOG: &str = "task moved back to backlog";
 
 pub(crate) const MICROS_PER_SEC: i64 = 1_000_000;
 
@@ -451,10 +454,39 @@ pub fn release_claim_after_failure(task: Task) -> Option<Task> {
     is_bare_claim(&task).then(|| released_task(task))
 }
 
+/// `HostReportsDispatched`'s check of the task: a task moved back to backlog
+/// while its host provisioned has given up the launch
+/// (`MovingBackToBacklogCancelsTheDispatch`), so its report is refused and the
+/// host tears down what it made.
+pub fn validate_dispatched_report_for_task(task: &Task) -> Result<(), String> {
+    if task.status == BACKLOG {
+        return Err(format!(
+            "task {} was moved back to backlog, so the dispatched report is refused",
+            task.id
+        ));
+    }
+    Ok(())
+}
+
+/// `MovingBackToBacklogCancelsTheDispatch`'s trigger: a hand status write
+/// from running into backlog.
+pub fn moves_back_to_backlog(prior_status: &str, status: &str) -> bool {
+    prior_status == RUNNING && status == BACKLOG
+}
+
+/// `MovingBackToBacklogCancelsTheDispatch`'s selection: the requests still
+/// waiting for their host. A provisioning one stays open until its host
+/// reports, so a second dispatch cannot race its worker.
+pub fn is_waiting_dispatch_request(row: &DispatchRequest) -> bool {
+    row.state == DISPATCH_REQUESTED
+}
+
 /// Every failure's write to the task (`ReleaseClaimOfFailedRequest` and
 /// `schedules.allium: ScheduledLaunchFails` in one write): the row to write,
 /// stamped `updated_at = stamp`, or `None` when neither rule changes it, and
-/// whether the claim was released (which ends the task's agent). The schedule
+/// whether the launch left the task with no worktree, which ends the task's
+/// agent (`FailedDispatchLeftNoWorktree`): the claim was released, or the
+/// operator had already moved the bare claim back to backlog. The schedule
 /// is marked only on a task the failure leaves in backlog, released or moved
 /// back by hand meanwhile: a task that moved on (a close fails its request
 /// after the Done write) is not a launch that left it in backlog.
@@ -473,12 +505,13 @@ pub fn task_after_failed_request(
     } else {
         None
     };
+    let left_no_worktree = was_released || (base.status == BACKLOG && base.worktree.is_empty());
     let row = marked.or_else(|| was_released.then_some(base));
     let row = row.map(|row| Task {
         updated_at: stamp.into(),
         ..row
     });
-    (row, was_released)
+    (row, left_no_worktree)
 }
 
 /// `HostRestartFailsInterrupted`'s selection, over rows already read by the
@@ -545,11 +578,11 @@ pub(crate) fn fail_dispatch_request(
         let epic_id = task.epic_id;
         // schedules.allium: ScheduledLaunchFails rides on the release's
         // write, so the task is back in backlog already disarmed or re-armed.
-        let (row, was_released) = task_after_failed_request(task, &origin, reason, &stamp);
+        let (row, left_no_worktree) = task_after_failed_request(task, &origin, reason, &stamp);
         if let Some(row) = row {
             write_task(ctx, row)?;
         }
-        if was_released {
+        if left_no_worktree {
             // agents.allium: EndAgentWhenLaunchFails, with the release.
             end_current_agent(&mut AgentTables(ctx), task_id, AGENT_END_LAUNCH_FAILED);
         }
@@ -576,6 +609,24 @@ pub(crate) fn fail_open_dispatch_requests_of(ctx: &ReducerContext, task_id: i64,
         // The task row is already deleted, so the release (the only fallible
         // write) has nothing to write.
         let _ = fail_dispatch_request(ctx, row, reason);
+    }
+}
+
+/// `MovingBackToBacklogCancelsTheDispatch`: fail the task's requests still
+/// waiting for their host. Called by `patch_task` after the status write, so
+/// the release finds a task already in backlog and writes nothing more to it.
+pub(crate) fn fail_waiting_dispatch_requests_of(ctx: &ReducerContext, task_id: i64) {
+    let waiting: Vec<DispatchRequest> = ctx
+        .db
+        .dispatch_requests()
+        .task_id()
+        .filter(&task_id)
+        .filter(is_waiting_dispatch_request)
+        .collect();
+    for row in waiting {
+        // The task is already in backlog, so the release writes nothing; only
+        // a schedule mark could, and a refused one leaves the request open.
+        let _ = fail_dispatch_request(ctx, row, DISPATCH_REASON_MOVED_TO_BACKLOG);
     }
 }
 
@@ -705,6 +756,7 @@ pub fn report_dispatch_provisioned(
     let Some(task) = ctx.db.tasks().id().find(row.task_id) else {
         return Err(format!("task {} no longer exists", row.task_id));
     };
+    validate_dispatched_report_for_task(&task)?;
     let row = dispatched_request_row(row, &worktree, &tmux_window, reused_worktree, &stamp);
     let epic_id = task.epic_id;
     write_task(ctx, apply_dispatched_to_task(task, &row))?;

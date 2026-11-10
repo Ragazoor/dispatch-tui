@@ -766,6 +766,81 @@ async fn a_task_deleted_under_the_host_is_torn_down() {
     );
 }
 
+/// `MovingBackToBacklogCancelsTheDispatch`: the operator moves the task back
+/// to backlog while its host provisions. The dispatched report is refused, so
+/// the host tears down what it made (here the window; the fixture's worktree
+/// is reused, so it stays) and reports the failure; the task is left in backlog with no window and may be
+/// dispatched again.
+#[tokio::test]
+async fn a_task_moved_back_to_backlog_under_the_host_is_torn_down() {
+    let fx = fx();
+    let (task, _repo) = fx.backlog_task(None).await;
+    let svc0 = fx.svc(MockProcessRunner::unused());
+    let id = requested(
+        svc0.request_dispatch(task.id, DispatchOrigin::User, Some(DispatchMode::Dispatch))
+            .await
+            .unwrap(),
+    );
+    let db = fx.db.clone();
+    let task_id = task.id;
+    let runner = Arc::new(OnCall {
+        inner: script_with_spare_teardown(),
+        needle: "new-window",
+        action: Mutex::new(Some(Box::new(move || {
+            ready(
+                db.patch_task(
+                    task_id,
+                    &store::TaskPatch::new()
+                        .status(TaskStatus::Backlog)
+                        .sub_status(crate::models::SubStatus::default_for(TaskStatus::Backlog)),
+                ),
+            )
+            .unwrap();
+        }))),
+    });
+    let svc = fx.svc(runner.clone());
+
+    let outcome = svc.serve_dispatch_request(fx.row(id).await, emb()).await;
+
+    let ServedDispatch::Failed(reason) = outcome else {
+        panic!("a dispatch given up by the operator is a failure, got {outcome:?}");
+    };
+    assert_eq!(reason, crate::dispatch::MOVED_BACK_TO_BACKLOG);
+    assert_eq!(
+        crate::dispatch::MOVED_BACK_TO_BACKLOG,
+        dispatch_spacetime_module::DISPATCH_REASON_MOVED_TO_BACKLOG,
+        "the host records the module's reason"
+    );
+    let row = fx.row(id).await;
+    assert_eq!(row.state, DispatchRequestState::Failed);
+    assert_eq!(
+        row.reason.as_deref(),
+        Some(crate::dispatch::MOVED_BACK_TO_BACKLOG)
+    );
+    let stored = svc.get_task(task.id).await.unwrap();
+    assert_eq!(stored.status, TaskStatus::Backlog);
+    assert!(
+        stored.worktree.is_none(),
+        "a refused report is never recorded"
+    );
+    assert!(
+        stored.tmux_window.is_none(),
+        "no window is left on the task"
+    );
+
+    let calls = runner.inner.flattened_calls();
+    assert!(
+        calls.iter().any(|c| c.contains("kill-window")),
+        "the window this attempt opened must be killed: {calls:?}"
+    );
+
+    requested(
+        svc0.request_dispatch(task.id, DispatchOrigin::User, Some(DispatchMode::Dispatch))
+            .await
+            .unwrap(),
+    );
+}
+
 /// D4, `HostReportsDispatched`'s deadline: an attempt that finishes
 /// provisioning just past the row's deadline has its dispatched report
 /// refused by the module's clock. The host tears down what it made and

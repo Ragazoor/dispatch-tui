@@ -817,7 +817,9 @@ rule RequestDispatch {
     requires: task.host = null or task.host = requester
     -- Redundant with the backlog check while nothing else moves the task, and
     -- not otherwise: a manual move back to backlog during provisioning leaves
-    -- the old request open, and a second one beside it would race it.
+    -- the old request open until its host's teardown has reported
+    -- (MovingBackToBacklogCancelsTheDispatch), and a second one beside it
+    -- would race it.
     requires: not DispatchRequests.any(r => r.task = task and r.is_open)
     -- D11: only the requester's own owner may name it.
     requires: requester.owner != null and requester.owner = caller()
@@ -946,6 +948,11 @@ rule HostReportsDispatched {
     -- (dispatch.allium: ProvisioningStopsAtTheDeadline); a report that raced
     -- it is refused, and the host tears down and reports the failure.
     requires: now < request.deadline
+    -- A task moved back to backlog while its host provisioned has given up
+    -- the launch (MovingBackToBacklogCancelsTheDispatch). The report is
+    -- refused, and the host tears down what it made and reports the failure,
+    -- as for any refused report.
+    requires: request.task.status != backlog
 
     ensures: request.state = dispatched
     ensures: request.finished_at = now
@@ -976,6 +983,50 @@ rule HostReportsDispatched {
         -- A REPEATED REPORT IS ACCEPTED AND CHANGES NOTHING (see
         -- HostRepeatsDispatchedReport): a host whose report got no answer
         -- sends it again, and must hear "accepted" if the first one landed.
+        --
+        -- A REPORT FOR A TASK BACK IN BACKLOG IS REFUSED. The claim moved the
+        -- task to running before anything was provisioned, so the operator
+        -- can move it back while the host is still at work. Accepting the
+        -- report then would write a worktree and a live window onto a backlog
+        -- task, with an agent running in it. Only backlog is refused: a move
+        -- on to review keeps the launch, as a hook's flip would.
+}
+
+-- Moving a task back to backlog gives up its launch. A request still waiting
+-- for its host fails at once: nothing has been made for it. A request its
+-- host is provisioning stays open until the host's report, which is refused
+-- (HostReportsDispatched); the host then tears down and reports the failure.
+rule MovingBackToBacklogCancelsTheDispatch {
+    when: tasks/TaskStatusWrittenByHand(task, from, to)
+
+    requires: from = running and to = backlog
+
+    let waiting = DispatchRequests where task = task and state = requested
+
+    ensures:
+        for request in waiting:
+            request.state = failed
+            request.finished_at = now
+            request.reason = "task moved back to backlog"
+
+    @guidance
+        -- In the same patch_task (or update_task) transaction as the status
+        -- write, after it, so ReleaseClaimOfFailedRequest finds a task that
+        -- is already in backlog and writes nothing more to it. Cancels the
+        -- row's timer, as every failure does.
+        --
+        -- WHY A PROVISIONING ROW IS NOT FAILED HERE. The open row is what
+        -- refuses a second dispatch of the task (RequestDispatch). Failing it
+        -- on the move would let the operator dispatch again at once, and the
+        -- second attempt would meet the first one's worker: the same
+        -- worktree path and the same task-<id> window, which the first
+        -- attempt's teardown then removes. Kept open, the row blocks a new
+        -- dispatch until the host's own failure report lands, after its
+        -- teardown. The host's deadline bounds that wait.
+        --
+        -- The board's own move kills no window during provisioning: the
+        -- task holds none until the report lands (MoveTaskBackward kills the
+        -- window the task holds).
 }
 
 rule HostRepeatsDispatchedReport {
@@ -1119,14 +1170,20 @@ rule ReleaseClaimOfFailedRequest {
     -- A request failed by its task's deletion (DeletingATaskFailsItsOpenRequest)
     -- has no task left to release.
     let still_claimed = exists task and task.status = running and task.worktree = null
+    -- A claim the operator gave up by moving the task back to backlog
+    -- (MovingBackToBacklogCancelsTheDispatch) has nothing to release, but its
+    -- launch never got a worktree either.
+    let moved_back_bare = exists task and task.status = backlog and task.worktree = null
 
     ensures:
         if still_claimed:
             task.status = backlog
             task.sub_status = default_sub_status(backlog)
-            -- agents.allium: EndAgentWhenLaunchFails ends the task's current
-            -- agent as launch_failed in this same write.
-            FailedDispatchReleasedClaim(task: task)
+    -- agents.allium: EndAgentWhenLaunchFails ends the task's current agent as
+    -- launch_failed in this same write.
+    ensures:
+        if still_claimed or moved_back_bare:
+            FailedDispatchLeftNoWorktree(task: task)
     -- The epic status rollup for the task's epic chain, in the same reducer,
     -- whether or not the release applied. Every failure reaches it: a
     -- reported one, the backstop, a host restart. A deleted task has no chain

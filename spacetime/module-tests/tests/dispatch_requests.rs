@@ -394,6 +394,10 @@ fn a_backlog_task_with_an_open_request_is_refused() {
     let store = Store::new();
     let id = host_and_task(&store);
     request(&store, id).expect("first");
+    // Claimed: a request still waiting would fail on the move back
+    // (`MovingBackToBacklogCancelsTheDispatch`).
+    let req = only_request(&store).id;
+    claim(&store, "alice", req, HOST_A).expect("claim");
     patch(&store, id, status_patch("backlog"));
 
     let refused = request(&store, id).unwrap_err();
@@ -947,4 +951,99 @@ fn the_owner_may_relabel_but_not_disown_its_host() {
     let row = store.db().hosts().id().find(HOST_A.to_string()).unwrap();
     assert_eq!(row.label, "laptop");
     assert_eq!(row.owner, me);
+}
+
+#[test]
+fn moving_back_to_backlog_fails_a_request_still_waiting_for_its_host() {
+    let store = Store::new();
+    let id = host_and_task(&store);
+    request(&store, id).expect("request");
+    let req = only_request(&store).id;
+    patch(&store, id, status_patch("backlog"));
+
+    let row = only_request(&store);
+    assert_eq!(row.state, DISPATCH_FAILED);
+    assert_eq!(row.reason, "task moved back to backlog");
+    assert_eq!(timer_count(&store, req), 0);
+    assert_eq!(store.task(id).status, "backlog");
+    let agent = store
+        .db()
+        .agents()
+        .iter()
+        .find(|a| a.task_id == id)
+        .expect("the agent the claim started");
+    assert_eq!(agent.state, "ended");
+    assert_eq!(agent.end_reason, "launch_failed");
+
+    assert!(claim(&store, "alice", req, HOST_A).is_err());
+    request(&store, id).expect("nothing is in flight, so it can be requested again");
+}
+
+#[test]
+fn moving_back_to_backlog_keeps_a_provisioning_request_open() {
+    let store = Store::new();
+    let id = host_and_task(&store);
+    request(&store, id).expect("request");
+    let req = only_request(&store).id;
+    claim(&store, "alice", req, HOST_A).expect("claim");
+    patch(&store, id, status_patch("backlog"));
+
+    assert_eq!(only_request(&store).state, DISPATCH_PROVISIONING);
+    let refused = request(&store, id).unwrap_err();
+    assert!(refused.contains("open dispatch request"), "{refused}");
+}
+
+#[test]
+fn a_dispatched_report_for_a_task_moved_back_to_backlog_is_refused() {
+    let store = Store::new();
+    let id = host_and_task(&store);
+    request(&store, id).expect("request");
+    let req = only_request(&store).id;
+    claim(&store, "alice", req, HOST_A).expect("claim");
+    patch(&store, id, status_patch("backlog"));
+
+    let refused = report_dispatched(&store, "alice", req, HOST_A, "/wt/1-t").unwrap_err();
+    assert!(refused.contains("backlog"), "{refused}");
+    let task = store.task(id);
+    assert_eq!(task.worktree, "");
+    assert_eq!(task.host, "");
+    assert_eq!(task.status, "backlog");
+    assert_eq!(only_request(&store).state, DISPATCH_PROVISIONING);
+}
+
+#[test]
+fn the_failure_report_after_a_move_back_ends_the_agent_and_frees_the_task() {
+    let store = Store::new();
+    let id = host_and_task(&store);
+    request(&store, id).expect("request");
+    let req = only_request(&store).id;
+    claim(&store, "alice", req, HOST_A).expect("claim");
+    patch(&store, id, status_patch("backlog"));
+    report_failed(&store, "alice", req, HOST_A).expect("report failed");
+
+    assert_eq!(only_request(&store).state, DISPATCH_FAILED);
+    let task = store.task(id);
+    assert_eq!(task.status, "backlog");
+    let agent = store
+        .db()
+        .agents()
+        .iter()
+        .find(|a| a.task_id == id)
+        .expect("the agent the claim started");
+    assert_eq!(agent.state, "ended");
+    assert_eq!(agent.end_reason, "launch_failed");
+    request(&store, id).expect("the old request is finished, so it can be requested again");
+}
+
+#[test]
+fn a_move_on_to_review_keeps_the_launch() {
+    let store = Store::new();
+    let id = host_and_task(&store);
+    request(&store, id).expect("request");
+    let req = only_request(&store).id;
+    claim(&store, "alice", req, HOST_A).expect("claim");
+    patch(&store, id, status_patch("review"));
+
+    report_dispatched(&store, "alice", req, HOST_A, "/wt/1-t").expect("accepted");
+    assert_eq!(store.task(id).worktree, "/wt/1-t");
 }

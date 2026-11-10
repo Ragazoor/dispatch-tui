@@ -201,9 +201,9 @@ async fn request_dispatch_refuses_and_writes_nothing() {
     assert_eq!(rows.task(foreign).unwrap().status, TaskStatus::Backlog);
 
     // An open request already exists: the task was moved back to backlog by
-    // hand while its request is still open.
-    let moved_back = caller.create_task(blank_task()).await.unwrap();
-    request_id(request(&caller, moved_back, HOST, "user", "dispatch").await);
+    // hand while its host provisions (a request still waiting would fail on
+    // the move: `MovingBackToBacklogCancelsTheDispatch`).
+    let (moved_back, _) = provisioning_request(&caller).await;
     caller
         .patch_task(
             moved_back,
@@ -782,4 +782,74 @@ async fn claims_reports_and_the_sweep_are_refused_for_a_host_the_caller_does_not
         rows.dispatch_request(provisioning).unwrap().state,
         DispatchRequestState::Provisioning
     );
+}
+
+// -- MovingBackToBacklogCancelsTheDispatch ---------------------------------------
+
+fn to_backlog() -> bindings::TaskPatch {
+    bindings::TaskPatch {
+        status: Some("backlog".into()),
+        sub_status: Some("none".into()),
+        ..blank_task_patch()
+    }
+}
+
+/// A request still waiting for its host fails at once on a move back to
+/// backlog, its agent ends, and the task may be dispatched again.
+#[tokio::test]
+async fn moving_back_to_backlog_fails_a_waiting_request() {
+    let (caller, rows) = caller();
+    let task = caller.create_task(blank_task()).await.unwrap();
+    let id = request_id(request(&caller, task, HOST, "user", "dispatch").await);
+
+    caller.patch_task(task, to_backlog()).await.unwrap();
+
+    let row = rows.dispatch_request(id).unwrap();
+    assert_eq!(row.state, DispatchRequestState::Failed);
+    assert_eq!(row.reason.as_deref(), Some("task moved back to backlog"));
+    assert!(
+        rows.current_agent(task).is_none(),
+        "the claim's agent ended"
+    );
+    request_id(request(&caller, task, HOST, "user", "dispatch").await);
+}
+
+/// A provisioning request stays open on a move back to backlog, so a second
+/// dispatch cannot race its worker; its dispatched report is refused and
+/// writes nothing, and the failure report that follows ends the agent.
+#[tokio::test]
+async fn moving_back_to_backlog_refuses_the_provisioning_report() {
+    let (caller, rows) = caller();
+    let (task, id) = provisioning_request(&caller).await;
+
+    caller.patch_task(task, to_backlog()).await.unwrap();
+    assert_eq!(
+        rows.dispatch_request(id).unwrap().state,
+        DispatchRequestState::Provisioning
+    );
+    assert!(matches!(
+        request(&caller, task, HOST, "user", "dispatch").await,
+        ReducerOutcome::Refused(_)
+    ));
+
+    let report = caller
+        .report_dispatch_provisioned(id, HOST.into(), "/wt/x".into(), "task-x".into(), false)
+        .await
+        .unwrap();
+    assert!(!report.won(), "the report for a backlog task is refused");
+    let t = rows.task(task).unwrap();
+    assert!(t.worktree.is_none());
+    assert!(t.tmux_window.is_none());
+    assert_eq!(t.status, TaskStatus::Backlog);
+
+    assert!(caller
+        .report_dispatch_failed(id, HOST.into(), "refused".into())
+        .await
+        .unwrap()
+        .won());
+    assert!(
+        rows.current_agent(task).is_none(),
+        "the claim's agent ended"
+    );
+    request_id(request(&caller, task, HOST, "user", "dispatch").await);
 }
