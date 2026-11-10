@@ -67,8 +67,9 @@ value Bump {
 -- the wrong design step, and a mis-read bump renders a branch that does not
 -- apply.
 contract PromptComposer {
-    -- True when task.repo_path (tilde-expanded) holds at least one
-    -- `docs/specs/*.allium` file. One directory read per dispatch, against the
+    -- True when task.repo_path (tilde-expanded) holds at least one `*.allium`
+    -- file anywhere under `docs/` (a recursive walk that does not follow
+    -- symlinked directories). One walk per dispatch, against the
     -- parent repo rather than the freshly provisioned worktree, never
     -- persisted — see DesignStepMatchesTheReposSpecs.
     holds_allium_specs: (repo_path: String) -> Boolean
@@ -146,10 +147,11 @@ contract PromptComposer {
 -- already been told, rather than a re-derivation from the two inputs — and the
 -- two builders cannot disagree about which branch they took.
 --
--- Four states: every combination of the plan question and the spec question,
--- each named. Neither question is answered before the other, and neither
--- collapses into the other. The enum therefore covers exactly the ground a
--- pair of booleans would, and is kept for the naming, not for narrowing.
+-- Six states: every combination of the plan question and the spec question,
+-- each named, plus the two CVE states (PromptComposer.preceding). Neither the
+-- plan nor the spec question is answered before the other, and neither
+-- collapses into the other; the enum is kept for the naming, not for
+-- narrowing.
 --
 -- Collapsing the two spec-less states into one would put a PLAN-carrying task
 -- in a spec-less repo in the same state as a NO-plan one, and cost it
@@ -233,8 +235,9 @@ rule ComposeAgentPrompt {
     when: dispatch/AgentLaunched(task, mode)
 
     -- The three modes that compose a prompt. resume composes none: it hands
-    -- Claude Code `--continue` and no positional text at all, so there is no
-    -- skeleton to fill and nothing here is owed to it.
+    -- Claude Code `--continue` and, at most, the caller's own message as the
+    -- positional text, so there is no skeleton to fill and nothing here is
+    -- owed to it.
     requires: mode in {standard, research, quick}
 
     ensures: AgentPromptComposed(task: task, mode: mode)
@@ -258,11 +261,10 @@ rule ComposeAgentPrompt {
         -- its preamble is "You are working interactively with the user."
         -- rather than "Your task is:" — quick dispatch begins as an
         -- interactive conversation where the agent establishes the goal
-        -- and renames the task, then follows the same
-        -- spec_first_instruction sentence as the no-plan variant
-        -- (NameTheDesignStep below).
-        -- The instruction text is shared verbatim between the two, so the
-        -- design step cannot drift apart between them.
+        -- and renames the task, then follows the same design step as the
+        -- no-plan variant (NameTheDesignStep below, or the CVE runbook under
+        -- the CVE root). The instruction text is shared verbatim between the
+        -- two, so the design step cannot drift apart between them.
         -- The rule that a design artefact is not a standalone stopping point
         -- is its own line, {plan_not_a_stopping_point_instruction},
         -- emitted whenever a plan is attached and placed immediately above
@@ -316,7 +318,7 @@ rule NameTheDesignStep {
     requires: under_cve_feed(task.epic) = false
 
     -- One directory read against the parent repo, per dispatch, never
-    -- persisted. Every failure to see a `docs/specs/*.allium` file — a missing
+    -- persisted. Every failure to see a `*.allium` file under `docs/` — a missing
     -- directory, an empty one, one holding no .allium file, an unreadable one
     -- — answers false.
     let repo_keeps_specs = holds_allium_specs(task.repo_path)
@@ -431,8 +433,9 @@ rule ClassifyDependencyBump {
 
     when: dispatch/AgentLaunched(task, mode)
 
-    -- A resume composes no prompt (ComposeAgentPrompt).
-    requires: mode in {standard, quick}
+    -- A resume composes no prompt (ComposeAgentPrompt), and a quick task
+    -- is created untagged, so only a standard launch reaches this.
+    requires: mode = standard
     requires: task.tag = dependabot
 
     -- Read from the task's own title and description, before the prompt is
@@ -487,8 +490,9 @@ rule RenderPrReviewRunbook {
 
     when: dispatch/AgentLaunched(task, mode)
 
-    -- A resume composes no prompt (ComposeAgentPrompt).
-    requires: mode in {standard, quick}
+    -- A resume composes no prompt (ComposeAgentPrompt), and a quick task
+    -- is created untagged, so only a standard launch reaches this.
+    requires: mode = standard
     requires: task.tag = pr_review
 
     ensures: PrReviewRunbookRendered(task: task)
@@ -510,8 +514,9 @@ rule RenderReleasePrRunbook {
 
     when: dispatch/AgentLaunched(task, mode)
 
-    -- A resume composes no prompt (ComposeAgentPrompt).
-    requires: mode in {standard, quick}
+    -- A resume composes no prompt (ComposeAgentPrompt), and a quick task
+    -- is created untagged, so only a standard launch reaches this.
+    requires: mode = standard
     requires: task.tag = release_please
 
     ensures: ReleasePrRunbookRendered(task: task)
@@ -557,6 +562,10 @@ surface AgentPrompt {
         --                                    <base> + git rebase <ref>,
         --                                    where <ref> is <base> or
         --                                    origin/<base>)
+        --   {fetch_note}                   ("Note: <warning>" when the fetch
+        --                                    of the base branch failed in a
+        --                                    way that lets the dispatch go
+        --                                    on; absent otherwise)
         --   {worktree_preamble}            ("Always work from this
         --                                    worktree folder — do not
         --                                    `cd` to the parent repo
@@ -807,7 +816,7 @@ surface AgentPrompt {
         -- wordings of one rule cost tokens and buy ambiguity.
         --
         -- The omission is conditional on spec-first actually being present.
-        -- None of the other three states the rules elsewhere — a task WITH a
+        -- No other non-CVE state carries the rules elsewhere — a task WITH a
         -- plan attached never reaches the sentence, and brainstorm_instruction
         -- names a skill without naming TDD or Allium — so all three keep
         -- {tdd_instruction}. Only plan_with_specs also keeps
@@ -838,8 +847,8 @@ surface AgentPrompt {
         -- omissions. The plan-path wording drops "writing a spec or" and names
         -- only the plan, because no spec-writing step runs on that path, so
         -- the surviving sentence is more accurate and not merely shorter. And
-        -- {wrap_up_instruction} itself stays universal: "use the /wrap-up
-        -- skill to commit any remaining changes and finalise the task" is the
+        -- {wrap_up_instruction} itself stays universal: "use the
+        -- dispatch:wrap-up skill to commit any remaining changes and finalise the task" is the
         -- one thing no design step states, and it keeps the end-of-prompt
         -- position a closing instruction earns. Its carve-out phrase does
         -- still appear on both, deliberately — above it qualifies how the

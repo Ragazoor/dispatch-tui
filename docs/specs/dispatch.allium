@@ -705,10 +705,9 @@ rule ProvisionDispatch {
         -- When local is both ahead and behind (diverged), local is still
         -- taken, and silently — no additional warning is added to the
         -- agent's prompt beyond what is described above.
-        -- Specifically, the worktree branch is created with
-        -- `git worktree add -B <branch> <path> <selected ref>`, where
-        -- `<selected ref>` is whichever of local <base_branch> or
-        -- `origin/<base_branch>` was selected above.
+        -- The worktree branch is cut from `<selected ref>`, whichever of
+        -- local <base_branch> or `origin/<base_branch>` was selected above,
+        -- with `-b`, or `-B` only as the fresh-add paragraph above allows.
         --
         -- == UnresolvableBaseIsRefusedByName ==
         -- On the FRESH path only, the selected ref must be known to resolve in
@@ -817,7 +816,7 @@ rule ProvisionDispatch {
         -- framed as an on-demand refresh so the agent can pull later pushes
         -- to the PR.
         -- The launched Claude command includes a plugin-dir flag so
-        -- the agent discovers dispatch plugin skills (e.g. /wrap-up).
+        -- the agent discovers dispatch plugin skills (e.g. dispatch:wrap-up).
         --
         -- == Conditional rebase preamble ==
         -- The fetch-then-rebase preamble is not unconditional. It targets
@@ -836,7 +835,7 @@ rule ProvisionDispatch {
         -- branch (task.base_branch, or else the detected default), never a
         -- literal "main".
         -- The launch carries no --permission-mode flag, for any mode —
-        -- see EveryTaskAgentLaunchesInAutoMode above.
+        -- see AgentLaunchCommand: EveryTaskAgentLaunchesInAutoMode.
 
         -- == The prompt itself ==
         -- What text the launched agent reads — the skeleton every variant
@@ -1061,7 +1060,7 @@ rule ResumeTask {
         --
         -- Resuming launches an agent, so it writes the same per-task MCP
         -- configuration a provisioning launch does — see
-        -- AgentCarriesItsOwnCallerIdentity in DispatchTask. Resume is the one
+        -- AgentLaunchCommand: AgentCarriesItsOwnCallerIdentity. Resume is the one
         -- launch path that never provisions; without this its agent would be
         -- the only one left unidentifiable. The write is owed only where an
         -- agent is actually launched: the live-window branch below launches
@@ -1086,10 +1085,9 @@ rule ResumeTask {
         -- on that name (select-window, send-keys, kill-window — all resolved
         -- by exact name, see TmuxWindowTargetedExactly) refused as ambiguous.
         --
-        -- A tmux query failure maps window_alive to false, not true: the
-        -- safe default is the one that reproduces the unconditional-create
-        -- behaviour this rule always had before the check existed, rather
-        -- than risking a task left with no live agent behind it.
+        -- A failed tmux query fails the resume, as TmuxWindowNamesAreUnique
+        -- requires: creating blind could duplicate a live window, and the
+        -- operator can retry.
         --
         -- Resuming from done is safe for the same reason as always. Moving a
         -- task to done runs only ConfirmDone's tmux-window teardown
@@ -1233,8 +1231,9 @@ surface AgentLaunchCommand {
         -- The flag is always passed, never left to Claude Code's own
         -- configured default: "sonnet unless the task says otherwise" must
         -- hold whatever the operator's ~/.claude settings choose for their own
-        -- sessions. The alias goes before `--mcp-config`, which is variadic
-        -- and stays last (PromptIsSeparatedFromTheLaunchFlags).
+        -- sessions. `--mcp-config` is variadic, so whatever follows it is
+        -- either a `-`-prefixed flag or the `--` separator
+        -- (PromptIsSeparatedFromTheLaunchFlags).
 
     @guarantee EveryTaskAgentLaunchesInAutoMode
         -- Every task-agent launch starts Claude in auto mode — i.e.
@@ -1243,10 +1242,9 @@ surface AgentLaunchCommand {
         -- dispatch and ResumeTask alike: an agent edits files without a
         -- per-edit approval prompt, so an unattended launch is not left
         -- blocked on a dialog nobody is watching.
-        -- ResumeTask is named deliberately. It does not share the
-        -- dispatch launch path — it composes its own claude command —
-        -- so it is the one launcher the guarantee reaches only by
-        -- assertion, not by construction.
+        -- ResumeTask builds its own outer command (`--continue`), but its
+        -- flags come from the same composition every launcher uses, so the
+        -- guarantee holds for it by construction.
         -- What differentiates the modes is the prompt content, never the
         -- permission flag. A mode that must not change code says so in
         -- its prompt — see DispatchResearchTask, whose addendum says that
@@ -1322,10 +1320,10 @@ surface AgentLaunchCommand {
     @guarantee DispatchedAgentsShareASccacheNotATargetDir
         -- Every agent launch sets RUSTC_WRAPPER=sccache in the tmux window's
         -- environment — DispatchTask, DispatchResearchTask, quick dispatch
-        -- and ResumeTask alike, through the same one seam
-        -- AgentCarriesItsOwnCallerIdentity above already requires each
-        -- launcher to share, so a launch composing its own flags cannot
-        -- forget the var independently of the identity header.
+        -- and ResumeTask alike. The launch environment (the task id,
+        -- RUSTC_WRAPPER and CARGO_BUILD_JOBS) is composed in one place every
+        -- launcher calls, as the launch flags are in another, so no launcher
+        -- sets one of these variables without the others.
         --
         -- The alternative — one shared CARGO_TARGET_DIR across worktrees —
         -- was measured and found unsafe, not
@@ -1346,7 +1344,8 @@ surface AgentLaunchCommand {
         --
         -- BEST-EFFORT in one direction only, unlike
         -- AgentCarriesItsOwnCallerIdentity's best-effort config write: the
-        -- var is set only when `sccache` resolves on PATH at dispatch time.
+        -- var is set only when `sccache` resolves on PATH, checked once per
+        -- board run.
         -- Absent, the launch proceeds without it,
         -- never blocking or failing the dispatch over a missing
         -- optional tool. sccache is a build-time speedup, not something any
@@ -1385,8 +1384,10 @@ surface AgentLaunchCommand {
         -- not each agent: a lone agent may use all of it, and no number of
         -- agents can take the memory the desktop and the board need.
         --
-        -- Before each launch dispatch reads the slice's MemoryMax from the
-        -- user service manager. When none is set, it sets, for the runtime
+        -- Once per board run, before its first launch, dispatch reads the
+        -- slice's MemoryMax from the user service manager; the answer,
+        -- including a failure, holds for the rest of the run. When none is
+        -- set, it sets, for the runtime
         -- of the manager only, MemoryHigh = config.agent_slice_memory_high,
         -- MemoryMax = config.agent_slice_memory_max and MemorySwapMax =
         -- config.agent_slice_swap_max. When one is set — by an earlier
@@ -1479,8 +1480,9 @@ surface AgentLaunchCommand {
         -- silently the next time the flag order changed or a variadic flag was
         -- added; nothing about the flag string would say why the order mattered.
         --
-        -- Only the prompt-carrying launch needs it. ResumeTask passes
-        -- `--continue`, a `-`-prefixed word, which ends the variadic by itself.
+        -- Every launch that carries a prompt has it, including a resume with a
+        -- message (`--continue -- <message>`). A resume with no message
+        -- passes no positional text, so it needs none.
 }
 
 -- The label the board shows for starting a task.
