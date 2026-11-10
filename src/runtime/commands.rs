@@ -252,7 +252,9 @@ async fn dispatch_task(
             rt.exec_trust_and_quick_dispatch(draft, epic_id)
         }
         KillTmuxWindow { window } => {
-            drop(rt.exec_kill_tmux_window(window));
+            // Waited for: the commands queued after a kill (RetryResume's
+            // Resume) look for the window and reattach to a live one.
+            let _ = rt.exec_kill_tmux_window(window).await;
             vec![]
         }
         PatchSubStatus { id, sub_status } => {
@@ -285,7 +287,9 @@ async fn run_cleanup(
             return;
         }
     }
-    drop(rt.exec_cleanup(request));
+    // Waited for: RetryFresh queues a re-dispatch right behind its cleanup,
+    // and provisioning must not meet the worktree while it is being removed.
+    let _ = rt.exec_cleanup(request).await;
 }
 
 /// Per-domain dispatcher for [`crate::tui::commands::EpicCommand`] variants.

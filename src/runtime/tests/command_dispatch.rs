@@ -235,6 +235,7 @@ fn refused(msg: &Message) -> bool {
 mod agent_dispatch;
 mod guards;
 mod host_effects;
+mod retry_ordering;
 mod split_pane;
 mod store_writes;
 mod task_windows;

@@ -1122,6 +1122,10 @@ rule RetryResume {
         -- If the task still references a tmux window (e.g. a stale session
         -- whose window is alive but idle), that window is killed before a
         -- fresh one is created. This tears down the old process cleanly.
+        -- The kill is finished before the launch looks for a window: the
+        -- launch reattaches to any live `task-<id>` instead of creating one,
+        -- so a kill still in flight would leave the task marked running on a
+        -- window that then dies.
         -- The kill is conditional because a crashed task has no window
         -- reference left: DetectCrashedAgent (agent-health.allium) clears
         -- tmux_window when it observes the window is gone.
@@ -1200,6 +1204,10 @@ rule RetryFresh {
         -- One operator pressing retry on a card they did not dispatch is all
         -- it takes. See ResumeTask's guidance for why the surrounding
         -- preconditions do not already prevent this.
+        --
+        -- The teardown of the old worktree and window is finished before the
+        -- re-dispatch request is written, so provisioning never meets the
+        -- dying worktree and takes the reuse path on it.
         --
         -- RetryFresh is the one board write that clears the worktree, host and
         -- window (tasks.allium: ABoardWriteLeavesThePointersAlone).
