@@ -1495,6 +1495,12 @@ contract TaskTeardown {
         --   * worktree, no window -> steps 2 and 3.
         --   * neither -> nothing.
         -- Step 1 is NOT contingent on step 2 having something to remove.
+        -- A FAILED step 1 on a task that owns a worktree stops the teardown
+        -- before step 2: an agent may still be live in that window, so its
+        -- worktree is not removed from under it. The worktree is reported
+        -- left, so WorktreeReleaseIsGated applies and the operator can retry.
+        -- A failed step 1 on a window-only task is warn-logged (see
+        -- WorktreeReleaseIsGated).
         -- Step 3 is: a task that never had a worktree never had a branch.
         -- Branch deletion lives inside the worktree arm, which is the only
         -- thing that deletes a branch. One primitive performs all three
@@ -2447,20 +2453,18 @@ rule RespawnPhoenixSuccessorNeedsTheFlag {
 -- Deletion is never reachable over MCP: there is no MCP delete tool, so
 -- removing a task stays a human act at the board (DeleteTask, BatchDelete).
 
--- SubStatusAutoreset. A task's sub_status always fits its status
--- (core/Task.SubStatusFitsStatus). The store's task write keeps it so: a write
--- that changes status and names no sub_status resets it to
--- default_sub_status(the new status); a write that repeats the current status
--- keeps it. A rule that changes
--- status without naming sub_status gets the reset for free; the sub_status
--- lines in the rules above document the resulting state. A write that sets a
--- specific sub_status overrides the default (HookNotification keeps running
--- and sets needs_input; FinishTaskConflict keeps the status and sets
--- conflict). An explicit pair that does not fit is refused before anything is
--- written (mcp-task-tools.allium: UpdateTaskViaMcp), and every other writer
--- that moves a sub_status is held to the table at the one task write
--- (SubStatusMovesMustBeLegal, BatchSubStatusPatchSkipsIllegalEntries).
-invariant SubStatusAutoreset {
-    for t in core/Tasks:
-        sub_status_valid_for(t.sub_status, t.status)
-}
+-- SubStatusAutoreset. The store's task write keeps a task's sub_status fitting
+-- its status (core/Task.SubStatusFitsStatus): a write that changes status and
+-- names no sub_status resets it to default_sub_status(the new status); a write
+-- that repeats the current status keeps it. A rule that changes status without
+-- naming sub_status gets the reset for free; the sub_status lines in the rules
+-- above document the resulting state. A write that sets a specific sub_status
+-- overrides the default (HookNotification keeps running and sets needs_input;
+-- FinishTaskConflict keeps the status and sets conflict). An explicit pair that
+-- does not fit is refused before anything is written (mcp-task-tools.allium:
+-- UpdateTaskViaMcp), and every other writer that MOVES a sub_status is held to
+-- the table at the one task write (SubStatusMovesMustBeLegal,
+-- BatchSubStatusPatchSkipsIllegalEntries). Only a move is judged: an insert (a
+-- seed) is not, and a row already holding an odd pair stays writable for its
+-- other fields. So this is a property of every write, not of every stored row,
+-- and it is stated here rather than as an invariant over core/Tasks.

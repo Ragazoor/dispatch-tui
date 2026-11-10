@@ -133,3 +133,48 @@ async fn a_cleanup_is_finished_before_the_next_command_starts() {
         "the worktree removal must be over when the cleanup command returns; calls: {calls:?}"
     );
 }
+
+// Only RetryFresh has a launch queued behind its teardown. A delete's teardown
+// runs in the background, so the board keeps taking keys and drawing while git
+// works (tasks.allium: TaskTeardown, WorktreeReleaseIsGated).
+#[tokio::test]
+async fn a_delete_cleanup_does_not_hold_up_the_next_command() {
+    let db = test_db().await;
+    let (tx, mut msgs) = mpsc::unbounded_channel();
+    let inner = Arc::new(MockProcessRunner::new(
+        (0..60).map(|_| MockProcessRunner::ok()).collect(),
+    ));
+    let runner = Arc::new(SlowKillTmux {
+        inner: Arc::clone(&inner),
+        alive: AtomicBool::new(true),
+    });
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let mut app = App::new(db.list_all().await);
+
+    commands::dispatch(
+        Command::Task(TaskCommand::Cleanup {
+            id: models::TaskId(1),
+            repo_path: "/repo".into(),
+            worktree: Some("/repo/.worktrees/1-x".into()),
+            tmux_window: Some(test_tmux_window("task-1")),
+            follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+            guard: None,
+        }),
+        &mut app,
+        &rt,
+    )
+    .await;
+
+    // The slow kill is still running, so the removal has not started.
+    let calls = inner.flattened_calls();
+    assert!(
+        !calls.iter().any(|c| c.contains("worktree remove")),
+        "a delete's cleanup must not be waited for; calls: {calls:?}"
+    );
+
+    // It still finishes and reports on its own.
+    tokio::time::timeout(TEST_TIMEOUT, msgs.recv())
+        .await
+        .expect("the cleanup must report")
+        .expect("sender alive");
+}

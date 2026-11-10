@@ -1110,7 +1110,9 @@ impl TuiRuntime {
     /// may run beside a removal that might not have happened
     /// (`WorktreeReleaseIsGated` in docs/specs/tasks.allium).
     ///
-    /// Returns the removal's handle. Callers `drop` it; tests await it.
+    /// Returns the removal's handle. A delete drops it; RetryFresh's cleanup
+    /// awaits it, because a re-dispatch to the same path follows
+    /// (`run_cleanup` in src/runtime/commands.rs); tests await it.
     pub(super) fn exec_cleanup(&self, request: CleanupRequest) -> tokio::task::JoinHandle<()> {
         let CleanupRequest {
             id,

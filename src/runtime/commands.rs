@@ -287,9 +287,19 @@ async fn run_cleanup(
             return;
         }
     }
-    // Waited for: RetryFresh queues a re-dispatch right behind its cleanup,
-    // and provisioning must not meet the worktree while it is being removed.
-    let _ = rt.exec_cleanup(request).await;
+    // Only RetryFresh (follow-up ClearPointer) is waited for: it queues a
+    // re-dispatch right behind its cleanup, and provisioning must not meet the
+    // worktree while it is being removed. A delete's teardown runs in the
+    // background so the board keeps taking keys and drawing while git works
+    // (tasks.allium: TaskTeardown).
+    let wait = matches!(
+        request.follow_up,
+        crate::tui::commands::CleanupFollowUp::ClearPointer
+    );
+    let handle = rt.exec_cleanup(request);
+    if wait {
+        let _ = handle.await;
+    }
 }
 
 /// Per-domain dispatcher for [`crate::tui::commands::EpicCommand`] variants.
