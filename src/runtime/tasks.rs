@@ -1183,6 +1183,11 @@ impl TuiRuntime {
                         id,
                         tmux_window: result.tmux_window,
                     }));
+                    if result.reattached && message.is_some() {
+                        let _ = tx.send(Message::Task(
+                            crate::tui::messages::TaskMessage::ResumeMessageDropped(id),
+                        ));
+                    }
                 }
                 Err(e) => {
                     let _ = tx.send(Message::Task(

@@ -17,6 +17,27 @@ fn resumed_sets_success_status_message() {
     assert_eq!(app.status.message.as_deref(), Some("Task 4 resumed"),);
 }
 
+/// `dispatch.allium: ResumeTask` — a message a live window dropped is reported.
+#[test]
+fn resume_message_dropped_sets_a_status_message() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = Some("/wt".to_string());
+    let mut app = App::new(vec![task]);
+
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
+        id: TaskId(4),
+        tmux_window: test_tmux_window("win-4"),
+    }));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ResumeMessageDropped(TaskId(4)),
+    ));
+
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Task 4 already running: the message was not delivered"),
+    );
+}
+
 #[test]
 fn batch_move_multiple_steps() {
     let mut app = make_app();

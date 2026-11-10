@@ -1439,6 +1439,13 @@ rule ResumeTaskViaMcp {
         -- (tmux or claude missing) shows in the board's status line, and
         -- get_task shows the task still detached.
         --
+        -- The reply is sent before the board checks tmux for a live window, so
+        -- it cannot know whether a message will be delivered. When the call
+        -- carries a message, the reply says so: a live window under the task's
+        -- name means nothing is launched and the message is dropped, and the
+        -- board's status line reports "already running: the message was not
+        -- delivered" (dispatch.allium: ResumeTask).
+        --
         -- == Not for crashed worktrees ==
         -- A task whose worktree is gone cannot resume; it is re-dispatched
         -- from backlog (DispatchTaskViaMcp). The tool description and the

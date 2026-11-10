@@ -895,7 +895,10 @@ pub fn resume_agent_with_message(
             %tmux_window,
             "resume found a live tmux window; reattaching instead of duplicating"
         );
-        return Ok(ResumeResult { tmux_window });
+        return Ok(ResumeResult {
+            tmux_window,
+            reattached: true,
+        });
     }
 
     let launch_env = super::agent_launch_env(runner, task_id, worktree_path);
@@ -945,7 +948,10 @@ pub fn resume_agent_with_message(
 
     tracing::info!(task_id = task_id.0, %tmux_window, "agent resumed");
 
-    Ok(ResumeResult { tmux_window })
+    Ok(ResumeResult {
+        tmux_window,
+        reattached: false,
+    })
 }
 
 #[cfg(test)]

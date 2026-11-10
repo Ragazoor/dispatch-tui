@@ -79,6 +79,23 @@ async fn resume_task_carries_the_message_to_the_board() {
     }
 }
 
+/// `ResumeTaskViaMcp`: the reply precedes the board's live-window check, so a
+/// call with a message warns that a live window drops it. A call without one
+/// has nothing to drop and says nothing of it.
+#[tokio::test]
+async fn resume_task_with_a_message_warns_that_a_live_window_drops_it() {
+    let (state, _rx) = test_state_with_notify().await;
+    let (id, _dir) = create_detached_task(&state).await;
+
+    let with = resume(&state, json!({ "task_id": id.0, "message": "hi" })).await;
+    let text = extract_response_text(&with);
+    assert!(text.contains("not delivered"), "got: {text}");
+
+    let without = resume(&state, json!({ "task_id": id.0 })).await;
+    let text = extract_response_text(&without);
+    assert!(!text.contains("not delivered"), "got: {text}");
+}
+
 #[tokio::test]
 async fn resume_task_refuses_a_task_that_never_ran() {
     let (state, mut rx) = test_state_with_notify().await;

@@ -1720,6 +1720,36 @@ fn resume_agent_propagates_new_window_failure() {
     );
 }
 
+/// `dispatch.allium: ResumeTask` — a live window means nothing is launched, so
+/// the result says it reattached; a launch says it did not. The board uses the
+/// flag to report a dropped message.
+#[test]
+fn resume_result_says_whether_it_reattached_to_a_live_window() {
+    let alive = DispatchScript::resume().window_already_alive();
+    let reattached = resume_agent_with_message(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        "/repo/.worktrees/42-fix-bug",
+        Some("rebase on main"),
+        &alive.runner(),
+    )
+    .unwrap();
+    assert!(reattached.reattached);
+
+    let (_dir, worktree_path) = make_test_repo();
+    let launched = resume_agent_with_message(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        Some("rebase on main"),
+        &DispatchScript::resume().runner(),
+    )
+    .unwrap();
+    assert!(!launched.reattached);
+}
+
 #[test]
 fn resume_agent_reattaches_to_live_window_without_creating_duplicate() {
     let script = DispatchScript::resume().window_already_alive();

@@ -1024,7 +1024,12 @@ rule ResumeTask {
         -- note on inter-agent messaging in mcp-task-tools.allium). With no
         -- message the launch is unchanged. When a live window is found
         -- nothing is launched, so a message has nowhere to go and is
-        -- dropped; the caller is told the agent is already running.
+        -- dropped. The board says so: after the Resumed report it sets the
+        -- status line to "<task> already running: the message was not
+        -- delivered". A resume without a message that finds a live window
+        -- says only "<task> resumed". The MCP caller has been answered by
+        -- then (mcp-task-tools.allium: ResumeTaskViaMcp), so the status line
+        -- is where the drop is reported.
         --
         -- == Why the host gate, when the other preconditions look sufficient ==
         -- They are sufficient on one machine and dangerous on two, and the

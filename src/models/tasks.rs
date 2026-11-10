@@ -1059,6 +1059,9 @@ pub struct DispatchResult {
 #[derive(Debug, Clone)]
 pub struct ResumeResult {
     pub tmux_window: TmuxWindow,
+    /// A live window was found, so nothing was launched. A message the resume
+    /// carried went nowhere (`dispatch.allium: ResumeTask`).
+    pub reattached: bool,
 }
 
 // ---------------------------------------------------------------------------

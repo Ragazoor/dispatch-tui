@@ -71,6 +71,9 @@ pub enum TaskMessage {
         id: TaskId,
         tmux_window: TmuxWindow,
     },
+    /// A resume of `id` carried a message but found a live window, so nothing
+    /// was launched and the message was dropped. Follows `Resumed`.
+    ResumeMessageDropped(TaskId),
     /// The resume handed to the runtime for `id` failed. Ends the in-flight
     /// resume, so the task can be resumed again, and reports `error`.
     ResumeFailed {
@@ -202,6 +205,13 @@ impl TaskMessage {
                 app.handle_resume_requested(id, message)
             }
             TaskMessage::Resumed { id, tmux_window } => app.handle_resumed(id, tmux_window),
+            TaskMessage::ResumeMessageDropped(id) => {
+                app.status.set(format!(
+                    "{} already running: the message was not delivered",
+                    app.board.task_label(id)
+                ));
+                vec![]
+            }
             TaskMessage::ResumeFailed { id, error } => app.handle_resume_failed(id, error),
             TaskMessage::DispatchAbandoned(id) => app.handle_dispatch_abandoned(id),
             TaskMessage::MarkDispatching(id) => app.handle_mark_dispatching(id),

@@ -35,14 +35,21 @@ pub(crate) async fn handle_resume_task(
     if let Some(why) = unresumable(&task, &state.host_id).await {
         return JsonRpcResponse::err(id, INVALID_PARAMS, refusal_text(&task.reference(), &why));
     }
+    let has_message = parsed.message.is_some();
     if let Err(why) = hand_resume_to_board(state, task_id, parsed.message) {
         return JsonRpcResponse::err(id, INTERNAL_ERROR, why.to_string());
     }
+    let drop_note = if has_message {
+        " If the agent's window is already live, nothing is launched and the message is not \
+         delivered; the board's status line says so."
+    } else {
+        ""
+    };
     let text = format!(
         "resume requested for {task_ref}: the board is restarting its agent in {window} with the \
          previous conversation. The task moves to running once the session starts; \
          get_task(task_id={n}) shows the window. A launch failure appears in the board's \
-         status line.",
+         status line.{drop_note}",
         n = task_id.0,
         task_ref = task.reference(),
         window = crate::models::TmuxWindow::for_task(task_id),
