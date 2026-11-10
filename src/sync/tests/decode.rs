@@ -226,6 +226,28 @@ fn an_undecodable_task_is_remembered_against_its_epic_until_replaced_or_removed(
     assert!(shared.undecodable_task_ids_for_epic(EpicId(7)).is_empty());
 }
 
+/// observability.allium: `BulkReadSkipsUndecodableRow`. An unknown visibility
+/// fails the row instead of guessing public: a guess could show a private item
+/// to the whole workspace.
+#[test]
+fn an_unknown_visibility_fails_the_row() {
+    let mut epic = blank_epic();
+    epic.visibility = "secret".into();
+    let error = decode::epic(&epic).unwrap_err().to_string();
+    assert!(error.contains("secret"), "{error}");
+
+    let package = bindings::WorkPackage {
+        id: 1,
+        title: "Blank".into(),
+        visibility: "secret".into(),
+        created_at: "2026-09-18 10:00:00".into(),
+        updated_at: "2026-09-18 10:00:00".into(),
+        ..dispatch_spacetime_module::blank_work_package().into()
+    };
+    let error = decode::work_package(&package).unwrap_err().to_string();
+    assert!(error.contains("secret"), "{error}");
+}
+
 fn agent_row() -> bindings::Agent {
     bindings::Agent {
         id: 4,

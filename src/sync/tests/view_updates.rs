@@ -622,16 +622,15 @@ const IGNORED_COLUMN_CASES: &[(&str, fn())] = &[
         );
     }),
     ("work_package", || {
-        // An unknown visibility decodes to Public, so two different unknown
-        // values decode equal.
-        let row = |visibility: &str| bindings::WorkPackage {
-            visibility: visibility.into(),
+        // Whole and fractional seconds parse to the same instant.
+        let row = |updated_at: &str| bindings::WorkPackage {
+            updated_at: updated_at.into(),
             ..package("2026-09-18 10:00:00")
         };
         survives_in_either_order(
             "work_package",
-            row("mystery"),
-            row("other-mystery"),
+            row("2026-09-18 10:00:00"),
+            row("2026-09-18 10:00:00.000"),
             |r, x| r.upsert_work_package(x),
             |r, x| r.retire_work_package(x),
             |r| r.work_packages().len() == 1,

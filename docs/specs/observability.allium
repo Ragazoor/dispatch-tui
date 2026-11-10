@@ -447,7 +447,10 @@ rule BulkReadSkipsUndecodableRow {
         -- would stop counting in a process with no tracing subscriber.
         -- The same counter covers field-level fallbacks (an unknown feed_role
         -- or epic origin defaulting rather than failing its row), so the total
-        -- reads as "decode surprises seen", not "rows dropped".
+        -- reads as "decode surprises seen", not "rows dropped". An unknown
+        -- visibility on an epic or work package is not such a fallback: it
+        -- fails the row, because guessing public could show a private item
+        -- to the whole workspace.
 }
 
 rule ReadByIdReportsAnUndecodableTask {
