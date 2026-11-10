@@ -405,9 +405,9 @@ impl MemoryReducerCaller {
             }
         }
         // The module's own cap rule (dispatch.allium: BranchHistoryCapped).
-        let rows: Vec<module::RepoBaseBranch> =
-            tables.repo_base_branches.values().cloned().collect();
-        for id in module::base_branches_beyond_cap(&rows, &repo_path) {
+        let stale =
+            module::base_branches_beyond_cap(tables.repo_base_branches.values(), &repo_path);
+        for id in stale {
             tables.repo_base_branches.remove(&id);
             self.rows.remove_repo_base_branch(id);
         }

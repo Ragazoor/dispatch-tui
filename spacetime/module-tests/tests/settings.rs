@@ -101,7 +101,8 @@ fn record_base_branch_prunes_the_paths_history_to_the_cap() {
             .expect("record_base_branch");
     };
     record("/other", "keep", "2026-01-01 00:00:00.000");
-    for i in 0..12 {
+    let cap = MAX_BASE_BRANCHES_PER_REPO;
+    for i in 0..cap + 2 {
         record(
             "/repo",
             &format!("b{i:02}"),
@@ -110,7 +111,11 @@ fn record_base_branch_prunes_the_paths_history_to_the_cap() {
     }
     // Re-recording an old branch makes it the most recent, so it survives.
     record("/repo", "b02", "2026-01-03 00:00:00.000");
-    record("/repo", "b12", "2026-01-03 00:00:01.000");
+    record(
+        "/repo",
+        &format!("b{:02}", cap + 2),
+        "2026-01-03 00:00:01.000",
+    );
 
     let mut kept: Vec<String> = store
         .db()
@@ -120,11 +125,10 @@ fn record_base_branch_prunes_the_paths_history_to_the_cap() {
         .map(|r| r.branch)
         .collect();
     kept.sort();
-    let mut expected: Vec<String> = (2..13)
+    let expected: Vec<String> = (2..cap + 3)
         .filter(|i| *i != 3)
         .map(|i| format!("b{i:02}"))
         .collect();
-    expected.sort();
     assert_eq!(kept, expected);
     assert_eq!(
         store

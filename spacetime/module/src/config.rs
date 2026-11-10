@@ -357,8 +357,8 @@ pub fn record_base_branch(
             last_used,
         }),
     };
-    let rows: Vec<RepoBaseBranch> = ctx.db.repo_base_branches().iter().collect();
-    for id in base_branches_beyond_cap(&rows, &repo_path) {
+    let stale = base_branches_beyond_cap(ctx.db.repo_base_branches().iter(), &repo_path);
+    for id in stale {
         ctx.db.repo_base_branches().id().delete(id);
     }
     Ok(())
@@ -368,16 +368,25 @@ pub fn record_base_branch(
 /// branches one repo path remembers (`BranchHistoryCapped`).
 pub const MAX_BASE_BRANCHES_PER_REPO: usize = 10;
 
-/// The ids of `repo_path`'s base-branch rows beyond the cap: all but the
+/// The ids of `repo_path`'s base-branch rows (owned or borrowed) beyond the cap: all but the
 /// [`MAX_BASE_BRANCHES_PER_REPO`] most recently used, newer id first on a tie.
 /// `record_base_branch` deletes them after its upsert; `MemoryReducerCaller`
 /// calls this too, so the two prune the same rows.
-pub fn base_branches_beyond_cap(rows: &[RepoBaseBranch], repo_path: &str) -> Vec<i64> {
-    let mut own: Vec<&RepoBaseBranch> = rows.iter().filter(|r| r.repo_path == repo_path).collect();
-    own.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(b.id.cmp(&a.id)));
+pub fn base_branches_beyond_cap<R: std::borrow::Borrow<RepoBaseBranch>>(
+    rows: impl IntoIterator<Item = R>,
+    repo_path: &str,
+) -> Vec<i64> {
+    let mut own: Vec<R> = rows
+        .into_iter()
+        .filter(|r| r.borrow().repo_path == repo_path)
+        .collect();
+    own.sort_by(|a, b| {
+        let (a, b) = (a.borrow(), b.borrow());
+        b.last_used.cmp(&a.last_used).then(b.id.cmp(&a.id))
+    });
     own.into_iter()
         .skip(MAX_BASE_BRANCHES_PER_REPO)
-        .map(|r| r.id)
+        .map(|r| r.borrow().id)
         .collect()
 }
 

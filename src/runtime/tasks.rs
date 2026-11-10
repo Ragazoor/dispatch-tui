@@ -186,13 +186,7 @@ impl TuiRuntime {
         app.update(Message::Task(
             crate::tui::messages::TaskMessage::MarkDispatching(task.id),
         ));
-        if let Err(e) = self.database.save_repo_path(&expanded).await {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("saving repo path", e),
-            )));
-        }
-        let paths = self.board_reads.list_repo_paths().await;
-        app.update(Message::RepoPathsUpdated(paths));
+        self.exec_save_repo_path(app, expanded.clone()).await;
         // A request like every other launch path (tasks.allium:
         // CreateQuickTask): origin `quick`, and the `quick` mode the module
         // never derives on its own, so this host's provisioning launches the

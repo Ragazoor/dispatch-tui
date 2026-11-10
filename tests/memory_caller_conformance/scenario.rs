@@ -295,7 +295,8 @@ fn memory_caller_matches_the_real_reducers() {
 
         // dispatch.allium: BranchHistoryCapped — both sides prune the path's
         // history to the cap on the write that passes it.
-        for i in 1..=10 {
+        let cap = dispatch_spacetime_module::MAX_BASE_BRANCHES_PER_REPO;
+        for i in 1..=cap {
             let stamp = ts(&format!("2026-01-01 00:00:{i:02}.000"));
             real.record_base_branch("/repo".into(), format!("b{i:02}"), stamp)
                 .await
@@ -312,7 +313,7 @@ fn memory_caller_matches_the_real_reducers() {
             rows_mem.base_branches(),
             "base_branches after the cap"
         );
-        assert_eq!(rows_real.base_branches().len(), 10);
+        assert_eq!(rows_real.base_branches().len(), cap);
 
         // N3/N2: a path is one row per (path, host); adopt stamps only an
         // unowned row; delete removes the caller's or an unowned row and

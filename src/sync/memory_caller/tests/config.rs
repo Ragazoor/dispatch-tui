@@ -278,7 +278,8 @@ async fn record_base_branch_prunes_the_paths_history_to_the_cap() {
         )
         .await
         .unwrap();
-    for i in 0..12 {
+    let cap = dispatch_spacetime_module::MAX_BASE_BRANCHES_PER_REPO;
+    for i in 0..cap + 2 {
         caller
             .record_base_branch(
                 "/repo".into(),
@@ -295,7 +296,7 @@ async fn record_base_branch_prunes_the_paths_history_to_the_cap() {
         .map(|(_, branch)| branch)
         .collect();
     kept.sort();
-    let expected: Vec<String> = (2..12).map(|i| format!("b{i:02}")).collect();
+    let expected: Vec<String> = (2..cap + 2).map(|i| format!("b{i:02}")).collect();
     assert_eq!(kept, expected, "the two least recently used go");
     assert!(rows
         .base_branches()

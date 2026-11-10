@@ -153,10 +153,15 @@ pub(in crate::tui) fn submit_repo_path(
     // Accepted std::fs-in-handler exception (docs/conventions.md, "No
     // std::fs inside async handlers"): a bare exists()/is_dir() stat, no
     // read or parse, on the low-frequency repo-path submit path.
-    if let Err(msg) = crate::models::validate_repo_path(&value) {
-        status.set(msg);
-        return vec![];
-    }
+    // The draft keeps the expanded path, the key the saved repo path and its
+    // base-branch history are stored under (dispatch.allium: RecordRepoPath).
+    let value = match crate::models::validate_repo_path(&value) {
+        Ok(expanded) => expanded,
+        Err(msg) => {
+            status.set(msg);
+            return vec![];
+        }
+    };
     if let Some(ref mut draft) = input.task_draft {
         draft.repo_path = value.clone();
     }
