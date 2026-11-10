@@ -68,7 +68,7 @@ enum StoreCommand {
 enum StoreTarget {
     named_store          -- the store named by --spacetime-server or DISPATCH_SPACETIME_SERVER
     | named_by_flag      -- the store named by the command's own --server flag
-    | managed_store      -- the managed store, brought up for the command; stopped after it if the command started it
+    | managed_store      -- the managed store, brought up for the command (who stops it: brings_up_managed_store)
     | cli_default_server -- whatever server the operator's `spacetime` CLI is configured for
 }
 
