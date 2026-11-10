@@ -567,6 +567,7 @@ pub(super) fn service_err_to_response(
         ServiceError::Validation(msg) => JsonRpcResponse::err(id, INVALID_PARAMS, msg),
         ServiceError::NotFound(msg) => JsonRpcResponse::err(id, NOT_FOUND_CODE, msg),
         ServiceError::Internal(e) => JsonRpcResponse::err(id, INTERNAL_ERROR, e.to_string()),
+        ServiceError::UndecodableTask(msg) => JsonRpcResponse::err(id, INTERNAL_ERROR, msg),
     }
 }
 

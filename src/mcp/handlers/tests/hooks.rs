@@ -65,6 +65,35 @@ async fn missing_task_does_not_push_task_changed() {
     );
 }
 
+/// A hook for a task the store holds but this board cannot decode answers the
+/// quiet not-found outcome, so the agent's hook does not fail on every tool
+/// use (observability.allium: `ReadByIdReportsAnUndecodableTask`).
+#[tokio::test]
+async fn a_hook_for_an_undecodable_task_answers_not_found() {
+    use crate::hooks::wire::{HookResponse, ObserveOutcome};
+    let db = Store::open_in_memory().unwrap();
+    db.plant_undecodable_task(42);
+    let (state, _db) = state_over(
+        Arc::new(db),
+        Arc::new(MockProcessRunner::new(vec![])),
+        None,
+        None,
+        None,
+    );
+
+    // PreToolUse is the event that reads the row; the others write straight
+    // to the store, which still holds it.
+    let request = HookRequest::Observe(ObservedEvent::Event {
+        task_id: TaskId(42),
+        kind: HookEventKind::PreToolUse,
+    });
+    let Json(resp) = handle_hook(State(state), Json(request)).await;
+    assert!(
+        matches!(resp, HookResponse::Observed(ObserveOutcome::TaskNotFound)),
+        "{resp:?}"
+    );
+}
+
 /// A pane keypress delivered over the hook endpoint is recorded as a
 /// keybinding usage event under the row's action and the key, and does not
 /// push a task refresh (`PanesRecordUsageLikeTheBoard`).

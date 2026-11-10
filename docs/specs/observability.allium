@@ -478,7 +478,12 @@ rule ReadByIdReportsAnUndecodableTask {
         -- Every task-service path that names one task by id and finds it
         -- missing answers this way, a write's existence pre-check included,
         -- and so does the MCP server's lookup of a caller's own task: an
-        -- update to such a task must not tell an agent it is gone.
+        -- update to such a task must not tell an agent it is gone. The one
+        -- exception is a Claude Code hook: it answers the quiet "task not
+        -- found, skipping" outcome and the board warns instead, because a
+        -- failing hook would put an error in the agent's terminal on every
+        -- tool use for something it cannot act on. Hook events that write
+        -- straight to the store still apply, since the store holds the row.
         -- Tasks only: the board keeps no record of an undecodable epic, so a
         -- read of one by its id answers "not found".
 }

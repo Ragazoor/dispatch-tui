@@ -346,10 +346,21 @@ impl LearningService {
         &self,
         params: QueryLearningsParams,
     ) -> Result<Vec<Learning>, ServiceError> {
-        let task =
-            self.db.get_task(params.task_id).await.ok_or_else(|| {
-                ServiceError::NotFound(format!("task {} not found", params.task_id))
-            })?;
+        let task = match self.db.get_task(params.task_id).await {
+            Some(task) => task,
+            None => {
+                return Err(
+                    match self.db.get_undecodable_task_reason(params.task_id).await {
+                        Some(reason) => ServiceError::UndecodableTask(
+                            crate::service::undecodable_task_message(params.task_id, &reason),
+                        ),
+                        None => {
+                            ServiceError::NotFound(format!("task {} not found", params.task_id))
+                        }
+                    },
+                )
+            }
+        };
 
         let query_text = params
             .query

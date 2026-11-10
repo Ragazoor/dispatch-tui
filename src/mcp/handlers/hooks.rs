@@ -216,6 +216,14 @@ async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
         // deleted. That is not a failure the agent can act on, so it
         // travels back as an outcome and the hook exits cleanly.
         Err(ServiceError::NotFound(_)) => ObserveOutcome::TaskNotFound,
+        // A task this board cannot decode cannot take the event either, and
+        // failing the hook would put an error in the agent's terminal on every
+        // tool use for something it cannot act on. Warned here once per event
+        // instead (observability.allium: `ReadByIdReportsAnUndecodableTask`).
+        Err(ServiceError::UndecodableTask(reason)) => {
+            tracing::warn!(task_id = task_id.0, "hook event skipped: {reason}");
+            ObserveOutcome::TaskNotFound
+        }
         Err(e) => {
             tracing::warn!(task_id = task_id.0, "hook event failed: {e}");
             ObserveOutcome::Failed {

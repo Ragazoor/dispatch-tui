@@ -515,9 +515,9 @@ impl TaskService {
     /// `ReadByIdReportsAnUndecodableTask`).
     async fn task_missing(&self, id: TaskId) -> ServiceError {
         match self.db.get_undecodable_task_reason(id).await {
-            Some(reason) => ServiceError::Internal(anyhow::anyhow!(
-                crate::service::undecodable_task_message(id, &reason)
-            )),
+            Some(reason) => {
+                ServiceError::UndecodableTask(crate::service::undecodable_task_message(id, &reason))
+            }
             None => Self::task_not_found(id),
         }
     }
@@ -649,10 +649,7 @@ impl TaskService {
                 // so a stale read self-corrects within a tick. The
                 // `status = running` guard, which cannot self-correct, rides in
                 // the write.
-                let task =
-                    self.db.get_task(id).await.ok_or_else(|| {
-                        ServiceError::NotFound(format!("Task {} not found", id.0))
-                    })?;
+                let task = self.get_task(id).await?;
                 let activity = classify_agent_activity(
                     Some(now),
                     task.last_notification_at,

@@ -362,41 +362,16 @@ async fn get_task_not_found() {
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
-/// A store holding task 42 in a form this board cannot decode (a newer binary
-/// wrote a status it does not know). The temp dir must outlive the store.
-fn store_with_undecodable_task() -> (Arc<dyn store::TaskStore>, tempfile::TempDir) {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    let mut row = crate::sync::encode::create_task_row(
-        &crate::store::CreateTaskRequest::fixture("From the future", "/repo"),
-        "",
-        "u",
-        "2026-10-11 12:00:00.000",
-    );
-    row.id = 42;
-    row.status = "teleported".into();
-    rows.upsert_task(&row);
-    let offline = crate::sync::SdkReducerCaller::new(
-        Arc::new(crate::sync::SpacetimeSdkConnector::new(
-            "offline",
-            rows.clone(),
-        )),
-        Arc::new(crate::sync::SettledIdentity::default()),
-    );
-    let host_dir = tempfile::tempdir().unwrap();
-    let db: Arc<dyn store::TaskStore> = Arc::new(Store::new(
-        rows,
-        Arc::new(offline),
-        Arc::new(crate::sync::SettledIdentity::default()),
-        Arc::new(crate::clock::SystemClock),
-        "test-host".to_string(),
-        host_dir.path(),
-    ));
-    (db, host_dir)
+/// A store holding task 42 in a form this board cannot decode.
+fn store_with_undecodable_task() -> Arc<dyn store::TaskStore> {
+    let db = Store::open_in_memory().unwrap();
+    db.plant_undecodable_task(42);
+    Arc::new(db)
 }
 
 fn assert_reports_undecodable(err: ServiceError) {
     assert!(
-        matches!(err, ServiceError::Internal(_)),
+        matches!(err, ServiceError::UndecodableTask(_)),
         "an undecodable task is not a missing one: {err}"
     );
     let msg = err.to_string();
@@ -411,7 +386,7 @@ fn assert_reports_undecodable(err: ServiceError) {
 /// answering "not found".
 #[tokio::test]
 async fn get_task_reports_a_task_the_board_cannot_decode() {
-    let (db, _dir) = store_with_undecodable_task();
+    let db = store_with_undecodable_task();
     let err = task_svc(&db).get_task(TaskId(42)).await.unwrap_err();
     assert_reports_undecodable(err);
 }
@@ -420,7 +395,7 @@ async fn get_task_reports_a_task_the_board_cannot_decode() {
 /// must not tell an agent the task is gone.
 #[tokio::test]
 async fn a_write_pre_check_reports_a_task_the_board_cannot_decode() {
-    let (db, _dir) = store_with_undecodable_task();
+    let db = store_with_undecodable_task();
     let err = task_svc(&db)
         .clear_subagents_no_drain(TaskId(42))
         .await

@@ -56,6 +56,10 @@ pub enum ServiceError {
     NotFound(String),
     /// Database or internal error; preserves the underlying anyhow source chain.
     Internal(anyhow::Error),
+    /// The shared store holds the task but this board cannot decode it
+    /// (observability.allium: `ReadByIdReportsAnUndecodableTask`). Not a
+    /// missing task, and nothing the caller can fix.
+    UndecodableTask(String),
 }
 
 impl std::fmt::Display for ServiceError {
@@ -64,6 +68,7 @@ impl std::fmt::Display for ServiceError {
             ServiceError::Validation(msg) => write!(f, "{msg}"),
             ServiceError::NotFound(msg) => write!(f, "{msg}"),
             ServiceError::Internal(e) => write!(f, "{e}"),
+            ServiceError::UndecodableTask(msg) => write!(f, "{msg}"),
         }
     }
 }
