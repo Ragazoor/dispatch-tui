@@ -60,7 +60,7 @@ async fn validate_wrap_up_request(
 /// unless a rebase moved the branch and the repo has a verify command.
 fn wrap_up_complete(
     id: Option<Value>,
-    task_id: TaskId,
+    task_ref: &str,
     verify_line: &str,
     action: WrapUpAction,
     token: SessionRequestId,
@@ -92,10 +92,9 @@ fn wrap_up_complete(
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": format!(
-            "wrap_up complete (task {tid}, action: {action_str}).{no_git_note} \
+            "wrap_up complete ({task_ref}, action: {action_str}).{no_git_note} \
         The session is NOT yet closed.{verify_line} \
         Exit token: {token} — {exit_line}.{tail}",
-            tid = task_id.0,
             action_str = action.as_str(),
             token = token.0,
         )}]}),
@@ -160,7 +159,8 @@ async fn answer_rebase(
                 }
                 None => String::new(),
             };
-            wrap_up_complete(id, task_id, &line, WrapUpAction::Rebase, request)
+            let task_ref = super::super::types::task_ref(state, task_id).await;
+            wrap_up_complete(id, &task_ref, &line, WrapUpAction::Rebase, request)
         }
         Some(row) if row.state == SessionRequestState::Failed => {
             let reason = row
@@ -180,10 +180,11 @@ async fn answer_rebase(
                 id,
                 INTERNAL_ERROR,
                 format!(
-                    "wrap_up request #{} for task #{} is still {state_word} and no exit token was \
+                    "wrap_up request #{} for {} is still {state_word} and no exit token was \
                      issued. Wait a moment and call wrap_up again — a second request is refused \
                      while this one is still open.",
-                    request.0, task_id.0
+                    request.0,
+                    super::super::types::task_ref(state, task_id).await
                 ),
             )
         }
@@ -270,7 +271,7 @@ pub(crate) async fn handle_wrap_up(
     match parsed.action {
         // No host work: the module wrote the row already done.
         WrapUpAction::Done | WrapUpAction::Pr => {
-            wrap_up_complete(id, task.id, "", parsed.action, request)
+            wrap_up_complete(id, &task.reference(), "", parsed.action, request)
         }
         WrapUpAction::Rebase => {
             answer_rebase(state, id, task.id, watch, request, &mut changes).await
@@ -299,19 +300,12 @@ async fn session_closed(
     {
         Some(next) => {
             state.notify_task_changed(next);
-            Some((
-                next,
-                state.task_svc.get_task(next).await.ok().map(|t| t.title),
-            ))
+            Some(super::super::types::task_ref(state, next).await)
         }
         None => None,
     };
     let text = match chained {
-        Some((next, Some(title))) => format!(
-            "Session closed. Dispatching next epic subtask #{} '{title}'.",
-            next.0
-        ),
-        Some((next, None)) => format!("Session closed. Dispatching next epic subtask #{}.", next.0),
+        Some(next) => format!("Session closed. Dispatching next epic subtask {next}."),
         None => "Session closed.".to_string(),
     };
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
@@ -392,9 +386,9 @@ pub(crate) async fn handle_exit_session(
                     INTERNAL_ERROR,
                     format!(
                         "exit_session got no answer from the shared store and the close did not \
-                         take effect: task #{} is unchanged, your tmux session is still alive and \
+                         take effect: {} is unchanged, your tmux session is still alive and \
                          the token is still valid — call exit_session again.",
-                        task_id.0
+                        task.reference()
                     ),
                 )
             }

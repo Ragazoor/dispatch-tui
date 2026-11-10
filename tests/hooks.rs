@@ -621,6 +621,11 @@ async fn undelivered_message_to_a_paused_agent_tells_the_sender_to_resume_it() {
     );
     assert!(context.contains(&name), "got: {context}");
     assert!(context.contains("not running"), "got: {context}");
+    // The task is named by id, display name and title.
+    assert!(
+        context.contains(&format!("Task {} ({name}, \"Target\")", target.0)),
+        "got: {context}"
+    );
 
     assert!(board.task(sender).await.last_peer_message_sent_at.is_some());
     assert!(

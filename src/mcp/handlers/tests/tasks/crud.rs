@@ -268,7 +268,7 @@ async fn update_task_done_marks_task_done_for_session_caller() {
     );
     assert_eq!(
         extract_response_text(&resp),
-        format!("Task #{} marked done.", task_id.0)
+        format!("{} marked done.", task_ref_of(&state, task_id).await)
     );
 
     let task = state.db.get_task(task_id).await.unwrap();
@@ -653,6 +653,12 @@ async fn create_task_minimal() {
     // Verify task was created in DB
     let tasks = state.db.list_all().await;
     assert_eq!(tasks.len(), 1);
+    // The reply keeps the id and adds the display name and title.
+    assert_eq!(
+        text,
+        format!("{} created", task_ref_of(&state, tasks[0].id).await)
+    );
+    assert!(text.contains("\"New Task\""), "{text}");
     assert_eq!(tasks[0].title, "New Task");
     assert_eq!(tasks[0].status, TaskStatus::Backlog);
     assert!(tasks[0].plan_path.is_none());
@@ -880,11 +886,12 @@ async fn update_task_accepts_string_task_id() {
 pub(super) fn extract_created_task_id(resp: &JsonRpcResponse) -> crate::models::TaskId {
     let result = resp.result.as_ref().expect("expected ok response");
     let text = result["content"][0]["text"].as_str().expect("text field");
-    // "Task <id> created"
+    // `Task <id> (<name>, "<title>") created`
     let id_str = text
         .strip_prefix("Task ")
         .and_then(|s| s.strip_suffix(" created"))
-        .expect("expected 'Task <id> created'");
+        .and_then(|s| s.split(' ').next())
+        .expect("expected 'Task <id> (...) created'");
     crate::models::TaskId(id_str.parse().expect("numeric id"))
 }
 

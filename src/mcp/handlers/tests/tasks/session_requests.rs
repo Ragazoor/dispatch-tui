@@ -235,8 +235,8 @@ async fn wrap_up_done_and_pr_answer_at_once_with_the_rows_id_as_the_token() {
         assert_eq!(token_in(&text), rows[0].id.0.to_string(), "{text}");
         assert!(
             text.contains(&format!(
-                "wrap_up complete (task {}, action: {action})",
-                task.0
+                "wrap_up complete ({}, action: {action})",
+                task_ref_of(&state, task).await
             )),
             "{text}"
         );
@@ -273,8 +273,8 @@ async fn wrap_up_rebase_waits_for_the_host_and_answers_with_the_token() {
     assert_eq!(token_in(&text), row.id.0.to_string(), "{text}");
     assert!(
         text.contains(&format!(
-            "wrap_up complete (task {}, action: rebase)",
-            task.0
+            "wrap_up complete ({}, action: rebase)",
+            task_ref_of(&state, task).await
         )),
         "{text}"
     );
@@ -442,8 +442,8 @@ async fn exit_session_response_names_the_chained_subtask() {
     assert_eq!(
         extract_response_text(&resp),
         format!(
-            "Session closed. Dispatching next epic subtask #{} 'Wire up the widget'.",
-            next.0
+            "Session closed. Dispatching next epic subtask {}.",
+            task_ref_of(&state, next).await
         )
     );
     assert_eq!(
@@ -658,7 +658,7 @@ async fn update_tasks_done_closes_in_the_module_and_writes_a_close_row_without_a
 
     assert_eq!(
         extract_response_text(&resp),
-        format!("Task #{} marked done.", task.0)
+        format!("{} marked done.", task_ref_of(&state, task).await)
     );
     let rows = db.session_requests().await;
     assert_eq!(rows.len(), 1, "{rows:?}");

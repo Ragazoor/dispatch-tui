@@ -67,7 +67,7 @@ async fn create_work_package_links_the_named_items() {
     let text = extract_response_text(&resp);
     let id = only_package(&state).await;
     assert!(
-        text.contains(&format!("Work package {id} created")),
+        text.contains(&format!("Work package {id} (\"Window 1\") created")),
         "{text}"
     );
     let l = links(&state).await;
@@ -109,7 +109,11 @@ async fn list_work_packages_shows_each_item_with_status_and_title() {
     assert!(text.contains("Window 1"), "{text}");
     assert!(text.contains("Description: plan"), "{text}");
     assert!(
-        text.contains(&format!("- task {} [backlog] the task", t.0)),
+        text.contains(&format!(
+            "- task {} [backlog] {}: the task",
+            t.0,
+            state.db.get_task(t).await.unwrap().agent_name.unwrap()
+        )),
         "{text}"
     );
 }
@@ -180,10 +184,12 @@ async fn update_work_package_names_the_unlinks_that_touched_nothing() {
     let text = extract_response_text(&resp);
     assert!(text.contains("updated"), "{text}");
     assert!(
-        text.contains(&format!("not linked: task {}", b.0)),
+        text.contains(&format!("not linked: {}", task_ref_of(&state, b).await)),
         "{text}"
     );
-    assert!(!text.contains(&format!("task {},", a.0)) && !text.ends_with(&format!("task {}", a.0)));
+    assert!(text.starts_with("Work package "), "{text}");
+    assert!(text.contains("(\"W\") updated"), "{text}");
+    assert!(!text.contains(&task_ref_of(&state, a).await), "{text}");
     assert!(links(&state).await.is_empty());
 }
 
@@ -271,7 +277,12 @@ async fn delete_work_package_keeps_the_items() {
     )
     .await;
 
-    assert!(extract_response_text(&resp).contains("unchanged"));
+    let text = extract_response_text(&resp);
+    assert!(text.contains("unchanged"));
+    assert!(
+        text.starts_with("Work package ") && text.contains("(\"W\") deleted"),
+        "{text}"
+    );
     assert!(state.db.list_work_packages().await.is_empty());
     assert!(links(&state).await.is_empty());
     assert!(state.db.get_task(t).await.is_some());

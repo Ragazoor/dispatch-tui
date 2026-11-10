@@ -20,7 +20,8 @@ fn parse_created_task_id(resp: &Value) -> TaskId {
     let id_str = text
         .strip_prefix("Task ")
         .and_then(|s| s.strip_suffix(" created"))
-        .expect("expected 'Task <id> created'");
+        .and_then(|s| s.split(' ').next())
+        .expect("expected 'Task <id> (...) created'");
     TaskId(id_str.parse().expect("numeric id"))
 }
 
@@ -72,7 +73,7 @@ async fn create_task_via_task_header_does_not_inherit_epic() {
     .await;
     let refusal = error_text(&refused);
     assert!(
-        refusal.contains("epic_id") && refusal.contains(&format!("#{}", epic.id.0)),
+        refusal.contains("epic_id") && refusal.contains(&format!("Epic {} (", epic.id.0)),
         "refusal must name the argument and the caller's epic, got: {refusal}"
     );
     assert_eq!(

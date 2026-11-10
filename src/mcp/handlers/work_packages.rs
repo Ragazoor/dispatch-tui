@@ -109,6 +109,7 @@ pub(super) async fn handle_create_work_package(
     let visibility = parsed.visibility.unwrap_or_default();
     let link = items(parsed.link_task_ids, parsed.link_epic_ids);
     let linked = link.len();
+    let title = parsed.title.clone();
     match state
         .work_package_svc
         .create_work_package(CreateWorkPackageParams {
@@ -125,7 +126,7 @@ pub(super) async fn handle_create_work_package(
             text(
                 id,
                 format!(
-                    "Work package {package_id} created in workspace {} ({}) with {linked} linked item(s)",
+                    "Work package {package_id} (\"{title}\") created in workspace {} ({}) with {linked} linked item(s)",
                     workspace_id, visibility
                 ),
             )
@@ -154,19 +155,42 @@ pub(super) async fn handle_list_work_packages(
             id,
             "No work packages. Create one with create_work_package.".to_string(),
         ),
-        Ok(views) => text(
-            id,
-            views
-                .iter()
-                .map(format_view)
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-        ),
+        Ok(views) => {
+            // Task items show the task's display name (`McpRepliesNameWhatTheyTouch`).
+            let mut names = std::collections::HashMap::new();
+            for view in &views {
+                for i in &view.items {
+                    if let WorkPackageItem::Task(task_id) = i.item {
+                        if let Some(name) = state
+                            .task_svc
+                            .get_task(task_id)
+                            .await
+                            .ok()
+                            .and_then(|t| t.agent_name)
+                            .filter(|n| !n.is_empty())
+                        {
+                            names.insert(task_id, name);
+                        }
+                    }
+                }
+            }
+            text(
+                id,
+                views
+                    .iter()
+                    .map(|v| format_view(v, &names))
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            )
+        }
         Err(e) => service_err_to_response(id, e),
     }
 }
 
-fn format_view(view: &WorkPackageView) -> String {
+fn format_view(
+    view: &WorkPackageView,
+    names: &std::collections::HashMap<TaskId, String>,
+) -> String {
     let p = &view.package;
     let mut out = format!("Work package {}: {}", p.id, p.title);
     if !p.description.is_empty() {
@@ -192,8 +216,14 @@ fn format_view(view: &WorkPackageView) -> String {
     } else {
         out.push_str(&format!("\nItems ({}):", view.items.len()));
         for i in &view.items {
+            let lead = match i.item {
+                WorkPackageItem::Task(task_id) => names
+                    .get(&task_id)
+                    .map_or(String::new(), |name| format!("{name}: ")),
+                WorkPackageItem::Epic(_) => String::new(),
+            };
             out.push_str(&format!(
-                "\n- {} {} [{}] {}",
+                "\n- {} {} [{}] {lead}{}",
                 i.item.kind(),
                 i.item.raw_id(),
                 i.status.as_str(),
@@ -249,26 +279,54 @@ pub(super) async fn handle_update_work_package(
     match state.work_package_svc.update_work_package(params).await {
         Ok(not_linked) => {
             state.notify();
-            text(id, update_reply(package_id, &fields, &not_linked))
+            let package = package_ref(state, package_id).await;
+            let mut named = Vec::with_capacity(not_linked.len());
+            for item in &not_linked {
+                named.push(item_ref(state, *item).await);
+            }
+            text(id, update_reply(&package, &fields, &named))
         }
         Err(e) => service_err_to_response(id, e),
     }
 }
 
+/// `Work package 5 ("Title")`, or the bare id when the store does not hold
+/// the package (`McpRepliesNameWhatTheyTouch`).
+async fn package_ref(state: &McpState, package_id: WorkPackageId) -> String {
+    match state
+        .work_package_svc
+        .list_work_packages(Some(package_id))
+        .await
+    {
+        Ok(views) => match views.first() {
+            Some(view) => format!("Work package {package_id} (\"{}\")", view.package.title),
+            None => format!("Work package {package_id}"),
+        },
+        Err(_) => format!("Work package {package_id}"),
+    }
+}
+
+/// A linked item as a reply names it: a task or an epic reference, or
+/// `task 4` / `epic 7` when the store does not hold it.
+async fn item_ref(state: &McpState, item: WorkPackageItem) -> String {
+    match item {
+        WorkPackageItem::Task(id) => match state.task_svc.get_task(id).await {
+            Ok(task) => task.reference(),
+            Err(_) => format!("task {id}"),
+        },
+        WorkPackageItem::Epic(id) => match state.epic_svc.get_epic(id).await {
+            Ok(epic) => epic.reference(),
+            Err(_) => format!("epic {id}"),
+        },
+    }
+}
+
 /// The reply to an update: what was written, and any requested unlink that
 /// named an item the package never held (it changed nothing).
-fn update_reply(
-    package_id: WorkPackageId,
-    fields: &[&str],
-    not_linked: &[WorkPackageItem],
-) -> String {
-    let mut reply = format!("Work package {package_id} updated ({})", fields.join(", "));
+fn update_reply(package: &str, fields: &[&str], not_linked: &[String]) -> String {
+    let mut reply = format!("{package} updated ({})", fields.join(", "));
     if !not_linked.is_empty() {
-        let named: Vec<String> = not_linked
-            .iter()
-            .map(|i| format!("{} {}", i.kind(), i.raw_id()))
-            .collect();
-        reply.push_str(&format!("; not linked: {}", named.join(", ")));
+        reply.push_str(&format!("; not linked: {}", not_linked.join(", ")));
     }
     reply
 }
@@ -284,14 +342,14 @@ async fn delete_work_package(
         work_package_id = package_id.0,
         "MCP update_work_package delete"
     );
+    // Named before the delete: afterwards there is no title left to read.
+    let package = package_ref(state, package_id).await;
     match state.work_package_svc.delete_work_package(package_id).await {
         Ok(()) => {
             state.notify();
             text(
                 id,
-                format!(
-                    "Work package {package_id} deleted; the tasks and epics it linked are unchanged"
-                ),
+                format!("{package} deleted; the tasks and epics it linked are unchanged"),
             )
         }
         Err(e) => service_err_to_response(id, e),

@@ -679,7 +679,7 @@ async fn create_task_refusal_names_the_callers_epic_and_the_null_option() {
         "refusal must name the argument, got: {msg}"
     );
     assert!(
-        msg.contains(&format!("#{}", parent_epic.0)),
+        msg.contains(&epic_ref_of(&state, parent_epic).await),
         "refusal must name the caller's epic as the likely answer, got: {msg}"
     );
     assert!(

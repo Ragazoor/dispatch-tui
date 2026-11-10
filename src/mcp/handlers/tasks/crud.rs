@@ -94,7 +94,8 @@ async fn handle_update_task(
         }
     }
     state.notify_task_changed(task_id);
-    let text = format!("Task {} updated ({}){}", task_id, fields.join(", "), nudge);
+    let task_ref = super::super::types::task_ref(state, task_id).await;
+    let text = format!("{task_ref} updated ({}){}", fields.join(", "), nudge);
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
@@ -213,7 +214,10 @@ pub(crate) async fn handle_update_tasks(
                 updated += 1;
                 lines.push(text);
             }
-            Err(message) => lines.push(format!("Task {task_id} failed: {message}")),
+            Err(message) => lines.push(format!(
+                "{} failed: {message}",
+                super::super::types::task_ref(state, *task_id).await
+            )),
         }
     }
     lines.push(format!("Updated {updated} of {} tasks.", task_ids.len()));
@@ -345,9 +349,9 @@ async fn handle_mark_task_done(
             tool_error(
                 id,
                 format!(
-                    "Task #{} could NOT be moved to done — the close did not take effect. \
+                    "{} could NOT be moved to done — the close did not take effect. \
                      The task is still in its previous status; try again.",
-                    task_id.0
+                    task.reference()
                 ),
             )
         }
@@ -355,7 +359,7 @@ async fn handle_mark_task_done(
         // never names a next subtask.
         Ok(()) => JsonRpcResponse::ok(
             id,
-            json!({"content": [{"type": "text", "text": format!("Task #{} marked done.", task_id.0)}]}),
+            json!({"content": [{"type": "text", "text": format!("{} marked done.", task.reference())}]}),
         ),
     }
 }
@@ -373,14 +377,13 @@ async fn handle_mark_task_done(
 /// This is why the requirement is enforced here rather than by making the
 /// field non-`Option` at the deserialization boundary: serde's own
 /// missing-field error cannot see the caller's identity.
-fn missing_epic_id_message(caller_epic: Option<EpicId>) -> String {
+fn missing_epic_id_message(caller_epic: Option<String>) -> String {
     let base = "epic_id is required. Pass the id of the epic this task belongs to, \
                 or null if it is deliberately standalone.";
     match caller_epic {
-        Some(epic) => format!(
-            "{base} Your own task is in epic #{}, which is the likely answer here.",
-            epic.0
-        ),
+        Some(epic) => {
+            format!("{base} Your own task is in {epic}, which is the likely answer here.")
+        }
         None => base.to_string(),
     }
 }
@@ -409,7 +412,10 @@ pub(crate) async fn handle_create_task(
     let caller_epic = match identity {
         CallerIdentity::Task(caller_id) => {
             match fetch_caller_task(&*state.db, &id, *caller_id).await {
-                Ok(t) => t.epic_id,
+                Ok(t) => match t.epic_id {
+                    Some(epic) => Some(super::super::types::epic_ref(state, epic).await),
+                    None => None,
+                },
                 Err(resp) => return resp,
             }
         }
@@ -449,7 +455,10 @@ pub(crate) async fn handle_create_task(
         Err(e) => return service_err_to_response(id, e),
     };
     state.notify_task_changed(task_id);
-    let text = format!("Task {task_id} created");
+    let text = format!(
+        "{} created",
+        super::super::types::task_ref(state, task_id).await
+    );
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
@@ -575,10 +584,16 @@ pub(crate) async fn handle_list_tasks(
         build_plan_goal_cache(&filtered),
         state.db.list_agents()
     );
-    let current_agents: HashMap<TaskId, &Agent> = agents
-        .iter()
-        .filter(|a| a.is_current())
-        .map(|a| (a.task_id, a))
+    // The display agent (agents.allium: A18): not ended, else the last to end.
+    let mut by_task: HashMap<TaskId, Vec<&Agent>> = HashMap::new();
+    for a in &agents {
+        by_task.entry(a.task_id).or_default().push(a);
+    }
+    let current_agents: HashMap<TaskId, &Agent> = by_task
+        .into_iter()
+        .filter_map(|(task, of_task)| {
+            crate::models::display_agent(of_task.iter().copied()).map(|a| (task, a))
+        })
         .collect();
     let mut lines: Vec<String> = filtered
         .iter()

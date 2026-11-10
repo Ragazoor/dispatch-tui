@@ -56,7 +56,19 @@ pub struct Epic {
     pub updated_at: DateTime<Utc>,
 }
 
+/// How an MCP reply names an epic: its id with the title beside it
+/// (`mcp-task-tools.allium: Replies name what they touch`).
+/// `Epic 314 ("Dispatch")`.
+pub fn epic_reference(id: EpicId, title: &str) -> String {
+    format!("Epic {id} (\"{title}\")")
+}
+
 impl Epic {
+    /// [`epic_reference`] for this epic.
+    pub fn reference(&self) -> String {
+        epic_reference(self.id, &self.title)
+    }
+
     /// The card's generic ordering key — the twin of [`crate::models::Task::sort_key`].
     pub fn sort_key(&self) -> i64 {
         self.sort_order.unwrap_or(self.id.0)

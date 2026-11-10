@@ -320,6 +320,7 @@ async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Opti
 
     let task = state.task_svc.get_task(target_id).await.ok()?;
     let n = target_id.0;
+    let task_ref = task.reference();
     let window = crate::models::TmuxWindow::for_task(target_id).to_string();
     let by_window_name = parse_peer_message_target_name(to).is_some();
     let to = peer_message_target_name(to);
@@ -345,7 +346,7 @@ async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Opti
                 String::new()
             };
             return Some(format!(
-                "{not_running} It is task #{n}'s agent {agent}.{ended} To wake it with your \
+                "{not_running} It is the agent of {task_ref}.{ended} To wake it with your \
                  message, call the dispatch MCP tool resume_task(task_id: {n}, message: <your \
                  message>): the message becomes the agent's first input when its session \
                  restarts.{moves}"
@@ -361,7 +362,7 @@ async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Opti
             };
             return Some(format!(
                 "{to} did not answer, so your message was not delivered, but the board still \
-                 shows task #{n}'s window open: the session in it has exited or is not \
+                 shows the window of {task_ref} open: the session in it has exited or is not \
                  responding.{try_window} resume_task refuses a task whose window is open. If \
                  the send still fails, tell your operator so they can check the window."
             ));
@@ -380,7 +381,7 @@ async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Opti
         }
     };
     Some(format!(
-        "{not_running} It is task #{n}, which cannot be resumed: {reason}. Starting a new \
+        "{not_running} It is {task_ref}, which cannot be resumed: {reason}. Starting a new \
          agent on it is your operator's decision; tell your user if the message matters."
     ))
 }

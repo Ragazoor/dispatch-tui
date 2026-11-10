@@ -317,7 +317,10 @@ async fn update_task_done_response_never_names_a_chained_subtask() {
 
     let resp = fx.close_via_update_task(closing).await;
     let text = extract_response_text(&resp);
-    assert_eq!(text, format!("Task #{} marked done.", closing.0));
+    assert_eq!(
+        text,
+        format!("{} marked done.", task_ref_of(&fx.state, closing).await)
+    );
 }
 
 /// Closing a task with a live tmux window via update_task(status="done")
@@ -447,8 +450,8 @@ async fn exit_session_response_names_the_chained_subtask() {
     assert_eq!(
         text,
         format!(
-            "Session closed. Dispatching next epic subtask #{} 'Wire up the widget'.",
-            next.0
+            "Session closed. Dispatching next epic subtask {}.",
+            task_ref_of(&fx.state, next).await
         ),
     );
 
@@ -474,7 +477,7 @@ async fn exit_session_chain_respects_sort_order() {
     let resp = fx.close(closing, WrapUpAction::Done).await;
     let text = extract_response_text(&resp);
     assert!(
-        text.contains(&format!("#{}", earlier.0)),
+        text.contains(&task_ref_of(&fx.state, earlier).await),
         "expected the lower sort_order subtask to be chained, got: {text}"
     );
 
@@ -646,7 +649,7 @@ async fn assert_action_chains(action: WrapUpAction) {
     let resp = fx.close(closing, action).await;
     let text = extract_response_text(&resp);
     assert!(
-        text.contains(&format!("#{}", next.0)),
+        text.contains(&task_ref_of(&fx.state, next).await),
         "action {:?} must chain, got: {text}",
         action
     );
@@ -996,7 +999,7 @@ async fn wrap_up_then_exit_session_chains_without_an_agent_tool_call() {
     .await;
     let text = extract_response_text(&resp);
     assert!(
-        text.contains(&format!("#{}", next.0)),
+        text.contains(&task_ref_of(&fx.state, next).await),
         "the close itself must chain, got: {text}"
     );
 
@@ -1278,7 +1281,7 @@ async fn dispatch_task_success_text_names_a_reused_worktree() {
 #[test]
 fn dispatch_task_success_text_names_a_created_worktree() {
     let text = crate::mcp::handlers::tasks::dispatch::dispatched_text(
-        crate::models::TaskId(7),
+        "Task 7 (ada, \"Thing\")",
         &crate::models::DispatchResult {
             worktree_path: "/repo/.worktrees/7-thing".to_string(),
             tmux_window: test_tmux_window("task-7"),

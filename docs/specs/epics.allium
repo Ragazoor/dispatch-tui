@@ -627,8 +627,8 @@ rule ListEpicsViaMcp {
         -- The response is one line per epic carrying the
         -- epic id, the title, the progress fraction, then a plan indicator
         -- (when a plan is attached) followed by a status indicator (when
-        -- the status is not backlog), then " (parent:<id>)" when the epic has
-        -- a parent, and finally the description. The parent is on every row so
+        -- the status is not backlog), then " (parent:<id> <parent title>)" when the epic
+        -- has a parent, and finally the description. The parent is on every row so
         -- a caller can rebuild the tree from one call instead of one
         -- list_epics(epic_id) per epic. The id
         -- is included because it is how the caller addresses the epic in
@@ -637,6 +637,10 @@ rule ListEpicsViaMcp {
         -- message rather than an error.
 }
 
+-- The update_epic reply is "<epic ref> updated (fields)", e.g.
+-- `Epic 314 ("Dispatch") updated (title)` (mcp-task-tools.allium: "Replies
+-- name what they touch"). When the call changes the title, the reply shows
+-- the new one.
 rule UpdateEpicViaMcp {
     when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?,
                         feed_command?, feed_interval_secs?, group_by_repo?,

@@ -272,3 +272,31 @@ mod wrap_up_mode_tests {
         assert_eq!(WrapUpMode::Done.to_string(), "done");
     }
 }
+
+#[test]
+fn a_task_reference_keeps_the_id_and_adds_name_and_title() {
+    assert_eq!(
+        task_reference(TaskId(5), Some("ada"), "Fix it"),
+        "Task 5 (ada, \"Fix it\")"
+    );
+}
+
+#[test]
+fn a_task_reference_without_a_display_name_shows_the_title_only() {
+    assert_eq!(
+        task_reference(TaskId(5), None, "Fix it"),
+        "Task 5 (\"Fix it\")"
+    );
+    assert_eq!(
+        task_reference(TaskId(5), Some(""), "Fix it"),
+        "Task 5 (\"Fix it\")"
+    );
+}
+
+#[test]
+fn an_epic_reference_keeps_the_id_and_adds_the_title() {
+    assert_eq!(
+        crate::models::epic_reference(crate::models::EpicId(314), "Dispatch"),
+        "Epic 314 (\"Dispatch\")"
+    );
+}

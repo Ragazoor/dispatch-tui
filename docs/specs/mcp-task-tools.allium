@@ -197,6 +197,20 @@ rule AgentPortRejectsNonLoopbackOrigins {
 -- task_id that names no task ("Task N not found"). A missing or null
 -- `arguments` means an empty object.
 
+-- == Replies name what they touch ==
+-- (agents.allium: NamesForPeople, McpRepliesNameWhatTheyTouch.) Ids stay the
+-- key every tool takes. A reply that names a task or an epic writes it as a
+-- reference, id first, so the caller can both act on it and read it:
+--
+--   task: `Task <id> (<name>, "<title>")`, or `Task <id> ("<title>")` while
+--         the task has no display name.
+--   epic: `Epic <id> ("<title>")`.
+--
+-- Every reply below that says "task <id>" or "epic <id>" means these forms.
+-- A tool never resolves an epic by title: titles are not unique, so an agent
+-- that holds only a title asks which epic was meant. The unseen-items tools
+-- and the `Task <id> not found` errors keep bare ids on purpose.
+
 -- == MCP Task Tools ==
 
 -- UpdateTaskViaMcp is the per-task rule behind the one update tool,
@@ -767,12 +781,12 @@ rule UpdateTasksViaMcp {
         -- With more than one id the call is not atomic. A failure on one task
         -- does not stop or roll back the others, and the response is a success
         -- even when some tasks fail. It has one line per id, in the order
-        -- given: "Task N updated (fields)" or "Task N failed: <error
-        -- message>", then a final "Updated X of Y tasks." A repeated id is
+        -- given: "<task ref> updated (fields)" or "<task ref> failed: <error
+        -- message>" (a bare "Task N" when the store has no such task), then a final "Updated X of Y tasks." A repeated id is
         -- handled once.
         --
         -- With exactly one id (after de-duplication) the reply is the old
-        -- single-task reply: "Task N updated (fields)" on success, and on
+        -- single-task reply: "<task ref> updated (fields)" on success, and on
         -- failure a real error response carrying the message, with no
         -- "failed:" line and no count. Reporting a lone failure inside a
         -- success response would hide it from a caller that checks for an
@@ -1019,6 +1033,12 @@ rule CreateTaskViaMcp {
         -- too. Left to the SQLite foreign key instead, as it once was, it
         -- surfaced as a -32603 Internal whose text named neither the epic nor
         -- the argument.
+        -- == The reply ==
+        -- "<task ref> created", e.g. `Task 5 (nevena2, "Fix it") created`:
+        -- the new task already has its agent (agents.allium: A17), so the
+        -- display name is there. The refusal for a missing epic_id names the
+        -- caller's own epic as an epic ref: `Your own task is in Epic 314
+        -- ("Dispatch"), which is the likely answer here.`
         -- Unlike the TUI CreateTask rule, this rule does not fire
         -- RecordRepoPath — MCP task creation skips repo path persistence.
         -- repo_path is expanded through expand_tilde before being
@@ -1091,14 +1111,15 @@ rule GetTaskViaMcp {
         -- the /wrap-up skill, the caller that reads them, not to the tool.
         -- Handled by handle_get_task in src/mcp/handlers/tasks/crud.rs.
         --
-        -- == The current agent ==
-        -- A task with a current agent (agents.allium: AgentIdentity) gets one
-        -- line, "Agent: <name> (live)" or "Agent: <name> (paused)", straight
-        -- after the Description line: live when the agent holds a tmux window,
-        -- paused when it does not. A task with no current agent has no such
-        -- line, as an unset field has none. An ended agent is never shown: it
-        -- still resolves as a task_ref (TaskRefResolvesToTaskId), but it is not
-        -- the one working the task.
+        -- == The display agent ==
+        -- A task with an agent (agents.allium: AgentIdentity) gets one
+        -- line, "Agent: <name> (<state>)", straight after the Description line.
+        -- The state is `live` when the agent holds a tmux window, `paused`
+        -- when it is current and holds none, `not started` while it is
+        -- assigned and has never launched, and `ended` once it has ended. The
+        -- line shows the task's display agent (core.allium: display_name), so
+        -- a task whose agent ended shows `ended`; a task with no agent has no
+        -- such line, as an unset field has none.
 }
 
 rule ListTasksViaMcp {
@@ -1133,10 +1154,11 @@ rule ListTasksViaMcp {
         -- disable auto-scoping, so "all my bookmarks" from a dispatched agent
         -- needs an explicit scope, as query does. A bookmarked task's row
         -- carries " bookmarked" after its title, with or without the filter.
-        -- == each row names the current agent ==
-        -- A row for a task with a current agent carries " agent:<name> (live)"
-        -- or " agent:<name> (paused)" after the title, with the same
-        -- meaning as get_task's Agent line. A task with none shows nothing.
+        -- == each row names the display agent ==
+        -- A row for a task with an agent carries " agent:<name> (<state>)"
+        -- after the title, with the same states as get_task's Agent line
+        -- (live, paused, not started, ended). A task with no agent shows
+        -- nothing.
         -- == query is a text search over title and description ==
         -- query, when set, keeps only tasks that match it. It is split on
         -- whitespace into words; a task matches when EVERY word is a
@@ -1315,6 +1337,13 @@ rule DispatchTaskViaMcp {
         -- to the local branch. What matters here is only that one path branches
         -- and the other does not.
         --
+        -- Every dispatch_task text names the task as a task ref, which
+        -- carries the name of the agent that runs it, read after the launch:
+        -- `dispatched <task ref> — <provisioning>: <path>, tmux: <window>`,
+        -- `<task ref> is not in backlog (current: <status>)`,
+        -- `<task ref> cannot be dispatched: <why>`, and for a request still
+        -- open `dispatch request <n> for <task ref> is still <state>`.
+        --
         -- The success text says which of the two happened, naming the worktree
         -- either as created or as reused. This is not decoration. It is the
         -- only place a caller learns, from the call itself, that a re-dispatch
@@ -1389,6 +1418,10 @@ rule ResumeTaskViaMcp {
         -- why the agent was woken; the task description is not rewritten.
         --
         -- == Errors ==
+        -- Every resume_task text, success and refusal, names the task as a
+        -- task ref: `resume requested for <task ref>: ...`,
+        -- `<task ref> has no resumable session: ...`.
+        --
         -- Each refused precondition is an error that says what is wrong in
         -- plain words: the task has no worktree (it never ran, so there is
         -- no session to resume; dispatch it); its status is not running,
@@ -1584,6 +1617,9 @@ rule WrapUpViaMcp {
         --     store unreachable): an INTERNAL_ERROR naming the request id
         --     and saying no token was issued and to call wrap_up again; a
         --     second request is refused while the first is still open.
+        -- The first success line is `wrap_up complete (<task ref>, action:
+        -- <action>).`, and an unfinished-request error names `<task ref>` the
+        -- same way.
         -- The success texts are today's: the action, that the session is NOT
         -- yet closed, "Exit token: <id>" with the
         -- exit_session instruction naming the action (and pr_url for pr),
@@ -1808,8 +1844,8 @@ rule ExitSessionViaMcp {
         -- == The response ==
         -- Accepted: the close took effect. The response is "Session closed."
         -- or, when the epic chain requested a subtask (the exit_session row's
-        -- chained_task), "Session closed. Dispatching next epic subtask #<id>
-        -- '<title>'."
+        -- chained_task), "Session closed. Dispatching next epic subtask <task ref>."
+        -- (the ref carries the subtask's name and title)
         --
         -- DECISION (with the user, store-split W4): the tool does NOT wait for
         -- the window teardown. It answers as soon as the module accepts the

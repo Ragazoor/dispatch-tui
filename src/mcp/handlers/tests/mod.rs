@@ -397,6 +397,17 @@ fn assert_error(resp: &JsonRpcResponse, substr: &str) {
 }
 
 /// Extract the text content from a successful MCP response.
+/// The reference a reply uses for task `id` (`Task 5 (ada, "Fix it")`). Agent
+/// names are random, so a test reads it from the store rather than spell it.
+async fn task_ref_of(state: &McpState, id: crate::models::TaskId) -> String {
+    state.db.get_task(id).await.unwrap().reference()
+}
+
+/// The reference a reply uses for epic `id` (`Epic 314 ("Dispatch")`).
+async fn epic_ref_of(state: &McpState, id: crate::models::EpicId) -> String {
+    state.db.get_epic(id).await.unwrap().reference()
+}
+
 fn extract_response_text(resp: &JsonRpcResponse) -> String {
     let result = resp
         .result

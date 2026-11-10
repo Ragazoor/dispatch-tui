@@ -118,7 +118,7 @@ async fn list_epics_rows_name_their_parent() {
 
     let grandchild = row(&text, t.grandchild).unwrap();
     assert!(
-        grandchild.contains(&format!("(parent:{})", t.child)),
+        grandchild.contains(&format!("(parent:{} Child)", t.child)),
         "{grandchild}"
     );
     let root = row(&text, t.root).unwrap();
@@ -299,7 +299,10 @@ async fn update_tasks_updates_every_named_task_whatever_its_status() {
         let task = state.db.get_task(id).await.unwrap();
         assert_eq!(task.base_branch, "master", "task {id}");
         assert!(
-            text.contains(&format!("Task {id} updated (base_branch)")),
+            text.contains(&format!(
+                "{} updated (base_branch)",
+                task_ref_of(&state, id).await
+            )),
             "{text}"
         );
     }
@@ -322,12 +325,12 @@ async fn update_tasks_reports_a_failure_and_carries_on() {
     let lines: Vec<&str> = text.lines().collect();
 
     assert!(
-        lines[0].starts_with(&format!("Task {first} updated")),
+        lines[0].starts_with(&format!("{} updated", task_ref_of(&state, first).await)),
         "{text}"
     );
     assert!(lines[1].starts_with("Task 9999 failed: "), "{text}");
     assert!(
-        lines[2].starts_with(&format!("Task {last} updated")),
+        lines[2].starts_with(&format!("{} updated", task_ref_of(&state, last).await)),
         "{text}"
     );
     assert_eq!(lines[3], "Updated 2 of 3 tasks.");
@@ -349,7 +352,10 @@ async fn update_tasks_handles_a_repeated_id_once() {
     .await;
     let text = extract_response_text(&resp);
 
-    assert_eq!(text, format!("Task {id} updated (title)"));
+    assert_eq!(
+        text,
+        format!("{} updated (title)", task_ref_of(&state, id).await)
+    );
 }
 
 #[tokio::test]
@@ -387,7 +393,10 @@ async fn update_tasks_applies_the_done_guard_per_task_with_several_ids() {
     .await;
     let text = extract_response_text(&resp);
 
-    assert!(text.contains(&format!("Task {a} failed: ")), "{text}");
+    assert!(
+        text.contains(&format!("{} failed: ", task_ref_of(&state, a).await)),
+        "{text}"
+    );
     assert!(text.contains("only field set"), "{text}");
     assert!(text.ends_with("Updated 0 of 2 tasks."), "{text}");
 }
@@ -409,7 +418,7 @@ async fn update_tasks_with_one_id_replies_with_the_single_task_line() {
     assert!(!is_error(&resp), "{:?}", resp.result);
     assert_eq!(
         extract_response_text(&resp),
-        format!("Task {id} updated (base_branch)")
+        format!("{} updated (base_branch)", task_ref_of(&state, id).await)
     );
 }
 

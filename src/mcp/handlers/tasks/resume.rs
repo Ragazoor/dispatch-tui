@@ -33,17 +33,18 @@ pub(crate) async fn handle_resume_task(
         Err(e) => return service_err_to_response(id, e),
     };
     if let Some(why) = unresumable(&task, &state.host_id).await {
-        return JsonRpcResponse::err(id, INVALID_PARAMS, refusal_text(task_id.0, &why));
+        return JsonRpcResponse::err(id, INVALID_PARAMS, refusal_text(&task.reference(), &why));
     }
     if let Err(why) = hand_resume_to_board(state, task_id, parsed.message) {
         return JsonRpcResponse::err(id, INTERNAL_ERROR, why.to_string());
     }
     let text = format!(
-        "resume requested for task #{n}: the board is restarting its agent in {window} with the \
+        "resume requested for {task_ref}: the board is restarting its agent in {window} with the \
          previous conversation. The task moves to running once the session starts; \
          get_task(task_id={n}) shows the window. A launch failure appears in the board's \
          status line.",
         n = task_id.0,
+        task_ref = task.reference(),
         window = crate::models::TmuxWindow::for_task(task_id),
     );
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
@@ -133,27 +134,27 @@ pub(crate) fn pane_refusal_text(name: &str, why: &Unresumable) -> String {
 }
 
 /// The `resume_task` refusal for `why`.
-fn refusal_text(n: i64, why: &Unresumable) -> String {
+fn refusal_text(task: &str, why: &Unresumable) -> String {
     match why {
         Unresumable::NeverRan(status) => format!(
-            "task #{n} has no resumable session: it is {status} and has not run yet. \
+            "{task} has no resumable session: it is {status} and has not run yet. \
              Use dispatch_task to start it."
         ),
         Unresumable::NoWorktree => format!(
-            "task #{n} has no resumable session: it has no worktree, so there is no \
+            "{task} has no resumable session: it has no worktree, so there is no \
              conversation to continue. Set it back to backlog with update_tasks and \
              dispatch_task it to start a new agent."
         ),
         Unresumable::OtherMachine => format!(
-            "task #{n}'s worktree is on another machine, so this machine cannot resume \
+            "{task}'s worktree is on another machine, so this machine cannot resume \
              it; resume it from the machine that holds the worktree."
         ),
         Unresumable::Attached => format!(
-            "task #{n} already has an agent attached; reach it with ListAgents and \
+            "{task} already has an agent attached; reach it with ListAgents and \
              SendMessage instead of resuming it."
         ),
         Unresumable::WorktreeGone(worktree) => format!(
-            "task #{n} has no resumable session: its worktree {worktree} is no longer on \
+            "{task} has no resumable session: its worktree {worktree} is no longer on \
              disk, so the agent is gone. Set it back to backlog with update_tasks and \
              dispatch_task it to start a new agent."
         ),

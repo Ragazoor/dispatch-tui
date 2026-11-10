@@ -158,7 +158,7 @@ async fn list_tasks_shows_the_current_agent_beside_the_title() {
 }
 
 #[tokio::test]
-async fn a_task_with_no_agent_shows_none() {
+async fn a_task_not_yet_launched_shows_its_agent_as_not_started() {
     let state = test_state().await;
     let id = state
         .db_write()
@@ -172,7 +172,12 @@ async fn a_task_with_no_agent_shows_none() {
         Some(json!({"name": "get_task", "arguments": {"task_id": id.0}})),
     )
     .await;
-    assert!(!extract_response_text(&resp).contains("Agent:"));
+    // Every task has an agent from creation (A17): not started, until launch.
+    assert!(
+        extract_response_text(&resp).contains(" (not started)"),
+        "{}",
+        extract_response_text(&resp)
+    );
 }
 
 /// agent-tree.allium: AgentRowShowsAgentName. The pane view carries the current

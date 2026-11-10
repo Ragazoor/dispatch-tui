@@ -382,6 +382,11 @@ async fn update_epic_title() {
     let text = extract_response_text(&resp);
     assert!(text.contains("updated"));
     assert!(text.contains("title"));
+    // The epic is named by its id and its (new) title.
+    assert_eq!(
+        text,
+        format!("Epic {} (\"New Title\") updated (title)", epic.id)
+    );
 
     let updated = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.title, "New Title");

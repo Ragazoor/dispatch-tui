@@ -584,7 +584,17 @@ rule DeletePackageFromBoard {
 --       (or the one named): id, title, description (omitted when empty),
 --       sort_order (omitted when unset), created_at, updated_at, and its linked items, each with
 --       kind, id, title and status. A link whose item this board does not
---       hold is left out.
+--       hold is left out. A task item reads
+--       `- task <id> [<status>] <name>: <title>`, the display name left out
+--       when the task has none; an epic item has no name.
+--
+-- Replies name what they touch (mcp-task-tools.allium: "Replies name what
+-- they touch"). Every reply that names a package says
+-- `Work package <id> ("<title>")`: `<package> created in workspace ...`,
+-- `<package> updated (fields)`, `<package> deleted; ...`. An unlink that
+-- touched nothing is listed as `not linked: <task ref>` or
+-- `not linked: <epic ref>`; an item the store does not hold stays `task 4` or
+-- `epic 7`.
 --   update_work_package(work_package_id, title?, description?, sort_order?,
 --                       link_task_ids?, unlink_task_ids?, link_epic_ids?,
 --                       unlink_epic_ids?, delete?)
@@ -593,8 +603,7 @@ rule DeletePackageFromBoard {
 --       unlink list is refused before anything is written, and so is a call
 --       that names no field. A link-only call leaves updated_at alone. UnlinkItem
 --       stays idempotent, but the reply names each requested unlink that
---       was not linked ("not linked: task 4"), so the caller can tell that
---       nothing changed for it. The store leaves a link to an item the
+--       was not linked, so the caller can tell that nothing changed for it. The store leaves a link to an item the
 --       caller cannot see in place, as if it were not linked (UnlinkItem).
 --       delete: true is DeleteWorkPackage (DeleteWorkPackageViaMcp below).
 --

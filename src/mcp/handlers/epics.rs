@@ -288,9 +288,30 @@ pub(super) async fn handle_list_epics(
         );
     }
     let cut_hint = super::types::apply_limit(&mut epics, parsed.limit);
+    // A parent's title comes from the listing when the parent is in it, else
+    // from the store (`McpRepliesNameWhatTheyTouch`).
+    let mut parent_titles: std::collections::HashMap<crate::models::EpicId, String> = epics
+        .iter()
+        .map(|(e, _, _)| (e.id, e.title.clone()))
+        .collect();
+    for (e, _, _) in &epics {
+        if let Some(parent) = e.parent_epic_id {
+            if let std::collections::hash_map::Entry::Vacant(slot) = parent_titles.entry(parent) {
+                if let Ok(found) = state.epic_svc.get_epic(parent).await {
+                    slot.insert(found.title);
+                }
+            }
+        }
+    }
     let mut lines: Vec<String> = epics
         .iter()
-        .map(|(e, done, total)| format_epic_list_line(e, *done, *total))
+        .map(|(e, done, total)| {
+            let parent_title = e
+                .parent_epic_id
+                .and_then(|p| parent_titles.get(&p))
+                .map(String::as_str);
+            format_epic_list_line(e, *done, *total, parent_title)
+        })
         .collect();
     lines.extend(cut_hint);
     JsonRpcResponse::ok(
@@ -299,7 +320,12 @@ pub(super) async fn handle_list_epics(
     )
 }
 
-fn format_epic_list_line(e: &Epic, done: usize, total: usize) -> String {
+fn format_epic_list_line(
+    e: &Epic,
+    done: usize,
+    total: usize,
+    parent_title: Option<&str>,
+) -> String {
     let plan_indicator = if e.plan_path.is_some() { " [plan]" } else { "" };
     let status_indicator = if e.status != TaskStatus::Backlog {
         format!(" [{}]", e.status.as_str())
@@ -307,7 +333,10 @@ fn format_epic_list_line(e: &Epic, done: usize, total: usize) -> String {
         String::new()
     };
     let parent_indicator = match e.parent_epic_id {
-        Some(p) => format!(" (parent:{p})"),
+        Some(p) => match parent_title {
+            Some(title) => format!(" (parent:{p} {title})"),
+            None => format!(" (parent:{p})"),
+        },
         None => String::new(),
     };
     format!(
@@ -369,6 +398,7 @@ pub(super) async fn handle_update_epic(
     };
     let epic_id = result.epic_id;
     state.notify_epic_changed(epic_id);
-    let text = format!("Epic {} updated ({})", epic_id, field_names.join(", "));
+    let epic_ref = super::types::epic_ref(state, epic_id).await;
+    let text = format!("{epic_ref} updated ({})", field_names.join(", "));
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }

@@ -355,7 +355,10 @@ pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
         build_epic_titles(state),
         crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path),
         state.db.latest_dispatch_request_for_task(task.id),
-        state.db.current_agent(task.id),
+        async {
+            let agents = state.db.list_agents().await;
+            crate::models::display_agent(agents.iter().filter(|a| a.task_id == task.id)).cloned()
+        },
         state.db.bookmarked_task_ids()
     );
     format_task_detail(
@@ -385,12 +388,15 @@ fn dispatch_request_line(request: &crate::models::DispatchRequest) -> String {
 }
 
 /// What `get_task` and `list_tasks` print for an agent's state: live when it
-/// holds a tmux window, paused when it does not (`AgentIdentity`).
+/// holds a tmux window, paused when it does not, not started while assigned and
+/// ended once it has ended (`AgentIdentity`).
 fn agent_state_label(agent: &Agent) -> &'static str {
-    if agent.is_live() {
-        "live"
-    } else {
-        "paused"
+    use crate::models::AgentState;
+    match agent.state {
+        AgentState::Assigned => "not started",
+        AgentState::Ended => "ended",
+        AgentState::Current if agent.is_live() => "live",
+        AgentState::Current => "paused",
     }
 }
 
@@ -641,6 +647,22 @@ mod tests {
             live_subagents: 0,
             stop_pending: false,
         }
+    }
+
+    #[test]
+    fn the_agent_state_label_covers_every_state() {
+        use crate::models::AgentState;
+        let mut agent = make_agent(None);
+        agent.state = AgentState::Assigned;
+        assert_eq!(super::agent_state_label(&agent), "not started");
+        agent.state = AgentState::Ended;
+        assert_eq!(super::agent_state_label(&agent), "ended");
+        agent.state = AgentState::Current;
+        assert_eq!(super::agent_state_label(&agent), "paused");
+        assert_eq!(
+            super::agent_state_label(&make_agent(Some("task-1"))),
+            "live"
+        );
     }
 
     #[test]

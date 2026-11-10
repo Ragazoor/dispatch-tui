@@ -534,6 +534,25 @@ pub(super) async fn fetch_caller_task(
     }
 }
 
+/// The reference a reply uses for task `id` (`Task 5 (ada, "Fix it")`), read
+/// from the store. A task the store no longer holds is named by its bare id,
+/// the only name left.
+pub(super) async fn task_ref(state: &crate::mcp::McpState, id: crate::models::TaskId) -> String {
+    match state.task_svc.get_task(id).await {
+        Ok(task) => task.reference(),
+        Err(_) => format!("Task {id}"),
+    }
+}
+
+/// The reference a reply uses for epic `id` (`Epic 314 ("Dispatch")`); a bare
+/// id when the store no longer holds the epic.
+pub(super) async fn epic_ref(state: &crate::mcp::McpState, id: crate::models::EpicId) -> String {
+    match state.epic_svc.get_epic(id).await {
+        Ok(epic) => epic.reference(),
+        Err(_) => format!("Epic {id}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ServiceError → JsonRpcResponse conversion
 // ---------------------------------------------------------------------------

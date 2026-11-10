@@ -48,7 +48,7 @@ async fn resume_task_hands_a_detached_task_to_the_board() {
     let resp = resume(&state, json!({ "task_id": id.0 })).await;
 
     let text = extract_response_text(&resp);
-    assert!(text.contains(&format!("#{}", id.0)), "got: {text}");
+    assert!(text.contains(&task_ref_of(&state, id).await), "got: {text}");
     assert!(text.contains("resum"), "got: {text}");
     match rx.try_recv().expect("expected a board event") {
         BoardEvent::ResumeTask { id: got, message } => {
@@ -88,6 +88,10 @@ async fn resume_task_refuses_a_task_that_never_ran() {
 
     let msg = error_message(&resp);
     assert!(msg.contains("no resumable session"), "{}", msg);
+    assert!(
+        msg.starts_with(&task_ref_of(&state, id).await),
+        "the refusal names the task by id, name and title: {msg}"
+    );
     assert!(msg.contains("dispatch_task"), "{}", msg);
     assert!(rx.try_recv().is_err(), "a refusal must not reach the board");
 }

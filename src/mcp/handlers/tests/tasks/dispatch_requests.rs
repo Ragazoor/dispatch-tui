@@ -143,7 +143,7 @@ async fn dispatch_task_answers_with_the_worktree_once_the_row_is_dispatched() {
 
     let text = extract_response_text(&resp);
     assert!(
-        text.contains(&format!("dispatched task #{}", task.0)),
+        text.contains(&format!("dispatched {}", task_ref_of(&state, task).await)),
         "{text}"
     );
     assert!(text.contains("/repo/.worktrees/1-test-task"), "{text}");
@@ -229,7 +229,13 @@ async fn dispatch_task_reports_a_refused_request_as_not_in_backlog() {
     )
     .await;
 
-    assert_error(&resp, "not in backlog (current: running)");
+    assert_error(
+        &resp,
+        &format!(
+            "{} is not in backlog (current: running)",
+            task_ref_of(&state, task).await
+        ),
+    );
 }
 
 /// A task whose worktree is on another machine is refused with that reason.
@@ -396,7 +402,7 @@ async fn the_chain_requests_its_next_subtask_with_origin_epic_chain() {
     let resp = close_a_session_in(&state, epic).await;
 
     assert!(
-        extract_response_text(&resp).contains(&format!("#{}", next.0)),
+        extract_response_text(&resp).contains(&task_ref_of(&state, next).await),
         "the close names the subtask the module chained: {resp:?}"
     );
     let row = db
@@ -430,7 +436,7 @@ async fn the_chain_moves_to_the_next_candidate_on_a_refused_request() {
     let resp = close_a_session_in(&state, epic).await;
 
     assert!(
-        extract_response_text(&resp).contains(&format!("#{}", second.0)),
+        extract_response_text(&resp).contains(&task_ref_of(&state, second).await),
         "{resp:?}"
     );
     assert!(db.latest_dispatch_request_for_task(foreign).await.is_none());

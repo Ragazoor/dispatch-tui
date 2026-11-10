@@ -443,7 +443,23 @@ pub fn task_heading(agent_name: Option<&str>, title: &str) -> String {
     }
 }
 
+/// How an MCP reply names a task: its id, the key every tool takes, with the
+/// display name and title beside it (`mcp-task-tools.allium: Replies name what
+/// they touch`). `Task 5 (ada, "Fix it")`, or `Task 5 ("Fix it")` while the
+/// task has no display name.
+pub fn task_reference(id: TaskId, agent_name: Option<&str>, title: &str) -> String {
+    match task_lead(agent_name) {
+        Some(name) => format!("Task {id} ({name}, \"{title}\")"),
+        None => format!("Task {id} (\"{title}\")"),
+    }
+}
+
 impl Task {
+    /// [`task_reference`] for this task.
+    pub fn reference(&self) -> String {
+        task_reference(self.id, self.agent_name.as_deref(), &self.title)
+    }
+
     /// [`task_lead`] for this task.
     pub fn lead(&self) -> Option<&str> {
         task_lead(self.agent_name.as_deref())
