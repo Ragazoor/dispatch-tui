@@ -162,9 +162,8 @@ pub(super) fn key_columns(table: SharedTable) -> &'static [&'static str] {
 ///
 /// Rendered as a sortable string rather than a tuple of values so one map type
 /// serves both a single integer id and a two-column composite. Integers are
-/// zero-padded so iteration is numeric rather than lexical — a convenience when
-/// reading a failure message, not something any assertion depends on (every
-/// consumer of `rows` sorts).
+/// zero-padded so the string order is numeric rather than lexical. A dump
+/// relies on that: `cli_store::order_rows` sorts every table by this key.
 pub(super) fn row_key(table: SharedTable, row: &Row) -> String {
     key_columns(table)
         .iter()

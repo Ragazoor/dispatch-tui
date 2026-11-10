@@ -592,3 +592,28 @@ fn rows_without_a_generated_id_are_ordered_by_their_key() {
         vec![(2, "z".into()), (10, "a".into()), (10, "b".into())]
     );
 }
+
+/// EveryCommandSaysWhichStoreItTouched (spacetime-snapshot.allium): a store
+/// names its server, and says so when it is the CLI's own default.
+#[test]
+fn a_store_names_its_server_or_the_cli_default() {
+    let named = SpacetimeCliStore::new(
+        Arc::new(MockProcessRunner::new(vec![])) as Arc<dyn crate::process::ProcessRunner>,
+        "dispatch",
+        Some("http://127.0.0.1:3001".into()),
+    );
+    assert_eq!(
+        named.to_string(),
+        "database dispatch on http://127.0.0.1:3001"
+    );
+
+    let default = SpacetimeCliStore::new(
+        Arc::new(MockProcessRunner::new(vec![])) as Arc<dyn crate::process::ProcessRunner>,
+        "dispatch",
+        None,
+    );
+    assert_eq!(
+        default.to_string(),
+        "database dispatch on the spacetime CLI's default server"
+    );
+}

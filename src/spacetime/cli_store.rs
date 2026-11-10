@@ -74,6 +74,23 @@ pub struct SpacetimeCliStore {
     shapes: Mutex<HashMap<SharedTable, Arc<Vec<ColumnShape>>>>,
 }
 
+/// Which store this is, for a command's report (`spacetime-snapshot.allium`:
+/// EveryCommandSaysWhichStoreItTouched). With no server the `spacetime` CLI
+/// picks its own default, so the text says so rather than leaving the
+/// operator to infer it.
+impl std::fmt::Display for SpacetimeCliStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.server {
+            Some(server) => write!(f, "database {} on {server}", self.database),
+            None => write!(
+                f,
+                "database {} on the spacetime CLI's default server",
+                self.database
+            ),
+        }
+    }
+}
+
 impl SpacetimeCliStore {
     pub fn new(
         runner: Arc<dyn ProcessRunner>,
