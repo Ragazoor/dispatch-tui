@@ -87,20 +87,19 @@ fn a_done_task_without_a_worktree_is_not_cleared() {
     assert!(cleared_on_tick(&mut app).is_empty());
 }
 
+/// `tasks.allium: TaskTeardown.WorktreeIsNeverShared` — no two tasks name one
+/// worktree, so the cleanup asks nothing about other tasks. This fabricates the
+/// impossible two-rows-one-path state so a reinstated sharing check fails here.
 #[test]
-fn a_worktree_another_task_still_works_in_is_skipped_until_it_is_done() {
+fn the_cleanup_does_not_check_for_a_shared_worktree() {
     let mut app = app_with(vec![
         held(1, TaskStatus::Done, "/wt/shared", HOST),
         held(2, TaskStatus::Running, "/wt/shared", HOST),
     ]);
 
-    assert!(cleared_on_tick(&mut app).is_empty());
-
-    app.board.tasks[1].status = TaskStatus::Done;
-    let cleared = cleared_on_tick(&mut app);
-    assert!(
-        cleared.contains(&(TaskId(1), "/wt/shared".to_string())),
-        "task 1 was not marked cleared while skipped, got {cleared:?}"
+    assert_eq!(
+        cleared_on_tick(&mut app),
+        vec![(TaskId(1), "/wt/shared".to_string())]
     );
 }
 

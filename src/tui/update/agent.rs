@@ -474,19 +474,14 @@ impl App {
             .map(|t| t.id)
             .collect();
         self.build_output_cleared.retain(|id| done.contains(id));
-        let busy: HashSet<&str> = tasks
-            .iter()
-            .filter(|t| t.status != TaskStatus::Done)
-            .filter_map(|t| t.worktree.as_deref())
-            .collect();
+        // No two tasks share a worktree (tasks.allium: TaskTeardown,
+        // WorktreeIsNeverShared), so no other task is consulted.
         let worktrees: Vec<(TaskId, String)> = tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Done)
             .filter(|t| t.host.as_deref() == Some(local))
             .filter(|t| !self.build_output_cleared.contains(&t.id))
-            .filter_map(|t| t.worktree.as_deref().map(|w| (t.id, w)))
-            .filter(|(_, w)| !busy.contains(w))
-            .map(|(id, w)| (id, w.to_string()))
+            .filter_map(|t| t.worktree.as_deref().map(|w| (t.id, w.to_string())))
             .collect();
         if worktrees.is_empty() {
             return vec![];

@@ -521,7 +521,8 @@ entity Subscription {
 -- person's two laptops share one mark and clearing it on either clears both.
 --
 -- A row lives only as long as the task it names stays unseen, in its epic and
--- not Done. See tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing.
+-- not Done. See tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpic and
+-- UnseenMarkEndsWithTheTaskFinishing.
 entity UnseenTask {
     subscriber: UserIdentity
     task: Task

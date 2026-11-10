@@ -9,7 +9,7 @@
 //!
 //! The rules each path must meet:
 //! - the task's unseen mark ends
-//!   (`UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`);
+//!   (`UnseenMarkEndsWithTheTaskLeavingItsEpic`);
 //! - the task lands in the same epic on both sides, with the same row shape;
 //! - a move onto an epic the caller cannot see is refused the same way on both
 //!   sides and leaves the mark alone (`set_task_epic`, `update_task`).
@@ -419,7 +419,7 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
     }
 }
 
-/// `UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`, for every move path.
+/// `UnseenMarkEndsWithTheTaskLeavingItsEpic`, for every move path.
 #[test]
 fn every_task_move_path_meets_the_same_rules_on_both_stores() {
     if !spacetime_available_or_skip() {

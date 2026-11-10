@@ -404,7 +404,7 @@ fn every_loss_of_sight_path_releases_the_claims_it_strands() {
         mark_task(&store, task, &["alice", "carol"]);
         carol_loses_sight_by(path, &store, a, epic, task);
         // A task move ends every unseen mark on its own
-        // (`UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`).
+        // (`UnseenMarkEndsWithTheTaskLeavingItsEpic`).
         let alice_unseen = if path == "detach_a_task" {
             vec![]
         } else {

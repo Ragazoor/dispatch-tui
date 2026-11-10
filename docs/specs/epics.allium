@@ -1475,7 +1475,7 @@ rule RegroupEpic {
         -- derived from the repo path's base name.
         --
         -- Every task this moves leaves its epic, so its unseen marks end
-        -- (tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing;
+        -- (tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpic;
         -- the store's relink_task clears them with the move). The same holds
         -- for FlattenEpic and for the repo_path-change reroute.
         -- A grouped epic should have no direct tasks after this runs:
@@ -1536,7 +1536,7 @@ rule FlattenEpic {
         -- FlattenEpic is idempotent: calling it when no repo-group
         -- sub-epics exist is a no-op.
         -- Every task moved back to the parent ends its unseen marks
-        -- (tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing),
+        -- (tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpic),
         -- as in RegroupEpic.
         -- After flattening, RecalculateEpicStatus is called to update
         -- the parent's status based on its new direct children.

@@ -22,7 +22,7 @@ pub(crate) fn clear_task_marks(ctx: &ReducerContext, task_id: i64) {
     clear_bookmarks_for_task(ctx, task_id);
 }
 
-/// `UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing` and
+/// `UnseenMarkEndsWithTheTaskFinishing` and
 /// `BookmarkEndsWithTheTaskFinishing`: a write from `prior` to `next` that
 /// enters Done ends both marks. Called by every task-write seam, so whichever
 /// writer moved the task (a patch, a session close, a merged PR, a batch move,

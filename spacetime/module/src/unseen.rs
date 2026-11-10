@@ -28,7 +28,8 @@ pub(crate) fn mark_task_unseen_for_viewers(ctx: &ReducerContext, task_id: i64, e
 }
 
 /// End every person's mark on a task: it left its epic, finished or was
-/// deleted (`tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`).
+/// deleted (`tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpic`,
+/// `UnseenMarkEndsWithTheTaskFinishing`).
 pub(crate) fn clear_unseen_for_task(ctx: &ReducerContext, task_id: i64) {
     ctx.db.unseen_tasks().task_id().delete(task_id);
 }

@@ -217,7 +217,7 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         assert_eq!(unseen_prs(&rows_real), unseen_prs(&rows_mem));
 
         // -- cycle 2b: pr-1 leaves My Reviews, so its mark ends -------------------
-        // (`tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`).
+        // (`tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpic`).
         let (r, m) = ingest(
             vec![
                 ingest_item("pr-1", &pr(1), &["team-request"]),

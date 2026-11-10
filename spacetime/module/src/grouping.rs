@@ -140,7 +140,7 @@ fn relink_task(ctx: &ReducerContext, task: Task, target: i64) -> Result<(), Stri
         },
     )?;
     // The task left its epic, so its unseen mark ends
-    // (`UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`).
+    // (`UnseenMarkEndsWithTheTaskLeavingItsEpic`).
     clear_unseen_for_task(ctx, id);
     Ok(())
 }

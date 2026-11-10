@@ -2707,7 +2707,7 @@ rule NewReviewRequestIsSignalled {
         -- is one caller of it, not a second mechanism. Who is marked, how the
         -- mark is drawn and how it clears are all the signal's own rules
         -- (tasks.allium: SeeTaskByLandingOnIt,
-        -- UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing).
+        -- UnseenMarkEndsWithTheTaskLeavingItsEpic).
         --
         -- ONLY AN INSERT IS SIGNALLED. A refresh of a PR already on the board
         -- (new commits, a new title, a changed CI label) writes no mark, and
