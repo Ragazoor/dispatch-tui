@@ -433,6 +433,17 @@ fn package(created_at: &str) -> bindings::WorkPackage {
     }
 }
 
+fn feed_request_row() -> bindings::FeedRequest {
+    bindings::FeedRequest {
+        id: 7,
+        kind: "refresh".into(),
+        host: "host-a".into(),
+        state: "requested".into(),
+        requested_at: "2026-10-12 12:00:00.000".into(),
+        ..dispatch_spacetime_module::blank_feed_request().into()
+    }
+}
+
 fn link(kind: &str) -> bindings::WorkPackageLink {
     bindings::WorkPackageLink {
         id: "7:task:3".into(),
@@ -610,6 +621,98 @@ const IGNORED_COLUMN_CASES: &[(&str, fn())] = &[
             |r| r.work_package_links().len() == 1,
         );
     }),
+    ("work_package", || {
+        // An unknown visibility decodes to Public, so two different unknown
+        // values decode equal.
+        let row = |visibility: &str| bindings::WorkPackage {
+            visibility: visibility.into(),
+            ..package("2026-09-18 10:00:00")
+        };
+        survives_in_either_order(
+            "work_package",
+            row("mystery"),
+            row("other-mystery"),
+            |r, x| r.upsert_work_package(x),
+            |r, x| r.retire_work_package(x),
+            |r| r.work_packages().len() == 1,
+        );
+    }),
+    ("learning_retrieval", || {
+        // Whole and fractional seconds parse to the same instant.
+        let row = |retrieved_at: &str| bindings::LearningRetrieval {
+            retrieved_at: retrieved_at.into(),
+            ..retrieval("query_learnings")
+        };
+        survives_in_either_order(
+            "learning_retrieval",
+            row("2026-09-18 10:00:00"),
+            row("2026-09-18 10:00:00.000"),
+            |r, x| r.upsert_learning_retrieval(x),
+            |r, x| r.retire_learning_retrieval(x),
+            |r| r.retrievals_for_task(TaskId(1)).len() == 1,
+        );
+    }),
+    ("dispatch_request", || {
+        // A pane id where a window name belongs decodes to None.
+        let row = |tmux_window: &str| bindings::DispatchRequest {
+            id: 7,
+            task_id: 7,
+            kind: "dispatch".into(),
+            host: "host-a".into(),
+            mode: "research".into(),
+            origin: "epic_chain".into(),
+            state: "requested".into(),
+            requested_at: "2026-10-11 12:00:00.000".into(),
+            deadline: "2026-10-11 12:01:00.000".into(),
+            tmux_window: tmux_window.into(),
+            ..dispatch_spacetime_module::blank_dispatch_request().into()
+        };
+        survives_in_either_order(
+            "dispatch_request",
+            row("%3"),
+            row("%4"),
+            |r, x| r.upsert_dispatch_request(x),
+            |r, x| r.retire_dispatch_request(x),
+            |r| r.dispatch_requests().len() == 1,
+        );
+    }),
+    ("session_request", || {
+        let row = |tmux_window: &str| bindings::SessionRequest {
+            id: 7,
+            task_id: 7,
+            kind: "wrap_up".into(),
+            action: "rebase".into(),
+            host: "host-a".into(),
+            state: "requested".into(),
+            requested_at: "2026-10-12 12:00:00.000".into(),
+            deadline: "2026-10-12 12:02:00.000".into(),
+            tmux_window: tmux_window.into(),
+            ..dispatch_spacetime_module::blank_session_request().into()
+        };
+        survives_in_either_order(
+            "session_request",
+            row("%3"),
+            row("%4"),
+            |r, x| r.upsert_session_request(x),
+            |r, x| r.retire_session_request(x),
+            |r| r.session_requests().len() == 1,
+        );
+    }),
+    ("feed_request", || {
+        let row = |tmux_window: &str| {
+            let mut r = feed_request_row();
+            r.tmux_window = tmux_window.into();
+            r
+        };
+        survives_in_either_order(
+            "feed_request",
+            row("%3"),
+            row("%4"),
+            |r, x| r.upsert_feed_request(x),
+            |r, x| r.retire_feed_request(x),
+            |r| r.feed_requests().len() == 1,
+        );
+    }),
     ("unseen_item", || {
         let item = |creator: &str| bindings::UnseenItem {
             kind: "epic".into(),
@@ -679,20 +782,6 @@ const IGNORED_COLUMN_CASES: &[(&str, fn())] = &[
 /// pair. If a decoder starts dropping a column, move the table into
 /// `IGNORED_COLUMN_CASES`.
 const DECODES_EVERY_COLUMN: &[(&str, &str)] = &[
-    ("work_package", "decode::work_package reads every column"),
-    (
-        "learning_retrieval",
-        "decode::learning_retrieval reads every column",
-    ),
-    (
-        "dispatch_request",
-        "decode::dispatch_request reads every column",
-    ),
-    (
-        "session_request",
-        "decode::session_request reads every column",
-    ),
-    ("feed_request", "decode::feed_request reads every column"),
     ("workspace", "stored raw: no decoder"),
     ("membership", "stored raw: no decoder"),
     ("learning_verdict", "stored raw: no decoder"),

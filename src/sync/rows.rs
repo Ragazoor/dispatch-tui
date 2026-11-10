@@ -132,6 +132,8 @@ struct Rows {
     /// which ids exist is the kind of invariant a single map holds for free.
     learnings: BTreeMap<i64, (Learning, Option<Vec<u8>>)>,
     learning_retrievals: BTreeMap<i64, LearningRetrieval>,
+    /// The raw rows behind `learning_retrievals`, for `retire_learning_retrieval`.
+    raw_learning_retrievals: BTreeMap<i64, bindings::LearningRetrieval>,
     /// Standing verdicts on the tasks this person holds, from the
     /// `visible_learning_verdicts` view. Read only to derive the per-repo
     /// dispatch mute (`core.allium: Learning.off_topic_in_repo`), so they are
@@ -166,6 +168,9 @@ struct Rows {
     /// `work-packages.allium`. Packages arrive scoped to their creator by the
     /// subscription's `WHERE created_by = …`; links arrive unfiltered.
     work_packages: BTreeMap<i64, WorkPackage>,
+    /// The raw rows behind `work_packages`, for `retire_work_package`: an
+    /// unknown visibility decodes to Public, so rows differing there decode equal.
+    raw_work_packages: BTreeMap<i64, bindings::WorkPackage>,
     /// Keyed by the store's derived link id.
     work_package_links: BTreeMap<String, WorkPackageLink>,
     /// The raw rows behind `work_package_links`: `retire_work_package_link`
@@ -175,13 +180,19 @@ struct Rows {
     /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsDispatchRequests`),
     /// in every state, so nothing here filters by host or state.
     dispatch_requests: BTreeMap<i64, DispatchRequest>,
+    /// The raw rows behind `dispatch_requests`, for `retire_dispatch_request`.
+    raw_dispatch_requests: BTreeMap<i64, bindings::DispatchRequest>,
     /// `store-split.allium: SessionRequest`. Arrive scoped to THIS host by the subscription's
     /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsSessionRequests`),
     /// in every state, so nothing here filters by host or state.
     session_requests: BTreeMap<i64, SessionRequest>,
+    /// The raw rows behind `session_requests`, for `retire_session_request`.
+    raw_session_requests: BTreeMap<i64, bindings::SessionRequest>,
     /// Arrive scoped to THIS host by the subscription's `WHERE host = …`
     /// (`sync.allium: SubscribeToThisHostsFeedRequests`), in every state.
     feed_requests: BTreeMap<i64, FeedRequest>,
+    /// The raw rows behind `feed_requests`, for `retire_feed_request`.
+    raw_feed_requests: BTreeMap<i64, bindings::FeedRequest>,
     /// agents A1. Arrive unfiltered (`sync.allium: SubscribeToAgents`),
     /// current and ended alike.
     agents: BTreeMap<i64, Agent>,
@@ -262,6 +273,7 @@ impl Rows {
             && self.poll_owners.is_empty()
             && self.learnings.is_empty()
             && self.learning_retrievals.is_empty()
+            && self.raw_learning_retrievals.is_empty()
             && self.learning_verdicts.is_empty()
             && self.subscriptions.is_empty()
             && self.unseen_tasks.is_empty()
@@ -272,11 +284,15 @@ impl Rows {
             && self.unseen_items.is_empty()
             && self.settings.is_empty()
             && self.work_packages.is_empty()
+            && self.raw_work_packages.is_empty()
             && self.work_package_links.is_empty()
             && self.raw_work_package_links.is_empty()
             && self.dispatch_requests.is_empty()
+            && self.raw_dispatch_requests.is_empty()
             && self.session_requests.is_empty()
+            && self.raw_session_requests.is_empty()
             && self.feed_requests.is_empty()
+            && self.raw_feed_requests.is_empty()
             && self.agents.is_empty()
     }
 }
@@ -411,13 +427,7 @@ impl SharedRows {
             self.write(|rows| remove_if_held(&mut rows.undecodable_tasks, &id, old));
             return;
         }
-        self.write(|rows| {
-            let removed = remove_if_held(&mut rows.raw_tasks, &old.id, old);
-            if removed {
-                rows.tasks.remove(&old.id);
-            }
-            removed
-        });
+        self.write(|rows| retire_raw(&mut rows.raw_tasks, &mut rows.tasks, &old.id, old));
     }
 
     /// An epic row left a per-caller view. As [`Self::retire_task`].
@@ -425,13 +435,7 @@ impl SharedRows {
         if decode::epic(old).is_err() {
             return;
         }
-        self.write(|rows| {
-            let removed = remove_if_held(&mut rows.raw_epics, &old.id, old);
-            if removed {
-                rows.epics.remove(&old.id);
-            }
-            removed
-        });
+        self.write(|rows| retire_raw(&mut rows.raw_epics, &mut rows.epics, &old.id, old));
     }
 
     pub fn upsert_epic(&self, row: &bindings::Epic) {
@@ -548,18 +552,25 @@ impl SharedRows {
     pub fn upsert_learning_retrieval(&self, row: &bindings::LearningRetrieval) {
         match decode::learning_retrieval(row) {
             Ok(retrieval) => self.write(|rows| {
+                rows.raw_learning_retrievals.insert(row.id, row.clone());
                 rows.learning_retrievals.insert(retrieval.id, retrieval);
                 true
             }),
             Err(e) => {
                 super::drop_undecodable("learning retrieval", &e);
-                self.write(|rows| rows.learning_retrievals.remove(&row.id).is_some());
+                self.write(|rows| {
+                    rows.raw_learning_retrievals.remove(&row.id);
+                    rows.learning_retrievals.remove(&row.id).is_some()
+                });
             }
         }
     }
 
     pub fn remove_learning_retrieval(&self, id: i64) {
-        self.write(|rows| rows.learning_retrievals.remove(&id).is_some());
+        self.write(|rows| {
+            rows.raw_learning_retrievals.remove(&id);
+            rows.learning_retrievals.remove(&id).is_some()
+        });
     }
 
     pub fn upsert_learning_verdict(&self, row: &bindings::LearningVerdict) {
@@ -773,18 +784,25 @@ impl SharedRows {
     pub fn upsert_work_package(&self, row: &bindings::WorkPackage) {
         match decode::work_package(row) {
             Ok(package) => self.write(|rows| {
+                rows.raw_work_packages.insert(row.id, row.clone());
                 rows.work_packages.insert(package.id.0, package);
                 true
             }),
             Err(e) => {
                 super::drop_undecodable("work package", &e);
-                self.write(|rows| rows.work_packages.remove(&row.id).is_some());
+                self.write(|rows| {
+                    rows.raw_work_packages.remove(&row.id);
+                    rows.work_packages.remove(&row.id).is_some()
+                });
             }
         }
     }
 
     pub fn remove_work_package(&self, id: WorkPackageId) {
-        self.write(|rows| rows.work_packages.remove(&id.0).is_some());
+        self.write(|rows| {
+            rows.raw_work_packages.remove(&id.0);
+            rows.work_packages.remove(&id.0).is_some()
+        });
     }
 
     pub fn upsert_work_package_link(&self, row: &bindings::WorkPackageLink) {
@@ -818,18 +836,25 @@ impl SharedRows {
     pub fn upsert_dispatch_request(&self, row: &bindings::DispatchRequest) {
         match decode::dispatch_request(row) {
             Ok(request) => self.write(|rows| {
+                rows.raw_dispatch_requests.insert(row.id, row.clone());
                 rows.dispatch_requests.insert(request.id.0, request);
                 true
             }),
             Err(e) => {
                 super::drop_undecodable("dispatch request", &e);
-                self.write(|rows| rows.dispatch_requests.remove(&row.id).is_some());
+                self.write(|rows| {
+                    rows.raw_dispatch_requests.remove(&row.id);
+                    rows.dispatch_requests.remove(&row.id).is_some()
+                });
             }
         }
     }
 
     pub fn remove_dispatch_request(&self, id: i64) {
-        self.write(|rows| rows.dispatch_requests.remove(&id).is_some());
+        self.write(|rows| {
+            rows.raw_dispatch_requests.remove(&id);
+            rows.dispatch_requests.remove(&id).is_some()
+        });
     }
 
     /// An agent row (agents A1). An undecodable one is dropped, as a task is.
@@ -867,12 +892,16 @@ impl SharedRows {
     pub fn upsert_session_request(&self, row: &bindings::SessionRequest) {
         match decode::session_request(row) {
             Ok(request) => self.write(|rows| {
+                rows.raw_session_requests.insert(row.id, row.clone());
                 rows.session_requests.insert(request.id.0, request);
                 true
             }),
             Err(e) => {
                 super::drop_undecodable("session request", &e);
-                self.write(|rows| rows.session_requests.remove(&row.id).is_some());
+                self.write(|rows| {
+                    rows.raw_session_requests.remove(&row.id);
+                    rows.session_requests.remove(&row.id).is_some()
+                });
             }
         }
     }
@@ -882,25 +911,39 @@ impl SharedRows {
     pub fn upsert_feed_request(&self, row: &bindings::FeedRequest) {
         match decode::feed_request(row) {
             Ok(request) => self.write(|rows| {
+                rows.raw_feed_requests.insert(row.id, row.clone());
                 rows.feed_requests.insert(request.id.0, request);
                 true
             }),
             Err(e) => {
                 super::drop_undecodable("feed request", &e);
-                self.write(|rows| rows.feed_requests.remove(&row.id).is_some());
+                self.write(|rows| {
+                    rows.raw_feed_requests.remove(&row.id);
+                    rows.feed_requests.remove(&row.id).is_some()
+                });
             }
         }
     }
 
     pub fn remove_feed_request(&self, id: i64) {
-        self.write(|rows| rows.feed_requests.remove(&id).is_some());
+        self.write(|rows| {
+            rows.raw_feed_requests.remove(&id);
+            rows.feed_requests.remove(&id).is_some()
+        });
     }
 
     pub fn retire_feed_request(&self, old: &bindings::FeedRequest) {
-        let Ok(old) = decode::feed_request(old) else {
+        if decode::feed_request(old).is_err() {
             return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.feed_requests, &old.id.0, &old));
+        }
+        self.write(|rows| {
+            retire_raw(
+                &mut rows.raw_feed_requests,
+                &mut rows.feed_requests,
+                &old.id,
+                old,
+            )
+        });
     }
 
     /// Every feed request row this subscription holds — this host's, in every
@@ -915,7 +958,10 @@ impl SharedRows {
     }
 
     pub fn remove_session_request(&self, id: i64) {
-        self.write(|rows| rows.session_requests.remove(&id).is_some());
+        self.write(|rows| {
+            rows.raw_session_requests.remove(&id);
+            rows.session_requests.remove(&id).is_some()
+        });
     }
 
     // -- Rows that left a per-caller view ---------------------------------
@@ -927,10 +973,17 @@ impl SharedRows {
     // a row that cannot be decoded was never stored, so nothing of it is held.
 
     pub fn retire_work_package(&self, old: &bindings::WorkPackage) {
-        let Ok(old) = decode::work_package(old) else {
+        if decode::work_package(old).is_err() {
             return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.work_packages, &old.id.0, &old));
+        }
+        self.write(|rows| {
+            retire_raw(
+                &mut rows.raw_work_packages,
+                &mut rows.work_packages,
+                &old.id,
+                old,
+            )
+        });
     }
 
     /// Compared RAW: the decoded link drops `created_at`, so rows that differ
@@ -940,11 +993,12 @@ impl SharedRows {
             return;
         }
         self.write(|rows| {
-            let removed = remove_if_held(&mut rows.raw_work_package_links, &old.id, old);
-            if removed {
-                rows.work_package_links.remove(&old.id);
-            }
-            removed
+            retire_raw(
+                &mut rows.raw_work_package_links,
+                &mut rows.work_package_links,
+                &old.id,
+                old,
+            )
         });
     }
 
@@ -978,10 +1032,17 @@ impl SharedRows {
     }
 
     pub fn retire_learning_retrieval(&self, old: &bindings::LearningRetrieval) {
-        let Ok(old) = decode::learning_retrieval(old) else {
+        if decode::learning_retrieval(old).is_err() {
             return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.learning_retrievals, &old.id, &old));
+        }
+        self.write(|rows| {
+            retire_raw(
+                &mut rows.raw_learning_retrievals,
+                &mut rows.learning_retrievals,
+                &old.id,
+                old,
+            )
+        });
     }
 
     pub fn retire_learning_verdict(&self, old: &bindings::LearningVerdict) {
@@ -1009,17 +1070,31 @@ impl SharedRows {
     }
 
     pub fn retire_dispatch_request(&self, old: &bindings::DispatchRequest) {
-        let Ok(old) = decode::dispatch_request(old) else {
+        if decode::dispatch_request(old).is_err() {
             return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.dispatch_requests, &old.id.0, &old));
+        }
+        self.write(|rows| {
+            retire_raw(
+                &mut rows.raw_dispatch_requests,
+                &mut rows.dispatch_requests,
+                &old.id,
+                old,
+            )
+        });
     }
 
     pub fn retire_session_request(&self, old: &bindings::SessionRequest) {
-        let Ok(old) = decode::session_request(old) else {
+        if decode::session_request(old).is_err() {
             return;
-        };
-        self.write(|rows| remove_if_held(&mut rows.session_requests, &old.id.0, &old));
+        }
+        self.write(|rows| {
+            retire_raw(
+                &mut rows.raw_session_requests,
+                &mut rows.session_requests,
+                &old.id,
+                old,
+            )
+        });
     }
 
     pub fn retire_agent(&self, old: &bindings::Agent) {
@@ -1542,4 +1617,19 @@ fn remove_if_held<K: Ord, V: PartialEq>(map: &mut BTreeMap<K, V>, key: &K, old: 
         map.remove(key);
     }
     held
+}
+
+/// `remove_if_held` on the raw map, then drop the decoded twin when the raw row
+/// went: the compare is RAW, so a column the decoder loses cannot erase an update.
+fn retire_raw<K: Ord, R: PartialEq, D>(
+    raw: &mut BTreeMap<K, R>,
+    decoded: &mut BTreeMap<K, D>,
+    key: &K,
+    old: &R,
+) -> bool {
+    let removed = remove_if_held(raw, key, old);
+    if removed {
+        decoded.remove(key);
+    }
+    removed
 }
