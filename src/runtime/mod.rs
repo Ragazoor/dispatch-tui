@@ -158,14 +158,29 @@ fn setup_tmux_for_tui(session: &str, self_pane: Option<&PaneId>, runner: &dyn Pr
 }
 
 /// Tear down tmux TUI state: unbind the keys and restore the original window name.
+/// Remove the server-wide key bindings [`wire_tmux_for_tui`] made.
+fn unbind_board_keys(runner: &dyn ProcessRunner) {
+    let _ = tmux::unbind_key(JUMP_BACK_KEY, runner);
+    let _ = tmux::unbind_key(AGENT_TREE_TOGGLE_KEY, runner);
+}
+
+/// The signalled exit's share of the tmux teardown (`startup.allium`:
+/// `ASignalledBoardRunsItsExit`): unbind the board's keys, but only once it
+/// has bound them, so a board signalled while starting leaves another
+/// board's bindings alone.
+pub(super) fn unbind_keys_on_termination(keys_bound: &AtomicBool, runner: &dyn ProcessRunner) {
+    if keys_bound.load(Ordering::SeqCst) {
+        unbind_board_keys(runner);
+    }
+}
+
 fn teardown_tmux_for_tui(
     session: &str,
     self_pane: Option<&PaneId>,
     original_name: Option<&TmuxWindow>,
     runner: &dyn ProcessRunner,
 ) {
-    let _ = tmux::unbind_key(JUMP_BACK_KEY, runner);
-    let _ = tmux::unbind_key(AGENT_TREE_TOGGLE_KEY, runner);
+    unbind_board_keys(runner);
     if let Some(name) = original_name {
         // Targets this board's own pane, like the outbound rename. A lookup of
         // the name `TUI` is server-wide: with two boards in two sessions it
@@ -418,9 +433,11 @@ pub async fn run_tui(
     // launch, and a named board's own record goes when this function does.
     forget_stale_store_record_for(&target, data_dir);
     let _record_guard = StoreRecordGuard::for_target(&target, data_dir);
+    let keys_bound = Arc::new(AtomicBool::new(false));
     clean_up_on_termination(
         target.managed().cloned(),
         target.is_named().then(|| data_dir.to_path_buf()),
+        keys_bound.clone(),
     );
     let bootstrapped = TuiRuntime::bootstrap(BootstrapInputs {
         data_dir,
@@ -446,6 +463,7 @@ pub async fn run_tui(
     let mut terminal = enter_tui_terminal()?;
     let tmux_runner = runtime.runner.clone();
     let tmux_wiring = wire_tmux_for_tui(&server, port, &*tmux_runner);
+    keys_bound.store(true, Ordering::SeqCst);
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread

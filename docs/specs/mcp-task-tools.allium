@@ -1479,8 +1479,9 @@ rule AttachPlanViaCli {
 --   • `dispatch repo set-verify <path> <command>` /
 --     `dispatch repo clear-verify <path>` / `dispatch repo list` — operator
 --     equivalents of SetVerifyCommandViaMcp, writing the same
---     core/SavedRepoPath.verify_command. set-verify creates the path entry
---     when it does not exist yet.
+--     core/SavedRepoPath.verify_command. set-verify creates this host's
+--     path entry when it has none; clear-verify refuses a path this host
+--     never saved (cli.allium: ClearVerifyRefusesAPathThisHostNeverSaved).
 --   • `dispatch prune-repo-paths` — drops the core/SavedRepoPath rows THIS host
 --     saved whose path no longer exists on its filesystem; other hosts' rows
 --     are left alone (cli.allium: PruneRepoPathsViaCli). Operator-only housekeeping.

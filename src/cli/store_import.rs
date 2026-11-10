@@ -340,7 +340,7 @@ pub async fn import_store(
             let log_dir = data_dir.to_path_buf();
             let managed = Arc::new(ManagedStore::for_launch(store_data_dir, &log_dir));
             let m = managed.clone();
-            let ready = tokio::task::spawn_blocking(move || m.bring_up())
+            let ready = tokio::task::spawn_blocking(move || m.bring_up_for_import())
                 .await?
                 .map_err(|abort| anyhow::anyhow!("{}", abort.message()))?;
             (ready.server, Some(managed))

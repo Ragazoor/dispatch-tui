@@ -1025,6 +1025,15 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// The orchestrator: `BringUpTheManagedStoreOnceTheHostIsNamed` through
 /// `StopTheManagedStoreWhenStartupAborts`.
+/// Who runs a bring-up, which decides what an abort inside it stops.
+#[derive(Clone, Copy)]
+enum Holder {
+    /// A board: every managed store it takes on is its own to stop.
+    Board,
+    /// `dispatch store import`: only a store it started is its own.
+    Import,
+}
+
 pub struct ManagedStore {
     ports: Arc<dyn ManagedStorePorts>,
     hashes: Arc<dyn ModuleHashRecord>,
@@ -1082,6 +1091,26 @@ impl ManagedStore {
     /// Probe, adopt or start, check the module, publish if needed. Every abort
     /// it returns has already stopped a store this board holds.
     pub fn bring_up(&self) -> Result<ManagedStoreReady, StartupAbort> {
+        self.bring_up_as(Holder::Board)
+    }
+
+    /// [`Self::bring_up`] for `dispatch store import`
+    /// (`startup.allium`: `ImportBringsUpTheManagedStore`): an abort stops
+    /// only a store the import started, never one it adopted, which a board
+    /// may be using.
+    pub fn bring_up_for_import(&self) -> Result<ManagedStoreReady, StartupAbort> {
+        self.bring_up_as(Holder::Import)
+    }
+
+    /// Stop what an abort inside bring-up leaves this process holding.
+    fn stop_after_abort(&self, holder: Holder) -> bool {
+        match holder {
+            Holder::Board => self.stop_once(|| self.ports.stop_managed_store()),
+            Holder::Import => self.stop_spawned_on_exit(),
+        }
+    }
+
+    fn bring_up_as(&self, holder: Holder) -> Result<ManagedStoreReady, StartupAbort> {
         let address = self.ports.managed_address();
         match address_action(self.ports.probe_managed_address(), &address) {
             AddressAction::Abort(abort) => return Err(abort),
@@ -1108,7 +1137,7 @@ impl ManagedStore {
             self.ports.cli_identity(),
         ) {
             if owner != cli {
-                self.stop_once(|| self.ports.stop_managed_store());
+                self.stop_after_abort(holder);
                 return Err(StartupAbort::ManagedDatabaseNotOwned { cli, owner });
             }
         }
@@ -1123,7 +1152,7 @@ impl ManagedStore {
         {
             let outcome = self.ports.publish_embedded_module();
             if let Err(abort) = after_publish(&outcome) {
-                self.stop_once(|| self.ports.stop_managed_store());
+                self.stop_after_abort(holder);
                 return Err(abort);
             }
             // A hash names only a module the store runs, so it is recorded

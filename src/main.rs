@@ -15,7 +15,12 @@ use dispatch_tui::{dispatch, runtime, startup};
 #[command(version)]
 struct Cli {
     /// Directory holding this install's own files (host.json, app.log, store records)
-    #[arg(long, env = "DISPATCH_DATA_DIR", default_value_os_t = default_data_dir())]
+    #[arg(
+        long,
+        env = "DISPATCH_DATA_DIR",
+        default_value_os_t = default_data_dir(),
+        global = true
+    )]
     data_dir: PathBuf,
 
     /// Shared store the board lives in, e.g. http://127.0.0.1:3000.
@@ -958,6 +963,14 @@ mod tests {
     fn parse(args: &[&str]) -> Cli {
         let argv = std::iter::once("dispatch").chain(args.iter().copied());
         Cli::try_parse_from(argv).expect("the arguments parse")
+    }
+
+    // cli.allium: DispatchCommandLine — `--data-dir` is global, like
+    // `--spacetime-server`, so it is accepted after the subcommand too.
+    #[test]
+    fn the_data_dir_is_accepted_after_the_subcommand() {
+        let cli = parse(&["caller-headers", "--data-dir", "/tmp/elsewhere"]);
+        assert_eq!(cli.data_dir, PathBuf::from("/tmp/elsewhere"));
     }
 
     #[test]

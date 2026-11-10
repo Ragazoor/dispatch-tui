@@ -170,10 +170,10 @@ dispatch verify-feed '<command>'                 # run a feed command and valida
 
 # Per-repo settings
 dispatch repo set-verify <path> <command>        # set the repo's verify command
-dispatch repo clear-verify <path>
+dispatch repo clear-verify <path>                # clear it; refuses a path this machine never saved
 dispatch repo list                               # known repo paths + their verify commands
 dispatch prune-repo-paths                        # forget repo paths that no longer exist; judges only rows this host saved
-                                                 # (plus unowned legacy rows: adopts if present here, removes if missing)
+                                                 # (plus unowned legacy rows: adopts if present here, leaves them if missing)
 
 # Shared store (see "SpacetimeDB" below)
 dispatch spacetime dump-server [--out <file>]    # snapshot a server's shared tables

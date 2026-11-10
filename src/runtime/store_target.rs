@@ -127,11 +127,13 @@ pub(super) fn abort_managed_startup(
 /// A board that is signalled -- SIGHUP is what tmux sends when a later launch
 /// retires this board's window (`kill-window`), SIGTERM what `kill` sends --
 /// would otherwise die on the default disposition without running its exit,
-/// and leave its managed store, or a named board's store record, behind. Catch
-/// both, stop the store or forget the record, and go.
+/// and leave its managed store, a named board's store record, or its tmux key
+/// bindings behind. Catch both, stop the store or forget the record, unbind the
+/// keys once `keys_bound` says the board made them, and go.
 pub(super) fn clean_up_on_termination(
     store: Option<Arc<crate::spacetime::managed_store::ManagedStore>>,
     record_db: Option<std::path::PathBuf>,
+    keys_bound: Arc<std::sync::atomic::AtomicBool>,
 ) {
     use tokio::signal::unix::{signal, SignalKind};
     let (Ok(mut hangup), Ok(mut terminate)) = (
@@ -154,6 +156,13 @@ pub(super) fn clean_up_on_termination(
         if let Some(data_dir) = record_db {
             crate::startup::forget_store_server(&data_dir);
         }
+        let _ = tokio::task::spawn_blocking(move || {
+            super::unbind_keys_on_termination(
+                &keys_bound,
+                &crate::process::RealProcessRunner::default(),
+            )
+        })
+        .await;
         let _ = disable_raw_mode();
         std::process::exit(0);
     });

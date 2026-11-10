@@ -625,6 +625,50 @@ fn a_cli_logged_in_as_someone_else_aborts_before_publishing_and_stops_the_store(
     assert_eq!(ports.count(Call::Stop), 1);
 }
 
+// startup.allium: ImportBringsUpTheManagedStore — an import leaves a store it
+// adopted running, refusal or not; a board may be using it.
+#[test]
+fn an_import_refused_on_ownership_leaves_an_adopted_store_running() {
+    let ports = owned_by(Some("aaaa"), Some("bbbb"));
+    let hashes = Arc::new(FakeHashes::new(Some(OLDER)));
+
+    assert_eq!(
+        store(&ports, &hashes).bring_up_for_import(),
+        Err(StartupAbort::ManagedDatabaseNotOwned {
+            cli: "bbbb".into(),
+            owner: "aaaa".into()
+        })
+    );
+    assert_eq!(stops(&ports), 0);
+}
+
+#[test]
+fn an_import_whose_publish_fails_leaves_an_adopted_store_running() {
+    let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
+    fake.publish = ModulePublishOutcome::NeedsManualMigration {
+        error: "manual migration".into(),
+    };
+    let ports = Arc::new(fake);
+    let hashes = Arc::new(FakeHashes::new(Some(OLDER)));
+
+    assert!(store(&ports, &hashes).bring_up_for_import().is_err());
+    assert_eq!(stops(&ports), 0);
+}
+
+#[test]
+fn an_import_whose_publish_fails_stops_only_the_store_it_started() {
+    let mut fake = FakePorts::new(ManagedAddressState::NothingListening);
+    fake.publish = ModulePublishOutcome::NeedsManualMigration {
+        error: "manual migration".into(),
+    };
+    let ports = Arc::new(fake);
+    let hashes = Arc::new(FakeHashes::new(Some(OLDER)));
+
+    assert!(store(&ports, &hashes).bring_up_for_import().is_err());
+    assert_eq!(ports.count(Call::Stop), 0);
+    assert_eq!(ports.count(Call::StopSpawned), 1);
+}
+
 #[test]
 fn the_ownership_check_runs_even_when_no_publish_is_due() {
     let ports = owned_by(Some("aaaa"), Some("bbbb"));

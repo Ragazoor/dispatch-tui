@@ -1061,16 +1061,38 @@ async fn dispatch_repo_set_verify_keeps_the_host_of_an_existing_row() {
     );
 }
 
-// C5: clearing an unknown path is ignored, as the docs say.
+// cli.allium: ClearVerifyRefusesAPathThisHostNeverSaved.
 #[tokio::test]
-async fn dispatch_repo_clear_verify_ignores_an_unknown_path() {
+async fn dispatch_repo_clear_verify_refuses_an_unknown_path() {
     let (_tmp, db) = in_memory_store().await;
-    commands::clear_verify(&db, "/unknown", &mut Vec::new())
+    let mut out = Vec::new();
+    let err = commands::clear_verify(&db, "/unknown", &mut out)
         .await
-        .expect("clearing an unknown path is not an error");
+        .expect_err("a path this machine never saved is refused");
+    assert!(
+        err.to_string()
+            .contains("this machine has not saved /unknown"),
+        "got: {err}"
+    );
+    assert!(out.is_empty(), "nothing is reported as cleared");
     assert!(dispatch_tui::store::RepoConfigRead::list_repo_paths(&db)
         .await
         .is_empty());
+}
+
+#[tokio::test]
+async fn dispatch_repo_clear_verify_refuses_a_path_only_another_host_saved() {
+    let (_dir, db, memory) = shared_store_with_caller();
+    let theirs = "/dispatch-test-theirs-clear-77777";
+    seed_repo_path_saved_by(&db, &memory, "host-b", theirs).await;
+
+    let err = commands::clear_verify(&db, theirs, &mut Vec::new())
+        .await
+        .expect_err("another host's path is not this machine's to clear");
+    assert!(
+        err.to_string().contains("this machine has not saved"),
+        "got: {err}"
+    );
 }
 
 // C4: prune deletes on NotFound only; an unreadable path stays.

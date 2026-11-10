@@ -145,6 +145,27 @@ async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
     assert_eq!(calls[3].1, vec!["rename-window", "-t", "%7", "my-shell"]);
 }
 
+// startup.allium: BoardLifecycle's ASignalledBoardRunsItsExit — a signalled
+// board removes the key bindings it made, and none it did not.
+#[tokio::test]
+async fn a_signalled_board_unbinds_the_keys_it_bound() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]);
+    let bound = std::sync::atomic::AtomicBool::new(true);
+    unbind_keys_on_termination(&bound, &mock);
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].1, vec!["unbind-key", "space"]);
+    assert_eq!(calls[1].1, vec!["unbind-key", AGENT_TREE_TOGGLE_KEY]);
+}
+
+#[tokio::test]
+async fn a_board_signalled_before_binding_unbinds_nothing() {
+    let mock = MockProcessRunner::new(vec![]);
+    let bound = std::sync::atomic::AtomicBool::new(false);
+    unbind_keys_on_termination(&bound, &mock);
+    assert!(mock.recorded_calls().is_empty());
+}
+
 #[tokio::test]
 async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
     let mock = MockProcessRunner::new(vec![

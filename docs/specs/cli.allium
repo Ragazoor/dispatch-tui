@@ -71,8 +71,10 @@ enum ProcessExit {
 -- What machinery a subcommand's process starts before its body runs. Chosen
 -- by the subcommand alone, before anything else happens.
 --
--- synchronous: no asynchronous runtime at all. statusline, caller-headers,
---   verify-feed, uninstall and toggle-agent-tree-pane. The first two run at a
+-- synchronous: no asynchronous runtime before the body runs. statusline,
+--   caller-headers, verify-feed, uninstall and toggle-agent-tree-pane.
+--   verify-feed's body builds a single-threaded one of its own, only to run
+--   the feed command it checks. The first two run at a
 --   rate (several times a second per session; every MCP session start) where
 --   setting up machinery they cannot use is pure waste — see
 --   observability.allium: StatusLineDecorator's StartsNoAsyncRuntime.
@@ -158,7 +160,7 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
     let found = store_database_identity_at(address)
     let pinned = pinned_store_identity()
 
-    requires: host_file_present()
+    requires: host_identity_usable()
     requires:
         invocation.subcommand = "store import"
             or found = null or pinned = null or found = pinned
@@ -211,8 +213,10 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
         -- (spacetime-seed.allium).
         --
         -- == Black boxes ==
-        -- host_file_present() asks whether host.allium's HostFile exists in
-        -- the data directory. store_database_identity_at(address) and
+        -- host_identity_usable() asks whether host.allium's HostFile exists in
+        -- the data directory and holds a user identity, which a board's first
+        -- connection completes (CliCommandsNeedAHostFile).
+        -- store_database_identity_at(address) and
         -- pinned_store_identity() are startup.allium's StoreIdentityPin
         -- reads, asked of the store at `address` and of this --data-dir.
 }
@@ -226,7 +230,7 @@ rule CliCommandsRefuseAStoreThisInstallDoesNotUse {
     let found = store_database_identity_at(invocation.store_address)
     let pinned = pinned_store_identity()
 
-    requires: host_file_present()
+    requires: host_identity_usable()
     requires: invocation.subcommand != "store import"
     requires: found != null and pinned != null and found != pinned
 
@@ -266,16 +270,18 @@ rule CliCommandsRefuseAStoreThisInstallDoesNotUse {
 
 rule CliCommandsNeedAHostFile {
     -- A one-shot command that needs this install's identity, run where there
-    -- is no host file yet.
+    -- is no host file yet, or where no board has connected with it yet.
     when: CliStoreRequested(invocation)
 
-    requires: not host_file_present()
+    requires: not host_identity_usable()
 
     ensures: CliFailed(invocation: invocation, reason: no_host_identity_message())
 
     @guidance
         -- The command ends with failure, saying that this machine has no
-        -- identity yet and that one interactive `dispatch tui` creates it. It
+        -- identity yet, or that its identity has no user identity yet (the
+        -- host file exists, but no board has connected with it), naming the
+        -- file, and that one interactive `dispatch tui` completes it. It
         -- does NOT mint an identity: minting is the board launch's
         -- (host.allium: MintHostIdentity), which is also where the host
         -- label is asked for, so the only writer of a new identity is the
@@ -286,7 +292,8 @@ rule CliCommandsNeedAHostFile {
         -- its credential are the board's.
         --
         -- == Black boxes ==
-        -- no_host_identity_message() is the line described above.
+        -- no_host_identity_message() is the line described above;
+        -- host_identity_usable() is CliCommandsReachTheStoreWithoutManagingIt's.
 }
 
 ------------------------------------------------------------
@@ -323,14 +330,33 @@ rule SetVerifyCommandViaCli {
 
 rule ClearVerifyCommandViaCli {
     when: CliClearVerify(path)
+    requires: saved_on_this_host(expand_tilde(path))
 
     ensures: VerifyCommandStored(path: expand_tilde(path), command: null)
     ensures: CliPrinted(line: "verify_command cleared for " + expand_tilde(path))
 
     @guidance
-        -- `dispatch repo clear-verify <path>`. A path that is not saved has
-        -- nothing to clear: it is ignored, creates no row and is not an
-        -- error.
+        -- `dispatch repo clear-verify <path>`. The command is the
+        -- repository's, so clearing it clears it on every row of the
+        -- repository (core.allium: VerifyCommandIsPerRepository).
+        --
+        -- == Black boxes ==
+        -- saved_on_this_host(path) is whether this host has a row of the
+        -- path: its own, or one no host owns.
+}
+
+rule ClearVerifyRefusesAPathThisHostNeverSaved {
+    when: CliClearVerify(path)
+    requires: not saved_on_this_host(expand_tilde(path))
+
+    ensures: CliFailed(invocation: current_invocation(), reason: "this machine has not saved " + expand_tilde(path))
+
+    @guidance
+        -- A path this machine never saved — unknown everywhere, or saved
+        -- only by another host — is refused with failure and nothing is
+        -- written: this host has no row to act through, and the repository's
+        -- command is not this host's to clear from a folder it does not use.
+        -- No row is created.
 }
 
 rule ListReposViaCli {
@@ -451,17 +477,25 @@ rule PlanFileIsCheckedBeforeTheStore {
 -- with failure; by NothingIsWrittenBeforeTheChecksPass the store was not
 -- written to.
 
-rule DumpReportsTheFileItWrote {
+rule DumpReportsWhatItWrote {
     when: seed/SnapshotWritten(snapshot, destination)
-    requires: destination != "-"
 
-    ensures: CliReported(on: stderr, line: "Wrote " + destination)
+    ensures:
+        if destination != "-":
+            CliReported(on: stderr, line: "Wrote " + destination)
+        CliReported(on: stderr, line: "Dumped " + snapshot_store() + ".")
 
     @guidance
         -- `dump-server` writes the snapshot to the file named by `--out`, or
         -- to stdout for `-` (the default), pretty-printed so that two backups
-        -- diff line by line. Only a file destination prints `Wrote <file>`,
-        -- and it prints it on stderr — stdout may BE the snapshot.
+        -- diff line by line. Both lines go to stderr — stdout may BE the
+        -- snapshot — and only a file destination prints `Wrote <file>`.
+        -- `Dumped <store>.` names the store read, as `database <name> on
+        -- <server>`.
+        --
+        -- == Black boxes ==
+        -- snapshot_store() is the store the command read or wrote, named as
+        -- above.
 }
 
 rule RestoreReportsWhatItWrote {
@@ -471,7 +505,8 @@ rule RestoreReportsWhatItWrote {
 
     @guidance
         -- `restore` reads its file, or stdin for `-`, and prints
-        -- `Restored <rows> rows across <tables> tables.`
+        -- `Restored <rows> rows across <tables> tables into <store>.`, the
+        -- store named as DumpReportsWhatItWrote names it.
         --
         -- == Black boxes ==
         -- restored_summary(snapshot) is the line described above.
@@ -571,7 +606,7 @@ rule PaneRenderersAskTheBoard {
         -- hook is handed in the session's settings; instead the board
         -- publishes its port on its own tmux session, beside the store
         -- address it publishes there (startup.allium:
-        -- RecordTheNamedStoreOnceItAnswers), and every pane split in one of
+        -- PublishTheBoardsStoreOnItsSession), and every pane split in one of
         -- its agent windows inherits it. Unlike the store address it is
         -- published whichever store the board runs on, managed or named,
         -- because a board on a non-default port is otherwise unreachable
@@ -688,7 +723,8 @@ surface DispatchCommandLine {
         --                               spacetime-seed.allium: SnapshotCommandLine
         --   store import --from <src>   spacetime-seed.allium: ImportOldStore
         --
-        -- Two options are global: `--data-dir` (also DISPATCH_DATA_DIR) and
+        -- Two options are global, accepted before or after the subcommand:
+        -- `--data-dir` (also DISPATCH_DATA_DIR) and
         -- `--spacetime-server` (the store; also DISPATCH_SPACETIME_SERVER, which is
         -- the operator's; the board's own variable is DISPATCH_BOARD_STORE).
         -- `--data-dir` names the data directory itself (storage.allium:

@@ -49,8 +49,8 @@ pub async fn set_verify(
     Ok(())
 }
 
-/// `dispatch repo clear-verify <path>`. A path that is not saved has nothing
-/// to clear and is ignored.
+/// `dispatch repo clear-verify <path>`. A path this machine never saved is
+/// refused (`cli.allium`: `ClearVerifyRefusesAPathThisHostNeverSaved`).
 pub async fn clear_verify(database: &Store, path: &str, out: &mut dyn Write) -> Result<()> {
     let path = expand_tilde(path);
     // Only a row this host can act through (its own, or an unowned one) has a
@@ -60,9 +60,10 @@ pub async fn clear_verify(database: &Store, path: &str, out: &mut dyn Write) -> 
         .await
         .contains(&path)
         || database.list_unowned_repo_paths().await.contains(&path);
-    if actable {
-        database.set_verify_command(&path, None).await?;
+    if !actable {
+        anyhow::bail!("this machine has not saved {path}");
     }
+    database.set_verify_command(&path, None).await?;
     writeln!(out, "verify_command cleared for {path}")?;
     Ok(())
 }

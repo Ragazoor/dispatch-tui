@@ -1628,6 +1628,9 @@ rule ImportBringsUpTheManagedStore {
         -- IT DOES NOT REQUIRE A HOST LABEL OR A BOARD: no window, port claim,
         -- configuration prompt or host-name prompt. The import has no use for
         -- them and the operator is typically running it in a plain shell.
+        -- It does need this install's identity to write as, so it is refused
+        -- like any one-shot command whose host file no board has connected
+        -- with yet (cli.allium: CliCommandsNeedAHostFile).
 }
 
 rule AbortWhenTheManagedAddressIsHeldByAnotherProgram {
@@ -2118,6 +2121,19 @@ rule PublishTheBoardsStoreOnItsSession {
         -- MANAGED BOARDS PUBLISH TOO. A managed board publishes the managed
         -- address, so a value an earlier named board left on the session is
         -- overwritten rather than trusted by the commands run there.
+        --
+        -- THE PORT GOES BESIDE IT. The board also publishes the port it
+        -- serves agents on, as DISPATCH_PORT, so the companion panes split in
+        -- its agent windows reach it on a non-default port (cli.allium:
+        -- PaneRenderersAskTheBoard). Unlike the address, the port is
+        -- published whichever store the board runs on.
+        --
+        -- DISPATCH_PORT is also what `dispatch tui --port` falls back to, so
+        -- a board started in that session without --port takes the port the
+        -- board before it published. That is intended, unlike the store
+        -- address: a restart keeps the port the agents' sessions already
+        -- reach the board on, and a port, unlike a store, holds no data a
+        -- launch could quietly move away from.
         --
         -- A DISPATCH_SPACETIME_SERVER set on the session by anything else
         -- stays until the session is recreated, and `dispatch tui` reads it
@@ -2626,6 +2642,10 @@ surface BoardLifecycle {
         -- it through kill-window) and SIGTERM, and exits with cause
         -- signalled. Signal delivery's default would end the process without
         -- an exit, and leave the managed store and the store record behind.
+        -- The signalled exit also removes the board's server-wide tmux key
+        -- bindings once it has made them, as a confirmed quit does
+        -- (ExactlyOneBoardPerSession), so a bare `kill` leaves no key bound to
+        -- a board that is gone.
         -- An exit the process cannot run (SIGKILL, a crash, power loss)
         -- raises no BoardExited; see AnOrphanedManagedStoreIsAdoptedNotBounded.
 }
