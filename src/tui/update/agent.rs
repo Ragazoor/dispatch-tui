@@ -658,13 +658,19 @@ impl App {
                 return vec![];
             }
         }
-        self.handle_resume_task(id, message)
+        self.handle_resume_task(id, message, false)
     }
 
+    /// `ResumeTask` (`dispatch.allium`). `go_to` is set by Space only: once
+    /// `Resumed` reports the window, the board goes to it
+    /// (`split-pane.allium: GoToTaskSpaceResumed`). It is recorded with the
+    /// in-flight entry, so a refused ask never turns another caller's resume
+    /// into a go-to.
     pub(in crate::tui) fn handle_resume_task(
         &mut self,
         id: TaskId,
         message: Option<String>,
+        go_to: bool,
     ) -> Vec<Command> {
         let local_host_id = self.local_host_id().map(str::to_string);
         let Some(task) = self.board.find_task(id) else {
@@ -705,17 +711,35 @@ impl App {
                 .set("Cannot resume: task already has an agent attached".to_string());
             return vec![];
         }
-        if !self.resuming.insert(id) {
+        if self.resuming.contains_key(&id) {
             let label = self.board.task_label(id);
             self.status.set(format!("{label} is already being resumed"));
             return vec![];
         }
+        self.resuming.insert(id, go_to);
         let worktree = self.board.find_task(id).and_then(|t| t.worktree.clone());
         vec![Command::Task(crate::tui::commands::TaskCommand::Resume {
             id,
             worktree,
             message,
         })]
+    }
+
+    /// `GoToTaskSpaceResumed`: what a second Space would do now that the task
+    /// has a window — swap it into the split pane while split mode is active
+    /// (`ActivateTask` priority 2), otherwise jump to it (priority 3).
+    fn go_to_resumed_task(&mut self, id: TaskId) -> Vec<Command> {
+        if self.board.split.active {
+            return self.update(crate::tui::Message::Split(
+                crate::tui::messages::SplitMessage::Swap(id),
+            ));
+        }
+        let Some(window) = self.board.find_task(id).and_then(|t| t.tmux_window.clone()) else {
+            return vec![];
+        };
+        vec![Command::Task(
+            crate::tui::commands::TaskCommand::JumpToTmux { window },
+        )]
     }
 
     /// The resume for `id` failed: allow another, and say why.
@@ -734,7 +758,7 @@ impl App {
         id: TaskId,
         tmux_window: TmuxWindow,
     ) -> Vec<Command> {
-        self.resuming.remove(&id);
+        let go_to = self.resuming.remove(&id) == Some(true);
         if let Some(task) = self.find_task_mut(id) {
             task.tmux_window = Some(tmux_window);
             task.status = TaskStatus::Running;
@@ -750,10 +774,14 @@ impl App {
             self.sync_board_selection();
             self.status
                 .set(format!("{} resumed", self.board.task_label(id)));
-            vec![
+            let mut cmds = vec![
                 Command::Task(crate::tui::commands::TaskCommand::Persist(fields)),
                 Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id, at: seed_at }),
-            ]
+            ];
+            if go_to {
+                cmds.extend(self.go_to_resumed_task(id));
+            }
+            cmds
         } else {
             vec![]
         }

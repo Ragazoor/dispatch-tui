@@ -269,8 +269,10 @@ pub struct App {
     /// `Resumed` or `ResumeFailed`. The task's window is only recorded when
     /// `Resumed` returns, so without this a second ask in between would start a
     /// second `claude --continue` in the same worktree
-    /// (`dispatch.allium: ResumeTaskOncePerTask`).
-    pub(in crate::tui) resuming: HashSet<TaskId>,
+    /// (`dispatch.allium: ResumeTaskOncePerTask`). The value is true for a
+    /// resume Space started: `Resumed` then goes to the task, as a second
+    /// Space would (`split-pane.allium: GoToTaskSpaceResumed`).
+    pub(in crate::tui) resuming: HashMap<TaskId, bool>,
     /// DispatchingFeedback's OPEN part: this host's dispatch request rows as
     /// the last board reload delivered them. See [`DispatchRequestView`].
     pub(in crate::tui) dispatch_requests: DispatchRequestView,
@@ -401,7 +403,7 @@ impl App {
             folds: SectionFoldState::default(),
             epic_folds: EpicFoldState::default(),
             dispatching: HashSet::new(),
-            resuming: HashSet::new(),
+            resuming: HashMap::new(),
             dispatch_requests: DispatchRequestView::default(),
             schedule_fired: HashMap::new(),
             spinner_tick: 0,

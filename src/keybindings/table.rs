@@ -259,7 +259,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["Space"],
         Some(C::TaskWithWorktree),
         "resume_task",
-        "Resume the task in its existing worktree",
+        "Resume the task in its existing worktree and go to it",
     ),
     normal(
         &["Space"],

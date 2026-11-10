@@ -974,8 +974,9 @@ rule ActivateTask {
                 -- (dispatch.allium: DispatchingOutranksIt).
                 UserInformed(about: dispatch_in_progress, task: task)
             else if task.worktree != null:
-                -- Worktree survives, no live window: reattach the agent.
-                ResumeTask(task)
+                -- Worktree survives, no live window: reattach the agent,
+                -- then go to it (GoToTaskSpaceResumed).
+                ResumeTask(task: task, go_to_task: true)
             else:
                 UserInformed(about: no_worktree_to_resume, task: task)
 
@@ -1066,13 +1067,54 @@ rule ActivateTask {
         --        hint ("Dispatch in progress…"), never the retry dialog.
         --      * Running/Review/Done with a worktree -> ResumeTask
         --        (dispatch.allium): reattach the agent in the existing
-        --        worktree.
+        --        worktree, then go to it as a second Space would
+        --        (GoToTaskSpaceResumed).
         --      * Running/Review/Done without a worktree -> a status hint
         --        ("No worktree to resume, move to Backlog and re-dispatch").
         --
         -- Space on an epic row (board view) enters the epic view, not this
         -- rule. Inside the epic, Space on each subtask follows the task rules
         -- above.
+}
+
+-- == Go to a Task Space Resumed ==
+--
+-- Space on a detached card resumes the agent, and the operator wants to
+-- work on it: one press takes them there, not a resume and then a second
+-- Space. Once the resume has recorded the task's window, the board does
+-- what ActivateTask does for a task with a window: swap it into the split
+-- pane while split mode is active, otherwise jump tmux focus to it.
+
+rule GoToTaskSpaceResumed {
+    when: ResumeTask(task, message?, go_to_task?)
+    requires: go_to_task = true
+
+    ensures:
+        if split_pane.active = true:
+            -- As ActivateTask priority 2: swap in, focus stays on the TUI.
+            SplitPaneSwapRequested(task: task)
+        else:
+            -- As ActivateTask priority 3.
+            tmux_focus = current_agent(task).tmux_window
+
+    @guidance
+        -- The window exists only once the launch reports back (ResumeTask's
+        -- ResumeTaskOncePerTask), so the go-to waits for that report. A
+        -- resume that fails goes nowhere and shows its error.
+        --
+        -- go_to_task belongs to the launch Space started. A Space refused
+        -- because another resume of the task is already in flight
+        -- (ResumeTaskOncePerTask) does not turn that resume into a go-to.
+        --
+        -- Only board Space sets go_to_task. The MCP tool resume_task and the
+        -- retry dialog's [r] Resume leave tmux focus where it is: an agent's
+        -- call must not pull the operator off what they are looking at. The
+        -- agent-tree pane's resume has its own wait-then-jump
+        -- (agent-tree.allium: AgentTreeResumeAccepted).
+        --
+        -- A resume that finds the task's window still alive (ResumeTask's
+        -- window_alive branch) launches nothing but still records the
+        -- window, so the go-to applies to it too.
 }
 
 -- == Jump Back to TUI Window (Prefix+Space) ==

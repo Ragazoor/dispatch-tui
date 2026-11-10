@@ -74,7 +74,8 @@ impl App {
             }
             // One resume per task at a time, here too: a double press must not
             // start a second `claude --continue`.
-            if self.resuming.insert(id) {
+            if let std::collections::hash_map::Entry::Vacant(entry) = self.resuming.entry(id) {
+                entry.insert(false);
                 cmds.push(Command::Task(crate::tui::commands::TaskCommand::Resume {
                     id,
                     worktree,

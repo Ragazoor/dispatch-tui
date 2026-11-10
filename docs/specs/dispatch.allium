@@ -1231,7 +1231,7 @@ rule DispatchResearchTask {
 }
 
 rule ResumeTask {
-    when: ResumeTask(task, message?)
+    when: ResumeTask(task, message?, go_to_task?)
 
     requires: task.status in {running, review, done}
     requires: task.worktree != null
@@ -1265,6 +1265,8 @@ rule ResumeTask {
         -- section (agent-tree.allium: ResumeDetachedAgentFromThePane), which
         -- carries none. All three reach the same board handler and the same
         -- launch, so every precondition and ensures here holds for each.
+        -- Only Space sets go_to_task: once the window is recorded the board
+        -- goes to it (split-pane.allium: GoToTaskSpaceResumed).
         --
         -- == One resume per task at a time (ResumeTaskOncePerTask) ==
         -- The window is recorded only when the launch reports back, so the
@@ -1346,10 +1348,11 @@ rule ResumeTask {
         -- does not spawn a second one: AgentLaunched does not fire, so no new
         -- window is created, no keys are sent, and no new companion pane is
         -- spawned. current_agent(task).tmux_window is still (re)pointed at the window so the
-        -- task stops looking detached; reattachment itself then happens the
-        -- normal way, through the existing "has a window" branch of Space (see
-        -- split-pane.allium ActivateTask, priority 3) on the next
-        -- keypress. Before this check existed, the stale-field case above
+        -- task stops looking detached; going to it is then what it always
+        -- is for a task with a window: Space's go-to for a Space resume
+        -- (split-pane.allium: GoToTaskSpaceResumed), else the "has a window"
+        -- branch of Space (ActivateTask, priority 3) on the next keypress.
+        -- Before this check existed, the stale-field case above
         -- caused AgentLaunched to unconditionally spawn a second window
         -- sharing the live one's name, and the next targeted tmux operation
         -- on that name (select-window, send-keys, kill-window — all resolved

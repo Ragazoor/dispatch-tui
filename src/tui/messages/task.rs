@@ -58,6 +58,8 @@ pub enum TaskMessage {
     Refresh(Vec<Task>),
     /// Splice a single fresh task into `app.board.tasks`.
     Updated(Box<Task>),
+    /// Space resumes `id` and, once it is resumed, goes to it
+    /// (`split-pane.allium: GoToTaskSpaceResumed`).
     Resume(TaskId),
     /// The MCP tool `resume_task` asks to resume `id`, optionally with a
     /// first message for the resumed session.
@@ -195,7 +197,7 @@ impl TaskMessage {
             TaskMessage::WindowGone(id) => app.handle_window_gone(id),
             TaskMessage::Refresh(tasks) => app.handle_refresh_tasks(tasks),
             TaskMessage::Updated(task) => app.handle_task_updated(*task),
-            TaskMessage::Resume(id) => app.handle_resume_task(id, None),
+            TaskMessage::Resume(id) => app.handle_resume_task(id, None, true),
             TaskMessage::ResumeRequested { id, message } => {
                 app.handle_resume_requested(id, message)
             }

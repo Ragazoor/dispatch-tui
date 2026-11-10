@@ -319,3 +319,159 @@ fn space_on_empty_column_is_noop() {
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
     assert!(cmds.is_empty());
 }
+// ---------------------------------------------------------------------------
+// GoToTaskSpaceResumed (docs/specs/split-pane.allium): once a resume Space
+// started reports its window, the board goes to it as a second Space would.
+// ---------------------------------------------------------------------------
+
+fn windowless_running_app() -> App {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = None;
+    App::new(vec![task])
+}
+
+/// Space on the windowless Running card (task 4).
+fn press_space(app: &mut App) -> Vec<Command> {
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    without_usage(app.handle_key(make_key(KeyCode::Char(' '))))
+}
+
+fn mcp_resume(app: &mut App) {
+    app.update(Message::Task(TaskMessage::ResumeRequested {
+        id: TaskId(4),
+        message: None,
+    }));
+}
+
+fn report_resumed(app: &mut App) -> Vec<Command> {
+    app.update(Message::Task(TaskMessage::Resumed {
+        id: TaskId(4),
+        tmux_window: crate::models::test_tmux_window("task-4"),
+    }))
+}
+
+fn is_resume(c: &Command) -> bool {
+    matches!(c, Command::Task(TaskCommand::Resume { .. }))
+}
+
+fn jumps(cmds: &[Command]) -> bool {
+    cmds.iter()
+        .any(|c| matches!(c, Command::Task(TaskCommand::JumpToTmux { .. })))
+}
+
+fn swaps(cmds: &[Command]) -> bool {
+    cmds.iter().any(|c| {
+        matches!(
+            c,
+            Command::Split(crate::tui::commands::SplitCommand::Swap { .. })
+        )
+    })
+}
+
+fn split_open(app: &mut App) {
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some(crate::models::test_pane_id("%10"));
+}
+
+#[test]
+fn space_resume_jumps_to_the_window_once_resumed() {
+    let mut app = windowless_running_app();
+    let space = press_space(&mut app);
+    assert!(
+        space.iter().any(is_resume),
+        "Space should resume, got {space:?}"
+    );
+
+    let cmds = report_resumed(&mut app);
+
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(TaskCommand::JumpToTmux { window }) if window.as_str() == "task-4"
+        )),
+        "a Space resume should jump to the resumed window, got {cmds:?}"
+    );
+}
+
+#[test]
+fn space_resume_with_split_active_swaps_the_window_in() {
+    let mut app = windowless_running_app();
+    split_open(&mut app);
+    let space = press_space(&mut app);
+    assert!(
+        space.iter().any(is_resume),
+        "Space should resume, got {space:?}"
+    );
+
+    let cmds = report_resumed(&mut app);
+
+    assert!(
+        swaps(&cmds),
+        "a Space resume in split mode should swap, got {cmds:?}"
+    );
+    assert!(!jumps(&cmds), "split mode must not jump, got {cmds:?}");
+}
+
+#[test]
+fn mcp_resume_does_not_move_focus() {
+    let mut app = windowless_running_app();
+    mcp_resume(&mut app);
+
+    let cmds = report_resumed(&mut app);
+
+    assert!(
+        !jumps(&cmds),
+        "an MCP resume must not pull focus, got {cmds:?}"
+    );
+}
+
+#[test]
+fn mcp_resume_with_split_active_does_not_swap() {
+    let mut app = windowless_running_app();
+    split_open(&mut app);
+    mcp_resume(&mut app);
+
+    let cmds = report_resumed(&mut app);
+
+    assert!(
+        !swaps(&cmds),
+        "an MCP resume must not swap the pane, got {cmds:?}"
+    );
+}
+
+#[test]
+fn a_failed_space_resume_does_not_jump_on_a_later_resume() {
+    let mut app = windowless_running_app();
+    press_space(&mut app);
+    app.update(Message::Task(TaskMessage::ResumeFailed {
+        id: TaskId(4),
+        error: "tmux is gone".to_string(),
+    }));
+    app.status.error_popup = None;
+    mcp_resume(&mut app);
+
+    let cmds = report_resumed(&mut app);
+
+    assert!(
+        !jumps(&cmds),
+        "a failed Space resume must not leave a jump for a later resume, got {cmds:?}"
+    );
+}
+
+/// A Space refused because an MCP resume is already in flight does not turn
+/// that resume into a jump.
+#[test]
+fn space_refused_during_an_mcp_resume_does_not_jump() {
+    let mut app = windowless_running_app();
+    mcp_resume(&mut app);
+    let space = press_space(&mut app);
+    assert!(
+        !space.iter().any(is_resume),
+        "the second resume must be refused, got {space:?}"
+    );
+
+    let cmds = report_resumed(&mut app);
+
+    assert!(!jumps(&cmds), "got {cmds:?}");
+}
