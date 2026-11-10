@@ -22,8 +22,9 @@ impl App {
     }
 
     /// `tasks.allium: SeeTaskByLandingOnIt`: the task card under the cursor
-    /// stops being unseen. Run after every update, so every way a card comes
-    /// to rest under the cursor (a key, an epic opening, a refresh) counts.
+    /// stops being unseen. Run after every key, so every way a key brings a
+    /// card under the cursor (a move, an epic opening, a view left) counts.
+    /// Never run after a data refresh: the operator may not be looking.
     /// Dropped locally at once so the mark does not outlive the frame, and
     /// sent to the store, which clears it for this person everywhere. An epic
     /// card under the cursor clears nothing: its mark is derived.

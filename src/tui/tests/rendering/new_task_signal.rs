@@ -156,9 +156,8 @@ fn app_with_two_new_tasks_in_one_epic() -> App {
 async fn cursor_landing_on_an_unseen_task_clears_only_it() {
     let mut app = app_with_two_new_tasks_in_one_epic();
 
-    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
-        EpicId(10),
-    )));
+    // Space on the epic card enters it.
+    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
 
     let landed = app.selected_task().expect("the cursor is on a task").id;
     let other = if landed == TaskId(2) {
@@ -194,20 +193,39 @@ async fn moving_the_cursor_onto_an_unseen_task_clears_it() {
     };
     app.board.unseen_tasks.insert(second);
 
-    let cmds = app.update(Message::NavigateRow(1));
+    let cmds = app.handle_key(make_key(KeyCode::Char('j')));
 
     assert_eq!(app.selected_task().map(|t| t.id), Some(second));
     assert!(app.board.unseen_tasks.is_empty());
     assert!(mark_seen_sent(&cmds, second));
 }
 
+/// Task #99089: the board may sit in a tmux window nobody is looking at. A
+/// new PR that a pull sorts into the row under a still cursor must keep its
+/// mark until the operator presses a key.
 #[tokio::test]
-async fn a_refresh_that_slides_an_unseen_task_under_the_cursor_clears_it() {
+async fn a_refresh_that_slides_an_unseen_task_under_the_cursor_keeps_it() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    assert_eq!(app.selected_task().map(|t| t.id), Some(TaskId(1)));
 
     let cmds = app.update(Message::Task(
         crate::tui::messages::TaskMessage::UnseenRefreshed(vec![TaskId(1)]),
     ));
+
+    assert!(app.board.unseen_tasks.contains(&TaskId(1)));
+    assert!(!any_mark_seen_sent(&cmds));
+}
+
+#[tokio::test]
+async fn a_key_with_the_cursor_on_an_unseen_task_clears_it() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::UnseenRefreshed(vec![TaskId(1)]),
+    ));
+
+    // `[` on the only card does not move the cursor; the operator is at the
+    // board all the same.
+    let cmds = app.handle_key(make_key(KeyCode::Char('[')));
 
     assert!(app.board.unseen_tasks.is_empty());
     assert!(mark_seen_sent(&cmds, TaskId(1)));
@@ -222,7 +240,7 @@ async fn cursor_on_a_marked_epic_clears_nothing() {
         "the cursor is on the epic card"
     );
 
-    let cmds = app.update(Message::NavigateRowFirst);
+    let cmds = app.handle_key(make_key(KeyCode::Char('[')));
 
     assert!(app.board.unseen_tasks.contains(&TaskId(1)));
     assert!(!any_mark_seen_sent(&cmds));
@@ -233,10 +251,15 @@ async fn entering_an_epic_whose_new_task_is_deeper_clears_nothing() {
     let mut app = app_with_task_two_epics_deep();
     app.board.unseen_tasks.insert(TaskId(1));
 
-    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
-        EpicId(10),
-    )));
+    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
 
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::Epic {
+            epic_id: EpicId(10),
+            ..
+        }
+    ));
     assert!(app.board.unseen_tasks.contains(&TaskId(1)));
     assert!(app.board.epic_has_unseen(EpicId(11)));
     assert!(!any_mark_seen_sent(&cmds));
@@ -246,7 +269,7 @@ async fn entering_an_epic_whose_new_task_is_deeper_clears_nothing() {
 async fn a_card_already_seen_sends_nothing() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
 
-    let cmds = app.update(Message::NavigateRowFirst);
+    let cmds = app.handle_key(make_key(KeyCode::Char('[')));
 
     assert!(!any_mark_seen_sent(&cmds));
 }

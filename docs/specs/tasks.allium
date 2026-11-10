@@ -1300,7 +1300,7 @@ rule MoveTaskToEpic {
 -- (board-visuals.allium, "New-task signal"). These rules end it.
 
 rule SeeTaskByLandingOnIt {
-    when: CursorRestsOnTaskCard(viewer, task)
+    when: OperatorKeyHandled(viewer, task)   -- task: the card under the cursor once the key is handled
 
     -- Only the task under the cursor is seen. Other tasks in the same epic
     -- stay unseen, and so does every epic whose subtree still holds one, so
@@ -1310,13 +1310,24 @@ rule SeeTaskByLandingOnIt {
             not exists u
 
     @guidance
-        -- "Rests on" is any way a task card comes to be under the board's
-        -- cursor, not only a keypress that moves it there: the arrow and
-        -- first/last keys, the first card a newly entered epic or package
-        -- puts the cursor on, the card the cursor returns to when a view is
-        -- left, and a card a refresh, fold or filter change slides under a
-        -- cursor that did not move. The board checks after every update, so
-        -- one check covers all of them.
+        -- The trigger is a key the operator pressed on the board, never a data
+        -- change. After each key is handled, the task card left under the
+        -- cursor is seen, however it got there: the arrow and first/last keys,
+        -- the first card a newly entered epic or package puts the cursor on,
+        -- the card the cursor returns to when a view is left. A key that does
+        -- not move the cursor counts too: the operator is at the board, so the
+        -- card under their cursor is in front of them. The board checks after
+        -- every key, so one check covers all of them.
+        --
+        -- A REFRESH SEES NOTHING. A card that a pull, a fold or a filter
+        -- change slides under a cursor that did not move keeps its mark until
+        -- the operator's next key (task #99089). The board runs in a tmux
+        -- window the operator may not be looking at, and a cursor left on a
+        -- row (the first row of a just-entered epic, or the row a merged PR
+        -- left) used to clear every new PR that sorted into that row on the
+        -- next poll, before it was ever drawn. The rule used to read "the
+        -- cursor rests on the card", which made the operator's absence
+        -- indistinguishable from their attention.
         --
         -- An EPIC card under the cursor clears nothing. An epic's mark is
         -- derived from the tasks below it (core/UnseenTask); it clears once
@@ -1341,7 +1352,9 @@ rule SeeTaskByLandingOnIt {
         -- There is no MCP tool for this. It is an operator act.
         --
         -- Implementation: src/tui/update/epics.rs::see_selected_task, called
-        -- from App::update; the store write is the module's mark_task_seen.
+        -- from App::handle_key and never from App::update, which data
+        -- refreshes also go through; the store write is the module's
+        -- mark_task_seen.
 }
 
 rule UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing {

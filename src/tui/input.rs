@@ -102,6 +102,10 @@ impl App {
         // without a 'c' keypress. Remove once root-caused.
         tracing::debug!(code = ?key.code, modifiers = ?key.modifiers, mode = ?self.input.mode, "handle_key");
         let mut cmds = self.dispatch_key(key);
+        // `tasks.allium: SeeTaskByLandingOnIt`: a key means the operator is at
+        // the board, so the task card left under the cursor is seen. A data
+        // refresh never sees it (task #99089).
+        cmds.extend(self.see_selected_task());
         cmds.extend(self.respawn_split_pane_if_pinned_window_gone());
 
         self.dirty = true;

@@ -667,8 +667,9 @@ use "./core.allium" as core
 -- == New-task signal ==
 --
 -- A task created with the signal on is unseen by each person who can see its
--- epic until that person's board cursor rests on the task's card
--- (core/UnseenTask; tasks.allium: SeeTaskByLandingOnIt). While a card is marked for the viewing
+-- epic until that person presses a key with the board cursor on the task's
+-- card (core/UnseenTask; tasks.allium: SeeTaskByLandingOnIt). A refresh that
+-- slides the card under a still cursor does not clear it. While a card is marked for the viewing
 -- person it carries a diamond glyph (◆ U+25C6) in SIGNAL, a hue added to
 -- the palette for this one meaning (ORANGE, Rgb 255 158 100). The glyph sits
 -- on the title line in the same slot, and by the same mechanism, as the
@@ -961,8 +962,12 @@ use "./core.allium" as core
 --   cursor_on_a_marked_epic_clears_nothing       the epic mark is derived
 --   moving_the_cursor_onto_an_unseen_task_clears_it
 --                                                a key that moves the cursor
---   a_refresh_that_slides_an_unseen_task_under_the_cursor_clears_it
+--   a_refresh_that_slides_an_unseen_task_under_the_cursor_keeps_it
 --                                                a cursor that did not move
+--                                                sees nothing (task #99089)
+--   a_key_with_the_cursor_on_an_unseen_task_clears_it
+--                                                the next key after such a
+--                                                refresh sees it
 --   bookmarked_task_card_shows_bookmark_glyph    a task with a Bookmark row
 --                                                for the viewer draws ◆ in
 --                                                BOOKMARK on its title line

@@ -129,8 +129,8 @@ pub enum DeleteGuard {
 #[derive(Debug, Clone)]
 pub enum TaskCommand {
     Persist(PersistFields),
-    /// `tasks.allium: SeeTaskByLandingOnIt`, fired when the cursor rests on an
-    /// unseen task's card.
+    /// `tasks.allium: SeeTaskByLandingOnIt`, fired when a key leaves the
+    /// cursor on an unseen task's card.
     MarkSeen(TaskId),
     /// `tasks.allium: SetBookmark`, from the `b` key. The board already
     /// toggled its own copy; the store write makes it this person's

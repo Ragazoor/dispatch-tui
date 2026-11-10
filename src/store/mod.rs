@@ -133,7 +133,7 @@ pub trait TaskCrud: TaskRead {
         labels: &[String],
     ) -> Result<TaskId>;
     async fn delete_task(&self, id: TaskId) -> Result<()>;
-    /// `tasks.allium: SeeTaskByLandingOnIt`: this board's cursor rested on
+    /// `tasks.allium: SeeTaskByLandingOnIt`: a key left this board's cursor on
     /// `id`'s card, so this board's person's unseen mark on it ends. A board
     /// with no settled identity has no marks to end and does nothing.
     async fn mark_task_seen(&self, id: TaskId) -> Result<()>;

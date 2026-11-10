@@ -751,6 +751,63 @@ async fn new_my_reviews_pr_is_signalled_and_a_refresh_is_not() {
 }
 
 #[tokio::test]
+async fn a_refresh_keeps_an_unseen_mark() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = reviews_parent(&db).await;
+    let items = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::DirectRequest],
+    )];
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+    let my = role_sub_epic(&db, parent, FeedRole::MyReviews).await;
+    let task = db.list_tasks_for_epic(my).await.remove(0);
+
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        unseen(&db).await,
+        vec![task.id],
+        "a poll that refreshes an unseen PR leaves its mark"
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_keeps_an_unseen_mark_in_a_repo_group() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = reviews_parent(&db).await;
+    run_role_routed_feed_sync(&*db, parent, entries(&[], &[], &[]))
+        .await
+        .unwrap();
+    let my = role_sub_epic(&db, parent, FeedRole::MyReviews).await;
+    set_strategy(&*db, my, None, Some(true)).await;
+    let items = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/myrepo/pull/1",
+        vec![Signal::DirectRequest],
+    )];
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+    let group = db.list_sub_epics(my).await.remove(0).id;
+    let task = db.list_tasks_for_epic(group).await.remove(0);
+
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        unseen(&db).await,
+        vec![task.id],
+        "a poll that refreshes an unseen PR in a repo group leaves its mark"
+    );
+}
+
+#[tokio::test]
 async fn new_team_reviews_pr_is_signalled() {
     let db = Arc::new(Store::open_in_memory().unwrap());
     let parent = reviews_parent(&db).await;
