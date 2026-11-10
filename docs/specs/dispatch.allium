@@ -323,9 +323,12 @@ rule ProvisionDispatch {
         -- (ProvisioningStopsAtTheDeadline below), the module's backstop timer
         -- (DispatchRequestTimesOut) and a restart of this host
         -- (HostRestartFailsInterrupted). A task deleted under its request has
-        -- nothing to release (DeletingATaskFailsItsOpenRequest), and a task
+        -- nothing to release (DeletingATaskFailsItsOpenRequest), a task
         -- closed under it is Done, which the release leaves alone
-        -- (store-split.allium: CloseFailsOpenRequests).
+        -- (store-split.allium: CloseFailsOpenRequests), and a task the
+        -- operator moved to backlog or done has already left running, so the
+        -- release leaves it alone too (store-split.allium:
+        -- GivingUpTheLaunchCancelsTheDispatch).
         --
         -- Only a FAILED REQUEST releases a claim, and no client calls a release
         -- of its own. A refused request wrote nothing and holds nothing, so

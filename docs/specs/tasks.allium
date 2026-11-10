@@ -509,6 +509,11 @@ rule ConfirmDone {
         -- status, moving the task straight to Done rather than one step
         -- forward — see the DeleteKeyRouting guidance on DeleteTask.
         --
+        -- A task sent to Done while its dispatch is still in flight gives up
+        -- that launch, as a move back to backlog does: it holds no window yet,
+        -- so this rule kills none, and the store cancels the request instead
+        -- (store-split.allium: GivingUpTheLaunchCancelsTheDispatch).
+        --
         -- task.completed_at = now is the Done column's ordering key
         -- (board-layout.allium, "Done Column Ordering"): Done reads newest
         -- first, so it sorts on this field DESCENDING. It is a real wallclock

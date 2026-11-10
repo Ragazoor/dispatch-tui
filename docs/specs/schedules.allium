@@ -334,7 +334,8 @@ rule ScheduledLaunchFails {
         -- see it back in backlog with the old, passed due time and fire it
         -- again. Every way a request fails while the task is claimed or back
         -- in backlog reaches it (a reported failure, the backstop timer, a
-        -- host restart);
+        -- host restart, a waiting request failed by a hand move back to
+        -- backlog: store-split.allium, GivingUpTheLaunchCancelsTheDispatch);
         -- a deleted task has nothing left to mark, and a closed one is Done,
         -- its pending run already cancelled (ClosingCancelsThePendingRun). A
         -- request of any other origin that fails leaves the schedule

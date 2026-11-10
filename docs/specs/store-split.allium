@@ -133,8 +133,9 @@
 --     config.dispatch_request_backstop_grace after the deadline, so a live
 --     host's stop lands first. When it fires on a row still open the module
 --     fails the row "timed out" and releases the claim. A dispatched report
---     arriving after the row has failed is refused, and the host tears down
---     what it made. UnprovisionedIndicator's claim-stamp fallback uses the
+--     arriving after the row has failed, after its deadline, or for a task
+--     the operator moved to backlog or done is refused, and the host tears
+--     down what it made (HostReportsDispatched). UnprovisionedIndicator's claim-stamp fallback uses the
 --     same config value.
 --   - D5, catch-up. A requested row is picked up from its host's initial
 --     subscription rows when that host's board starts. A row already
@@ -1033,6 +1034,12 @@ rule GivingUpTheLaunchCancelsTheDispatch {
         -- dispatch until the host's own failure report lands, after its
         -- teardown. The host's deadline bounds that wait.
         --
+        -- WHERE IT CANNOT REFUSE IN PRACTICE. The only write a failure can
+        -- still make to the task is a schedule mark (schedules.allium:
+        -- ScheduledLaunchFails), legal on a task that just left running. The
+        -- module would roll the whole patch back on a refusal; the in-memory
+        -- twin, which has no transaction, refuses after the status write.
+        --
         -- The board's own move kills no window during provisioning: the
         -- task holds none until the report lands (MoveTaskBackward kills the
         -- window the task holds).
@@ -1195,7 +1202,8 @@ rule ReleaseClaimOfFailedRequest {
             FailedDispatchLeftNoWorktree(task: task)
     -- The epic status rollup for the task's epic chain, in the same reducer,
     -- whether or not the release applied. Every failure reaches it: a
-    -- reported one, the backstop, a host restart. A deleted task has no chain
+    -- reported one, the backstop, a host restart, a hand move that gave up
+    -- the launch. A deleted task has no chain
     -- left here; its delete rolled the chain up.
     ensures:
         if exists task and task.epic != null:
@@ -1204,14 +1212,17 @@ rule ReleaseClaimOfFailedRequest {
     @guidance
         -- The claim release, applied by the module to every failure: a reported one, a timeout, a host restart, a delete, a
         -- close (CloseFailsOpenRequests; the task is already Done by then, so
+        -- nothing is released), a hand move into backlog or done
+        -- (GivingUpTheLaunchCancelsTheDispatch; the task has left running, so
         -- nothing is released). It is
         -- conditional: a task that was provisioned or moved on
         -- meanwhile is left alone rather than stomped back to backlog. The
         -- rollup runs in the module so no board has to recalculate an epic
         -- after the module moved its subtask (the backstop and the restart
-        -- sweep have no board report behind them to do it). The stamp
-        -- RequestDispatch wrote stays on the agent the release ends, as
-        -- history nothing reads.
+        -- sweep have no board report behind them to do it). The agent ends
+        -- whenever the failure leaves the task with no worktree, released or
+        -- not (FailedDispatchLeftNoWorktree); the stamp RequestDispatch wrote
+        -- stays on it, as history nothing reads.
 }
 
 -- == Session requests: wrap-up and exit-session ==
@@ -2036,12 +2047,14 @@ rule CloseFailsOpenRequests {
         -- AFTER THE DONE WRITE. The failure runs once the task is Done, so
         -- ReleaseClaimOfFailedRequest finds a task that is no longer a bare
         -- running claim and leaves it Done rather than putting it back in
-        -- backlog. Without this rule a task closed while its dispatch was
-        -- still provisioning could be reported dispatched, and
-        -- HostReportsDispatched would write a worktree, window and host onto
-        -- a Done task with an agent running in it. Now that report is refused,
-        -- and the host tears down what it made (dispatch.allium:
-        -- ProvisionDispatch, "A row that fails under this host").
+        -- backlog. A task closed while its dispatch was still provisioning
+        -- must not be reported dispatched: that would write a worktree,
+        -- window and host onto a Done task with an agent running in it. The
+        -- failed row refuses that report, and so does HostReportsDispatched's
+        -- own check of the task's status, which also covers a plain status
+        -- write into done (GivingUpTheLaunchCancelsTheDispatch). The host
+        -- tears down what it made (dispatch.allium: ProvisionDispatch, "A
+        -- row that fails under this host").
         --
         -- Not D11-checked, as for the session row: the row may name a
         -- teammate's machine, and it is the close that fails it.
