@@ -738,6 +738,7 @@ mod bootstrap {
         let paths = StartupPaths {
             claude_dir: dir.path().join("claude"),
             claude_json_path: dir.path().join(".claude.json"),
+            tmux_conf_path: dir.path().join(".tmux.conf"),
         };
         crate::host_file::resolve_for_launch(dir.path()).unwrap();
         crate::host_file::rename_host(dir.path(), "m4-bootstrap-host").unwrap();

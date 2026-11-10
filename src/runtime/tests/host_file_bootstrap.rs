@@ -78,6 +78,7 @@ async fn legacy_install() -> (tempfile::TempDir, PathBuf, StartupPaths) {
     let paths = StartupPaths {
         claude_dir: dir.path().join("claude"),
         claude_json_path: dir.path().join(".claude.json"),
+        tmux_conf_path: dir.path().join(".tmux.conf"),
     };
     let before = footprint(&data_dir);
     assert!(

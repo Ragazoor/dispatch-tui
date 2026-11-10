@@ -73,8 +73,8 @@ pub struct SetupPaths {
 }
 
 impl SetupPaths {
-    /// The set, composed from a configuration directory and trust store the
-    /// caller already resolved.
+    /// The set, composed from a configuration directory, trust store and tmux
+    /// configuration file the caller already resolved.
     ///
     /// There is deliberately no `resolve()` beside this: every caller is handed
     /// its locations, so no lookup is left inside setup that could reach the
@@ -83,23 +83,21 @@ impl SetupPaths {
     ///
     /// `runtime::StartupPaths::setup_paths` is the one caller: startup is
     /// handed the operator's locations and hands them onward, so the
-    /// configuration check performs no `$HOME` lookup of its own. The two
-    /// remaining values are fixed per machine rather than per configuration
-    /// directory, so they are resolved here — see
-    /// `SnapshotLocationIsFixedPerMachine`. The MCP entry's
-    /// helper command used to be a third: it is now composed at compile time
-    /// (`config::CALLER_HEADERS_COMMAND`), so there is nothing to resolve and
-    /// nothing to hand onward — see `startup.allium`'s
-    /// `TheHelperIsTheBareCommandName`.
-    pub fn under(claude_dir: &Path, mcp_path: &Path) -> Result<Self> {
-        Ok(Self {
+    /// configuration check performs no `$HOME` lookup of its own. The budget
+    /// snapshot is fixed per machine rather than per configuration directory,
+    /// so it is resolved here — see `SnapshotLocationIsFixedPerMachine`. The
+    /// MCP entry's helper command is composed at compile time
+    /// (`config::CALLER_HEADERS_COMMAND`), so there is nothing to resolve —
+    /// see `startup.allium`'s `TheHelperIsTheBareCommandName`.
+    pub fn under(claude_dir: &Path, mcp_path: &Path, tmux_conf_path: &Path) -> Self {
+        Self {
             legacy_mcp_path: claude_dir.join(".mcp.json"),
             statusline_path: statusline::settings_path(claude_dir),
             claude_dir: claude_dir.to_path_buf(),
             mcp_path: mcp_path.to_path_buf(),
-            tmux_conf_path: tmux::tmux_conf_path()?,
+            tmux_conf_path: tmux_conf_path.to_path_buf(),
             budget_snapshot_path: crate::budget_snapshot_path(),
-        })
+        }
     }
 }
 

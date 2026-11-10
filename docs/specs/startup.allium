@@ -2629,14 +2629,16 @@ surface HostLabelPrompt {
 -- it. Dispatch owns two things there: the settings file of the status-line
 -- decorator (observability.allium: StatusLineDecorator) and the directory of
 -- dispatch's own agent-facing plugin. Beside the configuration directory sits
--- the trust store.
+-- the trust store; also in the home directory is the operator's tmux
+-- configuration file, which the startup check edits (the focus-events line).
 surface OperatorConfigurationLocations {
     facing _: core/BoardProcess
 
     @guarantee SettingsLocationIsAnExplicitStartupInput
-        -- Startup is told where the operator's Claude Code configuration
-        -- lives: the directory the decorator's settings file goes in, and
-        -- the trust store beside it. It goes looking for neither. The
+        -- Startup is told where the operator's configuration lives: the
+        -- Claude Code directory the decorator's settings file goes in, the
+        -- trust store beside it, and the tmux configuration file. It goes
+        -- looking for none of them. The
         -- operator's own session is handed the operator's locations. A run
         -- that is not the operator's session, such as a test booting the
         -- runtime, is handed locations of its own, and so cannot reach
@@ -2655,8 +2657,8 @@ surface OperatorConfigurationLocations {
         -- it. When that reading yields nothing usable, resolution reports
         -- that and startup stops. It never yields a location anyway.
         --
-        -- The configuration directory and the trust store beside it are
-        -- resolved the same way. A resolution that failed for one and
+        -- The configuration directory, the trust store and the tmux
+        -- configuration file are resolved the same way. A resolution that failed for one and
         -- succeeded for the other would let the choice of location decide
         -- whether the operator is told anything at all.
         --

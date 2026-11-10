@@ -75,6 +75,7 @@ fn board_dir(root: &Path) -> (std::path::PathBuf, StartupPaths) {
     let paths = StartupPaths {
         claude_dir: root.join("claude"),
         claude_json_path: root.join(".claude.json"),
+        tmux_conf_path: root.join(".tmux.conf"),
     };
     crate::host_file::resolve_for_launch(&data_dir).unwrap();
     crate::host_file::rename_host(&data_dir, "smoke-test-host").unwrap();

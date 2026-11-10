@@ -218,6 +218,9 @@ pub struct StartupPaths {
     /// Claude Code's trust store (`~/.claude.json`), read and written by the
     /// trust-gated dispatch arms via `TuiRuntime::claude_json_path`.
     claude_json_path: std::path::PathBuf,
+    /// The operator's tmux configuration file (`~/.tmux.conf`), which the
+    /// startup configuration check edits (the focus-events line).
+    tmux_conf_path: std::path::PathBuf,
 }
 
 impl StartupPaths {
@@ -234,6 +237,7 @@ impl StartupPaths {
         Ok(Self {
             claude_dir: crate::setup::claude_dir_in(&home),
             claude_json_path: crate::setup::user_global_config_path_in(&home),
+            tmux_conf_path: crate::tmux::tmux_conf_path_in(&home),
         })
     }
 
@@ -247,8 +251,12 @@ impl StartupPaths {
     /// one resolved set, and goes looking for none of it. A run that is not the
     /// operator's session is handed locations of its own and so cannot reach
     /// theirs.
-    pub fn setup_paths(&self) -> Result<crate::setup::SetupPaths> {
-        crate::setup::SetupPaths::under(&self.claude_dir, &self.claude_json_path)
+    pub fn setup_paths(&self) -> crate::setup::SetupPaths {
+        crate::setup::SetupPaths::under(
+            &self.claude_dir,
+            &self.claude_json_path,
+            &self.tmux_conf_path,
+        )
     }
 }
 

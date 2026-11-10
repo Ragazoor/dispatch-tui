@@ -724,8 +724,11 @@ fn the_configuration_layout_is_what_the_spawn_constant_names() {
 #[test]
 fn setup_paths_compose_the_shared_configuration_layout() {
     let claude_dir = std::path::Path::new("/h/.claude");
-    let paths = SetupPaths::under(claude_dir, std::path::Path::new("/h/.claude.json"))
-        .expect("composing a layout must not fail");
+    let paths = SetupPaths::under(
+        claude_dir,
+        std::path::Path::new("/h/.claude.json"),
+        std::path::Path::new("/h/.tmux.conf"),
+    );
 
     assert_eq!(
         paths.claude_dir, claude_dir,

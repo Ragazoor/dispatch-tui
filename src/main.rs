@@ -404,7 +404,7 @@ async fn cmd_tui(
     // subprocess and may block on stdin waiting for an answer, so it runs on a
     // blocking thread rather than inline on the async runtime. It touches no
     // database.
-    let setup_paths = paths.setup_paths()?;
+    let setup_paths = paths.setup_paths();
     let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
     let startup_data_dir = data_dir.to_path_buf();
     match tokio::task::spawn_blocking(move || {

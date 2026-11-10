@@ -926,11 +926,6 @@ pub(crate) fn tmux_conf_path_in(home: &std::path::Path) -> std::path::PathBuf {
     home.join(".tmux.conf")
 }
 
-/// [`tmux_conf_path_in`] against the operator's own home directory.
-pub(crate) fn tmux_conf_path() -> Result<std::path::PathBuf> {
-    Ok(tmux_conf_path_in(&crate::setup::home_dir()?))
-}
-
 /// The setting that marks `~/.tmux.conf` as already configured. Written down
 /// once: the reader below and the writer beneath it both use it, so the drift
 /// check and the write cannot disagree about what "already there" means

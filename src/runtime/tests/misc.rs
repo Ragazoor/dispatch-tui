@@ -830,11 +830,24 @@ mod bootstrap {
         let paths = StartupPaths {
             claude_dir: dir.path().join("claude"),
             claude_json_path: dir.path().join(".claude.json"),
+            tmux_conf_path: dir.path().join(".tmux.conf"),
         };
         // The host file `--db`'s directory holds, already named.
         crate::host_file::resolve_for_launch(dir.path()).unwrap();
         crate::host_file::rename_host(dir.path(), "bootstrap-test-host").unwrap();
         (dir, data_dir, paths)
+    }
+
+    /// startup.allium: `SettingsLocationIsAnExplicitStartupInput`. The tmux
+    /// configuration file the startup check edits is the one startup was
+    /// handed, so a test-booted runtime cannot reach the operator's own.
+    #[tokio::test]
+    async fn setup_paths_take_the_tmux_conf_startup_was_handed() {
+        let (dir, _data_dir, paths) = fixture().await;
+        assert_eq!(
+            paths.setup_paths().tmux_conf_path,
+            dir.path().join(".tmux.conf")
+        );
     }
 
     /// The happy path: reads the host file, spawns the
