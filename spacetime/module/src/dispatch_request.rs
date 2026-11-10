@@ -128,8 +128,11 @@ pub const DISPATCH_REASON_TASK_DELETED: &str = "task deleted";
 /// A closed task's reason (`CloseFailsOpenRequests`).
 pub const DISPATCH_REASON_TASK_CLOSED: &str = "task closed";
 /// A waiting request's reason when its task is moved back to backlog
-/// (`MovingBackToBacklogCancelsTheDispatch`).
+/// (`GivingUpTheLaunchCancelsTheDispatch`).
 pub const DISPATCH_REASON_MOVED_TO_BACKLOG: &str = "task moved back to backlog";
+/// A waiting request's reason when its task is moved to done by a plain status
+/// write (`GivingUpTheLaunchCancelsTheDispatch`).
+pub const DISPATCH_REASON_MOVED_TO_DONE: &str = "task moved to done";
 
 pub(crate) const MICROS_PER_SEC: i64 = 1_000_000;
 
@@ -454,27 +457,35 @@ pub fn release_claim_after_failure(task: Task) -> Option<Task> {
     is_bare_claim(&task).then(|| released_task(task))
 }
 
-/// `HostReportsDispatched`'s check of the task: a task moved back to backlog
-/// while its host provisioned has given up the launch
-/// (`MovingBackToBacklogCancelsTheDispatch`), so its report is refused and the
+/// `HostReportsDispatched`'s check of the task: a task moved to backlog or
+/// done while its host provisioned has given up the launch
+/// (`GivingUpTheLaunchCancelsTheDispatch`), so its report is refused and the
 /// host tears down what it made.
 pub fn validate_dispatched_report_for_task(task: &Task) -> Result<(), String> {
-    if task.status == BACKLOG {
+    if task.status == BACKLOG || task.status == DONE {
         return Err(format!(
-            "task {} was moved back to backlog, so the dispatched report is refused",
-            task.id
+            "task {} was moved to {}, so the dispatched report is refused",
+            task.id, task.status
         ));
     }
     Ok(())
 }
 
-/// `MovingBackToBacklogCancelsTheDispatch`'s trigger: a hand status write
-/// from running into backlog.
-pub fn moves_back_to_backlog(prior_status: &str, status: &str) -> bool {
-    prior_status == RUNNING && status == BACKLOG
+/// `GivingUpTheLaunchCancelsTheDispatch`'s trigger: a hand status write into
+/// backlog or done. The reason its waiting requests fail with, or `None` when
+/// the write gives up no launch.
+pub fn launch_given_up_by(prior_status: &str, status: &str) -> Option<&'static str> {
+    if prior_status == status {
+        return None;
+    }
+    match status {
+        BACKLOG => Some(DISPATCH_REASON_MOVED_TO_BACKLOG),
+        DONE => Some(DISPATCH_REASON_MOVED_TO_DONE),
+        _ => None,
+    }
 }
 
-/// `MovingBackToBacklogCancelsTheDispatch`'s selection: the requests still
+/// `GivingUpTheLaunchCancelsTheDispatch`'s selection: the requests still
 /// waiting for their host. A provisioning one stays open until its host
 /// reports, so a second dispatch cannot race its worker.
 pub fn is_waiting_dispatch_request(row: &DispatchRequest) -> bool {
@@ -486,7 +497,7 @@ pub fn is_waiting_dispatch_request(row: &DispatchRequest) -> bool {
 /// stamped `updated_at = stamp`, or `None` when neither rule changes it, and
 /// whether the launch left the task with no worktree, which ends the task's
 /// agent (`FailedDispatchLeftNoWorktree`): the claim was released, or the
-/// operator had already moved the bare claim back to backlog. The schedule
+/// operator had already moved the claim on to backlog or done. The schedule
 /// is marked only on a task the failure leaves in backlog, released or moved
 /// back by hand meanwhile: a task that moved on (a close fails its request
 /// after the Done write) is not a launch that left it in backlog.
@@ -505,7 +516,8 @@ pub fn task_after_failed_request(
     } else {
         None
     };
-    let left_no_worktree = was_released || (base.status == BACKLOG && base.worktree.is_empty());
+    // A release clears no worktree, so `base` answers for both cases.
+    let left_no_worktree = base.worktree.is_empty();
     let row = marked.or_else(|| was_released.then_some(base));
     let row = row.map(|row| Task {
         updated_at: stamp.into(),
@@ -612,10 +624,16 @@ pub(crate) fn fail_open_dispatch_requests_of(ctx: &ReducerContext, task_id: i64,
     }
 }
 
-/// `MovingBackToBacklogCancelsTheDispatch`: fail the task's requests still
-/// waiting for their host. Called by `patch_task` after the status write, so
-/// the release finds a task already in backlog and writes nothing more to it.
-pub(crate) fn fail_waiting_dispatch_requests_of(ctx: &ReducerContext, task_id: i64) {
+/// `GivingUpTheLaunchCancelsTheDispatch`: fail the task's requests still
+/// waiting for their host with `reason`. Called by `patch_task` after the
+/// status write, so the release finds a task no longer running and writes
+/// nothing more to it; only a schedule mark can still write the task, and its
+/// refusal rolls the whole patch back.
+pub(crate) fn fail_waiting_dispatch_requests_of(
+    ctx: &ReducerContext,
+    task_id: i64,
+    reason: &str,
+) -> Result<(), String> {
     let waiting: Vec<DispatchRequest> = ctx
         .db
         .dispatch_requests()
@@ -624,10 +642,9 @@ pub(crate) fn fail_waiting_dispatch_requests_of(ctx: &ReducerContext, task_id: i
         .filter(is_waiting_dispatch_request)
         .collect();
     for row in waiting {
-        // The task is already in backlog, so the release writes nothing; only
-        // a schedule mark could, and a refused one leaves the request open.
-        let _ = fail_dispatch_request(ctx, row, DISPATCH_REASON_MOVED_TO_BACKLOG);
+        fail_dispatch_request(ctx, row, reason)?;
     }
+    Ok(())
 }
 
 // -- Reducers -----------------------------------------------------------------

@@ -356,13 +356,20 @@ rule ProvisionDispatch {
         -- module accepts while the row is still provisioning.
         --
         -- == A refused dispatched report ==
-        -- Whatever refused it — the row failed under this host (below), or
-        -- the row's deadline passed before the report landed
-        -- (store-split.allium: HostReportsDispatched) — nothing was recorded
-        -- on the task, so the host tears down what this attempt made and
-        -- reports the failure: "deadline passed" once the deadline has gone
-        -- by. On a row that already failed that report is refused in turn,
-        -- and the row keeps the module's reason.
+        -- Whatever refused it — the row failed under this host (below), the
+        -- row's deadline passed before the report landed, or the operator
+        -- moved the task to backlog or done meanwhile (store-split.allium:
+        -- HostReportsDispatched, GivingUpTheLaunchCancelsTheDispatch) —
+        -- nothing was recorded on the task, so the host tears down what this
+        -- attempt made and reports the failure: "deadline passed" once the
+        -- deadline has gone by, else "task moved back to backlog" or "task
+        -- moved to done" when its view of the task shows the move. On a row
+        -- that already failed that report is refused in turn, and the row
+        -- keeps the module's reason.
+        --
+        -- The move back is why a task can sit in backlog with a dispatch
+        -- still open: the row stays provisioning until this host's teardown
+        -- has reported, so no second dispatch meets the first one's worker.
         --
         -- == The row's deadline bounds provisioning ==
         -- Provisioning runs against the request's deadline (requested_at plus

@@ -462,6 +462,13 @@ rule MoveTaskBackward {
         -- reason "backlog tasks are unowned" is false — see that invariant's
         -- comment, which states the point at length because the wrong reading
         -- is the intuitive one.
+        -- A move back to backlog while the task's dispatch is still in flight
+        -- gives up that launch: the task holds no window yet, so this rule
+        -- kills none, and the store cancels the request instead — at once if
+        -- its host has not claimed it, else by refusing the host's report so
+        -- the host tears down what it made (store-split.allium:
+        -- GivingUpTheLaunchCancelsTheDispatch). ConfirmDone's write into done
+        -- does the same.
         -- Supports batch operation on multi-selected tasks.
         -- Leaving done clears nothing. task.sort_order is untouched by every
         -- status write (it is manual/feed ordering and nothing else), and

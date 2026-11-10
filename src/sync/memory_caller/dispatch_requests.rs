@@ -115,9 +115,14 @@ impl MemoryReducerCaller {
     }
 
     /// Mirrors the module's `fail_waiting_dispatch_requests_of`
-    /// (`MovingBackToBacklogCancelsTheDispatch`): called by `patch_task` after
+    /// (`GivingUpTheLaunchCancelsTheDispatch`): called by `patch_task` after
     /// the status write.
-    pub(super) fn fail_waiting_dispatch_requests_of(&self, tables: &mut Tables, task_id: i64) {
+    pub(super) fn fail_waiting_dispatch_requests_of(
+        &self,
+        tables: &mut Tables,
+        task_id: i64,
+        reason: &str,
+    ) -> Result<(), String> {
         let waiting: Vec<module::DispatchRequest> = tables
             .dispatch_requests
             .values()
@@ -125,9 +130,9 @@ impl MemoryReducerCaller {
             .cloned()
             .collect();
         for row in waiting {
-            let _ =
-                self.fail_dispatch_request(tables, row, module::DISPATCH_REASON_MOVED_TO_BACKLOG);
+            self.fail_dispatch_request(tables, row, reason)?;
         }
+        Ok(())
     }
 
     /// Mirrors the module's `delete_request_rows_of`

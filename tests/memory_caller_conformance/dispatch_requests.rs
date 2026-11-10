@@ -328,7 +328,7 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
         same_request(r_fail, m_fail);
         same_task(failing);
 
-        // -- MovingBackToBacklogCancelsTheDispatch ---------------------------------
+        // -- GivingUpTheLaunchCancelsTheDispatch ---------------------------------
         // A request still waiting fails at once; a provisioning one stays open,
         // its dispatched report is refused, and the host's failure report
         // finishes it.

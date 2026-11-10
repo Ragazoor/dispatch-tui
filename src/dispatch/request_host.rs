@@ -34,8 +34,11 @@ use crate::process::{AgentBinaries, ProcessRunner};
 pub const DEADLINE_PASSED: &str = "deadline passed";
 /// The reason a dispatch given up by a move back to backlog records, the
 /// module's `DISPATCH_REASON_MOVED_TO_BACKLOG`
-/// (`store-split.allium: MovingBackToBacklogCancelsTheDispatch`).
+/// (`store-split.allium: GivingUpTheLaunchCancelsTheDispatch`).
 pub const MOVED_BACK_TO_BACKLOG: &str = "task moved back to backlog";
+/// The reason a dispatch given up by a move to done records, the module's
+/// `DISPATCH_REASON_MOVED_TO_DONE`.
+pub const MOVED_TO_DONE: &str = "task moved to done";
 
 /// Which delivered rows this board serves (`HostClaimsDispatch`'s trigger).
 ///

@@ -395,7 +395,7 @@ fn a_backlog_task_with_an_open_request_is_refused() {
     let id = host_and_task(&store);
     request(&store, id).expect("first");
     // Claimed: a request still waiting would fail on the move back
-    // (`MovingBackToBacklogCancelsTheDispatch`).
+    // (`GivingUpTheLaunchCancelsTheDispatch`).
     let req = only_request(&store).id;
     claim(&store, "alice", req, HOST_A).expect("claim");
     patch(&store, id, status_patch("backlog"));
@@ -1046,4 +1046,40 @@ fn a_move_on_to_review_keeps_the_launch() {
 
     report_dispatched(&store, "alice", req, HOST_A, "/wt/1-t").expect("accepted");
     assert_eq!(store.task(id).worktree, "/wt/1-t");
+}
+
+#[test]
+fn moving_to_done_fails_a_waiting_request_and_refuses_a_provisioning_report() {
+    let store = Store::new();
+    let waiting = host_and_task(&store);
+    let provisioning = store.create("alice", user_task("u", "alice"));
+    request(&store, waiting).expect("request");
+    request(&store, provisioning).expect("request");
+    let req = request_for(&store, provisioning).id;
+    claim(&store, "alice", req, HOST_A).expect("claim");
+    let done = || TaskPatch {
+        status: Some("done".into()),
+        sub_status: Some("none".into()),
+        ..TaskPatch::default()
+    };
+    patch(&store, waiting, done());
+    patch(&store, provisioning, done());
+
+    let row = request_for(&store, waiting);
+    assert_eq!(row.state, DISPATCH_FAILED);
+    assert_eq!(row.reason, "task moved to done");
+    assert_eq!(request_for(&store, provisioning).state, DISPATCH_PROVISIONING);
+
+    assert!(report_dispatched(&store, "alice", req, HOST_A, "/wt/2-u").is_err());
+    let task = store.task(provisioning);
+    assert_eq!(task.worktree, "");
+    assert_eq!(task.status, "done");
+    report_failed(&store, "alice", req, HOST_A).expect("report failed");
+    let agent = store
+        .db()
+        .agents()
+        .iter()
+        .find(|a| a.task_id == provisioning && a.state != "assigned")
+        .expect("the agent the claim started");
+    assert_eq!(agent.end_reason, "launch_failed");
 }

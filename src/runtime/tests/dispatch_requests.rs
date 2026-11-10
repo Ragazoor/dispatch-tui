@@ -185,6 +185,63 @@ async fn the_dispatch_key_requests_and_provisions_nothing_inline() {
     );
 }
 
+/// `store-split.allium: GivingUpTheLaunchCancelsTheDispatch`, through the
+/// board: the operator dispatches a task, then moves it back to backlog before
+/// its host has claimed the row. The move's persist fails the waiting request,
+/// so the host never provisions it and the task is free to dispatch again.
+#[tokio::test]
+async fn moving_a_dispatched_task_back_before_its_host_claims_cancels_it() {
+    let runner = Arc::new(MockProcessRunner::new(vec![]));
+    let mut r = rig(runner.clone()).await;
+    let task = create_task_returning(
+        &*r.db,
+        "Keyed",
+        "desc",
+        "/repo",
+        None,
+        models::TaskStatus::Backlog,
+    )
+    .await
+    .unwrap();
+    r.dispatch(Command::Task(TaskCommand::DispatchAgent {
+        id: task.id,
+        mode: Some(DispatchMode::Dispatch),
+    }))
+    .await;
+    let request = r.request_for(task.id).await.id;
+    // The board sees the claim's move to running.
+    r.app = App::new(r.db.list_all().await);
+
+    let cmds = r
+        .app
+        .update(Message::Task(crate::tui::messages::TaskMessage::Move {
+            id: task.id,
+            direction: crate::tui::MoveDirection::Backward,
+        }));
+    for cmd in cmds {
+        r.dispatch(cmd).await;
+    }
+
+    let row = r.db.dispatch_request(request).await.unwrap();
+    assert_eq!(row.state, DispatchRequestState::Failed);
+    assert_eq!(
+        row.reason.as_deref(),
+        Some(crate::dispatch::MOVED_BACK_TO_BACKLOG)
+    );
+    assert_eq!(
+        r.db.get_task(task.id).await.unwrap().status,
+        models::TaskStatus::Backlog
+    );
+    for handle in r.rt.serve_dispatch_requests().await {
+        handle.await.unwrap();
+    }
+    assert!(
+        runner.recorded_calls().is_empty(),
+        "a cancelled request is never provisioned: {:?}",
+        runner.recorded_calls()
+    );
+}
+
 /// `dispatch.allium: DispatchResearchTask` — the research key names its mode
 /// on the row; origin is still `user`.
 #[tokio::test]

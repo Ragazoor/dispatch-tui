@@ -530,8 +530,11 @@ fn a_schedule_request_failed_by_a_close_does_not_mark_the_done_row() {
         phoenix: true,
         ..due_task()
     };
-    let (row, released) = task_after_failed_request(closed, "schedule", "task closed", NOW);
-    assert!(!released);
+    let (row, left_no_worktree) =
+        task_after_failed_request(closed, "schedule", "task closed", NOW);
+    // Closed before it got a worktree: the launch never landed, so its agent
+    // ends (`agents.allium: EndAgentWhenLaunchFails`), but the row is left.
+    assert!(left_no_worktree);
     assert!(row.is_none(), "nothing to write: {row:?}");
 }
 

@@ -818,7 +818,7 @@ rule RequestDispatch {
     -- Redundant with the backlog check while nothing else moves the task, and
     -- not otherwise: a manual move back to backlog during provisioning leaves
     -- the old request open until its host's teardown has reported
-    -- (MovingBackToBacklogCancelsTheDispatch), and a second one beside it
+    -- (GivingUpTheLaunchCancelsTheDispatch), and a second one beside it
     -- would race it.
     requires: not DispatchRequests.any(r => r.task = task and r.is_open)
     -- D11: only the requester's own owner may name it.
@@ -948,11 +948,11 @@ rule HostReportsDispatched {
     -- (dispatch.allium: ProvisioningStopsAtTheDeadline); a report that raced
     -- it is refused, and the host tears down and reports the failure.
     requires: now < request.deadline
-    -- A task moved back to backlog while its host provisioned has given up
-    -- the launch (MovingBackToBacklogCancelsTheDispatch). The report is
-    -- refused, and the host tears down what it made and reports the failure,
-    -- as for any refused report.
-    requires: request.task.status != backlog
+    -- A task moved back to backlog, or to done, while its host provisioned
+    -- has given up the launch (GivingUpTheLaunchCancelsTheDispatch). The
+    -- report is refused, and the host tears down what it made and reports
+    -- the failure, as for any refused report.
+    requires: request.task.status != backlog and request.task.status != done
 
     ensures: request.state = dispatched
     ensures: request.finished_at = now
@@ -984,22 +984,23 @@ rule HostReportsDispatched {
         -- HostRepeatsDispatchedReport): a host whose report got no answer
         -- sends it again, and must hear "accepted" if the first one landed.
         --
-        -- A REPORT FOR A TASK BACK IN BACKLOG IS REFUSED. The claim moved the
-        -- task to running before anything was provisioned, so the operator
-        -- can move it back while the host is still at work. Accepting the
-        -- report then would write a worktree and a live window onto a backlog
-        -- task, with an agent running in it. Only backlog is refused: a move
-        -- on to review keeps the launch, as a hook's flip would.
+        -- A REPORT FOR A TASK IN BACKLOG OR DONE IS REFUSED. The claim moved
+        -- the task to running before anything was provisioned, so the
+        -- operator can move it on while the host is still at work. Accepting
+        -- the report then would write a worktree and a live window onto a
+        -- backlog or done task, with an agent running in it. A move on to
+        -- review keeps the launch, as a hook's flip would.
 }
 
--- Moving a task back to backlog gives up its launch. A request still waiting
--- for its host fails at once: nothing has been made for it. A request its
--- host is provisioning stays open until the host's report, which is refused
--- (HostReportsDispatched); the host then tears down and reports the failure.
-rule MovingBackToBacklogCancelsTheDispatch {
+-- A hand move into backlog or done gives up the task's launch. A request
+-- still waiting for its host fails at once: nothing has been made for it. A
+-- request its host is provisioning stays open until the host's report, which
+-- is refused (HostReportsDispatched); the host then tears down and reports
+-- the failure.
+rule GivingUpTheLaunchCancelsTheDispatch {
     when: tasks/TaskStatusWrittenByHand(task, from, to)
 
-    requires: from = running and to = backlog
+    requires: from != to and (to = backlog or to = done)
 
     let waiting = DispatchRequests where task = task and state = requested
 
@@ -1007,13 +1008,21 @@ rule MovingBackToBacklogCancelsTheDispatch {
         for request in waiting:
             request.state = failed
             request.finished_at = now
-            request.reason = "task moved back to backlog"
+            request.reason =
+                if to = backlog: "task moved back to backlog"
+                else: "task moved to done"
 
     @guidance
         -- In the same patch_task (or update_task) transaction as the status
         -- write, after it, so ReleaseClaimOfFailedRequest finds a task that
-        -- is already in backlog and writes nothing more to it. Cancels the
+        -- is no longer running and writes nothing more to it. Cancels the
         -- row's timer, as every failure does.
+        --
+        -- The board's move to done (ConfirmDone, the 'x' key) is a plain
+        -- status write, not close_task, so CloseFailsOpenRequests does not
+        -- cover it; this rule does. close_task fails every open request
+        -- itself, provisioning ones included, and this rule adds nothing
+        -- there.
         --
         -- WHY A PROVISIONING ROW IS NOT FAILED HERE. The open row is what
         -- refuses a second dispatch of the task (RequestDispatch). Failing it
@@ -1170,10 +1179,10 @@ rule ReleaseClaimOfFailedRequest {
     -- A request failed by its task's deletion (DeletingATaskFailsItsOpenRequest)
     -- has no task left to release.
     let still_claimed = exists task and task.status = running and task.worktree = null
-    -- A claim the operator gave up by moving the task back to backlog
-    -- (MovingBackToBacklogCancelsTheDispatch) has nothing to release, but its
-    -- launch never got a worktree either.
-    let moved_back_bare = exists task and task.status = backlog and task.worktree = null
+    -- Whether the launch got a worktree. A claim the operator gave up
+    -- (GivingUpTheLaunchCancelsTheDispatch) or closed has nothing to
+    -- release, but its launch never got a worktree either.
+    let left_no_worktree = exists task and task.worktree = null
 
     ensures:
         if still_claimed:
@@ -1182,7 +1191,7 @@ rule ReleaseClaimOfFailedRequest {
     -- agents.allium: EndAgentWhenLaunchFails ends the task's current agent as
     -- launch_failed in this same write.
     ensures:
-        if still_claimed or moved_back_bare:
+        if left_no_worktree:
             FailedDispatchLeftNoWorktree(task: task)
     -- The epic status rollup for the task's epic chain, in the same reducer,
     -- whether or not the release applied. Every failure reaches it: a

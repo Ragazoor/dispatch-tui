@@ -766,7 +766,7 @@ async fn a_task_deleted_under_the_host_is_torn_down() {
     );
 }
 
-/// `MovingBackToBacklogCancelsTheDispatch`: the operator moves the task back
+/// `GivingUpTheLaunchCancelsTheDispatch`: the operator moves the task back
 /// to backlog while its host provisions. The dispatched report is refused, so
 /// the host tears down what it made (here the window; the fixture's worktree
 /// is reused, so it stays) and reports the failure; the task is left in backlog with no window and may be
@@ -809,6 +809,11 @@ async fn a_task_moved_back_to_backlog_under_the_host_is_torn_down() {
     assert_eq!(
         crate::dispatch::MOVED_BACK_TO_BACKLOG,
         dispatch_spacetime_module::DISPATCH_REASON_MOVED_TO_BACKLOG,
+        "the host records the module's reason"
+    );
+    assert_eq!(
+        crate::dispatch::MOVED_TO_DONE,
+        dispatch_spacetime_module::DISPATCH_REASON_MOVED_TO_DONE,
         "the host records the module's reason"
     );
     let row = fx.row(id).await;

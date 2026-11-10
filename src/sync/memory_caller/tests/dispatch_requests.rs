@@ -202,7 +202,7 @@ async fn request_dispatch_refuses_and_writes_nothing() {
 
     // An open request already exists: the task was moved back to backlog by
     // hand while its host provisions (a request still waiting would fail on
-    // the move: `MovingBackToBacklogCancelsTheDispatch`).
+    // the move: `GivingUpTheLaunchCancelsTheDispatch`).
     let (moved_back, _) = provisioning_request(&caller).await;
     caller
         .patch_task(
@@ -784,7 +784,7 @@ async fn claims_reports_and_the_sweep_are_refused_for_a_host_the_caller_does_not
     );
 }
 
-// -- MovingBackToBacklogCancelsTheDispatch ---------------------------------------
+// -- GivingUpTheLaunchCancelsTheDispatch ---------------------------------------
 
 fn to_backlog() -> bindings::TaskPatch {
     bindings::TaskPatch {
@@ -852,4 +852,31 @@ async fn moving_back_to_backlog_refuses_the_provisioning_report() {
         "the claim's agent ended"
     );
     request_id(request(&caller, task, HOST, "user", "dispatch").await);
+}
+
+/// A hand move into done gives up the launch as a move back to backlog does:
+/// a waiting request fails "task moved to done", and a provisioning one's
+/// dispatched report is refused.
+#[tokio::test]
+async fn moving_to_done_gives_up_the_launch() {
+    let (caller, rows) = caller();
+    let waiting = caller.create_task(blank_task()).await.unwrap();
+    let waiting_id = request_id(request(&caller, waiting, HOST, "user", "dispatch").await);
+    let (provisioning, id) = provisioning_request(&caller).await;
+    let done = || bindings::TaskPatch {
+        status: Some("done".into()),
+        sub_status: Some("none".into()),
+        ..blank_task_patch()
+    };
+    caller.patch_task(waiting, done()).await.unwrap();
+    caller.patch_task(provisioning, done()).await.unwrap();
+
+    let row = rows.dispatch_request(waiting_id).unwrap();
+    assert_eq!(row.reason.as_deref(), Some("task moved to done"));
+    let report = caller
+        .report_dispatch_provisioned(id, HOST.into(), "/wt/x".into(), "task-x".into(), false)
+        .await
+        .unwrap();
+    assert!(!report.won(), "the report for a done task is refused");
+    assert!(rows.task(provisioning).unwrap().worktree.is_none());
 }

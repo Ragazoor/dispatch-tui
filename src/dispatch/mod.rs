@@ -98,7 +98,7 @@ pub use prompts::{
 };
 pub use request_host::{
     DeadlineRunner, DispatchRequestObserver, SessionRequestObserver, SessionWork, DEADLINE_PASSED,
-    EXIT_SESSION_TEARDOWN_TIMEOUT, MOVED_BACK_TO_BACKLOG, WRAP_UP_REBASE_TIMEOUT,
+    EXIT_SESSION_TEARDOWN_TIMEOUT, MOVED_BACK_TO_BACKLOG, MOVED_TO_DONE, WRAP_UP_REBASE_TIMEOUT,
 };
 pub use split_panes::{
     join_task_window_into_pane, kill_task_window, restore_pinned_pane, swap_task_window_into_pane,
