@@ -28,6 +28,27 @@ async fn exec_save_base_branch_records_and_updates_app_state() {
     assert!(all.contains(&("/repo".to_string(), "develop".to_string())));
 }
 
+/// dispatch.allium: RecordRepoPath and RecordBaseBranch key one path the same
+/// way: a draft path typed with `~` records its branch history under the
+/// expanded path, the key the saved repo path has, and the picker finds it
+/// from either spelling.
+#[tokio::test]
+async fn exec_save_base_branch_expands_tilde() {
+    let (rt, mut app) = test_runtime().await;
+    let home = std::env::var("HOME").unwrap();
+    let expanded = format!("{home}/myrepo");
+    rt.exec_save_base_branch(&mut app, "~/myrepo".into(), "develop".into())
+        .await;
+    let all = rt.database.list_all_base_branches().await;
+    assert!(
+        all.contains(&(expanded.clone(), "develop".to_string())),
+        "{all:?}"
+    );
+    assert!(!all.iter().any(|(p, _)| p.starts_with("~/")));
+    assert_eq!(app.base_branches_for(&expanded), &["develop".to_string()]);
+    assert_eq!(app.base_branches_for("~/myrepo"), &["develop".to_string()]);
+}
+
 #[tokio::test]
 async fn exec_save_base_branch_upsert_keeps_most_recent_first() {
     let (rt, mut app) = test_runtime().await;

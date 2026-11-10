@@ -531,7 +531,7 @@ fn dispatch_with_prompt(
         .map(str::to_owned)
         .unwrap_or_else(|| detect_default_branch(&repo_path, runner));
 
-    // Review tasks (pr-review / dependabot / renovate) that carry a PR URL base
+    // Review tasks (pr-review / dependabot / release-please) that carry a PR URL base
     // their worktree on the PR's head branch so the agent sees the PR's code.
     // Soft-fall to the base branch on resolution failure or for fork PRs.
     let pr_branch: Option<String> = match (&task.tag, &task.url) {

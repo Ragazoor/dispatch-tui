@@ -298,7 +298,7 @@ unclear, and record what you find."
 /// research-shaped chore. [`brainstorm_instruction`] opens the same way.
 ///
 /// Framed as an intermediate step, not a stopping point;
-/// `Research`/`Dependabot`/`PrReview` never reach this addendum (see
+/// `Research` and the review tags (`Dependabot`, `PrReview`, `ReleasePlease`) never reach this addendum (see
 /// `DispatchMode::for_task` and `TaskTag::is_review`), so no per-tag branch is
 /// needed here. Carries the same epic-decomposition carve-out as
 /// `wrap_up_instruction` so the two stay consistent about what counts as done.

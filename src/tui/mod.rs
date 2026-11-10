@@ -540,11 +540,12 @@ impl App {
         &self.board.repo_paths
     }
     /// The most-recently-used base_branch history for `repo_path`, ordered
-    /// most-recent-first. Empty when the repo has no recorded history.
+    /// most-recent-first. Empty when the repo has no recorded history. A `~`
+    /// path is looked up expanded, the key history is recorded under.
     pub fn base_branches_for(&self, repo_path: &str) -> &[String] {
         self.board
             .repo_base_branches
-            .get(repo_path)
+            .get(&crate::models::expand_tilde(repo_path))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }

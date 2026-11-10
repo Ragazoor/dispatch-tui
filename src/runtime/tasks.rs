@@ -187,7 +187,9 @@ impl TuiRuntime {
             crate::tui::messages::TaskMessage::MarkDispatching(task.id),
         ));
         if let Err(e) = self.database.save_repo_path(&expanded).await {
-            tracing::warn!("quick dispatch: saving repo path {expanded}: {e}");
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("saving repo path", e),
+            )));
         }
         let paths = self.board_reads.list_repo_paths().await;
         app.update(Message::RepoPathsUpdated(paths));
@@ -741,6 +743,8 @@ impl TuiRuntime {
         repo_path: String,
         branch: String,
     ) {
+        // Keyed like the saved repo path (exec_save_repo_path below).
+        let repo_path = models::expand_tilde(&repo_path);
         if let Err(e) = self.database.record_base_branch(&repo_path, &branch).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("saving base branch", e),
