@@ -70,16 +70,21 @@ impl App {
             .find_task(id)
             .is_some_and(|t| t.status == crate::models::TaskStatus::Done);
         if bookmarked && done {
+            let label = self.board.task_label(id);
             self.status
-                .set(format!("Task #{id} is done and cannot be bookmarked"));
+                .set(format!("{label} is done and cannot be bookmarked"));
             return vec![];
         }
         if bookmarked {
             self.board.bookmarked_tasks.insert(id);
-            self.status.set(format!("Bookmarked #{id}"));
+            self.status
+                .set(format!("Bookmarked {}", self.board.task_label(id)));
         } else {
             self.board.bookmarked_tasks.remove(&id);
-            self.status.set(format!("Bookmark removed from #{id}"));
+            self.status.set(format!(
+                "Bookmark removed from {}",
+                self.board.task_label(id)
+            ));
         }
         self.dirty = true;
         vec![Command::Task(TaskCommand::SetBookmark { id, bookmarked })]

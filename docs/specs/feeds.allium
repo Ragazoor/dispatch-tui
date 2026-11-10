@@ -1374,7 +1374,7 @@ rule OverrideFeedOwner {
         PollOwnerOverridden(scope: epic, scope_id: epic.id, host: core/local_host())
 
     -- The board reports the answer on the status line: "Feed-poll ownership
-    -- for epic #<id> reassigned to this host." when the store accepts, and
+    -- for epic <title> reassigned to this host." when the store accepts, and
     -- the store's refusal as an error otherwise.
 
     @guidance

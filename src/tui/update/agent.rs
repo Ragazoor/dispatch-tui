@@ -124,7 +124,7 @@ impl App {
                 self.agents.notified_needs_input.insert(new_task.id);
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
-                        title: new_task.notification_title(),
+                        title: new_task.heading(),
                         body: "Agent needs your input".to_string(),
                         urgent: true,
                     },
@@ -138,7 +138,7 @@ impl App {
                 self.agents.notified_review.insert(new_task.id);
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
-                        title: new_task.notification_title(),
+                        title: new_task.heading(),
                         body: "Ready for review".to_string(),
                         urgent: false,
                     },
@@ -623,10 +623,10 @@ impl App {
             },
         ));
         let task = self.board.find_task(id);
-        let heading = task.map_or_else(|| crate::models::task_heading(id, None), Task::heading);
-        let notification = task.map(Task::notification_title);
+        let label = self.board.task_label(id);
+        let notification = task.map(Task::heading);
         self.status
-            .set(format!("{heading} agent crashed - press d to retry"));
+            .set(format!("{label} agent crashed - press d to retry"));
 
         if let Some(title) = notification.filter(|_| self.notifications_enabled) {
             cmds.push(Command::System(
@@ -652,7 +652,8 @@ impl App {
         if let Some(task) = self.board.find_task(id) {
             if !task.is_locally_owned(local_host_id.as_deref()) {
                 self.status.set(format!(
-                    "resume_task refused: task {id}'s worktree is on another machine"
+                    "resume_task refused: {}'s worktree is on another machine",
+                    task.label()
                 ));
                 return vec![];
             }
@@ -667,9 +668,8 @@ impl App {
     ) -> Vec<Command> {
         let local_host_id = self.local_host_id().map(str::to_string);
         let Some(task) = self.board.find_task(id) else {
-            self.status.set(format!(
-                "Cannot resume: task {id} is not on the board any more"
-            ));
+            self.status
+                .set("Cannot resume: that task is not on the board any more".to_string());
             return vec![];
         };
         if !matches!(
@@ -677,7 +677,8 @@ impl App {
             TaskStatus::Running | TaskStatus::Review | TaskStatus::Done
         ) {
             let msg = format!(
-                "Cannot resume: task {id} has no resumable session (it is {})",
+                "Cannot resume: {} has no resumable session (it is {})",
+                task.label(),
                 task.status
             );
             self.status.set(msg);
@@ -705,8 +706,8 @@ impl App {
             return vec![];
         }
         if !self.resuming.insert(id) {
-            self.status
-                .set(format!("Task {id} is already being resumed"));
+            let label = self.board.task_label(id);
+            self.status.set(format!("{label} is already being resumed"));
             return vec![];
         }
         let worktree = self.board.find_task(id).and_then(|t| t.worktree.clone());
@@ -747,7 +748,8 @@ impl App {
             task.last_pre_tool_use_at = Some(seed_at);
             let fields = crate::tui::commands::PersistFields::from_task(task);
             self.sync_board_selection();
-            self.status.set(format!("Task {id} resumed"));
+            self.status
+                .set(format!("{} resumed", self.board.task_label(id)));
             vec![
                 Command::Task(crate::tui::commands::TaskCommand::Persist(fields)),
                 Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id, at: seed_at }),

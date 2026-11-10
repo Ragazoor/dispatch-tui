@@ -441,8 +441,8 @@ rule PrClosed {
         -- is a stronger, more definitive GitHub signal than a local rebase
         -- conflict, and the user needs to see it regardless.
         -- Notification: title "PR closed", body "<PR label> closed: <task
-        -- title>". Status bar shows '<PR label> closed — task #<id> marked
-        -- "PR closed"'.
+        -- title>". Status bar shows '<PR label> closed — <name> marked
+        -- "PR closed"'. <name> is the task's display name, else its title.
         --
         -- Who writes: the module writes the sub_status (store-split.allium:
         -- ReportPrStatus); the host sends the notification and sets the

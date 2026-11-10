@@ -340,8 +340,7 @@ fn view_border_title(app: &App) -> Option<String> {
                 segments.insert(0, format!("\u{25a3} {}", package_title(*package_id)));
             }
             Some(format!(
-                " #{} {} ",
-                epic_id,
+                " {} ",
                 segments.join(crate::tui::ui::shared::BREADCRUMB_SEPARATOR)
             ))
         }

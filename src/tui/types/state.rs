@@ -119,6 +119,20 @@ impl BoardState {
         self.work_packages.iter().find(|p| p.id == id)
     }
 
+    /// How a message names a task: its display name, else its title, and
+    /// `"the task"` once it has left the board
+    /// (`agents.allium: BoardMessagesNameTasksAndEpics`).
+    pub(in crate::tui) fn task_label(&self, id: TaskId) -> String {
+        self.find_task(id)
+            .map_or_else(|| "the task".to_string(), Task::label)
+    }
+
+    /// How a message names an epic: its title, and `"the epic"` once it has
+    /// left the board.
+    pub(in crate::tui) fn epic_label(&self, id: EpicId) -> String {
+        self.epic_title(id).unwrap_or("the epic").to_string()
+    }
+
     /// Look up the title of an epic by ID.
     pub(in crate::tui) fn epic_title(&self, id: EpicId) -> Option<&str> {
         self.find_epic(id).map(|e| e.title.as_str())

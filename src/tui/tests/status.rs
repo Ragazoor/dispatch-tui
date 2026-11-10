@@ -588,7 +588,11 @@ fn dispatching_status_handles_empty_title() {
     ));
 
     let msg = app.status.message.as_deref().expect("status set");
-    assert!(msg.contains("#1"), "expected ID fallback, got: {msg}");
+    assert!(!msg.contains("#1"), "an id is never shown, got: {msg}");
+    assert!(
+        msg.contains("a task"),
+        "expected a plain fallback, got: {msg}"
+    );
     assert!(msg.contains("Dispatching"), "got: {msg}");
 }
 

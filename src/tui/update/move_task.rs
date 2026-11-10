@@ -74,7 +74,7 @@ impl App {
                     .iter()
                     .find(|e| e.id == eid)
                     .map(|e| truncate_title(&e.title, TITLE_DISPLAY_LENGTH))
-                    .unwrap_or_else(|| format!("\"epic #{}\"", eid.0));
+                    .unwrap_or_else(|| "the epic".to_string());
                 format!("Move {moving_title} to {epic_label}? [y/n]")
             }
         };

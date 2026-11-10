@@ -317,14 +317,14 @@ impl App {
         };
         self.status.error_popup = Some(match newly_failed.as_slice() {
             [row] => format!(
-                "Dispatch of task #{} failed: {}",
-                row.task_id.0,
+                "Dispatch of {} failed: {}",
+                self.board.task_label(row.task_id),
                 reason_of(row)
             ),
             rows => {
                 let each: Vec<String> = rows
                     .iter()
-                    .map(|r| format!("#{}: {}", r.task_id.0, reason_of(r)))
+                    .map(|r| format!("{}: {}", self.board.task_label(r.task_id), reason_of(r)))
                     .collect();
                 format!("{} dispatches failed — {}", rows.len(), each.join("; "))
             }
@@ -362,16 +362,15 @@ impl App {
         reason: String,
     ) -> Vec<Command> {
         self.status.set(format!(
-            "Auto-dispatch of #{} failed — epic #{} stalled: {reason}",
-            task_id.0, epic_id.0
+            "Auto-dispatch of {} failed — epic {} stalled: {reason}",
+            self.board.task_label(task_id),
+            self.board.epic_label(epic_id)
         ));
         self.agents.auto_dispatch_failed.insert(task_id, reason);
 
         if self.notifications_enabled {
-            let title = self.board.find_task(task_id).map_or_else(
-                || crate::models::task_heading(task_id, None),
-                Task::notification_title,
-            );
+            let title = self.board.task_label(task_id);
+            let title = self.board.find_task(task_id).map_or(title, Task::heading);
             vec![Command::System(
                 crate::tui::commands::SystemCommand::SendNotification {
                     title,

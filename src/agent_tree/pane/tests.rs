@@ -12,18 +12,13 @@ fn found() -> TaskLookup {
 
 #[test]
 fn a_missing_row_is_waited_for_inside_the_limit() {
-    let step = startup_step(
-        TaskId(7),
-        &TaskLookup::NotYet,
-        Duration::from_secs(9),
-        LIMIT,
-    );
+    let step = startup_step(&TaskLookup::NotYet, Duration::from_secs(9), LIMIT);
     assert_eq!(step, StartupStep::Wait);
 }
 
 #[test]
 fn a_row_that_arrives_proceeds() {
-    let step = startup_step(TaskId(7), &found(), Duration::from_secs(2), LIMIT);
+    let step = startup_step(&found(), Duration::from_secs(2), LIMIT);
     assert_eq!(
         step,
         StartupStep::Proceed {
@@ -35,28 +30,28 @@ fn a_row_that_arrives_proceeds() {
 
 #[test]
 fn a_row_arriving_at_the_limit_still_proceeds() {
-    let step = startup_step(TaskId(7), &found(), LIMIT, LIMIT);
+    let step = startup_step(&found(), LIMIT, LIMIT);
     assert!(matches!(step, StartupStep::Proceed { .. }));
 }
 
 #[test]
 fn a_row_that_never_arrives_fails_with_not_found_at_the_limit() {
-    let step = startup_step(TaskId(7), &TaskLookup::NotYet, LIMIT, LIMIT);
-    assert_eq!(step, StartupStep::Fail("task 7 not found".into()));
+    let step = startup_step(&TaskLookup::NotYet, LIMIT, LIMIT);
+    assert_eq!(step, StartupStep::Fail("this task was not found".into()));
 }
 
 /// The pane is split off when the agent launches and the worktree is recorded
 /// just after, so a row without one is waited out like a missing row.
 #[test]
 fn a_task_without_a_worktree_is_waited_for() {
-    let step = startup_step(TaskId(7), &TaskLookup::NoWorktree, Duration::ZERO, LIMIT);
+    let step = startup_step(&TaskLookup::NoWorktree, Duration::ZERO, LIMIT);
     assert_eq!(step, StartupStep::Wait);
 }
 
 #[test]
 fn a_task_that_never_gets_a_worktree_fails_at_the_limit() {
-    let step = startup_step(TaskId(7), &TaskLookup::NoWorktree, LIMIT, LIMIT);
-    assert_eq!(step, StartupStep::Fail("task 7 has no worktree".into()));
+    let step = startup_step(&TaskLookup::NoWorktree, LIMIT, LIMIT);
+    assert_eq!(step, StartupStep::Fail("this task has no worktree".into()));
 }
 
 fn drawn(step: &StartupStep) -> String {
@@ -67,7 +62,6 @@ fn drawn(step: &StartupStep) -> String {
             render_startup_notice(
                 f,
                 f.area(),
-                TaskId(7),
                 step,
                 crate::keybindings::KeyNamespace::AgentTreeTree,
             )
@@ -78,13 +72,13 @@ fn drawn(step: &StartupStep) -> String {
 
 #[test]
 fn the_pane_says_what_it_is_waiting_for() {
-    assert!(drawn(&StartupStep::Wait).contains("waiting for task 7"));
+    assert!(drawn(&StartupStep::Wait).contains("waiting for the task"));
 }
 
 #[test]
 fn the_pane_draws_the_failure_text() {
-    let out = drawn(&StartupStep::Fail("task 7 not found".into()));
-    assert!(out.contains("task 7 not found"), "{out}");
+    let out = drawn(&StartupStep::Fail("this task was not found".into()));
+    assert!(out.contains("this task was not found"), "{out}");
 }
 
 // -- PanesReadThroughTheBoard (task #4982) -------------------------------
@@ -104,7 +98,7 @@ fn unreachable() -> TaskLookup {
 /// (agent-tree.allium: "Companion Pane Startup").
 #[test]
 fn an_unreachable_board_is_waited_out_inside_the_limit() {
-    let step = startup_step(TaskId(7), &unreachable(), Duration::from_secs(3), LIMIT);
+    let step = startup_step(&unreachable(), Duration::from_secs(3), LIMIT);
     assert_eq!(step, StartupStep::Wait);
 }
 
@@ -113,7 +107,7 @@ fn an_unreachable_board_is_waited_out_inside_the_limit() {
 /// found" would send the user looking for a task that may well exist.
 #[test]
 fn an_unreachable_board_at_the_limit_is_named_not_reported_as_a_missing_task() {
-    let StartupStep::Fail(reason) = startup_step(TaskId(7), &unreachable(), LIMIT, LIMIT) else {
+    let StartupStep::Fail(reason) = startup_step(&unreachable(), LIMIT, LIMIT) else {
         panic!("an unreachable board at the limit must end the wait");
     };
     assert!(

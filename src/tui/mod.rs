@@ -701,7 +701,7 @@ impl App {
                 .map(|t| {
                     let trimmed = t.title.trim();
                     if trimmed.is_empty() {
-                        format!("task #{}", id.0)
+                        t.lead().unwrap_or("a task").to_string()
                     } else if trimmed.chars().count() <= TITLE_DISPLAY_LENGTH {
                         format!("'{trimmed}'")
                     } else {
@@ -710,7 +710,7 @@ impl App {
                         format!("'{truncated}…'")
                     }
                 })
-                .unwrap_or_else(|| format!("task #{}", id.0));
+                .unwrap_or_else(|| "a task".to_string());
             Some(format!("Dispatching {label}…"))
         } else {
             Some(format!("Dispatching {count} tasks…"))

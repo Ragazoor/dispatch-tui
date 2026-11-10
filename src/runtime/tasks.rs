@@ -206,8 +206,8 @@ impl TuiRuntime {
             // The task was created before the request failed, so it stays in
             // Backlog. Say so, rather than leave it to be found.
             self.send_system_error(format!(
-                "Quick dispatch failed; task #{} was created and stays in Backlog",
-                task.id.0
+                "Quick dispatch failed; {} was created and stays in Backlog",
+                task.label()
             ));
         }
         // After the request: the agent's launch does not wait on the link.
@@ -595,6 +595,15 @@ impl TuiRuntime {
     /// nothing, so there is nothing to release. A written one needs no message
     /// — its open row reaches the App through the next board reload and
     /// supersedes the pending entry (`SpansTheClaim`).
+    /// How a message names task `id`: its display name, else its title
+    /// (`agents.allium: BoardMessagesNameTasksAndEpics`).
+    async fn task_label(&self, id: TaskId) -> String {
+        match self.database.get_task(id).await {
+            Some(task) => task.label(),
+            None => "the task".to_string(),
+        }
+    }
+
     async fn request_for_dispatch(
         &self,
         id: TaskId,
@@ -604,7 +613,7 @@ impl TuiRuntime {
         let reason = match self.task_svc.request_dispatch(id, origin, mode).await {
             Ok(crate::store::RequestDispatchAnswer::Requested(_)) => return true,
             Ok(crate::store::RequestDispatchAnswer::Refused(why)) => {
-                format!("Task #{} was not dispatched: {why}", id.0)
+                format!("{} was not dispatched: {why}", self.task_label(id).await)
             }
             Err(e) => Self::db_error("requesting the dispatch", e),
         };
@@ -1153,7 +1162,7 @@ impl TuiRuntime {
             let _ = tx.send(Message::Task(
                 crate::tui::messages::TaskMessage::ResumeFailed {
                     id,
-                    error: format!("Resume failed: task {id} not found"),
+                    error: "Resume failed: the task was not found".to_string(),
                 },
             ));
             return;

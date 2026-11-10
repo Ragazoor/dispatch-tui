@@ -392,18 +392,17 @@ pub(super) fn render_epic_header_item(
     depth: usize,
     col_width: u16,
 ) -> ListItem<'static> {
-    // The id and title are the epic's own — the one whose task group this
+    // The title is the epic's own — the one whose task group this
     // header precedes — never an ancestor's; nesting is the indent
     // (board-layout.allium, "Flattening").
     ListItem::new(crate::epic_header::epic_header_line(
-        epic.id,
         &epic.title,
         col_width,
         depth,
     ))
 }
 
-/// A folded epic group's header: the same id and own title
+/// A folded epic group's header: the same own title
 /// [`render_epic_header_item`] draws, plus the count of cards it is hiding
 /// and a fold marker — same relationship as `render_folded_section_header`
 /// has to `render_substatus_header` (board-layout.allium: "Epic Folding").
@@ -420,17 +419,16 @@ pub(super) fn render_folded_epic_header(
 ) -> ListItem<'static> {
     let epic = header.epic;
     // Keeps its group's indent, and like the open header draws no rule left
-    // of the id (board-layout.allium: "Epic Folding").
+    // of the title (board-layout.allium: "Epic Folding").
     let indent = " ".repeat(crate::epic_header::epic_indent(header.depth));
-    let id_prefix = format!("#{} ", epic.id);
     let suffix = format!(" ({}) \u{22ef}", header.hidden);
 
-    let reserved = indent.len() + id_prefix.chars().count() + suffix.chars().count();
+    let reserved = indent.len() + suffix.chars().count();
     let budget = (col_width as usize).saturating_sub(reserved);
     let title = crate::tui::ui::shared::truncate(&epic.title, budget);
 
     crate::tui::ui::shared::section_header_item(
-        format!("{indent}{id_prefix}{title}{suffix}"),
+        format!("{indent}{title}{suffix}"),
         first,
         is_cursor,
     )
@@ -603,17 +601,15 @@ fn task_card_prefix_width(task: &Task, flash_received: bool, flash_sent: bool) -
     // select(2) + stripe(1) + " <lead> "(lead_len+2) + flash glyphs (" ✉"/" ➤",
     // 2 each) + the phoenix marker + the card's own chrome. Agent names are
     // lowercase ASCII, so their character count is their rendered width.
-    let lead_len = match &task.agent_name {
-        Some(name) => name.chars().count(),
-        None => task.id.0.unsigned_abs().max(1).ilog10() as usize + 2,
-    };
+    // Without a name the lead is its single separating space.
+    let lead_len = task.lead().map_or(0, |name| name.chars().count() + 1);
     let flash_width = if flash_received { 2 } else { 0 } + if flash_sent { 2 } else { 0 };
     let phoenix_width = if task.phoenix {
         PHOENIX_MARKER_WIDTH
     } else {
         0
     };
-    2 + 1 + 2 + lead_len + flash_width + phoenix_width + CARD_CHROME_WIDTH
+    2 + 1 + 1 + lead_len + flash_width + phoenix_width + CARD_CHROME_WIDTH
 }
 
 /// Whether the task has a live received / sent message flash.
@@ -665,9 +661,15 @@ fn card_title_line<'a>(
     let mut line1_spans = vec![
         Span::styled(select_prefix.to_string(), title_style),
         Span::styled(stripe_char, stripe_style),
-        Span::styled(format!(" {} ", task.lead()), Style::default().fg(MUTED)),
-        Span::styled(title_text.to_string(), title_style),
     ];
+    match task.lead() {
+        Some(name) => line1_spans.push(Span::styled(
+            format!(" {name} "),
+            Style::default().fg(MUTED),
+        )),
+        None => line1_spans.push(Span::raw(" ")),
+    }
+    line1_spans.push(Span::styled(title_text.to_string(), title_style));
     if has_message_flash {
         line1_spans.push(Span::styled(" \u{2709}", Style::default().fg(YELLOW)));
     }
@@ -820,14 +822,12 @@ pub(super) fn render_epic_item(
         ""
     };
 
-    // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + plan_indicator
-    let id_len = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
+    // Prefix: select(2) + stripe(1) + " "(1) + plan_indicator
     let unseen = ctx.marks.unseen.contains(&epic.id);
     let diamond = diamond_color(unseen, ctx.marks.bookmarked.contains(&epic.id));
     let prefix_width = 2
         + 1
-        + 3
-        + id_len
+        + 1
         + plan_indicator.chars().count()
         + diamond.map_or(0, |_| DIAMOND_MARKER_WIDTH)
         + CARD_CHROME_WIDTH;
@@ -848,7 +848,7 @@ pub(super) fn render_epic_item(
     let mut line1_spans = vec![
         Span::raw(select_prefix.to_string()),
         Span::styled(stripe_char, Style::default().fg(stripe_color)),
-        Span::styled(format!(" #{} ", epic.id), Style::default().fg(MUTED)),
+        Span::raw(" "),
         Span::styled(format!("{title_text}{plan_indicator}"), title_style),
     ];
     if let Some(color) = diamond {

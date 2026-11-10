@@ -25,8 +25,8 @@ use crate::models::{TaskId, TmuxWindow};
 pub struct AgentRow {
     pub id: TaskId,
     pub title: String,
-    /// The word the row leads with, the task's current agent name; empty
-    /// falls back to `#<id>`.
+    /// The word the row leads with, the task's display name; empty before the
+    /// backfill has named it, and the row then leads with its title alone.
     pub agent_name: String,
     /// The agent's window; `None` for a detached agent, which has none and
     /// which Space resumes instead (`ResumeDetachedAgentFromThePane`).
@@ -39,14 +39,16 @@ pub struct AgentRow {
 }
 
 impl AgentRow {
-    /// What the row leads with: the agent name, or `#<id>` when the task has no
-    /// current agent
+    /// What the row leads with: the display name, or nothing
     /// (`agent-tree.allium: AgentRowShowsAgentName`).
-    pub fn label(&self) -> String {
-        crate::models::task_lead(
-            self.id,
-            Some(self.agent_name.as_str()).filter(|name| !name.is_empty()),
-        )
+    pub fn label(&self) -> &str {
+        self.lead().unwrap_or(&self.title)
+    }
+
+    /// The display name alone; see [`AgentRow::label`] for the name-or-title
+    /// word a message uses.
+    pub fn lead(&self) -> Option<&str> {
+        crate::models::task_lead(Some(self.agent_name.as_str()))
     }
 }
 
@@ -391,9 +393,7 @@ pub fn render_agents(
                             .find(|a| a.id == id)
                             .map_or("", |a| a.title.as_str())
                     };
-                    return Some(crate::epic_header::epic_header_line(
-                        id, title, width, level,
-                    ));
+                    return Some(crate::epic_header::epic_header_line(title, width, level));
                 }
                 DrawnLine::EndOfEpics => return Some(crate::epic_header::end_of_epics_line(width)),
                 DrawnLine::HiddenByFilter => {
@@ -418,13 +418,10 @@ pub fn render_agents(
             let indent = paths.get(index).and_then(Option::as_ref).map_or(0, |p| {
                 crate::epic_header::epic_indent(p.len().saturating_sub(1))
             });
-            let text = format!(
-                "{:indent$}{dot} {} {}",
-                "",
-                row.label(),
-                row.title,
-                indent = indent
-            );
+            let text = match row.lead() {
+                Some(name) => format!("{:indent$}{dot} {name} {}", "", row.title),
+                None => format!("{:indent$}{dot} {}", "", row.title),
+            };
             Some(Line::from(Span::styled(text, style)))
         })
         .collect();
@@ -567,13 +564,13 @@ mod tests {
             row(43, false),
         ]);
         let out = rendered(&mut section, true, 10);
-        let first = line_of(&out, "#314 Dispatch ──");
-        let nested = line_of(&out, "#320 Pane ──");
+        let first = line_of(&out, "Dispatch ──");
+        let nested = line_of(&out, "Pane ──");
         assert!(!out.contains("Dispatch › Pane"), "ancestor drawn:\n{out}");
         let rule = line_of(&out, "╌╌ · ╌╌");
-        assert_eq!(line_of(&out, "#41 task 41"), first + 1, "{out}");
-        assert_eq!(line_of(&out, "#42 task 42"), nested + 1, "{out}");
-        assert_eq!(line_of(&out, "#43 task 43"), rule + 1, "{out}");
+        assert_eq!(line_of(&out, "task 41"), first + 1, "{out}");
+        assert_eq!(line_of(&out, "task 42"), nested + 1, "{out}");
+        assert_eq!(line_of(&out, "task 43"), rule + 1, "{out}");
     }
 
     /// An agent in `epic` (own title `title`) whose ancestors, root first,
@@ -646,11 +643,11 @@ mod tests {
         let out = rendered(&mut section, true, 14);
         let lines: Vec<&str> = out.lines().collect();
         let at = |needle: &str| lines[line_of(&out, needle)];
-        assert!(at("#1 A ").starts_with("│#1 A "), "{out}");
-        assert!(at("#2 B ").starts_with("│  #2 B "), "{out}");
-        assert!(at("#4 C ").starts_with("│    #4 C "), "{out}");
-        assert!(!out.contains("#3 X"), "{out}");
-        assert!(at("task 1").starts_with("│    ● #1 task 1"), "{out}");
+        assert!(at("A ").starts_with("│A "), "{out}");
+        assert!(at("B ").starts_with("│  B "), "{out}");
+        assert!(at("C ").starts_with("│    C "), "{out}");
+        assert!(!out.contains("X ─"), "{out}");
+        assert!(at("task 1").starts_with("│    ● task 1"), "{out}");
     }
 
     /// Headers and agent rows of a nested group step in together, two columns
@@ -666,10 +663,10 @@ mod tests {
         let out = rendered(&mut section, true, 12);
         let lines: Vec<&str> = out.lines().collect();
         let at = |needle: &str| lines[line_of(&out, needle)];
-        assert!(at("#10 Ten").starts_with("│#10 Ten"), "{out}");
-        assert!(at("#30 Thirty").starts_with("│  #30 Thirty"), "{out}");
-        assert!(at("task 2").starts_with("│  ● #2 task 2"), "{out}");
-        assert!(at("task 4").starts_with("│● #4 task 4"), "{out}");
+        assert!(at("Ten").starts_with("│Ten"), "{out}");
+        assert!(at("Thirty").starts_with("│  Thirty"), "{out}");
+        assert!(at("task 2").starts_with("│  ● task 2"), "{out}");
+        assert!(at("task 4").starts_with("│● task 4"), "{out}");
     }
 
     #[test]
@@ -690,7 +687,7 @@ mod tests {
         );
         section.bottom();
         let out = rendered(&mut section, true, 10);
-        assert!(out.contains("#20 task 20"), "{out}");
+        assert!(out.contains("task 20"), "{out}");
     }
 
     #[test]
@@ -706,11 +703,7 @@ mod tests {
         }
         assert_eq!(section.selected().unwrap().id, TaskId(11));
         let out = rendered(&mut section, true, 10);
-        assert_eq!(
-            line_of(&out, "#11 task 11"),
-            line_of(&out, "#5 Five") + 1,
-            "{out}"
-        );
+        assert_eq!(line_of(&out, "task 11"), line_of(&out, "Five") + 1, "{out}");
     }
 
     #[test]
@@ -720,7 +713,7 @@ mod tests {
         section.down();
         for _ in 0..2 {
             let out = rendered(&mut section, true, 3);
-            assert!(out.contains("#2 task 2"), "{out}");
+            assert!(out.contains("task 2"), "{out}");
         }
     }
 
@@ -734,7 +727,7 @@ mod tests {
         rendered(&mut section, true, 10);
         section.top();
         let out = rendered(&mut section, true, 10);
-        assert!(out.contains("#3 Three"), "{out}");
+        assert!(out.contains("Three"), "{out}");
     }
 
     // ---- label -----------------------------------------------------------
@@ -752,11 +745,12 @@ mod tests {
     }
 
     #[test]
-    fn a_row_without_an_agent_name_leads_with_the_id() {
+    fn a_row_without_an_agent_name_leads_with_its_title_alone() {
         let mut section = AgentsSection::new();
         section.set_rows(vec![row(4941, false)]);
         let out = rendered(&mut section, true, 6);
-        assert!(out.contains("#4941 task 4941"), "{out}");
+        assert!(out.contains("● task 4941"), "{out}");
+        assert!(!out.contains("#4941"), "{out}");
     }
 
     // ---- cursor ----------------------------------------------------------
@@ -842,10 +836,10 @@ mod tests {
         ]);
         let out = rendered(&mut section, true, 5);
         assert!(out.contains("Agents"), "{out}");
-        assert!(out.contains("● #4941 task 4941"), "{out}");
-        assert!(out.contains("● #4942 task 4942"), "{out}");
+        assert!(out.contains("● task 4941"), "{out}");
+        assert!(out.contains("● task 4942"), "{out}");
         assert!(!out.contains("task 4942 ●"), "{out}");
-        assert!(out.contains("○ #4943 task 4943"), "{out}");
+        assert!(out.contains("○ task 4943"), "{out}");
     }
 
     #[test]
@@ -883,8 +877,8 @@ mod tests {
         section.set_rows((1..=20).map(|id| row(id, false)).collect());
         section.bottom();
         let out = rendered(&mut section, true, 10);
-        assert!(out.contains("#20 task 20"), "{out}");
-        assert!(!out.contains("#1 task 1 "), "{out}");
+        assert!(out.contains("task 20"), "{out}");
+        assert!(!out.contains("task 1 "), "{out}");
     }
 
     #[test]
@@ -916,9 +910,9 @@ mod tests {
         // Scrolled past the nested group's headers: lines 0..=6 are above.
         section.offset = 7;
         let out = rendered(&mut section, true, 6);
-        assert!(out.contains("#10 Ten"), "root header hidden:\n{out}");
-        assert!(out.contains("#30 Thirty"), "{out}");
-        assert!(out.contains("#4 task 4"), "{out}");
+        assert!(out.contains("Ten"), "root header hidden:\n{out}");
+        assert!(out.contains("Thirty"), "{out}");
+        assert!(out.contains("task 4"), "{out}");
     }
 
     #[test]

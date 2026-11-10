@@ -1391,8 +1391,9 @@ rule ToggleBookmarkFromBoard {
                              b.subscriber = viewer and b.task = task))
 
     @guidance
-        -- The status bar confirms which way it went: "Bookmarked #<id>" or
-        -- "Bookmark removed from #<id>". A refusal (SetBookmark) shows its
+        -- The status bar confirms which way it went: "Bookmarked <name>" or
+        -- "Bookmark removed from <name>", <name> the task's display name (its
+        -- title when it has none yet). A refusal (SetBookmark) shows its
         -- message in the status bar instead.
         --
         -- Applies to the card under the cursor only, never to a multi-card
@@ -1433,7 +1434,7 @@ rule SetBookmark {
         -- changes nothing and is not an error, so an agent can state the
         -- wanted end state without reading first.
         --
-        -- The Done refusal reads "Task <id> is done and cannot be bookmarked".
+        -- The Done refusal reads "<name> is done and cannot be bookmarked".
         --
         -- Nobody else's bookmark is touched. A second person bookmarking the
         -- same task gets a row of their own.

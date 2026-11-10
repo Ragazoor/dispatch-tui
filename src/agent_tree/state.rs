@@ -273,8 +273,9 @@ impl RenderState {
                         if self.pending_jump_reads >= RESUME_JUMP_MAX_READS {
                             self.pending_jump = None;
                             self.notice = Some(Notice::agent_jump(format!(
-                                "task {waiting} did not start after a resume; \
-                                 press Space to try again"
+                                "{} did not start after a resume; \
+                                 press Space to try again",
+                                row.label()
                             )));
                         }
                         None

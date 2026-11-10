@@ -420,40 +420,44 @@ pub struct Task {
     pub agent_name: Option<String>,
 }
 
-/// The word that names a task to a person: its current agent's name, or
-/// `#<id>` with none. The board card and the agent-tree row both lead with
-/// it (`board-visuals.allium: CardLeadsWithTheAgentName`,
-/// `agent-tree.allium: AgentRowShowsAgentName`).
-pub fn task_lead(id: TaskId, agent_name: Option<&str>) -> String {
-    match agent_name {
-        Some(name) => name.to_string(),
-        None => format!("#{id}"),
-    }
+/// The word that leads a task's line: its display name, `None` before the
+/// backfill has given it one. The board card and the agent-tree row both lead
+/// with it (`board-visuals.allium: CardLeadsWithTheAgentName`,
+/// `agent-tree.allium: AgentRowShowsAgentName`); neither ever shows the id.
+pub fn task_lead(agent_name: Option<&str>) -> Option<&str> {
+    agent_name.filter(|name| !name.is_empty())
 }
 
-/// How the TUI heads a task: `<agent name> · Task #<id>`, or `Task #<id>`
-/// with no current agent (or no task in hand).
-pub fn task_heading(id: TaskId, agent_name: Option<&str>) -> String {
-    match agent_name {
-        Some(name) => format!("{name} · Task #{id}"),
-        None => format!("Task #{id}"),
+/// How a status line names a task: its display name, else its title
+/// (`agents.allium: BoardMessagesNameTasksAndEpics`).
+pub fn task_label(agent_name: Option<&str>, title: &str) -> String {
+    task_lead(agent_name).unwrap_or(title).to_string()
+}
+
+/// How the TUI heads a task: `<name>: <title>`, or the title alone with no
+/// name. The task detail popup's title and a desktop notification's title.
+pub fn task_heading(agent_name: Option<&str>, title: &str) -> String {
+    match task_lead(agent_name) {
+        Some(name) => format!("{name}: {title}"),
+        None => title.to_string(),
     }
 }
 
 impl Task {
     /// [`task_lead`] for this task.
-    pub fn lead(&self) -> String {
-        task_lead(self.id, self.agent_name.as_deref())
+    pub fn lead(&self) -> Option<&str> {
+        task_lead(self.agent_name.as_deref())
     }
 
-    /// [`task_heading`] for this task: the detail popup's title.
+    /// [`task_label`] for this task.
+    pub fn label(&self) -> String {
+        task_label(self.agent_name.as_deref(), &self.title)
+    }
+
+    /// [`task_heading`] for this task: the detail popup's title and a
+    /// desktop notification's title.
     pub fn heading(&self) -> String {
-        task_heading(self.id, self.agent_name.as_deref())
-    }
-
-    /// A desktop notification's title: the heading, then the task's title.
-    pub fn notification_title(&self) -> String {
-        format!("{}: {}", self.heading(), self.title)
+        task_heading(self.agent_name.as_deref(), &self.title)
     }
 
     /// The card's generic ordering key: its `sort_order`, or its id when that

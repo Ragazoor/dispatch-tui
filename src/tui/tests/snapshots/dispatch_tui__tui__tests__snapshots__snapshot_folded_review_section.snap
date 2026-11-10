@@ -9,7 +9,7 @@ expression: rendered
                               │                           │                              │
                               │                           │  ── awaiting review          │
                               │                           │ ╭──────────────────────────╮ │
-                              │                           │ │  ▎ #4 collapse sub-status│ │
+                              │                           │ │  ▎ collapse sub-status   │ │
                               │                           │ │   ● PR #1                │ │
                               │                           │ ╰──────────────────────────╯ │
                               │                           │                              │

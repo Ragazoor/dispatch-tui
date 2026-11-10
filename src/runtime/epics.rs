@@ -82,6 +82,11 @@ impl TuiRuntime {
     /// `database` (`PollOwnershipStore`) rather than `epic_svc` — there is no
     /// epic recalculation obligation to own.
     pub(super) async fn exec_override_feed_owner(&self, app: &mut App, id: models::EpicId) {
+        let title = app
+            .epics()
+            .iter()
+            .find(|e| e.id == id)
+            .map_or_else(|| "the epic".to_string(), |e| e.title.clone());
         match self
             .database
             .override_poll_owner(models::PollScopeId::Epic(id))
@@ -90,8 +95,8 @@ impl TuiRuntime {
             Ok(()) => {
                 app.update(Message::System(
                     crate::tui::messages::SystemMessage::StatusInfo(format!(
-                        "Feed-poll ownership for epic #{} reassigned to this host.",
-                        id.0
+                        "Feed-poll ownership for epic {} reassigned to this host.",
+                        title
                     )),
                 ));
             }

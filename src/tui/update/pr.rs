@@ -58,6 +58,7 @@ impl App {
 
             let pr_label = task.url.as_ref().map_or("PR".to_string(), |u| u.label());
             let task_title = task.title.clone();
+            let task_label = task.label();
 
             if let Some(window) = window {
                 cmds.push(Command::Task(
@@ -68,7 +69,7 @@ impl App {
             self.clear_agent_tracking(id);
             self.sync_board_selection();
             self.status.set(format!(
-                "{pr_label} merged \u{2014} task #{id} moved to Done"
+                "{pr_label} merged \u{2014} {task_label} moved to Done"
             ));
 
             cmds.extend(
@@ -101,9 +102,10 @@ impl App {
         }
         let pr_label = task.url.as_ref().map_or("PR".to_string(), |u| u.label());
         let task_title = task.title.clone();
+        let task_label = task.label();
 
         self.status.set(format!(
-            "{pr_label} closed \u{2014} task #{id} marked \"PR closed\""
+            "{pr_label} closed \u{2014} {task_label} marked \"PR closed\""
         ));
 
         self.pr_notification("PR closed", format!("{pr_label} closed: {task_title}"))
@@ -179,9 +181,10 @@ impl App {
         }
         let pr_label = task.url.as_ref().map_or("PR".to_string(), |u| u.label());
         let task_title = task.title.clone();
+        let task_label = task.label();
 
         self.status.set(format!(
-            "{pr_label} unreadable \u{2014} task #{id} marked \"PR unreachable\""
+            "{pr_label} unreadable \u{2014} {task_label} marked \"PR unreachable\""
         ));
 
         let mut cmds = vec![Command::Pr(

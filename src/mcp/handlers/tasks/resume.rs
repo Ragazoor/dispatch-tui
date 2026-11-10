@@ -116,18 +116,18 @@ pub(crate) async fn unresumable(task: &Task, host_id: &str) -> Option<Unresumabl
 
 /// The agent-tree pane's refusal for `why`: one line for the pane's notice,
 /// which has no tools to suggest (`AgentTreeResumeRefusedIsVisible`).
-pub(crate) fn pane_refusal_text(n: i64, why: &Unresumable) -> String {
+pub(crate) fn pane_refusal_text(name: &str, why: &Unresumable) -> String {
     match why {
         Unresumable::NeverRan(status) => {
-            format!("#{n} cannot be resumed: it is {status} and has not run yet")
+            format!("{name} cannot be resumed: it is {status} and has not run yet")
         }
-        Unresumable::NoWorktree => format!("#{n} cannot be resumed: it has no worktree"),
+        Unresumable::NoWorktree => format!("{name} cannot be resumed: it has no worktree"),
         Unresumable::OtherMachine => {
-            format!("#{n} cannot be resumed here: its worktree is on another machine")
+            format!("{name} cannot be resumed here: its worktree is on another machine")
         }
-        Unresumable::Attached => format!("#{n} already has an agent attached"),
+        Unresumable::Attached => format!("{name} already has an agent attached"),
         Unresumable::WorktreeGone(worktree) => {
-            format!("#{n} cannot be resumed: its worktree {worktree} is gone")
+            format!("{name} cannot be resumed: its worktree {worktree} is gone")
         }
     }
 }

@@ -442,7 +442,10 @@ fn the_agents_view_fills_the_pane_with_agents_and_hides_the_tree() {
     state.focus = Focus::Agents;
     let out = render_pane_to_string(&mut state, &tree, 12);
     assert!(out.contains("Agents (Tab: browse)"), "{out}");
-    assert!(out.contains("#4941") && out.contains("#4942"), "{out}");
+    assert!(
+        out.contains("task 4941") && out.contains("task 4942"),
+        "{out}"
+    );
     assert!(!out.contains("a.rs") && !out.contains("Commits"), "{out}");
 }
 

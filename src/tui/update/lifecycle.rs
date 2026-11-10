@@ -488,10 +488,10 @@ impl App {
         worktree: String,
         error: String,
     ) -> Vec<Command> {
+        let label = self.board.task_label(id);
         let mut cmds = self.handle_error(format!(
-            "Cleanup failed for task {}: {worktree} was left on disk ({error}). \
-             Delete the task again to retry.",
-            id.0
+            "Cleanup failed for {label}: {worktree} was left on disk ({error}). \
+             Delete the task again to retry."
         ));
         cmds.push(Command::Task(
             crate::tui::commands::TaskCommand::RefreshFromDb,

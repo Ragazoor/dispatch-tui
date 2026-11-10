@@ -420,11 +420,13 @@ fn epic_header_row(epic: &Epic, width: u16) -> String {
     )
 }
 
-/// A root epic's header row is prefixed with its own id.
+/// A header row names the epic by its title and shows no id
+/// (board-visuals.allium: EpicsAreShownByTitleNeverById).
 #[test]
-fn epic_header_row_shows_its_own_epic_id() {
+fn epic_header_row_shows_the_title_and_never_the_id() {
     let row = epic_header_row(&make_epic_with_title(42, "Solo"), 40);
-    assert!(row.contains("#42"), "got: {row:?}");
+    assert!(row.starts_with("Solo ──"), "got: {row:?}");
+    assert!(!row.contains("#42"), "got: {row:?}");
 }
 
 /// A nested epic's header row carries only its own id and its own title —
@@ -437,7 +439,7 @@ fn epic_header_row_names_only_the_nested_epic_itself() {
     let item = render_epic_header_item(&leaf, 0, 60);
     let row = buf_row(&render_list_item_to_buf(item, 60, 1), 0);
 
-    assert!(row.starts_with("#3 Leaf ──"), "got: {row:?}");
+    assert!(row.starts_with("Leaf ──"), "got: {row:?}");
     assert!(
         !row.contains('\u{203a}'),
         "breadcrumb separator drawn, got: {row:?}"
@@ -460,7 +462,7 @@ fn folded_epic_header_names_only_the_nested_epic_itself() {
     let item = render_folded_epic_header(&header, 60, true, false);
     let row = buf_row(&render_list_item_to_buf(item, 60, 1), 0);
 
-    assert!(row.starts_with("#3 Leaf (2) \u{22ef}"), "got: {row:?}");
+    assert!(row.starts_with("Leaf (2) \u{22ef}"), "got: {row:?}");
 }
 
 /// A title too long for the column ends in an ellipsis inside the row.
@@ -472,26 +474,25 @@ fn epic_header_row_truncates_a_long_title() {
     assert_eq!(row.chars().count(), 24, "got: {row:?}");
 }
 
-/// The id prefix is muted like every other id badge on the board, not the
-/// row's purple identity hue — that stays on the epic's title.
+/// The rule is muted; the title keeps the row's purple identity hue.
 #[test]
-fn epic_header_id_prefix_is_muted_not_purple() {
+fn epic_header_rule_is_muted_and_the_title_purple() {
     let epic = make_epic_with_title(7, "Alpha");
     let item = render_epic_header_item(&epic, 0, 40);
     let buf = render_list_item_to_buf(item, 40, 1);
 
-    let hash_x = buf_find_char(&buf, 0, '#').expect("row should contain the id marker '#'");
+    let rule_x = buf_find_char(&buf, 0, '\u{2500}').expect("row should contain the rule");
     assert_eq!(
-        buf[(hash_x, 0)].style().fg,
+        buf[(rule_x, 0)].style().fg,
         Some(MUTED),
-        "id prefix should be MUTED"
+        "rule should be MUTED"
     );
 
-    let title_x = buf_find_char(&buf, 0, 'A').expect("row should contain the breadcrumb title");
+    let title_x = buf_find_char(&buf, 0, 'A').expect("row should contain the title");
     assert_eq!(
         buf[(title_x, 0)].style().fg,
         Some(PURPLE),
-        "breadcrumb title should stay PURPLE"
+        "title should stay PURPLE"
     );
 }
 
@@ -506,18 +507,10 @@ fn epic_header_row_indents_by_depth_up_to_the_cap() {
             0,
         )
     };
+    assert!(row_at(1).starts_with("  Leaf ──"), "got: {:?}", row_at(1));
+    assert!(row_at(2).starts_with("    Leaf ──"), "got: {:?}", row_at(2));
     assert!(
-        row_at(1).starts_with("  #3 Leaf ──"),
-        "got: {:?}",
-        row_at(1)
-    );
-    assert!(
-        row_at(2).starts_with("    #3 Leaf ──"),
-        "got: {:?}",
-        row_at(2)
-    );
-    assert!(
-        row_at(3).starts_with("      #3 Leaf ──"),
+        row_at(3).starts_with("      Leaf ──"),
         "got: {:?}",
         row_at(3)
     );
@@ -541,25 +534,7 @@ fn folded_epic_header_keeps_its_indent() {
     };
     let item = render_folded_epic_header(&header, 60, true, false);
     let row = buf_row(&render_list_item_to_buf(item, 60, 1), 0);
-    assert!(row.starts_with("  #3 Leaf (2) \u{22ef}"), "got: {row:?}");
-}
-
-/// Reserving width for the id prefix means a wider id leaves less room for
-/// the title (board-layout.allium, "Flattening").
-#[test]
-fn epic_header_row_reserves_width_for_a_longer_id() {
-    let width = 30;
-    let long_title = "x".repeat(80);
-
-    let short_row = epic_header_row(&make_epic_with_title(1, &long_title), width);
-    let long_row = epic_header_row(&make_epic_with_title(123_456_789, &long_title), width);
-
-    let short_visible = short_row.matches('x').count();
-    let long_visible = long_row.matches('x').count();
-    assert!(
-        long_visible < short_visible,
-        "a wider id prefix must leave less room for the title text: short id showed {short_visible} title chars, long id showed {long_visible} (short row: {short_row:?}, long row: {long_row:?})"
-    );
+    assert!(row.starts_with("  Leaf (2) \u{22ef}"), "got: {row:?}");
 }
 
 #[test]

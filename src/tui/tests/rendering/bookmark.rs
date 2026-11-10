@@ -127,14 +127,14 @@ async fn b_on_a_task_card_toggles_its_bookmark() {
     let cmds = app.handle_key(make_key(KeyCode::Char('b')));
     assert_eq!(set_bookmark_sent(&cmds), Some((TaskId(1), true)));
     assert!(app.board.bookmarked_tasks.contains(&TaskId(1)));
-    assert_eq!(app.status.message.as_deref(), Some("Bookmarked #1"));
+    assert_eq!(app.status.message.as_deref(), Some("Bookmarked Task 1"));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('b')));
     assert_eq!(set_bookmark_sent(&cmds), Some((TaskId(1), false)));
     assert!(app.board.bookmarked_tasks.is_empty());
     assert_eq!(
         app.status.message.as_deref(),
-        Some("Bookmark removed from #1")
+        Some("Bookmark removed from Task 1")
     );
 }
 
@@ -149,7 +149,7 @@ async fn b_on_a_done_task_is_refused() {
     assert!(app.board.bookmarked_tasks.is_empty());
     assert_eq!(
         app.status.message.as_deref(),
-        Some("Task #1 is done and cannot be bookmarked")
+        Some("Task 1 is done and cannot be bookmarked")
     );
 }
 

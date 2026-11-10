@@ -254,9 +254,9 @@ async fn every_card_frame_is_lit_by_the_card_surface() {
 }
 
 /// The cell holding an epic card's stripe, and the cell holding its title's
-/// first character, on the row that starts with the given `#id` marker.
+/// first character, on the row whose title starts with `title`.
 ///
-/// Located by scanning for the id rather than by fixed coordinates, so the test
+/// Located by scanning for the title rather than by fixed coordinates, so the test
 /// does not silently start reading a different card when layout shifts.
 fn epic_card_row(
     buf: &ratatui::buffer::Buffer,
@@ -267,13 +267,13 @@ fn epic_card_row(
             if buf[(x, y)].symbol() != "\u{258e}" {
                 continue;
             }
-            // "▎ #10 Epic 10" — the id begins two cells right of the stripe.
-            let after: String = (x + 1..(x + 8).min(buf.area.right()))
+            // "▎ Epic 10" — the title begins two cells right of the stripe.
+            let after: String = (x + 1..(x + 10).min(buf.area.right()))
                 .map(|xx| buf[(xx, y)].symbol())
                 .collect();
             if after.trim_start().starts_with(id) {
-                // First title character: past "▎ #10 ".
-                let title_x = x + 2 + id.len() as u16 + 1;
+                // First title character: past "▎ ".
+                let title_x = x + 2;
                 return Some((buf[(x, y)].clone(), buf[(title_x, y)].clone()));
             }
         }
@@ -300,7 +300,7 @@ async fn epic_cards_carry_purple_identity_and_a_bold_title_at_rest() {
     // test exists to disprove, and would keep passing if epics started following
     // their column.
 
-    let (stripe, title) = epic_card_row(&buf, "#10").expect("expected the epic card to render");
+    let (stripe, title) = epic_card_row(&buf, "Epic 10").expect("expected the epic card to render");
     assert_eq!(
         stripe.fg, PURPLE,
         "an epic's stripe is PURPLE — its own identity, never its column's"
@@ -462,9 +462,8 @@ async fn the_cursor_card_title_is_bold_and_a_resting_one_is_not() {
             for x in buf.area.left()..buf.area.right().saturating_sub(6) {
                 let run: String = (x..x + 6).map(|xx| buf[(xx, y)].symbol()).collect();
                 if run.starts_with(id) {
-                    // Title begins one cell past "#N ".
-                    let tx = x + id.len() as u16 + 1;
-                    return buf[(tx, y)].modifier.contains(Modifier::BOLD);
+                    // The run is the title itself (a card shows no id).
+                    return buf[(x, y)].modifier.contains(Modifier::BOLD);
                 }
             }
         }
@@ -472,11 +471,11 @@ async fn the_cursor_card_title_is_bold_and_a_resting_one_is_not() {
     };
 
     assert!(
-        bold_for("#1"),
+        bold_for("Task 1"),
         "the cursor card's title must be bold — it is one of selection's two markers"
     );
     assert!(
-        !bold_for("#2"),
+        !bold_for("Task 2"),
         "a resting card's title must not be bold, or bold says nothing about the cursor"
     );
 }
@@ -588,36 +587,26 @@ async fn flat_view_epic_breadcrumb_is_purple() {
     // Target the breadcrumb row itself. Counting purple anywhere in the buffer is
     // not enough: the epic *card* is purple too, so such a test passes even with
     // the breadcrumb drawn in grey — it measures the card and reports the
-    // breadcrumb. Find the header row by its muted "#{id} " prefix (no rule
-    // is drawn left of it: board-layout.allium, "Flattening") and read the
-    // colour of the title that follows it — search for it rather than
-    // assuming a fixed offset, so the id prefix's width doesn't matter here.
+    // breadcrumb. Find the header row by its title (no rule is drawn left of
+    // it and no id: board-layout.allium, "Flattening") and read the colour of
+    // the title — search for it rather than assuming a fixed offset.
     let mut breadcrumb_title_colours: Vec<Color> = Vec::new();
     'rows: for y in buf.area.top()..buf.area.bottom() {
-        for x in buf.area.left()..buf.area.right().saturating_sub(3) {
-            let is_id_prefix = buf[(x, y)].symbol() == "#"
-                && buf[(x + 1, y)].symbol() == "1"
-                && buf[(x + 2, y)].symbol() == "0";
-            if !is_id_prefix {
-                continue;
-            }
-            let search_start = x + 3;
-            let window: String = (search_start..(search_start + 20).min(buf.area.right()))
-                .map(|xx| buf[(xx, y)].symbol())
+        let row: String = (buf.area.left()..buf.area.right())
+            .map(|xx| buf[(xx, y)].symbol())
+            .collect();
+        if let Some(at) = row.find("Epic 10 \u{2500}") {
+            let title_start = buf.area.left() + row[..at].chars().count() as u16;
+            breadcrumb_title_colours = (title_start..title_start + 7)
+                .map(|xx| buf[(xx, y)].fg)
                 .collect();
-            if let Some(rel_offset) = window.find("Epic 10") {
-                let title_start = search_start + rel_offset as u16;
-                breadcrumb_title_colours = (title_start..title_start + 7)
-                    .map(|xx| buf[(xx, y)].fg)
-                    .collect();
-                break 'rows;
-            }
+            break 'rows;
         }
     }
 
     assert!(
         !breadcrumb_title_colours.is_empty(),
-        "expected a \"#10 Epic 10\" header row in the flattened view"
+        "expected an \"Epic 10\" header row in the flattened view"
     );
     for c in &breadcrumb_title_colours {
         assert_eq!(
@@ -628,11 +617,10 @@ async fn flat_view_epic_breadcrumb_is_purple() {
 }
 
 /// board-layout.allium "Epic View Panel Title": drilling into an epic
-/// borders the columns panel with a breadcrumb title prefixed by that
-/// epic's own numeric id, the same "epic's own id" rule as the flattened
-/// epic-header row (see "Flattening").
+/// borders the columns panel with a breadcrumb title of epic titles and no
+/// id (board-visuals.allium: EpicsAreShownByTitleNeverById).
 #[tokio::test]
-async fn epic_view_panel_title_shows_the_current_epics_id() {
+async fn epic_view_panel_title_shows_the_title_and_not_the_id() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic_with_title(7, "Alpha")];
     app.board.view_mode = ViewMode::Epic {
@@ -644,8 +632,12 @@ async fn epic_view_panel_title_shows_the_current_epics_id() {
     let buf = render_to_buffer(&mut app, 120, 30);
 
     assert!(
-        buffer_contains(&buf, "#7 Alpha"),
-        "expected the epic-view panel title to show the epic's own id before its breadcrumb"
+        buffer_contains(&buf, " Alpha "),
+        "expected the epic-view panel title to show the epic's title"
+    );
+    assert!(
+        !buffer_contains(&buf, "#7"),
+        "the epic-view panel title shows no id"
     );
 }
 

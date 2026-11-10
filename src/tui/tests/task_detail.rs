@@ -377,29 +377,33 @@ fn detail_title_row(app: &mut App) -> String {
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
+    let title = app.board.tasks[0].title.clone();
     let buf = render_to_buffer(app, 100, 30);
     (0..30)
         .map(|y| buffer_line(&buf, y))
-        .find(|l| l.contains("Task #1"))
+        .find(|l| l.contains("╭") && l.contains(&title))
         .expect("the popup's title row")
 }
 
 #[test]
-fn task_detail_title_names_the_agent_and_the_id() {
+fn task_detail_title_names_the_agent_and_the_title() {
     let mut app = make_app_with_task();
     app.board.tasks[0].agent_name = Some("paivi".into());
 
     let row = detail_title_row(&mut app);
 
-    assert!(row.contains(" paivi · Task #1 "), "{row:?}");
+    let title = &app.board.tasks[0].title;
+    assert!(row.contains(&format!(" paivi: {title} ")), "{row:?}");
+    assert!(!row.contains("#1"), "{row:?}");
 }
 
 #[test]
-fn task_detail_title_without_an_agent_names_only_the_id() {
+fn task_detail_title_without_an_agent_is_the_title_alone() {
     let mut app = make_app_with_task();
 
     let row = detail_title_row(&mut app);
 
-    assert!(row.contains(" Task #1 "), "{row:?}");
-    assert!(!row.contains('·'), "{row:?}");
+    let title = &app.board.tasks[0].title;
+    assert!(row.contains(&format!(" {title} ")), "{row:?}");
+    assert!(!row.contains(':') && !row.contains("#1"), "{row:?}");
 }

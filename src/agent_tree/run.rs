@@ -305,9 +305,8 @@ fn spawn_resume_worker(
         while let Some(task) = incoming.recv().await {
             let answer = source.resume_agent(task).await.map_err(|e| {
                 format!(
-                    "could not ask the board at {} to resume #{}: {e:#}",
-                    source.board_address(),
-                    task.0
+                    "could not ask the board at {} to resume that agent: {e:#}",
+                    source.board_address()
                 )
             });
             if tx.send((task, answer)).is_err() {

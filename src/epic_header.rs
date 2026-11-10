@@ -6,7 +6,6 @@
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use crate::models::EpicId;
 use crate::palette::{MUTED, PURPLE};
 use crate::text::truncate;
 
@@ -24,24 +23,23 @@ pub(crate) fn epic_indent(depth: usize) -> usize {
     depth.min(EPIC_INDENT_MAX_DEPTH) * EPIC_INDENT_STEP
 }
 
-/// `#<id> <title> ───`, indented by [`epic_indent`]`(depth)` and filling
-/// `width` less one cell: the id and the rule muted, the title purple. No rule is drawn left
-/// of the id, so the indent is what shows the nesting. `title` is the epic's
+/// `<title> ───`, indented by [`epic_indent`]`(depth)` and filling `width`
+/// less one cell: the rule muted, the title purple. No rule is drawn left of
+/// the title and no id is shown (`board-visuals.allium:
+/// EpicsAreShownByTitleNeverById`), so the indent is what shows the nesting. `title` is the epic's
 /// own title, never its ancestors' (`board-layout.allium`, "Flattening"); it
 /// ends in an ellipsis when it does not fit.
-pub(crate) fn epic_header_line(id: EpicId, title: &str, width: u16, depth: usize) -> Line<'static> {
+pub(crate) fn epic_header_line(title: &str, width: u16, depth: usize) -> Line<'static> {
     let indent = epic_indent(depth);
-    let id_prefix = format!("#{id} ");
-    // The row is indent + id + title + " " + rule, one cell short of `width`
-    // so its right end lines up with a card's right margin; the title leaves
+    // The row is indent + title + " " + rule, one cell short of `width` so
+    // its right end lines up with a card's right margin; the title leaves
     // room for at least one rule cell.
-    let fixed = indent + id_prefix.chars().count() + 2;
+    let fixed = indent + 2;
     let budget = usize::from(width).saturating_sub(fixed + 1);
     let title = truncate(title, budget);
     let rule_count = usize::from(width).saturating_sub(fixed + title.chars().count());
     Line::from(vec![
         Span::raw(" ".repeat(indent)),
-        Span::styled(id_prefix, Style::default().fg(MUTED)),
         Span::styled(title, Style::default().fg(PURPLE)),
         Span::styled(
             format!(" {}", "\u{2500}".repeat(rule_count)),

@@ -237,7 +237,6 @@ const STARTUP_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 /// Decide the next step from one read. Arrival wins over the limit: a row that
 /// shows up on the last poll is still a row.
 pub(crate) fn startup_step(
-    task_id: TaskId,
     lookup: &TaskLookup,
     elapsed: std::time::Duration,
     limit: std::time::Duration,
@@ -250,9 +249,9 @@ pub(crate) fn startup_step(
         // The pane starts as the agent launches; the worktree is recorded on
         // the row just after. Waited out like a row that has not arrived.
         TaskLookup::NoWorktree if elapsed < limit => StartupStep::Wait,
-        TaskLookup::NoWorktree => StartupStep::Fail(format!("task {task_id} has no worktree")),
+        TaskLookup::NoWorktree => StartupStep::Fail("this task has no worktree".to_string()),
         TaskLookup::NotYet if elapsed < limit => StartupStep::Wait,
-        TaskLookup::NotYet => StartupStep::Fail(format!("task {task_id} not found")),
+        TaskLookup::NotYet => StartupStep::Fail("this task was not found".to_string()),
         TaskLookup::BoardUnreachable { .. } if elapsed < limit => StartupStep::Wait,
         TaskLookup::BoardUnreachable { address } => StartupStep::Fail(format!(
             "could not reach the dispatch board at {address}; is it running? \
@@ -264,7 +263,6 @@ pub(crate) fn startup_step(
 pub(crate) fn render_startup_notice(
     frame: &mut ratatui::Frame,
     area: ratatui::layout::Rect,
-    task_id: TaskId,
     step: &StartupStep,
     ns: crate::keybindings::KeyNamespace,
 ) {
@@ -275,7 +273,7 @@ pub(crate) fn render_startup_notice(
                 exit_keys(ns).join(" or ")
             )
         }
-        _ => format!("waiting for task {task_id}"),
+        _ => "waiting for the task".to_string(),
     };
     frame.render_widget(
         ratatui::widgets::Paragraph::new(text)
@@ -322,13 +320,11 @@ fn wait_for_pane_task(
     let failure = loop {
         let lookup =
             tokio::task::block_in_place(|| handle.block_on(lookup_from_board(source, task_id)));
-        match startup_step(task_id, &lookup, started.elapsed(), STARTUP_WAIT) {
+        match startup_step(&lookup, started.elapsed(), STARTUP_WAIT) {
             StartupStep::Proceed { root, base_branch } => return Ok(Some((root, base_branch))),
             StartupStep::Fail(reason) => break StartupStep::Fail(reason),
             StartupStep::Wait => {
-                terminal.draw(|f| {
-                    render_startup_notice(f, f.area(), task_id, &StartupStep::Wait, ns)
-                })?;
+                terminal.draw(|f| render_startup_notice(f, f.area(), &StartupStep::Wait, ns))?;
                 if quit_requested(STARTUP_POLL, ns)? {
                     return Ok(None);
                 }
@@ -336,7 +332,7 @@ fn wait_for_pane_task(
         }
     };
     loop {
-        terminal.draw(|f| render_startup_notice(f, f.area(), task_id, &failure, ns))?;
+        terminal.draw(|f| render_startup_notice(f, f.area(), &failure, ns))?;
         if quit_requested(STARTUP_POLL, ns)? {
             return Ok(None);
         }

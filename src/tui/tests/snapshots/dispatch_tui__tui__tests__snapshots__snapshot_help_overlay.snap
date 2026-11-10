@@ -6,11 +6,11 @@ expression: rendered
         ▸ BACKLOG 2 [ ]                ◦ RUNNING 1                   ◦ REVIEW 0                      ◦ DONE 1
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
  ╭──────────────────────────╮ │  ── active                │                              │ ╭──────────────────────────╮
- │  ▎ #1 Task 1         ╔ Help — j/Down/k/Up scroll, ? or Esc close ═══════════════════════════╗#4 Task 4             │
+ │  ▎ Task 1            ╔ Help — j/Down/k/Up scroll, ? or Esc close ═══════════════════════════╗Task 4                │
  │   ◦ <1h              ║  == board.normal ==                                                  ║ <1h                  │
  ╰──────────────────────║  h, Left, l, Right                                                   ║──────────────────────╯
  ╭──────────────────────║    Move to the previous column (h, Left) or the next column (l,      ║
- │  ▎ #2 Task 2         ║    Right)                                                            ║
+ │  ▎ Task 2            ║    Right)                                                            ║
  │   ◦ <1h              ║  j, Down, k, Up                                                      ║
  ╰──────────────────────║    Move to the next card (j, Down) or the previous card (k, Up) in   ║
                         ║    the column                                                        ║

@@ -1258,9 +1258,10 @@ rule AgentTreePaneTaskNeverArrives {
         -- == Black boxes ==
         -- board_task(task) is BoardPaneView's pane_view(task.id).task — null
         -- while the row has not arrived in the board's rows, and null while
-        -- the board cannot be reached. The two reason functions name the task
-        -- by id: task_without_worktree_reason reads "task <id> has no
-        -- worktree"; task_not_found_reason reads "task <id> not found" when
+        -- the board cannot be reached. The pane has not resolved its task, so it
+        -- has no name to give; the two reason functions say "this task":
+        -- task_without_worktree_reason reads "this task has no worktree";
+        -- task_not_found_reason reads "this task was not found" when
         -- the board answered without the task, and, when the renderer's last
         -- attempt could not reach the board, says that instead, naming the
         -- address it tried — "not found" would send the user looking for a
@@ -2668,7 +2669,7 @@ rule ResumeJumpWaitEnds {
     ensures: pane.notice_source = agent_jump
 
     @guidance
-        -- resume_never_started_reason(task) reads "task <id> did not start
+        -- resume_never_started_reason(task) reads "<agent> did not start
         -- after a resume; press Space to try again".
         --
         -- "Accepted" means only that the board took the request; the launch
@@ -3071,7 +3072,7 @@ surface AgentTreeCompanionPane {
 
     @guarantee AgentTreePaneSaysWhatItIsWaitingFor
         -- Until its task resolves, the pane draws one line in place of the
-        -- tree and the commits and agents sections: `waiting for task <id>`. It is never
+        -- tree and the commits and agents sections: `waiting for the task`. It is never
         -- blank, so a slow store or a restarting board reads as a wait rather than as a broken or
         -- empty pane. In the common case the task resolves at once and the
         -- line is never seen (AgentTreePaneResolvesItsTask).
@@ -3741,7 +3742,7 @@ surface AgentTreeDiffPane {
 
     @guarantee AgentTreeDiffPaneSaysWhatItIsWaitingFor
         -- The diff pane's form of AgentTreePaneSaysWhatItIsWaitingFor, and
-        -- the same behaviour exactly: `waiting for task <id>` until its own
+        -- the same behaviour exactly: `waiting for the task` until its own
         -- read of the task resolves, then either the diffs or
         -- pane.diff_startup_failure, which stays until the pane closes. Only
         -- the exit key acts meanwhile, and the pane never closes itself.

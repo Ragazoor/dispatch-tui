@@ -330,7 +330,7 @@ fn epic_list_rows<'a>(rows: &[FilterEpicRow], cursor: usize, styles: &HintStyles
             cursor_row(
                 i == cursor,
                 row.mark == FilterEpicMark::HiddenByParent,
-                format!(" {indent}{fold}{mark} #{} {}", row.id.0, row.title),
+                format!(" {indent}{fold}{mark} {}", row.title),
                 styles,
             )
         })

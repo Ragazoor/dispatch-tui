@@ -326,8 +326,8 @@ fn a_nested_groups_header_and_cards_are_indented_together() {
     let mut app = flat_app(vec![owned(1, 10), owned(3, 30)], vec![ten, thirty]);
 
     let buf = render_to_buffer(&mut app, 160, 40);
-    let (x10, y10) = find_text(&buf, "#10 Ten").expect("parent header drawn");
-    let (x30, y30) = find_text(&buf, "#30 Thirty").expect("child header drawn");
+    let (x10, y10) = find_text(&buf, "Ten").expect("parent header drawn");
+    let (x30, y30) = find_text(&buf, "Thirty").expect("child header drawn");
     assert_eq!(x30, x10 + 2, "the child header steps in one level");
 
     let start = x10.saturating_sub(2);
@@ -392,8 +392,8 @@ fn a_folded_child_sits_directly_under_its_parents_header() {
     app.epic_folds.toggle(TaskStatus::Running, EpicId(30));
 
     let buf = render_to_buffer(&mut app, 160, 40);
-    let (_, y10) = find_text(&buf, "#10 Ten").expect("parent header drawn");
-    let (_, y30) = find_text(&buf, "#30 Thirty").expect("folded child drawn");
+    let (_, y10) = find_text(&buf, "Ten").expect("parent header drawn");
+    let (_, y30) = find_text(&buf, "Thirty").expect("folded child drawn");
     assert_eq!(y30, y10 + 1);
 }
 

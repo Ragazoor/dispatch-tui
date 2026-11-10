@@ -122,7 +122,7 @@ fn task_updated_fires_review_notification_on_transition() {
 }
 
 /// The notification heads the task the way the board does: the current
-/// agent's name, then the id (board-visuals.allium: CardLeadsWithTheAgentName).
+/// agent's name, then the title (board-visuals.allium: CardLeadsWithTheAgentName).
 #[test]
 fn review_notification_title_leads_with_the_agent_name() {
     let mut app = make_app();
@@ -137,7 +137,7 @@ fn review_notification_title_leads_with_the_agent_name() {
     updated.status = TaskStatus::Review;
     updated.sub_status = SubStatus::default_for(TaskStatus::Review);
     updated.agent_name = Some("paivi".into());
-    let expected = format!("paivi · Task #1: {}", updated.title);
+    let expected = format!("paivi: {}", updated.title);
 
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(
         Box::new(updated),

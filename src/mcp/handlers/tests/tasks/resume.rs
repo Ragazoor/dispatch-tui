@@ -242,7 +242,8 @@ async fn a_pane_resume_of_an_attached_task_is_refused() {
 
     match answer {
         crate::hooks::wire::PaneResumeAnswer::Refused { reason } => {
-            assert!(reason.contains(&format!("#{}", id.0)), "{reason}");
+            assert!(reason.contains("already has an agent attached"), "{reason}");
+            assert!(!reason.contains(&format!("#{}", id.0)), "{reason}");
         }
         other => panic!("expected a refusal, got {other:?}"),
     }

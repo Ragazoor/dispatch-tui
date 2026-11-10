@@ -44,14 +44,16 @@ fn auto_dispatch_failure_marks_the_subtask() {
 #[test]
 fn auto_dispatch_failure_sets_a_status_message_naming_the_task() {
     let mut app = make_app();
+    app.board.epics.push(make_epic_with_title(7, "Staging"));
 
     fail_chain(&mut app, 1);
 
     let status = app.status_message().unwrap_or_default().to_string();
     assert!(
-        status.contains("#1"),
-        "status message must name the subtask, got: {status}"
+        status.contains("Auto-dispatch of Task 1 failed — epic Staging stalled"),
+        "status message must name the subtask and its epic, got: {status}"
     );
+    assert!(!status.contains('#'), "no bare id, got: {status}");
     assert!(
         status.contains("git fetch origin main failed"),
         "status message must carry the reason, got: {status}"

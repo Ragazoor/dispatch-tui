@@ -487,7 +487,7 @@ value EpicCardPlacement {
 --     title are told apart by their place in the indented tree. The title
 --     is bounded by the column width, less the row's indent — the same
 --     reservation task cards and epic cards
---     already make for their own id badge before computing their truncation
+--     already make for their lead word before computing their truncation
 --     budget — and truncated with an ellipsis when it does not fit.
 --   - Nesting is carried by order and indent, not by header text (task
 --     #98901). With own-title-only headers sorted by epic id, a sub-epic's
@@ -925,7 +925,7 @@ entity CollapsedSections {
 -- collapsed section's, over an epic group instead of a substatus run:
 --   - A folded epic group renders its header and nothing else: no task
 --     cards. The header itself is unchanged otherwise — it still carries
---     the epic's own id and own title, exactly as the open header
+--     the epic's own title, exactly as the open header
 --     does, so the user can tell which epic a folded header names without
 --     unfolding it first — and gains the hidden count and the folded
 --     marker, which the open header carries neither of. Same relationship

@@ -178,13 +178,12 @@ pub async fn handle_pane_resume(
     State(state): State<Arc<McpState>>,
     Json(request): Json<PaneResumeRequest>,
 ) -> Json<PaneResumeAnswer> {
-    let n = request.task_id.0;
     let refused = |reason: String| Json(PaneResumeAnswer::Refused { reason });
     let Ok(task) = state.task_svc.get_task(request.task_id).await else {
-        return refused(format!("#{n} is not on the board"));
+        return refused("that task is not on the board".to_string());
     };
     if let Some(why) = super::tasks::unresumable(&task, &state.host_id).await {
-        return refused(super::tasks::pane_refusal_text(n, &why));
+        return refused(super::tasks::pane_refusal_text(&task.label(), &why));
     }
     match super::tasks::hand_resume_to_board(&state, request.task_id, None) {
         Ok(()) => Json(PaneResumeAnswer::Accepted),

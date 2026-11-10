@@ -152,7 +152,7 @@ pub(in crate::tui) fn reparent_confirm(
                 .iter()
                 .find(|e| e.id == pid)
                 .map(|e| truncate_title(&e.title, TITLE_DISPLAY_LENGTH))
-                .unwrap_or_else(|| format!("\"epic #{}\"", pid.0));
+                .unwrap_or_else(|| "the epic".to_string());
             format!("Reparent {moving_title} under {parent_label}? [y/n]")
         }
     };
