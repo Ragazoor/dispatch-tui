@@ -187,7 +187,7 @@ pub(super) fn select_store_target(
                 // Fixed, not derived from `--db`: a throwaway database must not
                 // start a second store or lose sight of the module hash the first
                 // recorded.
-                let store_data_dir = crate::default_data_dir().join("spacetime");
+                let store_data_dir = crate::default_data_dir()?.join("spacetime");
                 let log_dir = data_dir;
                 StoreTarget::Managed(Arc::new(
                     crate::spacetime::managed_store::ManagedStore::for_launch(

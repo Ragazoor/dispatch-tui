@@ -729,7 +729,11 @@ surface DispatchCommandLine {
         -- the operator's; the board's own variable is DISPATCH_BOARD_STORE).
         -- `--data-dir` names the data directory itself (storage.allium:
         -- DataDirectory), where the host file is read from and a command's log
-        -- lines go.
+        -- lines go. Left out, it defaults as storage.allium: DataDirectory
+        -- says, and the default is resolved by the command that uses it, not
+        -- when the arguments are read: with no usable home directory it
+        -- cannot be, and only the commands that need it then fail (startup.allium:
+        -- AnUnavailableHomeDirectoryIsAFailureNotAPath).
         --
         -- THE COMMANDS THAT NEVER FAIL. `statusline`, `caller-headers` and
         -- `toggle-agent-tree-pane` always end with success, because a

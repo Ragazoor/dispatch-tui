@@ -728,6 +728,7 @@ fn setup_paths_compose_the_shared_configuration_layout() {
         claude_dir,
         std::path::Path::new("/h/.claude.json"),
         std::path::Path::new("/h/.tmux.conf"),
+        std::path::Path::new("/h/.local/share/dispatch/rate-limits.json"),
     );
 
     assert_eq!(
@@ -757,7 +758,7 @@ fn setup_paths_compose_the_shared_configuration_layout() {
 /// each silently substituted for the operator's own.
 #[test]
 fn an_unavailable_home_directory_is_a_failure_not_a_path() {
-    for absent in [None, Some("")] {
+    for absent in [None, Some(""), Some("rel/home"), Some(".")] {
         let err = home_dir_from_value(absent)
             .expect_err("an unavailable home directory must not resolve to a path");
         assert!(

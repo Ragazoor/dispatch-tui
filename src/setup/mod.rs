@@ -88,7 +88,7 @@ pub(super) fn user_global_config_path_in(home: &std::path::Path) -> PathBuf {
 /// The operator's home directory, from a `$HOME` *value* — `None` when the
 /// variable is unset.
 ///
-/// An empty value is unavailable, not the root: `export HOME=` is a shell's
+/// An empty or relative value is unavailable, not the root: `export HOME=` is a shell's
 /// other spelling of "unset", and `PathBuf::from("").join(..)` yields a path
 /// relative to the process's working directory, which is not the operator's
 /// anything. Taking the value as a parameter is what makes that testable —
@@ -96,9 +96,9 @@ pub(super) fn user_global_config_path_in(home: &std::path::Path) -> PathBuf {
 /// harness's threads regardless (see `src/editor.rs::resolve_editor`, the same
 /// shape for the same reason).
 pub(super) fn home_dir_from_value(home: Option<&str>) -> Result<PathBuf> {
-    home.filter(|home| !home.is_empty())
+    crate::usable_home(home)
         .map(PathBuf::from)
-        .context("$HOME is not set")
+        .context("$HOME is not set to an absolute path")
 }
 
 /// [`home_dir_from_value`] against the real process environment.
@@ -109,10 +109,10 @@ pub(super) fn home_dir_from_value(home: Option<&str>) -> Result<PathBuf> {
 /// Nothing downstream can name the cause — see docs/specs/startup.allium:
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
 ///
-/// Not every `$HOME` reader in the crate: `crate::models::expand_tilde` and
-/// `crate::default_data_dir` resolve their own, and neither fails — they are
-/// string-in/string-out and fall back to a default respectively, so they have
-/// no `Result` to report an absence through.
+/// Not every `$HOME` reader in the crate goes through here:
+/// `crate::models::expand_tilde` has no `Result` to report an absence through
+/// and keeps its input unexpanded, and `crate::default_data_dir` reports it
+/// itself. All three apply the one test, `crate::usable_home`.
 pub(super) fn home_dir() -> Result<PathBuf> {
     home_dir_from_value(std::env::var("HOME").ok().as_deref())
 }

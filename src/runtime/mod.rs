@@ -221,6 +221,11 @@ pub struct StartupPaths {
     /// The operator's tmux configuration file (`~/.tmux.conf`), which the
     /// startup configuration check edits (the focus-events line).
     tmux_conf_path: std::path::PathBuf,
+    /// The machine-wide budget snapshot (`<default data dir>/rate-limits.json`),
+    /// written by the decorator and read by the budget indicator. Resolved here
+    /// with the rest, so nothing downstream composes it from the working
+    /// directory.
+    budget_snapshot_path: std::path::PathBuf,
 }
 
 impl StartupPaths {
@@ -238,6 +243,7 @@ impl StartupPaths {
             claude_dir: crate::setup::claude_dir_in(&home),
             claude_json_path: crate::setup::user_global_config_path_in(&home),
             tmux_conf_path: crate::tmux::tmux_conf_path_in(&home),
+            budget_snapshot_path: crate::budget_snapshot_path()?,
         })
     }
 
@@ -256,6 +262,7 @@ impl StartupPaths {
             &self.claude_dir,
             &self.claude_json_path,
             &self.tmux_conf_path,
+            &self.budget_snapshot_path,
         )
     }
 }
@@ -1059,7 +1066,7 @@ impl TuiRuntime {
             // publish and read the same location as every other session. See
             // docs/specs/observability.allium:
             // SnapshotLocationIsFixedPerMachine.
-            budget_snapshot_path: crate::budget_snapshot_path(),
+            budget_snapshot_path: inputs.paths.budget_snapshot_path.clone(),
             claude_json_path: inputs.paths.claude_json_path.clone(),
             split_restores: std::sync::Mutex::new(Vec::new()),
             self_pane: tmux::self_pane_id(),

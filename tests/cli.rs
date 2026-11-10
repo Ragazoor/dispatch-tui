@@ -1405,3 +1405,82 @@ fn a_board_launch_without_a_home_directory_stops_before_writing() {
         "no data directory may be created under the working directory"
     );
 }
+
+/// Run `args` with no usable home directory, in an empty working directory.
+fn without_a_home_directory(cwd: &Path, args: &[&str]) -> std::process::Output {
+    binary()
+        .current_dir(cwd)
+        .env("HOME", "")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("DISPATCH_DATA_DIR")
+        .env_remove("DISPATCH_SPACETIME_SERVER")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// startup.allium: `AnUnavailableHomeDirectoryIsAFailureNotAPath`. A command
+/// that needs the default data directory fails naming the home directory and
+/// writes nothing under the working directory.
+#[test]
+fn a_command_needing_the_data_directory_fails_without_a_home_directory() {
+    for args in [
+        &["repo", "list"][..],
+        &["prune-repo-paths"][..],
+        &["store", "import", "--from", "/nonexistent"][..],
+    ] {
+        let cwd = tempfile::tempdir().unwrap();
+        let out = without_a_home_directory(cwd.path(), args);
+        assert!(!out.status.success(), "{args:?} must fail");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("HOME"),
+            "{args:?} names the cause: {stderr}"
+        );
+        assert!(
+            std::fs::read_dir(cwd.path()).unwrap().next().is_none(),
+            "{args:?} must write nothing under the working directory"
+        );
+    }
+}
+
+/// startup.allium: the decorator resolves no data directory, so with no usable
+/// home directory it still publishes where it was told and exits 0
+/// (observability.allium: AlwaysSucceeds).
+#[test]
+fn statusline_still_succeeds_without_a_home_directory() {
+    let cwd = tempfile::tempdir().unwrap();
+    let snapshot = cwd.path().join("elsewhere").join("rate-limits.json");
+    std::fs::create_dir(snapshot.parent().unwrap()).unwrap();
+    let mut child = binary()
+        .current_dir(cwd.path())
+        .env("HOME", "")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("DISPATCH_DATA_DIR")
+        .args(["statusline", "--snapshot", snapshot.to_str().unwrap()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(STATUS_PAYLOAD)
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert!(snapshot.exists());
+    assert!(!cwd.path().join(".local").exists());
+}
+
+/// A hook never reads the data directory, so it parses and runs with no usable
+/// home directory; here it fails only to reach a board, never over the home.
+#[test]
+fn a_hook_does_not_need_a_home_directory() {
+    let cwd = tempfile::tempdir().unwrap();
+    let out = without_a_home_directory(cwd.path(), &["hook", "1", "stop", "--port", "1"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("HOME"), "{stderr}");
+    assert!(std::fs::read_dir(cwd.path()).unwrap().next().is_none());
+}

@@ -15,13 +15,13 @@ use dispatch_tui::{dispatch, runtime, startup};
 #[command(version)]
 struct Cli {
     /// Directory holding this install's own files (host.json, app.log, store records)
-    #[arg(
-        long,
-        env = "DISPATCH_DATA_DIR",
-        default_value_os_t = default_data_dir(),
-        global = true
-    )]
-    data_dir: PathBuf,
+    ///
+    /// Defaults to `$XDG_DATA_HOME/dispatch`, else `~/.local/share/dispatch`.
+    /// The default is resolved by the command that needs it, not here: with no
+    /// usable home directory only those commands fail. See
+    /// docs/specs/storage.allium: DataDirectory.
+    #[arg(long, env = "DISPATCH_DATA_DIR", global = true)]
+    data_dir: Option<PathBuf>,
 
     /// Shared store the board lives in, e.g. http://127.0.0.1:3000.
     ///
@@ -318,8 +318,21 @@ enum SpacetimeAction {
 /// with rather than whether it errors at all.
 const BLOCK_TOOL_CALL: i32 = 2;
 
-fn default_data_dir() -> PathBuf {
-    dispatch_tui::default_data_dir()
+/// Whether this subcommand reads the data directory. The ones that do not must
+/// still run with no usable home directory (the decorator and the hooks must
+/// not fail, and `verify-feed` and `caller-headers` have no use for it), so the
+/// default is never resolved for them. `toggle-agent-tree-pane` wants it only
+/// for its log. See docs/specs/startup.allium:
+/// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
+fn needs_data_dir(command: &Commands) -> bool {
+    !is_hook(command)
+        && !matches!(
+            command,
+            Commands::Statusline { .. }
+                | Commands::CallerHeaders
+                | Commands::VerifyFeed { .. }
+                | Commands::ToggleAgentTreePane { .. }
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -753,8 +766,11 @@ async fn cmd_plan(
 /// detached via the global keybinding's `run-shell -b`, so a failure has
 /// nowhere useful to surface — it's logged to app.log and swallowed rather
 /// than returned, matching `spawn_agent_tree_pane`'s own best-effort stance.
-fn cmd_toggle_agent_tree_pane(data_dir: &std::path::Path, window: String) -> Result<()> {
-    let _ = init_app_log_subscriber(data_dir);
+fn cmd_toggle_agent_tree_pane(data_dir: Option<&std::path::Path>, window: String) -> Result<()> {
+    // Never fails, so with no data directory it runs without its log.
+    if let Some(data_dir) = data_dir {
+        let _ = init_app_log_subscriber(data_dir);
+    }
     // tmux substitutes `#{window_name}` into the keybinding, so this is the
     // border where an arbitrary argv string becomes a window name. A value that
     // is not one (empty, or a pane id) has no window to toggle a pane in.
@@ -797,6 +813,19 @@ fn cmd_toggle_agent_tree_pane(data_dir: &std::path::Path, window: String) -> Res
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // The one place the data directory's default is resolved: a command that
+    // needs it fails here, before it enters tmux or writes anything, and one
+    // that does not never asks.
+    let resolved = cli
+        .data_dir
+        .clone()
+        .map_or_else(dispatch_tui::default_data_dir, Ok);
+    let data_dir = if needs_data_dir(&cli.command) {
+        Some(resolved?)
+    } else {
+        resolved.ok()
+    };
+
     // The board needs a tmux session, so supply one before anything else runs:
     // no runtime, no database, no log file. On this path the process is
     // replaced outright, and every one of those would be work done on behalf of
@@ -824,10 +853,10 @@ fn main() -> Result<()> {
         Commands::CallerHeaders => cmd_caller_headers(),
         Commands::VerifyFeed { command } => cmd_verify_feed(command),
         Commands::Uninstall { yes, purge } => {
-            dispatch_tui::setup::run_uninstall(yes, purge, &cli.data_dir)
+            dispatch_tui::setup::run_uninstall(yes, purge, &data_dir.unwrap_or_default())
         }
         Commands::ToggleAgentTreePane { window } => {
-            cmd_toggle_agent_tree_pane(&cli.data_dir, window)
+            cmd_toggle_agent_tree_pane(data_dir.as_deref(), window)
         }
         // One connect, one small request, one response — and the connection
         // task the client spawns is driven by this same `block_on` while the
@@ -837,7 +866,7 @@ fn main() -> Result<()> {
             .enable_time()
             .build()?
             .block_on(run_async(
-                &cli.data_dir,
+                &data_dir.unwrap_or_default(),
                 cli.spacetime_server.clone(),
                 command,
             )),
@@ -846,7 +875,7 @@ fn main() -> Result<()> {
                 .enable_all()
                 .build()?;
             let result = runtime.block_on(run_async(
-                &cli.data_dir,
+                &data_dir.unwrap_or_default(),
                 cli.spacetime_server.clone(),
                 command,
             ));
@@ -975,7 +1004,7 @@ mod tests {
     #[test]
     fn the_data_dir_is_accepted_after_the_subcommand() {
         let cli = parse(&["caller-headers", "--data-dir", "/tmp/elsewhere"]);
-        assert_eq!(cli.data_dir, PathBuf::from("/tmp/elsewhere"));
+        assert_eq!(cli.data_dir, Some(PathBuf::from("/tmp/elsewhere")));
     }
 
     #[test]

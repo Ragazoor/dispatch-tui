@@ -831,6 +831,9 @@ mod bootstrap {
             claude_dir: dir.path().join("claude"),
             claude_json_path: dir.path().join(".claude.json"),
             tmux_conf_path: dir.path().join(".tmux.conf"),
+            budget_snapshot_path: std::path::PathBuf::from(
+                "/nonexistent-test-path/rate-limits.json",
+            ),
         };
         // The host file `--db`'s directory holds, already named.
         crate::host_file::resolve_for_launch(dir.path()).unwrap();

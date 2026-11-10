@@ -85,11 +85,12 @@ fn canonical_or_raw(path: &str) -> String {
 }
 
 /// Where a bare `spacetime start` keeps its data.
-fn default_spacetime_data_dir() -> PathBuf {
-    crate::default_data_dir()
+fn default_spacetime_data_dir() -> Result<PathBuf> {
+    let data_dir = crate::default_data_dir()?;
+    Ok(data_dir
         .parent()
         .map(|base| base.join("spacetime").join("data"))
-        .unwrap_or_else(|| PathBuf::from("spacetime/data"))
+        .unwrap_or_else(|| PathBuf::from("spacetime/data")))
 }
 
 fn running_command_lines() -> Vec<String> {
@@ -180,7 +181,7 @@ async fn read_data_dir_with(
     }
     let absolute = std::fs::canonicalize(data_dir)?;
     let lines = tokio::task::spawn_blocking(running_command_lines).await?;
-    if data_dir_in_use(&absolute, &lines, &default_spacetime_data_dir()) {
+    if data_dir_in_use(&absolute, &lines, &default_spacetime_data_dir()?) {
         bail!(
             "a store is running over {}. Copying a folder a store is writing can capture it \
              half-written; name that store's address instead, e.g. `--from http://127.0.0.1:3001`.",
@@ -336,7 +337,7 @@ pub async fn import_store(
             if !crate::spacetime::managed_store::spacetime_cli_on_path() {
                 bail!("the `spacetime` CLI is not on PATH; install it first");
             }
-            let store_data_dir = crate::default_data_dir().join("spacetime");
+            let store_data_dir = crate::default_data_dir()?.join("spacetime");
             let log_dir = data_dir.to_path_buf();
             let managed = Arc::new(ManagedStore::for_launch(store_data_dir, &log_dir));
             let m = managed.clone();

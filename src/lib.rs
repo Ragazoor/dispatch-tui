@@ -44,33 +44,48 @@ pub mod tmux;
 pub mod tui;
 pub mod worktree_admin;
 
-pub fn default_data_dir() -> std::path::PathBuf {
+/// A `$HOME` *value* that names a home directory: non-empty and absolute.
+///
+/// The one test every reader of `$HOME` applies. An empty or relative value
+/// composes into a path under whatever directory the process was started from,
+/// which is not the operator's anything — see docs/specs/startup.allium:
+/// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
+pub(crate) fn usable_home(home: Option<&str>) -> Option<&str> {
+    home.filter(|home| std::path::Path::new(home).is_absolute())
+}
+
+/// `storage.allium: DataDirectory`'s default, or an error naming the home
+/// directory when there is none. Resolve it at the edge of a command that
+/// needs it and pass the result inward.
+pub fn default_data_dir() -> anyhow::Result<std::path::PathBuf> {
     data_dir_from(
         std::env::var_os("XDG_DATA_HOME"),
         std::env::var("HOME").ok(),
     )
+    .ok_or_else(|| {
+        anyhow::anyhow!(
+            "$HOME is not set to an absolute path, so there is no default data \
+             directory; set $HOME or pass --data-dir"
+        )
+    })
 }
 
 /// `storage.allium: DataDirectory`'s default, from `$XDG_DATA_HOME` and
 /// `$HOME`. A relative `$XDG_DATA_HOME` (empty included) is ignored, as the XDG
-/// Base Directory spec says, and an empty `$HOME` takes the same fallback as an
-/// absent one: either would otherwise resolve against whatever directory the
-/// process was started from. See `crate::setup::home_dir`.
+/// Base Directory spec says, and an unusable `$HOME` ([`usable_home`]) leaves
+/// no default at all rather than one under the working directory.
 fn data_dir_from(
     xdg_data_home: Option<std::ffi::OsString>,
     home: Option<String>,
-) -> std::path::PathBuf {
+) -> Option<std::path::PathBuf> {
     let base = xdg_data_home
         .map(std::path::PathBuf::from)
         .filter(|xdg| xdg.is_absolute())
-        .unwrap_or_else(|| {
-            let home = home
-                .filter(|home| !home.is_empty())
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            home.join(".local").join("share")
-        });
-    base.join("dispatch")
+        .or_else(|| {
+            usable_home(home.as_deref())
+                .map(|home| std::path::Path::new(home).join(".local").join("share"))
+        })?;
+    Some(base.join("dispatch"))
 }
 
 /// The one budget-snapshot location on this machine.
@@ -79,9 +94,10 @@ fn data_dir_from(
 /// windows it holds are account-global, so publisher and reader must agree on a
 /// single location that does not vary with the data directory the current
 /// process was started with — see `docs/specs/observability.allium`:
-/// `SnapshotLocationIsFixedPerMachine`.
-pub(crate) fn budget_snapshot_path() -> std::path::PathBuf {
-    default_data_dir().join(crate::setup::statusline::RATE_LIMITS_FILE_NAME)
+/// `SnapshotLocationIsFixedPerMachine`. Resolved once, in
+/// `runtime::StartupPaths::resolve`.
+pub(crate) fn budget_snapshot_path() -> anyhow::Result<std::path::PathBuf> {
+    Ok(default_data_dir()?.join(crate::setup::statusline::RATE_LIMITS_FILE_NAME))
 }
 
 #[cfg(test)]
@@ -97,7 +113,7 @@ mod default_data_dir_tests {
     fn xdg_data_home_wins_when_set() {
         assert_eq!(
             data_dir_from(Some(OsString::from("/xdg")), Some("/home/u".into())),
-            PathBuf::from("/xdg/dispatch")
+            Some(PathBuf::from("/xdg/dispatch"))
         );
     }
 
@@ -107,7 +123,7 @@ mod default_data_dir_tests {
     fn an_empty_xdg_data_home_falls_back_to_home() {
         assert_eq!(
             data_dir_from(Some(OsString::new()), Some("/home/u".into())),
-            PathBuf::from("/home/u/.local/share/dispatch")
+            Some(PathBuf::from("/home/u/.local/share/dispatch"))
         );
     }
 
@@ -116,15 +132,29 @@ mod default_data_dir_tests {
     fn a_relative_xdg_data_home_falls_back_to_home() {
         assert_eq!(
             data_dir_from(Some(OsString::from("rel")), Some("/home/u".into())),
-            PathBuf::from("/home/u/.local/share/dispatch")
+            Some(PathBuf::from("/home/u/.local/share/dispatch"))
         );
     }
 
+    /// storage.allium: DataDirectory — with neither variable usable there is no
+    /// default, not one under the working directory.
     #[test]
-    fn an_empty_home_falls_back_to_the_current_directory() {
+    fn an_unusable_home_leaves_no_default() {
+        for home in [None, Some(""), Some("rel/home"), Some(".")] {
+            assert_eq!(
+                data_dir_from(None, home.map(String::from)),
+                None,
+                "home {home:?}"
+            );
+        }
+    }
+
+    /// A usable `$XDG_DATA_HOME` needs no home directory at all.
+    #[test]
+    fn xdg_data_home_needs_no_home() {
         assert_eq!(
-            data_dir_from(None, Some(String::new())),
-            PathBuf::from("./.local/share/dispatch")
+            data_dir_from(Some(OsString::from("/xdg")), None),
+            Some(PathBuf::from("/xdg/dispatch"))
         );
     }
 }
@@ -137,12 +167,15 @@ mod budget_snapshot_path_tests {
     /// nothing.
     #[test]
     fn sits_beside_the_default_database() {
-        let path = super::budget_snapshot_path();
+        let path = super::budget_snapshot_path().expect("the test environment has a home");
 
         assert_eq!(
             path.file_name(),
             Some(std::ffi::OsStr::new("rate-limits.json"))
         );
-        assert_eq!(path.parent(), Some(super::default_data_dir().as_path()));
+        assert_eq!(
+            path.parent(),
+            Some(super::default_data_dir().expect("a home").as_path())
+        );
     }
 }

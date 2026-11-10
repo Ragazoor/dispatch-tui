@@ -23,7 +23,7 @@
 /// `std::env::set_var` is `unsafe` in edition 2024 and races the test
 /// harness's threads regardless (see `crate::editor::resolve_editor`).
 pub fn expand_tilde_with_home(path: &str, home: Option<&str>) -> String {
-    let home = home.filter(|home| !home.is_empty());
+    let home = crate::usable_home(home);
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = home {
             return format!("{home}/{rest}");

@@ -2683,6 +2683,25 @@ surface OperatorConfigurationLocations {
         -- none it would land under the working directory with the board's
         -- log in it; checking first means an unusable home stops the launch
         -- before that directory exists.
+        --
+        -- Usable means non-empty and absolute. A relative home directory
+        -- composes a path under the working directory just as an absent one
+        -- does, so it is unavailable too, and every reader of the home
+        -- directory applies this one test: the locations above, tilde
+        -- expansion and the default data directory. They cannot disagree
+        -- about whether the home directory is there.
+        --
+        -- The commands other than the board launch follow the same rule, per
+        -- command (cli.allium: DispatchCommandLine). One that needs the
+        -- default data directory (`store import`, `repo`, `prune-repo-paths`,
+        -- `plan`, `agent-tree`, `agent-diff`, `uninstall`) fails naming the
+        -- home directory before it reads or writes anything. `statusline`,
+        -- `caller-headers`, the hooks and `verify-feed` never resolve it:
+        -- the decorator is handed the snapshot's location in its arguments
+        -- (observability.allium: SnapshotLocationIsFixedPerMachine), so it
+        -- still exits 0 with no usable home directory.
+        -- `toggle-agent-tree-pane` never fails, so with no data directory it
+        -- runs without its log.
 
     @guarantee SpawnSitesAndStartupNameTheSameConfigurationDirectory
         -- The decorator's settings file and the plugin directory each have

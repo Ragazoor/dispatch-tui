@@ -210,6 +210,10 @@ fn expand_tilde_leaves_the_path_alone_when_there_is_no_home_directory() {
         assert_eq!(expand_tilde_with_home("~/repo", absent), "~/repo");
         assert_eq!(expand_tilde_with_home("~", absent), "~");
     }
+    // A relative home is as unavailable as an empty one: expanding against it
+    // would compose a path under the working directory.
+    assert_eq!(expand_tilde_with_home("~/repo", Some("rel")), "~/repo");
+    assert_eq!(expand_tilde_with_home("~", Some("rel")), "~");
     assert_eq!(expand_tilde_with_home("~/repo", Some("/h")), "/h/repo");
     assert_eq!(expand_tilde_with_home("~", Some("/h")), "/h");
 }
