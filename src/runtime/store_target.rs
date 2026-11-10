@@ -150,12 +150,9 @@ pub(super) fn clean_up_on_termination(
             _ = hangup.recv() => {}
             _ = terminate.recv() => {}
         }
-        if let Some(store) = store {
-            let _ = tokio::task::spawn_blocking(move || store.stop_on_exit()).await;
-        }
-        if let Some(data_dir) = record_db {
-            crate::startup::forget_store_server(&data_dir);
-        }
+        // First, before the store's stop can take its timeout: a retiring
+        // launch waits only so long for this board to go, and must not bind
+        // its keys before this board has unbound its own.
         let _ = tokio::task::spawn_blocking(move || {
             super::unbind_keys_on_termination(
                 &keys_bound,
@@ -163,6 +160,12 @@ pub(super) fn clean_up_on_termination(
             )
         })
         .await;
+        if let Some(store) = store {
+            let _ = tokio::task::spawn_blocking(move || store.stop_on_exit()).await;
+        }
+        if let Some(data_dir) = record_db {
+            crate::startup::forget_store_server(&data_dir);
+        }
         let _ = disable_raw_mode();
         std::process::exit(0);
     });
