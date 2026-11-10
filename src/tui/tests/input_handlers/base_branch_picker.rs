@@ -31,6 +31,26 @@ fn submit_repo_path_prefills_base_branch_from_history() {
     assert!(cmds.is_empty());
 }
 
+/// A path typed with `~` is kept expanded on the draft, so the prefill lookup
+/// and the saves use the key its history is stored under (RecordRepoPath).
+#[test]
+fn submit_repo_path_keeps_the_expanded_path_and_finds_its_history() {
+    let home = std::env::var("HOME").unwrap();
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches =
+        std::collections::HashMap::from([(home.clone(), vec!["develop".to_string()])]);
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitRepoPath("~".to_string()),
+    ));
+    assert_eq!(app.input.task_draft.as_ref().unwrap().repo_path, home);
+    assert_eq!(app.input.buffer, "develop");
+}
+
 #[test]
 fn submit_repo_path_no_history_falls_back_to_default() {
     let mut app = App::new(vec![]);
