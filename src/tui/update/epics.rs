@@ -22,14 +22,19 @@ impl App {
     }
 
     /// `tasks.allium: SeeTaskByLandingOnIt`: the task card under the cursor
-    /// stops being unseen. Run after every key, so every way a key brings a
-    /// card under the cursor (a move, an epic opening, a view left) counts.
-    /// Never run after a data refresh: the operator may not be looking.
+    /// stops being unseen. Called after every key (`handle_key`), so every
+    /// way a key brings a card under the cursor (a move, an epic opening, a
+    /// view left) counts — but only when the key leaves the plain board
+    /// showing: a key in an overlay, a prompt or another screen sees nothing.
+    /// Never called after a data refresh (`update`), because the operator may
+    /// not be looking (task #99089).
     /// Dropped locally at once so the mark does not outlive the frame, and
     /// sent to the store, which clears it for this person everywhere. An epic
     /// card under the cursor clears nothing: its mark is derived.
     pub(in crate::tui) fn see_selected_task(&mut self) -> Vec<Command> {
-        if self.board.unseen_tasks.is_empty() {
+        if self.board.unseen_tasks.is_empty()
+            || self.key_namespace() != crate::keybindings::KeyNamespace::BoardNormal
+        {
             return vec![];
         }
         let Some(ColumnAnchor::Task(id)) = self.anchor_under_cursor() else {

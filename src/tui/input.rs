@@ -102,13 +102,7 @@ impl App {
         // without a 'c' keypress. Remove once root-caused.
         tracing::debug!(code = ?key.code, modifiers = ?key.modifiers, mode = ?self.input.mode, "handle_key");
         let mut cmds = self.dispatch_key(key);
-        // `tasks.allium: SeeTaskByLandingOnIt`: a key that leaves the plain
-        // board showing means the operator is looking at it, so the task card
-        // under the cursor is seen. A key in an overlay, a prompt or another
-        // screen sees nothing, and neither does a data refresh (task #99089).
-        if self.key_namespace() == crate::keybindings::KeyNamespace::BoardNormal {
-            cmds.extend(self.see_selected_task());
-        }
+        cmds.extend(self.see_selected_task());
         cmds.extend(self.respawn_split_pane_if_pinned_window_gone());
 
         self.dirty = true;

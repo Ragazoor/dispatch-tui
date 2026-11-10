@@ -890,9 +890,7 @@ impl App {
     /// The routing match lives in `dispatcher.rs`; this method is a thin
     /// delegate so adding a `Message` variant is a two-file edit.
     ///
-    /// Data refreshes come through here too, so this never marks the card
-    /// under the cursor seen: only a key does (`handle_key`,
-    /// `tasks.allium: SeeTaskByLandingOnIt`).
+    /// Never marks the card under the cursor seen; see `see_selected_task`.
     pub fn update(&mut self, msg: Message) -> Vec<Command> {
         let mut cmds = dispatcher::dispatch(self, msg);
         cmds.extend(self.respawn_split_pane_if_pinned_window_gone());

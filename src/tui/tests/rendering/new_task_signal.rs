@@ -139,6 +139,15 @@ fn any_mark_seen_sent(cmds: &[crate::tui::types::Command]) -> bool {
     })
 }
 
+/// One backlog task under the cursor, which a refresh then marked unseen.
+fn app_with_one_task_a_refresh_marked_unseen() -> App {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::UnseenRefreshed(vec![TaskId(1)]),
+    ));
+    app
+}
+
 /// Epic `10` holding two backlog tasks, `2` and `3`, both unseen.
 fn app_with_two_new_tasks_in_one_epic() -> App {
     let mut app = App::new(vec![]);
@@ -218,10 +227,7 @@ async fn a_refresh_that_slides_an_unseen_task_under_the_cursor_keeps_it() {
 
 #[tokio::test]
 async fn a_key_with_the_cursor_on_an_unseen_task_clears_it() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::UnseenRefreshed(vec![TaskId(1)]),
-    ));
+    let mut app = app_with_one_task_a_refresh_marked_unseen();
 
     // `[` on the only card does not move the cursor; the operator is at the
     // board all the same.
@@ -233,10 +239,7 @@ async fn a_key_with_the_cursor_on_an_unseen_task_clears_it() {
 
 #[tokio::test]
 async fn a_key_in_an_overlay_sees_nothing() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::UnseenRefreshed(vec![TaskId(1)]),
-    ));
+    let mut app = app_with_one_task_a_refresh_marked_unseen();
     app.input.mode = InputMode::Help;
 
     let cmds = app.handle_key(make_key(KeyCode::Char('j')));
