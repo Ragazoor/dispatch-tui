@@ -611,9 +611,12 @@ async fn cmd_spacetime(action: SpacetimeAction) -> Result<()> {
             database,
             server,
         } => {
+            let label = store_label(&database, server.as_deref());
             let store = spacetime_store(database, server);
             let snapshot = store.dump().await?;
             write_snapshot(&out, &snapshot)?;
+            // On stderr: with `-o -` stdout is the snapshot itself.
+            eprintln!("Dumped {label}.");
         }
         SpacetimeAction::Restore {
             file,
@@ -628,6 +631,7 @@ async fn cmd_spacetime(action: SpacetimeAction) -> Result<()> {
             };
             let snapshot: spacetime::Snapshot =
                 serde_json::from_str(&text).context("Failed to parse the snapshot")?;
+            let label = store_label(&database, server.as_deref());
             let store = spacetime_store(database, server);
 
             spacetime::restore(&store, &snapshot)
@@ -638,7 +642,7 @@ async fn cmd_spacetime(action: SpacetimeAction) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
             println!(
-                "Restored {} rows across {} tables.",
+                "Restored {} rows across {} tables into {label}.",
                 snapshot
                     .extracts()
                     .iter()
@@ -649,6 +653,17 @@ async fn cmd_spacetime(action: SpacetimeAction) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Which store a snapshot command touched, for its report
+/// (`spacetime-snapshot.allium`: EveryCommandSaysWhichStoreItTouched). With no
+/// `--server` the `spacetime` CLI picks its own default, so the label says so
+/// rather than leaving the operator to infer it.
+fn store_label(database: &str, server: Option<&str>) -> String {
+    match server {
+        Some(server) => format!("database {database} on {server}"),
+        None => format!("database {database} on the spacetime CLI's default server"),
+    }
 }
 
 fn spacetime_store(
@@ -1023,6 +1038,20 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777;
         assert_eq!(mode, 0o600);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    /// EveryCommandSaysWhichStoreItTouched (spacetime-snapshot.allium): the
+    /// label names the server, and says so when it is the CLI's own default.
+    #[test]
+    fn the_store_label_names_the_server_or_the_cli_default() {
+        assert_eq!(
+            store_label("dispatch", Some("http://127.0.0.1:3001")),
+            "database dispatch on http://127.0.0.1:3001"
+        );
+        assert_eq!(
+            store_label("dispatch", None),
+            "database dispatch on the spacetime CLI's default server"
+        );
     }
 
     #[tokio::test]

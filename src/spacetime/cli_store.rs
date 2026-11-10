@@ -27,7 +27,16 @@ use std::sync::{Arc, Mutex};
 use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
 use super::snapshot::{Row, SharedTable};
-use super::snapshot_target::SnapshotTarget;
+use super::snapshot_target::{row_key, SnapshotTarget};
+
+/// Put a dumped table's rows in key order: id order for a table with a
+/// generated id, and its key's order for one without (a host, a setting, a
+/// subagent pair). Every table gets a fixed order, so two dumps of an
+/// unchanged store are the same file (`spacetime-snapshot.allium`:
+/// SnapshotValuesAreStoreNeutral).
+pub(super) fn order_rows(table: SharedTable, rows: &mut [Row]) {
+    rows.sort_by_cached_key(|row| row_key(table, row));
+}
 
 /// How many bytes of encoded rows travel in one `spacetime call`.
 ///
@@ -375,9 +384,7 @@ impl SnapshotTarget for SpacetimeCliStore {
         // outright ("Unsupported: SELECT * FROM tasks ORDER BY id"), so the
         // ordering that makes two dumps of an unchanged database comparable —
         // and a diff between two backups readable — has to happen client-side.
-        if let Some(column) = table.id_column() {
-            rows.sort_by_key(|row| row.get(column).and_then(serde_json::Value::as_i64));
-        }
+        order_rows(table, &mut rows);
         // The inverse of the encode above: a sentinel read back out is the
         // absence it stands for. Without this a dump from the shared store
         // would differ from a dump of the same board from SQLite on every

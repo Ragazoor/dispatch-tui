@@ -294,9 +294,8 @@ impl SharedTable {
     /// and are wrong. The defence is that this list has exactly two consumers
     /// and they are the two ends of one conversion, both in
     /// `src/spacetime/cli_store.rs` — the encode on the way in and the decode
-    /// on the way out — plus the parity test in
-    /// `src/spacetime/tests/module_schema.rs`, which reads it to know which
-    /// non-optional module columns are deliberately so.
+    /// on the way out. Only tests read it otherwise (the sentinel encode test
+    /// in `src/sync/tests/encode.rs` and `snapshot_edges.rs`).
     pub fn sentinel_columns(self) -> &'static [(&'static str, Sentinel)] {
         use Sentinel::{EmptyString as S, Zero as Z};
         match self {

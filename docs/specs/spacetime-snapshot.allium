@@ -52,7 +52,7 @@ use "./startup.allium" as startup
 -- keeps non-optional although the domain treats them as absent-able.
 enum Sentinel {
     empty_string -- paths, timestamps, urls, tags, identities, labels
-    | zero       -- id references, and epics.feed_interval_secs
+    | zero       -- id references, epics.feed_interval_secs, and the dead tasks.live_shells count
 }
 
 -- The operator commands that read or write a whole store's shared tables, and
@@ -68,7 +68,7 @@ enum StoreCommand {
 enum StoreTarget {
     named_store          -- the store named by --spacetime-server or DISPATCH_SPACETIME_SERVER
     | named_by_flag      -- the store named by the command's own --server flag
-    | managed_store      -- the managed store, brought up for the command and stopped after it
+    | managed_store      -- the managed store, brought up for the command; stopped after it if the command started it
     | cli_default_server -- whatever server the operator's `spacetime` CLI is configured for
 }
 
@@ -98,8 +98,9 @@ entity StoreSelection {
     server_flag: String?   -- the command's own --server, where it has one
     target: StoreTarget
 
-    -- Bringing the managed store up is what makes a command responsible for
-    -- stopping it. Only two commands ever do (see the selection rules).
+    -- Only two commands ever bring the managed store up (see the selection
+    -- rules). The board stops it on exit whether it started or adopted it;
+    -- an import stops only a store it started.
     brings_up_managed_store: target = managed_store
 }
 
@@ -382,6 +383,11 @@ rule StopTheManagedStoreAtMostOnce {
         -- StartTheManagedStoreWhenNothingAnswers, stop_spawned_store), never
         -- the port. That stop counts against the same once-only guard, so a
         -- later exit does not signal the port either.
+        --
+        -- NOT THE HEALTH RESTART. startup.allium's
+        -- RestartTheManagedStoreWhenItStopsSaving stops and restarts a store
+        -- that can no longer save, outside this guard, and is not a stop
+        -- request. It does nothing once this rule has fired.
 }
 
 ------------------------------------------------------------
@@ -421,18 +427,18 @@ invariant SortOrderHasNoSentinel {
 -- an id that round-trips as 4096.0 compares unequal to 4096 while looking
 -- right in a diff. A byte vector is an array of byte values, the shape the
 -- store's own query output uses. Absence is null, never a sentinel. Rows are
--- in id order and the file is pretty-printed, so two backups diff line by
--- line. A value with no faithful representation — a non-finite float, a
--- boolean column holding anything but 0, 1 or null — is refused, never
--- written under a different name. Consequence: a dump of a store and a dump
--- of another store it was restored into are the same file, modulo taken_at. Not expressible as a state assertion: it relates the outputs of
+-- in key order (id order where the table generates ids) and the file is
+-- pretty-printed, so two backups diff line by line. A wire shape this side
+-- does not recognise is refused (DumpAStore). Consequence: a dump of a store
+-- and a dump of another store it was restored into are the same file, modulo
+-- taken_at. Not expressible as a state assertion: it relates the outputs of
 -- two different readers.
 
 -- SentinelsNeverReachTheSnapshot: a SentinelColumn's sentinel exists only
 -- inside the store. The write boundary turns absence into it and the read
 -- boundary turns it back into absence, and nothing else in the system
--- consumes the sentinel list but those two ends of one conversion (plus the
--- schema parity test that reads it). A reader that skipped the mapping would
+-- consumes the sentinel list but those two ends of one conversion
+-- (SentinelTranslation; only tests read it otherwise). A reader that skipped the mapping would
 -- see epic_id 0 as "belongs to epic 0" and owner "" as "owned by the empty
 -- person"; both look plausible and are wrong.
 --
@@ -443,7 +449,9 @@ invariant SortOrderHasNoSentinel {
 -- unreachable as a real one standing for absence: zero for id references
 -- (the store's own "no id supplied"; real ids start at 1) and for
 -- epics.feed_interval_secs (whose minimum is well above zero), the empty
--- string for everything else (host labels lean on host.allium: RenameHost
+-- string for everything else. The one exception is tasks.live_shells, a dead
+-- count whose zero is a real value; nothing writes it any more, so the
+-- overlap is harmless (host labels lean on host.allium: RenameHost
 -- refusing an empty label). Changing a column's type later is not
 -- automigratable, which is why the list covers more columns than are filtered
 -- on today. sort_order is deliberately excluded: zero is a real sort order and
@@ -451,8 +459,10 @@ invariant SortOrderHasNoSentinel {
 
 -- AStoreIsOnlyStartedForTheCommandsThatStopIt: of the commands above, only
 -- the board and an import with no store named ever start or adopt the managed
--- store, and both stop it on every exit they can run (startup.allium:
--- TheManagedStoreStopsWithItsBoard, ImportBringsUpTheManagedStore). A command
+-- store. The board stops it on every exit it can run (startup.allium:
+-- TheManagedStoreStopsWithItsBoard); an import stops a store it started and
+-- leaves an adopted one running, as it found it (startup.allium:
+-- ImportBringsUpTheManagedStore). A command
 -- that reaches the CLI's default server (dump-server, restore) never starts,
 -- publishes to or stops anything, so it can never leave a store behind.
 
@@ -479,8 +489,10 @@ surface SnapshotTargets {
         SelectStore(selection)
 
     @guarantee EveryCommandSaysWhichStoreItTouched
-        -- Each command reports the server it wrote to or read from: a
-        -- restore its row and table counts, an import its per-table imported / already-there / dropped counts.
+        -- Each command reports the server it wrote to or read from, and says
+        -- so when that is the `spacetime` CLI's default: a dump the database
+        -- it read, a restore its row and table counts, an import its
+        -- per-table imported / already-there / dropped counts.
         -- During an incident "which store did that just change" must not
         -- need to be inferred from flags and environment.
 

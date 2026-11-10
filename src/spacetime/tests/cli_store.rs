@@ -564,3 +564,31 @@ async fn a_config_path_is_passed_before_the_subcommand() {
     assert_eq!(calls[0].1[0], "--config-path=/tmp/instance/cli.toml");
     assert_eq!(calls[0].1[1], "sql");
 }
+
+/// A table with no generated id still comes out of a dump in a fixed order
+/// (its key's), so two dumps of an unchanged store are the same file
+/// (`spacetime-snapshot.allium`: SnapshotValuesAreStoreNeutral).
+#[test]
+fn rows_without_a_generated_id_are_ordered_by_their_key() {
+    let row = |task_id: i64, agent_id: &str| -> crate::spacetime::Row {
+        serde_json::from_value(serde_json::json!({"task_id": task_id, "agent_id": agent_id}))
+            .unwrap()
+    };
+    let mut rows = vec![row(10, "b"), row(2, "z"), row(10, "a")];
+
+    crate::spacetime::cli_store::order_rows(SharedTable::TaskSubagents, &mut rows);
+
+    let order: Vec<(i64, String)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r["task_id"].as_i64().unwrap(),
+                r["agent_id"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        order,
+        vec![(2, "z".into()), (10, "a".into()), (10, "b".into())]
+    );
+}
