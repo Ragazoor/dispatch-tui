@@ -56,11 +56,10 @@
 --           subject (`InstallShippedFeedScripts`); this spec governs only that
 --           it is reported in the drift report and gated on the same consent.
 --
--- Why this exists: getting started used to be three commands in a fixed order
--- that nothing stated — install, `dispatch setup`, start a tmux server, then
--- `dispatch tui`. Two of those are preconditions the board can satisfy for
--- itself, and the failure mode for each was an error message rather than an
--- action. This spec collapses the sequence to one command without making the
+-- Why this exists: getting started is one command. A configuration step and a
+-- tmux server are preconditions the board can satisfy for itself, and an
+-- error message naming one is worse than the action that satisfies it. This
+-- spec keeps the sequence to one command without making the
 -- board write to the operator's home directory behind their back: the tmux
 -- session is provided silently because it is dispatch's own, and configuration
 -- is only ever written after the operator says yes.
@@ -73,14 +72,14 @@
 -- session and calling it a launch is the one outcome the operator did not ask
 -- for — they typed the command that starts the board, so the board starts.
 --
--- The store followed the same arc (task #12296). Once it became mandatory the
--- getting-started sequence grew back to three commands — `spacetime start`,
--- `spacetime publish -p spacetime/module`, then `dispatch tui --spacetime-server
--- <url>` — each a precondition the board could satisfy for itself on a machine
--- where nobody named a store. It now does, on loopback only, and never for a
--- store the operator named: that one may be somebody else's.
+-- The store follows the same reasoning. Starting a store and publishing the
+-- module to it are preconditions the board can satisfy for itself on a
+-- machine where nobody named a store, so it does, on loopback only, and never
+-- for a store the operator named: that one may be somebody else's.
 
 use "./core.allium" as core
+use "./sync.allium" as sync
+use "./cli.allium" as cli
 
 ------------------------------------------------------------
 -- Value Types
@@ -425,10 +424,9 @@ contract ManagedStoreHost {
     -- The store the operator named on this launch: --spacetime-server, else
     -- DISPATCH_SPACETIME_SERVER, else null. A blank value is null too:
     -- `DISPATCH_SPACETIME_SERVER=` exported empty is the shell's way of saying
-    -- "unset". Null is not an error any more; it is what selects the managed
-    -- store.
+    -- "unset". Null is not an error; it is what selects the managed store.
     --
-    -- Never the address recorded beside the database (StoreAddressRecord).
+    -- Never the address recorded in the data directory (StoreAddressRecord).
     -- That record is what a board leaves behind for the short-lived commands
     -- run outside its session; a board that read it back would treat a store
     -- an earlier board once connected to as one the operator named on this
@@ -513,6 +511,11 @@ contract ManagedStoreHost {
     -- (two boards starting together), which is not this board's to stop.
     stop_spawned_store: () -> Boolean
 
+    -- Stop the managed store (stop_managed_store) and start it again
+    -- (start_managed_store). Null when the start succeeded; otherwise its
+    -- failure. A stop that runs out its timeout does not prevent the start.
+    restart_managed_store: () -> String?
+
     -- Whether the managed store's own log records, since this board took the
     -- store on (adopted it or started it), that it could not write its commit
     -- log (a full disk, say). A store in that state keeps its process and its
@@ -526,8 +529,8 @@ contract ManagedStoreHost {
         -- the pane, detaching tmux or the board's own window being retired
         -- does not deliver it a signal. Its lifetime is ended only by
         -- stop_managed_store, so a store that outlives a board is a store
-        -- whose board could not run its exit — see the open question on
-        -- uncatchable exits.
+        -- whose board could not run its exit — see
+        -- AnOrphanedManagedStoreIsAdoptedNotBounded.
 
     @invariant ReadyMeansServingNotListening
         -- start_managed_store reports success only once the store answers an
@@ -553,20 +556,17 @@ contract ManagedStoreHost {
         -- connected to on the default address — the operator's own store.
 
     @invariant StartupIsSmokeTestedAgainstARealStore
-        -- The suite runs the real composition root end to end against a real,
-        -- throwaway store (src/runtime/tests/startup_smoke.rs): once from a
-        -- fresh install (nothing listening: the managed store spawns
-        -- `spacetime start` itself, with a CLI config and JWT key pair of the
-        -- test's own, and the board's exit stops it), and once from a
-        -- committed store directory the previous module wrote
-        -- (tests/fixtures/previous-store/). After the upgrade, the same user sees exactly the same tasks and epics as
-        -- before it. A change that makes startup abort, or that hides a
-        -- user's existing rows, fails the suite rather than the operator's
-        -- next launch. Design:
-        -- docs/superpowers/specs/2026-10-26-startup-smoke-test-design.md.
+        -- Startup is exercised end to end against a real, throwaway store
+        -- (src/runtime/tests/startup_smoke.rs): once from a fresh install,
+        -- where the managed store is started and then stopped by the board's
+        -- exit, and once from a store the previous module wrote, where the
+        -- same user then sees exactly the same tasks and epics as before the
+        -- upgrade. A change that makes startup abort, or that hides a user's
+        -- existing rows, fails the suite rather than the operator's next
+        -- launch.
 }
 
--- The record of which NAMED store the board on this database is using, kept
+-- The record of which NAMED store the board on this data directory is using, kept
 -- for the short-lived commands that are not started inside the board's own
 -- tmux session (cli.allium: CliCommandsReachTheStoreWithoutManagingIt). Stated
 -- as a contract because it is a file on disk, which can be unwritable,
@@ -586,23 +586,23 @@ contract StoreAddressRecord {
     -- is not a failure.
     forget_store_server: () -> Boolean
 
-    @invariant TheRecordBelongsToItsDatabase
-        -- The record sits in the same folder as the database file the board
-        -- was started with, so a board on a throwaway --data-dir records nothing
-        -- next to the operator's real one, and a command run with that same
+    @invariant TheRecordBelongsToItsDataDirectory
+        -- The record is a file in the data directory the board was started
+        -- with (--data-dir), so a board on a throwaway --data-dir records
+        -- nothing in the operator's real one, and a command run with that same
         -- --data-dir finds the throwaway board's store and no other.
 
     @invariant TheRecordIsLocal
-        -- The record is this install's own configuration, like the database
-        -- file beside it — one of the things that stays local (sync.allium:
+        -- The record is this install's own configuration, like the host file
+        -- beside it — one of the things that stays local (sync.allium:
         -- BoardWritesThroughTheStore). It is never a shared row: which store a
         -- machine's board is using is not something a teammate's board may
         -- tell it.
 }
 
 -- Which store DATABASE this install's boards have been using, so a launch
--- that reaches a different one is stopped before it writes anything there
--- (task #28710). Stated as a contract because one half is a file on disk and
+-- that reaches a different one is stopped before it writes anything there.
+-- Stated as a contract because one half is a file on disk and
 -- the other is a question asked of the store over the network, and either can
 -- fail to answer.
 contract StoreIdentityPin {
@@ -612,7 +612,7 @@ contract StoreIdentityPin {
     -- has no such database, or (https:// only) its certificate is not one the
     -- board trusts. An http:// store is asked over plain HTTP and an https://
     -- store over TLS, so the address scheme does not decide whether a store is
-    -- checked (task #28722).
+    -- checked.
     --
     -- THE DATABASE'S OWN IDENTITY, NOT THE ADDRESS. The address says where a
     -- store listens, not which data it holds: two stores over two data
@@ -634,10 +634,10 @@ contract StoreIdentityPin {
     -- have seen that the store holds a different database and mean to use it.
     store_switch_accepted: () -> Boolean
 
-    @invariant ThePinBelongsToItsDatabase
-        -- The record sits in the same folder as the database file the board
-        -- was started with, like StoreAddressRecord, so a board on a
-        -- throwaway --data-dir pins nothing next to the operator's real one.
+    @invariant ThePinBelongsToItsDataDirectory
+        -- The pin is a file in the data directory the board was started
+        -- with, like StoreAddressRecord, so a board on a throwaway --data-dir
+        -- pins nothing in the operator's real one.
 
     @invariant ThePinIsLocal
         -- The record is this install's own, never a shared row: which
@@ -675,7 +675,8 @@ enum ConfigArtefact {
 }
 
 -- How the drift check ended. Every value is non-fatal: the board draws after
--- all four.
+-- all four. The checker reports it unused: its only uses are literals of
+-- StartupConfigResolved's outcome parameter, which it does not credit.
 enum StartupConfigOutcome {
     already_current   -- nothing was out of date; nothing was said
     | updated         -- the operator agreed and the artefacts were written
@@ -685,6 +686,8 @@ enum StartupConfigOutcome {
 
 -- Why the command could not put itself inside a tmux session. Both are fatal —
 -- unlike configuration drift, the board genuinely cannot run without one.
+-- The checker reports it unused: its only use is as a contract return type,
+-- which it does not credit.
 enum SessionLaunchFailure {
     tmux_unavailable  -- no tmux on PATH
     | launch_rejected -- tmux was reached and refused to start or attach
@@ -692,7 +695,9 @@ enum SessionLaunchFailure {
 
 -- The three states retiring the board's window can leave a session in. Named
 -- apart because the launch that follows differs in each: one starts the
--- replacement board, one recreates the session, and one aborts.
+-- replacement board, one recreates the session, and one aborts. The checker
+-- reports it unused: its only uses are as a contract return type and as
+-- literals of BoardWindowRetired's outcome, neither of which it credits.
 enum RetireOutcome {
     session_ready          -- the session is there and holds no board window
     | session_discarded    -- the board's window was its last; tmux dropped the session
@@ -701,14 +706,17 @@ enum RetireOutcome {
 
 -- What answers on the managed store's address when the board looks. Three
 -- values because the board does three different things: adopts, starts, or
--- aborts.
+-- aborts. The checker reports it unused: its only use is as a contract return
+-- type, which it does not credit.
 enum ManagedAddressState {
     store_answering        -- a SpacetimeDB store answers HTTP there
     | nothing_listening    -- nothing accepts a connection there
     | held_by_something_else -- something accepts connections there and is not a store
 }
 
--- How publishing the embedded module to the managed store ended.
+-- How publishing the embedded module to the managed store ended. The checker
+-- reports it unused: its only use is as a contract return type, which it does
+-- not credit.
 enum ModulePublishOutcome {
     published                -- the store accepted it, migrating automatically where needed
     | needs_manual_migration -- the store would only accept it by deleting data
@@ -719,6 +727,8 @@ enum ModulePublishOutcome {
 -- failures above are carried through unchanged; the rest are the ways a
 -- launch can find the substrate it needs already taken, unusable, or — in the
 -- host's case — unnamed with nobody there to name it, or not readable at all.
+-- The checker reports it unused: its only uses are literals of
+-- StartupAborted's reason parameter, which it does not credit.
 enum StartupAbortReason {
     tmux_unavailable              -- no tmux on PATH
     | launch_rejected             -- tmux was reached and refused
@@ -748,13 +758,12 @@ enum BoardExitCause {
     | startup_aborted  -- the launch aborted before the board drew (StartupAborted)
 }
 
--- Why there is no longer a store_unconfigured. It was a launch that never said
--- where the store is, and its remedy — a flag or an environment variable, plus
--- two `spacetime` commands run by hand — was a precondition the board can
--- satisfy for itself. A launch that names no store now gets the managed one
--- (BringUpTheManagedStoreOnceTheHostIsNamed), so "unconfigured" is not a
--- failure any more; the reasons that replace it are the ways the managed store
--- itself can fail to come up.
+-- Why a launch that names no store is not a failure. Its remedy would be a
+-- flag or an environment variable, plus two `spacetime` commands run by hand
+-- — a precondition the board can satisfy for itself. A launch that names no
+-- store gets the managed one (BringUpTheManagedStoreOnceTheHostIsNamed); the
+-- reasons that stand in its place are the ways the managed store itself can
+-- fail to come up.
 --
 -- Why the managed store's failures are six values and not one. Each is
 -- repaired by a different act, and the operator reads this enum as a list of
@@ -1063,11 +1072,10 @@ rule StartFreshBoardInSurvivingSession {
         -- board in it, so the session is given a new window running this
         -- invocation's argv first, and only then attached to.
         --
-        -- Implementation: `tmux new-window -t <session> -n <board_window_name>
-        -- -- <argv>` followed by an exec'd `tmux attach`. The window is named
-        -- up front rather than left for the board to rename, so a board that
-        -- dies before it renames anything still leaves a window the next
-        -- launch can find and retire.
+        -- The window carries config.board_window_name from the moment it is
+        -- created, rather than being renamed by the board, so a board that
+        -- dies early still leaves a window the next launch can find and
+        -- retire.
 }
 
 rule ReportFreshBoardFailure {
@@ -1487,16 +1495,15 @@ rule AbortWhenTheManagedStoreHasNoCli {
     ensures: StartupAborted(reason: spacetime_cli_missing)
 
     @guidance
-        -- THE SHARED STORE IS MANDATORY (Phase 12 of the SpacetimeDB migration,
-        -- task #4916), and a launch that names none gets the managed one
+        -- THE SHARED STORE IS MANDATORY, and a launch that names none gets
+        -- the managed one
         -- (BringUpTheManagedStoreOnceTheHostIsNamed). Running it needs the
         -- `spacetime` CLI — to start the store and publish to it —
         -- so a launch without one cannot succeed, and says so with an install
         -- hint rather than failing later with a subprocess error.
         --
         -- CHECKED FIRST, on the operator's own terminal, before a tmux session
-        -- is supplied or anything else is asked — the position the retired
-        -- store_unconfigured check held, for the same reason. It needs nothing
+        -- is supplied or anything else is asked. It needs nothing
         -- but the command line, the environment and PATH, and every later step
         -- would be work done for a launch that cannot succeed. The started
         -- board repeats it, harmlessly: LaunchBoard is every process's first
@@ -1521,7 +1528,6 @@ rule ConnectToTheNamedStoreOnceTheHostIsNamed {
         -- reported through the first connection's failure (store_unavailable,
         -- with the reason attached), never fixed by publishing over it.
         --
-
         -- THE FIRST CONNECTION IS PART OF STARTING, and it finishes before the
         -- board draws — sync.allium: OpenBoardConnection. It comes after the
         -- host identity because the subscription is scoped by host id
@@ -1544,10 +1550,9 @@ rule BringUpTheManagedStoreOnceTheHostIsNamed {
 
     @guidance
         -- NO STORE NAMED MEANS DISPATCH'S OWN, on config.managed_store_address
-        -- with its module in config.managed_database_name. The operator used to
-        -- have to run `spacetime start` and `spacetime publish` by hand and
-        -- then name the result; both are preconditions the board can satisfy
-        -- for itself, and the address is loopback, so nobody else's server is
+        -- with its module in config.managed_database_name. Starting a store and
+        -- publishing to it are preconditions the board can satisfy for
+        -- itself, and the address is loopback, so nobody else's server is
         -- touched. It is provided silently, like the tmux session and for the
         -- same reason: it is dispatch's own, and it writes nothing into the
         -- operator's configuration (ConfigurationIsNeverWrittenWithoutConsent
@@ -1600,13 +1605,10 @@ rule AdoptAStoreAlreadyOnTheManagedAddress {
 }
 
 rule ImportBringsUpTheManagedStore {
-    when: StoreImportRequested(operator, target)
+    when: cli/StoreImportRequested(operator, target)
+    requires: target = null
 
-    ensures:
-        if target = null:
-            ManagedStoreRequested(operator)
-        else:
-            ConnectToTheNamedStore(operator, target)
+    ensures: ManagedStoreRequested(operator)
 
     @guidance
         -- `dispatch store import --from <old store>` (spacetime-seed.allium:
@@ -1619,7 +1621,9 @@ rule ImportBringsUpTheManagedStore {
         -- machine as it found it, so the next `dispatch tui` starts the
         -- store itself exactly as usual and a running board keeps its
         -- store. A store the operator named is written to as it is and never
-        -- stopped (ANamedStoreIsNeverManaged).
+        -- stopped (ANamedStoreIsNeverManaged): nothing here runs for it, and
+        -- the import connects to it as cli.allium's
+        -- CliCommandsReachTheStoreWithoutManagingIt describes.
         --
         -- IT DOES NOT REQUIRE A HOST LABEL OR A BOARD: no window, port claim,
         -- configuration prompt or host-name prompt. The import has no use for
@@ -1689,16 +1693,15 @@ rule RestartTheManagedStoreWhenItStopsSaving {
         managed_store_held_by_this_board()
         managed_store_failed_to_save()
 
-    ensures:
-        stop_managed_store()
-        start_managed_store()
-        BoardWarned(core/local_host())
+    let restart_failure = restart_managed_store()
+
+    ensures: BoardWarned(core/local_host(), restart_failure: restart_failure)
 
     @guidance
-        -- Found on Oct 5: the disk filled for a moment, the store stopped
-        -- saving, and the board kept writing into it for about two days
-        -- because the store still answered HTTP. The board's only check was
-        -- the one at launch.
+        -- WHY A RUNNING CHECK. A disk that fills for a moment can leave the
+        -- store unable to save while it still answers HTTP, so a board that
+        -- checked only at launch would keep writing into it, unsaved, for as
+        -- long as it ran.
         --
         -- ONLY A STORE THIS BOARD HOLDS. A named store is never checked,
         -- stopped or restarted (ANamedStoreIsNeverManaged). Nor is one the
@@ -1913,16 +1916,13 @@ rule AbortWhenTheStoreIsNotTheOneThisInstallUses {
     ensures: StartupAborted(reason: store_switched)
 
     @guidance
-        -- WHY THIS EXISTS (task #28710). A board on a named store published
-        -- its address into the tmux session's environment; a later managed
-        -- board in the same session left it there; and a board restarted in
-        -- that session a day later inherited it and connected to the old
-        -- store. It drew a full board — the old store still held every task
-        -- from before the move — so nothing looked wrong, and two days of
-        -- work went into a database the next launch no longer used.
-        -- PublishTheBoardsStoreOnItsSession closed that one path;
-        -- this rule closes the class: whatever chose the store, a launch
-        -- that reaches a different database from the last one does not draw.
+        -- WHY THIS EXISTS. Whatever chooses the store — a flag, an
+        -- environment variable left in a shell or a tmux session — can name
+        -- an old store that still holds every task from before a move. A
+        -- board on it draws a full board, so nothing looks wrong, and work
+        -- goes into a database the next launch does not use. Whatever chose
+        -- the store, a launch that reaches a different database from the
+        -- last one does not draw.
         --
         -- THE MESSAGE NAMES BOTH. The store's address and the database it
         -- found, the database this install last used, and the flag that
@@ -1935,7 +1935,7 @@ rule AbortWhenTheStoreIsNotTheOneThisInstallUses {
 }
 
 rule PinTheStoreOnceItAnswers {
-    when: StoreReachedAtStartup(operator)
+    when: sync/StoreReachedAtStartup(operator)
     -- The identity read before connecting, not read again: the pin then names
     -- exactly the database the check approved.
     let found = store_database_identity()
@@ -2032,20 +2032,19 @@ rule StopTheManagedStoreWhenStartupAborts {
 }
 
 rule RecordTheNamedStoreOnceItAnswers {
-    when: StoreReachedAtStartup(operator)
+    when: sync/StoreReachedAtStartup(operator)
     requires: explicit_store_server() != null
 
     ensures: StoreAddressRecorded(operator, kept: record_store_server(explicit_store_server()))
 
     @guidance
-        -- A BOARD ON A NAMED STORE LEAVES ITS ADDRESS BESIDE ITS DATABASE, so
-        -- that a `dispatch repo …` or `dispatch plan …` typed in a plain
+        -- A BOARD ON A NAMED STORE LEAVES ITS ADDRESS IN ITS DATA DIRECTORY,
+        -- so that a `dispatch repo …` or `dispatch plan …` typed in a plain
         -- terminal reaches the store the board is using without being told
-        -- (cli.allium: CliCommandsReachTheStoreWithoutManagingIt). Before it,
-        -- such a command found a named store only through
-        -- DISPATCH_SPACETIME_SERVER, which the board sets on its own tmux
-        -- session and nowhere else; outside that session it fell back to the
-        -- managed address, which on a named-store machine is nobody's store.
+        -- (cli.allium: CliCommandsReachTheStoreWithoutManagingIt). Without
+        -- it, such a command outside the board's tmux session would fall back
+        -- to the managed address, which on a named-store machine is nobody's
+        -- store.
         --
         -- THE SESSION ENVIRONMENT STAYS, UNDER ITS OWN NAME. A board sets
         -- DISPATCH_BOARD_STORE (not the operator's DISPATCH_SPACETIME_SERVER)
@@ -2062,8 +2061,7 @@ rule RecordTheNamedStoreOnceItAnswers {
         --
         -- A record that cannot be written does not stop the launch: the board
         -- itself does not read it, and the only cost is that a command outside
-        -- the session must name the store itself, as it had to before. See the
-        -- open question.
+        -- the session must name the store itself. See the open question.
         --
         -- A MANAGED BOARD RECORDS NOTHING (ForgetAStaleStoreRecordOnAManagedLaunch):
         -- its store is already on the address a command with nothing named
@@ -2078,7 +2076,7 @@ rule ForgetAStaleStoreRecordOnAManagedLaunch {
 
     @guidance
         -- A record left by a named-store board that could not run its exit —
-        -- see the open question on uncatchable exits — would otherwise send
+        -- see AnOrphanedManagedStoreIsAdoptedNotBounded — would otherwise send
         -- every command outside the session to that store while this board
         -- runs on the managed one. The managed launch clears it as soon as
         -- the process that draws the board has chosen the managed store —
@@ -2087,7 +2085,7 @@ rule ForgetAStaleStoreRecordOnAManagedLaunch {
         -- (BringUpTheManagedStoreOnceTheHostIsNamed) — so from then on a
         -- command with nothing named reaches the managed address. A managed
         -- launch that later aborts has still cleared it; that costs nothing,
-        -- since no named board on this database is running once this launch
+        -- since no named board on this data directory is running once this launch
         -- has retired it.
         --
         -- The board itself never reads the record (ManagedStoreHost:
@@ -2096,12 +2094,12 @@ rule ForgetAStaleStoreRecordOnAManagedLaunch {
 }
 
 rule PublishTheBoardsStoreOnItsSession {
-    when: StoreReachedAtStartup(operator)
+    when: sync/StoreReachedAtStartup(operator)
 
     ensures: BoardStorePublished(operator, done: publish_board_store(configured_store_server()))
 
     @guidance
-        -- THE BOARD'S ADDRESS HAS ITS OWN VARIABLE (task #28729). The board
+        -- THE BOARD'S ADDRESS HAS ITS OWN VARIABLE. The board
         -- publishes the store it is on as DISPATCH_BOARD_STORE, on its tmux
         -- session, so the agent windows, the panes and any `dispatch` command
         -- an agent runs there reach the same store without being told. Only
@@ -2111,23 +2109,21 @@ rule PublishTheBoardsStoreOnItsSession {
         -- DISPATCH_SPACETIME_SERVER, is a different variable the board never
         -- writes.
         --
-        -- WHY TWO. The board used to publish under the operator's own
-        -- variable. A board restarted in that session then read its
-        -- predecessor's address as a store the operator had named, and ran on
-        -- an old store for two days (task #28710). That was patched by
-        -- clearing the variable on every managed launch; with the board's
-        -- address in a variable the board itself never reads, there is nothing
-        -- to clear, and that rule is gone.
+        -- WHY TWO. Were the board to publish under the operator's own
+        -- variable, a board restarted in that session would read its
+        -- predecessor's address as a store the operator had named, and run on
+        -- an old store. With the board's address in a variable the board
+        -- itself never reads, there is nothing to clear.
         --
         -- MANAGED BOARDS PUBLISH TOO. A managed board publishes the managed
         -- address, so a value an earlier named board left on the session is
         -- overwritten rather than trusted by the commands run there.
         --
-        -- LEFT OVER BY OLDER BOARDS. A session an older board published
-        -- DISPATCH_SPACETIME_SERVER on keeps it until the session is
-        -- recreated, and `dispatch tui` still reads it there as the operator's
-        -- choice. AbortWhenTheStoreIsNotTheOneThisInstallUses stands behind
-        -- that case; nothing clears it any more.
+        -- A DISPATCH_SPACETIME_SERVER set on the session by anything else
+        -- stays until the session is recreated, and `dispatch tui` reads it
+        -- there as the operator's choice. Nothing clears it;
+        -- AbortWhenTheStoreIsNotTheOneThisInstallUses stands behind that
+        -- case.
         --
         -- Best-effort: a session that is not there or will not answer leaves
         -- the commands to fall back to the record and then the managed
@@ -2141,14 +2137,14 @@ rule ForgetTheStoreRecordWhenTheBoardExits {
     ensures: StoreAddressForgotten(core/local_host(), done: forget_store_server())
 
     @guidance
-        -- The record says "a board on this database is using this store", so
+        -- The record says "a board on this data directory is using this store", so
         -- it goes when the board does: a confirmed quit, being retired by a
         -- later launch (the retiring launch waits until the board is gone,
         -- RetiredMeansGoneNotSignalled, so the old board's removal comes
         -- before the new board's record), and every startup abort, which is
         -- an exit like any other (StopTheManagedStoreWhenStartupAborts).
         --
-        -- A STALE RECORD IS ACCEPTED, NOT REPAIRED. A board that could not
+        -- A STALE RECORD IS LEFT, NOT REPAIRED. A board that could not
         -- run its exit leaves the record behind. A command that then reads it
         -- connects to that address and, when nothing answers, fails as any
         -- unreachable store does — naming the address it tried
@@ -2156,11 +2152,11 @@ rule ForgetTheStoreRecordWhenTheBoardExits {
         -- managed address: the operator's last board was on the recorded
         -- store, and quietly writing to a different one would be worse than
         -- saying it could not reach the right one. The next board on this
-        -- database replaces or clears the record.
+        -- data directory replaces or clears the record.
 }
 
 rule AbortWhenTheStoreCannotBeReached {
-    when: StoreUnreachableAtStartup(operator, reason)
+    when: sync/StoreUnreachableAtStartup(operator, reason)
 
     ensures: StartupAborted(reason: store_unavailable)
 
@@ -2178,7 +2174,7 @@ rule AbortWhenTheStoreCannotBeReached {
 }
 
 rule DrawBoardAfterTheHostIsNamed {
-    when: StoreReachedAtStartup(operator)
+    when: sync/StoreReachedAtStartup(operator)
     requires: core/local_host().label != null
 
     ensures: BoardDrawn()
@@ -2208,9 +2204,10 @@ rule AbortWhenTheAgentPortIsTaken {
         -- naming the port.
         --
         -- Restarting is what makes this worth stating. The board being replaced
-        -- held this port, and a launch that raced its exit used to draw a board
-        -- that looked entirely normal and that no agent could reach — the only
-        -- report went to a stderr the drawn board had already covered. A launch
+        -- held this port, and a launch that raced its exit and drew anyway
+        -- would show a board that looked entirely normal and that no agent
+        -- could reach, with the only report on a stderr the drawn board had
+        -- already covered. A launch
         -- that cannot serve agents is not a launch, so it fails where the
         -- operator can read it.
         --
@@ -2279,41 +2276,38 @@ rule AbortWhenTheAgentPortIsTaken {
 -- rather than their running work. Not expressible as a state assertion — it
 -- constrains what a transition may destroy, not what any state looks like.
 
--- StartupAbortsOnlyOnAnUnusableSubstrate: of the startup conditions this spec
--- describes, exactly seven abort, and each is something the board needs and
--- cannot obtain: a tmux session (absent tmux, or one that refuses); a session
+-- StartupAbortsOnlyOnAnUnusableSubstrate: every startup condition this spec
+-- describes that aborts is something the board needs and cannot obtain: a
+-- tmux session (absent tmux, or one that refuses); a session
 -- it can name, so that closing a window closes one it owns; a board window it
 -- may retire without closing its own caller, or that will close at all; the
 -- port agents reach it on; an identity for the machine it is running on; a
 -- name for that identity; and the shared store every row it draws and every
 -- change it makes lives in — the one the operator named, or, when they named
 -- none, the managed one it runs for itself. Every other condition degrades,
--- and a future startup step that wants to abort belongs in this invariant —
--- count and list both — or it does not belong at startup.
+-- and a future startup step that wants to abort belongs in this list, with
+-- its own StartupAbortReason value, or it does not belong at startup.
 --
--- The fifteen values of StartupAbortReason cover those seven: tmux_unavailable
--- and launch_rejected are the two ways the first fails, and the launch path
--- cannot tell them apart without asking, which is the distinction
--- DistinguishesAbsentFromBroken exists for; and seven are ways the last fails.
--- store_unavailable is the store — named or managed — refusing the first
--- connection; the other five (spacetime_cli_missing, managed_store_port_taken,
--- managed_store_did_not_start, module_needs_manual_migration,
--- module_publish_failed, managed_database_not_owned) are the managed store
--- failing to come up in a state the board can use, for the reasons given
--- beside StartupAbortReason.
+-- Every StartupAbortReason value is one of those needs failing.
+-- tmux_unavailable and launch_rejected are the two ways the tmux session
+-- fails, and the launch path cannot tell them apart without asking, which is
+-- the distinction DistinguishesAbsentFromBroken exists for.
+-- session_unidentified is the session it cannot name; board_already_in_this_window
+-- and previous_board_not_retired are the board window; agent_port_unavailable
+-- is the port; host_identity_unavailable and host_unnamed are the identity and
+-- its name. Every other value is the store: store_unavailable is the store —
+-- named or managed — refusing the first connection; store_switched is a store
+-- holding a different database from the one this install last used; and the
+-- rest are the managed store failing to come up in a state the board can
+-- use, for the reasons given beside StartupAbortReason.
 --
--- A store that is merely absent is no longer among them. Until task #12296 a
--- launch naming no store aborted (store_unconfigured); that condition is now
--- one the board repairs for itself, which is what this invariant asks of every
--- condition that can be.
---
--- The store is the newest substrate and was not one until Phase 12 of the
--- SpacetimeDB migration (task #4916): before it, a board with no store read
--- and wrote its own database and was a first-class way to run. With the store
+-- A store that is merely absent is not among them: a launch naming no store
+-- gets the managed one, a condition the board repairs for itself, which is
+-- what this invariant asks of every condition that can be. With the store
 -- mandatory, a board that could not reach it would draw no rows and refuse
 -- every change, which is not a degraded board but an empty one.
 --
--- The last two are the newest and the least obviously a substrate, so they are
+-- The two host conditions are the least obviously a substrate, so they are
 -- argued rather than asserted. `host_unnamed` fires only when this machine has
 -- never been named AND nobody is there to name it (see
 -- AbortWhenTheHostIsUnnamedAndNoOneCanAnswer). It is not "a configuration
@@ -2350,9 +2344,8 @@ rule AbortWhenTheAgentPortIsTaken {
 -- `AnUnavailableHomeDirectoryIsAFailureNotAPath` requires to fail rather than
 -- compose into a path, and a data directory that cannot be created, which is
 -- the board's own substrate rather than a step on the way to it. Both precede
--- any question this spec answers. (A database that will not open is no longer
--- among them: no launch opens one — storage.allium:
--- NoSqlite.)
+-- any question this spec answers. No launch opens a local database
+-- (storage.allium: NoSqlite).
 
 -- TheBoardNeverDrawsForAnUnnamedHost: BoardDrawn() is reachable only through
 -- HostLabelResolved, and both rules that emit it hold core/local_host().label
@@ -2391,13 +2384,13 @@ rule AbortWhenTheAgentPortIsTaken {
 -- a store — even the managed address itself, spelled out — is how the operator
 -- opts out of management.
 
--- TheStoreRecordNamesAStoreABoardReached: the address recorded beside a
--- database (StoreAddressRecord) is only ever one a board on that database
--- named and reached on its first connection (RecordTheNamedStoreOnceItAnswers),
+-- TheStoreRecordNamesAStoreABoardReached: the address recorded in a data
+-- directory (StoreAddressRecord) is only ever one a board on that data
+-- directory named and reached on its first connection (RecordTheNamedStoreOnceItAnswers),
 -- and every exit that board can run removes it again
 -- (ForgetTheStoreRecordWhenTheBoardExits). A managed launch clears any record
 -- it finds (ForgetAStaleStoreRecordOnAManagedLaunch) and writes none. So a
--- record is either the store of the board running on that database now, or
+-- record is either the store of the board running on that data directory now, or
 -- left by a board that could not run its exit — never an address no board
 -- reached, and never one a managed board is not using. Not expressible as a
 -- state assertion: it constrains which transitions may write the record.
@@ -2420,6 +2413,25 @@ rule AbortWhenTheAgentPortIsTaken {
 -- managed board never subscribes against a schema other than the one it was
 -- built with, which is the class of failure the hand-run `spacetime publish`
 -- step left to the operator to remember.
+
+-- AnOrphanedManagedStoreIsAdoptedNotBounded: a managed store whose board could
+-- not run its exit — a crash, a panic that aborts the process, SIGKILL, power
+-- loss, or the tmux server killed with the board in it — keeps running until
+-- something stops it, because StopTheManagedStoreWhenTheBoardExits cannot
+-- fire. Nothing (a pidfile checked at launch, a parent-death signal, a
+-- watchdog) bounds how long it outlives its board. That is accepted as an
+-- edge: the next launch adopts it (AdoptAStoreAlreadyOnTheManagedAddress) and
+-- that board's exit stops it, so nothing is lost and nothing duplicates.
+-- Between the two, a store nobody owns runs on loopback.
+
+-- TwoManagedBoardsShareOneStore: two boards on one machine, in two tmux
+-- sessions on two agent ports (reachable on purpose — see
+-- config.board_window_name), both run managed. The second adopts the store the
+-- first started, and whichever exits first stops the store under the other,
+-- which then shows an outage it cannot recover from until relaunched. That is
+-- accepted as an edge the operator reaches only on purpose: an exit does not
+-- ask whether another board still holds the store, and a second managed board
+-- is not refused.
 
 ------------------------------------------------------------
 -- Surfaces
@@ -2485,7 +2497,7 @@ surface BoardLaunchCommand {
         -- new board draws.
 
     @guarantee ArgumentsSurviveTheSessionHandoff
-        -- The database path and port the operator passed are the ones the board
+        -- The data directory and port the operator passed are the ones the board
         -- comes up with, whether or not a session had to be created to hold it.
 
     @guarantee ALaunchNeverMovesToAnotherDatabaseSilently
@@ -2511,8 +2523,10 @@ surface ConfigUpdatePrompt {
     -- Shown in the terminal before the board takes the screen, on the one
     -- launch where something is stale.
 
+    context drift: ConfigDrift
+
     exposes:
-        for item in ConfigDrift.items:
+        for item in drift.items:
             item
 
     provides:
@@ -2537,8 +2551,10 @@ surface StartupConfigReport {
 
     -- The non-interactive counterpart of the prompt: what a script sees.
 
+    context drift: ConfigDrift
+
     exposes:
-        for item in ConfigDrift.items:
+        for item in drift.items:
             item
 
     @guarantee ReportsWithoutWriting
@@ -2611,20 +2627,15 @@ surface BoardLifecycle {
         -- signalled. Signal delivery's default would end the process without
         -- an exit, and leave the managed store and the store record behind.
         -- An exit the process cannot run (SIGKILL, a crash, power loss)
-        -- raises no BoardExited; see the first open question.
+        -- raises no BoardExited; see AnOrphanedManagedStoreIsAdoptedNotBounded.
 }
 
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
 
+open question "RecordTheNamedStoreOnceItAnswers treats a store record that cannot be written (or removed, in the two forget rules) as a logged, non-fatal failure — the board does not read the record, and the cost is only that commands outside the session must name the store, as before. That mirrors record_module_hash's best-effort and the session-environment publication's. Is best-effort the intended answer, or should an unwritable record be reported to the operator (or abort, given the data directory it lives in is the board's own substrate)?"
 
-open question "ACCEPTED (task #12296) as an edge, not built against: what becomes of the managed store when the board cannot run its exit — a crash, a panic that aborts the process, SIGKILL, the machine losing power, or the tmux server being killed with the board in it? StopTheManagedStoreWhenTheBoardExits cannot fire, so the detached store keeps running until something stops it. The next launch adopts it (AdoptAStoreAlreadyOnTheManagedAddress) and its exit stops it, so nothing is lost and nothing duplicates — but between the two, a store nobody owns runs on loopback. Is that acceptable, or should something (a pidfile checked at launch, a parent-death signal, a watchdog in the store's launcher) bound how long an orphaned store can outlive its board?"
+open question "STILL PLACEHOLDERS (nothing has been measured beyond a near-empty data directory, where a start-and-publish took well under a second): config.managed_store_start_timeout (15 seconds) and config.managed_store_stop_timeout (5 seconds) are placeholders, not measured values. What does a cold `spacetime start` over a large data directory actually take, and how long may a quit be held up waiting for the store to stop?"
 
-open question "ACCEPTED (task #12296) as an edge the operator reaches only on purpose: two boards on one machine in two tmux sessions (reachable on purpose — see config.board_window_name) on two agent ports both run managed: the second adopts the store the first started, and whichever exits first stops the store under the other, which then shows an outage it cannot recover from until relaunched. Should an exit stop the managed store only when no other board still holds it, should a second managed board on one machine be refused, or is this accepted as an edge the operator reaches only on purpose?"
-
-open question "Task #4982: RecordTheNamedStoreOnceItAnswers treats a store record that cannot be written (or removed, in the two forget rules) as a logged, non-fatal failure — the board does not read the record, and the cost is only that commands outside the session must name the store, as before. That mirrors record_module_hash's best-effort and the session-environment publication's. Is best-effort the intended answer, or should an unwritable record be reported to the operator (or abort, given the database folder beside it is the board's own substrate)?"
-
-open question "STILL PLACEHOLDERS (task #12296 measured nothing beyond a near-empty data directory, where a start-and-publish took well under a second): config.managed_store_start_timeout (15 seconds) and config.managed_store_stop_timeout (5 seconds) are placeholders, not measured values. What does a cold `spacetime start` over a large data directory actually take, and how long may a quit be held up waiting for the store to stop?"
-
-open question "Task #28722 read the identity over TLS for an https:// store, with the bundled web PKI roots. A store behind a certificate only the operating system trusts (a corporate CA) answers null, so its launches go through unchecked, with a warning. Should the board trust the operating system's roots for this read, matching whichever roots the store connection itself trusts?"
+open question "The identity of an https:// store is read over TLS with the bundled web PKI roots. A store behind a certificate only the operating system trusts (a corporate CA) answers null, so its launches go through unchecked, with a warning. Should the board trust the operating system's roots for this read, matching whichever roots the store connection itself trusts?"

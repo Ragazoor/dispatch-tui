@@ -795,6 +795,10 @@ pub trait RepoConfigRead: Send + Sync {
     /// host saved, or one saved before hosts were recorded, is not in it.
     async fn list_repo_paths_saved_by_this_host(&self) -> Vec<String>;
 
+    /// The distinct paths with a row this host does not own (another host's,
+    /// or an unowned one): what stays saved when this host forgets its row.
+    async fn list_repo_paths_saved_by_other_hosts(&self) -> Vec<String>;
+
     /// The paths saved before hosts were recorded, most recent first. No host
     /// owns them, so any host's prune may adopt or remove one.
     async fn list_unowned_repo_paths(&self) -> Vec<String>;

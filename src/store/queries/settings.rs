@@ -100,6 +100,10 @@ impl super::super::RepoConfigRead for Store {
         self.rows.repo_paths_saved_by(&self.host)
     }
 
+    async fn list_repo_paths_saved_by_other_hosts(&self) -> Vec<String> {
+        self.rows.repo_paths_saved_by_others(&self.host)
+    }
+
     async fn list_unowned_repo_paths(&self) -> Vec<String> {
         self.rows.repo_paths_unowned()
     }

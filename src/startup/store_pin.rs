@@ -53,7 +53,7 @@ pub fn pin_store_identity(data_dir: &Path, identity: &str) -> bool {
     ) {
         Ok(()) => true,
         Err(e) => {
-            tracing::warn!("could not pin the store database identity beside the database: {e}");
+            tracing::warn!("could not pin the store database identity in the data directory: {e}");
             false
         }
     }

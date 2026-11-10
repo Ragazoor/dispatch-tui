@@ -90,10 +90,10 @@ pub struct CliStore {
 
 /// Route a handle through the store `server` names,
 /// and make the first connection — the same one a board makes at startup,
-/// with the same failures (`startup.allium`: `AbortWhenNoStoreIsConfigured`,
-/// `AbortWhenTheStoreCannotBeReached`). For the subcommands that read or write
-/// shared rows (`repo`, `plan`, the agent-tree and diff panes): with the store
-/// mandatory, the local database no longer holds them.
+/// with the same failures (`startup.allium`: `AbortWhenTheStoreCannotBeReached`).
+/// For the subcommands that read or write shared rows (`repo`,
+/// `prune-repo-paths`, `plan`; `cli.allium`:
+/// `CliCommandsReachTheStoreWithoutManagingIt`).
 pub async fn open_cli_store(data_dir: &Path, server: Option<String>) -> Result<CliStore> {
     open_cli_store_checked(data_dir, server, StorePin::Checked, store_database_identity).await
 }
@@ -122,8 +122,8 @@ async fn open_cli_store_checked(
     store_identity: fn(&str) -> Option<String>,
 ) -> Result<CliStore> {
     // Flag, then the operator's environment, then the address the board
-    // published on its session, then the record a board left beside this
-    // database, then the managed address (`CliCommandsReachTheStoreWithoutManagingIt`).
+    // published on its session, then the record a board left in this data
+    // directory, then the managed address (`CliCommandsReachTheStoreWithoutManagingIt`).
     // The environment is read here too, so a blank flag falls through to it.
     let server = crate::startup::cli_store_server(
         server,

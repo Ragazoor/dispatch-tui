@@ -159,17 +159,17 @@ pub fn store_server_or_managed(server: Option<String>) -> String {
 // ---------------------------------------------------------------------------
 // StoreAddressRecord (startup.allium)
 //
-// A board on a named store keeps that address in a small file beside its
-// database, so a command run from a plain terminal reaches the same store
+// A board on a named store keeps that address in a small file in its data
+// directory, so a command run from a plain terminal reaches the same store
 // without the flag or the environment variable.
 // ---------------------------------------------------------------------------
 
-/// The record's file name, in the same folder as the database file.
+/// The record's file name, inside the data directory.
 const STORE_RECORD_FILE: &str = "store-server";
 
 /// `file` inside the data directory `data_dir`: where the
-/// store record and the store pin live (`TheRecordBelongsToItsDatabase`,
-/// `ThePinBelongsToItsDatabase`).
+/// store record and the store pin live (`TheRecordBelongsToItsDataDirectory`,
+/// `ThePinBelongsToItsDataDirectory`).
 pub(super) fn beside_data_dir(data_dir: &std::path::Path, file: &str) -> std::path::PathBuf {
     data_dir.join(file)
 }
@@ -195,7 +195,7 @@ pub fn record_store_server(data_dir: &std::path::Path, address: &str) -> bool {
     ) {
         Ok(()) => true,
         Err(e) => {
-            tracing::warn!("could not record the store address beside the database: {e}");
+            tracing::warn!("could not record the store address in the data directory: {e}");
             false
         }
     }

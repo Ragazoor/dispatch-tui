@@ -1385,6 +1385,22 @@ impl SharedRows {
         })
     }
 
+    /// The distinct paths that have a row `host` does not own: another
+    /// host's, or one saved before rows carried a host. Unordered.
+    pub fn repo_paths_saved_by_others(&self, host: &str) -> Vec<String> {
+        self.read(|rows| {
+            let mut out: Vec<String> = rows
+                .repo_paths
+                .values()
+                .filter(|row| row.host.is_empty() || row.host != host)
+                .map(|row| row.path.clone())
+                .collect();
+            out.sort();
+            out.dedup();
+            out
+        })
+    }
+
     /// The paths saved before rows carried a host, in [`Self::repo_paths`]'s
     /// order. No host owns them; every host's prune may judge them.
     pub fn repo_paths_unowned(&self) -> Vec<String> {

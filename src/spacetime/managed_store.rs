@@ -63,7 +63,7 @@ pub const MANAGED_STORE_HEALTH_INTERVAL: Duration = Duration::from_secs(10);
 /// the failure shows.
 const COMMITLOG_FAILURE_MARKER: &str = "error flushing commitlog";
 /// The file, in the managed store's own data directory (the `spacetime`
-/// directory beside dispatch's database), that holds the hash of the module
+/// directory in dispatch's default data directory), that holds the hash of the module
 /// last published to the managed store.
 pub const MODULE_HASH_FILE: &str = "managed-module.sha256";
 

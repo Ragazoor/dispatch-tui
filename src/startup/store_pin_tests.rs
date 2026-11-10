@@ -95,7 +95,7 @@ fn nothing_is_pinned_on_a_fresh_data_directory() {
 }
 
 #[test]
-fn a_pin_reads_back_and_lives_beside_the_database() {
+fn a_pin_reads_back_and_lives_in_the_data_directory() {
     let dir = tempfile::tempdir().unwrap();
     let db = db_in(&dir);
     assert!(pin_store_identity(&db, MANAGED));

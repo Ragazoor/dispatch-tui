@@ -3,8 +3,7 @@
 //!
 //! Here rather than in `src/main.rs` so they can be run against a handle the
 //! caller supplies. The binary hands them a store-backed one
-//! (`store_connection::open_cli_store` — the store is mandatory, task #4916); the tests
-//! hand them an in-memory store (`Store::open_in_memory`). Output goes to the
+//! (`store_connection::open_cli_store`); the tests hand them an in-memory store (`Store::open_in_memory`). Output goes to the
 //! writers passed in, which the binary points at stdout and stderr.
 
 use std::io::Write;
@@ -32,10 +31,12 @@ pub async fn set_verify(
     if command.trim().is_empty() {
         anyhow::bail!("verify command is empty; use `repo clear-verify` to remove it");
     }
-    // Creates this host's row of the path when it has none (`cli.allium`): the
-    // store's own `set_verify_command` acts through this host's row of a saved
-    // path. A row only another host saved does not count, so this host gets its
-    // own beside it; a row this host already has is left alone.
+    // Saves this host's row of the path when it has none (`cli.allium`:
+    // `SetVerifyCommandViaCli`): the store's `set_verify_command` acts through
+    // the caller's own row. The save adopts an unowned row of the path, or else
+    // adds one beside any row only another host saved; a row this host already
+    // has is not re-saved. The command then lands on every row of the
+    // repository.
     if !database
         .list_repo_paths_saved_by_this_host()
         .await
@@ -95,16 +96,22 @@ fn path_on_disk(path: &str) -> std::io::Result<bool> {
 /// The table is shared, but a path is a place on one machine: a row another
 /// host saved says nothing about this disk and is left alone, verify command
 /// and all. A row saved before rows carried a host belongs to no one: this
-/// host adopts it when the path exists here and removes it when it does not.
-/// `kept` counts the whole store.
+/// host adopts it when the path exists here and leaves it alone when it does
+/// not. `kept` counts the paths still saved afterwards, across the whole
+/// store, each once (`cli.allium`: `PruneRepoPathsViaCli`).
 pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<()> {
     let total = database.list_repo_paths().await.len();
+    let saved_elsewhere = database.list_repo_paths_saved_by_other_hosts().await;
     let mut removed = 0;
+    let mut gone = 0;
     for p in &database.list_repo_paths_saved_by_this_host().await {
         if matches!(path_on_disk(p), Ok(false)) {
             database.delete_repo_path(p).await?;
             writeln!(out, "removed: {p}")?;
             removed += 1;
+            if !saved_elsewhere.contains(p) {
+                gone += 1;
+            }
         }
     }
     // Rows saved before hosts were stamped belong to no one. Present on this
@@ -117,7 +124,7 @@ pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<(
             writeln!(out, "adopted: {p}")?;
         }
     }
-    writeln!(out, "{removed} path(s) removed, {} kept.", total - removed)?;
+    writeln!(out, "{removed} path(s) removed, {} kept.", total - gone)?;
     Ok(())
 }
 

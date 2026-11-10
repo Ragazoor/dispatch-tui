@@ -16,8 +16,8 @@ fn db_in(dir: &tempfile::TempDir) -> PathBuf {
     dir.path().to_path_buf()
 }
 
-/// Where the record lives: beside the database file
-/// (`TheRecordBelongsToItsDatabase`).
+/// Where the record lives: in the data directory
+/// (`TheRecordBelongsToItsDataDirectory`).
 fn record_file(data_dir: &Path) -> PathBuf {
     data_dir.join("store-server")
 }
@@ -29,7 +29,7 @@ fn write_record(data_dir: &Path, contents: &str) {
 // -- recorded_store_server ------------------------------------------------
 
 #[test]
-fn a_recorded_address_is_read_back_from_beside_the_database() {
+fn a_recorded_address_is_read_back_from_the_data_directory() {
     let dir = tempfile::tempdir().unwrap();
     let db = db_in(&dir);
     write_record(&db, "http://team:3000\n");
@@ -59,14 +59,14 @@ fn a_blank_record_reads_as_none() {
 // -- record_store_server --------------------------------------------------
 
 #[test]
-fn a_recorded_address_is_written_beside_the_database_and_read_back() {
+fn a_recorded_address_is_written_in_the_data_directory_and_read_back() {
     let dir = tempfile::tempdir().unwrap();
     let db = db_in(&dir);
 
     assert!(record_store_server(&db, "http://team:3000"));
 
     let written = std::fs::read_to_string(record_file(&db))
-        .expect("the record must be a file beside the database");
+        .expect("the record must be a file in the data directory");
     assert_eq!(written.trim(), "http://team:3000");
     assert_eq!(
         recorded_store_server(&db),
@@ -88,11 +88,11 @@ fn recording_replaces_whatever_was_there() {
     );
 }
 
-/// `TheRecordBelongsToItsDatabase`: a board on a throwaway --db records
-/// nothing next to the operator's real one, and a command run with the
-/// throwaway --db finds the throwaway board's store and no other.
+/// `TheRecordBelongsToItsDataDirectory`: a board on a throwaway --data-dir
+/// records nothing in the operator's real one, and a command run with the
+/// throwaway --data-dir finds the throwaway board's store and no other.
 #[test]
-fn the_record_belongs_to_its_database() {
+fn the_record_belongs_to_its_data_directory() {
     let throwaway = tempfile::tempdir().unwrap();
     let real = tempfile::tempdir().unwrap();
 

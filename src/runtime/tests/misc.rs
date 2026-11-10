@@ -707,17 +707,17 @@ mod bootstrap {
         assert_eq!(bootstrap.app.store_server(), Some(TEST_STORE));
     }
 
-    /// The record a board leaves beside its database (task #4982,
-    /// startup.allium: StoreAddressRecord).
+    /// The record a board leaves in its data directory (startup.allium:
+    /// StoreAddressRecord).
     fn store_record(data_dir: &std::path::Path) -> std::path::PathBuf {
         data_dir.join("store-server")
     }
 
     /// startup.allium: RecordTheNamedStoreOnceItAnswers. A board on a named
-    /// store leaves the address beside its database once the first connection
+    /// store leaves the address in its data directory once the first connection
     /// has succeeded, so a command in a plain terminal reaches the same store.
     #[tokio::test]
-    async fn bootstrap_records_a_named_store_beside_the_database_once_it_answers() {
+    async fn bootstrap_records_a_named_store_in_the_data_directory_once_it_answers() {
         let (_dir, data_dir, paths) = fixture().await;
 
         let _bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
@@ -725,7 +725,7 @@ mod bootstrap {
             .expect("bootstrap must succeed against a reachable named store");
 
         let recorded = std::fs::read_to_string(store_record(&data_dir))
-            .expect("a board on a named store must record its address beside the database");
+            .expect("a board on a named store must record its address in the data directory");
         assert_eq!(recorded.trim(), TEST_STORE);
     }
 
@@ -1160,7 +1160,7 @@ mod store_address_record {
     }
 
     #[test]
-    fn a_named_store_is_recorded_beside_the_database() {
+    fn a_named_store_is_recorded_in_the_data_directory() {
         let dir = tempfile::tempdir().unwrap();
         let data_dir = dir.path().to_path_buf();
 

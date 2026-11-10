@@ -371,14 +371,16 @@ config {
 -- == Taking a snapshot ==
 
 rule TakeSnapshot {
-    when: TakeSnapshot(operator)
+    -- destination is the file `--out` names, or "-" for stdout.
+    when: TakeSnapshot(operator, destination)
 
     ensures:
-        Snapshot.created(
+        let snapshot = Snapshot.created(
             format_version: config.snapshot_format_version,
             taken_at: now,
             extracts: extract_every_shared_table()
         )
+        SnapshotWritten(snapshot: snapshot, destination: destination)
 
     @guidance
         -- READS ONE MOMENT, NOT TEN. The extracts must come from a single
@@ -437,6 +439,7 @@ rule RestoreSnapshot {
         BurnIdSequences(snapshot: snapshot)
         for extract in snapshot.extracts:
             TableRowsWriteRequested(table: extract.table, rows: extract.rows)
+        SnapshotRestored(snapshot: snapshot)
 
     @guidance
         -- The rows cross the store boundary through
@@ -1092,7 +1095,7 @@ surface SnapshotCommandLine {
             sequence.highest_row_id
 
     provides:
-        TakeSnapshot(operator)
+        TakeSnapshot(operator, destination)
         RestoreSnapshot(operator, snapshot)
         ImportOldStore(operator, source)
 

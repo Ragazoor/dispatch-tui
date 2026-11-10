@@ -925,6 +925,29 @@ async fn prune_repo_paths_removes_this_hosts_missing_path_and_its_verify_command
     );
 }
 
+// cli.allium: PruneRepoPathsViaCli — kept counts the paths still saved, so a
+// path this host removed stays counted while another host's row of it remains.
+#[tokio::test]
+async fn prune_repo_paths_counts_a_path_another_host_still_saves_as_kept() {
+    let (_dir, db, memory) = shared_store_with_caller();
+    let shared = "/dispatch-test-nonexistent-shared-77777";
+    seed_repo_path_saved_by(&db, &memory, dispatch_tui::store::MEMORY_HOST_ID, shared).await;
+    seed_repo_path_saved_by(&db, &memory, "host-b", shared).await;
+
+    let mut out = Vec::new();
+    commands::prune_repo_paths(&db, &mut out).await.unwrap();
+    let stdout = String::from_utf8(out).unwrap();
+
+    assert!(
+        stdout.contains(&format!("removed: {shared}")),
+        "got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 path(s) removed, 1 kept."),
+        "the other host's row still saves the path; got: {stdout}"
+    );
+}
+
 #[tokio::test]
 async fn prune_repo_paths_empty_db_succeeds() {
     let (_tmp, db) = in_memory_store().await;
