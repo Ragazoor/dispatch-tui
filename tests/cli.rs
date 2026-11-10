@@ -1243,7 +1243,7 @@ fn run_statusline(db: &Path, snapshot: &Path, chain: Option<&str>) -> std::proce
 /// `Store` import, but that is a source property; this asserts the observable
 /// one — running the subcommand creates no data directory. See
 /// docs/specs/observability.allium: StatusLineDecorator
-/// (`@guarantee NeverTouchesTheStoreOrTheDataDirectory`).
+/// (`@guarantee WritesNothingButTheSnapshot`).
 #[test]
 fn statusline_creates_no_data_directory() {
     let tmp = tempfile::tempdir().unwrap();

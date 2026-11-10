@@ -362,12 +362,9 @@ async fn get_task_not_found() {
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
-/// observability.allium: `ReadByIdReportsAnUndecodableTask`. The store holds
-/// the task but this board cannot decode it (a newer binary wrote a status it
-/// does not know): a read by id says so and names the reason, rather than
-/// answering "not found".
-#[tokio::test]
-async fn get_task_reports_a_task_the_board_cannot_decode() {
+/// A store holding task 42 in a form this board cannot decode (a newer binary
+/// wrote a status it does not know). The temp dir must outlive the store.
+fn store_with_undecodable_task() -> (Arc<dyn store::TaskStore>, tempfile::TempDir) {
     let rows = Arc::new(crate::sync::SharedRows::new());
     let mut row = crate::sync::encode::create_task_row(
         &crate::store::CreateTaskRequest::fixture("From the future", "/repo"),
@@ -394,10 +391,10 @@ async fn get_task_reports_a_task_the_board_cannot_decode() {
         "test-host".to_string(),
         host_dir.path(),
     ));
-    let svc = task_svc(&db);
+    (db, host_dir)
+}
 
-    let err = svc.get_task(TaskId(42)).await.unwrap_err();
-
+fn assert_reports_undecodable(err: ServiceError) {
     assert!(
         matches!(err, ServiceError::Internal(_)),
         "an undecodable task is not a missing one: {err}"
@@ -407,6 +404,28 @@ async fn get_task_reports_a_task_the_board_cannot_decode() {
     assert!(msg.contains("cannot decode"), "{msg}");
     assert!(msg.contains("teleported"), "the reason is named: {msg}");
     assert!(msg.contains("do not recreate"), "{msg}");
+}
+
+/// observability.allium: `ReadByIdReportsAnUndecodableTask`. A read by id
+/// says the task is there but undecodable, and names the reason, rather than
+/// answering "not found".
+#[tokio::test]
+async fn get_task_reports_a_task_the_board_cannot_decode() {
+    let (db, _dir) = store_with_undecodable_task();
+    let err = task_svc(&db).get_task(TaskId(42)).await.unwrap_err();
+    assert_reports_undecodable(err);
+}
+
+/// The same rule covers a write's existence pre-check: a write to such a task
+/// must not tell an agent the task is gone.
+#[tokio::test]
+async fn a_write_pre_check_reports_a_task_the_board_cannot_decode() {
+    let (db, _dir) = store_with_undecodable_task();
+    let err = task_svc(&db)
+        .clear_subagents_no_drain(TaskId(42))
+        .await
+        .unwrap_err();
+    assert_reports_undecodable(err);
 }
 
 #[tokio::test]

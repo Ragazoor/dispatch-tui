@@ -60,11 +60,16 @@ use "./core.allium" as core
 value TrajectoryEntry {
     schema_version: String     -- semver string, e.g. "1.0.0"
     timestamp:      Timestamp  -- UTC, RFC 3339
-    task_id:        String     -- stringified Task.id of the caller
+    task_id:        Integer    -- the Task.id the server identified the caller by
     method:         String     -- MCP tool name (e.g. "update_tasks")
-    args:           String     -- full tool arguments as received, JSON-encoded
-    result:         String     -- response payload on success (JSON-encoded);
-                               -- on failure, the JSON object {"error": "<msg>"}
+    args:           String     -- the tool arguments as a JSON value, after an
+                               -- agent name given for a task id is replaced
+                               -- by that id
+    result:         String     -- the response as a JSON value, a tool error
+                               -- included; for a protocol error (an unknown
+                               -- tool), the JSON object {"error": "<msg>"}.
+                               -- Longer than config.trajectory_result_cap
+                               -- bytes, it is cut there and marked truncated.
     duration_ms:    Integer    -- wall-clock time from dispatch to response
 }
 
@@ -118,6 +123,12 @@ config {
     trajectory_schema_version: String = "1.0.0"
     -- Subdirectory name within the dispatch data dir that holds trajectory files.
     trajectory_subdir: String = "trajectories"
+    -- The longest result kept in one entry, so one huge tool result cannot
+    -- bloat the file or make one append large enough to interleave with
+    -- another.
+    trajectory_result_cap: Integer = 65_536
+    -- A trajectory file not written for this long is deleted.
+    trajectory_retention: Duration = 90.days
     -- Maximum number of feature-usage events retained. Recording an event
     -- when the log is already at the cap evicts the oldest events, so the log
     -- is a bounded sliding window rather than an ever-growing table. 100_000
@@ -147,11 +158,10 @@ rule TrajectoryAppend {
     when: McpToolCall(caller_identity, method, args, result, duration_ms)
 
     -- Only Task-kind callers are logged. Session callers are silently dropped.
+    -- The task is not looked up first: a call from an agent whose task this
+    -- board cannot decode, or whose task was deleted while it ran, is the
+    -- call an audit log most needs.
     requires: caller_identity.kind = task
-
-    -- The caller's task must exist in the shared store. Entries are written
-    -- whether or not the task has a worktree.
-    requires: exists core/Task{id: caller_identity.task_id}
 
     ensures: append_jsonl(
         path: dispatch_data_dir
@@ -160,7 +170,7 @@ rule TrajectoryAppend {
         entry: TrajectoryEntry {
             schema_version: config.trajectory_schema_version,
             timestamp: now,
-            task_id: str(caller_identity.task_id),
+            task_id: caller_identity.task_id,
             method: method,
             args: args,
             result: result,
@@ -200,13 +210,11 @@ rule TrajectoryWriteFailureIsSilent {
     ensures: TrajectoryWriteWarning(task_id: task_id, error: error)
 
     @guidance
-        -- The implementation wraps the append in a fallible block; on error
-        -- the error is forwarded to tracing::warn (target: "trajectory")
-        -- with the task_id and error message, and the handler proceeds to
-        -- return its normal response. There is no retry, no buffering, no
-        -- dead-letter file. A flush failure after a successful write is
-        -- warned the same way as a write failure — the entry is still lost,
-        -- and the caller is still not told.
+        -- The append runs beside the handler, which returns its normal
+        -- response. A failure is warned with the file's path and the error.
+        -- There is no retry, no buffering, no dead-letter file. A flush
+        -- failure after a successful write is warned the same way as a write
+        -- failure: the entry is still lost, and the caller is still not told.
         -- TrajectoryWriteWarning is observable via the standard tracing
         -- subscriber; it has no entity representation in this spec.
 }
@@ -464,10 +472,12 @@ rule ReadByIdReportsAnUndecodableTask {
         -- DeleteEpicRefused). A read by id decodes the kept row again to name
         -- the reason. The message says the board is likely older than the
         -- writer and that the task should not be recreated.
+        -- Every task-service path that names one task by id and finds it
+        -- missing answers this way, a write's existence pre-check included,
+        -- and so does the MCP server's lookup of a caller's own task: an
+        -- update to such a task must not tell an agent it is gone.
         -- Tasks only: the board keeps no record of an undecodable epic, so a
-        -- read of one by its id answers "not found". Existence checks
-        -- (whether a task id is held) are not reads of the row and also
-        -- answer "not found".
+        -- read of one by its id answers "not found".
 }
 
 ------------------------------------------------------------
@@ -487,10 +497,12 @@ surface McpToolCalls {
         -- which is never empty. Readers use it to tell format versions apart;
         -- an entry without one is unreadable.
 
-    @guarantee TrajectoryEntriesNameARealTask
-        -- A trajectory entry's task_id names a task the shared store held
-        -- when the entry was written. TrajectoryAppend writes every entry and
-        -- requires the task to exist, so this holds by construction.
+    @guarantee OldTrajectoriesArePruned
+        -- Once per process, before its first append, the server deletes every
+        -- trajectory file not written for config.trajectory_retention. A file
+        -- it cannot read or remove stays. So a file whose task is long gone,
+        -- or one written under an id the store never held, does not outlive
+        -- the retention window.
 }
 
 -- Where the failures this spec decides about come from. Each is reported by
@@ -561,17 +573,19 @@ surface StatusLineDecorator {
         -- snapshot, with the model populated and the windows absent, rather
         -- than nothing at all.
 
-    @guarantee NeverTouchesTheStoreOrTheDataDirectory
-        -- The decorator never connects to the shared store and never creates
-        -- the data directory. At this invocation rate, across every session,
-        -- store work here would be pure waste.
+    @guarantee WritesNothingButTheSnapshot
+        -- The decorator never connects to the shared store, and the only
+        -- thing it writes is the snapshot (creating the snapshot's directory
+        -- when it is missing). It does not create the data directory of the
+        -- board it was started for. At this invocation rate, across every
+        -- session, store work here would be pure waste.
 
     @guarantee StartsNoAsyncRuntime
         -- The decorator does no asynchronous work, and starts none of the
         -- machinery for it: no worker-thread pool, no reactor. At several
         -- invocations a second in every session, concurrently, setup it cannot
         -- use is the same waste as store work (see
-        -- NeverTouchesTheStoreOrTheDataDirectory).
+        -- WritesNothingButTheSnapshot).
 
     @guarantee PublishedSnapshotIsAlwaysWholeAndFromOneWriter
         -- Every session publishes to the same snapshot location concurrently. A
@@ -647,7 +661,7 @@ surface StatusLineDecorator {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "Retention: <dispatch_data_dir>/trajectories/<task_id>.jsonl grows unbounded for long-lived tasks. Should there be a size cap, rotation policy, or a wrap-up-time truncation? Currently the file is left untouched for the life of the dispatch installation."
+open question "Retention: a trajectory file is deleted once it has gone config.trajectory_retention without a write (OldTrajectoriesArePruned), but a long-lived task's file grows without bound while it is written. Should there be a size cap, rotation, or a wrap-up-time truncation?"
 
 open question "Replay: should a future reader tool reconstruct task state from trajectory.jsonl, or is it write-only audit? The schema_version field is forward-looking but no reader is specified."
 

@@ -7,8 +7,8 @@
 --        board, then a graph of the same data), plus a plain-text walkthrough
 --        of the same tour.
 -- Includes: The page and where it lives (docs/guide/index.html, served by
---           GitHub Pages); its two steps and the Next/Back buttons between
---           them; what the example board holds; which keys the page answers
+--           GitHub Pages); its two steps and the Next/Back buttons and step
+--           tabs between--           them; what the example board holds; which keys the page answers
 --           to and the rule that every one of them is a real binding
 --           (key parity), with the test that holds the page to it; the
 --           status-bar banner; the graph step; the walkthrough; the README
@@ -32,7 +32,8 @@
 --   - It is an imitation on invented example data. It never talks to a real
 --     store, MCP server or tmux.
 --   - Two steps, ExploreBoard then Graph, moved between with on-page Next and
---     Back buttons. Buttons, not keys, so the guide invents no key of its own.
+--     Back buttons or the two step tabs. Buttons, not keys, so the guide
+--     invents no key of its own.
 --   - Key parity is the most important rule: every key the guide answers to
 --     is a real binding from the keybinding table. The guide may answer to a
 --     subset of the table, never to a key or action the table lacks. The
@@ -197,6 +198,16 @@ rule BackGoesToTheBoard {
         -- visitor left it: cursor, open epic or package, open overlay.
 }
 
+rule StepTabChoosesTheStep {
+    -- The two step tabs above the page name the steps; choosing one shows
+    -- it, from either step. Choosing the step already shown changes nothing.
+    when: GuideStepTabPressed(visit, step)
+
+    requires: visit.step != step
+
+    ensures: visit.step = step
+}
+
 -- == Keys ==
 
 rule GuideKeyRunsItsDeclaredAction {
@@ -242,8 +253,10 @@ rule GuideKeyRunsItsDeclaredAction {
 rule GuideKeyOutsideTheBlockDoesNothing {
     -- The converse: a key the block does not list for the current namespace
     -- does nothing, as on the real board (keybindings.allium:
-    -- KeyWithoutARowCannotAct). The Graph step declares no keys, so every key
-    -- does nothing there.
+    -- KeyWithoutARowCannotAct). The Graph step declares no keys, so no
+    -- board key does anything there. The browser's own activation keys
+    -- (Enter or Space on a focused button, a package node included) are not
+    -- board keys: they press that button.
     when: GuideKeyPressed(visit, pressed_in, key)
 
     requires: visit.step != explore_board
@@ -312,6 +325,7 @@ surface OnboardingGuidePage {
         GuideOpened(reader)
         GuideNextPressed(visit) when visit.step = explore_board
         GuideBackPressed(visit) when visit.step = graph
+        GuideStepTabPressed(visit, step)
         GuideKeyPressed(visit, pressed_in, key)
 
     @guarantee OnePageNoBuildNoNetwork
@@ -336,10 +350,14 @@ surface OnboardingGuidePage {
 
     @guarantee BannerListsTheKeysThatApplyHere
         -- A banner, the imitation of the board's status bar, is always shown
-        -- in the ExploreBoard step and lists the keys that apply where the
-        -- cursor is. It is built from the dispatch-keys block, so it never
-        -- names a key the page does not answer to, and a key the page
-        -- answers to in that place is not left off it.
+        -- in the ExploreBoard step and names, once each, the actions a key
+        -- runs where the cursor is. It is built from the dispatch-keys
+        -- block, so it never names a key the page does not answer to, and an
+        -- entry it names is the one a press of that key runs there (the
+        -- first applicable entry in block order). Each entry shows under its
+        -- first key (h/l and j/k for the motion pairs); alternate keys (Esc
+        -- beside q, the arrows, i beside Enter) are left to the help overlay,
+        -- so the banner fits one line.
 
     @guarantee GraphShowsHowTheBoardOrganizesWork
         -- The Graph step draws the same example data as a node-link graph,
@@ -355,8 +373,9 @@ surface OnboardingGuidePage {
         -- board of the tasks and epic cards it links, each task saying
         -- which epic it comes from. #whole-picture links straight to this
         -- step, #whole-picture/<package id> with that package chosen. The
-        -- step also gives a sense of how much the board holds. It is not
-        -- operated with keys.
+        -- step also gives a sense of how much the board holds. It has no
+        -- board keys; its buttons and package nodes answer the browser's
+        -- own activation keys.
 
     @guarantee WalkthroughReadsWithoutJavaScript
         -- The page carries a plain-text walkthrough of the same tour in its

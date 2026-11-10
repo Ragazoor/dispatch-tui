@@ -938,6 +938,10 @@ function statusBar(ns) {
   const seen = new Set();
   const parts = [];
   for (const b of applicable(ns)) {
+    // Name an entry only where a press of its key would run it: two entries
+    // can apply at once (a Backlog card without a worktree), and the first
+    // in block order is the one the press runs.
+    if (lookup(ns, b.keys[0]) !== b) continue;
     const key = b.keys.length === 4 && b.keys[0] === "h" ? "h/l" : b.keys.length === 4 && b.keys[0] === "j" ? "j/k" : b.keys[0];
     const id = key + b.label;
     if (seen.has(id)) continue;

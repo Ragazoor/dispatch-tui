@@ -805,7 +805,12 @@ fn guide_declares_only_real_bindings() {
             bindings_in(ns).any(|b| b.action == action && b.description == description),
             "guide's description of {ns_name}/{action} is not the table's"
         );
-        for key in entry["keys"].as_array().expect("keys") {
+        let keys = entry["keys"].as_array().expect("keys");
+        assert!(
+            !keys.is_empty(),
+            "{ns_name}/{action}: guide entry declares no key"
+        );
+        for key in keys {
             let key = key.as_str().expect("key is a string");
             assert!(
                 bindings_in(ns).any(|b| b.action == action && b.keys.contains(&key)),

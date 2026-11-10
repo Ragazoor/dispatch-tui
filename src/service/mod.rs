@@ -37,6 +37,17 @@ pub use work_packages::{
 // Service error
 // ---------------------------------------------------------------------------
 
+/// What a read by id says about a task the shared store holds but this board
+/// cannot decode (observability.allium: `ReadByIdReportsAnUndecodableTask`).
+pub fn undecodable_task_message(id: crate::models::TaskId, reason: &str) -> String {
+    format!(
+        "task {} is in the shared store but this board cannot decode it: {reason}. \
+         A newer dispatch probably wrote it; update this board, and do not recreate \
+         the task.",
+        id.0
+    )
+}
+
 #[derive(Debug)]
 pub enum ServiceError {
     /// Client-provided data is invalid (bad status, missing fields, etc.)
