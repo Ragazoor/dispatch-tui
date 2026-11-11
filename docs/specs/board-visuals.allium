@@ -807,17 +807,9 @@ use "./work-packages.allium" as wp
 -- coverage". A new colour or weight claim here arrives with its test there,
 -- or with a line in its list of uncovered claims.
 
--- The board's hues. Four are column identities (blue, yellow, purple,
--- green); purple is also the epic identity and cyan the work package's. red
--- and yellow are also the state colours a frame, an indicator line or a CI
--- badge takes, with green and cyan for the healthy indicator states. signal
--- is the new-task mark and bookmark the bookmark mark, each a hue used for
--- that one meaning. muted is the generic grey for de-emphasised text and is
--- not any column's identity. The cursor white and the neutrals are not here:
--- they are not hues ("Card border: cursor and state", BoardNeutralRamp).
-enum PaletteToken {
-    blue | yellow | purple | green | cyan | red | signal | bookmark | muted
-}
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
 
 value ColumnChrome {
     -- The column's identity colour. Not a function of focus.
@@ -954,15 +946,98 @@ value BoardNeutralRamp {
 }
 
 
+-- The scope of the named exception under "Focus is intensity, not
+-- colour-vs-absence", as a claim rather than as a paragraph. Two surfaces
+-- signal focus by GAINING hue and drop to a flat neutral grey when unfocused;
+-- every other hued surface keeps its hue at both focus states.
+--
+-- Typing it is the point. The prose says "this exception covers the top rule
+-- and the scroll indicators and nothing else. It is not a general licence to
+-- drop hue when unfocused" — a scope statement, which is exactly the kind of
+-- sentence a later edit widens without noticing. As an equality it cannot be
+-- widened by one surface at a time.
+value HuedSurfaceFocusBehaviour {
+    surface: HuedSurface
+    keeps_hue_when_unfocused: Boolean
+
+    invariant OnlyTheHairlinesDropHue {
+        keeps_hue_when_unfocused = (surface != column_top_rule
+            and surface != column_scroll_indicator)
+    }
+
+    @guidance
+        -- The reason the two hairlines are the exception is size, not
+        -- oversight: a dimmed hue on a one-cell-tall rule is not
+        -- distinguishable from grey, so the reduced-emphasis treatment that
+        -- works on a text label would spend a hue to produce something the
+        -- eye reads as grey anyway. The full argument is in "Focus is
+        -- intensity, not colour-vs-absence".
+        --
+        -- The epic surfaces answer this question vacuously — an epic's purple
+        -- does not depend on its column's focus at all — and they are
+        -- therefore keeps_hue_when_unfocused, which is the right answer for
+        -- the wrong reason. That is accepted: the invariant exists to stop
+        -- the exception spreading to the header label and the card stripe,
+        -- and it does that whatever the epic rows say.
+}
+
+-- == Header Bar Extent ==
+
+-- "Column header bar" makes a geometric claim that reads as neatness and is
+-- not: a bar spans exactly the horizontal extent of the column it labels, no
+-- more and no less, and the separators between columns are part of no bar.
+--
+-- The normative form is that the header row and the board below it are ONE
+-- division of the screen seen at two heights, not two divisions that must be
+-- kept equal. Two independent divisions of one width disagree in ways that
+-- depend on how the division rounds, so they drift rather than break — which
+-- is precisely what a keep-them-in-step rule fails to prevent.
+--
+-- What is at stake is identity attribution. The label is the column's
+-- identity surface, so a bar that overhangs puts one column's header over
+-- another column's cards, which is the single thing the identity rules exist
+-- to prevent.
+value ColumnHeaderGeometry {
+    column_left: Integer
+    column_width: Integer
+    bar_left: Integer
+    bar_width: Integer
+
+    invariant BarMatchesItsColumnExactly {
+        bar_left = column_left and bar_width = column_width
+    }
+
+    @guidance
+        -- Coverage is header_bar_stops_at_the_column_separators, which checks
+        -- five terminal widths on purpose: whether a misalignment is visible
+        -- at all depends on how the division rounds at that particular width,
+        -- so a single-width assertion would read as coverage while hiding the
+        -- defect. At 120 columns it very nearly does.
+}
+
 ------------------------------------------------------------
--- The Card Frame, Typed
+-- Enumerations
 ------------------------------------------------------------
+
+-- The board's hues. Four are column identities (blue, yellow, purple,
+-- green); purple is also the epic identity and cyan the work package's. red
+-- and yellow are also the state colours a frame, an indicator line or a CI
+-- badge takes, with green and cyan for the healthy indicator states. signal
+-- is the new-task mark and bookmark the bookmark mark, each a hue used for
+-- that one meaning. muted is the generic grey for de-emphasised text and is
+-- not any column's identity. The cursor white and the neutrals are not here:
+-- they are not hues ("Card border: cursor and state", BoardNeutralRamp).
+enum PaletteToken {
+    blue | yellow | purple | green | cyan | red | signal | bookmark | muted
+}
+
+-- == The Card Frame, Typed ==
 
 -- "Card border: cursor and state" states the border rule as a numbered list
 -- and then spends forty lines on why each row is where it is. The list is the
 -- normative part, and it is the part a renderer gets wrong. It is restated
--- here as a type and four invariants so that the toolchain can see it: a
--- change to any row now has to change a named claim.
+-- as this type and RenderedCard's four invariants so that the toolchain can
+-- see it: a change to any row has to change a named claim.
 --
 -- Nothing here supersedes the prose. The prose says why the cursor is white
 -- rather than the column hue, why dispatching is excluded, and what the
@@ -978,6 +1053,62 @@ enum CardFrameColour {
     state_yellow       -- the two attention states
     resting_neutral    -- every healthy card that is not the cursor
 }
+
+-- == Where Hue Is Allowed ==
+
+-- The closed set of surfaces that carry a hue at all. Everything not listed
+-- here is neutral: the three large flat areas (column ground, header fill,
+-- card surface), a resting card's frame, the select-all checkbox fill, the
+-- message flash's border, and every ordinary label badge. The cursor frame
+-- is the cursor white, which is not a hue.
+--
+-- The list is worth having as a type because the board's colour budget is the
+-- design. Each entry was argued for individually, and there is deliberately
+-- no tinted column ground, no hued header fill and no per-column select-all
+-- ramp, so a surface arriving without an argument is the failure mode this
+-- enum makes visible.
+enum HuedSurface {
+    header_label               -- derived from the column's identity hue at
+                               -- both focus states, and equal to it at
+                               -- neither ("Column header bar")
+    task_card_stripe           -- the literal palette token, and the only
+                               -- surface on a card that renders it
+    epic_card_stripe           -- purple, in every column; signal while the
+                               -- epic is marked by the new-task signal
+    epic_card_title            -- purple, bold at rest
+    epic_header_row            -- purple, heading a group of epic-owned tasks
+                               -- in a flattened column
+    package_card_chrome        -- cyan: a work package card's stripe, square
+                               -- glyph and title, in every column
+    card_frame_state           -- red or yellow on an unhealthy card ("Card
+                               -- border: cursor and state")
+    card_indicator             -- a task card's status indicator and its
+                               -- schedule suffix, and an epic card's
+                               -- substatus label, in the colour of the state
+                               -- they name: red, yellow, cyan or green
+    message_flash_glyph        -- yellow ✉ / ➤ on the title line
+    message_flash_fill         -- the warm flash fill: the one card whose
+                               -- fill differs from the card surface
+    new_task_signal_glyph      -- ◆ in signal ("New-task signal")
+    bookmark_glyph             -- ◆ in bookmark ("Bookmark")
+    column_top_rule            -- the identity hue, focused only
+    column_scroll_indicator    -- the identity hue, focused only
+    ci_status_badge            -- green / red / yellow by exact text match.
+                               -- A state colour, not an identity hue: it says
+                               -- the same thing on every card in every column
+                               -- ("Card label badges").
+    epic_view_panel_ground     -- a faint purple on the panel ENCLOSING the
+                               -- columns, as a mode signal. The one hued flat
+                               -- area on the screen, and it is the board's
+                               -- frame rather than a column ground — see
+                               -- "Column ground and card surface", where the
+                               -- distinction is made and the fact that no
+                               -- test covers it is recorded.
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
 
 -- One per card currently drawn on the board — task cards and epic cards
 -- alike, because the border rule is uniform across card kinds ("Epic cards").
@@ -1061,6 +1192,10 @@ entity RenderedCard {
         -- absence rather than leaving it to be inferred.
 }
 
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
 -- At most one card on the board carries the cursor white. This is the half of
 -- the border rule that no per-card invariant can state, and it is the half
 -- that makes the white worth having: a colour used once is a position, a
@@ -1075,131 +1210,6 @@ invariant AtMostOneCursorWhiteFrame {
         for b in RenderedCards:
             a != b implies not (a.frame_colour = cursor_white
                 and b.frame_colour = cursor_white)
-}
-
-------------------------------------------------------------
--- Where Hue Is Allowed
-------------------------------------------------------------
-
--- The closed set of surfaces that carry a hue at all. Everything not listed
--- here is neutral: the three large flat areas (column ground, header fill,
--- card surface), a resting card's frame, the select-all checkbox fill, the
--- message flash's border, and every ordinary label badge. The cursor frame
--- is the cursor white, which is not a hue.
---
--- The list is worth having as a type because the board's colour budget is the
--- design. Each entry was argued for individually, and there is deliberately
--- no tinted column ground, no hued header fill and no per-column select-all
--- ramp, so a surface arriving without an argument is the failure mode this
--- enum makes visible.
-enum HuedSurface {
-    header_label               -- derived from the column's identity hue at
-                               -- both focus states, and equal to it at
-                               -- neither ("Column header bar")
-    task_card_stripe           -- the literal palette token, and the only
-                               -- surface on a card that renders it
-    epic_card_stripe           -- purple, in every column; signal while the
-                               -- epic is marked by the new-task signal
-    epic_card_title            -- purple, bold at rest
-    epic_header_row            -- purple, heading a group of epic-owned tasks
-                               -- in a flattened column
-    package_card_chrome        -- cyan: a work package card's stripe, square
-                               -- glyph and title, in every column
-    card_frame_state           -- red or yellow on an unhealthy card ("Card
-                               -- border: cursor and state")
-    card_indicator             -- a task card's status indicator and its
-                               -- schedule suffix, and an epic card's
-                               -- substatus label, in the colour of the state
-                               -- they name: red, yellow, cyan or green
-    message_flash_glyph        -- yellow ✉ / ➤ on the title line
-    message_flash_fill         -- the warm flash fill: the one card whose
-                               -- fill differs from the card surface
-    new_task_signal_glyph      -- ◆ in signal ("New-task signal")
-    bookmark_glyph             -- ◆ in bookmark ("Bookmark")
-    column_top_rule            -- the identity hue, focused only
-    column_scroll_indicator    -- the identity hue, focused only
-    ci_status_badge            -- green / red / yellow by exact text match.
-                               -- A state colour, not an identity hue: it says
-                               -- the same thing on every card in every column
-                               -- ("Card label badges").
-    epic_view_panel_ground     -- a faint purple on the panel ENCLOSING the
-                               -- columns, as a mode signal. The one hued flat
-                               -- area on the screen, and it is the board's
-                               -- frame rather than a column ground — see
-                               -- "Column ground and card surface", where the
-                               -- distinction is made and the fact that no
-                               -- test covers it is recorded.
-}
-
--- The scope of the named exception under "Focus is intensity, not
--- colour-vs-absence", as a claim rather than as a paragraph. Two surfaces
--- signal focus by GAINING hue and drop to a flat neutral grey when unfocused;
--- every other hued surface keeps its hue at both focus states.
---
--- Typing it is the point. The prose says "this exception covers the top rule
--- and the scroll indicators and nothing else. It is not a general licence to
--- drop hue when unfocused" — a scope statement, which is exactly the kind of
--- sentence a later edit widens without noticing. As an equality it cannot be
--- widened by one surface at a time.
-value HuedSurfaceFocusBehaviour {
-    surface: HuedSurface
-    keeps_hue_when_unfocused: Boolean
-
-    invariant OnlyTheHairlinesDropHue {
-        keeps_hue_when_unfocused = (surface != column_top_rule
-            and surface != column_scroll_indicator)
-    }
-
-    @guidance
-        -- The reason the two hairlines are the exception is size, not
-        -- oversight: a dimmed hue on a one-cell-tall rule is not
-        -- distinguishable from grey, so the reduced-emphasis treatment that
-        -- works on a text label would spend a hue to produce something the
-        -- eye reads as grey anyway. The full argument is in "Focus is
-        -- intensity, not colour-vs-absence".
-        --
-        -- The epic surfaces answer this question vacuously — an epic's purple
-        -- does not depend on its column's focus at all — and they are
-        -- therefore keeps_hue_when_unfocused, which is the right answer for
-        -- the wrong reason. That is accepted: the invariant exists to stop
-        -- the exception spreading to the header label and the card stripe,
-        -- and it does that whatever the epic rows say.
-}
-
-------------------------------------------------------------
--- Header Bar Extent
-------------------------------------------------------------
-
--- "Column header bar" makes a geometric claim that reads as neatness and is
--- not: a bar spans exactly the horizontal extent of the column it labels, no
--- more and no less, and the separators between columns are part of no bar.
---
--- The normative form is that the header row and the board below it are ONE
--- division of the screen seen at two heights, not two divisions that must be
--- kept equal. Two independent divisions of one width disagree in ways that
--- depend on how the division rounds, so they drift rather than break — which
--- is precisely what a keep-them-in-step rule fails to prevent.
---
--- What is at stake is identity attribution. The label is the column's
--- identity surface, so a bar that overhangs puts one column's header over
--- another column's cards, which is the single thing the identity rules exist
--- to prevent.
-value ColumnHeaderGeometry {
-    column_left: Integer
-    column_width: Integer
-    bar_left: Integer
-    bar_width: Integer
-
-    invariant BarMatchesItsColumnExactly {
-        bar_left = column_left and bar_width = column_width
-    }
-
-    @guidance
-        -- Coverage is header_bar_stops_at_the_column_separators, which checks
-        -- five terminal widths on purpose: whether a misalignment is visible
-        -- at all depends on how the division rounds at that particular width,
-        -- so a single-width assertion would read as coverage while hiding the
-        -- defect. At 120 columns it very nearly does.
 }
 
 ------------------------------------------------------------

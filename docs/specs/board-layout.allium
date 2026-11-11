@@ -167,218 +167,6 @@ given {
 --   to wait out the `gg` chord window. Multi-select is on `v`.
 
 ------------------------------------------------------------
--- Board View
-------------------------------------------------------------
-
--- The board's view: what the operator is looking at, and the controls that
--- narrow it. There is exactly one, and it lives in the TUI (store-split S1):
--- no MCP tool reads it, because no agent sees the operator's board.
---
--- Every derivation below is a rendered answer, never a stored one. No task
--- or epic row records which columns its card appears in, which section it
--- sits in or how deep its epic header is indented, so moving a task between
--- columns moves every card that depends on it without a write.
-
-entity BoardView {
-    -- The rows this board holds: the shared rows it subscribes to.
-    tasks: Set<core/Task>
-    epics: Set<core/Epic>
-    packages: Set<wp/WorkPackage>
-    -- The repo paths the repo filter admits, with its include/exclude mode
-    -- and the empty selection (which admits every repo) already resolved.
-    active_repo_filter: Set<String>
-    -- The main board, rather than an epic view or a package view.
-    is_board: Boolean
-    -- The epic an epic view shows. Null on the main board and in a package
-    -- view.
-    current_epic: core/Epic?
-    -- The board search query, "" when none is active ("Board Search
-    -- Filter").
-    search_query: String
-    -- How the board is read ("Board Lens").
-    lens: BoardLens
-    -- Which epics and packages the operator has hidden ("Hidden Epics and
-    -- Work Packages").
-    hides: BoardHides
-
-    -- == Visibility ==
-
-    -- The search half of visibility. own_match is board_search_filter's
-    -- per-item predicate: a title subsequence match or an id-prefix match.
-    matches_search(title, id): search_query = "" or own_match(title, id, search_query)
-
-    -- The four predicates every task card on the board is held to: the repo
-    -- filter, the epic hide-list, the only-active filter and the search
-    -- query. Flattening is not among them: it decides which column shows a
-    -- task (in_scope), not whether the board is hiding it.
-    task_is_visible(task):
-        task.repo_path in active_repo_filter
-        and not hides.task_is_hidden(task)
-        and (not lens.only_active or task.current_window != null)
-        and matches_search(task.title, task.id)
-
-    -- The tasks under an epic that the epic hide-list leaves on the board.
-    unhidden_subtree_tasks(epic):
-        filter(epic.subtree_tasks, t => not hides.task_is_hidden(t))
-
-    -- The repo filter and the only-active filter as they apply to an epic
-    -- card, read off its unhidden subtree. An epic with no task there passes
-    -- the repo filter, so a new, empty epic stays reachable; under the
-    -- only-active filter it needs a task with a live session.
-    epic_admitted(epic):
-        (unhidden_subtree_tasks(epic).count = 0
-            or unhidden_subtree_tasks(epic).any(t => t.repo_path in active_repo_filter))
-        and (not lens.only_active
-            or unhidden_subtree_tasks(epic).any(t => t.current_window != null))
-
-    -- The search half for an epic card ("Board Search Filter"): the epic
-    -- matches itself, a sub-epic the board would show matches, or a visible
-    -- subtree task does (placing_tasks already holds a task to the query).
-    epic_matches_search(epic):
-        search_query = ""
-        or own_match(epic.title, epic.id, search_query)
-        or epic.subtree_epics.any(e =>
-            not hides.epic_is_hidden(e) and epic_admitted(e)
-            and own_match(e.title, e.id, search_query))
-        or has_placing_tasks(epic)
-
-    -- Whether an epic card is drawn at all. Which columns it is drawn in is
-    -- appears_in.
-    epic_is_visible(epic):
-        not hides.epic_is_hidden(epic)
-        and epic_admitted(epic)
-        and epic_matches_search(epic)
-
-    -- == Epic card placement ("Epic Card Placement") ==
-
-    -- The tasks that place an epic's cards: its whole subtree, held to the
-    -- visibility every card on the board is held to.
-    placing_tasks(epic): filter(epic.subtree_tasks, t => task_is_visible(t))
-
-    has_placing_tasks(epic): placing_tasks(epic).count > 0
-
-    -- A column draws the epic's card when some placing task holds its
-    -- status. An epic with no placing task at all falls back to Backlog, so
-    -- it stays reachable. Only a column that renders epic cards draws it.
-    appears_in(epic, status):
-        placing_tasks(epic).any(t => t.status = status)
-        or (not has_placing_tasks(epic) and status = backlog)
-
-    -- The placing tasks one column's copy is derived from. Its section and
-    -- its substatus label come from these and nothing else: the epic
-    -- substatus (epics.allium, "Epic substatus") computed over this slice,
-    -- mapped as in section_of's note below.
-    placing_tasks_in(epic, status): filter(placing_tasks(epic), t => t.status = status)
-
-    -- The key an epic's card sorts by in the Done column, read descending
-    -- ("Done Column Ordering"). The epic's own completion time wins when it
-    -- has one; otherwise the most recent completion in the column's own
-    -- slice of the subtree. Null when neither exists, and a null key sorts
-    -- last.
-    done_sort_key(epic):
-        epic.completed_at ?? latest_completion(placing_tasks_in(epic, done))
-
-    -- == Flattening ("Flattened Mode") ==
-
-    -- The column flattening never reaches. The backlog is read at the epic
-    -- level, so it keeps its epic cards and every descendant stays inside
-    -- the epic it belongs to.
-    unflattened_statuses: { backlog }
-
-    -- Flattening is decided per column, never once for the board. A column
-    -- is its task status (see "Board Columns").
-    flattens(status): lens.flattened and status not in unflattened_statuses
-
-    -- A column renders epic cards unless it is being flattened.
-    renders_epics(status): not flattens(status)
-
-    -- What hierarchical mode shows in a column: on the main board, tasks
-    -- with no epic; in an epic view, the viewed epic's own direct tasks.
-    -- Deeper descendants stay inside their sub-epic's card.
-    directly_under(task):
-        (is_board and task.epic = null)
-        or (current_epic != null and task.epic = current_epic)
-
-    -- Whether a task card is drawn in its status column, on the main board
-    -- or in an epic view: a flattened column admits the whole subtree in
-    -- view, an unflattened one only what hierarchical mode shows there. A
-    -- package view's cards are work-packages.allium's PackageViewCards.
-    in_scope(task, status):
-        task_is_visible(task)
-        and (current_epic = null or task in current_epic.subtree_tasks)
-        and (flattens(status) or directly_under(task))
-
-    -- The task cards a column draws.
-    column_tasks(status): filter(tasks, t => t.status = status and in_scope(t, status))
-
-    -- == Column sections ("Column Section Layout") ==
-
-    -- The columns that have sections at all. Every other column lists its
-    -- cards without headers: its tasks hold sub_status = none throughout.
-    -- Unrelated to unflattened_statuses: one is about epic grouping, the
-    -- other about section grouping.
-    sectioned_statuses: { running, review }
-
-    has_sections(status): status in sectioned_statuses
-
-    -- The section a task card sits in, or null in a column with no
-    -- sections. A derived section wins over the task's own sub_status, and
-    -- parked is tested first: "no PR at all" dominates any review decision
-    -- recorded without one.
-    --
-    -- An epic card lands in a section too, off its column's display
-    -- substatus: "N blocked" -> needs_input, active -> active, in review ->
-    -- awaiting_review.
-    section_of(task):
-        if task.status = review and task.worktree != null
-            and task.current_window = null
-            and not (task.url != null and task.url.url_type = pr): parked
-        else if task.is_review_tagged
-            and task.sub_status = changes_requested: changes_requested_by_me
-        else if task.is_review_tagged
-            and task.sub_status = approved: approved_by_me
-        else if task.sub_status = none: null
-        else: task.sub_status
-
-    -- Where a flattened column draws epic-header rows: a flattened column
-    -- with sections. The flattened Done column has none ("Done Column
-    -- Ordering"), so it draws no header and has no epic group to fold.
-    draws_epic_headers(status): flattens(status) and has_sections(status)
-
-    -- == The epic tree ("Flattened Mode", Rendering) ==
-
-    section_tasks(status, section):
-        filter(column_tasks(status), t => section_of(t) = section)
-
-    -- The compact epic tree one section of a flattened column lays its
-    -- groups out as. The tree's top is the viewed epic in an epic view and
-    -- the root epics elsewhere; its owners are the epics owning a task in
-    -- the section. Folding is not consulted ("Epic Folding").
-    epic_tree(status, section):
-        EpicGroupTree(top: current_epic, owners: epics_of(section_tasks(status, section)))
-
-    epic_depth(epic, status, section): epic_tree(status, section).depth(epic)
-
-    epic_indent(epic, status, section): epic_tree(status, section).indent(epic)
-
-    -- == Status bar badges ("Board Lens", "Hidden Epics and Work Packages") ==
-
-    -- The hides the badge and the overlay's tab counts name: only epics and
-    -- packages the board holds, since the user could never find the row to
-    -- unhide a ghost. An epic hidden only through its parent is not counted.
-    hidden_epic_count: filter(epics, e => e in hides.hidden_epics).count
-    hidden_package_count: filter(packages, p => hides.package_is_hidden(p)).count
-
-    @guidance
-        -- == Black boxes ==
-        -- own_match(title, id, query): board_search_filter's predicate.
-        -- latest_completion(tasks): the greatest completed_at among the
-        -- tasks, null when none has one.
-        -- epics_of(tasks): the epics the tasks name directly, a task with
-        -- no epic adding none.
-}
-
-------------------------------------------------------------
 -- Epic Card Placement
 ------------------------------------------------------------
 
@@ -701,72 +489,6 @@ entity BoardView {
 --     off, and every epic card becomes visible and selectable again.
 
 
-config {
-    -- Columns of indent per level of epic depth, for a flattened column's
-    -- epic headers and cards and the agent-tree pane's agents section.
-    epic_indent_step: Integer = 2
-    -- The depth past which the indent stops growing.
-    epic_indent_max_depth: Integer = 3
-    -- The longest an epic title runs in the epic view's border breadcrumb
-    -- before it is truncated with an ellipsis ("Epic View Panel Title").
-    breadcrumb_segment_max_chars: Integer = 30
-}
-
--- The compact epic tree one flattened section (or the agent-tree pane's
--- agents section) lays its groups out as. `top` is the viewed epic in an
--- epic view, and null on the main board, in a package view and in the pane:
--- only epics strictly below the top may count as ancestors, so the tree's
--- top is the viewed epic's direct sub-epics or the root epics. `owners` is
--- the set of epics that own a task in the section (an agent in the pane).
--- The viewed epic's own group is still drawn, at depth 0; it is only never
--- an ancestor.
-value EpicGroupTree {
-    top: core/Epic?
-    owners: Set<core/Epic>
-
-    -- Whether an epic may count as an ancestor here.
-    in_view(epic): top = null or epic in top.subtree_epics
-
-    -- Whether some owner sits anywhere below the epic.
-    has_owner_below(epic): owners.any(o => o in epic.subtree_epics)
-
-    -- How many of the epic's child epics are an owner or have an owner
-    -- below them. Counted over its children in the full epic tree, so an
-    -- epic only one branch passes through counts 1 however wide the subtree
-    -- beneath that branch is.
-    branches(epic):
-        filter(epic.sub_epics, c => c in owners or has_owner_below(c)).count
-
-    -- An epic draws a header when it owns a task here, or when two or more
-    -- branches meet at it in view. Every other epic is skipped. An owner
-    -- out of view (only ever the viewed epic) still draws its header.
-    shown(epic):
-        epic in owners or (in_view(epic) and branches(epic) >= 2)
-
-    -- Whether a drawn epic counts as an ancestor: only one in view.
-    counts(epic): in_view(epic) and shown(epic)
-
-    -- The nearest ancestor drawn, skipping every one that does not count.
-    -- Null at the tree's top.
-    drawn_parent(epic):
-        if epic.parent = null: null
-        else if counts(epic.parent): epic.parent
-        else: drawn_parent(epic.parent)
-
-    -- 0 at the tree's top; one more per counted ancestor.
-    depth(epic):
-        if drawn_parent(epic) = null: 0
-        else: depth(drawn_parent(epic)) + 1
-
-    -- A drawn epic with no drawn epic directly under it. Under one parent
-    -- these come before the drawn children that are not leaves.
-    is_leaf(epic):
-        not epic.subtree_epics.any(e => counts(e) and drawn_parent(e) = epic)
-
-    indent(epic):
-        min(depth(epic), config.epic_indent_max_depth) * config.epic_indent_step
-}
-
 -- == Epic View Panel Title ==
 --
 -- Independent of flattened mode: whenever the current view is a specific
@@ -907,43 +629,6 @@ value EpicGroupTree {
 --     nothing the board renders, and it neither errors nor collapses anything
 --     else.
 
--- One folded section, named by the column it is in and the section within it.
--- The same section name in two columns is two independent pairs.
-value SectionRef {
-    column: core/TaskStatus
-    section: core/ColumnSection
-}
-
--- An entity rather than a value, on the same terms as core.allium's
--- BoardSelection:
--- the rule that folds and unfolds a section mutates it, so it has to be
--- something a rule elsewhere can be given. There is exactly one.
-entity CollapsedSections {
-    collapsed: Set<SectionRef>
-
-    is_collapsed(ref): ref in collapsed
-
-    -- What the user sees, as opposed to what is recorded: while a query is
-    -- live, no section draws folded.
-    --
-    -- Stated that way rather than as "a folded section holding a match is
-    -- forced open", which is the intent, because the two are the same rule and
-    -- this one needs no per-section card count to evaluate. A section the query
-    -- leaves empty renders no header at all, folded or not (see Rendering
-    -- above), so overriding it is unobservable.
-    renders_collapsed(ref, search_query):
-        is_collapsed(ref) and search_query = ""
-
-    -- A header holds the cursor only while it draws folded. An expanded one
-    -- does not, and neither does a section that renders no header.
-    header_is_selectable(ref, search_query):
-        renders_collapsed(ref, search_query)
-
-    @guidance
-        -- Persisted, unlike the lens and BoardSelection: it survives an
-        -- app restart.
-}
-
 -- == Epic Folding ==
 
 -- A flattened epic's group can be folded too, independently of section
@@ -1063,36 +748,6 @@ entity CollapsedSections {
 --     that column is inert: it names nothing the column renders, and it
 --     neither errors nor folds anything else.
 
--- One folded epic group, named by the column it is in and the epic within
--- it. The same epic in two columns is two independent pairs.
-value EpicFoldRef {
-    column: core/TaskStatus
-    epic: core/Epic
-}
-
--- An entity rather than a value, on the same terms as CollapsedSections: the
--- rule that folds and unfolds an epic group mutates it. There is exactly
--- one.
-entity FoldedEpics {
-    folded: Set<EpicFoldRef>
-
-    is_folded(ref): ref in folded
-
-    -- What the user sees, as opposed to what is recorded: while a query is
-    -- live, no epic group draws folded. Same reasoning as
-    -- CollapsedSections.renders_collapsed.
-    renders_folded(ref, search_query):
-        is_folded(ref) and search_query = ""
-
-    -- A header holds the cursor only while it draws folded.
-    header_is_selectable(ref, search_query):
-        renders_folded(ref, search_query)
-
-    @guidance
-        -- Persisted, like CollapsedSections and unlike the lens and
-        -- BoardSelection: it survives an app restart.
-}
-
 -- == Board Vertical Layout ==
 
 -- board_vertical_layout:
@@ -1174,42 +829,6 @@ entity FoldedEpics {
 -- own board for one session, needs nothing from the shared store (store-split
 -- S1 keeps it in the TUI), and no agent sees that board.
 
-enum Lens { everything | flat | flat_active }
-
-entity BoardLens {
-    lens: Lens
-
-    -- The two switches the rest of this file reads. Derived, never set on
-    -- their own: the lens is the only state.
-    only_active: lens = flat_active
-    flattened: lens = flat or lens = flat_active
-
-    next: if lens = everything: flat
-          else if lens = flat: flat_active
-          else: everything
-
-    previous: if lens = everything: flat_active
-              else if lens = flat: everything
-              else: flat
-}
-
-rule CycleLensForward {
-    when: CycleLensForward()
-    ensures: board_view.lens.lens = board_view.lens.next
-
-    @guidance
-        -- Bound to Tab on the board (board.normal), in the main board and in
-        -- an epic view alike.
-}
-
-rule CycleLensBackward {
-    when: CycleLensBackward()
-    ensures: board_view.lens.lens = board_view.lens.previous
-
-    @guidance
-        -- Bound to BackTab (Shift+Tab) on the board (board.normal).
-}
-
 -- == Hidden Epics and Work Packages ==
 
 -- Besides the repo filter, the board filter holds two hide-lists: epics the
@@ -1272,89 +891,6 @@ rule CycleLensBackward {
 -- epic hide-list and the repo filter there, not the search, the lens or the
 -- package hide-list, and it reads them from the saved settings, so a change
 -- reaches the pane once the overlay closes.
-
-entity BoardHides {
-    hidden_epics: Set<core/Epic>
-    hidden_packages: Set<wp/WorkPackage>
-
-    -- An epic is hidden when it or any ancestor is on the list.
-    epic_is_hidden(epic):
-        epic in hidden_epics
-        or hidden_epics.any(h => epic in h.subtree_epics)
-
-    -- A task is hidden when its epic is. A task with no epic is never hidden
-    -- by this list.
-    task_is_hidden(task):
-        task.epic != null and epic_is_hidden(task.epic)
-
-    -- A shown epic with some sub-epic on the list: part of its subtree is
-    -- hidden though its own card is not. The overlay marks it partly hidden.
-    epic_is_partly_hidden(epic):
-        not epic_is_hidden(epic)
-        and hidden_epics.any(h => h in epic.subtree_epics)
-
-    package_is_hidden(package): package in hidden_packages
-
-    @guidance
-        -- Each list is saved as ids, so it can name an epic or package the
-        -- board no longer holds. Such an entry hides nothing; the counts
-        -- the badge shows are BoardView.hidden_epic_count and
-        -- hidden_package_count, which skip it.
-}
-
-rule ToggleHiddenEpic {
-    when: ToggleHiddenEpic(epic)
-    ensures:
-        if epic in board_view.hides.hidden_epics
-            or board_view.hides.epic_is_partly_hidden(epic):
-            -- Show the whole subtree: the epic and every sub-epic leave the
-            -- list, done ones and unlisted ones included.
-            board_view.hides.hidden_epics.remove(epic)
-            for sub_epic in epic.subtree_epics:
-                board_view.hides.hidden_epics.remove(sub_epic)
-        else:
-            board_view.hides.hidden_epics.add(epic)
-
-    @guidance
-        -- Space on an epic row in the overlay's Epics tab. The tab works like
-        -- a tree of checkboxes: hiding a parent hides its subtree, and showing
-        -- it again shows the whole subtree, clearing any sub-epic the user had
-        -- hidden on its own. Space on a partly hidden row shows
-        -- its whole subtree too; a second Space then hides the parent. Space
-        -- on a row hidden by its parent adds or removes that epic's own entry
-        -- (removing also clears its sub-epics' entries), which changes nothing
-        -- visible while the parent stays hidden.
-}
-
-rule ToggleHiddenWorkPackage {
-    when: ToggleHiddenWorkPackage(package)
-    ensures:
-        if package in board_view.hides.hidden_packages:
-            board_view.hides.hidden_packages.remove(package)
-        else:
-            board_view.hides.hidden_packages.add(package)
-
-    @guidance
-        -- Space on a package row in the overlay's Work packages tab.
-}
-
-rule SaveBoardFilterOnClose {
-    when: CloseBoardFilter()
-    ensures:
-        settings/SaveSetting(key: "hidden_epics", value: id_list(board_view.hides.hidden_epics))
-        settings/SaveSetting(key: "hidden_packages", value: id_list(board_view.hides.hidden_packages))
-
-    @guidance
-        -- Closing the [f] overlay saves the whole board filter, once, rather
-        -- than one write per Space. The same close saves the repo selection
-        -- (key "repo_filter") and its include/exclude mode
-        -- ("repo_filter_mode"); this spec does not model those as state, so
-        -- they are named here rather than in the ensures.
-        --
-        -- == Black boxes ==
-        -- id_list(set) is the ids in the set, sorted, as the setting's
-        -- stored text.
-}
 
 -- == Board Filter Overlay Layout ==
 
@@ -1537,6 +1073,490 @@ rule SaveBoardFilterOnClose {
 --
 --   When the cursor is on the select-all column header (on_select_all = true), the anchor
 --   is None and the header state is preserved across refreshes.
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- The compact epic tree one flattened section (or the agent-tree pane's
+-- agents section) lays its groups out as. `top` is the viewed epic in an
+-- epic view, and null on the main board, in a package view and in the pane:
+-- only epics strictly below the top may count as ancestors, so the tree's
+-- top is the viewed epic's direct sub-epics or the root epics. `owners` is
+-- the set of epics that own a task in the section (an agent in the pane).
+-- The viewed epic's own group is still drawn, at depth 0; it is only never
+-- an ancestor.
+value EpicGroupTree {
+    top: core/Epic?
+    owners: Set<core/Epic>
+
+    -- Whether an epic may count as an ancestor here.
+    in_view(epic): top = null or epic in top.subtree_epics
+
+    -- Whether some owner sits anywhere below the epic.
+    has_owner_below(epic): owners.any(o => o in epic.subtree_epics)
+
+    -- How many of the epic's child epics are an owner or have an owner
+    -- below them. Counted over its children in the full epic tree, so an
+    -- epic only one branch passes through counts 1 however wide the subtree
+    -- beneath that branch is.
+    branches(epic):
+        filter(epic.sub_epics, c => c in owners or has_owner_below(c)).count
+
+    -- An epic draws a header when it owns a task here, or when two or more
+    -- branches meet at it in view. Every other epic is skipped. An owner
+    -- out of view (only ever the viewed epic) still draws its header.
+    shown(epic):
+        epic in owners or (in_view(epic) and branches(epic) >= 2)
+
+    -- Whether a drawn epic counts as an ancestor: only one in view.
+    counts(epic): in_view(epic) and shown(epic)
+
+    -- The nearest ancestor drawn, skipping every one that does not count.
+    -- Null at the tree's top.
+    drawn_parent(epic):
+        if epic.parent = null: null
+        else if counts(epic.parent): epic.parent
+        else: drawn_parent(epic.parent)
+
+    -- 0 at the tree's top; one more per counted ancestor.
+    depth(epic):
+        if drawn_parent(epic) = null: 0
+        else: depth(drawn_parent(epic)) + 1
+
+    -- A drawn epic with no drawn epic directly under it. Under one parent
+    -- these come before the drawn children that are not leaves.
+    is_leaf(epic):
+        not epic.subtree_epics.any(e => counts(e) and drawn_parent(e) = epic)
+
+    indent(epic):
+        min(depth(epic), config.epic_indent_max_depth) * config.epic_indent_step
+}
+
+-- One folded section, named by the column it is in and the section within it.
+-- The same section name in two columns is two independent pairs.
+value SectionRef {
+    column: core/TaskStatus
+    section: core/ColumnSection
+}
+
+-- One folded epic group, named by the column it is in and the epic within
+-- it. The same epic in two columns is two independent pairs.
+value EpicFoldRef {
+    column: core/TaskStatus
+    epic: core/Epic
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum Lens { everything | flat | flat_active }
+
+------------------------------------------------------------
+-- Board View
+------------------------------------------------------------
+
+-- The board's view: what the operator is looking at, and the controls that
+-- narrow it. There is exactly one, and it lives in the TUI (store-split S1):
+-- no MCP tool reads it, because no agent sees the operator's board.
+--
+-- Every derivation below is a rendered answer, never a stored one. No task
+-- or epic row records which columns its card appears in, which section it
+-- sits in or how deep its epic header is indented, so moving a task between
+-- columns moves every card that depends on it without a write.
+
+entity BoardView {
+    -- The rows this board holds: the shared rows it subscribes to.
+    tasks: Set<core/Task>
+    epics: Set<core/Epic>
+    packages: Set<wp/WorkPackage>
+    -- The repo paths the repo filter admits, with its include/exclude mode
+    -- and the empty selection (which admits every repo) already resolved.
+    active_repo_filter: Set<String>
+    -- The main board, rather than an epic view or a package view.
+    is_board: Boolean
+    -- The epic an epic view shows. Null on the main board and in a package
+    -- view.
+    current_epic: core/Epic?
+    -- The board search query, "" when none is active ("Board Search
+    -- Filter").
+    search_query: String
+    -- How the board is read ("Board Lens").
+    lens: BoardLens
+    -- Which epics and packages the operator has hidden ("Hidden Epics and
+    -- Work Packages").
+    hides: BoardHides
+
+    -- == Visibility ==
+
+    -- The search half of visibility. own_match is board_search_filter's
+    -- per-item predicate: a title subsequence match or an id-prefix match.
+    matches_search(title, id): search_query = "" or own_match(title, id, search_query)
+
+    -- The four predicates every task card on the board is held to: the repo
+    -- filter, the epic hide-list, the only-active filter and the search
+    -- query. Flattening is not among them: it decides which column shows a
+    -- task (in_scope), not whether the board is hiding it.
+    task_is_visible(task):
+        task.repo_path in active_repo_filter
+        and not hides.task_is_hidden(task)
+        and (not lens.only_active or task.current_window != null)
+        and matches_search(task.title, task.id)
+
+    -- The tasks under an epic that the epic hide-list leaves on the board.
+    unhidden_subtree_tasks(epic):
+        filter(epic.subtree_tasks, t => not hides.task_is_hidden(t))
+
+    -- The repo filter and the only-active filter as they apply to an epic
+    -- card, read off its unhidden subtree. An epic with no task there passes
+    -- the repo filter, so a new, empty epic stays reachable; under the
+    -- only-active filter it needs a task with a live session.
+    epic_admitted(epic):
+        (unhidden_subtree_tasks(epic).count = 0
+            or unhidden_subtree_tasks(epic).any(t => t.repo_path in active_repo_filter))
+        and (not lens.only_active
+            or unhidden_subtree_tasks(epic).any(t => t.current_window != null))
+
+    -- The search half for an epic card ("Board Search Filter"): the epic
+    -- matches itself, a sub-epic the board would show matches, or a visible
+    -- subtree task does (placing_tasks already holds a task to the query).
+    epic_matches_search(epic):
+        search_query = ""
+        or own_match(epic.title, epic.id, search_query)
+        or epic.subtree_epics.any(e =>
+            not hides.epic_is_hidden(e) and epic_admitted(e)
+            and own_match(e.title, e.id, search_query))
+        or has_placing_tasks(epic)
+
+    -- Whether an epic card is drawn at all. Which columns it is drawn in is
+    -- appears_in.
+    epic_is_visible(epic):
+        not hides.epic_is_hidden(epic)
+        and epic_admitted(epic)
+        and epic_matches_search(epic)
+
+    -- == Epic card placement ("Epic Card Placement") ==
+
+    -- The tasks that place an epic's cards: its whole subtree, held to the
+    -- visibility every card on the board is held to.
+    placing_tasks(epic): filter(epic.subtree_tasks, t => task_is_visible(t))
+
+    has_placing_tasks(epic): placing_tasks(epic).count > 0
+
+    -- A column draws the epic's card when some placing task holds its
+    -- status. An epic with no placing task at all falls back to Backlog, so
+    -- it stays reachable. Only a column that renders epic cards draws it.
+    appears_in(epic, status):
+        placing_tasks(epic).any(t => t.status = status)
+        or (not has_placing_tasks(epic) and status = backlog)
+
+    -- The placing tasks one column's copy is derived from. Its section and
+    -- its substatus label come from these and nothing else: the epic
+    -- substatus (epics.allium, "Epic substatus") computed over this slice,
+    -- mapped as in section_of's note below.
+    placing_tasks_in(epic, status): filter(placing_tasks(epic), t => t.status = status)
+
+    -- The key an epic's card sorts by in the Done column, read descending
+    -- ("Done Column Ordering"). The epic's own completion time wins when it
+    -- has one; otherwise the most recent completion in the column's own
+    -- slice of the subtree. Null when neither exists, and a null key sorts
+    -- last.
+    done_sort_key(epic):
+        epic.completed_at ?? latest_completion(placing_tasks_in(epic, done))
+
+    -- == Flattening ("Flattened Mode") ==
+
+    -- The column flattening never reaches. The backlog is read at the epic
+    -- level, so it keeps its epic cards and every descendant stays inside
+    -- the epic it belongs to.
+    unflattened_statuses: { backlog }
+
+    -- Flattening is decided per column, never once for the board. A column
+    -- is its task status (see "Board Columns").
+    flattens(status): lens.flattened and status not in unflattened_statuses
+
+    -- A column renders epic cards unless it is being flattened.
+    renders_epics(status): not flattens(status)
+
+    -- What hierarchical mode shows in a column: on the main board, tasks
+    -- with no epic; in an epic view, the viewed epic's own direct tasks.
+    -- Deeper descendants stay inside their sub-epic's card.
+    directly_under(task):
+        (is_board and task.epic = null)
+        or (current_epic != null and task.epic = current_epic)
+
+    -- Whether a task card is drawn in its status column, on the main board
+    -- or in an epic view: a flattened column admits the whole subtree in
+    -- view, an unflattened one only what hierarchical mode shows there. A
+    -- package view's cards are work-packages.allium's PackageViewCards.
+    in_scope(task, status):
+        task_is_visible(task)
+        and (current_epic = null or task in current_epic.subtree_tasks)
+        and (flattens(status) or directly_under(task))
+
+    -- The task cards a column draws.
+    column_tasks(status): filter(tasks, t => t.status = status and in_scope(t, status))
+
+    -- == Column sections ("Column Section Layout") ==
+
+    -- The columns that have sections at all. Every other column lists its
+    -- cards without headers: its tasks hold sub_status = none throughout.
+    -- Unrelated to unflattened_statuses: one is about epic grouping, the
+    -- other about section grouping.
+    sectioned_statuses: { running, review }
+
+    has_sections(status): status in sectioned_statuses
+
+    -- The section a task card sits in, or null in a column with no
+    -- sections. A derived section wins over the task's own sub_status, and
+    -- parked is tested first: "no PR at all" dominates any review decision
+    -- recorded without one.
+    --
+    -- An epic card lands in a section too, off its column's display
+    -- substatus: "N blocked" -> needs_input, active -> active, in review ->
+    -- awaiting_review.
+    section_of(task):
+        if task.status = review and task.worktree != null
+            and task.current_window = null
+            and not (task.url != null and task.url.url_type = pr): parked
+        else if task.is_review_tagged
+            and task.sub_status = changes_requested: changes_requested_by_me
+        else if task.is_review_tagged
+            and task.sub_status = approved: approved_by_me
+        else if task.sub_status = none: null
+        else: task.sub_status
+
+    -- Where a flattened column draws epic-header rows: a flattened column
+    -- with sections. The flattened Done column has none ("Done Column
+    -- Ordering"), so it draws no header and has no epic group to fold.
+    draws_epic_headers(status): flattens(status) and has_sections(status)
+
+    -- == The epic tree ("Flattened Mode", Rendering) ==
+
+    section_tasks(status, section):
+        filter(column_tasks(status), t => section_of(t) = section)
+
+    -- The compact epic tree one section of a flattened column lays its
+    -- groups out as. The tree's top is the viewed epic in an epic view and
+    -- the root epics elsewhere; its owners are the epics owning a task in
+    -- the section. Folding is not consulted ("Epic Folding").
+    epic_tree(status, section):
+        EpicGroupTree(top: current_epic, owners: epics_of(section_tasks(status, section)))
+
+    epic_depth(epic, status, section): epic_tree(status, section).depth(epic)
+
+    epic_indent(epic, status, section): epic_tree(status, section).indent(epic)
+
+    -- == Status bar badges ("Board Lens", "Hidden Epics and Work Packages") ==
+
+    -- The hides the badge and the overlay's tab counts name: only epics and
+    -- packages the board holds, since the user could never find the row to
+    -- unhide a ghost. An epic hidden only through its parent is not counted.
+    hidden_epic_count: filter(epics, e => e in hides.hidden_epics).count
+    hidden_package_count: filter(packages, p => hides.package_is_hidden(p)).count
+
+    @guidance
+        -- == Black boxes ==
+        -- own_match(title, id, query): board_search_filter's predicate.
+        -- latest_completion(tasks): the greatest completed_at among the
+        -- tasks, null when none has one.
+        -- epics_of(tasks): the epics the tasks name directly, a task with
+        -- no epic adding none.
+}
+
+------------------------------------------------------------
+-- Other Entities
+------------------------------------------------------------
+
+-- An entity rather than a value, on the same terms as core.allium's
+-- BoardSelection:
+-- the rule that folds and unfolds a section mutates it, so it has to be
+-- something a rule elsewhere can be given. There is exactly one.
+entity CollapsedSections {
+    collapsed: Set<SectionRef>
+
+    is_collapsed(ref): ref in collapsed
+
+    -- What the user sees, as opposed to what is recorded: while a query is
+    -- live, no section draws folded.
+    --
+    -- Stated that way rather than as "a folded section holding a match is
+    -- forced open", which is the intent, because the two are the same rule and
+    -- this one needs no per-section card count to evaluate. A section the query
+    -- leaves empty renders no header at all, folded or not (see Rendering
+    -- above), so overriding it is unobservable.
+    renders_collapsed(ref, search_query):
+        is_collapsed(ref) and search_query = ""
+
+    -- A header holds the cursor only while it draws folded. An expanded one
+    -- does not, and neither does a section that renders no header.
+    header_is_selectable(ref, search_query):
+        renders_collapsed(ref, search_query)
+
+    @guidance
+        -- Persisted, unlike the lens and BoardSelection: it survives an
+        -- app restart.
+}
+
+-- An entity rather than a value, on the same terms as CollapsedSections: the
+-- rule that folds and unfolds an epic group mutates it. There is exactly
+-- one.
+entity FoldedEpics {
+    folded: Set<EpicFoldRef>
+
+    is_folded(ref): ref in folded
+
+    -- What the user sees, as opposed to what is recorded: while a query is
+    -- live, no epic group draws folded. Same reasoning as
+    -- CollapsedSections.renders_collapsed.
+    renders_folded(ref, search_query):
+        is_folded(ref) and search_query = ""
+
+    -- A header holds the cursor only while it draws folded.
+    header_is_selectable(ref, search_query):
+        renders_folded(ref, search_query)
+
+    @guidance
+        -- Persisted, like CollapsedSections and unlike the lens and
+        -- BoardSelection: it survives an app restart.
+}
+
+entity BoardLens {
+    lens: Lens
+
+    -- The two switches the rest of this file reads. Derived, never set on
+    -- their own: the lens is the only state.
+    only_active: lens = flat_active
+    flattened: lens = flat or lens = flat_active
+
+    next: if lens = everything: flat
+          else if lens = flat: flat_active
+          else: everything
+
+    previous: if lens = everything: flat_active
+              else if lens = flat: everything
+              else: flat
+}
+
+entity BoardHides {
+    hidden_epics: Set<core/Epic>
+    hidden_packages: Set<wp/WorkPackage>
+
+    -- An epic is hidden when it or any ancestor is on the list.
+    epic_is_hidden(epic):
+        epic in hidden_epics
+        or hidden_epics.any(h => epic in h.subtree_epics)
+
+    -- A task is hidden when its epic is. A task with no epic is never hidden
+    -- by this list.
+    task_is_hidden(task):
+        task.epic != null and epic_is_hidden(task.epic)
+
+    -- A shown epic with some sub-epic on the list: part of its subtree is
+    -- hidden though its own card is not. The overlay marks it partly hidden.
+    epic_is_partly_hidden(epic):
+        not epic_is_hidden(epic)
+        and hidden_epics.any(h => h in epic.subtree_epics)
+
+    package_is_hidden(package): package in hidden_packages
+
+    @guidance
+        -- Each list is saved as ids, so it can name an epic or package the
+        -- board no longer holds. Such an entry hides nothing; the counts
+        -- the badge shows are BoardView.hidden_epic_count and
+        -- hidden_package_count, which skip it.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- Columns of indent per level of epic depth, for a flattened column's
+    -- epic headers and cards and the agent-tree pane's agents section.
+    epic_indent_step: Integer = 2
+    -- The depth past which the indent stops growing.
+    epic_indent_max_depth: Integer = 3
+    -- The longest an epic title runs in the epic view's border breadcrumb
+    -- before it is truncated with an ellipsis ("Epic View Panel Title").
+    breadcrumb_segment_max_chars: Integer = 30
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule CycleLensForward {
+    when: CycleLensForward()
+    ensures: board_view.lens.lens = board_view.lens.next
+
+    @guidance
+        -- Bound to Tab on the board (board.normal), in the main board and in
+        -- an epic view alike.
+}
+
+rule CycleLensBackward {
+    when: CycleLensBackward()
+    ensures: board_view.lens.lens = board_view.lens.previous
+
+    @guidance
+        -- Bound to BackTab (Shift+Tab) on the board (board.normal).
+}
+
+rule ToggleHiddenEpic {
+    when: ToggleHiddenEpic(epic)
+    ensures:
+        if epic in board_view.hides.hidden_epics
+            or board_view.hides.epic_is_partly_hidden(epic):
+            -- Show the whole subtree: the epic and every sub-epic leave the
+            -- list, done ones and unlisted ones included.
+            board_view.hides.hidden_epics.remove(epic)
+            for sub_epic in epic.subtree_epics:
+                board_view.hides.hidden_epics.remove(sub_epic)
+        else:
+            board_view.hides.hidden_epics.add(epic)
+
+    @guidance
+        -- Space on an epic row in the overlay's Epics tab. The tab works like
+        -- a tree of checkboxes: hiding a parent hides its subtree, and showing
+        -- it again shows the whole subtree, clearing any sub-epic the user had
+        -- hidden on its own. Space on a partly hidden row shows
+        -- its whole subtree too; a second Space then hides the parent. Space
+        -- on a row hidden by its parent adds or removes that epic's own entry
+        -- (removing also clears its sub-epics' entries), which changes nothing
+        -- visible while the parent stays hidden.
+}
+
+rule ToggleHiddenWorkPackage {
+    when: ToggleHiddenWorkPackage(package)
+    ensures:
+        if package in board_view.hides.hidden_packages:
+            board_view.hides.hidden_packages.remove(package)
+        else:
+            board_view.hides.hidden_packages.add(package)
+
+    @guidance
+        -- Space on a package row in the overlay's Work packages tab.
+}
+
+rule SaveBoardFilterOnClose {
+    when: CloseBoardFilter()
+    ensures:
+        settings/SaveSetting(key: "hidden_epics", value: id_list(board_view.hides.hidden_epics))
+        settings/SaveSetting(key: "hidden_packages", value: id_list(board_view.hides.hidden_packages))
+
+    @guidance
+        -- Closing the [f] overlay saves the whole board filter, once, rather
+        -- than one write per Space. The same close saves the repo selection
+        -- (key "repo_filter") and its include/exclude mode
+        -- ("repo_filter_mode"); this spec does not model those as state, so
+        -- they are named here rather than in the ensures.
+        --
+        -- == Black boxes ==
+        -- id_list(set) is the ids in the set, sorted, as the setting's
+        -- stored text.
+}
 
 ------------------------------------------------------------
 -- Surfaces
