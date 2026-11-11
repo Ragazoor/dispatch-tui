@@ -199,10 +199,15 @@ fn recorded_text(
     scope: LearningScope,
     similar: &[crate::models::Learning],
 ) -> String {
-    let mut text = format!(
-        "Learning {learning_id} recorded and active. \
-         It will be injected into future dispatch prompts for matching tasks."
-    );
+    // A task-scoped learning is never injected (learnings.allium: Scope Model).
+    let mut text = if scope == LearningScope::Task {
+        format!("Learning {learning_id} recorded and active.")
+    } else {
+        format!(
+            "Learning {learning_id} recorded and active. \
+             It will be injected into future dispatch prompts for matching tasks."
+        )
+    };
     if similar.is_empty() {
         return text;
     }
@@ -363,5 +368,35 @@ mod scope_ref_tests {
         assert_eq!(norm("~/a/repo/", Some("/home/u")), "/home/u/a/repo");
         assert_eq!(norm("/a/repo", Some("/home/u")), "/a/repo");
         assert_eq!(norm("/", Some("/home/u")), "/");
+    }
+}
+
+#[cfg(test)]
+mod recorded_text_tests {
+    use super::recorded_text;
+    use crate::models::{LearningId, LearningKind, LearningScope};
+
+    /// learnings.allium Scope Model: a task-scoped learning is never injected,
+    /// so its reply must not promise injection; every other scope's does.
+    #[test]
+    fn only_a_non_task_scope_promises_dispatch_injection() {
+        let task = recorded_text(
+            LearningId(1),
+            LearningKind::Pitfall,
+            LearningScope::Task,
+            &[],
+        );
+        assert!(task.contains("recorded and active"), "{task}");
+        assert!(!task.contains("injected"), "{task}");
+        let repo = recorded_text(
+            LearningId(1),
+            LearningKind::Pitfall,
+            LearningScope::Repo,
+            &[],
+        );
+        assert!(
+            repo.contains("injected into future dispatch prompts"),
+            "{repo}"
+        );
     }
 }

@@ -55,9 +55,10 @@ use "./store-split.allium" as split
 -- family of repos that share a parent directory, without the user scope,
 -- which reaches every repo.
 --
--- task-scoped learnings are never injected into a dispatch prompt. They
--- record task-specific outcomes, and query_learnings is the way to reach
--- them.
+-- task-scoped learnings record task-specific outcomes. They are never
+-- injected into a dispatch prompt and never returned by query_learnings;
+-- they are listed and read as context resources (mcp-task-tools.allium:
+-- McpContextResources).
 --
 -- When record_learning omits scope_ref, the scope supplies it:
 --   scope=user    → null
@@ -239,8 +240,9 @@ rule RecordLearningViaMcp {
     )
 
     @guidance
-        -- default_scope_ref is the table in Scope Model. A blank or
-        -- whitespace-only summary counts as empty.
+        -- default_scope_ref is the table in Scope Model. An explicit repo
+        -- scope_ref is stored with `~` expanded and no trailing "/". A blank
+        -- or whitespace-only summary counts as empty.
         --
         -- The embedding is computed from summary, detail, kind and tags in
         -- the same write as the row, so a stored learning never carries an
@@ -249,7 +251,9 @@ rule RecordLearningViaMcp {
         -- pass derives the missing ones from the stored fields, changes
         -- nothing else, and only logs a failure.
         --
-        -- The reply lists up to 5 approved learnings of the same kind, scope
+        -- The reply says the entry is active and, for a scope other than
+        -- task, that matching dispatches will receive it. It then lists up to
+        -- 5 approved learnings of the same kind, scope
         -- and scope_ref, and warns against keeping a duplicate when one of
         -- them already says the same thing. It does not suggest rating them:
         -- they are not retrievals for this task, so rate_learning would
@@ -303,7 +307,8 @@ rule QueryLearningsViaMcp {
     -- The ranked entries the call returns: the scope union for task, ranked
     -- as Ranking says against query, or against the task's title and
     -- description when query is omitted; at most limit of them (default and
-    -- cap 50).
+    -- cap 50; a limit below 1 counts as 1). task-scoped entries are never
+    -- candidates.
     let returned = ranked_learnings(task, query, tag_filter, limit)
 
     ensures:

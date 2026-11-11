@@ -1369,6 +1369,13 @@ rule WrapUpViaMcp {
     -- A review task does not end by being wrapped up (ReviewTasksAreNotWrappedUp).
     -- core/Task.is_review_tagged is the code's TaskTag::is_review.
     requires: not task.is_review_tagged
+    -- For rebase, the worktree path names a branch (the rebase needs one).
+    -- Checked before the commit check below and before any request is
+    -- written, so an underivable branch is refused as a bad request
+    -- ("Cannot derive branch from worktree: <path>", INVALID_PARAMS) rather
+    -- than reported as a failed rebase. done and pr need no branch.
+    requires: action = rebase implies worktree_names_a_branch(task.worktree)
+
     -- WrapUpRefusesUnfinishedWork, below: the worktree is committed. Checked
     -- before the action runs, and before any request is written, so a refusal
     -- has no side effect and issues no token. It is an observation of the
@@ -1378,13 +1385,6 @@ rule WrapUpViaMcp {
     -- verify command is NOT checked here: the agent runs it itself
     -- (AgentsRunTheVerifyCommand).
     requires: worktree_is_committed(task.worktree)
-
-    -- For rebase, the worktree path names a branch (the rebase needs one).
-    -- Checked here, after the commit check above and before any request is
-    -- written, so an underivable branch is refused as a bad request
-    -- ("Cannot derive branch from worktree: <path>", INVALID_PARAMS) rather
-    -- than reported as a failed rebase. done and pr need no branch.
-    requires: action = rebase implies worktree_names_a_branch(task.worktree)
 
     -- All three actions leave task.status unchanged (still running/review) and
     -- only issue an exit token whose request row records which action was
@@ -1414,9 +1414,9 @@ rule WrapUpViaMcp {
         --
         -- == The request, then a wait (store-split.allium: SessionRequest) ==
         -- The tool checks the request first, in this order: wrappable
-        -- (running or review, a worktree, ReviewTasksAreNotWrappedUp), then
-        -- WrapUpRefusesUnfinishedWork (commit), then for rebase
-        -- the branch. Only then does it call request_wrap_up. It subscribes to the request rows' changes BEFORE
+        -- (running or review, a worktree, ReviewTasksAreNotWrappedUp), then for
+        -- rebase the branch, then WrapUpRefusesUnfinishedWork (commit), the
+        -- same order the module checks (store-split.allium, W2). Only then does it call request_wrap_up. It subscribes to the request rows' changes BEFORE
         -- writing, so no change to the row is missed, and answers:
         --   - refused by the module (not running or review, no worktree, a
         --     review-tagged task, the worktree on another machine, an open
@@ -2193,6 +2193,11 @@ surface McpTaskTools {
         -- unreadable request (bad identity) is a JSON-RPC error. This includes a
         -- task_id that names no task ("Task N not found"). A missing or null
         -- `arguments` means an empty object.
+        --
+        -- Where a rule below names a code for a tool's failure (-32001
+        -- not-found, -32602 invalid params, -32603 internal, INVALID_PARAMS,
+        -- INTERNAL_ERROR), it names the failure's class, which decides the
+        -- message. Over tools/call the caller sees only isError and the text.
 
     @guarantee RepliesNameWhatTheyTouch
         -- (agents.allium: NamesForPeople, McpRepliesNameWhatTheyTouch.) Ids stay the
