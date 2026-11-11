@@ -1408,12 +1408,35 @@ fn memory_caller_matches_the_real_reducers() {
         // -- work packages (`work-packages.allium`) -----------------------------
         // `updated_at` is the store's own clock on a patch, so it is left out
         // of the comparison, on `SameEndState`'s reasoning.
-        type PackageShape = (i64, String, String, Option<i64>, Option<String>);
+        //
+        // The real store's auto-inc ids are not dense (a fresh block of 4096
+        // after a restart or reallocation), so ids are never compared across
+        // the two sides. Shapes and links name a package by its creation
+        // order, and a returned id is checked to be the newest row on its
+        // own side.
+        type PackageShape = (String, String, Option<i64>, Option<String>);
         let package_shapes = |rows: &SharedRows| -> Vec<PackageShape> {
             rows.work_packages()
                 .into_iter()
-                .map(|p| (p.id.0, p.title, p.description, p.sort_order, p.created_by))
+                .map(|p| (p.title, p.description, p.sort_order, p.created_by))
                 .collect()
+        };
+        let package_links = |rows: &SharedRows| -> Vec<(usize, dispatch_tui::models::WorkPackageItem)> {
+            let mut ids: Vec<_> = rows.work_packages().into_iter().map(|p| p.id).collect();
+            ids.sort();
+            rows.work_package_links()
+                .into_iter()
+                .map(|l| {
+                    (
+                        ids.iter().position(|id| *id == l.work_package_id),
+                        l.item,
+                    )
+                })
+                .map(|(pos, item)| (pos.unwrap_or(usize::MAX), item))
+                .collect()
+        };
+        let is_newest_package = |rows: &SharedRows, id: dispatch_tui::models::WorkPackageId| {
+            rows.work_packages().iter().map(|p| p.id).max() == Some(id)
         };
         let package_row = || bindings::WorkPackage {
             id: 0,
@@ -1429,7 +1452,8 @@ fn memory_caller_matches_the_real_reducers() {
         let package_real = real.create_work_package(package_row()).await.unwrap();
         wait_for!(!rows_real.work_packages().is_empty());
         let package_mem = mem.create_work_package(package_row()).await.unwrap();
-        assert_eq!(package_real, package_mem, "generated work package id");
+        assert!(is_newest_package(&rows_real, package_real));
+        assert!(is_newest_package(&rows_mem, package_mem));
         assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
 
         let blank = bindings::WorkPackage {
@@ -1451,8 +1475,8 @@ fn memory_caller_matches_the_real_reducers() {
         }
         wait_for!(rows_real.work_package_links().len() == 2);
         assert_eq!(
-            rows_real.work_package_links(),
-            rows_mem.work_package_links(),
+            package_links(&rows_real),
+            package_links(&rows_mem),
             "links after linking"
         );
 
@@ -1481,8 +1505,8 @@ fn memory_caller_matches_the_real_reducers() {
         }
         wait_for!(rows_real.work_package_links().len() == 1);
         assert_eq!(
-            rows_real.work_package_links(),
-            rows_mem.work_package_links()
+            package_links(&rows_real),
+            package_links(&rows_mem)
         );
 
         let rename = || bindings::WorkPackagePatch {
@@ -1518,7 +1542,7 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
-        assert_eq!(package_shapes(&rows_real)[0].3, Some(5));
+        assert_eq!(package_shapes(&rows_real)[0].2, Some(5));
 
         let missing = dispatch_tui::models::WorkPackageId(987_654);
         let r = real.patch_work_package(missing, rename()).await.unwrap();
@@ -1537,12 +1561,19 @@ fn memory_caller_matches_the_real_reducers() {
             .create_work_package_with_links(package_row(), vec![task_item, epic_item, task_item])
             .await
             .unwrap();
-        assert_eq!(with_links_real, with_links_mem, "id of a create with links");
+        assert!(
+            is_newest_package(&rows_real, with_links_real),
+            "real: id of a create with links"
+        );
+        assert!(
+            is_newest_package(&rows_mem, with_links_mem),
+            "memory: id of a create with links"
+        );
         wait_for!(rows_real.work_package_links().len() == 3);
         assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
         assert_eq!(
-            rows_real.work_package_links(),
-            rows_mem.work_package_links(),
+            package_links(&rows_real),
+            package_links(&rows_mem),
             "links after a create with links"
         );
 
@@ -1572,8 +1603,8 @@ fn memory_caller_matches_the_real_reducers() {
             .is_err());
         assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
         assert_eq!(
-            rows_real.work_package_links(),
-            rows_mem.work_package_links(),
+            package_links(&rows_real),
+            package_links(&rows_mem),
             "a refused create writes no link"
         );
 
@@ -1606,8 +1637,8 @@ fn memory_caller_matches_the_real_reducers() {
         wait_for!(rows_real.work_package_links().len() == 2);
         assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
         assert_eq!(
-            rows_real.work_package_links(),
-            rows_mem.work_package_links(),
+            package_links(&rows_real),
+            package_links(&rows_mem),
             "links after an update with links"
         );
 
@@ -1640,8 +1671,8 @@ fn memory_caller_matches_the_real_reducers() {
         }
         assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
         assert_eq!(
-            rows_real.work_package_links(),
-            rows_mem.work_package_links(),
+            package_links(&rows_real),
+            package_links(&rows_mem),
             "a refused update writes no link"
         );
 
