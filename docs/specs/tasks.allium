@@ -1357,12 +1357,12 @@ rule UnseenMarkEndsWithTheTaskLeavingItsEpic {
         -- "something new landed here"; a move is a different event, and the
         -- people who see the new epic were never told about this task.
         --
-        -- Every path that changes task.epic raises TaskRelinked, not only
-        -- MoveTaskToEpic and update_tasks (UpdateTaskIsOneTransaction): a
-        -- feed routing move (feeds.allium), and the store's repo-group
-        -- relinks: RegroupEpic into a per-repo sub-epic, FlattenEpic back to
-        -- the parent, and the reroute after a repo_path change. Each of them
-        -- clears the marks in the same write as the move.
+        -- MoveTaskToEpic and update_tasks (UpdateTaskIsOneTransaction) raise
+        -- TaskRelinked here. Every other path that changes task.epic ends the
+        -- marks the same way, in the same write as the move: a feed routing
+        -- move (feeds.allium), and the store's repo-group relinks (RegroupEpic
+        -- into a per-repo sub-epic, FlattenEpic back to the parent, and the
+        -- reroute after a repo_path change).
 }
 
 -- == Bookmark ==
@@ -1481,15 +1481,17 @@ rule BookmarkEndsWithTheTaskFinishing {
 contract TaskTeardown {
     -- In order: 1. kill the task's tmux window if it has one; 2. remove the
     -- task's worktree if it has one; 3. delete the task's branch, best
-    -- effort. Answers the worktree path still on disk when step 2 failed,
-    -- and null when there was none to release or it was released.
+    -- effort. Answers the worktree path still on disk when step 2 failed or
+    -- did not run because step 1 failed, and null when there was none to
+    -- release or it was released.
     teardown: (worktree: String?, tmux_window: String?) -> String?
 
     @invariant TeardownIsOwedWheneverThereIsSomethingToRelease
         -- The teardown runs when the task owns a worktree OR a tmux window;
         -- a task owning NEITHER runs no commands at all. The two are
         -- independent, so all four combinations are reachable, and each step
-        -- is owed exactly on its own condition:
+        -- is owed on its own condition (a failed step 1 stops the rest; see
+        -- below):
         --   * worktree and window -> steps 1, 2, 3.
         --   * window, no worktree -> step 1 only.
         --   * worktree, no window -> steps 2 and 3.
@@ -2092,7 +2094,7 @@ surface Board {
     facing _: core/Operator
 
     contracts:
-        demands TaskTeardown
+        fulfils TaskTeardown
 
     exposes:
         selection.selected_tasks
@@ -2196,6 +2198,7 @@ surface TaskWriteReducers {
         SubStatusBatchPatched(updates)
         TaskPatchRequested(task, patch)
         TaskCreateRequested(row)
+        TaskInsertRequested(written)
         TaskUpdateRequested(task, epic?, patch, host)
         PhoenixSuccessorRequested(predecessor, successor)
 }
@@ -2205,9 +2208,7 @@ rule SubStatusMovesMustBeLegal {
 
     -- task is the row as the store holds it, written the row the write would
     -- leave. ONLY A MOVE IS JUDGED: a write that leaves sub_status as it was
-    -- passes whatever the pair, so a row already holding an odd pair (a
-    -- restore, an older board, a status move that left the old sub_status
-    -- behind) stays writable for its other fields.
+    -- passes, because the stored pair already fits (SubStatusAutoreset).
     requires:
         written.sub_status = task.sub_status
         or sub_status_valid_for(written.sub_status, written.status)
@@ -2229,12 +2230,28 @@ rule SubStatusMovesMustBeLegal {
         -- sub_status against the status the row will hold). This rule holds
         -- every other writer to the table.
         --
-        -- AN INSERT IS NOT JUDGED (there is no prior row to move from): a seed
-        -- carries whatever the old store held, and every creating rule writes
-        -- default_sub_status of its status anyway.
+        -- An insert has no prior row to move from, so it is judged on its pair
+        -- alone (InsertedTaskSubStatusMustFit below).
         --
         -- The same write refuses an unknown status, insert or not
         -- (spacetime-seed.allium: StoreRefusesUnknownStatus).
+}
+
+rule InsertedTaskSubStatusMustFit {
+    -- Every insert of a task row: a creating reducer, a seed, a restore.
+    when: TaskInsertRequested(written)
+
+    requires: sub_status_valid_for(written.sub_status, written.status)
+
+    ensures: TaskRowWritten(task: written, written: written)
+
+    @guidance
+        -- Refused, not repaired: an insert whose pair does not fit writes
+        -- nothing and reads "sub_status 'x' is not valid for status 'y'",
+        -- the same words as SubStatusMovesMustBeLegal. Every creating rule
+        -- writes default_sub_status of its status, so only a seed or a
+        -- restore carrying an old row can meet this; that restore fails
+        -- loudly rather than landing a row SubStatusAutoreset forbids.
 }
 
 rule BatchSubStatusPatchSkipsIllegalEntries {
@@ -2453,18 +2470,25 @@ rule RespawnPhoenixSuccessorNeedsTheFlag {
 -- Deletion is never reachable over MCP: there is no MCP delete tool, so
 -- removing a task stays a human act at the board (DeleteTask, BatchDelete).
 
--- SubStatusAutoreset. The store's task write keeps a task's sub_status fitting
--- its status (core/Task.SubStatusFitsStatus): a write that changes status and
--- names no sub_status resets it to default_sub_status(the new status); a write
--- that repeats the current status keeps it. A rule that changes status without
--- naming sub_status gets the reset for free; the sub_status lines in the rules
--- above document the resulting state. A write that sets a specific sub_status
--- overrides the default (HookNotification keeps running and sets needs_input;
--- FinishTaskConflict keeps the status and sets conflict). An explicit pair that
--- does not fit is refused before anything is written (mcp-task-tools.allium:
--- UpdateTaskViaMcp), and every other writer that MOVES a sub_status is held to
--- the table at the one task write (SubStatusMovesMustBeLegal,
--- BatchSubStatusPatchSkipsIllegalEntries). Only a move is judged: an insert (a
--- seed) is not, and a row already holding an odd pair stays writable for its
--- other fields. So this is a property of every write, not of every stored row,
--- and it is stated here rather than as an invariant over core/Tasks.
+-- SubStatusAutoreset. Every stored task's sub_status fits its status
+-- (core/Task.SubStatusFitsStatus). The store's task writes keep it so:
+--   * a write that changes status and names no sub_status resets it to
+--     default_sub_status(the new status); a write that repeats the current
+--     status keeps it. A rule that changes status without naming sub_status
+--     gets the reset for free; the sub_status lines in the rules above
+--     document the resulting state. A write that sets a specific sub_status
+--     overrides the default (HookNotification keeps running and sets
+--     needs_input; FinishTaskConflict keeps the status and sets conflict).
+--   * an explicit pair that does not fit is refused before anything is
+--     written (mcp-task-tools.allium: UpdateTaskViaMcp), every other writer
+--     that moves a sub_status is held to the table at the one task write
+--     (SubStatusMovesMustBeLegal, BatchSubStatusPatchSkipsIllegalEntries),
+--     and an insert whose pair does not fit is refused
+--     (InsertedTaskSubStatusMustFit).
+--   * a row stored before these checks existed with a pair that does not
+--     fit is reset once to default_sub_status(its status), when the module
+--     that enforces this is first published to a store.
+invariant SubStatusAutoreset {
+    for t in core/Tasks:
+        sub_status_valid_for(t.sub_status, t.status)
+}
