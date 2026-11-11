@@ -152,6 +152,11 @@ impl App {
                 if !self.view().is_flattened_for_status(status) {
                     return None;
                 }
+                // Epic headers are drawn only inside a section run, so a card
+                // with no section (the flattened Done column) has no group
+                // header to fold (board-layout.allium:
+                // BoardView.draws_epic_headers).
+                crate::models::ColumnSection::for_task(t)?;
                 self.board.epics.iter().find(|e| e.id == epic_id)?;
                 Some(EpicFoldRef::new(status, epic_id))
             }

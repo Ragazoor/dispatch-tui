@@ -1,5 +1,5 @@
 //! The epic group header and the end-of-epics rule, drawn alike by the
-//! board's flattened columns (`board-layout.allium`, "Flattening") and the
+//! board's flattened columns (`board-layout.allium`, "Flattened Mode") and the
 //! agent-tree pane's agents section (`agent-tree.allium:
 //! AgentListGroupsByEpic`), so neither reaches into the other.
 
@@ -27,7 +27,7 @@ pub(crate) fn epic_indent(depth: usize) -> usize {
 /// less one cell: the rule muted, the title purple. No rule is drawn left of
 /// the title and no id is shown (`board-visuals.allium:
 /// EpicsAreShownByTitleNeverById`), so the indent is what shows the nesting. `title` is the epic's
-/// own title, never its ancestors' (`board-layout.allium`, "Flattening"); it
+/// own title, never its ancestors' (`board-layout.allium`, "Flattened Mode"); it
 /// ends in an ellipsis when it does not fit.
 pub(crate) fn epic_header_line(title: &str, width: u16, depth: usize) -> Line<'static> {
     let indent = epic_indent(depth);

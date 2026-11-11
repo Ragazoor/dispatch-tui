@@ -44,6 +44,7 @@
 
 use "./core.allium" as core
 use "./workspaces.allium" as workspaces
+use "./board-layout.allium" as board_layout
 
 ------------------------------------------------------------
 -- Entities
@@ -653,23 +654,25 @@ surface PackageViewCards {
     facing _: core/Operator
     context package: WorkPackage
 
-    -- flat: board-layout.allium's FlattenedView, the board lens as it
-    -- applies here (a black box read of the board's current lens).
-    let flat = board_lens()
+    -- The board's view: its filters, its search query and its lens, which
+    -- apply here as on the main board (board-layout.allium: BoardView).
+    let view = board_layout/board_view
 
     exposes:
         -- A linked task is a task card in its status column.
-        for task in package.linked_tasks where visible:
+        for task in package.linked_tasks where view.task_is_visible(task):
             task.status
-        for epic in package.linked_epics where visible:
+        for epic in package.linked_epics where view.epic_is_visible(epic):
             -- Placed exactly as on the main board: one card per column its
             -- subtree has visible work in, Backlog when it has none, and
             -- only in columns the lens does not flatten.
-            for column in epic.placement_columns where flat.renders_epics(column):
+            for column in { backlog, running, review, done }
+                where view.appears_in(epic, column) and view.renders_epics(column):
                 column
             -- In a flattened column the epic's contents stand in for it:
             -- every visible task in its subtree, once each.
-            for task in epic.subtree_tasks where visible and flat.flattens(status):
+            for task in epic.subtree_tasks
+                where view.task_is_visible(task) and view.flattens(task.status):
                 task.status
 
     @guidance
@@ -679,7 +682,7 @@ surface PackageViewCards {
         -- A task that is linked AND sits inside a linked epic shows as its
         -- own card and also counts toward the epic card's placement.
         -- Visible is the same predicate the main board applies.
-        -- Flattened columns (board-layout.allium: FlattenedView) apply in a
+        -- Flattened columns (board-layout.allium: BoardView.flattens) apply in a
         -- package view exactly as on the main board, per column. A flattened
         -- column draws no epic card: it holds the linked tasks plus every
         -- task in the subtree of a linked epic, each once, grouped under

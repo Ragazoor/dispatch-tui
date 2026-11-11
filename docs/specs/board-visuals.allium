@@ -1811,7 +1811,7 @@ surface EpicCard {
     @guarantee EpicsAreShownByTitleNeverById
         -- An epic is shown to people by its title alone (task #99056): the
         -- epic card, a folded epic header, the epic header row in flattened
-        -- view (board-layout.allium, "Flattening"), the epic view's border
+        -- view (board-layout.allium, "Flattened Mode"), the epic view's border
         -- and the board filter's epic list carry no `#<id>`. Titles are not
         -- unique, and that is accepted: where the tree shows them, their
         -- place in it tells two "Staging" epics apart. The id stays the key

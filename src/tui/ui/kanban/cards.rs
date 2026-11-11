@@ -415,7 +415,7 @@ pub(super) fn render_epic_header_item(
 ) -> ListItem<'static> {
     // The title is the epic's own — the one whose task group this
     // header precedes — never an ancestor's; nesting is the indent
-    // (board-layout.allium, "Flattening").
+    // (board-layout.allium, "Flattened Mode").
     ListItem::new(crate::epic_header::epic_header_line(
         &epic.title,
         col_width,
@@ -472,7 +472,7 @@ pub(super) struct ColRenderCtx<'a> {
     pub width: u16,
     pub ground: Color,
     /// Cells of column ground left of the card, beyond its margin: a nested
-    /// flattened group's indent (board-layout.allium: "Flattening").
+    /// flattened group's indent (board-layout.allium: "Flattened Mode").
     pub indent: u16,
     /// Which epic cards carry the new-task or bookmark mark, derived once per
     /// render pass ([`EpicMarks`]).

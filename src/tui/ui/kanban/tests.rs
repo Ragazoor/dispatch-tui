@@ -402,7 +402,7 @@ fn a_folded_header_carries_its_count_and_marker() {
 }
 
 // ---------------------------------------------------------------------------
-// render_epic_header_item (board-layout.allium, "Flattening": the
+// render_epic_header_item (board-layout.allium, "Flattened Mode": the
 // epic-header id prefix)
 // ---------------------------------------------------------------------------
 
@@ -430,7 +430,7 @@ fn epic_header_row_shows_the_title_and_never_the_id() {
 }
 
 /// A nested epic's header row carries only its own id and its own title —
-/// none of its ancestors' (board-layout.allium, "Flattening").
+/// none of its ancestors' (board-layout.allium, "Flattened Mode").
 #[test]
 fn epic_header_row_names_only_the_nested_epic_itself() {
     let mut leaf = make_epic_with_title(3, "Leaf");
@@ -497,7 +497,7 @@ fn epic_header_rule_is_muted_and_the_title_purple() {
 }
 
 /// A nested header steps in by the indent step per level, capped at the
-/// max depth (board-layout.allium, "Flattening", EpicGroupTree).
+/// max depth (board-layout.allium, "Flattened Mode", EpicGroupTree).
 #[test]
 fn epic_header_row_indents_by_depth_up_to_the_cap() {
     let epic = make_epic_with_title(3, "Leaf");

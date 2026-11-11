@@ -588,7 +588,7 @@ async fn flat_view_epic_breadcrumb_is_purple() {
     // not enough: the epic *card* is purple too, so such a test passes even with
     // the breadcrumb drawn in grey — it measures the card and reports the
     // breadcrumb. Find the header row by its title (no rule is drawn left of
-    // it and no id: board-layout.allium, "Flattening") and read the colour of
+    // it and no id: board-layout.allium, "Flattened Mode") and read the colour of
     // the title — search for it rather than assuming a fixed offset.
     let mut breadcrumb_title_colours: Vec<Color> = Vec::new();
     'rows: for y in buf.area.top()..buf.area.bottom() {

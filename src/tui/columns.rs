@@ -506,7 +506,7 @@ impl<'a> BoardView<'a> {
 
     /// Emit the epic headers, orphan separator and cards of one open section
     /// run of a flattened column, laid out as the epic tree
-    /// (board-layout.allium: "Flattening", `EpicGroupTree`; "Epic Folding").
+    /// (board-layout.allium: "Flattened Mode", `EpicGroupTree`; "Epic Folding").
     pub(in crate::tui) fn push_epic_groups(
         self,
         status: TaskStatus,

@@ -1,7 +1,7 @@
 //! Epic cards are placed per column, not once.
 //!
 //! Obligations from `docs/specs/board-layout.allium`, "Epic Card Placement"
-//! and `FlattenedView`.
+//! and `BoardView` (flattening).
 use super::*;
 use crate::models::{ColumnSection, EpicId, SubStatus, TaskId, TaskStatus};
 use crate::tui::types::RepoFilterMode;

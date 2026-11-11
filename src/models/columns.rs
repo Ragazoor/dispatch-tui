@@ -387,7 +387,7 @@ mod sectioned_columns_tests {
     use crate::models::tasks::model_tests::legal;
 
     /// Exactly Running and Review have sections
-    /// (`board-layout.allium`: ColumnSectionLayout.sectioned_statuses). Derived from
+    /// (`board-layout.allium`: BoardView.sectioned_statuses). Derived from
     /// the section mapping rather than restated as its own predicate, so the
     /// claim cannot drift away from the thing that decides it.
     #[test]

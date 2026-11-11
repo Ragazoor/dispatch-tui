@@ -206,7 +206,7 @@ rule CreateEpic {
         -- sub-epics appear only inside their parent's epic view.
         --
         -- This grouping is bypassed when the board is in flattened mode
-        -- (see board-layout.allium: FlattenedView), but only in the Running,
+        -- (see board-layout.allium: "Flattened Mode"), but only in the Running,
         -- Review and Done columns: there epic cards are hidden and every
         -- descendant task surfaces directly in its status column. Backlog is
         -- excluded from flattening — it is the column read at the epic level,
@@ -1767,7 +1767,7 @@ rule JumpToTaskEpic {
 
     @guidance
         -- Enter on a task card in a FLATTENED column (board-layout.allium:
-        -- FlattenedView.flattens). A task with no epic has nowhere to jump:
+        -- BoardView.flattens). A task with no epic has nowhere to jump:
         -- the press does nothing. A flattened column can show a task from
         -- deeper than the current view, so the trail is longer than one
         -- level whenever task.epic is not a direct child of the current epic.
@@ -2143,7 +2143,7 @@ surface AppendOnlyEpicIndicator {
         --
         -- "Epic detail view" here means ViewMode::Epic, whatever the
         -- FLATTENED toggle is set to. Flattened is an orthogonal concept in
-        -- this spec set — board-layout.allium's FlattenedView applies inside epic view
+        -- this spec set — board-layout.allium's flattened mode applies inside epic view
         -- too, where it widens the scope to the epic's whole subtree — and it
         -- does not change which epic the header describes. So a flattened
         -- epic view still shows the marker, and only leaving for board view

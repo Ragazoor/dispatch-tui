@@ -2454,7 +2454,7 @@ rule RefreshAgentTreeAgentList {
         -- an ancestor's, so a sub-epic's tasks form a group of their own. The
         -- groups are laid out as the compact epic tree, the shape a flattened
         -- board section lays out its own in (board-layout.allium,
-        -- "Flattening", EpicGroupTree): an epic's group, then the subtrees of
+        -- "Flattened Mode", EpicGroupTree): an epic's group, then the subtrees of
         -- the drawn epics directly under it — first those with no drawn
         -- child of their own, then the rest, each run in ascending epic id —
         -- and the top-level groups ordered the same way. (The board orders
@@ -3186,7 +3186,7 @@ surface AgentTreeCompanionPane {
 
     @guarantee AgentListGroupsByEpic
         -- The agents section reads like a flattened board column
-        -- (board-layout.allium, "Flattening"): each epic's agents sit under a
+        -- (board-layout.allium, "Flattened Mode"): each epic's agents sit under a
         -- header row, so the user sees at a glance which agents work on the
         -- same epic. The header is the board's epic header, drawn the same
         -- way: `<title> ───`, the rule muted and the title purple, filling

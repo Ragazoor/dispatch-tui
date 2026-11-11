@@ -125,7 +125,7 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
         marks,
     };
     // A flattened group's cards step in with the header above them
-    // (board-layout.allium: "Flattening", EpicGroupTree). Every group's cards
+    // (board-layout.allium: "Flattened Mode", EpicGroupTree). Every group's cards
     // follow its own header directly, so the last header's depth is theirs;
     // anything that ends a group resets it.
     let mut card_indent: u16 = 0;
@@ -332,7 +332,12 @@ fn view_border_title(app: &App) -> Option<String> {
                     app.epics()
                         .iter()
                         .find(|e| e.id == *id)
-                        .map(|e| truncate(&e.title, 30))
+                        .map(|e| {
+                            truncate(
+                                &e.title,
+                                crate::tui::ui::shared::BREADCRUMB_SEGMENT_MAX_CHARS,
+                            )
+                        })
                         .unwrap_or_default()
                 })
                 .collect();

@@ -59,7 +59,7 @@ impl TaskStatus {
 
     /// The board columns that flattened mode never reaches. Kept as its own
     /// const, in the same polarity as `board-layout.allium`'s
-    /// `FlattenedView.unflattened_statuses`, so the two cannot drift: a new
+    /// `BoardView.unflattened_statuses`, so the two cannot drift: a new
     /// column added to the enum flattens by default in both.
     ///
     /// Backlog is the one column read at the epic level — it is where work is

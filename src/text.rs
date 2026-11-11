@@ -14,3 +14,7 @@ pub fn truncate(s: &str, max: usize) -> String {
 /// Separator joining ancestor-breadcrumb segments in the epic-view border
 /// title.
 pub const BREADCRUMB_SEPARATOR: &str = " › ";
+
+/// The most characters one epic title takes in that breadcrumb before it is
+/// truncated (`board-layout.allium`: `config.breadcrumb_segment_max_chars`).
+pub const BREADCRUMB_SEGMENT_MAX_CHARS: usize = 30;

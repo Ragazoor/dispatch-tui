@@ -3,7 +3,7 @@
 //! drawn branches meet, leaves before deeper siblings, a depth on each
 //! header, and folds that hide a whole subtree.
 //!
-//! See "Flattening" (EpicGroupTree) and "Epic Folding" in
+//! See "Flattened Mode" (EpicGroupTree) and "Epic Folding" in
 //! `docs/specs/board-layout.allium` (tasks #98901, #99033).
 use super::*;
 use crate::models::{EpicId, SubStatus, TaskStatus};

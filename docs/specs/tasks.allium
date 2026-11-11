@@ -905,16 +905,15 @@ rule ClearSelection {
 -- set lives are all in board-layout.allium ("Collapsed Sections").
 
 rule ToggleSectionCollapse {
-    -- ref names the column and the section within it. has_section is whether
-    -- the cursor is somewhere that identifies a section at all: on a card in a
-    -- sectioned column, or on a folded section's header.
-    when: ToggleSectionCollapse(ref, has_section)
+    -- ref names the column and the section the cursor is in: the section of
+    -- the card under it, or the section a folded header under it names.
+    when: ToggleSectionCollapse(ref)
 
     -- Nowhere else is a section to fold. A column without sections
-    -- (board-layout.allium: ColumnSectionLayout.sectioned_statuses), an empty
-    -- column, and the select-all cursor position all leave
-    -- the key doing nothing rather than guessing at a neighbouring section.
-    requires: has_section
+    -- (board-layout.allium: BoardView.has_sections) leaves the key doing
+    -- nothing; so do an empty column and the select-all cursor position,
+    -- which name no section and raise no toggle (Board).
+    requires: board_layout/board_view.has_sections(ref.column)
 
     ensures:
         if collapsed_sections.is_collapsed(ref):
@@ -965,21 +964,20 @@ rule ToggleSectionCollapse {
 -- the folded set lives are all in board-layout.allium ("Epic Folding").
 
 rule ToggleEpicFold {
-    -- ref names the column and the epic within it. has_epic_group is
-    -- whether the cursor is somewhere that identifies a flattened epic
-    -- group at all: on a card belonging to that epic in a flattened column,
-    -- or on that epic's already-folded header. The open epic-header row
-    -- itself never holds the cursor — it is decoration, exactly as an open
-    -- SubstatusLabel is (board-layout.allium: "Epic Folding").
-    when: ToggleEpicFold(ref, has_epic_group)
+    -- ref names the column and the epic group the cursor is in: the epic of
+    -- the task card under it, or the epic an already-folded header under it
+    -- names. The open epic-header row itself never holds the cursor — it is
+    -- decoration, exactly as an open SubstatusLabel is (board-layout.allium:
+    -- "Epic Folding").
+    when: ToggleEpicFold(ref)
 
-    -- Nowhere else is an epic group to fold. A card with no epic, an
-    -- unflattened column (board-layout.allium: FlattenedView.flattens), a
-    -- flattened column with no header for the group at all
-    -- (board-layout.allium, "Epic Folding": today, Done), and the select-all
-    -- cursor position all leave the key doing nothing rather than guessing
-    -- at a neighbouring group.
-    requires: has_epic_group
+    -- Nowhere else is an epic group to fold. An unflattened column, and a
+    -- flattened column with no header for the group at all (today, Done),
+    -- leave the key doing nothing (board-layout.allium:
+    -- BoardView.draws_epic_headers). So do a card with no epic, an epic
+    -- card and the select-all cursor position, which name no group and
+    -- raise no toggle (Board).
+    requires: board_layout/board_view.draws_epic_headers(ref.column)
 
     ensures:
         if folded_epics.is_folded(ref):
@@ -1121,7 +1119,7 @@ rule ReorderItem {
     -- it is ordered by its completion key, descending — for a task its own
     -- completed_at, for an epic card its own completed_at falling back to the
     -- freshest completed_at among the done tasks that placed it in the column
-    -- (board-layout.allium, EpicCardPlacement.done_sort_key). The two columns
+    -- (board-layout.allium, BoardView.done_sort_key). The two columns
     -- therefore write different fields.
     let item_eff = item.sort_order ?? item.id
     let target_eff = target.sort_order ?? target.id
@@ -2123,9 +2121,11 @@ surface Board {
         -- (ClearSelection).
         SelectAllColumn(tasks, epics)
         ClearSelection()
-        -- [z] and [Z] (ToggleSectionCollapse, ToggleEpicFold).
-        ToggleSectionCollapse(ref, has_section)
-        ToggleEpicFold(ref, has_epic_group)
+        -- [z] and [Z] (ToggleSectionCollapse, ToggleEpicFold), raised only
+        -- with the cursor on a card or a folded header that names a section
+        -- or an epic group.
+        ToggleSectionCollapse(ref)
+        ToggleEpicFold(ref)
         -- [b] on a task card (ToggleBookmarkFromBoard).
         ToggleBookmarkKeyPressed(viewer, task)
         -- Any key handled on the plain board, with the task card left under

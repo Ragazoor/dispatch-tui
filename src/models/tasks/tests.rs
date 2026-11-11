@@ -132,7 +132,7 @@ fn folding_ignores_an_undated_done_task() {
 }
 
 /// Pins the exempt set against `board-layout.allium`'s
-/// `FlattenedView.unflattened_statuses`. Changing one without the other is
+/// `BoardView.unflattened_statuses`. Changing one without the other is
 /// a behaviour change, so make it fail here rather than drift silently.
 #[test]
 fn unflattened_is_backlog_alone() {

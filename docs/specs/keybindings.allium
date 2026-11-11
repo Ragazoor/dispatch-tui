@@ -278,7 +278,7 @@ enum KeyReceiver { dispatch | tmux }
 --                                                                m: move_task_to_epic;
 --                                                                w: link_work_package
 --   on_flattened_task_card    "on a task card in a flattened    Enter: jump_to_task_epic
---                              column" (FlattenedView.flattens;  (does nothing when the task
+--                              column" (BoardView.flattens;      (does nothing when the task
 --                              a subset of on_task_card)         has no epic)
 --   on_unflattened_task_card  "on a task card in a column       Enter: open_task_detail
 --                              that is not flattened"

@@ -276,6 +276,24 @@ fn shift_z_on_a_card_folds_that_cards_epic() {
     assert!(!app.epic_folds.is_folded(TaskStatus::Running, EpicId(20)));
 }
 
+/// The flattened Done column draws no epic header, so it has no group to fold
+/// (`tasks.allium`: ToggleEpicFold requires `BoardView.draws_epic_headers`):
+/// `Z` on a card there records nothing and saves nothing.
+#[test]
+fn shift_z_in_the_flattened_done_column_records_no_fold() {
+    let mut done = make_task(1, TaskStatus::Done);
+    done.epic_id = Some(EpicId(10));
+    let mut app = App::new(vec![done]);
+    app.board.epics = vec![make_epic(10)];
+    app.filter.lens = crate::tui::types::Lens::Flat;
+    app.selection_mut().set_column(4); // Done = nav col 4
+
+    let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('Z'))));
+
+    assert!(!app.epic_folds.is_folded(TaskStatus::Done, EpicId(10)));
+    assert!(cmds.is_empty(), "nothing is saved: {cmds:?}");
+}
+
 #[test]
 fn shift_z_on_the_resulting_header_unfolds_it() {
     let mut app = folding_app();
