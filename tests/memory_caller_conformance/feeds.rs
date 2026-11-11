@@ -574,6 +574,16 @@ fn grouped_ingest_moves_a_task_between_present_sub_epics() {
             .find(|t| t.external_id.as_deref() == Some("x-1"))
             .unwrap()
             .id;
+        // x-2 comes back unchanged below. Both stores stamp milliseconds, so
+        // a rewrite of it would show (`UnchangedFeedItemIsNotRewritten`).
+        let stamp_of = |rows: &SharedRows, ext: &str| {
+            rows.tasks()
+                .into_iter()
+                .find(|t| t.external_id.as_deref() == Some(ext))
+                .map(|t| t.updated_at)
+        };
+        let unchanged_real = stamp_of(&rows_real, "x-2");
+        let unchanged_mem = stamp_of(&rows_mem, "x-2");
 
         // x-1 now names repo-1; x-2 keeps "other" present, and first.
         let (r, m) = ingest(vec![
@@ -595,6 +605,18 @@ fn grouped_ingest_moves_a_task_between_present_sub_epics() {
         assert!(
             rows_mem.tasks().iter().any(|t| t.id == moving),
             "a move keeps the row"
+        );
+        // The x-1 move landing on the real side proves the whole
+        // transaction did, so x-2's row is final there too.
+        assert_eq!(
+            stamp_of(&rows_real, "x-2"),
+            unchanged_real,
+            "the real module rewrote an unchanged feed item"
+        );
+        assert_eq!(
+            stamp_of(&rows_mem, "x-2"),
+            unchanged_mem,
+            "the in-memory caller rewrote an unchanged feed item"
         );
     });
 }

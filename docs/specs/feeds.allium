@@ -1863,7 +1863,12 @@ rule UpsertFeedTasks {
     --     or carried from the original insert wins over feed-supplied
     --     values.
     --     updated_at is
-    --     bumped. labels and sort_order are feed-controlled (never
+    --     bumped only when one of those values actually changes. A match
+    --     whose title, description, tag, labels, sort_order, url and
+    --     url_type would all come out as they already are is NOT written
+    --     at all: the row, its updated_at and the store's commit log stay
+    --     as they were (UnchangedFeedItemIsNotRewritten). labels and
+    --     sort_order are feed-controlled (never
     --     user-editable), so they are always replaced — on a done task too.
     --     The Done column's completion rank is core/Task.completed_at
     --     (tasks.allium, ConfirmDone), which no feed field writes.
@@ -1871,6 +1876,21 @@ rule UpsertFeedTasks {
     --     task (via 'e') keeps that correction across subsequent feed
     --     refreshes, while the feed-owned tag, labels, and sort_order
     --     stay in sync with the script output.
+    --
+    -- == UnchangedFeedItemIsNotRewritten ==
+    --
+    -- A feed re-emits the same items on every poll, and most of them have
+    -- not changed since the last one. Writing such a match anyway costs a
+    -- full row delete plus insert in the store's commit log, and a row update
+    -- sent to every subscribed board; for a feed of long PR bodies, polled
+    -- every few minutes, that alone grows the log by tens of megabytes a
+    -- day. So a match whose feed-owned values (title, description,
+    -- tag, labels, sort_order, and url/url_type after the backfill rule)
+    -- equal the stored ones is skipped: no write, updated_at unchanged. A
+    -- cycle in which no item changed and nothing was inserted, moved or
+    -- deleted writes no row at all, and the store logs nothing for it.
+    -- updated_at on a feed task therefore means "last time the feed changed
+    -- it", which is what the card's age shows.
     --
     -- Tasks present locally that are NOT in the latest emission are
     -- removed. The dispatch runtime treats the feed as the source of
@@ -1952,6 +1972,9 @@ rule UpsertFeedTasks {
                     existing.url = core/TaskUrl{url: item.url, url_type: resolved_url_type}
                 -- existing.status, existing.sub_status, existing.repo_path,
                 -- existing.wrap_up_mode preserved
+                -- existing.updated_at moves to now only when one of the
+                -- assignments above changed a value; otherwise the row is
+                -- not written at all (UnchangedFeedItemIsNotRewritten)
                 -- (an existing row is refreshed even when its id is retired:
                 -- retirement suppresses re-insertion, it does not reach a row
                 -- that is still on the board)
@@ -3243,8 +3266,9 @@ rule AppendOnlyFeed {
     -- arm of UpsertFeedTasks finds it on every later poll, so the
     -- status-preservation clause leaves it in done. ACCEPTED CONSEQUENCE:
     -- every later poll re-applies the item's title, description, tag, labels
-    -- and sort_order to that done task and bumps updated_at — for as long as
-    -- the source keeps emitting the id. This is ordinary UpsertFeedTasks
+    -- and sort_order to that done task — for as long as the source keeps
+    -- emitting the id — and bumps updated_at only when one of them changed
+    -- (UnchangedFeedItemIsNotRewritten). This is ordinary UpsertFeedTasks
     -- behaviour rather than anything new; column ordering is by sort_order —
     -- or, in Done, by completed_at — rather than updated_at (core/Task), so
     -- the churn reorders nothing a user sees. Deleting the task ends it.

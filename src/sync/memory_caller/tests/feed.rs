@@ -73,6 +73,41 @@ async fn ingest_feed_inserts_updates_and_removes_stale_items() {
     assert_eq!(remaining[0].external_id.as_deref(), Some("a"));
 }
 
+/// `feeds.allium: UnchangedFeedItemIsNotRewritten`, mirrored: an unchanged
+/// re-poll leaves `updated_at` where it was; a changed one moves it.
+#[tokio::test]
+async fn ingest_feed_skips_an_unchanged_item_and_writes_a_changed_one() {
+    let (caller, rows, clock) = super::dispatch_requests::caller_with_clock();
+    let host = super::dispatch_requests::HOST.to_string();
+    let epic_id = caller.create_epic(blank_epic()).await.unwrap();
+    let mut item = feed_item("a");
+    item.item.description = "a long PR body".into();
+    let ingest = |items: Vec<bindings::FeedIngestItem>| {
+        caller.ingest_feed(epic_id, items, false, "tester".into(), host.clone())
+    };
+
+    assert!(ingest(vec![item.clone()]).await.unwrap().won());
+    let first = rows.tasks_for_epic(epic_id)[0].updated_at;
+
+    clock.advance(chrono::Duration::seconds(60));
+    assert!(ingest(vec![item.clone()]).await.unwrap().won());
+    assert_eq!(
+        rows.tasks_for_epic(epic_id)[0].updated_at,
+        first,
+        "an unchanged re-poll must not rewrite the row"
+    );
+
+    clock.advance(chrono::Duration::seconds(60));
+    item.item.title = "renamed".into();
+    assert!(ingest(vec![item]).await.unwrap().won());
+    let task = &rows.tasks_for_epic(epic_id)[0];
+    assert_eq!(task.title, "renamed");
+    assert_ne!(
+        task.updated_at, first,
+        "a re-poll that changes a feed field must bump updated_at"
+    );
+}
+
 #[tokio::test]
 async fn ingest_feed_refuses_an_unknown_epic() {
     let (caller, _rows) = feed_caller().await;

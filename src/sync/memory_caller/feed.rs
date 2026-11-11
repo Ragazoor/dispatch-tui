@@ -164,24 +164,12 @@ impl MemoryReducerCaller {
         }
 
         let row = match existing {
-            Some(existing) => {
-                let (url, url_type) = if existing.url.is_empty() {
-                    (item.url.clone(), item.url_type.clone())
-                } else {
-                    (existing.url.clone(), existing.url_type.clone())
-                };
-                module::Task {
-                    title: item.title.clone(),
-                    description: item.description.clone(),
-                    tag: item.tag.clone(),
-                    labels: item.labels.clone(),
-                    sort_order: item.sort_order,
-                    url,
-                    url_type,
-                    updated_at: self.now(),
-                    ..existing
-                }
-            }
+            // The module's own match arm, so an unchanged item is skipped
+            // exactly as the real store skips it.
+            Some(existing) => match module::refreshed_feed_task(&existing, item, self.now()) {
+                Some(row) => row,
+                None => return,
+            },
             None => module::Task {
                 id: 0,
                 title: item.title.clone(),

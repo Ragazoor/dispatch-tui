@@ -149,24 +149,10 @@ pub(crate) fn upsert_feed_item(
     }
 
     let row = match existing {
-        Some(existing) => {
-            let (url, url_type) = if existing.url.is_empty() {
-                (item.url.clone(), item.url_type.clone())
-            } else {
-                (existing.url.clone(), existing.url_type.clone())
-            };
-            Task {
-                title: item.title.clone(),
-                description: item.description.clone(),
-                tag: item.tag.clone(),
-                labels: item.labels.clone(),
-                sort_order: item.sort_order,
-                url,
-                url_type,
-                updated_at: now(ctx),
-                ..existing
-            }
-        }
+        Some(existing) => match refreshed_feed_task(&existing, item, now(ctx)) {
+            Some(row) => row,
+            None => return,
+        },
         None => Task {
             id: 0,
             title: item.title.clone(),
@@ -201,6 +187,35 @@ pub(crate) fn upsert_feed_item(
     // the UPDATE branch `status`/`completed_at` are carried over unchanged
     // from `existing`, so the condition cannot fire there.
     let _ = write_task(ctx, row);
+}
+
+/// The match arm of `feeds.allium: UpsertFeedTasks`: `existing` with the
+/// item's feed-owned values applied, stamped `now` — or `None` when applying
+/// them changes nothing (`UnchangedFeedItemIsNotRewritten`), so the caller
+/// writes no row. Every poll re-emits most items as they were, and a write
+/// costs a full delete plus insert in the commit log and an update to every
+/// board. Shared with the board's in-memory caller, so the two cannot drift.
+pub fn refreshed_feed_task(existing: &Task, item: &FeedTaskUpsertItem, now: String) -> Option<Task> {
+    // url and url_type are backfilled together, and only onto an empty url.
+    let (url, url_type) = if existing.url.is_empty() {
+        (item.url.clone(), item.url_type.clone())
+    } else {
+        (existing.url.clone(), existing.url_type.clone())
+    };
+    let refreshed = Task {
+        title: item.title.clone(),
+        description: item.description.clone(),
+        tag: item.tag.clone(),
+        labels: item.labels.clone(),
+        sort_order: item.sort_order,
+        url,
+        url_type,
+        ..existing.clone()
+    };
+    (refreshed != *existing).then(|| Task {
+        updated_at: now,
+        ..refreshed
+    })
 }
 
 /// Delete every task in `epic_id` whose `external_id` is set and not in

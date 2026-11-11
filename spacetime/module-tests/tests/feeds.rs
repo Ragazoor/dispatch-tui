@@ -175,6 +175,112 @@ fn feed_upsert_updates_feed_fields_and_preserves_user_and_store_fields() {
     );
 }
 
+/// `feeds.allium: UnchangedFeedItemIsNotRewritten`. A re-poll that carries the
+/// same feed-owned values leaves the row alone, `updated_at` included; one
+/// that changes a value writes it and moves `updated_at`.
+#[test]
+fn feed_upsert_skips_an_unchanged_item_and_writes_a_changed_one() {
+    let store = Store::new();
+    let epic = plain_epic(&store, "E", 0);
+    let mut item = feed_item("ext-1", "title", "backlog");
+    item.description = "a long PR body".into();
+    item.url = "https://example.com/1".into();
+    item.url_type = "pr".into();
+    ingest(&store, epic, vec![item.clone()], CREATOR);
+    let id = by_external_id(&store, "ext-1")[0].id;
+    let first = store.task(id).updated_at;
+
+    store.advance_secs(60);
+    ingest(&store, epic, vec![item.clone()], CREATOR);
+    assert_eq!(
+        store.task(id).updated_at,
+        first,
+        "an unchanged re-poll must not rewrite the row"
+    );
+
+    store.advance_secs(60);
+    item.labels = r#"["ci:fail"]"#.into();
+    ingest(&store, epic, vec![item], CREATOR);
+    let task = store.task(id);
+    assert_eq!(task.labels, r#"["ci:fail"]"#);
+    assert_ne!(
+        task.updated_at, first,
+        "a re-poll that changes a feed field must bump updated_at"
+    );
+}
+
+/// Every row an ingest could touch, as text, sorted: equal snapshots mean the
+/// call wrote nothing.
+fn ingest_footprint(store: &Store) -> Vec<String> {
+    let db = store.db();
+    let mut rows: Vec<String> = db
+        .tasks()
+        .iter()
+        .map(|r| format!("{r:?}"))
+        .chain(db.epics().iter().map(|r| format!("{r:?}")))
+        .chain(db.unseen_tasks().iter().map(|r| format!("{r:?}")))
+        .chain(db.agents().iter().map(|r| format!("{r:?}")))
+        .chain(db.retired_feed_items().iter().map(|r| format!("{r:?}")))
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// `feeds.allium: UnchangedFeedItemIsNotRewritten`, on every ingest shape: a
+/// second identical emission writes no row at all, so the store logs nothing
+/// for it. Flat, grouped by repo, and the role-routed reviews parent.
+#[test]
+fn an_identical_emission_writes_nothing_on_any_feed_shape() {
+    let item = |ext: &str, repo: &str, signals: &[&str]| {
+        let mut item = feed_item(ext, ext, "backlog");
+        item.url = format!("https://github.com/org/{repo}/pull/1");
+        item.url_type = "pr".into();
+        FeedIngestItem {
+            item,
+            signals: signals.iter().map(|s| s.to_string()).collect(),
+        }
+    };
+    let emission = || {
+        vec![
+            item("a", "alpha", &["direct-request"]),
+            item("b", "beta", &["team-request"]),
+            item("c", "gamma", &["author-bot"]),
+        ]
+    };
+    for shape in ["flat", "grouped", "reviews-parent"] {
+        let store = Store::new();
+        let epic = feed_epic(&store, "E", 0);
+        let row = store.epic(epic);
+        store.db().epics().id().update(Epic {
+            group_by_repo: shape == "grouped",
+            feed_role: if shape == "reviews-parent" {
+                "reviews-parent".into()
+            } else {
+                row.feed_role.clone()
+            },
+            ..row
+        });
+        store.register_host_for(HOST_A, "alice");
+        let run = || {
+            store
+                .call("alice", |ctx| {
+                    ingest_feed(ctx, epic, emission(), false, CREATOR.into(), HOST_A.into())
+                })
+                .expect("ingest_feed");
+        };
+        run();
+        let before = ingest_footprint(&store);
+        assert_eq!(by_external_id(&store, "a").len(), 1, "{shape}: not ingested");
+        store.advance_secs(60);
+        run();
+        assert_eq!(
+            ingest_footprint(&store),
+            before,
+            "{shape}: an identical emission rewrote a row"
+        );
+    }
+}
+
 /// An existing non-null url always wins over whatever the item carries; url
 /// and url_type move together, never one without the other.
 #[test]

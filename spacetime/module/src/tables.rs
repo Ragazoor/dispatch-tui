@@ -3,7 +3,7 @@
 // Tables
 
 #[spacetimedb::table(accessor = tasks)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Task {
     #[primary_key]
     #[auto_inc]
