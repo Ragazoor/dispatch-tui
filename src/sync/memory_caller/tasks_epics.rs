@@ -391,7 +391,11 @@ impl MemoryReducerCaller {
         if let Err(why) = self.write_task(&mut tables, row) {
             return Ok(ReducerOutcome::Refused(why));
         }
-        if let (Some(task), Some(host)) = (closed_task, close_host) {
+        // Mirrors the module: `HandMoveReleasesAWindowTheBoardDidNotSee`; its
+        // row stands in for the windowless close row.
+        let released_window =
+            given_up.is_some() && self.release_unseen_window(&mut tables, id.0, close_host);
+        if let (Some(task), Some(host), false) = (closed_task, close_host, released_window) {
             self.request_close_teardown(&mut tables, &task, "", host, &self.now());
         }
         // Mirrors the module: `GivingUpTheLaunchCancelsTheDispatch`.

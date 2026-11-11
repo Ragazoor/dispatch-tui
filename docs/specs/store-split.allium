@@ -1042,7 +1042,62 @@ rule GivingUpTheLaunchCancelsTheDispatch {
         --
         -- The board's own move kills no window during provisioning: the
         -- task holds none until the report lands (MoveTaskBackward kills the
-        -- window the task holds).
+        -- window the task holds). A window that lands after the board's last
+        -- read is the next rule's.
+}
+
+rule HandMoveReleasesAWindowTheBoardDidNotSee {
+    when: tasks/TaskStatusWrittenByHand(task, from, to)
+
+    requires: from != to and (to = backlog or to = done)
+
+    -- The store's own read of the window, after the write's patch: the board
+    -- names the window it knows, and clears it in the same patch when it
+    -- holds one, so a window left here is one the board's copy lacked (the
+    -- host's dispatched report landed after the board's last subscription
+    -- delivery).
+    let window = task.current_window
+    let teardown_host = if task.host != null: task.host else: caller_host
+    let may_tear_down = teardown_host != null
+        and teardown_host.owner != null and teardown_host.owner = caller()
+
+    ensures:
+        if window != null and may_tear_down:
+            current_agent(task).tmux_window = null
+            SessionRequest.created(
+                task: task,
+                kind: close,
+                action: done,
+                host: teardown_host,
+                requested_by: caller(),
+                state: requested,
+                requested_at: now,
+                tmux_window: window
+            )
+
+    @guidance
+        -- WHY THE STORE. A hand move into backlog or done kills the window
+        -- the board's copy holds (MoveTaskBackward, ConfirmDone). Between the
+        -- host's dispatched report and the subscription delivering it the
+        -- copy holds none, so the board sends no kill and no clearing, and
+        -- the store would keep a window on a backlog or done task with
+        -- claude still running in it. The module reads its own row, as
+        -- UpdateTaskDoneWritesACloseRow does for a pr url.
+        --
+        -- THE ROW IS THE CLOSE ROW. Same kind, same host-side service
+        -- (ExitSessionTeardown: the host kills the window it names), same
+        -- backstop timer; action stays done, so CloseRowsCarryNoTokenAndNoChain
+        -- holds. A backlog move leaves the task not done, so the row's gh pr
+        -- close step finds nothing to close. An open session request on the
+        -- task is failed first, as for any close row.
+        --
+        -- WHEN NO HOST IS KNOWN OR OWNED BY THE CALLER (patch_task from a
+        -- caller that names no host, on a task with none; a teammate's
+        -- machine) there is no row and the window is left, on the task, to
+        -- its own machine: clearing it with no kill would orphan it.
+        --
+        -- Ends in the same transaction as the status write, after
+        -- GivingUpTheLaunchCancelsTheDispatch.
 }
 
 rule HostRepeatsDispatchedReport {
@@ -2068,7 +2123,8 @@ rule UpdateTaskDoneWritesACloseRow {
     -- call moves the task into Done (status was not done, is done after the
     -- patch) and the task then carries a pr-typed url, writes a close row for
     -- the host to serve. The close is windowless: an edit to Done never killed
-    -- a window, and still does not.
+    -- a window, and still does not. (A window the store itself finds held
+    -- on a move into Done is HandMoveReleasesAWindowTheBoardDidNotSee's.)
     let was_already_done = task.status = done
     let has_pr_url = task.url != null and task.url.url_type = pr
     let teardown_host = if task.host != null: task.host else: host

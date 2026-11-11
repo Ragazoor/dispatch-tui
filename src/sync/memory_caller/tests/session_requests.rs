@@ -1171,6 +1171,35 @@ async fn close_task_applies_the_done_close_and_writes_a_close_row() {
     );
 }
 
+/// `HandMoveReleasesAWindowTheBoardDidNotSee`: a hand move to backlog whose
+/// patch names no window still releases the one the store holds, and writes a
+/// close row naming it. Mirrors the module's test of the same name.
+#[tokio::test]
+async fn a_hand_move_to_backlog_releases_a_window_the_patch_did_not_name() {
+    let (caller, rows) = caller();
+    let task = dispatched_task(&caller).await;
+
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                status: Some("backlog".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(rows.task(task).unwrap().tmux_window.is_none());
+    let [row] = close_rows(&rows, task).try_into().expect("one close row");
+    assert_eq!(row.action, WrapUpMode::Done);
+    assert_eq!(row.host, HOST);
+    assert_eq!(
+        row.tmux_window.as_ref().map(|w| w.as_str()),
+        Some(format!("task-{}", task.0).as_str())
+    );
+}
+
 /// No window and no pr-typed url means no host work, so no row.
 #[tokio::test]
 async fn close_task_without_host_work_writes_no_row() {

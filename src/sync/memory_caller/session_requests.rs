@@ -356,6 +356,32 @@ impl MemoryReducerCaller {
         }
     }
 
+    /// Mirrors the module's `release_unseen_window`
+    /// (`HandMoveReleasesAWindowTheBoardDidNotSee`).
+    pub(super) fn release_unseen_window(
+        &self,
+        tables: &mut Tables,
+        task_id: i64,
+        call_host: Option<&str>,
+    ) -> bool {
+        let window = module::session_window(&self.agent_store(tables), task_id);
+        if window.is_empty() {
+            return false;
+        }
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
+            return false;
+        };
+        let Some(host) = module::window_release_host(&task.host, call_host) else {
+            return false;
+        };
+        if self.acting_for(tables, host).is_err() {
+            return false;
+        }
+        module::close_agent_session(&mut self.agent_store(tables), task_id);
+        self.request_close_teardown(tables, &task, &window, host, &self.now());
+        true
+    }
+
     /// Mirrors the module's `respawn_phoenix_successor_of`: the successor row,
     /// and whether it landed. A failure is swallowed: Done outranks the respawn.
     pub(super) fn respawn_phoenix_successor_of(

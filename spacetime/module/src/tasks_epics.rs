@@ -491,7 +491,12 @@ fn patch_task_row(
         (close_host.is_some() && finished && close_has_host_work(&row, "")).then(|| row.clone());
     let given_up = launch_given_up_by(&prior_status, &row.status);
     write_task(ctx, row)?;
-    if let (Some(task), Some(host)) = (closed_task, close_host) {
+    // `HandMoveReleasesAWindowTheBoardDidNotSee`: a window still held after the
+    // patch is one the board's copy lacked, so it sent no kill. Its close row
+    // also runs `ClosePrOnDone`, so it stands in for the windowless one below.
+    let released_window =
+        given_up.is_some() && release_unseen_window(ctx, id, close_host);
+    if let (Some(task), Some(host), false) = (closed_task, close_host, released_window) {
         request_close_teardown(ctx, &task, "", host, &now(ctx));
     }
     // `GivingUpTheLaunchCancelsTheDispatch`, after the status write.
@@ -1454,3 +1459,26 @@ pub(crate) fn is_bare_claim(task: &Task) -> bool {
 // them one at a time, and `request_dispatch` arbitrates: a task another host
 // already took is refused, and the client moves to the next. Exclusivity is still the
 // store's, which is the part that had to move.
+
+/// `HandMoveReleasesAWindowTheBoardDidNotSee`: clear the current agent's
+/// window and write a `close` row naming it, so the host kills it. Nothing
+/// when the agent holds none, or when no host the caller acts for is known (the
+/// window then stays on the task, with its own machine).
+fn release_unseen_window(ctx: &ReducerContext, id: i64, call_host: Option<&str>) -> bool {
+    let window = session_window(&AgentTables(ctx), id);
+    if window.is_empty() {
+        return false;
+    }
+    let Some(task) = visible_task(ctx, id) else {
+        return false;
+    };
+    let Some(host) = window_release_host(&task.host, call_host) else {
+        return false;
+    };
+    if require_acting_for(ctx, host).is_err() {
+        return false;
+    }
+    close_agent_session(&mut AgentTables(ctx), id);
+    request_close_teardown(ctx, &task, &window, host, &now(ctx));
+    true
+}

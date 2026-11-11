@@ -518,11 +518,17 @@ fn update_task_attaching_a_pr_url_and_moving_to_done_writes_a_close_row() {
 #[test]
 fn update_task_writes_no_close_row_without_a_transition_or_a_pr_url() {
     let (store, _, ids) = wrappable(false, &["review", "review", "review"]);
-    update_to(&store, ids[0], status_patch("done")).expect("done without a pr");
+    // The board kills and clears the window it holds as it moves to Done; a
+    // window left in the store is HandMoveReleasesAWindowTheBoardDidNotSee's.
+    let done_clearing_window = || TaskPatch {
+        tmux_window: Some(String::new()),
+        ..status_patch("done")
+    };
+    update_to(&store, ids[0], done_clearing_window()).expect("done without a pr");
     assert_eq!(session_count(&store), 0, "no pr url");
 
     patch(&store, ids[1], pr_patch()).expect("attach the pr");
-    update_to(&store, ids[1], status_patch("done")).expect("to done");
+    update_to(&store, ids[1], done_clearing_window()).expect("to done");
     assert_eq!(session_rows(&store, ids[1], SESSION_KIND_CLOSE).len(), 1);
     let after_first = session_count(&store);
     update_to(&store, ids[1], status_patch("done")).expect("done again");
@@ -544,4 +550,67 @@ fn update_task_into_done_on_a_teammates_host_writes_no_row() {
     update_to(&store, id, status_patch("done")).expect("update_task");
     assert_eq!(store.task(id).status, "done");
     assert_eq!(session_rows(&store, id, SESSION_KIND_CLOSE).len(), 0);
+}
+
+// -- A window the board did not see (store-split.allium:
+//    HandMoveReleasesAWindowTheBoardDidNotSee)
+
+/// The board's copy lacked the window, so its move names none: the store
+/// clears the window itself and writes a close row naming it.
+#[test]
+fn a_hand_move_to_backlog_releases_a_window_the_patch_did_not_name() {
+    let (store, _, ids) = wrappable(false, &["running"]);
+    let id = ids[0];
+
+    update_to(&store, id, status_patch("backlog")).expect("update_task");
+
+    assert_eq!(current_agent(&store, id).tmux_window, "", "window released");
+    let row = session_row(&store, id, SESSION_KIND_CLOSE);
+    assert_eq!(row.tmux_window, format!("task-{id}"));
+    assert_eq!(row.host, HOST_A);
+    assert_eq!(row.state, SESSION_REQUESTED);
+    assert_eq!(row.action, ACTION_DONE);
+    assert_eq!(timers_for(&store, row.id), 1);
+}
+
+#[test]
+fn a_hand_move_to_done_through_patch_task_releases_the_window_too() {
+    let (store, _, ids) = wrappable(false, &["running"]);
+    let id = ids[0];
+
+    patch(&store, id, status_patch("done")).expect("patch_task");
+
+    assert_eq!(current_agent(&store, id).tmux_window, "");
+    assert_eq!(
+        session_row(&store, id, SESSION_KIND_CLOSE).tmux_window,
+        format!("task-{id}")
+    );
+}
+
+/// The board saw the window: it kills it and clears it in the same patch, so
+/// the store has nothing left to release and writes no row.
+#[test]
+fn a_move_that_already_clears_the_window_writes_no_row() {
+    let (store, _, ids) = wrappable(false, &["running"]);
+    let id = ids[0];
+
+    let moved = TaskPatch {
+        tmux_window: Some(String::new()),
+        ..status_patch("backlog")
+    };
+    update_to(&store, id, moved).expect("update_task");
+
+    assert!(session_rows(&store, id, SESSION_KIND_CLOSE).is_empty());
+}
+
+/// A move to review keeps the session, so it keeps the window.
+#[test]
+fn a_move_to_review_keeps_the_window() {
+    let (store, _, ids) = wrappable(false, &["running"]);
+    let id = ids[0];
+
+    update_to(&store, id, status_patch("review")).expect("update_task");
+
+    assert_eq!(current_agent(&store, id).tmux_window, format!("task-{id}"));
+    assert!(session_rows(&store, id, SESSION_KIND_CLOSE).is_empty());
 }

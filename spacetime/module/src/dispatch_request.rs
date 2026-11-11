@@ -490,6 +490,16 @@ pub fn launch_given_up_by(prior_status: &str, status: &str) -> Option<&'static s
         .flatten()
 }
 
+/// `HandMoveReleasesAWindowTheBoardDidNotSee`'s host for the kill: the task's
+/// own, else the one the call names (`update_task`'s). `None` when neither is
+/// known, which leaves the window where it is: clearing it with no host to kill
+/// it would orphan it.
+pub fn window_release_host<'a>(task_host: &'a str, call_host: Option<&'a str>) -> Option<&'a str> {
+    Some(task_host)
+        .filter(|h| !h.is_empty())
+        .or(call_host.filter(|h| !h.is_empty()))
+}
+
 /// `GivingUpTheLaunchCancelsTheDispatch`'s selection: the requests still
 /// waiting for their host. A provisioning one stays open until its host
 /// reports, so a second dispatch cannot race its worker.

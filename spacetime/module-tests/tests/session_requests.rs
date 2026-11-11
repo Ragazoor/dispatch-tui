@@ -268,6 +268,16 @@ fn patch(store: &Store, id: i64, patch: TaskPatch) {
         .expect("patch_task");
 }
 
+/// A hand move as the board sends it: it kills the window it holds and clears
+/// it in the same patch, so the store has none left to release
+/// (`HandMoveReleasesAWindowTheBoardDidNotSee`).
+fn moved_clearing_window(status: &str) -> TaskPatch {
+    TaskPatch {
+        tmux_window: Some(String::new()),
+        ..status_patch(status)
+    }
+}
+
 fn claim(store: &Store, row: i64, host: &str) -> Result<(), String> {
     store.call("alice", |ctx| claim_session_request(ctx, row, host.into()))
 }
@@ -421,7 +431,7 @@ fn each_wrap_up_refusal_names_why_and_writes_nothing() {
     dispatch_to_running(&store, running);
     let done = store.create("alice", user_task("done", "alice"));
     dispatch_to_running(&store, done);
-    patch(&store, done, status_patch("done"));
+    patch(&store, done, moved_clearing_window("done"));
 
     let mut cases = vec![
         (backlog, HOST_A, "cannot be wrapped up"),
@@ -560,7 +570,7 @@ fn a_conflict_report_leaves_a_task_that_moved_on_alone() {
     wrap_up(&store, id, "rebase").expect("request_wrap_up");
     let row = only_row(&store, id, SESSION_KIND_WRAP_UP);
     claim(&store, row.id, HOST_A).expect("claim");
-    patch(&store, id, status_patch("done"));
+    patch(&store, id, moved_clearing_window("done"));
     set_sub_status(&store, id, "none");
 
     report_failed(&store, row.id, HOST_A, "conflict", true).expect("report");
@@ -721,7 +731,7 @@ fn a_later_dispatch_voids_the_exit_token() {
     let (store, id) = ready();
     wrap_up(&store, id, "done").expect("request_wrap_up");
     let token = only_row(&store, id, SESSION_KIND_WRAP_UP).id;
-    patch(&store, id, status_patch("backlog"));
+    patch(&store, id, moved_clearing_window("backlog"));
     set_sub_status(&store, id, "none");
     dispatch_to_running(&store, id);
 
@@ -1016,7 +1026,7 @@ fn a_restart_fails_only_this_hosts_running_session_requests() {
 fn deleting_a_task_fails_its_open_session_request_and_cancels_its_timer() {
     let (store, id) = ready();
     wrap_up(&store, id, "rebase").expect("request_wrap_up");
-    patch(&store, id, status_patch("done"));
+    patch(&store, id, moved_clearing_window("done"));
 
     store
         .call("alice", |ctx| delete_task(ctx, id))
@@ -1038,7 +1048,7 @@ fn batch_delete_fails_the_open_session_requests_of_the_tasks_it_deletes() {
             let id = store.create("alice", epic_task("t", epic, "backlog"));
             dispatch_to_running(&store, id);
             wrap_up(&store, id, "rebase").expect("request_wrap_up");
-            patch(&store, id, status_patch("done"));
+            patch(&store, id, moved_clearing_window("done"));
             id
         })
         .collect();
