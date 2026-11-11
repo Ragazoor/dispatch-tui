@@ -174,7 +174,9 @@ rule UpdateWorkPackageIsOneTransaction {
         if patch.title != null or patch.description != null or patch.sort_order != null:
             UpdateWorkPackage(package, patch.title, patch.description, patch.sort_order)
     ensures:
-        if visibility != null: package.visibility = visibility
+        if visibility != null:
+            package.visibility = visibility
+            package.updated_at = now
     ensures:
         for item in unlink: UnlinkItem(package, item)
     ensures:
@@ -182,7 +184,7 @@ rule UpdateWorkPackageIsOneTransaction {
 
     @guidance
         -- Unlinks run before links. A link-only or unlink-only call leaves
-        -- updated_at alone: only the patch touches it.
+        -- updated_at alone: only the patch and the visibility touch it.
 }
 
 -- J/K on a package card moves it among the package cards of its column.
@@ -447,7 +449,8 @@ rule ListWorkPackagesViaMcp {
     @guidance
         -- Every package the board holds (the ones visible to the caller), or
         -- the one named: id, title, description (omitted when empty),
-        -- sort_order (omitted when unset), created_at, updated_at, and its
+        -- sort_order (omitted when unset), created_at, updated_at, its
+        -- creator (CreatorIsShownByName), workspace and visibility, and its
         -- linked items, each with kind, id, title and status. A link whose
         -- item this board does not hold is left out. A task item reads
         -- `- task <id> [<status>] <name>: <title>`, the display name left
@@ -490,6 +493,9 @@ rule UpdateWorkPackageViaMcp {
         -- linked, so the caller can tell that nothing changed for it. The
         -- store leaves a link to an item the caller cannot see in place, as
         -- if it were not linked (UnlinkItem).
+        -- An empty list is the same as leaving the list out: a call whose
+        -- only field is `link_task_ids: []` names no field, and
+        -- `delete: true` with an empty list is still a delete.
         -- The tool is declared destructive, because one of its forms deletes
         -- (DeleteWorkPackageViaMcp): annotations describe a whole tool.
 }
@@ -617,8 +623,9 @@ surface PackageCardPlacement {
         -- once.
         -- The card shows a square glyph and the title in CYAN (an epic card's
         -- identity is PURPLE — board-visuals.allium: WorkPackageCard), and a
-        -- second line "N items · M done" counting the linked items the board
-        -- holds and how many of them are done; "no items" when it holds none.
+        -- second line "N items · M done" ("1 item · M done" for one)
+        -- counting the linked items the board holds and how many of them are
+        -- done; "no items" when it holds none.
         -- When the package has a creator, the line ends " · by <creator>",
         -- the creator shown by display name or identity prefix
         -- (workspaces.allium: CreatorIsShownByName).
@@ -626,8 +633,8 @@ surface PackageCardPlacement {
         -- column header's card count does not include it, select-all and
         -- multi-select skip it, and H/L do nothing on it. J/K moves it among
         -- the package cards only (ReorderPackage).
-        -- The status bar on a package card offers Space open, e rename and
-        -- x delete.
+        -- The status bar on a package card offers Space open, e rename,
+        -- x delete, n new, E epic, / search and ? help.
         -- Computed on every render rather than cached: the placement reads
         -- links, the epic tree and the filters, and a board holds few
         -- packages.

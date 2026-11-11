@@ -477,6 +477,31 @@ fn deleting_a_sub_epic_retires_its_whole_subtrees_feed_tasks() {
     );
 }
 
+/// `epics.allium: DeleteEpicRefused`: the store's refusal names the LOWEST-id
+/// undone task in the subtree, the same one the client pre-check names, not
+/// whichever task a walk over the subtree's epics happens to reach first.
+#[test]
+fn a_refused_epic_delete_names_the_lowest_id_undone_task() {
+    let store = Store::new();
+    let root = plain_epic(&store, "root", 0);
+    let subs: Vec<i64> = (0..8)
+        .map(|n| plain_epic(&store, &format!("sub {n}"), root))
+        .collect();
+    // The lowest id goes into the LAST sub-epic, the others after it.
+    let lowest = store.create("alice", epic_task("first", subs[7], "running"));
+    for &sub in &subs[..7] {
+        store.create("alice", epic_task("later", sub, "running"));
+    }
+
+    let why = store
+        .call("alice", |ctx| delete_epic(ctx, root))
+        .expect_err("a subtree holding undone tasks must be refused");
+    assert!(
+        why.contains(&format!("task {lowest} in its subtree")),
+        "the refusal must name the lowest-id undone task {lowest}: {why}"
+    );
+}
+
 /// `epics.allium: DeleteEpic`'s guard — every task anywhere in the subtree is
 /// `done` — enforced at the reducer, not only in the client's view check.
 #[test]

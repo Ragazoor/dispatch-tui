@@ -1200,20 +1200,21 @@ pub(crate) fn collect_epic_subtree_ids(
 /// itself included — rather than a single epic's own direct tasks, for the
 /// same reason `collect_epic_subtree_ids` walks the whole tree: a nested
 /// sub-epic's unfinished task must block the delete exactly as one of the
-/// root's own would. Returns the first non-`done` task's id found, or `None`
-/// when every task in the subtree qualifies (an empty subtree qualifies).
+/// root's own would. Returns the LOWEST id among the non-`done` tasks, the one
+/// the client pre-check names too (`epics.allium: DeleteEpicRefused`), or
+/// `None` when every task in the subtree qualifies (an empty subtree
+/// qualifies). The doomed set is a `HashSet`, so the first task a walk meets
+/// would differ from run to run.
 pub(crate) fn first_undone_task_in(
     ctx: &ReducerContext,
     doomed: &std::collections::HashSet<i64>,
 ) -> Option<i64> {
-    for &epic_id in doomed {
-        for task in ctx.db.tasks().epic_id().filter(&epic_id) {
-            if task.status != DONE {
-                return Some(task.id);
-            }
-        }
-    }
-    None
+    doomed
+        .iter()
+        .flat_map(|epic_id| ctx.db.tasks().epic_id().filter(epic_id))
+        .filter(|task| task.status != DONE)
+        .map(|task| task.id)
+        .min()
 }
 
 /// epics.allium: `DeleteEpic`'s guard, combining [`collect_epic_subtree_ids`]

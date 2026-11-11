@@ -370,7 +370,7 @@ rule DeleteEpic {
         -- check while holding
         -- non-done tasks the view never delivered. So the same guard is
         -- checked again inside the delete_epic reducer itself
-        -- (spacetime/module/src/lib.rs), over the store's true row set, and
+        -- (spacetime/module/src/tasks_epics.rs::validate_epic_deletable), over the store's true row set, and
         -- the reducer refuses (returns an error, deletes nothing) rather
         -- than trusting the caller. The client check is the responsive
         -- path; the reducer check is the one that actually holds against
@@ -481,9 +481,8 @@ rule DeleteEpicRefused {
         --     and ids. The readable blocker leads because it is the one the
         --     user can act on.
         -- Lowest id is what the store's own delete_epic guard names too
-        -- (the spacetime module's validate_epic_deletable in tasks_epics.rs names
-        -- the first undone task id), so a refusal from either check points at
-        -- the same task.
+        -- (spacetime/module/src/tasks_epics.rs::first_undone_task_in), so a
+        -- refusal from either check points at the same task.
         --
         -- WHY UNREADABLE TASKS BLOCK. A row the client cannot decode is
         -- skipped by its reads, so it is invisible on the board but still in
@@ -549,8 +548,8 @@ rule GetEpicViaMcp {
     @guidance
         -- Returns the epic's core fields (title, description,
         -- status, plan_path, sort_order, parent_epic_id, feed_command,
-        -- feed_interval_secs, created_at, updated_at) plus a
-        -- "Subtasks: D/T done" line where D counts subtasks with
+        -- feed_interval_secs, created_at, updated_at), its workspace and
+        -- visibility, plus a "Subtasks: D/T done" line where D counts subtasks with
         -- status = done and T is the total.
         -- The counts come from EpicService::get_epic_with_progress, which
         -- reuses the same rollup as list_epics_with_progress
@@ -619,7 +618,8 @@ rule ListEpicsViaMcp {
         -- unknown parent_epic_id is not found (-32001); recursive without
         -- parent_epic_id is invalid params (-32602).
         -- The response is one line per epic carrying the
-        -- epic id, the title, the progress fraction, then a plan indicator
+        -- epic id, the title, the progress fraction, then
+        -- "[workspace <id>, <visibility>]", then a plan indicator
         -- (when a plan is attached) followed by a status indicator (when
         -- the status is not backlog), then " (parent:<id> <parent title>)" when the epic
         -- has a parent, and finally the description. The parent is on every row so
@@ -636,17 +636,18 @@ rule ListEpicsViaMcp {
 -- name what they touch"). When the call changes the title, the reply shows
 -- the new one.
 rule UpdateEpicViaMcp {
-    when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?,
+    when: McpUpdateEpic(epic, title?, description?, status?, plan_path?, sort_order?,
                         feed_command?, feed_interval_secs?, group_by_repo?,
                         feed_append_only?, parent_epic_id?, visibility?,
                         workspace_id?)
 
     requires: title != null or description != null or status != null
-              or plan != null or sort_order != null
+              or plan_path != null or sort_order != null
               or feed_command != omitted
               or feed_interval_secs != omitted or group_by_repo != null
               or feed_append_only != null
               or parent_epic_id != omitted
+              or visibility != null or workspace_id != null
 
     -- The universal feed-cadence floor (core.allium: "Interval literals",
     -- CLAIM 2). A value below it is rejected with a validation error naming
@@ -703,7 +704,7 @@ rule UpdateEpicViaMcp {
     ensures:
         if status != null: epic.status = status
     ensures:
-        if plan != null: epic.plan_path = plan
+        if plan_path != null: epic.plan_path = plan_path
     ensures:
         if sort_order != null: epic.sort_order = sort_order
     ensures:
@@ -1984,7 +1985,7 @@ surface EpicMcpTools {
         -- (ListEpicsViaMcp).
         McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?)
         -- update_epic (UpdateEpicViaMcp).
-        McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?,
+        McpUpdateEpic(epic, title?, description?, status?, plan_path?, sort_order?,
                       feed_command?, feed_interval_secs?, group_by_repo?,
                       feed_append_only?, parent_epic_id?, visibility?,
                       workspace_id?)
@@ -2006,10 +2007,9 @@ surface AutoDispatchFailureIndicator {
     -- backlog. Evaluated per rendered card, not only for the selected one.
     --
     -- The marked set is implementation-internal and is NOT persisted. It does
-    -- not need to be: the chain runs inside the board's own process, so the
-    -- marker is exactly as durable as the failure that produced it, and a
-    -- board that has been restarted since is observing the epic afresh rather
-    -- than replaying a stall it has already forgotten.
+    -- not need to be: the board that raised AutoDispatchFailed holds it, and
+    -- a board that has been restarted since is observing the epic afresh
+    -- rather than replaying a stall it has already forgotten.
 
     context task: core/Task
 
