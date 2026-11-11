@@ -19,8 +19,8 @@
 --           prompt deliberately omits, and where it comes from instead (see
 --           mcp-task-tools.allium: GetTaskViaMcp and
 --           WrapUpRefusesUnfinishedWork); the MCP
---           tool descriptions a prompt must not shadow (see the
---           tool-description standard at the head of mcp-task-tools.allium).
+--           tool descriptions a prompt must not shadow (see
+--           mcp-task-tools.allium: ToolDescriptionsStateBehaviourAndNameNoCode).
 
 use "./core.allium" as core
 use "./dispatch.allium" as dispatch
@@ -658,7 +658,7 @@ surface AgentPrompt {
         -- prompt asks for a SPECIFIC call the schema cannot imply — quick
         -- dispatch naming update_tasks for the rename off its placeholder
         -- title. What a tool does belongs in that tool's own description; see
-        -- the tool-description standard at the head of mcp-task-tools.allium.
+        -- mcp-task-tools.allium: ToolDescriptionsStateBehaviourAndNameNoCode.
         --
         -- {learning_tools_instruction} names the /learnings SKILL and no tool:
         -- query_learnings, rate_learning and delete_learning each say in

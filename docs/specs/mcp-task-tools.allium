@@ -77,7 +77,7 @@ config {
 ------------------------------------------------------------
 
 rule ToolsAdvertiseAnnotations {
-    when: McpToolsList()
+    when: McpToolsList(client)
 
     -- Every tool in the list carries `annotations` with a `title` and the four
     -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
@@ -307,10 +307,9 @@ rule UpdateTaskViaMcp {
         --
         -- == The tool description enumerates every field it accepts ==
         -- update_tasks' description opens with that list, in full, and it is
-        -- the first thing a caller reads. The list drifted once — it named
-        -- eight of the fifteen fields and still called the typed url pair "PR
-        -- fields" — and an unadvertised field is one a caller reaches for a
-        -- second tool to do, or does not do at all. The list is asserted
+        -- the first thing a caller reads. An unadvertised field is one a
+        -- caller reaches for a second tool to do, or does not do at all. The
+        -- list is asserted
         -- against the generated schema rather than reviewed by eye, so a field
         -- added to the argument set fails until the description learns it.
         -- wrap_up_mode can be set to "rebase", "pr", or "done" to pre-set
@@ -806,8 +805,8 @@ rule CreateTaskViaMcp {
     -- propagates a blank: an epic-less task creates an epic-less child, which
     -- creates another. Measured on the real board, 93 of 209 omitted-epic_id
     -- calls produced a task with no epic, and every one of them had inherited
-    -- correctly from a caller that itself had none — chains such as
-    -- 4786 -> 4806 -> 4826 -> 4843, with no error raised on any surface.
+    -- correctly from a caller that itself had none, in chains of four and
+    -- more, with no error raised on any surface.
     -- Requiring the argument stops the chain: a wrong answer now costs one
     -- task instead of a lineage.
     --
@@ -1022,7 +1021,7 @@ rule ListTasksViaMcp {
         -- When nothing matches the reply is the usual "No tasks found".
         -- == limit caps the rows, with no default ==
         -- limit is optional and has NO default: without it the list is
-        -- complete, as before. A default would silently truncate the plain
+        -- complete. A default would silently truncate the plain
         -- list that callers rely on being complete (a bulk change would miss
         -- tasks without knowing). With limit set, the first `limit` rows in
         -- the usual order are returned after every filter has been applied.
@@ -1076,7 +1075,7 @@ rule ListTasksViaMcp {
         -- == The tool description names every url label, not just PR ==
         -- The url line is typed, so three of the four labels are not "PR". The
         -- description names all four rather than describing the output as a PR
-        -- url, which is what it said while the url field was PR-only: a caller
+        -- url: a caller
         -- who scans for the word "PR" on a security-alert or issue task finds
         -- nothing and concludes the task carries no link.
 }
@@ -1445,7 +1444,7 @@ rule WrapUpViaMcp {
         -- The first success line is `wrap_up complete (<task ref>, action:
         -- <action>).`, and an unfinished-request error names `<task ref>` the
         -- same way.
-        -- The success texts are today's: the action, that the session is NOT
+        -- The success texts carry the action, that the session is NOT
         -- yet closed, "Exit token: <id>" with the
         -- exit_session instruction naming the action (and pr_url for pr),
         -- the rate_learning nudge for pr (learnings.allium:
@@ -1836,7 +1835,7 @@ rule ReadContextViaMcp {
         -- Claude Code cannot pull an MCP resource into an agent's context by
         -- itself today, and agents are first-class MCP users: a capability
         -- reachable only as a resource is one an agent cannot use.
-        -- Description standard (Tool descriptions, above): the description
+        -- Description standard (McpTaskTools: ToolDescriptionsStateBehaviourAndNameNoCode): the description
         -- says that read_context returns the text of a dispatch context
         -- resource and names the URI shapes; it does not restate the
         -- resolution table or the error codes.
@@ -2070,12 +2069,13 @@ surface McpContextResources {
         -- Allium specs, the design step, when to wrap up — stays in the
         -- dispatch prompt (dispatch-prompt.allium), whose conditions decide
         -- whether it applies. What one tool does belongs in that tool's
-        -- description (the tool-description standard at the head of this
-        -- file), not here.
+        -- description (McpTaskTools:
+        -- ToolDescriptionsStateBehaviourAndNameNoCode), not here.
         --
         -- The dispatch prompt does not restate these conventions: the epic
         -- section keeps the epic's id and title and the invitation to ask a
         -- sibling for help, and leaves how to reach one to this text
+        -- (dispatch-prompt.allium: ThePromptNamesNoToolMerelyToSayItExists).
 }
 
 -- The task tools' boundary: every tools/call a client makes to them.
@@ -2117,7 +2117,7 @@ surface McpTaskTools {
         -- and nothing re-checks a citation that goes stale; and a description reaches
         -- an agent mid-task, where it is acted on rather than read.
         --
-        -- Individual rules below add their own description guarantees where a wrong or
+        -- Individual rules add their own description guarantees where a wrong or
         -- missing sentence has a named consequence. Those are asserted in tests, and
         -- derived from the generated schema wherever the fact has a machine-readable
         -- source, so the description cannot drift from the tool it describes.
@@ -2148,8 +2148,8 @@ surface McpTaskTools {
         --     them; the description points at the skill (record_learning and the
         --     /learnings skill — learnings.allium: RecordLearningViaMcp).
         --   - Human-UI trivia (which tags the TUI offers), implementation detail
-        --     (how a self-reference is guarded) and worked examples (list_keybindings
-        --     once showed one) do not belong. A caller acts on neither of the first
+        --     (how a self-reference is guarded) and worked examples do not
+        --     belong. A caller acts on neither of the first
         --     two, and the schema plus a real response already show the third.
 
     @guarantee SkillCopyIsJustInTime
@@ -2164,7 +2164,7 @@ surface McpTaskTools {
         -- the same way.
         --
         -- The same SKILL.md files, and the references/ files beside them, are also
-        -- served as MCP resources (see "MCP context resources" below), from the copy
+        -- served as MCP resources (see "MCP context resources" in Rules), from the copy
         -- built into dispatch out of plugin/skills — never from the installed copy
         -- under ~/.claude/plugins/. So a skill's copy reaches an agent by two routes,
         -- both carry the text in plugin/skills, and a branch that names a references/
@@ -2194,7 +2194,7 @@ surface McpTaskTools {
         -- task_id that names no task ("Task N not found"). A missing or null
         -- `arguments` means an empty object.
         --
-        -- Where a rule below names a code for a tool's failure (-32001
+        -- Where a rule names a code for a tool's failure (-32001
         -- not-found, -32602 invalid params, -32603 internal, INVALID_PARAMS,
         -- INTERNAL_ERROR), it names the failure's class, which decides the
         -- message. Over tools/call the caller sees only isError and the text.
@@ -2208,7 +2208,7 @@ surface McpTaskTools {
         --         the task has no display name.
         --   epic: `Epic <id> ("<title>")`.
         --
-        -- Every reply below that says "task <id>" or "epic <id>" means these forms.
+        -- Every reply in this file that says "task <id>" or "epic <id>" means these forms.
         -- A tool never resolves an epic by title: titles are not unique, so an agent
         -- that holds only a title asks which epic was meant. The unseen-items tools
         -- and the `Task <id> not found` errors keep bare ids on purpose.
@@ -2322,18 +2322,13 @@ surface McpTaskTools {
         -- That also bounds the claim. A feed-created review task is cleaned
         -- up; a review task dispatched by hand is not, and after this refusal
         -- nothing the agent can call releases its worktree or tmux window —
-        -- the user closes it from the TUI. Behaviour is unchanged from the
-        -- prompt line this replaced, which forbade wrap-up just as flatly,
-        -- but the limit is worth naming rather than implying an auto-clean
-        -- that only some of these tasks get.
+        -- the user closes it from the TUI. The limit is named rather than
+        -- implying an auto-clean that only some of these tasks get.
         --
-        -- This was a prompt instruction before it was a guard. Both review
-        -- runbooks opened with "do not call /wrap-up", which is a rule
-        -- stated where it cannot be enforced: an agent that ignores the
-        -- line reaches a tool that accepts the call. Refusing here is what
-        -- lets the line go, and it also covers the agents the line never
-        -- reached — a review task the user dispatched by hand, or one the
-        -- agent resumed in a later session.
+        -- The rule is a guard, not a prompt line: a prompt line is a rule
+        -- stated where it cannot be enforced, and the guard also covers the
+        -- agents a prompt never reached — a review task the user dispatched
+        -- by hand, or one the agent resumed in a later session.
         --
         -- The refusal names the tag as the reason, says a review task ends
         -- at its PR rather than at wrap-up, and names the one way out: a
