@@ -1260,8 +1260,7 @@ entity RetiredFeedItem {
     @guidance
         -- Written by tasks.allium: DeleteTask and BatchDelete, and
         -- epics.allium: DeleteEpic; read and dropped by feeds.allium:
-        -- UpsertFeedTasks ("Retired feed items") and DropClosedRetiredFeedItems;
-        -- backfilled once by epics.allium: ArchivedStatusMigration.
+        -- UpsertFeedTasks ("Retired feed items") and DropClosedRetiredFeedItems.
         -- feed_epic carries a feed_command at the moment of writing, but that
         -- is not an invariant: clearing the command later does not drop the
         -- epic's records. They simply stop being read, since no cycle runs.

@@ -127,8 +127,8 @@ fn task_status_from_str_error() {
 }
 
 /// core.allium: `enum TaskStatus { backlog | running | review | done }`.
-/// The `archived` status was retired by ArchivedStatusMigration
-/// (epics.allium); a stored or supplied "archived" no longer decodes.
+/// There is no `archived` status: a stored or supplied "archived" does not
+/// decode.
 #[test]
 fn archived_is_no_longer_a_task_status() {
     assert!(TaskStatus::parse("archived").is_none());

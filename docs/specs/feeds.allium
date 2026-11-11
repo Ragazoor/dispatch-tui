@@ -3392,9 +3392,7 @@ rule AppendOnlyFeed {
 --     creates no empty repo sub-epic to hold it.
 --
 -- Suppression covers insertion only. A task that is still on the board with a
--- retired id — the migration's worktree-holding survivors (epics.allium:
--- ArchivedStatusMigration) are the case that produces one — is matched,
--- refreshed, moved and, on a trusted cycle, removed as stale exactly like any
+-- retired id is matched, refreshed, moved and, on a trusted cycle, removed as stale exactly like any
 -- other feed task. Filtering it out of the emission instead would make a
 -- mirror cycle read it as absent and tear its worktree down.
 --

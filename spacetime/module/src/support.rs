@@ -47,9 +47,8 @@ pub(crate) fn caller_identity(ctx: &ReducerContext) -> String {
 /// Listed rather than parsed loosely, so an unrecognised one is a REFUSAL
 /// rather than a value that falls through to a plausible branch. See
 /// `derive_epic_status`'s unknown-status arm for why that matters here in
-/// particular. There is no `archived` any more — `epics.allium:
-/// ArchivedStatusMigration` retired it (task #4971): a finished epic either
-/// stays in `done` or is deleted.
+/// particular. There is no `archived` status: a finished epic either stays in
+/// `done` or is deleted.
 pub(crate) const DONE: &str = "done";
 
 pub(crate) const BACKLOG: &str = "backlog";

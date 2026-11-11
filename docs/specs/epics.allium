@@ -8,6 +8,7 @@ use "./core.allium" as core
 use "./store-split.allium" as split
 use "./tasks.allium" as tasks
 use "./settings.allium" as settings
+use "./pr-workflow.allium" as pr
 
 ------------------------------------------------------------
 -- Config
@@ -57,9 +58,7 @@ rule EditEpic {
     -- FEED_INTERVAL_SECS accepts the shared interval-literal grammar
     -- (core.allium: "How a human types an interval"), so "10m" and "600" are
     -- the same edit. It is written back as bare seconds, so a suffixed value
-    -- reappears unsuffixed on the next open. The bare-integer form has always
-    -- meant seconds here and still does, which is what makes suffix support
-    -- purely additive for every feed epic configured before it existed.
+    -- reappears unsuffixed on the next open. A bare integer means seconds.
     -- FEED_INTERVAL_SECS otherwise follows the same parse rule as EditTask's
     -- enum-ish sections: an empty section and an unparseable section are
     -- treated identically — the section yields no value, so the field
@@ -112,7 +111,7 @@ rule EditEpic {
         -- what accepting it does.
         if accepted and edited.feed_command != "" and edited.feed_command != original_feed_command:
             let existing_owner = core/PollOwner{scope: epic, scope_id: epic.id}
-            if exists existing_owner and existing_owner.host != local_host():
+            if exists existing_owner and existing_owner.host != core/local_host():
                 FeedOwnerTakeoverOffered(epic: epic, current_owner: existing_owner.host)
 
     @guidance
@@ -165,7 +164,7 @@ rule CreateEpic {
     -- parent, when given, must refer to an existing epic. Checked before the
     -- insert, so a bad parent yields a not-found error and no epic at all.
     requires:
-        if parent != null: core/Epic.exists(parent)
+        if parent != null: exists parent
 
     ensures: core/Epic.created(
         title: title,
@@ -197,14 +196,9 @@ rule CreateEpic {
         -- one (store-split.allium, X3). The two
         -- rules differ only in which parameters the surface exposes.
         --
-        -- Known implementation limitation (not design intent): the current
-        -- insert cannot express sort_order, feed_command or
-        -- feed_interval_secs, so the service writes them in a follow-up
-        -- patch and re-reads. That patch's failure is an error of the whole
-        -- creation. The two-write shape is not atomic — a failure between
-        -- them leaves a half-populated epic — and it is not a pattern to
-        -- extend: a fourth such field wants a single-insert create request
-        -- (mirroring core/CreateTaskRequest) rather than another patch line.
+        -- The create is one write: sort_order, feed_command and
+        -- feed_interval_secs ride in the created row, so a failure leaves no
+        -- half-configured epic and a retry cannot duplicate one.
         --
         -- When parent is provided, this creates a sub-epic nested inside
         -- the given parent. Root epics (parent = null) appear on the main board;
@@ -240,7 +234,7 @@ rule MoveEpicForward {
     ensures:
         if next = done:
             epic.completed_at = now
-            for task in epic.subtasks where current_window != null:
+            for task in epic.subtasks where current_agent(task).tmux_window != null:
                 current_agent(task).tmux_window = null
 
     @guidance
@@ -319,7 +313,7 @@ rule DeleteEpic {
     -- for an epic with none), counting each epic once, so a loop that got in
     -- some other way still has a finite answer. A subtree deeper than the
     -- store's recursive delete reaches is refused rather than deleted down to
-    -- that level, which would strand the rows below it (task #94222).
+    -- that level, which would strand the rows below it.
     requires: subtree_depth(epic) <= core/config.max_epic_depth
 
     -- The epics this delete removes: the epic itself and every descendant.
@@ -339,8 +333,8 @@ rule DeleteEpic {
         for task in epic.subtree_tasks:
             if task.external_id != null
                and task.epic.nearest_feed_epic != null
-               and not doomed_epics.contains(task.epic.nearest_feed_epic)
-               and not core/RetiredFeedItems.any(r => r.feed_epic = task.epic.nearest_feed_epic and r.external_id = task.external_id):
+               and task.epic.nearest_feed_epic not in doomed_epics
+               and not exists core/RetiredFeedItem{feed_epic: task.epic.nearest_feed_epic, external_id: task.external_id}:
                 core/RetiredFeedItem.created(
                     feed_epic:   task.epic.nearest_feed_epic,
                     external_id: task.external_id,
@@ -351,7 +345,7 @@ rule DeleteEpic {
             not exists task
             tasks/TaskRowDeleted(task: task)
     ensures:
-        for item in core/RetiredFeedItems where doomed_epics.contains(item.feed_epic):
+        for item in core/RetiredFeedItems where item.feed_epic in doomed_epics:
             not exists item
     ensures:
         for sub_epic in epic.subtree_epics:
@@ -370,8 +364,8 @@ rule DeleteEpic {
         -- ENFORCED TWICE, DELIBERATELY. EpicService::delete_epic
         -- (src/service/epics.rs) checks this guard client-side, over
         -- the Store's subscription view, before ever calling the store —
-        -- that is what lets a refusal be instant and say why. But permanent
-        -- delete removed the safety net an incomplete view used to have: an
+        -- that is what lets a refusal be instant and say why. But the view
+        -- can be incomplete, and a delete is permanent: an
         -- epic visible only through own_creations can pass that client
         -- check while holding
         -- non-done tasks the view never delivered. So the same guard is
@@ -386,12 +380,11 @@ rule DeleteEpic {
         -- batch_delete refuse a subtree nested more than
         -- core/config.max_epic_depth levels deep, with "epic <id>: cannot
         -- delete a subtree nested more than 64 levels deep", before deleting
-        -- anything. Before task #94222 the recursive delete silently stopped
-        -- at that depth. The client pre-check does not measure depth, so such
+        -- anything. The client pre-check does not measure depth, so such
         -- a refusal comes after the subtree's teardown has run, as for the
         -- reopen race below; a tree that deep is not one the board builds.
         --
-        -- PRE-CHECK BEFORE ANY SIDE EFFECT (task #8198), as for DeleteTask
+        -- PRE-CHECK BEFORE ANY SIDE EFFECT, as for DeleteTask
         -- (tasks.allium). The subtree's teardown — every worktree, tmux
         -- window and branch — runs client-side
         -- before the reducer is called, so the reducer guard alone would
@@ -411,14 +404,14 @@ rule DeleteEpic {
         -- "deletes nothing" covers just the rows and their RetiredFeedItems.
         --
         -- Deletion is performed in a single database transaction that
-        -- walks parent_epic_id pointers depth-first, deleting each
+        -- walks parent pointers depth-first, deleting each
         -- epic's tasks then the epic row itself. Worktrees and tmux
         -- windows are cleaned up best-effort for every subtask in that
         -- same subtree — not just the directly-owned ones — before the DB
         -- call. The two must agree: the DB delete drops the whole subtree,
         -- so a cleanup that covered only direct children would delete a
         -- nested subtask's row while leaving its worktree, branch and tmux
-        -- window on disk with nothing left referencing them (task #3897).
+        -- window on disk with nothing left referencing them.
         -- This rule stays exempt from WorktreeReleaseIsGated's (c)
         -- (tasks.allium): it removes the rows in one operation, leaving
         -- nothing that could hold a pointer.
@@ -507,19 +500,19 @@ rule DeleteEpicRefused {
 -- == MCP Epic Tools ==
 
 rule CreateEpicViaMcp {
-    when: McpCreateEpic(title, description?, sort_order?,
-                        parent_epic_id?)
+    when: McpCreateEpic(title, description?, sort_order?, parent_epic_id?,
+                        workspace_id?, visibility?)
 
     -- parent_epic_id, when given, must refer to an existing epic.
     requires:
-        if parent_epic_id != null: core/Epic.exists(parent_epic_id)
+        if parent_epic_id != null: exists core/Epic{id: parent_epic_id}
 
     ensures: core/Epic.created(
         title: title,
         description: description,
         status: backlog,
         sort_order: sort_order,
-        parent_epic_id: parent_epic_id,
+        parent: if parent_epic_id = null: null else: core/Epic{id: parent_epic_id},
         created_at: now,
         updated_at: now
     )
@@ -538,9 +531,10 @@ rule CreateEpicViaMcp {
 -- replies differ: the list gives one row per epic, the epic_id form the full
 -- record. list_work_packages(work_package_id) is the same shape.
 rule GetEpicViaMcp {
-    when: McpListEpics(epic_id, parent_epic_id?, recursive?, query?, limit?)
+    when: McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?)
 
-    requires: core/Epic.exists(epic_id)
+    requires: epic_id != null
+    requires: exists core/Epic{id: epic_id}
     -- epic_id picks one epic, so no filter can narrow it further. A call
     -- that sets epic_id together with any other argument is invalid params
     -- (-32602), not a silent ignore.
@@ -589,7 +583,7 @@ rule ListEpicsViaMcp {
     -- With epic_id set the call is GetEpicViaMcp (above).
     requires: epic_id = null
     requires:
-        if parent_epic_id != null: core/Epic.exists(parent_epic_id)
+        if parent_epic_id != null: exists core/Epic{id: parent_epic_id}
     -- recursive narrows nothing on its own: the unfiltered list is already
     -- every epic.
     requires:
@@ -644,7 +638,8 @@ rule ListEpicsViaMcp {
 rule UpdateEpicViaMcp {
     when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?,
                         feed_command?, feed_interval_secs?, group_by_repo?,
-                        feed_append_only?, parent_epic_id?)
+                        feed_append_only?, parent_epic_id?, visibility?,
+                        workspace_id?)
 
     requires: title != null or description != null or status != null
               or plan != null or sort_order != null
@@ -678,17 +673,17 @@ rule UpdateEpicViaMcp {
     -- carrying the store's own wording.
     requires:
         if parent_epic_id != omitted and parent_epic_id != null:
-            Epic.exists(parent_epic_id)
+            exists core/Epic{id: parent_epic_id}
     -- The store's cycle walk climbs at most core/config.max_ancestor_walk
     -- hops above the proposed parent. A chain still going at that point is
     -- already a loop or a corrupt tree, and the move is refused with the same
-    -- cycle error rather than waved through (task #94222; before it, a spent
-    -- walk accepted the move). ancestor_chain(p) counts p itself, so the
+    -- cycle error rather than waved through. ancestor_chain(p) (a black box:
+    -- p, then its parent, and so on up to a root) counts p itself, so the
     -- bound admits p plus max_ancestor_walk - 1 ancestors above it.
     requires:
         if parent_epic_id != omitted and parent_epic_id != null:
-            not Epic.ancestor_chain(parent_epic_id).contains(epic.id)
-            and Epic.ancestor_chain(parent_epic_id).count <= core/config.max_ancestor_walk
+            epic not in ancestor_chain(core/Epic{id: parent_epic_id})
+            and ancestor_chain(core/Epic{id: parent_epic_id}).count <= core/config.max_ancestor_walk
 
     let prior_status = epic.status
 
@@ -713,8 +708,8 @@ rule UpdateEpicViaMcp {
         if sort_order != null: epic.sort_order = sort_order
     ensures:
         -- Entering done via the status param stamps the completion time,
-        -- matching MoveEpicForward. It no longer competes with an explicit
-        -- sort_order in the same call: the two write different fields now, so
+        -- matching MoveEpicForward. It does not compete with an explicit
+        -- sort_order in the same call: the two write different fields, so
         -- a caller can set both and get both. Leaving done writes nothing.
         if status != null:
             if status = done and prior_status != done:
@@ -769,7 +764,8 @@ rule UpdateEpicViaMcp {
     ensures:
         -- parent_epic_id uses triple-state semantics: omitted = no change,
         -- integer = reparent under that epic, null = make this a root epic.
-        if parent_epic_id != omitted: epic.parent_epic_id = parent_epic_id
+        if parent_epic_id != omitted:
+            epic.parent = if parent_epic_id = null: null else: core/Epic{id: parent_epic_id}
 
     @guidance
         -- updated_at is refreshed automatically by the database layer
@@ -823,9 +819,7 @@ rule ManagedFeedConfigViaMcp {
                                cve_command?, cve_interval_secs?)
 
     -- One tool both reads and writes the four managed-feed config settings
-    -- (reviews/CVE feed commands and their poll intervals). It replaces the
-    -- former get_managed_feed_config / set_managed_feed_config pair, whose
-    -- write half told callers to read with the other tool first.
+    -- (reviews/CVE feed commands and their poll intervals).
     --
     -- Each field is triple-state JSON: omitted = leave the stored value
     -- unchanged; explicit null = clear to null; a value = set.
@@ -900,10 +894,10 @@ rule ReparentEpicFromTui {
     -- parent validation: when a parent is chosen it must exist and
     -- introduce no cycle. A null new_parent makes the epic a root.
     requires:
-        if new_parent != null: core/Epic.exists(new_parent)
+        if new_parent != null: exists new_parent
     requires:
         if new_parent != null:
-            not Epic.ancestor_chain(new_parent).contains(epic)
+            epic not in ancestor_chain(new_parent)
             and new_parent != epic
 
     -- An auto-created repo-group sub-epic cannot be moved, in either
@@ -912,7 +906,7 @@ rule ReparentEpicFromTui {
     -- auto-created repo-group sub-epic".
     requires: epic.origin != repo_group
 
-    ensures: epic.parent_epic_id = new_parent
+    ensures: epic.parent = new_parent
     ensures: epic.updated_at = now
 
     @guidance
@@ -930,7 +924,7 @@ rule ReparentEpicFromTui {
         -- parent but keeps
         -- an eligible child, the child is re-rooted to the top level so it
         -- stays selectable. The first item is always "— no parent —", which
-        -- sets parent_epic_id to null.
+        -- makes the epic a root.
         -- Tree navigation: j/k = up/down, l/→ = expand,
         -- h/← = collapse, Space/Enter = select. Space does not expand:
         -- it chooses, so it never reads as a fold key.
@@ -968,7 +962,7 @@ rule ToggleAutoDispatch {
         -- ViewMode::Epic is active). The key is a no-op outside that
         -- view.
         -- Flips the auto_dispatch flag. When false, closing a subtask's
-        -- agent session no longer chains: AutoDispatchNextSubtask leaves
+        -- agent session does not chain: AutoDispatchNextSubtask leaves
         -- the epic untouched and the next subtask is dispatched by the
         -- human from the TUI.
         -- The new value is persisted to the database and reflected
@@ -978,7 +972,7 @@ rule ToggleAutoDispatch {
 -- == Automatic Subtask Chaining ==
 
 rule AutoDispatchNextSubtask {
-    when: SessionClosed(task, close)
+    when: pr/SessionClosed(task, close)
 
     -- Deliberately no requires. A chain that stops is a normal outcome, not a
     -- violated precondition, so every guard lives inside the ensures below:
@@ -1049,11 +1043,10 @@ rule AutoDispatchNextSubtask {
         -- normal stopping conditions below, and the human closes the subtask by
         -- hand and dispatches the next one from the TUI.
         --
-        -- There is no agent-facing tool for this. The former dispatch_next MCP
-        -- tool is gone precisely because, alongside automatic chaining, an
-        -- agent that called it and then exited fired TWO subtasks — one of them
-        -- from a base that predated its own commits, which is the bug this rule
-        -- exists to remove.
+        -- There is no agent-facing tool for this. Beside automatic chaining,
+        -- an agent that dispatched the next subtask itself and then exited
+        -- would fire TWO subtasks, one of them from a base that predates its
+        -- own commits.
         --
         -- Ordering guarantee. Every write that determines the next
         -- subtask's starting base is complete before selection happens: the
@@ -1186,12 +1179,7 @@ rule AutoDispatchNextSubtask {
         -- cannot tell whether to run, it launches nothing. Nothing requested
         -- this chain, so the conservative default is to launch no agent:
         -- failing open would start an agent on an epic whose operator may have
-        -- turned chaining off. (The predecessor dispatch_next tool failed
-        -- open, which was right for an explicit agent request; that reasoning
-        -- does not transfer to an automatic trigger.) The board-side chain's
-        -- two log-only cases — a DB error reading auto_dispatch and a request
-        -- the store could not be reached to write — no longer exist apart from
-        -- the close: a store that cannot be reached fails the whole
+        -- turned chaining off. A store that cannot be reached fails the whole
         -- exit_session call, close included (ExitSessionViaMcp).
 }
 
@@ -1206,9 +1194,9 @@ rule ReportChainedDispatchFailure {
     -- raises it too.
     requires: request.host = core/local_host()
     -- A subtask deleted under its request has no card to mark; deleting it
-    -- was the operator's own act. (Since task #94222 the delete also removes
-    -- the row, store-split.allium: DeletingATaskDeletesItsRequestRows, so
-    -- this board sees no "task deleted" failure to raise at all.)
+    -- was the operator's own act. (The delete also removes the row,
+    -- store-split.allium: DeletingATaskDeletesItsRequestRows, so this board
+    -- sees no "task deleted" failure to raise at all.)
     requires: exists request.task
 
     ensures: AutoDispatchFailed(
@@ -1280,24 +1268,6 @@ rule SurfaceAutoDispatchFailure {
         -- the task this rule marks.
 }
 
--- == Feed Task Identity Invariant ==
---
--- Within any role sub-epic's subtree (the role sub-epic itself plus its
--- direct repo-group children), no two feed tasks may share the same
--- external_id. This is the global identity guarantee that allows
--- run_role_routed_feed_sync to move tasks across role sub-epics and
--- across group_by_repo transitions without creating duplicates.
---
--- Enforced by the store's feed reducers. It used to be enforced at the
--- database level by SQLite triggers (migration v72, since removed with SQLite
--- in task #36865), so the invariant is stated here as history and as the
--- rule the feed's own existing-task index upholds.
---
--- The feed respects this invariant by building its existing-task index
--- across the full subtree (repo-group children first, role sub-epic last
--- so role sub-epic copies take precedence) and always running subtree
--- stale deletion for every role sub-epic regardless of group_by_repo.
-
 rule ToggleGroupByRepo {
     when: UserTogglesGroupByRepo(epic)
 
@@ -1333,8 +1303,8 @@ rule ToggleGroupByRepo {
         -- AppendOnlyEpicIndicator.
         -- The flag write and the migration are ONE store reducer
         -- (SetEpicGroupByRepoIsOneTransaction), so a
-        -- refused migration leaves the flag as it was; the board no longer
-        -- re-reads the epic between the two.
+        -- refused migration leaves the flag as it was; the board does not
+        -- re-read the epic between the two.
         -- The task migration (RegroupEpic / FlattenEpic) only runs for
         -- non-feed epics (feed_command = null):
         --   * turning ON  → RegroupEpic moves every task into
@@ -1576,12 +1546,12 @@ rule ProvisionManagedEpics {
     -- differs. Otherwise create the epic and stamp its feed_role — including
     -- when the user deleted a previously-provisioned one.
     --
-    -- Task #98746 (V9). A managed ROOT is the caller's own: epic_for_role of a
+    -- A managed ROOT is the caller's own: epic_for_role of a
     -- root role finds only an epic CREATED BY the caller, and a root created
     -- here is private (visibility = private, created_by = the caller), so each
     -- board provisions a root of its own and never reuses or rewrites another
     -- person's. A found root the caller created that is still public is made
-    -- private (the migration of a store whose members shared one root). The
+    -- private. The
     -- review sub-epics inherit privacy from their root.
     --
     -- epic_for_role is a black-box lookup
@@ -1682,7 +1652,7 @@ rule ProvisionManagedEpics {
         -- deleted (epics.allium: DeleteEpic) is absent, so the next run
         -- creates it again for as long as its command is configured. The
         -- opt-out is clearing the command via managed_feed_config, not
-        -- deleting the epic: there is no longer an archived state for a
+        -- deleting the epic: there is no archived state for a
         -- deleted managed epic to linger in as a "do not resurrect" marker.
         -- A re-provisioned epic starts with no RetiredFeedItems — its
         -- predecessor's records went with it — so still-open items the user
@@ -1732,153 +1702,6 @@ rule ProvisionManagedEpics {
         -- team_reviews -> "Team Reviews", bots -> "Bots"). It is consulted
         -- only on creation; once an epic exists its title is owned by the
         -- user.
-}
-
--- == Retiring the archived status (migration) ==
-
--- One schema migration removes the `archived` status from tasks and epics and
--- brings every row that held it into the delete-based model. It runs once per
--- store, in one transaction, and is the only place the old status is still
--- named. `was_archived(row)` is a black-box read of the row's pre-migration
--- status column; nothing after the migration can observe it.
---
--- The phases run in order, and the order is load-bearing: records are written
--- before any row they describe is deleted, tasks are settled before epics
--- (an epic's fate depends on which of its tasks remain), and the managed-feed
--- opt-out is recorded before the managed epic that expressed it disappears.
-rule ArchivedStatusMigration {
-    when: ArchivedStatusMigrationRuns()
-
-    -- 1. Retire every archived feed task, under the feed epic its chain names
-    --    now — the same key DeleteTask would use.
-    ensures:
-        for task in core/Tasks where was_archived(task)
-                                 and task.external_id != null
-                                 and task.epic != null
-                                 and task.epic.nearest_feed_epic != null:
-            if not core/RetiredFeedItems.any(r => r.feed_epic = task.epic.nearest_feed_epic and r.external_id = task.external_id):
-                core/RetiredFeedItem.created(
-                    feed_epic:   task.epic.nearest_feed_epic,
-                    external_id: task.external_id,
-                    retired_at:  now
-                )
-
-    -- 2. An archived task that still holds a worktree is one whose teardown
-    --    failed (tasks.allium: WorktreeReleaseIsGated). It becomes done, so
-    --    the user can delete it from the board and retry the teardown there.
-    --    Every other archived task is deleted.
-    ensures:
-        for task in core/Tasks where was_archived(task):
-            if task.worktree != null:
-                task.status = done
-                task.sub_status = default_sub_status(done)
-            else:
-                not exists task
-
-    -- 3. An archived managed ROOT epic was the old opt-out for its managed
-    --    feed. Clear the matching settings so ProvisionManagedEpics does not
-    --    re-provision what the user switched off, and so a root that survives
-    --    phase 4 as done does not resume a feed the user had stopped. Applies
-    --    to every archived managed root, whether phase 4 deletes it or keeps it.
-    ensures:
-        for epic in core/Epics where was_archived(epic)
-                                 and epic.feed_role = reviews_parent:
-            config.reviews_feed_command = null
-            config.reviews_feed_interval_secs = null
-    ensures:
-        for epic in core/Epics where was_archived(epic)
-                                 and epic.feed_role = cve:
-            config.cve_feed_command = null
-            config.cve_feed_interval_secs = null
-
-    -- 4. Archived epics: deleted when no task remains anywhere in their
-    --    subtree (after phase 2), otherwise moved to done and recalculated.
-    --    The deletion is DeleteEpic's own: the whole subtree goes — every
-    --    descendant epic, archived or not — along with every RetiredFeedItem
-    --    keyed on any epic in it.
-    ensures:
-        for epic in core/Epics where was_archived(epic):
-            if epic.subtree_tasks.is_empty():
-                for item in core/RetiredFeedItems where (epic.subtree_epics + epic).contains(item.feed_epic):
-                    not exists item
-                for sub_epic in epic.subtree_epics:
-                    not exists sub_epic
-                not exists epic
-            else:
-                epic.status = done
-                RecalculateEpicStatus(epic)
-
-    -- 5. The status CHECK constraints are rebuilt without `archived`, so no
-    --    later write can bring the value back.
-    ensures: ArchivedStatusRemovedFromSchema()
-
-    @guidance
-        -- Why each phase is what it is:
-        --
-        -- Phase 1 turns every archived feed task into the record that stops its
-        -- feed re-inserting it, so the migration changes nothing about what the
-        -- board shows for feed items the user had put away. A record under a
-        -- feed epic that phase 4 then deletes goes with that epic, exactly as
-        -- a later DeleteEpic would drop it — for an archived managed root the
-        -- settings cleared in phase 3 are what keep the feed off instead.
-        --
-        -- Phase 2 keeps only the rows that still point at something on disk.
-        -- Deleting them would strand the worktree with nothing referencing it,
-        -- the orphan WorktreeReleaseIsGated exists to prevent.
-        --
-        -- Phase 3 applies only to the two command-carrying roots
-        -- (reviews_parent, cve). An archived role sub-epic (my_reviews,
-        -- team_reviews, bots) has no configuration equivalent: its tasks are
-        -- retired under the reviews_parent root by phase 1 and the sub-epic is
-        -- deleted by phase 4, so ProvisionManagedEpics re-creates it and new
-        -- items in that role appear again. An archived managed root that still
-        -- holds a task survives as done, but with its settings cleared its
-        -- feed stays off, exactly as it was while archived.
-        --
-        -- Phase 4's deletion is DeleteEpic applied to every archived epic with
-        -- no task left in its subtree: an empty subtree_tasks is exactly what
-        -- makes DeleteEpic's guard (every subtree task done) hold, and the
-        -- doomed set is the same — the epic plus epic.subtree_epics. So a
-        -- descendant that was never archived itself, and which this loop
-        -- never names, is still deleted with its archived ancestor, as a
-        -- later DeleteEpic on that ancestor would have deleted it. There are
-        -- no worktrees to clean up: the subtree holds no tasks.
-        --
-        -- Phase 4 turns a surviving archived epic into done rather than
-        -- backlog because everything the user could see in it was finished;
-        -- the recalculation then settles it by its remaining children like
-        -- any other epic (see "Epic status recalculation").
-        --
-        -- THIS RULE HAS NO STORE-SIDE EQUIVALENT, AND NO IMPLEMENTATION LEFT.
-        -- It was implemented only as the SQLite migration v106, from before
-        -- task #4916 made the shared store mandatory; the
-        -- module's KNOWN_STATUSES never admitted `archived` and nothing
-        -- there re-derives phases 1-4 over an already-populated store. A
-        -- second copy of this migration written against the store was
-        -- considered and declined: the risk of a store-side reimplementation
-        -- silently drifting from this one — different phase order, a missed
-        -- RetiredFeedItem backfill — is worse than the alternative, which is
-        -- to refuse. A restore that finds any row still carrying `archived`
-        -- is refused outright, naming the offending row(s), rather than
-        -- silently dropped or backfilled on the fly — see
-        -- `spacetime-seed.allium: RefuseArchivedRows`. In practice the only
-        -- way a row like that reaches a restore at all is a snapshot FILE
-        -- written by a binary older than this migration, or a dump of a store
-        -- that still holds rows written before the module refused them
-        -- (spacetime-seed.allium: StoreRefusesUnknownStatus).
-        --
-        -- SINCE TASK #16755 THIS RULE NEVER RUNS IN PRODUCTION. No launch
-        -- opens a board database any more (storage.allium:
-        -- NoSqlite, CodeNeverTouchesLegacyDatabase), and
-        -- `dispatch spacetime seed` and
-        -- `dispatch spacetime dump`, which used to open their SQLite source
-        -- through `Store::open` and so run v106 first, are removed. v106
-        -- was deleted with the rest of the migrations (task #36865), and this
-        -- rule stays as the record of what the removal did. An old snapshot file with archived rows
-        -- is refused as above, and there is no longer a supported route that
-        -- upgrades such a file first (the old one — restore it into a SQLite
-        -- board, which ran v106 on open, and dump that — went with the local
-        -- dump).
 }
 
 ------------------------------------------------------------
@@ -1972,6 +1795,26 @@ rule ExitAllEpics {
 -- Invariants
 ------------------------------------------------------------
 
+-- No two feed tasks under one role sub-epic share an external_id. A role
+-- sub-epic's home is the role sub-epic itself plus its direct repo-group
+-- children, so the identity holds while role routing moves a task between role
+-- sub-epics and while repo grouping is switched on or off. The store's feed
+-- reducers hold it: the feed builds its existing-task index across the whole
+-- home (repo-group children first, the role sub-epic last, so its copy wins)
+-- and runs stale deletion over the whole home of every role sub-epic, grouped
+-- or not.
+--
+-- role_home(t) is a black box: t.epic when that epic's feed_role is
+-- my_reviews, team_reviews or bots; t.epic.parent when t.epic is a repo-group
+-- sub-epic of such an epic; otherwise null.
+invariant FeedTaskIdentityPerRoleSubEpic {
+    for a in core/Tasks:
+        for b in core/Tasks:
+            a != b and a.external_id != null
+                and role_home(a) != null and role_home(a) = role_home(b)
+                implies a.external_id != b.external_id
+}
+
 -- EpicStatusRecalculation:
 -- Epic status is persisted and recalculated by the module (recalculate_epic_chain).
     --
@@ -2013,7 +1856,7 @@ rule ExitAllEpics {
     -- It moves both forward and backward to always reflect child reality.
     -- "Children" means core/Epic.children: the union of subtasks (Task) and
     -- sub_epics (Epic). Each child contributes its .status value. Every child
-    -- counts: there is no longer an archived status that takes a row out of
+    -- counts: no status takes a row out of
     -- the recalculation, so a finished child either sits in done or has been
     -- deleted. Epic progress totals likewise count every task.
     --
@@ -2073,10 +1916,9 @@ rule ExitAllEpics {
     -- it — it is what turns a corrupt parent chain into one refused
     -- recalculation rather than an unbounded walk that takes the whole store
     -- down with it.
-    -- Implementation note: the propagation walk threads a `visited` set
-    -- to defensively break parent_epic_id cycles, even though the
-    -- `parent_epic_id != id` CHECK plus immutable parent_epic_id make
-    -- cycles unreachable in practice.
+    -- The walk climbs at most core/config.max_epic_depth levels, so a parent
+    -- cycle (which the store's reparent check already refuses) ends at that
+    -- bound rather than looping.
     --
     -- Epic substatus (display label for epic cards):
     --   backlog + no plan             => unplanned
@@ -2095,6 +1937,66 @@ rule ExitAllEpics {
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
+
+-- What the operator does to epics at the board. Each key's binding is in
+-- keybindings.allium; the rule each action reaches says what it does.
+surface EpicBoard {
+    facing _: core/Operator
+
+    provides:
+        -- The new-epic form (title, then description), finished. Inside an
+        -- epic view the new epic is a sub-epic of the epic showing (CreateEpic).
+        CreateEpic(title, description, parent?)
+        -- [e] on an epic card (EditEpic).
+        EditEpic(epic)
+        -- The move keys on an epic card (MoveEpicForward, MoveEpicBackward).
+        MoveEpicStatus(epic, direction)
+        -- [x] on one epic card (tasks.allium: DeleteKeyRouting), then y on
+        -- its prompt (ConfirmDeleteEpic, DeleteEpic).
+        ConfirmDeleteEpic(epic)
+        DeleteEpic(epic) when epic.subtree_tasks.all(t => t.status = done)
+        -- [m] on an epic card, the target confirmed (ReparentEpicFromTui).
+        ReparentEpic(epic, new_parent?)
+        -- [U] and [R] in an epic view (ToggleAutoDispatch, ToggleGroupByRepo).
+        UserTogglesAutoDispatch(epic)
+        UserTogglesGroupByRepo(epic)
+        -- Enter on an epic card (JumpToDeepestEpic), or on a task card in a
+        -- flattened column (JumpToTaskEpic).
+        UserJumpsIntoEpic(epic, column_status)
+        UserJumpsToTaskEpic(task) when task.epic != null
+        -- q (or Esc with no search) and Q inside an epic view
+        -- (ExitEpicOneLevel, ExitAllEpics).
+        UserExitsEpicView(view)
+        UserExitsAllEpicViews(view)
+}
+
+-- The epic tools of the dispatch MCP server. Replies name what they touch
+-- (mcp-task-tools.allium: "Replies name what they touch").
+surface EpicMcpTools {
+    facing _: core/McpClient
+
+    provides:
+        -- create_epic (CreateEpicViaMcp). workspace_id and visibility:
+        -- workspaces.allium, NameWorkspaceAndVisibilityViaMcp.
+        McpCreateEpic(title, description?, sort_order?, parent_epic_id?,
+                      workspace_id?, visibility?)
+        -- list_epics: one epic with epic_id (GetEpicViaMcp), else a list
+        -- (ListEpicsViaMcp).
+        McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?)
+        -- update_epic (UpdateEpicViaMcp).
+        McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?,
+                      feed_command?, feed_interval_secs?, group_by_repo?,
+                      feed_append_only?, parent_epic_id?, visibility?,
+                      workspace_id?)
+        -- managed_feed_config (ManagedFeedConfigViaMcp).
+        McpManagedFeedConfig(reviews_command?, reviews_interval_secs?,
+                             cve_command?, cve_interval_secs?)
+
+    @guidance
+        -- The caller is an agent or a session (core/McpClient). Every one of
+        -- these tools is open to every client; what a client may see or
+        -- change is the store's to decide (workspaces.allium).
+}
 
 surface AutoDispatchFailureIndicator {
     facing user: core/Operator
@@ -2252,11 +2154,3 @@ surface AppendOnlyEpicIndicator {
 open question "R is offered on every epic in the detail view, including an append-only one where UpdateEpicViaMcp guarantees the toggle will be refused. AppendOnlyEpicIndicator argues that a bracketed key in the header means 'press this to toggle', so advertising [R] there contradicts the row's own convention -- yet the flag it would refuse is exactly the one the append-only marker exists to explain. Should the keypress be guarded before it is attempted (no refusal, no rollback, but the service rule is then duplicated in the TUI), should [R] render differently on such an epic, or is refusing-then-restoring the honest behaviour to keep?"
 
 open question "Managed-epic role lookup keys on (feed_role, parent), so reparenting a managed epic makes the next ProvisionManagedEpics run create a duplicate epic for that role. Should the lookup fall back to feed_role alone, should managed epics be reparent-blocked the way repo-group sub-epics are, or is the duplicate an acceptable cost of a user moving them?"
-
--- Resolved 2026-09-28 (task #4971, final iteration): DeleteEpic's reducer
--- guard refuses too late relative to client-side teardown, the identical gap
--- tasks.allium's DeleteTask has — first accepted as a known limitation, then
--- decided in task #8198: "pre-check first". DeleteEpic re-reads the subtree's
--- true status from the store before any teardown, and a failed
--- pre-check touches nothing (DeleteEpicRefused). See tasks.allium's
--- now-resolved open question and DeleteTask's guidance for the residual race.

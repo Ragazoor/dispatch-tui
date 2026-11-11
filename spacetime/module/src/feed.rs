@@ -124,8 +124,7 @@ pub struct FeedTaskUpsertItem {
 /// `feed_epic_id` is `nearest_feed_epic(epic_id)`, resolved once by the caller
 /// and reused for every item in the batch (`feeds.allium:
 /// IngestSkipsRetiredFeedItems`): a retired `external_id` with no existing
-/// survivor row is refused outright; an existing survivor (e.g. the
-/// worktree-holding case `ArchivedStatusMigration` left in done) still matches
+/// survivor row is refused outright; an existing survivor row still matches
 /// above and is refreshed regardless of retirement.
 pub(crate) fn upsert_feed_item(
     ctx: &ReducerContext,
