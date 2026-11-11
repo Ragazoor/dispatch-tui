@@ -166,6 +166,102 @@ An inline `#[cfg(test)] mod` that grows past ~200 lines moves out of the file. F
 
 Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clippy::unwrap_used, clippy::expect_used)]` at the top — the workspace `-D warnings` policy otherwise rejects bare `unwrap()`/`expect()` calls. See `src/store/tests/mod.rs` for the canonical pattern.
 
+## Board visuals coverage
+
+Which tests enforce the colour and frame rules in `docs/specs/board-visuals.allium`, and which of its claims no test covers. Naming a test here couples this list to it: renaming or deleting one must update this list, and `./scripts/check-doc-symbols.sh` fails the pre-push hook when a name stops resolving.
+
+Most of it renders a board to a buffer and reads colours back off it, the right instrument for a claim about what reaches the screen. The two border tests in `src/tui/ui/kanban/cards/tests.rs` instead call `state_border_color`, a helper too narrow to re-export, so they are tested in the module that owns it.
+
+| Test | What it pins |
+|---|---|
+| **`src/tui/tests/rendering/palette_and_frames.rs`** | |
+| `board_ground_is_uniform_across_columns` | uniform neutral ground |
+| `neutral_ramp_is_strictly_ascending` | the three-step ramp |
+| `board_ground_is_recessed_below_terminal_background` | the unfocused ground sits below the terminal background |
+| `selection_does_not_lift_the_fill` | a selected card's fill equals a resting one's |
+| `resting_card_border_is_neutral` | every column, through the identity lookup, none special-cased |
+| `every_card_frame_is_lit_by_the_card_surface` | all four corner glyphs |
+| `cards_are_inset_by_one_cell_of_column_ground` | margin width, its ground colour, and the lit rail inside it |
+| `card_frame_carries_state_and_the_cursor_outranks_it` | the whole border rule on one board (see below) |
+| `only_the_selected_card_has_the_cursor_white_frame` | at most one white, healthy frames neutral, no identity hue on any frame |
+| `no_column_leaks_an_identity_hue_onto_a_card_frame` | the cross-column companion: all tasks healthy, so the board is one white and neutrals |
+| `epic_cards_carry_purple_identity_and_a_bold_title_at_rest` | a resting epic's stripe is PURPLE, not its column's hue, and its title is bold |
+| `selected_epic_frames_in_the_cursor_white_not_purple` | the selected epic frames white, and every frame is white or neutral |
+| `an_epic_frame_never_takes_a_state_colour` | an epic beside a crashed task frames neutral, with the cursor in a third column so the cursor rule cannot mask the answer (`EpicFramesAreOnlyWhiteOrNeutral`) |
+| `flat_view_epic_breadcrumb_is_purple` | the flattened epic-header row's title is epic purple |
+| `a_card_spends_four_cells_of_its_column_on_chrome` | rendered content width against column width: exactly four apart |
+| `unfocused_column_header_keeps_its_identity_colour` | an unfocused header label keeps its hue |
+| `header_bar_stops_at_the_column_separators` | no header fill covers a separator cell, at five terminal widths |
+| `select_all_checkbox_fill_is_neutral_in_every_column` | the checkbox fill in every column equals a resting card's border |
+| `header_fill_is_uniform_across_columns` | same fill in every column at a focus state, no hue |
+| `header_label_is_hued_in_every_column_at_both_focus_states` | no label collapses into its fill, and no two columns share a label colour |
+| `focused_header_label_is_brighter_than_unfocused` | focus moves the label's brightness |
+| `each_header_label_keeps_its_column_hue_signature` | each label keeps its source hue's channel ranking at both focus states |
+| `column_top_rule_is_hued_only_while_focused` | focused rule in the identity hue, unfocused in the neutral grey, no third colour |
+| `scroll_indicators_follow_the_column_top_rule` | the focused column's overflow arrow is hued, an unfocused one's grey |
+| **`src/tui/tests/rendering.rs`** | |
+| `focused_column_ground_is_distinct_from_unfocused` | the focus step on the ground is visible |
+| `ci_status_badge_is_coloured_by_state` | the three CI badges read back green / red / yellow; an ordinary label and an unknown `ci:` value read back muted |
+| `render_v2_task_card_shows_stripe` | the quarter block ▎ is present and the half block ▌ absent |
+| **`src/tui/tests/rendering/selection_reorder_and_flash.rs`** | |
+| `render_card_message_flash_shows_envelope` | the flash's glyph |
+| `message_flash_envelope_outlives_the_old_three_second_window` | the glyph is still drawn well past a short window |
+| `message_flash_expires_once_past_its_ttl` | past the threshold: swept, and no longer drawn |
+| `message_flash_render_and_sweep_share_one_threshold` | the sweep and the renderer read one duration |
+| `message_flash_never_colours_the_card_frame` | a live flash leaves the frame alone |
+| **`src/tui/tests/rendering/new_task_signal.rs`** | |
+| `unseen_task_card_shows_signal_glyph` | ◆ in SIGNAL on an unseen task's title line |
+| `unseen_task_card_stripe_keeps_column_hue` | the task stripe is untouched |
+| `epic_on_the_path_to_an_unseen_task_is_marked` | every epic whose subtree holds one, however deep |
+| `marked_epic_stripe_is_signal_not_purple` | the epic stripe takes SIGNAL |
+| `epic_mark_clears_when_the_last_unseen_task_below_it_is_seen` | derived, not stored |
+| `signal_never_colours_the_card_frame` | the frame stays neutral or cursor white |
+| `cursor_landing_on_an_unseen_task_clears_only_it` | entering an epic clears only the card the cursor lands on |
+| `cursor_on_a_marked_epic_clears_nothing` | the epic mark is derived |
+| `moving_the_cursor_onto_an_unseen_task_clears_it` | a key that moves the cursor |
+| `a_refresh_that_slides_an_unseen_task_under_the_cursor_keeps_it` | a cursor that did not move sees nothing |
+| `a_key_with_the_cursor_on_an_unseen_task_clears_it` | the next key after such a refresh sees it |
+| `a_key_in_an_overlay_sees_nothing` | a key outside the plain board clears no mark |
+| **`src/tui/tests/rendering/bookmark.rs`** | |
+| `bookmarked_task_card_shows_bookmark_glyph` | ◆ in BOOKMARK on a bookmarked task's title line |
+| `epic_on_the_path_to_a_bookmarked_task_is_marked` | every epic whose subtree holds one, however deep |
+| `bookmarked_epic_stripe_stays_purple` | the epic stripe keeps PURPLE |
+| `unseen_wins_the_glyph_slot_over_bookmark` | one ◆, in SIGNAL, on task and epic cards |
+| `cursor_on_a_bookmarked_task_clears_nothing` | the bookmark outlives the cursor landing on it |
+| **`src/tui/ui/kanban/cards/tests.rs`**, against `state_border_color` | |
+| `every_indicator_claims_the_border_its_severity_earns` | every `CardIndicator` variant paired with the border it claims |
+| `exactly_six_indicators_are_hard_failures` | the counts: six red, two amber, every variant in {red, amber, none} |
+
+The two `cards/tests.rs` tests are a pair. The first walks a hand-written list of variants, for the same reason `state_border_color` matches exhaustively: a new variant forces a deliberate entry. But it would still pass if someone moved a variant into the red set and updated its expectation in the same edit, which is how a state gets promoted to a hard failure without anyone deciding to. The counts make that edit visible: it has to change a number that says six. Dispatching's entry is an explicit "no border", with its reason: it renders an amber *indicator* but claims no border, the rule's one judgement-rather-than-category exclusion, and an asserted absence is the only kind that survives someone "fixing" it.
+
+`card_frame_carries_state_and_the_cursor_outranks_it` carries the rule, and its shape is the reason. It puts a crashed, a blocked and a healthy card on one board with the cursor *on the crashed one*, asserts amber on the blocked card, white on the cursor, neutral on the healthy one and no red anywhere, then moves the cursor off and asserts the suppressed red appears. That last step makes it a test of precedence; without it a renderer that forgot red would pass.
+
+### Confine the measurement to the claim
+
+Four tests here were first written wrong in the same way: **the measurement was not confined to the thing the test claims to check**, so each passed on broken code while reading as coverage.
+
+- **By metric.** `each_header_label_keeps_its_column_hue_signature` cannot use colour distance: measured by distance, Review's correctly dimmed label lands nearer BLUE than PURPLE. Channel ranking survives linear mixing toward any neutral (BLUE is b > g > r dimmed or brightened, PURPLE is b > r > g), so it is the right fingerprint.
+- **By source.** The epic tests take PURPLE as a literal, not from the Review column's identity lookup, though the two share the token. Sourcing it from the column encodes the conflation the test disproves.
+- **By region.** `flat_view_epic_breadcrumb_is_purple` at first counted purple cells across the whole buffer, and the epic *card* is purple too, so it passed with the header drawn in grey. It now finds the row by the epic's title followed by its rule and reads only that row.
+- **By source of truth.** `select_all_checkbox_fill_is_neutral_in_every_column` first compared the rendered fill with the accessor the renderer itself calls, so a wrong-*neutral* change moved both sides together. It now asserts what the spec claims, the same neutral as a resting card's border. A spec claim "X is the same value as Y" is asserted against Y, not against whatever X reads. A test that needs new access to production internals is often reaching for the wrong side of the claim.
+
+Before trusting one of these, check that its measurement can tell its subject from everything that looks similar: the right metric, sourced independently of the claim, read from the right region, compared against the specified value. All four survive mutation testing of the *code*, because the fault is in the test.
+
+Two fixture hazards:
+
+- A card is *healthy* only if the fixture makes it so. A test that drives a tick has an inactive Running task reclassified as stale, which claims an amber border, so a neutral control silently turns amber. Seed recent activity on any card meant to rest.
+- `header_bar_stops_at_the_column_separators` checks five widths on purpose: whether a misaligned header row shows depends on how the division rounds at that width, and one width can line up by chance and hide it.
+
+The lit frame and the one-cell inset are both produced by `src/tui/ui/kanban/cards.rs::frame_card`, which paints the margin cells in the column ground. Its chrome total (`CARD_CHROME_WIDTH`) is what the title budget is reduced by, so a change to the margin moves truncation on every card.
+
+### Claims no render test covers
+
+- Epic view's enclosing panel tint: faintly purple as a mode signal, with the column grounds inside it neutral. One production site, no test; it is the only place purple means *mode* rather than *epic*.
+- That a cursor or multi-selected *task* card's title is bold. The epic case is asserted; the task case is not.
+- That the new-task signal and the bookmark are per viewer. The board only receives the viewer's own rows (the store's `own_unseen_tasks` and `own_bookmarks` views), so the render path has no other person's row to draw.
+
+Style claims are the usual gap: text is caught by the snapshots, colour and weight only by a test that reads them back. A new colour or weight claim in the spec arrives with its test, or with a line in this list.
+
 ## No wall-clock sleeps in tests
 
 Tests must never sleep on the wall clock — not to "wait for" `spawn_blocking` or detached `tokio::spawn` work, and not to cross a duration threshold — and must never measure it either. Instead await a deterministic completion signal (oneshot / `Notify` / an `BoardEvent`), inject a clock, or inject the threshold. `./scripts/check-no-test-sleep.sh` (in the pre-push hook, with its own self-test) enforces this: no `tokio::time::sleep`, `std::thread::sleep` or `.elapsed()` in test code — test files *and* top-level inline `#[cfg(test)] mod` blocks. Production use of all three is unaffected (the frame-wait deadline in `next_loop_event` is a production `tokio::time::sleep`). A deadline-bounded poll may carry an `// allow-test-sleep: <why>` marker on a `std::thread::sleep` or `.elapsed()`; the marker never exempts `tokio::time::sleep`. When a test's subject *is* a deadline, bound it structurally (`tokio::time::timeout`, `Receiver::recv_timeout`) rather than asserting on measured elapsed time. See the "No `tokio::time::sleep` in tests" section of `docs/conventions.md` for the exact scoping rule, its remaining blind spot, and the canonical patterns.

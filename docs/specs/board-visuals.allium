@@ -24,16 +24,13 @@
 --           label vocabulary a badge renders (see feeds.allium, "CI status
 --           label").
 --
--- Extracted from core.allium (task #4758), which had grown a rendering
--- specification inside a file whose header declared it a domain model, and
--- carried it almost entirely as prose no Allium construct claimed. The
--- extraction typed it: the border precedence rule, the board-wide cursor
--- claim, the scope of the focus exception and the header bar's extent are
--- constructs here rather than sentences. The rationale prose came across
--- unchanged — it is why these rules are re-derivable rather than merely
--- obeyed.
+-- The border precedence rule, the board-wide cursor claim, the scope of the
+-- focus exception and the header bar's extent are constructs here rather
+-- than sentences. The rationale prose stays beside them: it is why these
+-- rules are re-derivable rather than merely obeyed.
 
 use "./core.allium" as core
+use "./work-packages.allium" as wp
 
 ------------------------------------------------------------
 -- Column Identity and Focus
@@ -63,9 +60,8 @@ use "./core.allium" as core
 -- "Board Columns", for the (1-indexed) index space this table does not use.
 --
 -- MUTED, the palette's generic grey for de-emphasised text throughout the
--- board, is not any column's identity. There used to be a fifth column, the
--- Archive edge column, with its own ARCHIVE_STRIPE token; both went with the
--- archived status (task #4971), leaving exactly one identity per task status.
+-- board, is not any column's identity. There is no fifth column, so there is
+-- exactly one identity per task status.
 --
 -- The identity colour is used for that column's own chrome and for its
 -- *task* cards: the header label, the focused column's top rule and
@@ -92,10 +88,17 @@ use "./core.allium" as core
 --   - the per-card stripe accent.
 --   - the per-card state indicators, which carry their own semantic hues
 --     (crashed, needs-input, and so on) rather than the column's.
---   - an epic card's stripe and an epic breadcrumb header row, both in
---     PURPLE regardless of column ("Epic cards").
+--   - an epic card's stripe and a flattened column's epic-header row, both
+--     in PURPLE regardless of column ("Epic cards").
 --   - the panel enclosing the columns in Epic view, faintly purple as a
 --     mode signal ("Column ground and card surface").
+--   - a work package card's stripe, glyph and title, in CYAN regardless of
+--     column (WorkPackageCard).
+--   - the title-line marks: the message flash's glyphs and warm fill
+--     ("Message flash"), the new-task ◆ in SIGNAL ("New-task signal") and
+--     the bookmark ◆ in BOOKMARK ("Bookmark").
+--
+-- HuedSurface below is the same list as a type.
 --
 -- Those are the *identity* uses of colour. A card's border is no longer
 -- among them: it carries state rather than identity, in a separate
@@ -114,9 +117,9 @@ use "./core.allium" as core
 --
 -- == Focus is intensity, not colour-vs-absence ==
 --
--- Previously an unfocused column header rendered in a flat neutral grey,
--- discarding its identity colour entirely; only the focused column
--- showed colour at all. That is replaced.
+-- An unfocused column header does not render in a flat neutral grey: that
+-- would discard its identity colour and leave only the focused column
+-- showing colour at all.
 --
 -- The rule: on the header label, the column's identity colour is always
 -- visible and focus modulates emphasis only.
@@ -331,7 +334,7 @@ use "./core.allium" as core
 -- paints. The board draws its own grounds but leaves the terminal's own
 -- background wherever it draws nothing, so "below the terminal
 -- background" is a claim about the dark theme this palette is designed
--- for (a near-black around #1a1b26), not a property the app controls or
+-- for (a near-black), not a property the app controls or
 -- can check. On a light terminal the relation inverts and the board
 -- reads as raised rather than recessed. This is an accepted assumption,
 -- not an oversight: it is unenforceable against an arbitrary theme, and
@@ -376,7 +379,7 @@ use "./core.allium" as core
 --
 -- Every card's border is decided by the first of these that applies:
 --
---   1. the cursor card       a near-white (#e8edfb) used for nothing
+--   1. the cursor card       a near-white used for nothing
 --                            else anywhere on the board
 --   2. an unhealthy card     its state colour, below
 --   3. anything else         the resting neutral
@@ -460,9 +463,9 @@ use "./core.allium" as core
 -- An epic card is not a member of its column's identity. It is its own
 -- identity object, and it carries PURPLE in every column: its stripe is
 -- purple wherever the card sits — in Done it is purple, not green; dragged
--- to Backlog it is purple, not blue. The epic breadcrumb header row that
--- precedes a group of epic-owned tasks in flattened view is purple on the
--- same terms.
+-- to Backlog it is purple, not blue. The epic-header row that precedes a
+-- group of epic-owned tasks in a flattened column is purple on the same
+-- terms.
 --
 -- An epic's purple stops at its frame. A *selected* epic frames in the
 -- cursor white like any other card ("Card border: cursor and state") —
@@ -616,8 +619,8 @@ use "./core.allium" as core
 --
 -- == Message flash ==
 --
--- When a task sends or receives a native cross-session message (task #4098
--- — Claude Code's own SendMessage, observed via the hook pipeline; see
+-- When a task sends or receives a native cross-session message (Claude
+-- Code's own SendMessage, observed via the hook pipeline; see
 -- HookPeerMessageSent in agent-health.allium), that task's card flashes for
 -- config.message_flash_ttl: a direction-specific glyph and a distinct warm
 -- fill. A card that received a message shows an envelope (✉); one that sent
@@ -671,7 +674,7 @@ use "./core.allium" as core
 -- card (core/UnseenTask; tasks.allium: SeeTaskByLandingOnIt). A refresh that
 -- slides the card under a still cursor does not clear it. While a card is marked for the viewing
 -- person it carries a diamond glyph (◆ U+25C6) in SIGNAL, a hue added to
--- the palette for this one meaning (ORANGE, Rgb 255 158 100). The glyph sits
+-- the palette for this one meaning, an orange. The glyph sits
 -- on the title line in the same slot, and by the same mechanism, as the
 -- message flash and phoenix glyphs. It is single-column and BMP, so the
 -- title-width budget counts it as one.
@@ -713,7 +716,7 @@ use "./core.allium" as core
 -- A task the viewing person has bookmarked (core/Bookmark; tasks.allium:
 -- ToggleBookmarkFromBoard) carries the same diamond glyph (◆ U+25C6) as the
 -- new-task signal, in BOOKMARK: a hue added to the palette for this one
--- meaning, a cool mint green (Rgb 80 250 123). It is brighter and bluer than
+-- meaning, a cool mint green. It is brighter and bluer than
 -- GREEN, which already says Done and "merged" on cards, so a bookmark does
 -- not read as finished work. The glyph is the same so the two marks read as
 -- one family, "look here"; the hue says which kind.
@@ -799,368 +802,22 @@ use "./core.allium" as core
 --
 -- == Where these rules are enforced ==
 --
--- Coverage lives in two files, and which one is not arbitrary. Most of it
--- is in src/tui/tests/rendering.rs, which renders a board to a buffer and
--- reads colours back off it — that is the right instrument for a claim
--- about what reaches the screen. Two of the border tests instead sit
--- inline in src/tui/ui/kanban/cards.rs, because they exercise
--- state_border_color, a helper too narrow to re-export and so unreachable
--- from the tests directory; the repo's convention is that such a helper is
--- tested in the module that owns it. Each entry below names its home when
--- it is not rendering.rs, so a reader who searches rendering.rs for border
--- coverage and comes up short does not conclude it is missing.
---
--- Any remaining gaps are listed after the tests rather than left to be
--- assumed.
---
--- In src/tui/tests/rendering.rs:
---
---   board_ground_is_uniform_across_columns       uniform neutral ground
---   focused_column_ground_is_distinct_from_unfocused
---   neutral_ramp_is_strictly_ascending           the three-step ramp
---   board_ground_is_recessed_below_terminal_background
---   selection_does_not_lift_the_fill             selected fill = resting
---   resting_card_border_is_neutral               iterates all four columns
---                                                through the identity
---                                                lookup, none special-cased
---   every_card_frame_is_lit_by_the_card_surface  all four corner glyphs
---   cards_are_inset_by_one_cell_of_column_ground margin width, its ground
---                                                colour, and the lit rail
---                                                inside it
---   card_frame_carries_state_and_the_cursor_outranks_it
---                                                the whole border rule on
---                                                one board — see the note
---   only_the_selected_card_has_the_cursor_white_frame
---                                                at most one white, healthy
---                                                frames neutral, and no
---                                                column identity hue on any
---                                                frame
---   no_column_leaks_an_identity_hue_onto_a_card_frame
---                                                the cross-column
---                                                companion: all tasks
---                                                healthy, so the whole
---                                                board is one white and
---                                                neutrals
---   epic_cards_carry_purple_identity_and_a_bold_title_at_rest
---                                                a resting epic's stripe is
---                                                PURPLE and not its
---                                                column's hue, and its
---                                                title is bold
---   selected_epic_frames_in_the_cursor_white_not_purple
---                                                the selected epic frames
---                                                white, no frame anywhere
---                                                is purple, and every frame
---                                                is white or the neutral
---   an_epic_frame_never_takes_a_state_colour     the other half: an epic
---                                                sharing a column with a
---                                                crashed task frames neutral,
---                                                with the cursor parked in a
---                                                third column so the cursor
---                                                rule cannot mask the answer
---                                                (EpicFramesAreOnlyWhiteOrNeutral)
---   flat_view_epic_breadcrumb_is_purple          the breadcrumb row heading
---                                                a group of epic-owned
---                                                tasks renders its title in
---                                                epic purple
---   a_card_spends_four_cells_of_its_column_on_chrome
---                                                rendered content width
---                                                against column width: the
---                                                difference is exactly four
---   ci_status_badge_is_coloured_by_state         the three CI-status badge
---                                                texts read back green / red
---                                                / yellow, an ordinary label
---                                                on the same card reads back
---                                                muted, and an unrecognised
---                                                `ci:` value reads back muted
---                                                too ("Card label badges")
---   render_v2_task_card_shows_stripe             the quarter block ▎ is
---                                                present and the superseded
---                                                cursor half block ▌ is
---                                                absent, so stripe weight
---                                                no longer moves with the
---                                                cursor
---   unfocused_column_header_keeps_its_identity_colour
---                                                the principle above, on
---                                                the header label: guards
---                                                against the superseded
---                                                flatten-to-grey
---   header_bar_stops_at_the_column_separators    no header fill covers a
---                                                separator cell, at five
---                                                terminal widths
---   select_all_checkbox_fill_is_neutral_in_every_column
---                                                the cursor is parked on
---                                                each task-status column's
---                                                header in turn and the
---                                                rendered checkbox's fill
---                                                read back — asserted
---                                                against a resting card's
---                                                border, which is what the
---                                                spec claims the value is
---   header_fill_is_uniform_across_columns        the fill is the same in
---                                                every column at a given
---                                                focus state and carries
---                                                no hue; all four columns,
---                                                both focus states
---   header_label_is_hued_in_every_column_at_both_focus_states
---                                                two guards: no label
---                                                collapses into its own
---                                                fill, and no two columns
---                                                share a label colour —
---                                                the label being the only
---                                                per-column signal left
---   focused_header_label_is_brighter_than_unfocused
---                                                focus moves the label's
---                                                brightness, which is what
---                                                "focus is intensity"
---                                                reduces to on the header
---   each_header_label_keeps_its_column_hue_signature
---                                                the labels really are
---                                                derived from their hue:
---                                                each keeps the channel
---                                                *ranking* of its source
---                                                at both focus states
---   column_top_rule_is_hued_only_while_focused   the named exception:
---                                                focused rule carries the
---                                                identity hue, unfocused
---                                                rules the neutral grey,
---                                                and no third colour
---   scroll_indicators_follow_the_column_top_rule the other half of that
---                                                exception: the focused
---                                                column's overflow arrow
---                                                carries its identity hue,
---                                                an unfocused one's is grey
---   render_card_message_flash_shows_envelope     the flash's glyph
---   message_flash_envelope_outlives_the_old_three_second_window
---                                                the glyph is still drawn
---                                                well past the superseded
---                                                short window
---   message_flash_expires_once_past_its_ttl      the other side of the
---                                                threshold: swept, and no
---                                                longer drawn
---   message_flash_render_and_sweep_share_one_threshold
---                                                the sweep and the renderer
---                                                read one duration, so they
---                                                cannot disagree about
---                                                whether a flash is live
---   unseen_task_card_shows_signal_glyph          a task with an UnseenTask row
---                                                for the viewer draws ◆ in
---                                                SIGNAL on its title line
---   unseen_task_card_stripe_keeps_column_hue     the task stripe is untouched
---   epic_on_the_path_to_an_unseen_task_is_marked every epic whose subtree holds
---                                                one draws the glyph, however
---                                                deep the task sits
---   marked_epic_stripe_is_signal_not_purple      the epic stripe takes SIGNAL
---   epic_mark_clears_when_the_last_unseen_task_
---     below_it_is_seen                           derived, not stored
---   signal_never_colours_the_card_frame          the frame stays neutral/cursor
---   signal_is_per_viewer                         another person's row marks
---                                                nothing for this viewer
---   cursor_landing_on_an_unseen_task_clears_only_it
---                                                entering an epic clears only
---                                                the card the cursor lands
---                                                on; its siblings keep ◆
---   cursor_on_a_marked_epic_clears_nothing       the epic mark is derived
---   moving_the_cursor_onto_an_unseen_task_clears_it
---                                                a key that moves the cursor
---   a_refresh_that_slides_an_unseen_task_under_the_cursor_keeps_it
---                                                a cursor that did not move
---                                                sees nothing (task #99089)
---   a_key_with_the_cursor_on_an_unseen_task_clears_it
---                                                the next key after such a
---                                                refresh sees it
---   a_key_in_an_overlay_sees_nothing             a key outside the plain
---                                                board clears no mark
---   bookmarked_task_card_shows_bookmark_glyph    a task with a Bookmark row
---                                                for the viewer draws ◆ in
---                                                BOOKMARK on its title line
---   epic_on_the_path_to_a_bookmarked_task_is_marked
---                                                every epic whose subtree
---                                                holds one draws ◆ in
---                                                BOOKMARK, however deep
---   bookmarked_epic_stripe_stays_purple          the epic stripe keeps PURPLE
---   unseen_wins_the_glyph_slot_over_bookmark     a card both new and
---                                                bookmarked draws one ◆, in
---                                                SIGNAL, on task and epic cards
---   bookmark_is_per_viewer                       another person's bookmark
---                                                marks nothing for this viewer
---   cursor_on_a_bookmarked_task_clears_nothing   the bookmark outlives the
---                                                cursor landing on it
---   message_flash_never_colours_the_card_frame   a live flash leaves the
---                                                frame alone: no column
---                                                hue, and the only
---                                                non-neutral frame is the
---                                                cursor's
---
--- Inline in src/tui/ui/kanban/cards.rs, against state_border_color:
---
---   every_indicator_claims_the_border_its_severity_earns
---                                                every CardIndicator
---                                                variant paired with the
---                                                border it should claim
---   exactly_six_indicators_are_hard_failures     the counts: six red, three
---                                                amber, and every variant
---                                                in {red, amber, none}
---
--- Those two are a pair, and neither is redundant. The first walks a list of
--- variants written out by hand rather than generated — deliberately, for
--- the same reason state_border_color matches exhaustively: adding a variant
--- forces a deliberate entry, and if list and match ever disagree, one of
--- them is a mistake and the test says which. But a per-variant list alone
--- would still pass if someone moved a variant into the red set and updated
--- its expected value in the same edit, which is precisely how a state gets
--- promoted to a hard failure without anyone deciding to. The counts make
--- that edit visible: it has to change a number that says four.
---
--- Dispatching's entry in that list is an explicit "no border", recorded
--- with its reason — it renders an amber *indicator* while claiming no
--- border. It is the rule's one judgement-rather-than-category exclusion,
--- and so the one most likely to be "fixed" by someone who sees the glyph
--- and takes the missing border for an oversight. An asserted absence is
--- the only kind that survives that.
---
--- card_frame_carries_state_and_the_cursor_outranks_it is the one that
--- carries the rule, and its shape is the reason. It puts a crashed card, a
--- blocked card and a healthy card on one board and places the cursor *on
--- the crashed one*, so the precedence collision is the subject rather than
--- a case the fixture avoids. It asserts amber on the blocked card, white on
--- the cursor, neutral on the healthy one, and no red anywhere — then moves
--- the cursor off and asserts the red it was suppressing appears. That last
--- step is what makes it a test of precedence rather than of three colours
--- sitting side by side; without it, a renderer that had simply forgotten
--- red would pass.
---
--- These four replaced three tests written for the superseded rule that a
--- hued card border meant selection. Those were invalidated rather than
--- retuned: two asserted at most one card frame is non-neutral, which the
--- state colours falsify outright, and the third pinned the flash's hue to
--- its glyph, an obligation retired with the flash's hue.
---
--- Three tests in this section have been written wrong first, in the same
--- way each time, so the pattern is worth naming once: **a test whose
--- measurement is not confined to the thing it claims to check.** Each
--- version passed on broken code while reading as coverage, which is the
--- worst failure a test can have — it does not merely miss the defect, it
--- certifies its absence. The three ways the confinement slipped:
---
---   by metric  each_header_label_keeps_its_column_hue_signature cannot use
---              colour *distance*, because a dimmed colour is far from the
---              hue it was dimmed from. The natural measure is the wrong
---              one, and it fails on correct code.
---   by source  the epic tests must take PURPLE as a literal, not from the
---              Review column's identity lookup, even though the two share
---              the token. Sourcing it from the column encodes the very
---              conflation the test disproves, and would keep passing if
---              epics ever began following their column.
---   by region  flat_view_epic_breadcrumb_is_purple counted purple cells
---              across the whole buffer at first — and the epic *card* is
---              purple too, so it measured the card and reported the
---              breadcrumb. It passed with the breadcrumb drawn in grey.
---              The fix was to find the row by its `── ` rule prefix and
---              read only the title cells after it.
---   by source  select_all_checkbox_fill_is_neutral_in_every_column first
---     of truth  asserted the rendered fill equalled the accessor the
---              renderer itself calls. That caught a *hued* mutation but
---              silently passed a wrong-*neutral* one, because changing the
---              function moved both sides of the assertion together. It was
---              restating the implementation, not checking it. The fix was
---              to assert what the spec claims the value is — the same
---              neutral as a resting card's border — which is an
---              independent claim and catches both mutations.
---
--- The fourth is the one a careful person is likeliest to write, which is
--- why it is worth naming separately from the third. Reaching for the
--- accessor feels like avoiding a magic literal, and that instinct is
--- normally right. It is wrong here because the accessor is downstream of
--- the thing under test: an assertion built from it cannot fail for any
--- change that keeps the renderer and its constant in agreement, which is
--- most changes. The distinguishing question is whether the right-hand side
--- is derived from the subject or from the specification — and a spec claim
--- of the form "X is the same value as Y" should be asserted as exactly
--- that, against Y, not against whatever X currently reads.
---
--- That the accessor had to be re-exported to write the first version, and
--- the re-export became unnecessary once it was fixed, is itself the signal:
--- a test that needs new access to production internals is often reaching
--- for the wrong side of the claim.
---
--- The generalisation: before trusting one of these, check that its
--- measurement can distinguish its subject from everything else that looks
--- similar — the right metric, sourced independently of the claim, read
--- from the right region, and compared against the specified value rather
--- than the implemented one. All four survive mutation testing of the
--- *code*, because the fault is in the test; the fourth passed a mutation
--- and was nearly kept.
---
--- A fixture hazard the border rule creates, worth knowing before writing
--- the next one: a card is *healthy* only if the fixture makes it so. Any
--- test that drives a tick will have an inactive Running task reclassified
--- as stale, and stale now claims an amber border — so a card meant to be a
--- neutral control silently becomes an amber one, and the failed assertion
--- points at whatever the test was actually about rather than at its
--- fixture. This is the cost of the border reading states a fixture
--- acquires by default rather than by asking: "healthy" is no longer the
--- absence of setup, it is setup. Seed recent activity on any card that is
--- meant to rest.
---
--- The separator test checks five widths on purpose. Whether a misaligned
--- header row is visible at all depends on how the division rounds at that
--- particular width, so one width can coincidentally line up and hide the
--- defect entirely — at 120 columns it very nearly does, while the code this
--- replaced fails at 100. A single-width assertion here would have been
--- worse than none, because it would have read as coverage.
---
--- The "by metric" case above, in detail, because the numbers are what make
--- it convincing: measured by distance, Review's dimmed label lands nearer
--- BLUE than PURPLE, while it is correctly derived. Channel ranking is the right fingerprint
--- because it survives linear mixing toward any neutral — BLUE is
--- b > g > r and stays so dimmed or brightened, PURPLE is b > r > g
--- throughout.
---
--- The superseded three-level tint ladder (unfocused < focused < cursor
--- card) was replaced rather than retuned, because a selected card no
--- longer differs from a resting one by fill at all.
---
--- Not enforced by any test — normative claims above that a reader should
--- not assume are covered:
---   - Epic view's enclosing panel tint: that the panel around the columns
---     is faintly purple as a mode signal, while the column grounds inside
---     it stay neutral ("Column ground and card surface"). One production
---     site, no test. It is the last flat area on the board whose colour is
---     unasserted, and it is the only place purple means *mode* rather than
---     *epic*, so a regression would not read as obviously wrong to someone
---     who found it.
---   - That a cursor or multi-selected *task* card's title is bold
---     ("Selection"). The epic case is asserted — deliberately, since bold
---     is unconditional there — but the task case is not. Low consequence
---     while the frame carries the cursor unambiguously, which is why it is
---     listed rather than urgent: the spec claims two markers and only one
---     of them is checked.
---
--- Both are style claims, which is the pattern in every gap this list has
--- held: text is caught by the snapshots, style is caught only by a test
--- that reads it back. When adding a claim about colour or weight, assume
--- the snapshots will not cover it.
---
--- Every other normative claim in this section is asserted somewhere. That
--- is a statement about now, not a finished state: a new claim here arrives
--- with its test, or with a line in this list saying it has none. Neither
--- is optional, and a short list is only worth having if it is maintained
--- as carefully as a long one.
---
--- Naming tests here couples this spec to them: renaming or deleting one
--- must update this list. That coupling is deliberate, and
--- ./scripts/check-doc-symbols.sh enforces it — a citation that stops
--- resolving fails the pre-push hook rather than rotting quietly.
---
--- The lit frame and the one-cell inset are both produced by
--- src/tui/ui/kanban/cards.rs::frame_card, which paints the margin cells
--- in the column ground so they do not inherit the card surface. Its
--- chrome total (`CARD_CHROME_WIDTH`) is what the title budget is reduced
--- by, so a change to the margin moves truncation on every card.
+-- Which tests pin each claim above, the claims no test covers, and the
+-- traps those tests have fallen into: docs/testing.md, "Board visuals
+-- coverage". A new colour or weight claim here arrives with its test there,
+-- or with a line in its list of uncovered claims.
 
--- muted is the palette's generic grey for de-emphasised text, and is not any
--- column's identity.
-enum PaletteToken { blue | yellow | purple | green | muted }
+-- The board's hues. Four are column identities (blue, yellow, purple,
+-- green); purple is also the epic identity and cyan the work package's. red
+-- and yellow are also the state colours a frame, an indicator line or a CI
+-- badge takes, with green and cyan for the healthy indicator states. signal
+-- is the new-task mark and bookmark the bookmark mark, each a hue used for
+-- that one meaning. muted is the generic grey for de-emphasised text and is
+-- not any column's identity. The cursor white and the neutrals are not here:
+-- they are not hues ("Card border: cursor and state", BoardNeutralRamp).
+enum PaletteToken {
+    blue | yellow | purple | green | cyan | red | signal | bookmark | muted
+}
 
 value ColumnChrome {
     -- The column's identity colour. Not a function of focus.
@@ -1313,7 +970,7 @@ value BoardNeutralRamp {
 -- expressible, and none of it is redundant.
 
 enum CardFrameColour {
-    cursor_white       -- a near-white (#e8edfb) used for nothing else anywhere
+    cursor_white       -- a near-white used for nothing else anywhere
                        -- on the board. Deliberately not a PaletteToken: a
                        -- colour that cannot be named as an identity hue cannot
                        -- be misread as one.
@@ -1369,7 +1026,7 @@ entity RenderedCard {
     -- The row that is easiest to lose. A fixture that drives a tick
     -- reclassifies an inactive Running task as stale, so a card meant to be a
     -- neutral control silently becomes an amber one — see the fixture hazard
-    -- under "Where these rules are enforced".
+    -- in docs/testing.md, "Board visuals coverage".
     invariant RestingCardFramesNeutral {
         (not is_cursor and not has_hard_failure and not has_attention_state)
             implies frame_colour = resting_neutral
@@ -1426,13 +1083,14 @@ invariant AtMostOneCursorWhiteFrame {
 
 -- The closed set of surfaces that carry a hue at all. Everything not listed
 -- here is neutral: the three large flat areas (column ground, header fill,
--- card surface), the card frame, the select-all checkbox fill, the message
--- flash's border, and every ordinary label badge.
+-- card surface), a resting card's frame, the select-all checkbox fill, the
+-- message flash's border, and every ordinary label badge. The cursor frame
+-- is the cursor white, which is not a hue.
 --
 -- The list is worth having as a type because the board's colour budget is the
--- design. Each entry was argued for individually and three were removed by
--- argument — the tinted column ground, the hued header fill, the per-column
--- select-all ramp — so a fourth arriving without one is the failure mode this
+-- design. Each entry was argued for individually, and there is deliberately
+-- no tinted column ground, no hued header fill and no per-column select-all
+-- ramp, so a surface arriving without an argument is the failure mode this
 -- enum makes visible.
 enum HuedSurface {
     header_label               -- derived from the column's identity hue at
@@ -1440,10 +1098,24 @@ enum HuedSurface {
                                -- neither ("Column header bar")
     task_card_stripe           -- the literal palette token, and the only
                                -- surface on a card that renders it
-    epic_card_stripe           -- purple, in every column
+    epic_card_stripe           -- purple, in every column; signal while the
+                               -- epic is marked by the new-task signal
     epic_card_title            -- purple, bold at rest
-    epic_breadcrumb_row        -- purple, heading a group of epic-owned tasks
-                               -- in flattened view
+    epic_header_row            -- purple, heading a group of epic-owned tasks
+                               -- in a flattened column
+    package_card_chrome        -- cyan: a work package card's stripe, square
+                               -- glyph and title, in every column
+    card_frame_state           -- red or yellow on an unhealthy card ("Card
+                               -- border: cursor and state")
+    card_indicator             -- a task card's status indicator and its
+                               -- schedule suffix, and an epic card's
+                               -- substatus label, in the colour of the state
+                               -- they name: red, yellow, cyan or green
+    message_flash_glyph        -- yellow ✉ / ➤ on the title line
+    message_flash_fill         -- the warm flash fill: the one card whose
+                               -- fill differs from the card surface
+    new_task_signal_glyph      -- ◆ in signal ("New-task signal")
+    bookmark_glyph             -- ◆ in bookmark ("Bookmark")
     column_top_rule            -- the identity hue, focused only
     column_scroll_indicator    -- the identity hue, focused only
     ci_status_badge            -- green / red / yellow by exact text match.
@@ -1740,8 +1412,8 @@ surface TaskCard {
         -- in muted grey. A name is the word a person scans fastest, and it is
         -- the word a peer addresses the agent by. Every task has one, a
         -- Backlog card's assigned agent and a Done card's ended agent
-        -- included, so no card shows its id (task #99056: ids grow in jumps
-        -- and are poor names for people). A row the backfill has not reached
+        -- included, so no card shows its id (ids grow in jumps and are poor
+        -- names for people). A row the backfill has not reached
         -- yet has no name and leads with its title alone. This is the same
         -- rule as agent-tree.allium's AgentRowShowsAgentName, so a task reads
         -- the same in both places. The task detail popup's title and the
@@ -1809,7 +1481,7 @@ surface EpicCard {
         epic.title
 
     @guarantee EpicsAreShownByTitleNeverById
-        -- An epic is shown to people by its title alone (task #99056): the
+        -- An epic is shown to people by its title alone: the
         -- epic card, a folded epic header, the epic header row in flattened
         -- view (board-layout.allium, "Flattened Mode"), the epic view's border
         -- and the board filter's epic list carry no `#<id>`. Titles are not
@@ -1819,8 +1491,8 @@ surface EpicCard {
 
     @guarantee PurpleInEveryColumn
         -- The stripe is purple wherever the card sits — in Done it is purple,
-        -- not green; in Backlog purple, not blue. The epic breadcrumb row
-        -- that precedes a group of epic-owned tasks in flattened view is
+        -- not green; in Backlog purple, not blue. The epic-header row that
+        -- precedes a group of epic-owned tasks in a flattened column is
         -- purple on the same terms.
 
     @guarantee EpicFramesAreOnlyWhiteOrNeutral
@@ -1855,7 +1527,7 @@ surface EpicCard {
         -- The two epic tests must take purple as a LITERAL, not from the
         -- Review column's identity lookup, even though the two share the
         -- token: sourcing it from the column encodes the very conflation the
-        -- tests disprove. See "Where these rules are enforced".
+        -- tests disprove (docs/testing.md, "Board visuals coverage").
 }
 
 -- A work package card (work-packages.allium: PackageCardPlacement) is a
@@ -1863,7 +1535,7 @@ surface EpicCard {
 surface WorkPackageCard {
     facing user: core/Operator
 
-    context package: WorkPackage
+    context package: wp/WorkPackage
     context card: RenderedCard
 
     exposes:
