@@ -673,6 +673,7 @@ pub fn research_agent(
     runner: &dyn ProcessRunner,
     teardown: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    injections: &LearningInjections<'_>,
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
@@ -684,6 +685,7 @@ pub fn research_agent(
                 &task.description,
                 epic,
                 &PromptContext {
+                    learnings: injections.clone(),
                     agent_name,
                     ..PromptContext::default()
                 },
@@ -752,9 +754,14 @@ pub fn run_agent_for_mode(
             &injections,
             &review_command,
         ),
-        crate::models::DispatchMode::Research => {
-            research_agent(task, &agent_name, runner, teardown, epic_ctx.as_ref())
-        }
+        crate::models::DispatchMode::Research => research_agent(
+            task,
+            &agent_name,
+            runner,
+            teardown,
+            epic_ctx.as_ref(),
+            &injections,
+        ),
         crate::models::DispatchMode::Quick => quick_dispatch_agent(
             task,
             &agent_name,

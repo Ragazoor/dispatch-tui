@@ -204,7 +204,15 @@ fn no_task_agent_passes_a_permission_mode_flag() {
         }),
         ("research_agent", || {
             dispatched_claude_cmd(|task, mock| {
-                research_agent(task, "atlas", mock, mock, None).unwrap();
+                research_agent(
+                    task,
+                    "atlas",
+                    mock,
+                    mock,
+                    None,
+                    &LearningInjections::default(),
+                )
+                .unwrap();
             })
         }),
         ("quick_dispatch_agent", || {

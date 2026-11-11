@@ -32,7 +32,7 @@ async fn create_learning_assigns_an_id_and_pushes_the_row() {
     assert_eq!(stored.upvote_count, 0);
 }
 
-/// `ApprovedLearningsHaveScopeRef` (`docs/specs/learnings.allium`),
+/// `Learning.ScopeRefConsistency` (`docs/specs/core.allium`),
 /// enforced server-side via `validate_learning_scope` — mirrors the
 /// module's own `create_learning`.
 #[tokio::test]

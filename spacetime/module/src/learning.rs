@@ -99,7 +99,7 @@ pub fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) {
 /// [`create_task`] — see that reducer's doc comment for why a reducer cannot
 /// answer with it directly.
 ///
-/// Enforces `docs/specs/learnings.allium`'s `ApprovedLearningsHaveScopeRef`
+/// Enforces `docs/specs/core.allium`'s `Learning.ScopeRefConsistency`
 /// server-side, on the same reasoning `write_task` enforces
 /// `OwnerTracksUserBoardTask`: a client-side check is a courtesy to a
 /// well-behaved caller, and a shared table has more than one.
