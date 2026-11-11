@@ -302,7 +302,8 @@ pub fn not_retrieved_message(learning_id: i64, task_id: i64) -> String {
 /// by rating twice; entries naming one learning twice in a batch apply in
 /// order. A verdict on a learning the task was never shown (no
 /// `learning_retrievals` row) refuses the whole batch, as does an unknown
-/// verdict string. A missing learning is skipped rather than failing the batch.
+/// verdict string. A learning the caller cannot see, or that does not exist,
+/// is refused as "learning N not found" before the retrieval is checked.
 /// A verdict that leaves the score where it was (a repeat, or a first
 /// `not_applicable`) stores the verdict and does not write the learning, so it
 /// cannot keep a stale entry alive.
@@ -316,6 +317,11 @@ pub fn apply_learning_verdicts(
         return Err(format!("task {task_id} not found"));
     }
     for v in &verdicts {
+        // Visibility first: a learning the caller cannot see is answered as a
+        // missing one, whether or not it was ever retrieved.
+        if visible_learning(ctx, v.learning_id).is_none() {
+            return Err(format!("learning {} not found", v.learning_id));
+        }
         let retrieved = ctx
             .db
             .learning_retrievals()

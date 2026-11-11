@@ -325,6 +325,10 @@ rule QueryLearningsViaMcp {
 rule RateLearningViaMcp {
     when: McpRateLearning(learning, task, verdict)
 
+    -- Checked before the retrieval: a learning the caller cannot see (never
+    -- retrieved, or retrieved and since moved out of sight) is answered "not
+    -- found", never "was not retrieved" and never "recorded".
+    requires: learning.visible_to(caller())
     -- Only an entry surfaced to this task, by injection or query_learnings,
     -- can be rated. An unknown verdict string is refused too.
     requires: exists core/Retrieval{task: task, learning: learning}

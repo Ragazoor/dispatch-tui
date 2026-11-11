@@ -187,3 +187,42 @@ fn not_applicable_replacing_helped_moves_the_score_back_and_helped_replaces_it()
     assert_eq!(score(&store), 1);
     assert_eq!(store.db().learning_verdicts().iter().count(), 1);
 }
+
+/// Learning 2: private to someone else, so alice cannot see it.
+fn seed_unseen_learning(store: &Store, retrieved_for: Option<i64>) {
+    let unseen = Learning {
+        id: 2,
+        scope: "user".into(),
+        author: identity_of("someone-else"),
+        ..learning(2)
+    };
+    store
+        .call_as_scheduler(|ctx| seed_learnings(ctx, vec![unseen]))
+        .expect("seed unseen learning");
+    if let Some(task) = retrieved_for {
+        store
+            .call_as_scheduler(|ctx| seed_learning_retrievals(ctx, vec![retrieval(3, task, 2)]))
+            .expect("seed retrieval");
+    }
+}
+
+#[test]
+fn rating_an_unseen_learning_answers_not_found_whether_or_not_it_was_retrieved() {
+    for retrieved_for in [None, Some(7)] {
+        let store = store_with_a_retrieved_learning();
+        seed_unseen_learning(&store, retrieved_for);
+        let message = rate(&store, 7, vec![verdict(2, "helped")])
+            .expect_err("alice cannot see learning 2");
+        assert!(message.contains("learning 2 not found"), "{message}");
+        assert_eq!(store.db().learning_verdicts().iter().count(), 0);
+    }
+}
+
+#[test]
+fn an_unseen_learning_in_a_batch_refuses_the_whole_batch() {
+    let store = store_with_a_retrieved_learning();
+    seed_unseen_learning(&store, Some(7));
+    let refused = rate(&store, 7, vec![verdict(1, "helped"), verdict(2, "helped")]);
+    assert!(refused.is_err());
+    assert_eq!(score(&store), 0);
+}

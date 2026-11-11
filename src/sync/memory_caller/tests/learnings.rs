@@ -302,7 +302,7 @@ async fn apply_learning_verdicts_refuses_a_learning_never_retrieved_for_the_task
 }
 
 #[tokio::test]
-async fn apply_learning_verdicts_skips_a_missing_learning() {
+async fn apply_learning_verdicts_refuses_a_missing_learning_as_not_found() {
     let (caller, _rows) = caller();
     retrieve(&caller, LearningId(999)).await;
     let outcome = caller
@@ -312,7 +312,10 @@ async fn apply_learning_verdicts_skips_a_missing_learning() {
         )
         .await
         .unwrap();
-    assert!(outcome.won());
+    assert!(
+        matches!(&outcome, ReducerOutcome::Refused(why) if why.contains("learning 999 not found")),
+        "{outcome:?}"
+    );
 }
 
 #[tokio::test]

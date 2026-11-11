@@ -243,8 +243,9 @@ impl MemoryReducerCaller {
     /// `not_retrieved_message`.
     ///
     /// A real reducer's `Err` rolls back every mutation the transaction already
-    /// made, so this validates before it writes: every entry needs a retrieval
-    /// for `task_id` first (a refusal for the batch), and the second pass
+    /// made, so this validates before it writes: every entry must be a learning the
+    /// caller sees (else `learning N not found`) and have a retrieval for
+    /// `task_id` first (a refusal for the batch), and the second pass
     /// works on a copy of the verdict table and the learnings it touches,
     /// installed only once every entry has applied. Entries naming one learning
     /// twice apply in order against each other's result, as the module's
@@ -261,6 +262,12 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused(format!("task {task_id} not found")));
         }
         for (learning_id, _) in &verdicts {
+            if tables.visible_learning(&scope, learning_id.0).is_none() {
+                return Ok(ReducerOutcome::Refused(format!(
+                    "learning {} not found",
+                    learning_id.0
+                )));
+            }
             let retrieved = tables
                 .learning_retrievals
                 .values()
