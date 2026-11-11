@@ -102,7 +102,7 @@ rule ToolsAdvertiseAnnotations {
         -- name (read_only, write, idempotent or destructive), so a new tool
         -- cannot be registered without choosing one.
         -- Asserted by tool_definitions_carry_annotations and
-        -- every_argument_carries_a_description in src/mcp/handlers/tests/mod.rs.
+        -- every_argument_carries_a_description.
 }
 
 -- == MCP Task Tools ==
@@ -153,7 +153,7 @@ rule UpdateTaskViaMcp {
     -- delete tool. Permanent delete stays a human TUI action (tasks.allium:
     -- DeleteTask), because it cannot be undone and it retires a feed item.
     --
-    -- Done is now reachable via MCP, but never through THIS rule — it is
+    -- Done is reachable via MCP, but never through THIS rule — it is
     -- carved out entirely into MarkTaskDoneViaMcp below, a dedicated
     -- close-only call (task_id and status="done", nothing else) with its
     -- own caller guard. `status != done` here means exactly that: this
@@ -325,34 +325,23 @@ rule UpdateTaskViaMcp {
         -- the recurrence survives its own session. Arming it costs nothing if
         -- wrong — the flag does nothing until the task reaches done, and the
         -- human can clear it from the editor.
-        -- Note: worktree and tmux_window ARE mutable through the internal
-        -- Rust TaskService::update_task API (UpdateTaskParams defines
-        -- them; see src/service/tasks/params.rs). The runtime uses that
-        -- path to clear the pointers once a teardown has released them, and
-        -- for the post-provision patch on both dispatch paths (dispatch_task
-        -- and the epic chain).
-        -- They are intentionally unreachable from MCP because the MCP
-        -- handler does not parse those fields: the UpdateTaskArgs struct
-        -- that defines the accepted argument set
-        -- (src/mcp/handlers/tasks/mod.rs) has no worktree or
-        -- tmux_window field, so handle_update_task
-        -- (src/mcp/handlers/tasks/crud.rs) can never carry them into
-        -- UpdateTaskParams.
+        -- worktree and tmux_window are written by the board's own update
+        -- path (clearing the pointers after a teardown, and the
+        -- post-provision patch on both dispatch paths), never by this tool:
+        -- its argument set has no slot for them.
         -- The typed url is carried by two params: `url` (the string) and
         -- `url_type` (one of pr | security_alert | issue | other). A non-empty
         -- `url` REQUIRES `url_type`; an unknown `url_type` is rejected
         -- unconditionally, at argument decoding. Both facts are stated by the
         -- schema (see the typed-url contract above), not by prose. An
-        -- empty-string `url` clears task.url and its type (maps to
-        -- FieldUpdate::Clear); any non-empty `url` sets task.url to a
+        -- empty-string `url` clears task.url and its type; any non-empty
+        -- `url` sets task.url to a
         -- core/TaskUrl{url, url_type} value.
-        -- This rule writes nothing on a status change out of done. It used to
-        -- clear a completion-recency rank from task.sort_order; that rank is
-        -- now task.completed_at, which is deliberately kept across a move out
-        -- of done (tasks.allium, ConfirmDone's guidance), and sort_order is
-        -- left to mean manual ordering alone. So an explicit sort_order in the
-        -- same call is no longer overridden by the status param: the two write
-        -- different fields. The entering-done stamp is not reachable from this
+        -- This rule writes nothing on a status change out of done:
+        -- task.completed_at is kept across a move out of done (tasks.allium,
+        -- ConfirmDone's guidance), and sort_order means manual ordering
+        -- alone, so an explicit sort_order and a status in the same call
+        -- write different fields. The entering-done stamp is not reachable from this
         -- rule at all — `requires: status != done` rules it out — and is
         -- applied on the other routes into done: tasks/ConfirmDone (the TUI
         -- path, through the module's patch_task, which stamps completed_at on
@@ -361,10 +350,8 @@ rule UpdateTaskViaMcp {
         -- The board stamps nothing itself (store-split X2): a board
         -- that needs the stamp re-reads the task.
         -- The `status` argument's description lists the statuses and nothing
-        -- more. It used to carry the resume-a-crashed-task story and an aside
-        -- that no MCP path deletes a task; the first is dispatch_task's
-        -- (DispatchTaskViaMcp owns it, once), and the second describes a tool
-        -- that does not exist, which no caller acts on.
+        -- more. The resume-a-crashed-task story is dispatch_task's
+        -- (DispatchTaskViaMcp).
         -- When status or epic_id changes, the parent epic's status is
         -- recalculated (if a parent epic exists). Re-assigning a task
         -- from one epic to another triggers recalculation on both the
@@ -476,17 +463,12 @@ rule MarkTaskDoneViaMcp {
     -- failed.
 
     @guidance
-        -- The MCP `update_tasks` tool's dedicated done-only path. Handled by
-        -- handle_update_task (src/mcp/handlers/tasks/crud.rs), which checks
-        -- `status = "done"` FIRST — before the url/url_type pairing
-        -- validation, before any field mapping —
-        -- and branches to a separate function operating on the raw parsed
-        -- arguments, not on the built UpdateTaskParams. That ordering is load
-        -- bearing: checking the field-exclusivity guard against
-        -- UpdateTaskParams instead (which has no slot for a url_type sent
-        -- without a url) would let such a call slip through unrejected, and
-        -- checking it after the url/url_type pairing validation would answer
-        -- a `status="done", url=<x>` call with "url_type is required" instead
+        -- The MCP `update_tasks` tool's dedicated done-only path. The tool
+        -- checks `status = "done"` FIRST, on the arguments as sent, before
+        -- the url/url_type pairing check and before any field mapping. The
+        -- order matters: a check on the mapped fields would miss a url_type
+        -- sent without a url, and a check after the pairing would answer a
+        -- `status="done", url=<x>` call with "url_type is required" instead
         -- of the close-only error this rule promises.
         --
         -- From there, this path calls the close_task reducer
@@ -575,8 +557,7 @@ rule MarkTaskDoneViaMcp {
         -- outcome, so the response text never names a chained subtask —
         -- unlike exit_session's, which does.
         --
-        -- MCP_UPDATABLE (src/models/tasks.rs) now includes Done: the
-        -- schema's advertised status enum is backlog | running | review |
+        -- The schema's advertised status enum is backlog | running | review |
         -- done, which is every TaskStatus there is. There is no delete
         -- counterpart to MarkTaskDoneViaMcp: removing a task is a human TUI
         -- action (tasks.allium: DeleteTask).
@@ -609,22 +590,17 @@ rule PrFinalisationReflectionNudge {
         -- applies its mutations regardless, and when the flag is false the
         -- response text is simply shorter.
         --
-        -- Layering: the finalisation shape is computed in the service layer as
-        -- was_pr_finalisation (src/service/tasks/crud.rs) — status = review AND
-        -- a pr-typed url AND the pre-write task had url = None — and returned on
-        -- UpdateTaskResult. handle_update_task (src/mcp/handlers/tasks/crud.rs)
-        -- consults it and only then calls reflection_nudge
-        -- (src/mcp/handlers/tasks/mod.rs), which reads the setting and returns
-        -- the empty string when it is false.
+        -- The service layer decides the finalisation shape from the task as
+        -- it was before the write, and the tool reads the setting only when
+        -- the shape matched.
         --
         -- IMPORTANT — this nudge does NOT fire on the normal wrap-up path.
         -- ExitSessionViaMcp (below) performs an equivalent mutation for
         -- action = pr (status -> review plus a pr-typed url, set
         -- unconditionally regardless of any prior url), but that close is the
         -- module's (pr-workflow.allium: ExitSession, run inside
-        -- store-split.allium's RequestExitSession), which computes no was_pr_finalisation, and
-        -- handle_exit_session (src/mcp/handlers/tasks/wrap_up.rs) never calls
-        -- reflection_nudge. So the nudge only appears when a caller invokes the
+        -- store-split.allium's RequestExitSession), and exit_session appends
+        -- no reflection nudge. So the nudge only appears when a caller invokes the
         -- update_tasks MCP tool directly to link a PR, bypassing
         -- wrap_up/exit_session entirely. The wrap_up response carries a
         -- different rate_learning nudge, gated to the pr action rather than
@@ -660,11 +636,9 @@ rule UpdateTasksViaMcp {
 
     @guidance
         -- == One tool, one or many ids ==
-        -- update_task used to exist beside this tool and did the same job for
-        -- one id, with the same guards. Two tools for one job made a caller
-        -- choose between them, so update_task is gone and update_tasks keeps
-        -- the plural name: the many-id case is the one that needs the array.
-        -- A caller updating one task passes task_ids: [id].
+        -- There is no update_task beside this tool: two tools for one job
+        -- would make a caller choose between them. A caller updating one
+        -- task passes task_ids: [id].
         --
         -- == Reported per task, except for one id ==
         -- With more than one id the call is not atomic. A failure on one task
@@ -692,7 +666,6 @@ rule UpdateTasksViaMcp {
         -- task_id argument is rejected as invalid params (-32602) before any
         -- task is touched. A call with no field set is too: every task would
         -- fail the same way.
-        -- Handled by handle_update_tasks in src/mcp/handlers/tasks/crud.rs.
 }
 
 rule CreateTaskViaMcp {
@@ -726,14 +699,10 @@ rule CreateTaskViaMcp {
     --
     -- TheHelperAnswersSessionUnconditionally. The helper takes no reading of
     -- its surroundings and has no second answer to give: `session` is the
-    -- whole of it. It once derived a task identity by inspecting its own
-    -- working directory for a worktree path, which could not work — Claude
-    -- Code runs a user-global helper from its own configuration directory,
-    -- so the directory it inspected was never the agent's (see
-    -- CallerIdentityDependsOnTheLaunch below). Keeping that derivation as an
-    -- unreachable branch would leave two mechanisms answering "which task is
-    -- this agent", one of them a dead end that the next investigation of a
-    -- wrong caller identity would search first.
+    -- whole of it. It cannot derive a task identity from its working
+    -- directory: Claude Code runs a user-global helper from its own
+    -- configuration directory, which is never the agent's
+    -- (CallerIdentityDependsOnTheLaunch below).
 
     -- A Task-kind caller must reference an existing task.
     requires:
@@ -782,11 +751,9 @@ rule CreateTaskViaMcp {
     @guidance
         -- SIGHT, NOT FOLLOWING. Everyone the epic is shown to is marked: every
         -- member of its workspace when it is public all the way up, only the
-        -- private holder when it is private. A core/Subscription plays no part.
-        -- It used to (only subscribers were marked), and an operator who had
-        -- created PR Reviews but never followed it got no mark at all, since
-        -- their own epics reach their board without a subscription (task
-        -- #98730). Whoever can see the epic is who the colour is for.
+        -- private holder when it is private. A core/Subscription plays no
+        -- part: an operator's own epics reach their board without one, and
+        -- whoever can see the epic is who the colour is for.
         --
         -- WHO IS SIGNALLED IS DECIDED AT CREATION. A person who joins the
         -- workspace, or is shown the epic, afterwards is not marked for a task
@@ -879,9 +846,8 @@ rule CreateTaskViaMcp {
         --
         -- The degradation is silent on one of the two surfaces only. An agent
         -- launched without its per-task configuration gets no auto-scoping in
-        -- ListTasksViaMcp, with no error — that half still stands, and
-        -- ListTasksViaMcp cannot detect the difference. Here it no longer
-        -- applies: create_task requires epic_id of every caller, so a
+        -- ListTasksViaMcp, with no error, and ListTasksViaMcp cannot detect
+        -- the difference. Here it does not apply: create_task requires epic_id of every caller, so a
         -- misconfigured agent that omits it is REFUSED outright rather than
         -- quietly given no epic. What it loses is the refusal's help, not the
         -- refusal: TheRefusalNamesTheLikelyAnswer can only name the caller's
@@ -891,12 +857,9 @@ rule CreateTaskViaMcp {
         -- The obligation still lives entirely on the dispatch side — see
         -- AgentCarriesItsOwnCallerIdentity in dispatch.allium.
         --
-        -- The Axum middleware (src/mcp/middleware.rs) is an *extractor*,
-        -- not a gatekeeper: it parses the two headers and attaches a
-        -- Result<CallerIdentity, IdentityError> to request extensions
-        -- without ever short-circuiting the request. This is required
-        -- because the middleware runs before the JSON-RPC body is
-        -- parsed and therefore has no request id to echo back — and a
+        -- Reading the identity headers never refuses a request on its own:
+        -- that step runs before the JSON-RPC body is parsed and therefore
+        -- has no request id to echo back — and a
         -- JSON-RPC response with `id: null` is rejected by strict MCP
         -- clients (Claude Code), which would abort the session during
         -- the handshake.
@@ -908,9 +871,8 @@ rule CreateTaskViaMcp {
         -- handler boundary with JSON-RPC -32600, echoing back the
         -- request's actual id.
         -- An unknown caller-task is a not-found condition, not a
-        -- validation one: the shared caller-task lookup (fetch_caller_task
-        -- in src/mcp/handlers/types.rs) rejects it with -32001, the same
-        -- code every ServiceError::NotFound maps to.
+        -- validation one: it is refused with -32001, the code every
+        -- not-found answer uses.
         -- An unknown epic_id is a not-found condition, like an unknown
         -- caller-task above, and returns -32001 for the same reason: the epic
         -- named is not there, which is not the same answer as the argument
@@ -919,9 +881,7 @@ rule CreateTaskViaMcp {
         -- reassign path in MoveTaskToEpic give one answer to one operator
         -- mistake rather than -32602 and -32001 by entry point. It sits in the
         -- service rather than the handler so the TUI create path is held to it
-        -- too. Left to the SQLite foreign key instead, as it once was, it
-        -- surfaced as a -32603 Internal whose text named neither the epic nor
-        -- the argument.
+        -- too.
         -- == The reply ==
         -- "<task ref> created", e.g. `Task 5 (nevena2, "Fix it") created`:
         -- the new task already has its agent (agents.allium: A17), so the
@@ -994,11 +954,9 @@ rule GetTaskViaMcp {
         -- The description says, in one short sentence, that get_task returns
         -- a task's details. The format is shown by what it returns: the
         -- response is labelled "Label: value" lines, and a reader that has the
-        -- response in front of it needs no prose describing it. It used to
-        -- name the format, the absent-line-means-unset convention and the
-        -- three lines a wrapping-up agent reads. Naming those lines belongs to
-        -- the /wrap-up skill, the caller that reads them, not to the tool.
-        -- Handled by handle_get_task in src/mcp/handlers/tasks/crud.rs.
+        -- response in front of it needs no prose describing it. Naming the
+        -- lines a wrapping-up agent reads belongs to the /wrap-up skill, the
+        -- caller that reads them, not to the tool.
         --
         -- == The display agent ==
         -- A task with an agent (agents.allium: AgentIdentity) gets one
@@ -1121,7 +1079,6 @@ rule ListTasksViaMcp {
         -- url, which is what it said while the url field was PR-only: a caller
         -- who scans for the word "PR" on a security-alert or issue task finds
         -- nothing and concludes the task carries no link.
-        -- Implemented in handle_list_tasks (src/mcp/handlers/tasks/crud.rs).
 }
 
 rule QueryUsageViaMcp {
@@ -1157,7 +1114,6 @@ rule QueryUsageViaMcp {
         -- These are feature-usage counters (which keybindings and MCP tools
         -- are exercised), NOT token counts. Per-call usage recording fires
         -- on every tools/call request.
-        -- Handled by handle_query_usage in src/mcp/handlers/tasks/crud.rs.
 }
 
 rule DispatchTaskViaMcp {
@@ -1268,12 +1224,10 @@ rule DispatchTaskViaMcp {
         -- request id and its state rather than the worktree. What to do then
         -- is told in that response, not in the description.
         --
-        -- This description is the ONE place the recovery move is told.
-        -- update_tasks' `status` argument carried a copy for a while, on the
-        -- grounds that backlog is where a caller meets the move; it no longer
-        -- does. A caller resuming a task is about to call dispatch_task, so
-        -- that is where it reads the story, and a second copy was a second
-        -- wording to keep in step by hand.
+        -- This description is the ONE place the recovery move is told. A
+        -- caller resuming a task is about to call dispatch_task, so that is
+        -- where it reads the story; update_tasks' `status` argument carries
+        -- no copy to keep in step.
 }
 
 rule ResumeTaskViaMcp {
@@ -1352,11 +1306,8 @@ rule AttachPlanViaCli {
 
     @guidance
         -- CLI command: `dispatch plan <id> <path>` attaches a plan file to
-        -- an existing task by writing task.plan_path directly via
-        -- db.patch_task. No status transition occurs; the plan attachment
-        -- is decoupled from dispatch.
-        -- Implementation: src/main.rs Commands::Plan match arm.
-        -- Used by the /queue-plan slash command (and operators) to stage
+        -- an existing task. No status transition occurs; the plan attachment
+        -- is decoupled from dispatch. Used by the /queue-plan slash command (and operators) to stage
         -- a plan onto a task before dispatching it.
 }
 
@@ -1364,7 +1315,7 @@ rule AttachPlanViaCli {
 -- modeled as separate rules because they do not mutate task domain state
 -- beyond what existing rules already cover):
 --   • `dispatch tui [--port]` — the only entry point, launching the TUI
---     (src/main.rs Commands::Tui). --port also reads the DISPATCH_PORT env
+--     --port also reads the DISPATCH_PORT env
 --     var and defaults to core/config.mcp_port. It obtains its own tmux
 --     session and offers to write the Claude Code MCP configuration before
 --     the board draws — see startup.allium, and CreateTaskViaMcp guidance for
@@ -1377,7 +1328,7 @@ rule AttachPlanViaCli {
 --     dispatch MCP configuration from Claude Code; with `--purge` also
 --     deletes this machine's host file (host.allium: HostFile) and the log
 --     file from the data directory, and the directory itself if that leaves
---     it empty (src/main.rs Commands::Uninstall). The confirmation it asks
+--     it empty. The confirmation it asks
 --     first says that this machine's identity will be forgotten — a later
 --     launch mints a new one, and tasks stamped with the old host id stop
 --     being this machine's — and states no task count: tasks live in the
@@ -1404,10 +1355,9 @@ rule AttachPlanViaCli {
 --   • `dispatch verify-feed <command>` — see VerifyFeed in feeds.allium.
 --
 -- There is deliberately NO CLI surface for listing tasks or changing a
--- task's status. The `dispatch list` and `dispatch update` subcommands were
--- removed once the installed Claude Code hooks moved to the dedicated
--- `hook-*` subcommands and agents moved to the MCP tools; the board and the
--- MCP tools are the only surfaces for reading and mutating task state.
+-- task's status: the board and the MCP tools are the only surfaces for
+-- reading and mutating task state, and hooks use the dedicated `hook-*`
+-- subcommands.
 
 -- == MCP Wrap-Up and Exit Tools ==
 
@@ -1439,8 +1389,8 @@ rule WrapUpViaMcp {
     -- All three actions leave task.status unchanged (still running/review) and
     -- only issue an exit token whose request row records which action was
     -- requested. The terminal mutation (Done, or Review + pr-typed url) is
-    -- deferred to the single ExitSessionViaMcp call. pr_url is no longer a
-    -- wrap_up param — it travels with exit_session instead.
+    -- deferred to the single ExitSessionViaMcp call. pr_url travels with
+    -- exit_session, not with wrap_up.
     --
     -- The tool ASKS: one request_wrap_up call naming
     -- this board's host (store-split.allium: RequestWrapUp). For rebase the
@@ -1458,12 +1408,9 @@ rule WrapUpViaMcp {
         -- action="rebase" is the only action with host work: the rebase /
         -- fast-forward via finish_task, which performs no
         -- session teardown, so the session stays alive until exit_session.
-        -- action="done" and action="pr" perform no task-status
-        -- or url mutation at wrap_up time — done no longer flips to Done, and
-        -- pr no longer sets task.url or moves the task to review. Those
-        -- mutations are applied later, atomically, by ExitSessionViaMcp. This
-        -- removes the old asymmetry where done/pr mutated status inside
-        -- wrap_up while rebase deferred to exit_session.
+        -- action="done" and action="pr" perform no task-status or url
+        -- mutation at wrap_up time. Every action's terminal mutation is
+        -- applied later, atomically, by ExitSessionViaMcp.
         --
         -- == The request, then a wait (store-split.allium: SessionRequest) ==
         -- The tool checks the request first, in this order: wrappable
@@ -1512,7 +1459,6 @@ rule WrapUpViaMcp {
         -- For the pr path the agent has already run git push and
         -- gh pr create by this point, and passes the resulting URL to
         -- exit_session (not to wrap_up).
-        -- Handled by handle_wrap_up in src/mcp/handlers/tasks/wrap_up.rs.
 
 }
 
@@ -1534,11 +1480,9 @@ rule ExitSessionViaMcp {
     ensures: split/ExitSessionRequested(task: task, token: token, action: action, pr_url: pr_url)
 
     @guidance
-        -- Single-call session close for all three wrap-up actions. The old
-        -- two-phase behaviour (first call showed a reflection prompt and set
-        -- token.reflected, second call closed) is gone: the mandatory
-        -- reflection is now the /retro skill, which the /wrap-up skill runs
-        -- BEFORE exit_session is ever called.
+        -- Single-call session close for all three wrap-up actions.
+        -- Reflection is the /retro skill, which the /wrap-up skill runs
+        -- BEFORE exit_session is called.
         --
         -- Validation, in order (all mutate nothing on failure; every refusal
         -- is an INVALID_PARAMS error):
@@ -1572,8 +1516,7 @@ rule ExitSessionViaMcp {
         --                      url_type = pr) — this branch does not enter done,
         --                      so task.completed_at is untouched
         -- The module rolls up the parent epic chain in the same transaction;
-        -- boards redraw from their subscriptions. Handled by
-        -- handle_exit_session in src/mcp/handlers/tasks/wrap_up.rs.
+        -- boards redraw from their subscriptions.
         --
         -- == The response ==
         -- Accepted: the close took effect. The response is "Session closed."
@@ -1656,14 +1599,10 @@ rule SetVerifyCommandViaMcp {
         -- == The tool description does not claim prompt injection ==
         -- The description states that the command never appears in a dispatch
         -- prompt, names the surface that does carry it (get_task's "Verify
-        -- command" line) and says the agent runs it itself. It said the opposite for a time — that the command
-        -- was injected into future agent prompts — which contradicts the
-        -- prompt-assembly rule in dispatch-prompt.allium and sends the one reader who
-        -- needs the command looking on the single surface that never carries
-        -- it. A description that disagrees with the prompt rule is a defect in
-        -- the description, not a second opinion.
-        -- Handled by handle_set_verify_command in
-        -- src/mcp/handlers/tasks/verify.rs.
+        -- command" line) and says the agent runs it itself. A description
+        -- claiming prompt injection would contradict dispatch-prompt.allium
+        -- and send the one reader who needs the command to the single
+        -- surface that never carries it.
 }
 
 rule SetReviewCommandViaMcp {
@@ -1691,8 +1630,7 @@ rule SetReviewCommandViaMcp {
         -- containing "\n" or "\r" is rejected at the handler with -32602.
         -- The tool exists so the operator and agents can set a personal
         -- skill such as `/review-pr` without a TUI surface: an
-        -- interactive capability needs an MCP twin. Handled by
-        -- handle_set_review_command in src/mcp/handlers/review_command.rs.
+        -- interactive capability needs an MCP twin.
 }
 
 -- == MCP context resources ==
@@ -1726,7 +1664,7 @@ rule SetReviewCommandViaMcp {
 -- returns for that task, whoever the caller is. dispatch://task/self is the
 -- literal word "self", never an id, so the two shapes cannot overlap.
 --
--- Decided in #28716 and deliberately not built:
+-- Deliberately not built:
 --   • the io.modelcontextprotocol/skills extension (skills/list, skills/get):
 --     the MCP client matrix does not list Claude Code as supporting it
 --     (checked 2026-10-07; only mcpc is full, Inspector and others partial).
@@ -1780,9 +1718,9 @@ rule DeclareResourcesCapability {
         -- and resources. The resources capability declares neither
         -- `subscribe` nor `listChanged` — the server sends no resource
         -- notifications (ContextResourcesAreReadOnly). It does NOT declare
-        -- the io.modelcontextprotocol/skills extension; serving skills
-        -- through that extension is a later task (#28716). Until then a
-        -- skill is an ordinary resource with a skill:// URI.
+        -- the io.modelcontextprotocol/skills extension (see "Deliberately not
+        -- built" above), so a skill is an ordinary resource with a skill://
+        -- URI.
         -- initialize stays identity-free, as CreateTaskViaMcp's guidance
         -- describes: the declared capabilities do not depend on the caller.
 }
@@ -2279,9 +2217,8 @@ surface McpTaskTools {
         -- name, current or ended (agents.allium: AgentNameResolvesToTask). A word that
         -- is no agent's name is the same NotFound (-32001) an unknown id gets. Results
         -- still report the numeric id.
-        --
-        -- Task aliases are gone (agents.allium, step A5): an old alias no longer
-        -- resolves, and `update_tasks` has no `alias` field.
+        -- There are no task aliases (agents.allium, A5), and `update_tasks`
+        -- has no `alias` field.
 
     @guarantee TheNextCallIsNamedJustInTime
         -- The instruction to call exit_session next, as the session's final
@@ -2298,10 +2235,10 @@ surface McpTaskTools {
         -- sessions that never wrap up, and repeating an instruction three
         -- times in capitals reads as distrust rather than as information.
         --
-        -- The /wrap-up skill no longer carries a section telling the agent not
-        -- to dispatch the epic's next subtask itself. exit_session owns that
-        -- behaviour and its description says it happens; there is no tool an
-        -- agent could misuse to do it anyway.
+        -- The /wrap-up skill does not tell the agent to leave the epic's
+        -- next subtask alone. exit_session owns that behaviour and its
+        -- description says it happens; there is no tool an agent could
+        -- misuse to do it anyway.
 
     @guarantee WrapUpRefusesUnfinishedWork
         -- Skipping the commit is how agents went idle with work stranded on
@@ -2337,7 +2274,7 @@ surface McpTaskTools {
         -- (no timeout, no wait cap, no outcome memory, no stdin or sccache
         -- handling for it). wrap_up does not check that the command passed
         -- and issues a token whether or not it did: the board trusts the
-        -- agent (task #81924).
+        -- agent.
         --
         -- The command reaches the agent through get_task's "Verify command"
         -- line (GetTaskViaMcp), and the /wrap-up skill has a step that sends

@@ -406,8 +406,8 @@ rule DeletePackageFromBoard {
 -- a tool. Three tools, in the merged style of update_tasks: create_work_package,
 -- list_work_packages and update_work_package (WorkPackageMcpTools).
 --
--- Replies name what they touch (mcp-task-tools.allium: "Replies name what
--- they touch"). Every reply that names a package says
+-- Replies name what they touch (mcp-task-tools.allium:
+-- RepliesNameWhatTheyTouch). Every reply that names a package says
 -- `Work package <id> ("<title>")`: `<package> created in workspace ...`,
 -- `<package> updated (fields)`, `<package> deleted; ...`. An unlink that
 -- touched nothing is listed as `not linked: <task ref>` or

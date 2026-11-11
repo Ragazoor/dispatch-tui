@@ -1124,12 +1124,15 @@ entity Learning {
 
     -- True when this learning is relevant to the given task's dispatch.
     -- task-scoped learnings are excluded from auto-injection; they surface
-    -- via query_learnings on demand (see learnings.allium).
+    -- via query_learnings on demand (see learnings.allium). A repo scope_ref
+    -- covers task.repo_path when the two are equal or the repo lies under it
+    -- at a path separator, a trailing "/" ignored (repo_ref_covers;
+    -- learnings.allium: Scope Model).
     applies_to_dispatch(task):
         status = approved
         and (
             scope = user
-            or (scope = repo and scope_ref = task.repo_path)
+            or (scope = repo and repo_ref_covers(scope_ref, task.repo_path))
             or (scope = epic and task.epic != null and scope_ref = str(task.epic.id))
         )
 

@@ -632,8 +632,8 @@ rule ListEpicsViaMcp {
 }
 
 -- The update_epic reply is "<epic ref> updated (fields)", e.g.
--- `Epic 314 ("Dispatch") updated (title)` (mcp-task-tools.allium: "Replies
--- name what they touch"). When the call changes the title, the reply shows
+-- `Epic 314 ("Dispatch") updated (title)` (mcp-task-tools.allium:
+-- RepliesNameWhatTheyTouch). When the call changes the title, the reply shows
 -- the new one.
 rule UpdateEpicViaMcp {
     when: McpUpdateEpic(epic, title?, description?, status?, plan_path?, sort_order?,
@@ -1973,7 +1973,7 @@ surface EpicWriteReducers {
 }
 
 -- The epic tools of the dispatch MCP server. Replies name what they touch
--- (mcp-task-tools.allium: "Replies name what they touch").
+-- (mcp-task-tools.allium: RepliesNameWhatTheyTouch).
 surface EpicMcpTools {
     facing _: core/McpClient
 
