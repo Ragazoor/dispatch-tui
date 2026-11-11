@@ -1333,16 +1333,6 @@ rule ToggleGroupByRepo {
         -- self-healing is poll-driven and symmetric in both directions.
 }
 
--- The module's epic-write reducers this spec guards, which any store client
--- may call (set_epic_group_by_repo, update_epic).
-surface EpicWriteReducers {
-    facing _: core/StoreClient
-
-    provides:
-        EpicGroupByRepoSetRequested(epic, group_by_repo)
-        EpicUpdateRequested(epic, patch, workspace?, visibility?)
-}
-
 rule SetEpicGroupByRepoIsOneTransaction {
     when: EpicGroupByRepoSetRequested(epic, group_by_repo)
 
@@ -1351,7 +1341,7 @@ rule SetEpicGroupByRepoIsOneTransaction {
     -- epic, runs RegroupEpic (flag on) or FlattenEpic (flag off) in the same
     -- transaction, so a failure never leaves the flag set and the tasks
     -- unmoved.
-    requires: epic.exists
+    requires: exists epic
 
     ensures: EpicPatchAccepted(epic: epic, patch: { group_by_repo: group_by_repo })
     ensures:
@@ -1377,7 +1367,7 @@ rule UpdateEpicIsOneTransaction {
     -- nothing applied. A member who is not the creator sends a title and a
     -- visibility: the visibility is refused and the title is not saved, and the
     -- caller learns the whole update failed.
-    requires: epic.exists
+    requires: exists epic
 
     ensures: EpicPatchAccepted(epic: epic, patch: patch)
     -- A patch that names a feed_command is held to feeds.allium's
@@ -1796,23 +1786,24 @@ rule ExitAllEpics {
 -- Invariants
 ------------------------------------------------------------
 
--- No two feed tasks under one role sub-epic share an external_id. A role
--- sub-epic's home is the role sub-epic itself plus its direct repo-group
--- children, so the identity holds while role routing moves a task between role
--- sub-epics and while repo grouping is switched on or off. The store's feed
--- reducers hold it: the feed builds its existing-task index across the whole
--- home (repo-group children first, the role sub-epic last, so its copy wins)
--- and runs stale deletion over the whole home of every role sub-epic, grouped
--- or not.
+-- No two feed tasks under one role-routed feed share an external_id. The feed
+-- is a reviews_parent root, its three role sub-epics (my_reviews,
+-- team_reviews, bots) and their repo-group children, so the identity holds
+-- while role routing moves a task between role sub-epics and while repo
+-- grouping is switched on or off. The store's feed reducers hold it: the feed
+-- builds one existing-task index across the whole feed (the root, then the
+-- repo-group children, then the role sub-epics, so a role sub-epic's copy
+-- wins) and runs stale deletion over every role sub-epic and its children,
+-- grouped or not.
 --
--- role_home(t) is a black box: t.epic when that epic's feed_role is
--- my_reviews, team_reviews or bots; t.epic.parent when t.epic is a repo-group
--- sub-epic of such an epic; otherwise null.
-invariant FeedTaskIdentityPerRoleSubEpic {
+-- routed_feed_root(t) is a black box: the reviews_parent epic whose role-routed
+-- feed (as above) holds t, or null when no such feed holds it.
+invariant FeedTaskIdentityPerRoutedFeed {
     for a in core/Tasks:
         for b in core/Tasks:
             a != b and a.external_id != null
-                and role_home(a) != null and role_home(a) = role_home(b)
+                and routed_feed_root(a) != null
+                and routed_feed_root(a) = routed_feed_root(b)
                 implies a.external_id != b.external_id
 }
 
@@ -1945,12 +1936,12 @@ surface EpicBoard {
     facing _: core/Operator
 
     provides:
-        -- The new-epic form (title, then description), finished. Inside an
+        -- [E], the new-epic form (title, then description), finished. Inside an
         -- epic view the new epic is a sub-epic of the epic showing (CreateEpic).
         CreateEpic(title, description, parent?)
         -- [e] on an epic card (EditEpic).
         EditEpic(epic)
-        -- The move keys on an epic card (MoveEpicForward, MoveEpicBackward).
+        -- [L] and [H] on an epic card (MoveEpicForward, MoveEpicBackward).
         MoveEpicStatus(epic, direction)
         -- [x] on one epic card (tasks.allium: DeleteKeyRouting), then y on
         -- its prompt (ConfirmDeleteEpic, DeleteEpic).
@@ -1969,6 +1960,16 @@ surface EpicBoard {
         -- (ExitEpicOneLevel, ExitAllEpics).
         UserExitsEpicView(view)
         UserExitsAllEpicViews(view)
+}
+
+-- The module's epic-write reducers this spec guards, which any store client
+-- may call (set_epic_group_by_repo, update_epic).
+surface EpicWriteReducers {
+    facing _: core/StoreClient
+
+    provides:
+        EpicGroupByRepoSetRequested(epic, group_by_repo)
+        EpicUpdateRequested(epic, patch, workspace?, visibility?)
 }
 
 -- The epic tools of the dispatch MCP server. Replies name what they touch
@@ -1994,9 +1995,8 @@ surface EpicMcpTools {
                              cve_command?, cve_interval_secs?)
 
     @guidance
-        -- The caller is an agent or a session (core/McpClient). Every one of
-        -- these tools is open to every client; what a client may see or
-        -- change is the store's to decide (workspaces.allium).
+        -- The caller is an agent or a session (core/McpClient). What a client
+        -- may see or change is the store's to decide (workspaces.allium).
 }
 
 surface AutoDispatchFailureIndicator {

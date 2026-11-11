@@ -556,8 +556,9 @@ surface WorkPackageBoard {
         -- in a package view (ExitPackage).
         UserEntersPackage(package)
         UserExitsPackageView(view)
-        -- Space or Enter on a linked epic card in a package view
-        -- (EnterEpicFromPackage).
+        -- Space on a linked epic card in a package view
+        -- (EnterEpicFromPackage); Enter there is epics.allium's
+        -- JumpToDeepestEpic, with the trail starting at the package view.
         UserEntersEpicFromPackage(epic, package)
         -- J/K on a package card (ReorderPackage).
         ReorderPackage(package, direction)

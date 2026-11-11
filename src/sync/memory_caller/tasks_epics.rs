@@ -200,6 +200,9 @@ impl MemoryReducerCaller {
         tables: &Tables,
         doomed: &std::collections::HashSet<i64>,
     ) -> Option<i64> {
+        // `tasks` is ordered by id, so this is the LOWEST-id undone task, as
+        // the module's `first_undone_task_in` names (epics.allium:
+        // DeleteEpicRefused).
         tables
             .tasks
             .values()
