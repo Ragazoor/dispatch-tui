@@ -134,8 +134,6 @@ Four MCP tools manage the knowledge base from within an agent session:
 
 **Scope auto-derivation:** omit `scope_ref` — the MCP handler derives it from the task's repo or epic automatically. Pass `scope_ref` explicitly only to override.
 
-**Task-scoped learnings** are not auto-injected into dispatch prompts. Use `query_learnings` with `tag_filter` to retrieve them when needed.
-
 **Scopes at retrieval time**: a `query_learnings` call for a task returns the union of all approved learnings where:
 - `scope = user` (always included)
 - `scope = repo` and `scope_ref` matches the task's repo path

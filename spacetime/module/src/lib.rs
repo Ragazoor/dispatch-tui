@@ -343,4 +343,9 @@ pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
     if previous < REPO_PATH_VERIFY_RULES_VERSION {
         unify_repo_verify_commands(ctx);
     }
+    // Once, for learnings recorded under the removed task scope
+    // (`learnings.allium: Scope Model`).
+    if previous < TASK_SCOPE_REMOVED_RULES_VERSION {
+        retire_task_scoped_learnings(ctx);
+    }
 }

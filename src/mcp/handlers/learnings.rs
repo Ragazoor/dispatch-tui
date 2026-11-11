@@ -10,7 +10,7 @@ use crate::store::LearningFilter;
 
 use super::types::{
     deserialize_flexible_id, deserialize_optional_flexible_i64, parse_args,
-    service_err_to_response, JsonRpcResponse,
+    service_err_to_response, JsonRpcResponse, INVALID_PARAMS,
 };
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,6 @@ fn resolve_scope_ref(
                 "scope=epic requires the task to belong to an epic".to_string(),
             )),
         },
-        LearningScope::Task => Ok(Some(task.id.0.to_string())),
     }
 }
 
@@ -149,6 +148,16 @@ pub(super) async fn handle_record_learning(
     _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
+    // The task scope is gone (learnings.allium: Scope Model). Say so, and say
+    // where the learning belongs, instead of serde's bare "unknown variant".
+    if args.get("scope").and_then(Value::as_str) == Some("task") {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            "scope=task is not supported; record the learning with scope=repo or scope=epic"
+                .to_string(),
+        );
+    }
     let parsed = match parse_args::<RecordLearningArgs>(&id, args) {
         Ok(a) => a,
         Err(e) => return e,
@@ -199,11 +208,10 @@ fn recorded_text(
     scope: LearningScope,
     similar: &[crate::models::Learning],
 ) -> String {
-    let mut text = format!("Learning {learning_id} recorded and active.");
-    // A task-scoped learning is never injected (learnings.allium: Scope Model).
-    if scope != LearningScope::Task {
-        text.push_str(" It will be injected into future dispatch prompts for matching tasks.");
-    }
+    let mut text = format!(
+        "Learning {learning_id} recorded and active. \
+         It will be injected into future dispatch prompts for matching tasks."
+    );
     if similar.is_empty() {
         return text;
     }
@@ -364,35 +372,5 @@ mod scope_ref_tests {
         assert_eq!(norm("~/a/repo/", Some("/home/u")), "/home/u/a/repo");
         assert_eq!(norm("/a/repo", Some("/home/u")), "/a/repo");
         assert_eq!(norm("/", Some("/home/u")), "/");
-    }
-}
-
-#[cfg(test)]
-mod recorded_text_tests {
-    use super::recorded_text;
-    use crate::models::{LearningId, LearningKind, LearningScope};
-
-    /// learnings.allium Scope Model: a task-scoped learning is never injected,
-    /// so its reply must not promise injection; every other scope's does.
-    #[test]
-    fn only_a_non_task_scope_promises_dispatch_injection() {
-        let task = recorded_text(
-            LearningId(1),
-            LearningKind::Pitfall,
-            LearningScope::Task,
-            &[],
-        );
-        assert!(task.contains("recorded and active"), "{task}");
-        assert!(!task.contains("injected"), "{task}");
-        let repo = recorded_text(
-            LearningId(1),
-            LearningKind::Pitfall,
-            LearningScope::Repo,
-            &[],
-        );
-        assert!(
-            repo.contains("injected into future dispatch prompts"),
-            "{repo}"
-        );
     }
 }

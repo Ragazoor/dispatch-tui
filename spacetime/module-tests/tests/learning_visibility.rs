@@ -143,24 +143,13 @@ fn a_learning_on_an_epic_the_caller_cannot_see_is_refused() {
 }
 
 #[test]
-fn a_task_scoped_learning_follows_its_tasks_epic() {
+fn a_task_scoped_learning_is_refused() {
     let (store, a, _b) = world();
     let epic = epic_in(&store, "alice", a);
     let task = store.create("alice", epic_task("t", epic, "backlog"));
-    let l = record(&store, "alice", row("task", Some(task.to_string()), None)).expect("record");
-    assert_eq!(l.workspace_id, a);
-    assert!(can_see(&store, "bob", l.id));
-    assert!(!can_see(&store, "carol", l.id));
-}
-
-#[test]
-fn a_task_scoped_learning_on_a_main_board_task_is_private_to_its_author() {
-    let (store, _a, _b) = world();
-    let task = store.create("alice", user_task("mine", "alice"));
-    let l = record(&store, "alice", row("task", Some(task.to_string()), None)).expect("record");
-    assert_eq!(l.workspace_id, 0);
-    assert!(can_see(&store, "alice", l.id));
-    assert!(!can_see(&store, "bob", l.id));
+    let why = record(&store, "alice", row("task", Some(task.to_string()), None))
+        .expect_err("scope=task is gone");
+    assert!(why.contains("scope=repo or scope=epic"), "{why}");
 }
 
 #[test]

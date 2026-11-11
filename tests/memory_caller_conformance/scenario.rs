@@ -1031,6 +1031,22 @@ fn memory_caller_matches_the_real_reducers() {
             "scope-ref validation"
         );
 
+        // `RecordLearningViaMcp`: the task scope is gone, so both stores refuse
+        // it, whatever scope_ref comes with it.
+        let task_scope = || bindings::Learning {
+            scope: "task".into(),
+            scope_ref: Some("1".into()),
+            ..blank_learning()
+        };
+        assert!(
+            real.create_learning(task_scope()).await.is_err(),
+            "the real store must refuse scope=task"
+        );
+        assert!(
+            mem.create_learning(task_scope()).await.is_err(),
+            "the memory store must refuse scope=task"
+        );
+
         let revise = || bindings::LearningPatch {
             status: None,
             summary: Some("revised".into()),

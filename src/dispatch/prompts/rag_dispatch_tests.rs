@@ -82,35 +82,6 @@ async fn dispatch_injection_includes_procedural_learnings_without_prioritizing_t
 }
 
 #[tokio::test]
-async fn dispatch_injection_excludes_task_scoped_learnings() {
-    let db = seed_db().await;
-    let task = make_task(&db).await;
-    let emb = fake_emb_bytes();
-
-    // Task-scoped learning — should be excluded by list_all_approved_non_task_learnings
-    db.create_learning(CreateLearningRow {
-        kind: LearningKind::Convention,
-        summary: "task-scoped learning",
-        detail: None,
-        scope: LearningScope::Task,
-        scope_ref: Some(&task.id.0.to_string()),
-        tags: &[],
-        source_task_id: Some(task.id),
-        embedding: Some(&emb),
-    })
-    .await
-    .unwrap();
-
-    let emb_svc = EmbeddingService::new_test();
-    let results = list_learnings_for_dispatch_rag(&*db, &task, &emb_svc, 0.0).await;
-
-    assert!(
-        results.iter().all(|l| l.scope != LearningScope::Task),
-        "task-scoped learnings must not appear in dispatch injection"
-    );
-}
-
-#[tokio::test]
 async fn dispatch_injection_respects_cap_of_5() {
     let db = seed_db().await;
     let task = make_task(&db).await;

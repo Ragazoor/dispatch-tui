@@ -930,11 +930,11 @@ pub trait LearningStore: Send + Sync {
 
     async fn delete_learning(&self, id: LearningId) -> Result<bool>;
 
-    /// Returns all approved, non-task-scoped learnings that have embeddings stored,
+    /// Returns all approved learnings that have embeddings stored,
     /// with their raw embedding bytes. Used by the RAG pipeline.
-    async fn list_all_approved_non_task_learnings(&self) -> Result<Vec<(Learning, Vec<u8>)>>;
+    async fn list_all_approved_learnings_with_embedding(&self) -> Result<Vec<(Learning, Vec<u8>)>>;
 
-    /// Returns approved, non-task-scoped learnings that have no embedding stored yet.
+    /// Returns approved learnings that have no embedding stored yet.
     /// Used by the backfill job to determine which learnings need to be embedded.
     async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>>;
 

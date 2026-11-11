@@ -55,27 +55,31 @@ use "./store-split.allium" as split
 -- family of repos that share a parent directory, without the user scope,
 -- which reaches every repo.
 --
--- task-scoped learnings record task-specific outcomes. They are never
--- injected into a dispatch prompt and never returned by query_learnings;
--- they are listed and read as context resources (mcp-task-tools.allium:
--- McpContextResources).
+-- There is no task scope. A learning scoped to one task would never reach a
+-- dispatch prompt or a query_learnings answer, not even for its own task: a
+-- re-dispatch or phoenix copy gets a new task id. record_learning refuses
+-- scope=task and points the agent to repo or epic (RecordLearningViaMcp).
+-- Rows recorded under the old scope were archived and re-scoped to repo once
+-- (the store's one-time retire step, run on the first connection after the
+-- module that dropped the scope is published).
+-- A row whose task sat under a private epic (anywhere up the chain) loses its
+-- workspace, so it stays with its author as it did before; one with no author
+-- keeps its workspace, as none would show it to everyone.
 --
 -- When record_learning omits scope_ref, the scope supplies it:
 --   scope=user    → null
 --   scope=repo    → task.repo_path
 --   scope=epic    → str(task.epic_id), refused when the task has no epic
---   scope=task    → str(task.id)
 --
 -- Who sees a learning (workspaces.allium: LearningVisibility, D8). The store
 -- stamps author and workspace on every new learning; a client cannot choose
 -- them.
 --   scope=user    → no workspace; only the author sees it.
 --   scope=epic    → the epic's workspace.
---   scope=task    → the task's epic's workspace; none for a main-board task.
 --   scope=repo    → the workspace of the recording task's epic; none when the
 --                   task is on the main board or there is no task.
 -- A learning with no workspace is private to its author. A learning with a
--- workspace is seen by that workspace's members, and an epic- or task-scoped
+-- workspace is seen by that workspace's members, and an epic-scoped
 -- one only while its item is also visible to the reader. A learning with no
 -- author and no workspace is visible to everyone.
 --
@@ -221,7 +225,7 @@ rule RecordLearningViaMcp {
 
     requires: summary != ""
     requires: scope = user implies scope_ref = null
-    requires: scope in {repo, epic, task} implies scope_ref != null
+    requires: scope in {repo, epic} implies scope_ref != null
     requires: not references_internal_code(summary) and not references_internal_code(detail)
     requires: kind = procedural implies (detail != null and detail != "")
 
@@ -240,6 +244,10 @@ rule RecordLearningViaMcp {
     )
 
     @guidance
+        -- scope is one of user, repo, epic (core.allium: LearningScope).
+        -- scope=task is refused: "scope=task is not supported; record the
+        -- learning with scope=repo or scope=epic". The store's
+        -- validate_learning_scope refuses it too, so no write path stores it.
         -- default_scope_ref is the table in Scope Model. An explicit repo
         -- scope_ref is stored with `~` expanded and no trailing "/". A blank
         -- or whitespace-only summary counts as empty.
@@ -307,8 +315,7 @@ rule QueryLearningsViaMcp {
     -- The ranked entries the call returns: the scope union for task, ranked
     -- as Ranking says against query, or against the task's title and
     -- description when query is omitted; at most limit of them (default and
-    -- cap 50; a limit below 1 counts as 1). task-scoped entries are never
-    -- candidates.
+    -- cap 50; a limit below 1 counts as 1).
     let returned = ranked_learnings(task, query, tag_filter, limit)
 
     ensures:

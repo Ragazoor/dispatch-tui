@@ -438,7 +438,10 @@ async fn create_learning_with_embedding_stores_it() {
     db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
         .await
         .unwrap();
-    let results = db.list_all_approved_non_task_learnings().await.unwrap();
+    let results = db
+        .list_all_approved_learnings_with_embedding()
+        .await
+        .unwrap();
     let found = results.iter().find(|(l, _)| l.id == id).unwrap();
     assert_eq!(found.1.len(), 1536);
 }

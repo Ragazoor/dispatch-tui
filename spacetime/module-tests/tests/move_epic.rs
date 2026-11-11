@@ -179,7 +179,6 @@ fn learnings_of_the_tree_follow_and_repo_learnings_stay() {
     };
     for row in [
         learning("epic", Some(sub.to_string()), None),
-        learning("task", Some(task.to_string()), None),
         learning("repo", Some("r".into()), Some(task)),
     ] {
         store
@@ -197,7 +196,6 @@ fn learnings_of_the_tree_follow_and_repo_learnings_stay() {
             .workspace_id
     };
     assert_eq!(ws("epic"), b);
-    assert_eq!(ws("task"), b);
     assert_eq!(ws("repo"), a);
 }
 

@@ -411,20 +411,20 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
         }
 
         wait_for(&rows, |rows| {
-            rows.approved_non_task_learnings_with_embedding().len() == 2
+            rows.approved_learnings_with_embedding().len() == 2
         })
         .await
         .unwrap_or_else(|_| {
             panic!(
                 "both learnings must arrive, got {}",
-                rows.approved_non_task_learnings_with_embedding().len()
+                rows.approved_learnings_with_embedding().len()
             )
         });
 
         // Host B's read: the RAG candidate pool, sourced entirely from the
-        // subscription — this is `LearningStore::list_all_approved_non_task_learnings`'s
-        // backing, `SharedRows::approved_non_task_learnings_with_embedding`.
-        let candidates = rows.approved_non_task_learnings_with_embedding();
+        // subscription — this is `LearningStore::list_all_approved_learnings_with_embedding`'s
+        // backing, `SharedRows::approved_learnings_with_embedding`.
+        let candidates = rows.approved_learnings_with_embedding();
 
         let decoded: Vec<(dispatch_tui::models::Learning, Vec<f32>)> = candidates
             .into_iter()

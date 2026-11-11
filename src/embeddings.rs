@@ -200,7 +200,6 @@ pub fn scope_multiplier_for(
                 .then_some(0.20)
         }
         LearningScope::User => Some(0.10),
-        LearningScope::Task => Some(0.0),
     }
 }
 

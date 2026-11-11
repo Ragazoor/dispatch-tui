@@ -81,7 +81,7 @@ pub fn workspace_has_admin(r: &impl StoreReads, workspace_id: i64, who: &str) ->
 /// `Epic.private_holder`: the creator of the nearest private epic at or above
 /// `epic`, or `None` when the epic is public all the way up. `Some("")` is a
 /// private epic with no creator, which nobody holds.
-fn private_holder(r: &impl StoreReads, epic: &Epic) -> Option<String> {
+pub(crate) fn private_holder(r: &impl StoreReads, epic: &Epic) -> Option<String> {
     let mut current = epic.clone();
     for _ in 0..PRIVATE_WALK_LIMIT {
         if current.visibility == VISIBILITY_PRIVATE {
@@ -648,7 +648,6 @@ pub(crate) fn move_epic_row(
         let id = l.scope_ref.as_deref().and_then(|r| r.parse::<i64>().ok());
         match (l.scope.as_str(), id) {
             ("epic", Some(id)) => tree.contains(&id),
-            ("task", Some(id)) => task_ids.contains(&id),
             _ => false,
         }
     };
@@ -854,7 +853,6 @@ pub fn learning_seen_by(r: &impl StoreReads, learning: &Learning, caller: &str) 
         .and_then(|r| r.parse::<i64>().ok());
     let item_seen = match (learning.scope.as_str(), item_id) {
         ("epic", Some(id)) => r.epic(id).is_none_or(|e| epic_visible_to(r, &e, caller)),
-        ("task", Some(id)) => r.task(id).is_none_or(|t| task_visible_to(r, &t, caller)),
         _ => true,
     };
     item_seen
@@ -880,9 +878,6 @@ pub(crate) fn learning_workspace(ctx: &ReducerContext, row: &Learning, caller: &
     };
     match row.scope.as_str() {
         "epic" => id_of(&row.scope_ref).map_or(0, epic_workspace),
-        "task" => id_of(&row.scope_ref)
-            .and_then(|id| ctx.db.tasks().id().find(id))
-            .map_or(0, |t| epic_workspace(t.epic_id)),
         "repo" => row
             .source_task_id
             .and_then(|id| ctx.db.tasks().id().find(id))

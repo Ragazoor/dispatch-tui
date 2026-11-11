@@ -189,9 +189,7 @@ fn validate_create_params(params: &CreateLearningParams) -> Result<(), ServiceEr
                 "scope_ref must be null for user-scoped learnings".into(),
             ));
         }
-        LearningScope::Repo | LearningScope::Epic | LearningScope::Task
-            if params.scope_ref.is_none() =>
-        {
+        LearningScope::Repo | LearningScope::Epic if params.scope_ref.is_none() => {
             return Err(ServiceError::Validation(
                 "scope_ref is required for non-user-scoped learnings".into(),
             ));
@@ -357,7 +355,7 @@ impl LearningService {
             .await
             .map_err(ServiceError::from)?;
 
-        let candidates_raw = self.db.list_all_approved_non_task_learnings().await?;
+        let candidates_raw = self.db.list_all_approved_learnings_with_embedding().await?;
         let candidates = deserialize_candidate_rows(candidates_raw);
 
         let epic_id_str = task.epic_id.map(|e| e.0.to_string());

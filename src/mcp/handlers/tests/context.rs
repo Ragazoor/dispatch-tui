@@ -682,21 +682,11 @@ async fn listing_carries_every_approved_learning_whatever_its_scope_and_no_other
         St::Approved,
     )
     .await;
-    let other_task = new_learning(
-        &state,
-        "Other task scoped",
-        None,
-        S::Task,
-        Some("99999"),
-        &[],
-        St::Approved,
-    )
-    .await;
     let archived = new_learning(&state, "Archived", None, S::User, None, &[], St::Archived).await;
     let rejected = new_learning(&state, "Rejected", None, S::User, None, &[], St::Rejected).await;
 
     let listed = uris(&list_all(&state, CallerIdentity::Task(task)).await);
-    for id in [user, other_repo, other_task] {
+    for id in [user, other_repo] {
         assert!(
             listed.contains(&learning_uri(id)),
             "approved {id:?} must be listed"

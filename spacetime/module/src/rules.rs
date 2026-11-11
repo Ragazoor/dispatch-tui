@@ -57,6 +57,9 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 48: the learning task scope is gone — `create_learning` refuses
+///    `scope=task` (`validate_learning_scope`) and a store from an older module
+///    has its task-scoped learnings archived once (`retire_task_scoped_learnings`).
 /// 47: a hand move into backlog or done releases a window the board did not
 ///    see — the store clears the current agent's window and writes a `close`
 ///    row naming it, so its host kills it
@@ -250,7 +253,13 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 47;
+pub const RULES_VERSION: i64 = 48;
+
+/// The rules version that removed the learning task scope: a store stamped
+/// with anything older has its task-scoped learnings archived once, on its
+/// first connection (`learning.rs: retire_task_scoped_learnings`). Never
+/// moves, like the others here.
+pub const TASK_SCOPE_REMOVED_RULES_VERSION: i64 = 48;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first

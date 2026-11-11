@@ -1039,3 +1039,41 @@ async fn record_learning_tool_description_defers_every_authoring_rule_to_the_ski
         );
     }
 }
+
+/// learnings.allium RecordLearningViaMcp: scope=task is refused, the refusal
+/// points to repo or epic, and nothing is stored.
+#[tokio::test]
+async fn record_learning_refuses_the_removed_task_scope() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "record_learning",
+            "arguments": {
+                "task_id": task_id.0,
+                "kind": "convention",
+                "summary": "Only this task cares",
+                "scope": "task"
+            }
+        })),
+    )
+    .await;
+    let is_error = resp
+        .result
+        .as_ref()
+        .map(|r| r["isError"].clone())
+        .expect("tools/call wraps the refusal as a result");
+    assert_eq!(is_error, json!(true), "scope=task must be refused");
+    let message = extract_response_text(&resp);
+    assert!(message.contains("scope=repo or scope=epic"), "{message}");
+
+    let learnings = state
+        .db
+        .list_learnings(crate::store::LearningFilter::default())
+        .await
+        .unwrap();
+    assert!(learnings.is_empty());
+}

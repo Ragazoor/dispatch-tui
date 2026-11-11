@@ -408,8 +408,11 @@ mod backfill_embeddings {
         // Both learnings should now have non-empty embeddings stored.
         let l1 = db.get_learning(id1).await.unwrap().unwrap();
         let l2 = db.get_learning(id2).await.unwrap().unwrap();
-        // Verify via list_all_approved_non_task_learnings which returns embeddings
-        let all = db.list_all_approved_non_task_learnings().await.unwrap();
+        // Verify via list_all_approved_learnings_with_embedding which returns embeddings
+        let all = db
+            .list_all_approved_learnings_with_embedding()
+            .await
+            .unwrap();
         let emb1 = all.iter().find(|(l, _)| l.id == l1.id).map(|(_, e)| e);
         let emb2 = all.iter().find(|(l, _)| l.id == l2.id).map(|(_, e)| e);
         assert!(

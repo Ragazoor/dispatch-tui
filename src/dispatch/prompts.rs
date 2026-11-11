@@ -1166,7 +1166,7 @@ pub use crate::embeddings::RAG_SIMILARITY_THRESHOLD as DISPATCH_RAG_THRESHOLD;
 ///
 /// Steps:
 /// 1. Embeds the task title + description to form a query vector.
-/// 2. Fetches all approved non-task-scoped learnings with embeddings from the DB.
+/// 2. Fetches all approved learnings with embeddings from the DB.
 /// 3. Ranks them by cosine similarity + scope/upvote boost (via `rag_rank_learnings`).
 /// 4. Returns at most `DISPATCH_INJECTION_CAP` results; all go into the
 ///    validated-knowledge block regardless of `LearningKind`.
@@ -1192,7 +1192,7 @@ pub async fn list_learnings_for_dispatch_rag(
         }
     };
 
-    let mut rows = match db.list_all_approved_non_task_learnings().await {
+    let mut rows = match db.list_all_approved_learnings_with_embedding().await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(

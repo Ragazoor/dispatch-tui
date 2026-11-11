@@ -537,7 +537,7 @@ dispatch_task for those), and when its agent is already attached (use SendMessag
                 },
                 "scope": {
                     "type": "string",
-                    "description": "Scope this learning applies to: user (global), repo, epic, or task",
+                    "description": "Scope this learning applies to: user (global), repo, or epic",
                     "enum": crate::models::LearningScope::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>()
                 },
                 "detail": {
@@ -561,7 +561,7 @@ dispatch_task for those), and when its agent is already attached (use SendMessag
         "Query the knowledge base by semantic similarity to your task's context. Results are \
 ranked by embedding similarity plus a scope and upvote boost, and entries below the similarity \
 threshold are dropped — so an empty result means nothing relevant was found, not that the store is \
-empty. Task-scoped entries are excluded; the entries already injected into your prompt are not, so \
+empty. The entries already injected into your prompt are not, so \
 expect overlap with those. Call it when something is unclear, before guessing or asking.",
         {
             "type": "object",

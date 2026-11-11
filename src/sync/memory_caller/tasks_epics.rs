@@ -629,18 +629,8 @@ impl MemoryReducerCaller {
             _ => false,
         };
         if leaves_workspace {
-            // Mirrors the module: the task's links and task-scoped learnings
-            // were the old workspace's.
+            // Mirrors the module: the task's links were the old workspace's.
             self.delete_work_package_links_to(&mut tables, module::WORK_PACKAGE_ITEM_TASK, id.0);
-            let task_ref = id.0.to_string();
-            self.update_matching_learnings(
-                &mut tables,
-                |l| l.scope == "task" && l.scope_ref.as_deref() == Some(task_ref.as_str()),
-                |row| module::Learning {
-                    workspace_id: joined_workspace.unwrap_or(0),
-                    ..row
-                },
-            );
         }
         self.recalculate_epic_chain(&mut tables, was_in);
         self.recalculate_epic_chain(&mut tables, epic_id);

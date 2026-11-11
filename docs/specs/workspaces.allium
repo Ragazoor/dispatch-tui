@@ -59,8 +59,8 @@
 --   D7. People have a display name. The directory of identities and display
 --       names is readable by every connected client, because admins must
 --       find people by name to add them.
---   D8. Learnings belong to a workspace: an epic- or task-scoped learning to
---       its item's workspace, a repo-scoped learning to the workspace it was
+--   D8. Learnings belong to a workspace: an epic-scoped learning to
+--       its epic's workspace, a repo-scoped learning to the workspace it was
 --       recorded in. A user-scoped learning is private to its author.
 --   D9. Settings are host-scoped (core.allium: Setting); a host's settings
 --       are visible only to the host's owner.
@@ -636,7 +636,7 @@ rule MoveEpicToWorkspace {
         for node in epic.subtree:
             node.workspace = destination
         for learning in Learnings
-                where learning.scope in {epic, task}
+                where learning.scope = epic
                   and learning.item_in(epic.subtree):
             learning.workspace = destination
         for link in WorkPackageLinks
@@ -730,17 +730,16 @@ rule TaskMovesStayInTheWorkspace {
         -- workspace, so it may join any epic the caller sees
         -- (TaskEntersAnEpicTheCallerCanSee).
         -- Only the store itself can still move a task across workspaces; it
-        -- drops the task's package links and re-homes its task-scoped
-        -- learnings (LinkedItemsShareThePackagesWorkspace, D8), in
-        -- move_task_row.
+        -- drops the task's package links
+        -- (LinkedItemsShareThePackagesWorkspace, D8), in move_task_row.
         -- A detach is also refused while a person other than the caller's
         -- own hosts hold a current agent or an open request on the task: the
         -- detach would hide the task from the host that is running it (the
         -- store refuses rather than serve a hosted task past sight). Refusal: "task N: another person's
         -- host is running it; detach it once that agent has ended".
         -- Module: task_detach_strands_a_host (shared with MemoryReducerCaller).
-        -- A detach also leaves the workspace for the package links and the
-        -- task-scoped learnings, as a cross-workspace move does.
+        -- A detach also leaves the workspace for the package links, as a
+        -- cross-workspace move does (A8).
         -- Refusals: "task N: a task stays in its workspace; it cannot move
         -- into another workspace", and for a detach by someone with no
         -- authority "task N: only its creator or an admin may detach it from
@@ -975,7 +974,7 @@ rule LearningVisibility {
         learning.author = recorder
         if learning.scope = user:
             learning.workspace = null
-        else if learning.scope = epic or learning.scope = task:
+        else if learning.scope = epic:
             learning.workspace = scope_item(learning).epic_workspace
         else:
             learning.workspace = recording_workspace(recorder)
@@ -983,7 +982,7 @@ rule LearningVisibility {
     @guidance
         -- D8. The store stamps author (the recorder's identity) and workspace
         -- itself; a client cannot choose either. A learning with a workspace
-        -- is seen by that workspace's members, and an epic- or task-scoped
+        -- is seen by that workspace's members, and an epic-scoped
         -- one also only while its item is visible to the reader. A learning
         -- with no workspace is seen only by its author: that is every
         -- user-scoped learning, and every other learning whose item or
@@ -991,9 +990,8 @@ rule LearningVisibility {
         -- recording_workspace is the workspace of the recording agent's
         -- task's epic. A repo-scoped learning recorded from a main-board
         -- task, or by a person with no task, has none, so it is private to
-        -- its author like the user board it came from (there is no personal
-        -- workspace, D2). The
-        -- same holds for a task-scoped learning on a main-board task.
+        -- its author like the user board it came from (resolved with the
+        -- user, task #98523; there is no personal workspace, D2).
         -- The workspace follows the item afterwards: an epic tree moved
         -- (MoveEpicToWorkspace), an epic-scoped learning re-scoped to another epic
         -- (rescope_epic_learnings; learnings.allium:

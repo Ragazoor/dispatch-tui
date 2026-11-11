@@ -134,10 +134,74 @@ pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String
 /// `spacetime-memory-store.allium`'s `ReducerConformance` `@guidance`.
 pub fn validate_learning_scope(scope: &str, scope_ref: &Option<String>) -> Result<(), String> {
     match (scope, scope_ref) {
+        // `learnings.allium: RecordLearningViaMcp`. The scope is gone; every
+        // write path comes through here, so none stores it.
+        ("task", _) => Err(
+            "scope=task is not supported; record the learning with scope=repo or scope=epic"
+                .to_string(),
+        ),
         ("user", Some(_)) => Err("a user-scoped learning must not carry a scope_ref".to_string()),
         ("user", None) => Ok(()),
         (_, None) => Err(format!("a {scope}-scoped learning needs a scope_ref")),
         (_, Some(_)) => Ok(()),
+    }
+}
+
+/// What the one-time retire step makes of a learning recorded under the removed
+/// task scope: archived, so no retrieval returns it, and re-scoped to repo
+/// (the recording task's repo, `""` when that task is gone) so the row stays a
+/// scope every reader parses. `None` for any other row.
+///
+/// A task-scoped learning was seen only while its task was. A repo scope has no
+/// such check, so a row whose task sat in a non-public epic (`private_item`)
+/// loses its workspace and stays with its author, as it stayed hidden before.
+/// A row with no author (it predates workspaces) keeps its workspace instead:
+/// workspace 0 with no author is seen by everyone, which is wider still.
+/// Pure, so the tests can pin it.
+pub fn retired_task_scoped_learning(
+    row: &Learning,
+    source_repo: Option<String>,
+    private_item: bool,
+) -> Option<Learning> {
+    (row.scope == "task").then(|| Learning {
+        scope: "repo".to_string(),
+        scope_ref: Some(source_repo.unwrap_or_default()),
+        status: "archived".to_string(),
+        workspace_id: if private_item && !row.author.is_empty() {
+            0
+        } else {
+            row.workspace_id
+        },
+        ..row.clone()
+    })
+}
+
+/// `learnings.allium: Scope Model`: archive every learning recorded under the
+/// removed task scope. Run once by `stamp_rules_version_on_connect`
+/// (`TASK_SCOPE_REMOVED_RULES_VERSION`).
+pub fn retire_task_scoped_learnings(ctx: &ReducerContext) {
+    let rows: Vec<Learning> = ctx
+        .db
+        .learnings()
+        .iter()
+        .filter(|l| l.scope == "task")
+        .collect();
+    for row in rows {
+        // The task the scope named, as the old visibility check read it.
+        let task = row
+            .scope_ref
+            .as_deref()
+            .and_then(|r| r.parse::<i64>().ok())
+            .and_then(|id| ctx.db.tasks().id().find(id));
+        let private_item = task
+            .as_ref()
+            .and_then(|t| ctx.db.epics().id().find(t.epic_id))
+            // The real predicate: a private epic anywhere up the chain.
+            .is_some_and(|e| crate::visibility::private_holder(ctx, &e).is_some());
+        let repo = task.map(|t| t.repo_path);
+        if let Some(retired) = retired_task_scoped_learning(&row, repo, private_item) {
+            ctx.db.learnings().id().update(retired);
+        }
     }
 }
 

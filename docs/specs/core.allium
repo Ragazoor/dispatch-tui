@@ -294,8 +294,7 @@ enum NotificationKind {
 
 -- LearningScope identifies what context a learning applies to.
 -- Dispatch retrieval unions: user + repo:<this_repo> + epic:<this_epic> (if set).
--- task scope carries task-specific outcomes, retrieved on demand.
-enum LearningScope { user | repo | epic | task }
+enum LearningScope { user | repo | epic }
 
 -- LearningKind categorises what was learned. kind does not affect retrieval or
 -- rendering: every retrieved entry, procedural included, goes into the single
@@ -1096,7 +1095,6 @@ entity Learning {
     scope_ref: String?       -- qualifies the scope:
                              --   scope=repo    → repo_path of the target repository
                              --   scope=epic    → string form of epic_id
-                             --   scope=task    → string form of task_id
                              --   scope=user    → null (no qualifier needed)
     tags: Set<String>        -- free-form labels for filtering (e.g. "rust", "testing")
     status: LearningStatus
@@ -1123,9 +1121,7 @@ entity Learning {
     -- rows are excluded from retrieval.
 
     -- True when this learning is relevant to the given task's dispatch.
-    -- task-scoped learnings are excluded from auto-injection; they surface
-    -- via query_learnings on demand (see learnings.allium). A repo scope_ref
-    -- covers task.repo_path when the two are equal or the repo lies under it
+    -- A repo scope_ref covers task.repo_path when the two are equal or the repo lies under it
     -- at a path separator, a trailing "/" ignored (repo_ref_covers;
     -- learnings.allium: Scope Model).
     applies_to_dispatch(task):

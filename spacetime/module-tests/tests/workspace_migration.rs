@@ -96,7 +96,7 @@ fn old_store() -> Store {
     store
         .call_as_scheduler(|ctx| subscribe_to_epic(ctx, identity_of("frank"), root))
         .expect("subscribe");
-    for scope in ["repo", "epic", "task", "user"] {
+    for scope in ["repo", "epic", "user"] {
         store
             .call("operator", |ctx| create_learning(ctx, learning(scope)))
             .expect("learning");

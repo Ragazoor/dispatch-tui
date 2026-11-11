@@ -356,3 +356,76 @@ fn migration_gate_versions_never_move() {
     assert_eq!(WORKSPACES_RULES_VERSION, 17);
     assert_eq!(REPO_PATH_VERIFY_RULES_VERSION, 43);
 }
+
+// -- The removed learning task scope (`learnings.allium: Scope Model`) --------
+
+#[test]
+fn a_task_scoped_learning_is_refused_pointing_to_repo_or_epic() {
+    let why = validate_learning_scope("task", &Some("7".to_string())).unwrap_err();
+    assert!(why.contains("scope=repo or scope=epic"), "{why}");
+    assert!(validate_learning_scope("task", &None).is_err());
+}
+
+#[test]
+fn the_other_scopes_still_validate() {
+    assert!(validate_learning_scope("user", &None).is_ok());
+    assert!(validate_learning_scope("repo", &Some("/r".to_string())).is_ok());
+    assert!(validate_learning_scope("epic", &Some("3".to_string())).is_ok());
+    assert!(validate_learning_scope("repo", &None).is_err());
+}
+
+#[test]
+fn retiring_a_task_scoped_learning_archives_and_re_scopes_it_to_its_repo() {
+    let row = Learning {
+        scope: "task".to_string(),
+        scope_ref: Some("7".to_string()),
+        status: "approved".to_string(),
+        ..blank_learning()
+    };
+    let retired = retired_task_scoped_learning(&row, Some("/repo/a".to_string()), false).unwrap();
+    assert_eq!(retired.status, "archived");
+    assert_eq!(retired.scope, "repo");
+    assert_eq!(retired.scope_ref.as_deref(), Some("/repo/a"));
+    // The recording task is gone: the row still parses as a repo scope.
+    let orphan = retired_task_scoped_learning(&row, None, false).unwrap();
+    assert_eq!(orphan.scope_ref.as_deref(), Some(""));
+}
+
+#[test]
+fn retiring_leaves_every_other_learning_alone() {
+    let row = Learning {
+        scope: "repo".to_string(),
+        scope_ref: Some("/r".to_string()),
+        ..blank_learning()
+    };
+    assert!(retired_task_scoped_learning(&row, None, false).is_none());
+}
+
+#[test]
+fn retiring_a_learning_on_a_private_tasks_epic_drops_its_workspace() {
+    let row = Learning {
+        scope: "task".to_string(),
+        scope_ref: Some("7".to_string()),
+        workspace_id: 5,
+        author: "ann".to_string(),
+        ..blank_learning()
+    };
+    let shared = retired_task_scoped_learning(&row, None, false).unwrap();
+    assert_eq!(shared.workspace_id, 5);
+    let private = retired_task_scoped_learning(&row, None, true).unwrap();
+    assert_eq!(private.workspace_id, 0);
+}
+
+#[test]
+fn retiring_a_private_learning_with_no_author_keeps_its_workspace() {
+    // Workspace 0 with no author is seen by everyone: wider than before.
+    let row = Learning {
+        scope: "task".to_string(),
+        scope_ref: Some("7".to_string()),
+        workspace_id: 5,
+        author: String::new(),
+        ..blank_learning()
+    };
+    let retired = retired_task_scoped_learning(&row, None, true).unwrap();
+    assert_eq!(retired.workspace_id, 5);
+}

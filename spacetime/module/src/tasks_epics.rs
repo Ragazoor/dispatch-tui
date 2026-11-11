@@ -701,18 +701,9 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
         _ => false,
     };
     if leaves_workspace {
-        // `LinkedItemsShareThePackagesWorkspace`: the task's package links and
-        // task-scoped learnings were the old workspace's.
+        // `LinkedItemsShareThePackagesWorkspace`: the task's package links
+        // were the old workspace's.
         delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, id);
-        let task_ref = id.to_string();
-        update_matching_learnings(
-            ctx,
-            |l| l.scope == "task" && l.scope_ref.as_deref() == Some(task_ref.as_str()),
-            |row| Learning {
-                workspace_id: joined_workspace.unwrap_or(0),
-                ..row
-            },
-        );
     }
     // Both, and in that order. The one it left may now be complete; the one it
     // joined may no longer be.

@@ -1764,7 +1764,7 @@ rule ListContextResourcesViaMcp {
         --      named "<name>: <file>" with no description.
         --   3. one dispatch://learnings/<id> entry per validated learning, by
         --      id ascending — ALL of them, with no filtering by the caller's
-        --      repo, epic or task. The scope a learning carries governs
+        --      repo or epic. The scope a learning carries governs
         --      dispatch-prompt injection (learnings.allium: Scope Model), not
         --      this listing. Archived and rejected learnings are not listed.
         --      mimeType text/plain; name a short title cut from the

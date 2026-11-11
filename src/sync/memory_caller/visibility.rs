@@ -185,10 +185,6 @@ impl Tables {
                 .epics
                 .get(&id)
                 .is_none_or(|e| self.epic_visible(scope, e)),
-            ("task", Some(id)) => self
-                .tasks
-                .get(&id)
-                .is_none_or(|t| self.task_visible(scope, t)),
             _ => true,
         };
         item_seen
@@ -223,9 +219,6 @@ impl Tables {
         let epic_workspace = |epic_id: i64| self.epics.get(&epic_id).map_or(0, |e| e.workspace_id);
         match row.scope.as_str() {
             "epic" => id_of(&row.scope_ref).map_or(0, epic_workspace),
-            "task" => id_of(&row.scope_ref)
-                .and_then(|id| self.tasks.get(&id))
-                .map_or(0, |t| epic_workspace(t.epic_id)),
             "repo" => row
                 .source_task_id
                 .and_then(|id| self.tasks.get(&id))
@@ -676,7 +669,6 @@ impl MemoryReducerCaller {
                 let item = l.scope_ref.as_deref().and_then(|r| r.parse::<i64>().ok());
                 match (l.scope.as_str(), item) {
                     ("epic", Some(i)) => tree.contains(&i),
-                    ("task", Some(i)) => task_ids.contains(&i),
                     _ => false,
                 }
             },

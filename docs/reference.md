@@ -926,7 +926,6 @@ Agents propose learnings via `record_learning`. The `scope_ref` is auto-derived 
 scope=user    → scope_ref: (none)
 scope=repo    → scope_ref: task.repo_path
 scope=epic    → scope_ref: task.epic_id  (error if task has no epic)
-scope=task    → scope_ref: task.id
 ```
 
 Recorded learnings are approved on creation and become eligible for injection immediately — there is no
@@ -952,12 +951,6 @@ summary="Integration tests use Store::open_in_memory() — never mock the DB lay
 ```
 scope=epic, kind=procedural
 summary="This epic adds the learning store; consult docs/specs/core.allium before changing domain types"
-```
-
-**Task episodic note** — scoped to a single task, not auto-injected:
-```
-scope=task, kind=episodic
-summary="Rebase on main resolved the rusqlite version conflict; use that if it recurs"
 ```
 
 ## Verify Command

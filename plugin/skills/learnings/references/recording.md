@@ -45,7 +45,8 @@ Good: summary "Sync the repo before starting work." — detail "…Stop and ask 
 | `repo` | Codebase-wide convention or landscape entry | omit (auto-derived) |
 | `repo` | A fact about a family of repos that share a parent directory (every Terraform domain repo, every Scala service) | the parent directory's absolute path |
 | `epic` | Shared design decision for this epic only | omit (auto-derived) |
-| `task` | One-off note; not auto-injected into future prompts | omit (auto-derived) |
+
+There is no task scope: `record_learning` refuses `scope=task`. A note that only matters to one task belongs in the task's own description or plan, or in a `repo` or `epic` entry if it would help a later agent.
 
 **Default to `repo` for code conventions and `user` for workflow preferences.** A domain fact that holds in more than one repo is still not `user`: a `repo` entry reaches every repo under its `scope_ref`, so give it the parent directory. User-scoped Terraform and Cloud SQL facts used to reach Scala, frontend and deployment repos, where agents almost never rated them helped.
 

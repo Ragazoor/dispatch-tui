@@ -70,7 +70,6 @@ pub enum LearningScope {
     User,
     Repo,
     Epic,
-    Task,
 }
 
 impl LearningScope {
@@ -78,7 +77,6 @@ impl LearningScope {
         LearningScope::User,
         LearningScope::Repo,
         LearningScope::Epic,
-        LearningScope::Task,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -86,7 +84,6 @@ impl LearningScope {
             LearningScope::User => "user",
             LearningScope::Repo => "repo",
             LearningScope::Epic => "epic",
-            LearningScope::Task => "task",
         }
     }
 
@@ -95,7 +92,6 @@ impl LearningScope {
             "user" => Some(LearningScope::User),
             "repo" => Some(LearningScope::Repo),
             "epic" => Some(LearningScope::Epic),
-            "task" => Some(LearningScope::Task),
             _ => None,
         }
     }
@@ -281,9 +277,9 @@ impl Learning {
     /// LearningVisibility`): a learning with a workspace goes to that
     /// workspace's members, one with none to its author alone, and one from
     /// before workspaces (no workspace, no author) to everyone. Whether an
-    /// epic- or task-scoped learning's item is visible is the store's to
+    /// epic-scoped learning's epic is visible is the store's to
     /// decide; a retrieval only reaches epic learnings of the reader's own
-    /// epic and never task-scoped ones.
+    /// epic.
     pub fn seen_by(&self, reader: Option<&str>, reader_workspaces: &[i64]) -> bool {
         if self.workspace_id != 0 {
             return reader_workspaces.contains(&self.workspace_id);
@@ -354,7 +350,7 @@ mod validation_tests {
     #[test]
     fn learning_enum_all_consts_have_every_variant() {
         assert_eq!(LearningKind::ALL.len(), 6);
-        assert_eq!(LearningScope::ALL.len(), 4);
+        assert_eq!(LearningScope::ALL.len(), 3);
         assert_eq!(LearningVerdict::ALL.len(), 3);
     }
 

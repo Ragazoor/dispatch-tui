@@ -250,7 +250,10 @@ async fn create_learning_embeds_on_write() {
         .await
         .unwrap();
     // Retrieve the raw row and verify embedding bytes are stored.
-    let learnings_with_emb = db.list_all_approved_non_task_learnings().await.unwrap();
+    let learnings_with_emb = db
+        .list_all_approved_learnings_with_embedding()
+        .await
+        .unwrap();
     let emb_entry = learnings_with_emb
         .iter()
         .find(|(l, _)| l.id == id)

@@ -1536,26 +1536,26 @@ impl SharedRows {
         })
     }
 
-    /// Every approved, non-task-scoped learning with a stored embedding, with
+    /// Every approved learning with a stored embedding, with
     /// its raw bytes — the RAG candidate pool. Ordered `id ASC`, matching
-    /// `list_all_approved_non_task_learnings`'s SQL.
-    pub fn approved_non_task_learnings_with_embedding(&self) -> Vec<(Learning, Vec<u8>)> {
+    /// `list_all_approved_learnings_with_embedding`'s SQL.
+    pub fn approved_learnings_with_embedding(&self) -> Vec<(Learning, Vec<u8>)> {
         self.read(|rows| {
             rows.learnings
                 .values()
-                .filter(|(l, emb)| is_approved_non_task(l) && emb.is_some())
+                .filter(|(l, emb)| is_approved(l) && emb.is_some())
                 .map(|(l, emb)| (l.clone(), emb.clone().unwrap_or_default()))
                 .collect()
         })
     }
 
-    /// Approved, non-task-scoped learnings with no embedding stored yet —
+    /// Approved learnings with no embedding stored yet —
     /// the backfill job's worklist. Ordered `id ASC`.
     pub fn learnings_missing_embedding(&self) -> Vec<Learning> {
         self.read(|rows| {
             rows.learnings
                 .values()
-                .filter(|(l, emb)| emb.is_none() && is_approved_non_task(l))
+                .filter(|(l, emb)| emb.is_none() && is_approved(l))
                 .map(|(l, _)| l.clone())
                 .collect()
         })
@@ -1609,12 +1609,11 @@ impl SharedRows {
     }
 }
 
-/// Shared by [`SharedRows::approved_non_task_learnings_with_embedding`] and
+/// Shared by [`SharedRows::approved_learnings_with_embedding`] and
 /// [`SharedRows::learnings_missing_embedding`] — the two differ only in
 /// whether they want a stored embedding or its absence.
-fn is_approved_non_task(l: &Learning) -> bool {
-    use crate::models::{LearningScope, LearningStatus};
-    l.status == LearningStatus::Approved && l.scope != LearningScope::Task
+fn is_approved(l: &Learning) -> bool {
+    l.status == crate::models::LearningStatus::Approved
 }
 
 /// Sort by `(key, id)`, where the `BTreeMap`'s own iteration order already

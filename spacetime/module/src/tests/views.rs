@@ -562,12 +562,12 @@ fn learnings_follow_their_workspace_their_author_and_their_item() {
     store.learnings = vec![
         learning(1, "repo", None, 7, "bob"),
         learning(2, "user", None, 0, "bob"),
-        learning(3, "task", Some("11"), 7, "bob"),
+        learning(3, "epic", Some("3"), 7, "bob"),
         learning(4, "repo", None, 0, ""),
         learning(5, "repo", None, 9, "zed"),
     ];
     // Ann: the workspace one and the legacy one; not bob's user note, not the
-    // learning on bob's private task, not another workspace's.
+    // learning on bob's private epic, not another workspace's.
     assert_eq!(ids(&learnings_visible_to(&store, "ann"), |l| l.id), [1, 4]);
     assert_eq!(
         ids(&learnings_visible_to(&store, "bob"), |l| l.id),

@@ -88,11 +88,11 @@ impl super::super::LearningStore for Store {
         Ok(self.caller.delete_learning(id).await?.won())
     }
 
-    async fn list_all_approved_non_task_learnings(&self) -> Result<Vec<(Learning, Vec<u8>)>> {
+    async fn list_all_approved_learnings_with_embedding(&self) -> Result<Vec<(Learning, Vec<u8>)>> {
         let reader = self.learning_reader().await;
         Ok(self
             .rows
-            .approved_non_task_learnings_with_embedding()
+            .approved_learnings_with_embedding()
             .into_iter()
             .filter(|(l, _)| reader.sees(l))
             .collect())
