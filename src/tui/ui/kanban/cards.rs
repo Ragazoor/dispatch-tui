@@ -406,8 +406,8 @@ fn label_color(chip: &str) -> Color {
 }
 
 /// Render a decorative epic-header separator row (non-selectable).
-/// Shows the epic's own id, then its own title — never its ancestors' —
-/// indented by its depth in the epic tree: `  #NNN self ──────────`.
+/// Shows the epic's own title — never its ancestors', and no id — indented by
+/// its depth in the epic tree: `  self ──────────`.
 pub(super) fn render_epic_header_item(
     epic: &Epic,
     depth: usize,

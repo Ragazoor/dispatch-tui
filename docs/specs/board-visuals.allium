@@ -90,8 +90,12 @@ use "./work-packages.allium" as wp
 --     (crashed, needs-input, and so on) rather than the column's.
 --   - an epic card's stripe and a flattened column's epic-header row, both
 --     in PURPLE regardless of column ("Epic cards").
---   - the panel enclosing the columns in Epic view, faintly purple as a
---     mode signal ("Column ground and card surface").
+--   - the panel enclosing the columns in Epic view, faintly purple with a
+--     purple border and title, and in a package view, faintly teal with a
+--     CYAN border and title: a mode signal ("Column ground and card
+--     surface").
+--   - an epic card's progress counts, each in the identity hue of the
+--     column it counts ("Epic cards").
 --   - a work package card's stripe, glyph and title, in CYAN regardless of
 --     column (WorkPackageCard).
 --   - the title-line marks: the message flash's glyphs and warm fill
@@ -291,7 +295,10 @@ use "./work-packages.allium" as wp
 -- that encloses the columns with a faint purple ground, as a mode signal
 -- — it says "you are inside an epic", not "this column is purple" — and
 -- the column grounds inside that panel stay neutral and uniform. The two
--- do not conflict: one is the board's frame, the other is the board.
+-- do not conflict: one is the board's frame, the other is the board. A
+-- package view tints its panel the same way, faintly teal with a CYAN
+-- border, a package card's colour; an epic view entered from a package is
+-- still an epic view and keeps purple.
 --
 -- This replaces the earlier per-column tinted ground. Tinting five
 -- adjacent full-height panels put hue everywhere and so left hue with
@@ -499,6 +506,12 @@ use "./work-packages.allium" as wp
 -- they have. That is the reason the white has to stay legible here
 -- specifically: on a task card a weakened frame still leaves the bold
 -- title as a partial cue, and on an epic card it leaves nothing.
+--
+-- An epic card's progress counts are the one place it shows column hues:
+-- each count of its subtree's tasks is drawn in the identity hue of the
+-- column it counts (Backlog blue, Running yellow, Review purple, Done green),
+-- so the counts read as a small map of the columns, not as the card's own
+-- identity.
 --
 -- Everything else about an epic card is unchanged from a task card: the
 -- neutral card surface, the neutral resting frame, the lit frame, the
@@ -816,10 +829,10 @@ value ColumnChrome {
     identity_colour: PaletteToken
     focused: Boolean
 
-    -- The only surface that renders the identity colour itself, and so the
-    -- only place the literal palette token reaches a card at all (see
-    -- "Column header bar"). Epic cards are not among them: they carry their
-    -- own identity — see EpicCardChrome.
+    -- The only surface on a task card that renders the identity colour
+    -- itself (see "Column header bar"). Epic cards carry their own identity
+    -- — see EpicCardChrome — and show column hues only on their progress
+    -- counts, where each count names the column it counts.
     --
     -- A selected card's border used to be the second such surface. It is
     -- not any longer: the border carries state and the cursor takes a white
@@ -1056,8 +1069,10 @@ enum CardFrameColour {
 
 -- == Where Hue Is Allowed ==
 
--- The closed set of surfaces that carry a hue at all. Everything not listed
--- here is neutral: the three large flat areas (column ground, header fill,
+-- The closed set of surfaces on the board — its columns, its cards and the
+-- panel around them — that carry a hue at all. The status bar, the split
+-- view's focus border and the overlays have colours of their own, specified
+-- with them. Everything not listed here is neutral: the three large flat areas (column ground, header fill,
 -- card surface), a resting card's frame, the select-all checkbox fill, the
 -- message flash's border, and every ordinary label badge. The cursor frame
 -- is the cursor white, which is not a hue.
@@ -1072,7 +1087,9 @@ enum HuedSurface {
                                -- both focus states, and equal to it at
                                -- neither ("Column header bar")
     task_card_stripe           -- the literal palette token, and the only
-                               -- surface on a card that renders it
+                               -- surface on a task card that renders it
+    epic_card_counts           -- an epic card's progress counts, each in the
+                               -- identity hue of the column it counts
     epic_card_stripe           -- purple, in every column; signal while the
                                -- epic is marked by the new-task signal
     epic_card_title            -- purple, bold at rest
@@ -1085,7 +1102,11 @@ enum HuedSurface {
     card_indicator             -- a task card's status indicator and its
                                -- schedule suffix, and an epic card's
                                -- substatus label, in the colour of the state
-                               -- they name: red, yellow, cyan or green
+                               -- they name: red, yellow, cyan or green. The
+                               -- idle indicator's freshness tiers take the
+                               -- terminal's own green, yellow and red rather
+                               -- than the palette's, so they follow the
+                               -- terminal theme
     message_flash_glyph        -- yellow ✉ / ➤ on the title line
     message_flash_fill         -- the warm flash fill: the one card whose
                                -- fill differs from the card surface
@@ -1098,12 +1119,14 @@ enum HuedSurface {
                                -- the same thing on every card in every column
                                -- ("Card label badges").
     epic_view_panel_ground     -- a faint purple on the panel ENCLOSING the
-                               -- columns, as a mode signal. The one hued flat
-                               -- area on the screen, and it is the board's
-                               -- frame rather than a column ground — see
-                               -- "Column ground and card surface", where the
-                               -- distinction is made and the fact that no
-                               -- test covers it is recorded.
+                               -- columns, with a purple border and title, as
+                               -- a mode signal. With the package view's, one
+                               -- of the two hued flat areas on the screen,
+                               -- and the board's frame rather than a column
+                               -- ground — see "Column ground and card
+                               -- surface". No test covers it.
+    package_view_panel_ground  -- the same for a package view: faintly teal,
+                               -- with a CYAN border and title
 }
 
 ------------------------------------------------------------
@@ -1323,9 +1346,11 @@ surface ColumnGround {
         -- Epic view tints the panel ENCLOSING the columns a faint purple as a
         -- mode signal. The column grounds inside that panel stay neutral and
         -- uniform. The two do not conflict: one is the board's frame, the
-        -- other is the board. This is the one hued flat area on the screen
-        -- (HuedSurface.epic_view_panel_ground) and the only place purple
-        -- means MODE rather than EPIC — and no test covers it.
+        -- other is the board. With the package view's teal panel
+        -- (HuedSurface.package_view_panel_ground) these are the only hued
+        -- flat areas on the screen (HuedSurface.epic_view_panel_ground), and
+        -- the only place purple means MODE rather than EPIC — and no test
+        -- covers them.
 }
 
 surface ColumnFocusHairlines {

@@ -362,3 +362,41 @@ fn an_only_active_change_invalidates_the_placement_cache() {
         "a filter change must make the warm map unreadable"
     );
 }
+
+/// Each copy of an epic card keeps its own cursor position ("Epic Card
+/// Placement", Interaction), so a refresh with the cursor on the Review copy
+/// leaves it there rather than snapping to the leftmost copy
+/// (board-layout.allium, "Cursor Selection Preservation").
+#[test]
+fn a_refresh_keeps_the_cursor_on_the_epic_copy_in_its_own_column() {
+    let mut app = app_with_epic_spread_over_all_columns();
+    app.selection_mut().set_column(3); // Review
+    app.selection_mut().set_row(3, 0);
+    app.selection_mut().anchor = Some(crate::tui::types::ColumnAnchor::Epic(EpicId(1)));
+
+    app.sync_board_selection();
+
+    assert_eq!(app.selection().column(), 3, "the cursor stays in Review");
+    assert!(
+        matches!(app.selected_column_item(), Some(ColumnItem::Epic(e)) if e.id == EpicId(1)),
+        "on the epic's Review copy"
+    );
+}
+
+/// When the current column no longer holds a copy, the cursor follows the
+/// card to the leftmost column that does.
+#[test]
+fn a_refresh_follows_an_epic_that_left_the_cursors_column() {
+    let mut app = App::new(vec![epic_task(1, 1, TaskStatus::Running)]);
+    app.board.epics.push(make_epic(1));
+    app.selection_mut().set_column(3); // Review: holds no copy
+    app.selection_mut().anchor = Some(crate::tui::types::ColumnAnchor::Epic(EpicId(1)));
+
+    app.sync_board_selection();
+
+    assert_eq!(
+        app.selection().column(),
+        2,
+        "the cursor follows it to Running"
+    );
+}

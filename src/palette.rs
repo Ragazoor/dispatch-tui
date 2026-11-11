@@ -21,6 +21,12 @@ pub(crate) const SIGNAL: Color = Color::Rgb(255, 158, 100);
 /// from `GREEN`, which says Done and "merged". One meaning, no other use.
 pub(crate) const BOOKMARK: Color = Color::Rgb(80, 250, 123);
 pub(crate) const FLASH_BG: Color = Color::Rgb(62, 52, 20);
+/// The faint ground of the panel enclosing an epic view's columns, a mode
+/// signal (`board-visuals.allium`: `HuedSurface.epic_view_panel_ground`).
+pub(crate) const EPIC_PANEL_BG: Color = Color::Rgb(24, 20, 34);
+/// The package view's panel ground, teal like a package card
+/// (`board-visuals.allium`: `HuedSurface.package_view_panel_ground`).
+pub(crate) const PACKAGE_PANEL_BG: Color = Color::Rgb(18, 30, 34);
 
 // ── Board neutral ramp (board-visuals.allium: BoardNeutralRamp) ──────────────
 // Four neutral surfaces in strictly ascending lightness. No hue enters

@@ -123,18 +123,27 @@ impl App {
         // Rebuild all layout caches for the fresh board state.
         let _ = self.cached_epic_stats();
         // Search for the anchor in the pre-sorted anchor cache (avoids re-sorting each column).
+        // An epic or package card can sit in several columns at once, so the
+        // current column is searched first: a refresh keeps the cursor on the
+        // copy it is on, and only follows the card to the leftmost column that
+        // holds it once the current one no longer does (board-layout.allium,
+        // "Cursor Selection Preservation").
+        let current = self.selection().column();
         let found = self
             .layout
             .column_anchor_cache
             .as_ref()
             .and_then(|anchor_map| {
+                let row_in = |idx: usize, status: &TaskStatus| {
+                    let row = anchor_map.get(status)?.iter().position(|&a| a == anchor)?;
+                    Some((idx + 1, row))
+                };
                 TaskStatus::ALL
                     .iter()
                     .enumerate()
-                    .find_map(|(idx, status)| {
-                        let row = anchor_map.get(status)?.iter().position(|&a| a == anchor)?;
-                        Some((idx + 1, row))
-                    })
+                    .filter(|&(idx, _)| idx + 1 == current)
+                    .chain(TaskStatus::ALL.iter().enumerate())
+                    .find_map(|(idx, status)| row_in(idx, status))
             });
 
         // Clamp every column, `found_col` included — the anchor row is

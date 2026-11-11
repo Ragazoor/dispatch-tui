@@ -98,7 +98,9 @@ given {
 --
 -- Navigation:
 --   - h/l (or Left/Right) moves the cursor between nav indices 1–4, on the
---     main board and in ViewMode::Epic alike.
+--     main board, in an epic view and in a package view alike. Every row
+--     navigation key below, the `gg` chord and `space` reach all three
+--     views the same way; "the board" below means any of them.
 --   - At nav index 1 (Backlog), h/Left is a no-op (already at leftmost edge).
 --   - At nav index 4 (Done), l/Right is a no-op (already at rightmost edge).
 --   - A task card's column is determined by task.status alone; which section
@@ -128,14 +130,12 @@ given {
 --     They share the same behaviour on an empty column (a no-op that
 --     leaves cursor/scroll/toggle untouched), the same release of the
 --     select-all cursor position on a real move, and the same behaviour in
---     ViewMode::Epic. Jump-to-top/bottom are available on the main board
---     and in epic view.
---   - G/gg are deliberately scoped to the main board and epic view only.
---     Overlays keep their own key handling; this navigation does not
---     touch it.
+--     every view of the board.
+--   - G/gg are deliberately scoped to the board's views. Overlays keep
+--     their own key handling; this navigation does not touch it.
 --
 -- The `gg` chord:
---   On the main board (Normal mode) and in epic view, `gg` is a pure
+--   On the board (Normal mode), `gg` is a pure
 --   chord with no other meaning attached to a lone `g`:
 --   - Pressing `g` with no chord pending starts a pending-chord window
 --     (records the press time). Nothing else happens yet.
@@ -156,12 +156,11 @@ given {
 --     leaking across an unrelated view transition; it is not expected to
 --     be user-visible.
 --   - `G` (jump-to-bottom) has no such conflict and no chord: wherever it
---     is bound it is a direct alias for `]`. It is bound on the main board
---     and in epic view.
+--     is bound it is a direct alias for `]`. It is bound on the board.
 --
 -- `space` (jump to the selected task's tmux window, or enter the
 -- selected epic):
---   On the main board (Normal mode) and in epic view, a single `space`
+--   On the board (Normal mode), a single `space`
 --   press fires this action immediately — no chord, no deferred
 --   resolution, no latency. It is not on `g`: a lone `g` there would have
 --   to wait out the `gg` chord window. Multi-select is on `v`.
@@ -435,8 +434,10 @@ given {
 --         own tasks come first. Then come the drawn children that have no
 --         drawn child of their own, then the drawn children that do: a
 --         flush block never sits below a deeper one under the same parent.
---         Each of those two runs keeps the epics' card order (sort_order,
---         else id — the key top-level groups already sorted by). Top-level
+--         Each of those two runs keeps the epics' order in the full epic
+--         tree: depth first, siblings by card order (sort_order, else id).
+--         So two drawn siblings whose branches pass through skipped
+--         ancestors follow those ancestors' order, not their own. Top-level
 --         groups are ordered the same way.
 --       - The tree's top: on the main board and in a work-package view,
 --         epics with no parent; in an epic view, the viewed epic's direct
@@ -491,19 +492,25 @@ given {
 
 -- == Epic View Panel Title ==
 --
--- Independent of flattened mode: whenever the current view is a specific
--- epic (ViewMode::Epic), the panel enclosing the columns is bordered, and
--- the border's title carries that epic's ancestor breadcrumb — the root
--- ancestor first, the epic itself last, segments joined with " › " and
--- each truncated to config.breadcrumb_segment_max_chars characters. board-visuals.allium's
--- HuedSurface.epic_view_panel_ground documents this same panel's hue; this
--- entry documents what its title says.
+-- Independent of flattened mode: whenever the current view is an epic view
+-- or a package view, the panel enclosing the columns is bordered, and the
+-- border's title is a breadcrumb of the views the user stepped through to
+-- get there, outermost first, segments joined with " › " and each title
+-- truncated to config.breadcrumb_segment_max_chars characters:
+--   - an epic view entered from the main board: the epic's ancestors from
+--     the root down, the epic itself last;
+--   - a package view: `▣ <package title>` alone;
+--   - an epic view entered from a package view: the package segment first,
+--     then only the epics entered from it, starting at the linked epic that
+--     was pressed (work-packages.allium, "Package view").
+-- board-visuals.allium's HuedSurface.epic_view_panel_ground documents the
+-- panel's hue; this entry documents what its title says.
 --
 -- The title carries no id (board-visuals.allium:
 -- EpicsAreShownByTitleNeverById). Unlike the flattened epic-header row
--- (see "Flattened Mode"), the title keeps the whole ancestor path: it says
--- where the user is, while the header row only has to tell one task group
--- from the next.
+-- (see "Flattened Mode"), the title keeps the whole trail: it says where
+-- the user is, while the header row only has to tell one task group from
+-- the next.
 
 -- == Column Section Layout ==
 
@@ -706,7 +713,7 @@ given {
 --     its whole subtree in that section — its own cards and every
 --     descendant's header and cards — and its hidden count is the subtree's
 --     tasks there. A folded header keeps its indent and, like the open one,
---     has no rule to the left of its id. Folding a parent does not touch a
+--     has no rule to the left of its title. Folding a parent does not touch a
 --     descendant's recorded fold: when the parent unfolds, each descendant
 --     draws folded or open exactly as it was recorded before. A folded
 --     header directly under its parent's open header draws no blank line
@@ -1061,12 +1068,18 @@ given {
 -- == Cursor Selection Preservation ==
 
 -- selection_preservation:
---   When the cursor has an anchor (a task or epic ID) and column items are recomputed
---   (on any status change, task movement, filter change, or data refresh), the cursor
+--   When the cursor has an anchor (a task, epic or work package card, or a
+--   folded section or epic header) and column items are recomputed (on any
+--   status change, task movement, filter change, or data refresh), the cursor
 --   position is resolved by locating the anchor item in the new item list.
 --
 --   If the anchor item is found: the cursor moves to the item's new column and row,
---   following the item if it changed columns.
+--   following the item if it changed columns. An epic or package card can sit in
+--   several columns at once ("Epic Card Placement"); while the current column
+--   still holds a copy, the cursor stays on that copy, so a refresh never moves
+--   it to another column's copy of the same card. Only when the current column
+--   no longer holds one does it follow the card to the leftmost column that
+--   does.
 --
 --   If the anchor item is not present (deleted or moved outside board scope): the cursor
 --   clamps to the nearest valid position in the current column.

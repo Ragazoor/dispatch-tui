@@ -21,7 +21,7 @@ use super::cards::{
     render_package_item, ColRenderCtx,
 };
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
-use crate::palette::{CYAN, MUTED, PURPLE};
+use crate::palette::{CYAN, EPIC_PANEL_BG, MUTED, PACKAGE_PANEL_BG, PURPLE};
 
 fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
     let line = crate::epic_header::end_of_epics_line(col_width);
@@ -302,7 +302,12 @@ fn view_border_title(app: &App) -> Option<String> {
     let package_title = |id: crate::models::WorkPackageId| {
         app.board
             .find_work_package(id)
-            .map(|p| truncate(&p.title, 30))
+            .map(|p| {
+                truncate(
+                    &p.title,
+                    crate::tui::ui::shared::BREADCRUMB_SEGMENT_MAX_CHARS,
+                )
+            })
             .unwrap_or_default()
     };
     match app.view_mode() {
@@ -365,9 +370,9 @@ pub(super) fn render_columns(frame: &mut Frame, app: &mut App, data: ColumnsData
         // A package view is teal like its card; an epic view (even one entered
         // from a package) is purple (`work-packages.allium: EnterPackage`).
         let (accent, tint) = if matches!(app.view_mode(), ViewMode::Package { .. }) {
-            (CYAN, Color::Rgb(18, 30, 34))
+            (CYAN, PACKAGE_PANEL_BG)
         } else {
-            (PURPLE, Color::Rgb(24, 20, 34))
+            (PURPLE, EPIC_PANEL_BG)
         };
         let block = rounded_block(accent)
             .title(title.as_str())
