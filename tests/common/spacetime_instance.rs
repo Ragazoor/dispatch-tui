@@ -79,6 +79,24 @@ impl Instance {
     /// file's, purely for readability in `spacetime` CLI output — collisions
     /// are already ruled out by [`Self::database`]'s per-instance counter.
     pub fn start(label: &str) -> Self {
+        // `free_port` can hand two concurrently starting tests the same port;
+        // the loser's server then exits during startup. Retry on a fresh port
+        // (and a fresh directory) rather than failing the test.
+        const ATTEMPTS: usize = 5;
+        for _ in 0..ATTEMPTS {
+            if let Some(instance) = Self::try_start(label) {
+                return instance;
+            }
+        }
+        panic!(
+            "this test's spacetime instance exited during startup on each of \
+             {ATTEMPTS} attempts — another process keeps taking its port"
+        );
+    }
+
+    /// One start attempt. `None` when the instance's own process exited during
+    /// startup, which means it lost a race for its port.
+    fn try_start(label: &str) -> Option<Self> {
         let dir = tempfile::tempdir().expect("temp dir");
         let port = free_port();
         let child = spacetime_command(
@@ -116,24 +134,21 @@ impl Instance {
             dir,
             database,
         };
-        instance.await_ready();
+        if !instance.await_ready() {
+            return None;
+        }
 
         // Ours, not somebody else's. `await_ready` only proves that SOMETHING
         // answers on the port, and a port collision means the thing answering
         // belongs to another test. Left undetected that is not a failure, it is
         // two tests quietly sharing a server — which is how a publish of an
         // unchanged module came to be refused for removing a column.
-        assert!(
-            instance
-                .child
-                .try_wait()
-                .expect("poll the instance process")
-                .is_none(),
-            "this test's spacetime instance exited during startup — most likely \
-             another test won the race for port {}",
-            instance.port
-        );
-        instance
+        let alive = instance
+            .child
+            .try_wait()
+            .expect("poll the instance process")
+            .is_none();
+        alive.then_some(instance)
     }
 
     /// Where this instance's JWT signing key pair lives.
@@ -159,7 +174,8 @@ impl Instance {
         self.dir.path().join("cli.toml").display().to_string()
     }
 
-    /// Block until the instance SERVES, or panic on the deadline.
+    /// Block until the instance SERVES. Returns `false` if its own process
+    /// exits first, and panics on the deadline.
     ///
     /// A poll against a real condition, not a fixed wait: the common path costs
     /// one failed request, and only a genuinely dead server pays the timeout.
@@ -171,11 +187,19 @@ impl Instance {
     /// whichever test drew the short straw. So this asks for an actual
     /// response, and any HTTP status counts: what is being waited for is a
     /// server that answers, not a particular answer.
-    fn await_ready(&self) {
+    fn await_ready(&mut self) -> bool {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         loop {
+            if self
+                .child
+                .try_wait()
+                .expect("poll the instance process")
+                .is_some()
+            {
+                return false;
+            }
             if self.answers_http() {
-                return;
+                return true;
             }
             assert!(
                 Instant::now() < deadline,
