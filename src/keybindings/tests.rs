@@ -252,6 +252,14 @@ fn action_of(b: Option<&KeyBinding>) -> Option<&'static str> {
     b.map(|b| b.action)
 }
 
+/// Every key `ns`'s rows bind to `action`, in table order.
+fn keys_of(ns: KeyNamespace, action: &str) -> Vec<&'static str> {
+    bindings_in(ns)
+        .filter(|b| b.action == action)
+        .flat_map(|b| b.keys.iter().copied())
+        .collect()
+}
+
 #[test]
 fn lookup_an_exact_key_beats_the_catch_all() {
     for key in ["y", "Y"] {
@@ -606,15 +614,13 @@ fn the_commits_namespace_shares_the_pane_wide_keys_with_the_tree() {
         "navigate_row_last",
         "navigate_half_page",
     ] {
-        let keys = |ns: KeyNamespace| -> Vec<&str> {
-            bindings_in(ns)
-                .filter(|b| b.action == action)
-                .flat_map(|b| b.keys.iter().copied())
-                .collect()
-        };
-        let tree = keys(KeyNamespace::AgentTreeTree);
+        let tree = keys_of(KeyNamespace::AgentTreeTree, action);
         assert!(!tree.is_empty(), "{action}");
-        assert_eq!(keys(KeyNamespace::AgentTreeCommits), tree, "{action}");
+        assert_eq!(
+            keys_of(KeyNamespace::AgentTreeCommits, action),
+            tree,
+            "{action}"
+        );
     }
 }
 
@@ -842,12 +848,6 @@ fn no_agent_tree_namespace_binds_an_all_files_key() {
 /// commits, so they have no row in the agents namespace.
 #[test]
 fn s_flips_the_agent_tree_view_and_tab_switches_the_browse_section() {
-    let keys_of = |ns: KeyNamespace, action: &str| -> Vec<&str> {
-        bindings_in(ns)
-            .filter(|b| b.action == action)
-            .flat_map(|b| b.keys.iter().copied())
-            .collect()
-    };
     for ns in [
         KeyNamespace::AgentTreeTree,
         KeyNamespace::AgentTreeCommits,

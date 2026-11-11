@@ -182,8 +182,9 @@ fn run_tree_action(
             }
             KeyAction::Continue
         }
-        // SwitchAgentTreeBrowseFocus: Tab and Shift+Tab, tree <-> commits. The
-        // agents namespace has no row for them; the guard is belt and braces.
+        // SwitchAgentTreeBrowseFocus: Tab and Shift+Tab, tree <-> commits. No
+        // key reaches the agents arm (that namespace has no switch_section
+        // row); the match must still be exhaustive.
         "switch_section" => {
             state.focus = match state.focus {
                 Focus::Tree => Focus::Commits,
