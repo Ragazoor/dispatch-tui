@@ -1517,52 +1517,37 @@ fn research_agent_prompt_is_correct() {
     );
 }
 
-/// learnings.allium: AugmentDispatchPromptWithLearnings fires for research
-/// launches too, and every injected learning gets a retrieval row the agent may
-/// rate, so the research prompt must show the learnings it was handed.
+/// learnings.allium: AugmentDispatchPromptWithLearnings records a retrieval for
+/// every learning a launch injects, whatever the mode, and an agent may rate
+/// only what it was shown. So every mode's prompt must show the learnings it
+/// was handed.
 #[test]
-fn research_mode_prompt_shows_the_injected_learnings() {
-    use crate::models::{
-        DispatchMode, Learning, LearningId, LearningKind, LearningScope, LearningStatus,
-    };
-    let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-    let script = DispatchScript::dispatch();
-    let mock = script.runner();
-    let task = make_task(&repo_path);
-    let at = chrono::Utc::now();
-    let learning = Learning {
-        id: LearningId(77),
-        kind: LearningKind::Pitfall,
-        summary: "Research agents see this injected pitfall".into(),
-        detail: None,
-        scope: LearningScope::User,
-        scope_ref: None,
-        tags: vec![],
-        status: LearningStatus::Approved,
-        source_task_id: None,
-        upvote_count: 0,
-        last_upvoted_at: None,
-        created_at: at,
-        updated_at: at,
-        workspace_id: 0,
-        author: String::new(),
-    };
-    let inputs = crate::dispatch::DispatchInputs {
-        epic_ctx: None,
-        injected: vec![learning],
-        agent_name: "atlas".into(),
-        review_command: String::new(),
-    };
-    run_agent_for_mode(&task, DispatchMode::Research, &mock, &mock, inputs).unwrap();
-    let prompt = read_prompt(&worktree_dir);
-    assert!(
-        prompt.contains(crate::dispatch::RESEARCH_AGENT_INTRO),
-        "research mode should build the research prompt, got: {prompt}"
-    );
-    assert!(
-        prompt.contains("Validated knowledge") && prompt.contains("injected pitfall"),
-        "research prompt must show the injected learnings, got: {prompt}"
-    );
+fn every_mode_prompt_shows_the_injected_learnings() {
+    use crate::models::{DispatchMode, LearningScope};
+    for mode in [
+        DispatchMode::Dispatch,
+        DispatchMode::Research,
+        DispatchMode::Quick,
+    ] {
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+        let script = DispatchScript::dispatch();
+        let mock = script.runner();
+        let task = make_task(&repo_path);
+        let mut learning = crate::dispatch::prompts::tests::seed(77, LearningScope::User, 0);
+        learning.summary = "Every mode sees this injected pitfall".into();
+        let inputs = crate::dispatch::DispatchInputs {
+            epic_ctx: None,
+            injected: vec![learning],
+            agent_name: "atlas".into(),
+            review_command: String::new(),
+        };
+        run_agent_for_mode(&task, mode, &mock, &mock, inputs).unwrap();
+        let prompt = read_prompt(&worktree_dir);
+        assert!(
+            prompt.contains("Validated knowledge") && prompt.contains("injected pitfall"),
+            "{mode:?} prompt must show the injected learnings, got: {prompt}"
+        );
+    }
 }
 
 #[test]

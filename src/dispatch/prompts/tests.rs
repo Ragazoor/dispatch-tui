@@ -1,7 +1,7 @@
 use super::*;
 use crate::models::{LearningKind, LearningScope};
 
-fn seed(id: i64, scope: LearningScope, count: i64) -> Learning {
+pub(in crate::dispatch) fn seed(id: i64, scope: LearningScope, count: i64) -> Learning {
     use crate::models::{LearningId, LearningStatus};
     use chrono::{TimeZone, Utc};
     Learning {

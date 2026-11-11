@@ -199,15 +199,11 @@ fn recorded_text(
     scope: LearningScope,
     similar: &[crate::models::Learning],
 ) -> String {
+    let mut text = format!("Learning {learning_id} recorded and active.");
     // A task-scoped learning is never injected (learnings.allium: Scope Model).
-    let mut text = if scope == LearningScope::Task {
-        format!("Learning {learning_id} recorded and active.")
-    } else {
-        format!(
-            "Learning {learning_id} recorded and active. \
-             It will be injected into future dispatch prompts for matching tasks."
-        )
-    };
+    if scope != LearningScope::Task {
+        text.push_str(" It will be injected into future dispatch prompts for matching tasks.");
+    }
     if similar.is_empty() {
         return text;
     }

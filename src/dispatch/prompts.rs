@@ -1253,7 +1253,7 @@ pub async fn build_and_record_injections(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 #[cfg(test)]
 mod rag_dispatch_tests;
