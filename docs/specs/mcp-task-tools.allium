@@ -1,25 +1,59 @@
 -- allium: 3
 -- mcp-task-tools.allium
 --
--- Scope: MCP tools for task management (create, get, update, list,
---        dispatch, resume, query-usage,
---        set-verify-command) and the CLI plan-attachment surface; the
---        standard every tool description and agent-facing skill is held to;
---        context via MCP — the read-only resources the dispatch MCP server
---        offers (skills and their references/ files, validated learnings,
---        the caller's own task) through
---        resources/list, resources/read and their tool twin read_context.
--- Excludes: Task lifecycle (see tasks.allium); dispatch/retry (see dispatch.allium);
---           MCP epic tools (see epics.allium); learnings tools (see learnings.allium);
---           work-package tools (see work-packages.allium);
---           agent-to-agent
---           messaging, which is no longer a dispatch MCP tool — see
---           HookPeerMessageSent in agent-health.allium.
+-- Scope: the dispatch MCP server's task tools (create_task, get_task,
+--        update_tasks, list_tasks, query_usage, dispatch_task, resume_task,
+--        wrap_up, exit_session, set_verify_command, set_review_command), the
+--        CLI plan attachment, the agent port that serves them, the standard
+--        every tool description and agent-facing skill is held to, and the
+--        read-only context resources (resources/list, resources/read and their
+--        tool twin read_context).
+-- Excludes: task lifecycle (tasks.allium); dispatch and retry
+--           (dispatch.allium); the epic tools (epics.allium); the learnings
+--           tools (learnings.allium: LearningMcpTools); the work-package tools
+--           (work-packages.allium); agent-to-agent messaging, which is Claude
+--           Code's own ListAgents/SendMessage (agent-health.allium:
+--           HookPeerMessageSent).
 
 use "./core.allium" as core
+use "./cli.allium" as cli
 use "./schedules.allium" as schedules
 use "./settings.allium" as settings
 use "./store-split.allium" as split
+use "./tasks.allium" as tasks
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The HTTP port the board serves MCP, the hook path, the pane-view path and
+-- the pane-resume path on. A web page can rebind a hostname it controls to
+-- 127.0.0.1 and then reach this port same-origin, with no CORS preflight to
+-- stop it, and caller identity is a client-supplied header, so the port
+-- itself refuses such a request.
+contract AgentPort {
+    -- True when an authority (a Host or Origin header) is loopback: it parses
+    -- strictly (no userinfo, path or non-numeric port; scheme http or https
+    -- for an origin) and its hostname is 127.0.0.1, localhost or [::1],
+    -- case-insensitively and with no trailing dot. Any port present is the
+    -- port the board is bound to. A Host may omit the port (the hook client
+    -- sends Host "127.0.0.1"); an Origin may not, since a browser always
+    -- sends it and a missing one means the default port. "null" is not
+    -- loopback.
+    loopback: (authority: String) -> Boolean
+
+    @invariant NonLoopbackRequestsAreRefused
+        -- A request whose Host header is present and not loopback, or whose
+        -- Origin header is present and not loopback, is answered 403. A
+        -- request with no Host header is allowed: a browser always sends
+        -- one. The check runs before caller identity is read, so a refused
+        -- request never reaches a handler.
+
+    @invariant TheHookPathTakesJsonOnly
+        -- A cross-origin text/plain POST needs no preflight, so a body on
+        -- the hook path that is not declared application/json (charset
+        -- parameters allowed) is refused with 415 and never applied.
+}
 
 ------------------------------------------------------------
 -- Config
@@ -41,89 +75,6 @@ config {
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
-
--- == Tool descriptions ==
---
--- A tool's `description` and its arguments' descriptions are an agent-facing
--- surface, held to the same standard as the specs and docs: they state
--- behaviour, and they name no code. A description may name a tool, an argument
--- or a setting the caller passes — that is public interface — but never the
--- function, type, macro or file behind it. Two reasons the bar is *higher*
--- here than in docs/: check-doc-symbols.sh scans src/ for doc comments only
--- (`///` and `//!`), so a description — a string literal — is invisible to it
--- and nothing re-checks a citation that goes stale; and a description reaches
--- an agent mid-task, where it is acted on rather than read.
---
--- Individual rules below add their own description guarantees where a wrong or
--- missing sentence has a named consequence. Those are asserted in tests, and
--- derived from the generated schema wherever the fact has a machine-readable
--- source, so the description cannot drift from the tool it describes.
---
--- A description says what the tool does and what it returns, and stops.
--- Everything else an agent needs has a better home, and a copy in the
--- description is a second wording nothing keeps in step:
---
---   - What to do NEXT goes in the tool's RESPONSE, where it arrives just in
---     time and only on the path that needs it. wrap_up's response names
---     exit_session as the final call; neither tool's description repeats it
---     (see WrapUpViaMcp: TheNextCallIsNamedJustInTime).
---   - Why a call is REFUSED goes in the refusal's error message, which is
---     the only text a refused caller is certain to read
---     (ReviewTasksAreNotWrappedUp).
---   - A constraint the schema can express is expressed by the schema, not
---     prose: an enum for a closed value set, a conditional requirement for
---     one argument depending on another (update_tasks' url_type).
---   - An argument that means the same thing on every tool that takes it —
---     base_branch, wrap_up_mode, model, auto_run_plan, phoenix, tag, sort_order —
---     carries one short wording of that meaning, the same on each tool. A
---     tool adds text only where its meaning differs (an omitted argument
---     defaulting on create but meaning "no change" on update).
---   - A story spanning several tools is told once, by the tool where the
---     caller acts on it: resuming a crashed task is dispatch_task's
---     (DispatchTaskViaMcp), not update_tasks' status argument's.
---   - Authoring rules for a tool's content live in the skill that teaches
---     them; the description points at the skill (record_learning and the
---     /learnings skill — learnings.allium: RecordLearningViaMcp).
---   - Human-UI trivia (which tags the TUI offers), implementation detail
---     (how a self-reference is guarded) and worked examples (list_keybindings
---     once showed one) do not belong. A caller acts on neither of the first
---     two, and the schema plus a real response already show the third.
---
--- == Skill copy ==
---
--- The agent-facing skills (the /wrap-up, /retro, /allium-loop, /fix and /learnings
--- skills and their siblings) follow the same just-in-time principle. A skill's
--- SKILL.md carries the flow every invocation walks. Detail only one branch
--- needs lives in a references/ file beside it, and the branch names that file
--- at the point it is taken, so the file is loaded only on that path. The
--- /wrap-up skill's pr path and its exit_session error handling are such
--- branches (pr-workflow.allium: WrapUpPr, ExitSession); /retro, /allium-loop
--- and /learnings keep their core flow in SKILL.md and move their long tails
--- the same way.
---
--- The same SKILL.md files, and the references/ files beside them, are also
--- served as MCP resources (see "MCP context resources" below), from the copy
--- built into dispatch out of plugin/skills — never from the installed copy
--- under ~/.claude/plugins/. So a skill's copy reaches an agent by two routes,
--- both carry the text in plugin/skills, and a branch that names a references/
--- file can be followed over MCP too.
---
--- The /fix skill creates and dispatches a task in the repo that owns a defect.
--- It checks for a duplicate and asks the user to confirm before create_task,
--- because dispatch launches an agent in auto mode and a dispatched agent may
--- invoke /fix itself; the confirmation is the only bound on that chain.
-
--- == Tool definitions follow the authoring standard ==
---
--- Anthropic's guidance on tool definitions (platform.claude.com "Define
--- tools"; anthropic.com/engineering "Writing tools for agents") is the
--- reference for every tool. docs/mcp-tool-design.md is how this repo applies it
--- and holds the audit of the current tool list. The parts a test can hold:
---   - a description of at least three sentences (the detail floor, asserted by
---     every_tool_description_meets_the_detail_floor);
---   - a description on every argument, so no caller guesses what one means;
---   - behaviour annotations on every tool, so a client can tell a read from a
---     write from a destructive call without parsing prose.
 
 rule ToolsAdvertiseAnnotations {
     when: McpToolsList()
@@ -154,76 +105,18 @@ rule ToolsAdvertiseAnnotations {
         -- every_argument_carries_a_description in src/mcp/handlers/tests/mod.rs.
 }
 
--- == The agent port answers loopback callers only ==
---
--- A web page can rebind a hostname it controls to 127.0.0.1 and then reach the
--- agent port same-origin, with no CORS preflight to stop it. Caller identity is
--- a client-supplied header, so the port itself must refuse such a request.
--- This covers /mcp, the hook path, the pane-view path and the pane-resume path.
-
-rule AgentPortRejectsNonLoopbackOrigins {
-    when: AgentPortRequest(host?, origin?)
-
-    -- host and origin are the request's Host and Origin headers; "loopback"
-    -- means the authority parses strictly (no userinfo, path or non-numeric
-    -- port; scheme http or https for an origin) and the hostname is 127.0.0.1,
-    -- localhost or [::1], case-insensitively and with no trailing dot. Any port
-    -- present must be the port the board is bound to. A Host may omit the port
-    -- (the hook client sends Host "127.0.0.1"); an Origin may not, since a
-    -- browser always sends it and a missing one means the default port. "null"
-    -- is not loopback. A request with no Host header is allowed: a browser
-    -- always sends one.
-    ensures:
-        if (host != null and not loopback(host)) or (origin != null and not loopback(origin)):
-            RequestRejected(status: 403)
-
-    @guidance
-        -- The check runs before caller identity is read, so a rejected request
-        -- never reaches a handler. A per-board bearer token is a possible
-        -- follow-up and is not part of this rule.
-}
-
--- == The hook path takes JSON only ==
---
--- A cross-origin text/plain POST needs no preflight, so a body on the hook
--- path that is not declared application/json (charset parameters allowed) is
--- refused with 415 and never applied.
-
--- == MCP tool failures share one shape ==
---
--- Every failure after a tools/call is accepted, including an unresolvable
--- agent name in the arguments, comes back as a result with isError: true and
--- the message as text. A tool can never return a JSON-RPC error code. Only an
--- unreadable request (bad identity) is a JSON-RPC error. This includes a
--- task_id that names no task ("Task N not found"). A missing or null
--- `arguments` means an empty object.
-
--- == Replies name what they touch ==
--- (agents.allium: NamesForPeople, McpRepliesNameWhatTheyTouch.) Ids stay the
--- key every tool takes. A reply that names a task or an epic writes it as a
--- reference, id first, so the caller can both act on it and read it:
---
---   task: `Task <id> (<name>, "<title>")`, or `Task <id> ("<title>")` while
---         the task has no display name.
---   epic: `Epic <id> ("<title>")`.
---
--- Every reply below that says "task <id>" or "epic <id>" means these forms.
--- A tool never resolves an epic by title: titles are not unique, so an agent
--- that holds only a title asks which epic was meant. The unseen-items tools
--- and the `Task <id> not found` errors keep bare ids on purpose.
-
 -- == MCP Task Tools ==
 
 -- UpdateTaskViaMcp is the per-task rule behind the one update tool,
 -- update_tasks (UpdateTasksViaMcp below). There is no separate update_task
 -- tool: a call with one id is the single-task update.
 rule UpdateTaskViaMcp {
-    when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
-                        repo_path?, sort_order?, url?, url_type?, tag?, epic_id?,
-                        base_branch?, wrap_up_mode?, model?, auto_run_plan?, phoenix?,
-                        schedule?, bookmarked?)
+    when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan_path?,
+                        title?, description?, repo_path?, sort_order?, url?,
+                        url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
+                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
 
-    requires: status != null or sub_status != null or plan != null or title != null
+    requires: status != null or sub_status != null or plan_path != null or title != null
               or description != null or repo_path != null
               or sort_order != null or epic_id != null
               or url != null or tag != null
@@ -313,7 +206,7 @@ rule UpdateTaskViaMcp {
         else if status != null and status != prior_status:
             task.sub_status = default_sub_status(status)
     ensures:
-        if plan != null: task.plan_path = plan
+        if plan_path != null: task.plan_path = plan_path
     ensures:
         if title != null: task.title = title
     ensures:
@@ -340,18 +233,20 @@ rule UpdateTaskViaMcp {
     ensures:
         if tag != null: task.tag = tag
     ensures:
-        if epic_id != null: task.epic = route_target(core/Epic.find(epic_id), task.repo_path)
+        if epic_id != null: task.epic = route_target(core/Epic{id: epic_id}, task.repo_path)
     ensures:
         if base_branch != null: task.base_branch = base_branch
     ensures:
         -- wrap_up_mode supports three states: omitted (no change), one of
-        -- WrapUpMode's literals (set), or explicit null (clear to NULL).
-        if wrap_up_mode != omitted: task.wrap_up_mode = wrap_up_mode
+        -- WrapUpMode's literals (set), or explicit null (clear). The write is
+        -- tasks.allium's SetWrapUpMode, the same one the task editor raises.
+        if wrap_up_mode != omitted: tasks/SetWrapUpMode(task: task, mode: wrap_up_mode)
     ensures:
         -- model has the same three states as wrap_up_mode: omitted (no
         -- change), one of TaskModel's literals (set), or explicit null (clear,
-        -- so the task launches on sonnet again — tasks.allium: SetModel).
-        if model != omitted: task.model = model
+        -- so the task launches on sonnet again). The write is tasks.allium's
+        -- SetModel, the same one the task editor raises.
+        if model != omitted: tasks/SetModel(task: task, model: model)
     ensures:
         if auto_run_plan != null: task.auto_run_plan = auto_run_plan
         -- phoenix is a plain nullable boolean: omitted leaves it alone, true
@@ -395,7 +290,7 @@ rule UpdateTaskViaMcp {
     -- shared task. Every other call stamps it.
     ensures:
         if not (bookmarked != null and status = null and sub_status = null
-                and plan = null and title = null and description = null
+                and plan_path = null and title = null and description = null
                 and repo_path = null and sort_order = null and epic_id = null
                 and url = null and tag = null and base_branch = null
                 and wrap_up_mode = omitted and model = omitted
@@ -498,10 +393,10 @@ rule UpdateTaskViaMcp {
 }
 
 rule MarkTaskDoneViaMcp {
-    when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan?, title?,
-                        description?, repo_path?, sort_order?, url?, url_type?, tag?,
-                        epic_id?, base_branch?, wrap_up_mode?, model?, auto_run_plan?,
-                        phoenix?, schedule?, bookmarked?)
+    when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan_path?,
+                        title?, description?, repo_path?, sort_order?, url?,
+                        url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
+                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
 
     requires: status = done
 
@@ -517,7 +412,7 @@ rule MarkTaskDoneViaMcp {
     -- field change and completion makes two calls — one update_tasks call for
     -- the field, a separate status-only call to close.
     requires:
-        sub_status = null and plan = null and title = null and description = null
+        sub_status = null and plan_path = null and title = null and description = null
         and repo_path = null and sort_order = null and url = null and url_type = null
         and tag = null and epic_id = null and base_branch = null
         and wrap_up_mode = omitted and model = omitted and auto_run_plan = null
@@ -688,9 +583,10 @@ rule MarkTaskDoneViaMcp {
 }
 
 rule PrFinalisationReflectionNudge {
-    when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
-                        repo_path?, sort_order?, url?, url_type?, tag?, epic_id?,
-                        base_branch?, wrap_up_mode?, auto_run_plan?)
+    when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan_path?,
+                        title?, description?, repo_path?, sort_order?, url?,
+                        url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
+                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
 
     -- "PR finalisation": this one call both moves the task to review and
     -- attaches a pr-typed url, on a task that carried no url at all before the
@@ -735,30 +631,14 @@ rule PrFinalisationReflectionNudge {
         -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
 }
 
--- Anywhere an MCP tool takes a task id it also takes the name of one of the
--- task's agents.
---
--- `get_task`, `update_tasks`, `dispatch_task`, `wrap_up` and the rest resolve
--- the argument first: digits are an id, anything else is looked up as an agent
--- name, current or ended (agents.allium: AgentNameResolvesToTask). A word that
--- is no agent's name is the same NotFound (-32001) an unknown id gets. Results
--- still report the numeric id.
---
--- Task aliases are gone (agents.allium, step A5): an old alias no longer
--- resolves, and `update_tasks` has no `alias` field.
-rule TaskRefResolvesToTaskId {
-    when: McpToolCalled(task_ref)
-    ensures: TaskResolved(task_ref)
-}
-
 rule UpdateTasksViaMcp {
-    when: McpUpdateTasks(caller_identity, task_ids, fields)
+    when: McpUpdateTasks(caller_identity, task_ids, status?, sub_status?, plan_path?,
+                         title?, description?, repo_path?, sort_order?, url?,
+                         url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
+                         model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
 
-    -- update_tasks is the only MCP tool that updates tasks. fields is the
-    -- field set (status, sub_status, plan_path, title, description, repo_path,
-    -- sort_order, url, url_type, tag, epic_id, base_branch, wrap_up_mode,
-    -- model, auto_run_plan, phoenix, schedule, bookmarked), with the meaning
-    -- UpdateTaskViaMcp gives it.
+    -- update_tasks is the only MCP tool that updates tasks. Each field has the
+    -- meaning UpdateTaskViaMcp gives it.
 
     requires: task_ids.count > 0
 
@@ -767,7 +647,15 @@ rule UpdateTasksViaMcp {
     -- independently of the others.
     ensures:
         for t in task_ids:
-            McpUpdateTask(task: t, caller_identity: caller_identity, fields: fields)
+            McpUpdateTask(task: t, caller_identity: caller_identity,
+                          status: status, sub_status: sub_status,
+                          plan_path: plan_path, title: title,
+                          description: description, repo_path: repo_path,
+                          sort_order: sort_order, url: url, url_type: url_type,
+                          tag: tag, epic_id: epic_id, base_branch: base_branch,
+                          wrap_up_mode: wrap_up_mode, model: model,
+                          auto_run_plan: auto_run_plan, phoenix: phoenix,
+                          schedule: schedule, bookmarked: bookmarked)
     ensures: BulkUpdateReported(task_ids: task_ids)
 
     @guidance
@@ -809,7 +697,7 @@ rule UpdateTasksViaMcp {
 
 rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
-                        title, repo_path, epic_id, description?, plan?,
+                        title, repo_path, epic_id, description?, plan_path?,
                         sort_order?, tag?, base_branch?,
                         wrap_up_mode?, model?, auto_run_plan?, phoenix?, schedule?, signal?)
 
@@ -849,11 +737,11 @@ rule CreateTaskViaMcp {
 
     -- A Task-kind caller must reference an existing task.
     requires:
-        if caller_identity.kind = task: core/Task.exists(caller_identity.task_id)
+        if caller_identity.kind = task: exists core/Task{id: caller_identity.task_id}
 
     -- epic_id, when non-null, must refer to an existing epic.
     requires:
-        if epic_id != null: core/Epic.exists(epic_id)
+        if epic_id != null: exists core/Epic{id: epic_id}
 
     ensures:
       let task = core/Task.created(
@@ -862,7 +750,7 @@ rule CreateTaskViaMcp {
         repo_path: repo_path,
         status: backlog,
         sub_status: default_sub_status(backlog),
-        plan_path: plan,
+        plan_path: plan_path,
         epic: route_target(epic_id, repo_path),
         tag: tag,
         sort_order: sort_order,
@@ -885,7 +773,7 @@ rule CreateTaskViaMcp {
     -- (core/Epic.visible_to), in the same store transaction as the task. The
     -- epic is the one the task LANDS in (route_target's), not the argument.
       if signal = true and task.epic != null:
-            for m in task.epic.workspace.memberships.where(m => task.epic.visible_to(m.user)):
+            for m in task.epic.workspace.memberships where task.epic.visible_to(m.user):
                 core/UnseenTask.created(subscriber: m.user, task: task)
 
     -- signal is optional and defaults to false. Absent or false writes no
@@ -1050,7 +938,7 @@ rule CreateTaskViaMcp {
 rule GetTaskViaMcp {
     when: McpGetTask(task_id)
 
-    requires: core/Task.exists(task_id)
+    requires: exists core/Task{id: task_id}
 
     -- Read-only. Returns the task detail view for task_id; no state changes.
     ensures: TaskRetrieved(task_id)
@@ -1453,28 +1341,10 @@ rule ResumeTaskViaMcp {
         -- when there is no session to resume.
 }
 
--- Inter-agent messaging no longer has a dispatch MCP tool. It was
--- `send_message` (from_task_id, to_task_id, body) → a message file under the
--- target's worktree + a `tmux send-keys` nudge — replaced (task #4098) after
--- reproducing that the nudge could land on a permission prompt or
--- plan-mode/elicitation dialog instead of the agent's chat input, silently
--- answering it rather than being read. See
--- docs/superpowers/specs/2026-08-15-send-message-delivery-hardening-design.md
--- for that reproduction.
---
--- Agents now use Claude Code's own native `ListAgents`/`SendMessage` tools
--- directly, addressed by the `task-<id>` session name dispatch assigns at
--- launch (`dispatch.allium`'s `DispatchTask`/`ResumeTask`). Delivery is
--- queued and read between tool calls — it cannot land on a dialog, because
--- it never touches the pane's raw stdin. Dispatch never sits in the call
--- path; it only observes the sender's own tool call via the existing Claude
--- Code hook pipeline to drive the TUI flash and reconstruct an audit entry —
--- see `HookPeerMessageSent` in `agent-health.allium`.
-
 -- == CLI surface ==
 
 rule AttachPlanViaCli {
-    when: CliAttachPlan(task, path)
+    when: cli/CliAttachPlan(task, path)
 
     requires: task != null
 
@@ -1644,150 +1514,6 @@ rule WrapUpViaMcp {
         -- exit_session (not to wrap_up).
         -- Handled by handle_wrap_up in src/mcp/handlers/tasks/wrap_up.rs.
 
-    @guarantee TheNextCallIsNamedJustInTime
-        -- The instruction to call exit_session next, as the session's final
-        -- action, is stated in wrap_up's success RESPONSE — the moment it
-        -- applies, with the token it needs beside it — and by one short clause
-        -- in the /wrap-up skill. It is stated nowhere else.
-        --
-        -- The wrap_up and exit_session tool DESCRIPTIONS say only what each
-        -- tool does: wrap_up performs the chosen action and returns an exit
-        -- token; exit_session closes the session with that token and, when the
-        -- task's epic auto-dispatches, starts the epic's next backlog subtask.
-        -- Neither carries MUST, "never stop after", or a restatement of the
-        -- other's role. Those words reach every agent on every tools/list, on
-        -- sessions that never wrap up, and repeating an instruction three
-        -- times in capitals reads as distrust rather than as information.
-        --
-        -- The /wrap-up skill no longer carries a section telling the agent not
-        -- to dispatch the epic's next subtask itself. exit_session owns that
-        -- behaviour and its description says it happens; there is no tool an
-        -- agent could misuse to do it anyway.
-
-    @guarantee WrapUpRefusesUnfinishedWork
-        -- Skipping the commit is how agents went idle with work stranded on
-        -- an uncommitted tree, so the step a tool can check cheaply is
-        -- enforced by the tool, not by the /wrap-up skill's prose.
-        --
-        -- Commit. `git status --porcelain` in the task's worktree must be
-        -- empty, untracked files included. A status that cannot be read (git
-        -- fails or exits non-zero) refuses too: the check fails closed.
-        -- Otherwise wrap_up is refused, naming the uncommitted paths (at most
-        -- a short list, then a count) and saying to commit them and call
-        -- wrap_up again. This also makes the retro/commit ORDER hold in the
-        -- one way observable from here: a retro fix left uncommitted blocks
-        -- the call instead of being stranded after the rebase.
-        --
-        -- Refused wrap-ups are INVALID_PARAMS errors, as for a backlog task. A
-        -- dirty tree changes no task state.
-        --
-        -- What is NOT enforced: that /retro ran, and that the verify command
-        -- passed (AgentsRunTheVerifyCommand). A retro leaves no trace the
-        -- tool can read (it may change nothing), so requiring it would need a
-        -- marker the agent sets itself, which is the same honour system as the
-        -- prose. It stays one line in the skill; only its fixes are held to the
-        -- commit check above. Choosing the action first stays in the skill for
-        -- the same reason: it is a question for the user, not a state of the
-        -- repository.
-
-    @guarantee AgentsRunTheVerifyCommand
-        -- The board never runs a repository's verify command. The agent runs
-        -- it, in its own worktree, with its own shell: a long test run is
-        -- then not bounded by the agent's tool-call timeout, the board spends
-        -- no time or memory on it, and there is no board-side verify state
-        -- (no timeout, no wait cap, no outcome memory, no stdin or sccache
-        -- handling for it). wrap_up does not check that the command passed
-        -- and issues a token whether or not it did: the board trusts the
-        -- agent (task #81924).
-        --
-        -- The command reaches the agent through get_task's "Verify command"
-        -- line (GetTaskViaMcp), and the /wrap-up skill has a step that sends
-        -- the agent to run it, fix failures and commit BEFORE it calls
-        -- wrap_up. On the pr path that step comes before the push.
-        --
-        -- One case is named just in time in wrap_up's rebase response: when
-        -- the rebase moved the worktree's HEAD (the base branch had commits
-        -- the branch lacked, so the branch was rewritten on top of them) and
-        -- the task's repo has a verify command, the success text adds a line
-        -- naming the command and telling the agent to re-run it before
-        -- exit_session. A rebase that left HEAD where it was, a done or pr
-        -- action, and a repo with no verify command add no such line. The
-        -- board does not run the command or check the result.
-        --
-        -- When the verify command fails for a reason the agent did not
-        -- cause, including a broken base branch, no fixed procedure is
-        -- specified. The repository's CLAUDE.md tells agents to coordinate
-        -- with other agents and the board (look for a task already fixing
-        -- it, otherwise propose or create one) rather than wrapping up past a
-        -- red result alone.
-
-    @guarantee ReviewTasksAreNotWrappedUp
-        -- A review-tagged task is refused, whatever its status and whatever
-        -- action is asked for. Such a task has no wrap-up to perform: it ends
-        -- when its PR merges, or when the agent hands it back to the user and
-        -- the user takes it over. Nothing is committed, rebased, or PR'd on
-        -- its behalf, so every one of the three actions would be a no-op that
-        -- still spent an exit token.
-        --
-        -- What cleans it up is the FEED's stale pass (feeds.allium:
-        -- AppendOnlyFeed's counterpart — a card whose PR has merged stops
-        -- being emitted and is deleted on the next poll), not
-        -- pr-workflow.allium's PollPrStatus. PollPrStatus filters on
-        -- status = review with a pr-typed url, and a review task never
-        -- reaches that pair: the only rule that sets it is the terminal
-        -- ExitSessionViaMcp patch, which this guarantee makes unreachable.
-        -- So a review task lives its whole life in running.
-        --
-        -- That also bounds the claim. A feed-created review task is cleaned
-        -- up; a review task dispatched by hand is not, and after this refusal
-        -- nothing the agent can call releases its worktree or tmux window —
-        -- the user closes it from the TUI. Behaviour is unchanged from the
-        -- prompt line this replaced, which forbade wrap-up just as flatly,
-        -- but the limit is worth naming rather than implying an auto-clean
-        -- that only some of these tasks get.
-        --
-        -- This was a prompt instruction before it was a guard. Both review
-        -- runbooks opened with "do not call /wrap-up", which is a rule
-        -- stated where it cannot be enforced: an agent that ignores the
-        -- line reaches a tool that accepts the call. Refusing here is what
-        -- lets the line go, and it also covers the agents the line never
-        -- reached — a review task the user dispatched by hand, or one the
-        -- agent resumed in a later session.
-        --
-        -- The refusal names the tag as the reason, says a review task ends
-        -- at its PR rather than at wrap-up, and names the one way out: a
-        -- review task that has genuinely become code work is retagged
-        -- (update_tasks with a non-review tag) and wrapped up as that. The
-        -- escape hatch is stated because the alternative is an agent that
-        -- has done real work and is told only "no" — it would leave the
-        -- work uncommitted rather than infer the retag.
-        --
-        -- The rule lives in that refusal message, not in wrap_up's tool
-        -- description. A refused caller is certain to read the error; every
-        -- other caller reads the description on every tools/list and has no
-        -- use for the rule. The description may say in passing that a
-        -- review-tagged task is refused, and no more — the reason and the
-        -- retag escape hatch are the message's.
-        --
-        -- Refusing wrap_up leaves exit_session unreachable for these tasks
-        -- (ExitSessionViaMcp requires a token wrap_up mints), which is the
-        -- intended shape: a review agent stops when it has presented its
-        -- findings, exactly as build_prompt's review runbooks describe.
-        --
-        -- The refusal is the MODULE's, by decision with
-        -- the user: request_wrap_up refuses a review-tagged task (pr_review,
-        -- dependabot or release_please; store-split.allium: RequestWrapUp,
-        -- W2), so no client can wrap one
-        -- up. The tool may still check it first, as an early refusal before
-        -- the commit check, with the same wording.
-        --
-        -- The refusal is also REPORTED by GetTaskViaMcp, on a "Wrap-up:
-        -- refused — …" line carrying the same sentence. wrap_up is the last
-        -- call of the /wrap-up skill's sequence and get_task is its second,
-        -- so a refusal delivered only at the tool lets an agent run a retro
-        -- and a commit that nothing wanted. One predicate answers both, so
-        -- the two can not drift into disagreeing about whether a given task
-        -- may wrap up.
 }
 
 rule ExitSessionViaMcp {
@@ -1907,7 +1633,7 @@ rule SetVerifyCommandViaMcp {
     -- is ever stored.
     requires:
         if command != null:
-            not (command.contains("\n") or command.contains("\r"))
+            not spans_lines(command)
 
     ensures: core/SavedRepoPath.created_or_updated(
         path: repo_path,
@@ -1946,7 +1672,7 @@ rule SetReviewCommandViaMcp {
     -- A command is one line, like a verify command.
     requires:
         if command != null:
-            not (command.contains("\n") or command.contains("\r"))
+            not spans_lines(command)
 
     -- Omitting `command` is a read: nothing is written and the reply names
     -- the command in effect. A blank command restores the default.
@@ -2065,36 +1791,6 @@ rule ServerInstructionsStateDispatchConventions {
     when: McpInitialize(caller_identity)
 
     ensures: McpServerInstructionsSent(text: server_instructions())
-
-    @guarantee InstructionsCoverOnlyConventionsNoSchemaStates
-        -- initialize's response carries an `instructions` string. Claude Code
-        -- loads it into the system prompt of every session connected to the
-        -- server, so it is the one place to state a convention that spans
-        -- several tools and that no single tool's schema owns:
-        --   * the name of one of a task's agents works wherever a tool takes
-        --     a task id (TaskRefResolvesToTaskId; agents.allium:
-        --     AgentNameResolvesToTask);
-        --   * an agent's Claude Code session carries that name, so another
-        --     agent is reached with the harness's ListAgents and SendMessage
-        --     by it, and each task's details and listing show it
-        --     (agents.allium: PromptNamesTheAgent);
-        --   * tasks in the same epic are siblings.
-        --
-        -- It says nothing else. It is identity-free like the rest of the
-        -- initialize response (DeclareResourcesCapability), so every client
-        -- reads it: an operator session, an agent in another repo, a task with
-        -- no epic. A rule that holds only for some tasks, or that is a
-        -- repository's policy rather than how to use dispatch's tools — TDD,
-        -- Allium specs, the design step, when to wrap up — stays in the
-        -- dispatch prompt (dispatch-prompt.allium), whose conditions decide
-        -- whether it applies. What one tool does belongs in that tool's
-        -- description (the tool-description standard at the head of this
-        -- file), not here.
-        --
-        -- The dispatch prompt does not restate these conventions: the epic
-        -- section keeps the epic's id and title and the invitation to ask a
-        -- sibling for help, and leaves how to reach one to this text
-        -- (dispatch-prompt.allium: ThePromptNamesNoToolMerelyToSayItExists).
 }
 
 rule ListContextResourcesViaMcp {
@@ -2104,7 +1800,7 @@ rule ListContextResourcesViaMcp {
     requires: cursor = null or context_list_cursor_valid(cursor)
 
     let has_own_task =
-        caller_identity.kind = task and core/Task.exists(caller_identity.task_id)
+        caller_identity.kind = task and exists core/Task{id: caller_identity.task_id}
 
     ensures: ContextResourcesListed(
         caller_identity: caller_identity,
@@ -2413,6 +2109,324 @@ surface McpContextResources {
         -- with an isError tool result carrying the same message. An internal
         -- failure serving a resolvable URI is -32603 on resources/read and an
         -- isError result on read_context.
+
+    @guarantee InstructionsCoverOnlyConventionsNoSchemaStates
+        -- initialize's response carries an `instructions` string. Claude Code
+        -- loads it into the system prompt of every session connected to the
+        -- server, so it is the one place to state a convention that spans
+        -- several tools and that no single tool's schema owns:
+        --   * the name of one of a task's agents works wherever a tool takes
+        --     a task id (TaskRefAcceptsAgentName; agents.allium:
+        --     AgentNameResolvesToTask);
+        --   * an agent's Claude Code session carries that name, so another
+        --     agent is reached with the harness's ListAgents and SendMessage
+        --     by it, and each task's details and listing show it
+        --     (agents.allium: PromptNamesTheAgent);
+        --   * tasks in the same epic are siblings.
+        --
+        -- It says nothing else. It is identity-free like the rest of the
+        -- initialize response (DeclareResourcesCapability), so every client
+        -- reads it: an operator session, an agent in another repo, a task with
+        -- no epic. A rule that holds only for some tasks, or that is a
+        -- repository's policy rather than how to use dispatch's tools — TDD,
+        -- Allium specs, the design step, when to wrap up — stays in the
+        -- dispatch prompt (dispatch-prompt.allium), whose conditions decide
+        -- whether it applies. What one tool does belongs in that tool's
+        -- description (the tool-description standard at the head of this
+        -- file), not here.
+        --
+        -- The dispatch prompt does not restate these conventions: the epic
+        -- section keeps the epic's id and title and the invitation to ask a
+        -- sibling for help, and leaves how to reach one to this text
+}
+
+-- The task tools' boundary: every tools/call a client makes to them.
+surface McpTaskTools {
+    facing client: core/McpClient
+
+    contracts:
+        fulfils AgentPort
+
+    provides:
+        McpToolsList(client)
+        McpUpdateTasks(client, task_ids, status?, sub_status?, plan_path?,
+                       title?, description?, repo_path?, sort_order?, url?,
+                       url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
+                       model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
+        McpCreateTask(client, title, repo_path, epic_id, description?,
+                      plan_path?, sort_order?, tag?, base_branch?,
+                      wrap_up_mode?, model?, auto_run_plan?, phoenix?,
+                      schedule?, signal?)
+        McpGetTask(task_id)
+        McpListTasks(client, epic_id?, repo_paths?, status?, recursive?,
+                     base_branch?, query?, limit?, bookmarked?)
+        McpQueryUsage(category?, actor?, since?)
+        McpDispatchTask(task)
+        McpResumeTask(task, message?)
+        McpWrapUp(task, action)
+        McpExitSession(task, token?, action?, pr_url?)
+        McpSetVerifyCommand(repo_path, command?)
+        McpSetReviewCommand(command?)
+
+    @guarantee ToolDescriptionsStateBehaviourAndNameNoCode
+        -- A tool's `description` and its arguments' descriptions are an agent-facing
+        -- surface, held to the same standard as the specs and docs: they state
+        -- behaviour, and they name no code. A description may name a tool, an argument
+        -- or a setting the caller passes — that is public interface — but never the
+        -- function, type, macro or file behind it. Two reasons the bar is *higher*
+        -- here than in docs/: check-doc-symbols.sh scans src/ for doc comments only
+        -- (`///` and `//!`), so a description — a string literal — is invisible to it
+        -- and nothing re-checks a citation that goes stale; and a description reaches
+        -- an agent mid-task, where it is acted on rather than read.
+        --
+        -- Individual rules below add their own description guarantees where a wrong or
+        -- missing sentence has a named consequence. Those are asserted in tests, and
+        -- derived from the generated schema wherever the fact has a machine-readable
+        -- source, so the description cannot drift from the tool it describes.
+        --
+        -- A description says what the tool does and what it returns, and stops.
+        -- Everything else an agent needs has a better home, and a copy in the
+        -- description is a second wording nothing keeps in step:
+        --
+        --   - What to do NEXT goes in the tool's RESPONSE, where it arrives just in
+        --     time and only on the path that needs it. wrap_up's response names
+        --     exit_session as the final call; neither tool's description repeats it
+        --     (see WrapUpViaMcp: TheNextCallIsNamedJustInTime).
+        --   - Why a call is REFUSED goes in the refusal's error message, which is
+        --     the only text a refused caller is certain to read
+        --     (ReviewTasksAreNotWrappedUp).
+        --   - A constraint the schema can express is expressed by the schema, not
+        --     prose: an enum for a closed value set, a conditional requirement for
+        --     one argument depending on another (update_tasks' url_type).
+        --   - An argument that means the same thing on every tool that takes it —
+        --     base_branch, wrap_up_mode, model, auto_run_plan, phoenix, tag, sort_order —
+        --     carries one short wording of that meaning, the same on each tool. A
+        --     tool adds text only where its meaning differs (an omitted argument
+        --     defaulting on create but meaning "no change" on update).
+        --   - A story spanning several tools is told once, by the tool where the
+        --     caller acts on it: resuming a crashed task is dispatch_task's
+        --     (DispatchTaskViaMcp), not update_tasks' status argument's.
+        --   - Authoring rules for a tool's content live in the skill that teaches
+        --     them; the description points at the skill (record_learning and the
+        --     /learnings skill — learnings.allium: RecordLearningViaMcp).
+        --   - Human-UI trivia (which tags the TUI offers), implementation detail
+        --     (how a self-reference is guarded) and worked examples (list_keybindings
+        --     once showed one) do not belong. A caller acts on neither of the first
+        --     two, and the schema plus a real response already show the third.
+
+    @guarantee SkillCopyIsJustInTime
+        -- The agent-facing skills (the /wrap-up, /retro, /allium-loop, /fix and /learnings
+        -- skills and their siblings) follow the same just-in-time principle. A skill's
+        -- SKILL.md carries the flow every invocation walks. Detail only one branch
+        -- needs lives in a references/ file beside it, and the branch names that file
+        -- at the point it is taken, so the file is loaded only on that path. The
+        -- /wrap-up skill's pr path and its exit_session error handling are such
+        -- branches (pr-workflow.allium: WrapUpPr, ExitSession); /retro, /allium-loop
+        -- and /learnings keep their core flow in SKILL.md and move their long tails
+        -- the same way.
+        --
+        -- The same SKILL.md files, and the references/ files beside them, are also
+        -- served as MCP resources (see "MCP context resources" below), from the copy
+        -- built into dispatch out of plugin/skills — never from the installed copy
+        -- under ~/.claude/plugins/. So a skill's copy reaches an agent by two routes,
+        -- both carry the text in plugin/skills, and a branch that names a references/
+        -- file can be followed over MCP too.
+        --
+        -- The /fix skill creates and dispatches a task in the repo that owns a defect.
+        -- It checks for a duplicate and asks the user to confirm before create_task,
+        -- because dispatch launches an agent in auto mode and a dispatched agent may
+        -- invoke /fix itself; the confirmation is the only bound on that chain.
+
+    @guarantee ToolDefinitionsFollowTheAuthoringStandard
+        -- Anthropic's guidance on tool definitions (platform.claude.com "Define
+        -- tools"; anthropic.com/engineering "Writing tools for agents") is the
+        -- reference for every tool. docs/mcp-tool-design.md is how this repo applies it
+        -- and holds the audit of the current tool list. The parts a test can hold:
+        --   - a description of at least three sentences (the detail floor, asserted by
+        --     every_tool_description_meets_the_detail_floor);
+        --   - a description on every argument, so no caller guesses what one means;
+        --   - behaviour annotations on every tool, so a client can tell a read from a
+        --     write from a destructive call without parsing prose.
+
+    @guarantee ToolFailuresShareOneShape
+        -- Every failure after a tools/call is accepted, including an unresolvable
+        -- agent name in the arguments, comes back as a result with isError: true and
+        -- the message as text. A tool can never return a JSON-RPC error code. Only an
+        -- unreadable request (bad identity) is a JSON-RPC error. This includes a
+        -- task_id that names no task ("Task N not found"). A missing or null
+        -- `arguments` means an empty object.
+
+    @guarantee RepliesNameWhatTheyTouch
+        -- (agents.allium: NamesForPeople, McpRepliesNameWhatTheyTouch.) Ids stay the
+        -- key every tool takes. A reply that names a task or an epic writes it as a
+        -- reference, id first, so the caller can both act on it and read it:
+        --
+        --   task: `Task <id> (<name>, "<title>")`, or `Task <id> ("<title>")` while
+        --         the task has no display name.
+        --   epic: `Epic <id> ("<title>")`.
+        --
+        -- Every reply below that says "task <id>" or "epic <id>" means these forms.
+        -- A tool never resolves an epic by title: titles are not unique, so an agent
+        -- that holds only a title asks which epic was meant. The unseen-items tools
+        -- and the `Task <id> not found` errors keep bare ids on purpose.
+
+    @guarantee TaskRefAcceptsAgentName
+        -- Anywhere an MCP tool takes a task id it also takes the name of one of the
+        -- task's agents.
+        --
+        -- `get_task`, `update_tasks`, `dispatch_task`, `wrap_up` and the rest resolve
+        -- the argument first: digits are an id, anything else is looked up as an agent
+        -- name, current or ended (agents.allium: AgentNameResolvesToTask). A word that
+        -- is no agent's name is the same NotFound (-32001) an unknown id gets. Results
+        -- still report the numeric id.
+        --
+        -- Task aliases are gone (agents.allium, step A5): an old alias no longer
+        -- resolves, and `update_tasks` has no `alias` field.
+
+    @guarantee TheNextCallIsNamedJustInTime
+        -- The instruction to call exit_session next, as the session's final
+        -- action, is stated in wrap_up's success RESPONSE — the moment it
+        -- applies, with the token it needs beside it — and by one short clause
+        -- in the /wrap-up skill. It is stated nowhere else.
+        --
+        -- The wrap_up and exit_session tool DESCRIPTIONS say only what each
+        -- tool does: wrap_up performs the chosen action and returns an exit
+        -- token; exit_session closes the session with that token and, when the
+        -- task's epic auto-dispatches, starts the epic's next backlog subtask.
+        -- Neither carries MUST, "never stop after", or a restatement of the
+        -- other's role. Those words reach every agent on every tools/list, on
+        -- sessions that never wrap up, and repeating an instruction three
+        -- times in capitals reads as distrust rather than as information.
+        --
+        -- The /wrap-up skill no longer carries a section telling the agent not
+        -- to dispatch the epic's next subtask itself. exit_session owns that
+        -- behaviour and its description says it happens; there is no tool an
+        -- agent could misuse to do it anyway.
+
+    @guarantee WrapUpRefusesUnfinishedWork
+        -- Skipping the commit is how agents went idle with work stranded on
+        -- an uncommitted tree, so the step a tool can check cheaply is
+        -- enforced by the tool, not by the /wrap-up skill's prose.
+        --
+        -- Commit. `git status --porcelain` in the task's worktree must be
+        -- empty, untracked files included. A status that cannot be read (git
+        -- fails or exits non-zero) refuses too: the check fails closed.
+        -- Otherwise wrap_up is refused, naming the uncommitted paths (at most
+        -- a short list, then a count) and saying to commit them and call
+        -- wrap_up again. This also makes the retro/commit ORDER hold in the
+        -- one way observable from here: a retro fix left uncommitted blocks
+        -- the call instead of being stranded after the rebase.
+        --
+        -- Refused wrap-ups are INVALID_PARAMS errors, as for a backlog task. A
+        -- dirty tree changes no task state.
+        --
+        -- What is NOT enforced: that /retro ran, and that the verify command
+        -- passed (AgentsRunTheVerifyCommand). A retro leaves no trace the
+        -- tool can read (it may change nothing), so requiring it would need a
+        -- marker the agent sets itself, which is the same honour system as the
+        -- prose. It stays one line in the skill; only its fixes are held to the
+        -- commit check above. Choosing the action first stays in the skill for
+        -- the same reason: it is a question for the user, not a state of the
+        -- repository.
+
+    @guarantee AgentsRunTheVerifyCommand
+        -- The board never runs a repository's verify command. The agent runs
+        -- it, in its own worktree, with its own shell: a long test run is
+        -- then not bounded by the agent's tool-call timeout, the board spends
+        -- no time or memory on it, and there is no board-side verify state
+        -- (no timeout, no wait cap, no outcome memory, no stdin or sccache
+        -- handling for it). wrap_up does not check that the command passed
+        -- and issues a token whether or not it did: the board trusts the
+        -- agent (task #81924).
+        --
+        -- The command reaches the agent through get_task's "Verify command"
+        -- line (GetTaskViaMcp), and the /wrap-up skill has a step that sends
+        -- the agent to run it, fix failures and commit BEFORE it calls
+        -- wrap_up. On the pr path that step comes before the push.
+        --
+        -- One case is named just in time in wrap_up's rebase response: when
+        -- the rebase moved the worktree's HEAD (the base branch had commits
+        -- the branch lacked, so the branch was rewritten on top of them) and
+        -- the task's repo has a verify command, the success text adds a line
+        -- naming the command and telling the agent to re-run it before
+        -- exit_session. A rebase that left HEAD where it was, a done or pr
+        -- action, and a repo with no verify command add no such line. The
+        -- board does not run the command or check the result.
+        --
+        -- When the verify command fails for a reason the agent did not
+        -- cause, including a broken base branch, no fixed procedure is
+        -- specified. The repository's CLAUDE.md tells agents to coordinate
+        -- with other agents and the board (look for a task already fixing
+        -- it, otherwise propose or create one) rather than wrapping up past a
+        -- red result alone.
+
+    @guarantee ReviewTasksAreNotWrappedUp
+        -- A review-tagged task is refused, whatever its status and whatever
+        -- action is asked for. Such a task has no wrap-up to perform: it ends
+        -- when its PR merges, or when the agent hands it back to the user and
+        -- the user takes it over. Nothing is committed, rebased, or PR'd on
+        -- its behalf, so every one of the three actions would be a no-op that
+        -- still spent an exit token.
+        --
+        -- What cleans it up is the FEED's stale pass (feeds.allium:
+        -- AppendOnlyFeed's counterpart — a card whose PR has merged stops
+        -- being emitted and is deleted on the next poll), not
+        -- pr-workflow.allium's PollPrStatus. PollPrStatus filters on
+        -- status = review with a pr-typed url, and a review task never
+        -- reaches that pair: the only rule that sets it is the terminal
+        -- ExitSessionViaMcp patch, which this guarantee makes unreachable.
+        -- So a review task lives its whole life in running.
+        --
+        -- That also bounds the claim. A feed-created review task is cleaned
+        -- up; a review task dispatched by hand is not, and after this refusal
+        -- nothing the agent can call releases its worktree or tmux window —
+        -- the user closes it from the TUI. Behaviour is unchanged from the
+        -- prompt line this replaced, which forbade wrap-up just as flatly,
+        -- but the limit is worth naming rather than implying an auto-clean
+        -- that only some of these tasks get.
+        --
+        -- This was a prompt instruction before it was a guard. Both review
+        -- runbooks opened with "do not call /wrap-up", which is a rule
+        -- stated where it cannot be enforced: an agent that ignores the
+        -- line reaches a tool that accepts the call. Refusing here is what
+        -- lets the line go, and it also covers the agents the line never
+        -- reached — a review task the user dispatched by hand, or one the
+        -- agent resumed in a later session.
+        --
+        -- The refusal names the tag as the reason, says a review task ends
+        -- at its PR rather than at wrap-up, and names the one way out: a
+        -- review task that has genuinely become code work is retagged
+        -- (update_tasks with a non-review tag) and wrapped up as that. The
+        -- escape hatch is stated because the alternative is an agent that
+        -- has done real work and is told only "no" — it would leave the
+        -- work uncommitted rather than infer the retag.
+        --
+        -- The rule lives in that refusal message, not in wrap_up's tool
+        -- description. A refused caller is certain to read the error; every
+        -- other caller reads the description on every tools/list and has no
+        -- use for the rule. The description may say in passing that a
+        -- review-tagged task is refused, and no more — the reason and the
+        -- retag escape hatch are the message's.
+        --
+        -- Refusing wrap_up leaves exit_session unreachable for these tasks
+        -- (ExitSessionViaMcp requires a token wrap_up mints), which is the
+        -- intended shape: a review agent stops when it has presented its
+        -- findings, exactly as build_prompt's review runbooks describe.
+        --
+        -- The refusal is the MODULE's, by decision with
+        -- the user: request_wrap_up refuses a review-tagged task (pr_review,
+        -- dependabot or release_please; store-split.allium: RequestWrapUp,
+        -- W2), so no client can wrap one
+        -- up. The tool may still check it first, as an early refusal before
+        -- the commit check, with the same wording.
+        --
+        -- The refusal is also REPORTED by GetTaskViaMcp, on a "Wrap-up:
+        -- refused — …" line carrying the same sentence. wrap_up is the last
+        -- call of the /wrap-up skill's sequence and get_task is its second,
+        -- so a refusal delivered only at the tool lets an agent run a retro
+        -- and a commit that nothing wanted. One predicate answers both, so
+        -- the two can not drift into disagreeing about whether a given task
+        -- may wrap up.
 }
 
 ------------------------------------------------------------

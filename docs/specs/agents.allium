@@ -411,7 +411,7 @@ surface AgentIdentity {
 
     provides:
         -- Every MCP tool that takes a task id (mcp-task-tools.allium:
-        -- TaskRefResolvesToTaskId).
+        -- McpTaskTools, TaskRefAcceptsAgentName).
         McpToolCalled(task_ref)
 
     @guarantee ResumeKeepsTheAgent
