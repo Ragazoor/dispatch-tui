@@ -20,15 +20,11 @@
 --               Membership from core.allium; WorkPackage from
 --               work-packages.allium.
 --
--- WHERE THIS STARTS FROM (task #98510). Before this spec the store had no
--- authorisation model. Every table was public: any client that connected
--- could read every row and call almost every reducer. The board chose what
--- to ask for (followed epics plus own creations, sync.allium), but nothing
--- in the store enforced it. The only write checks were D11's host
--- ownership and the scheduled reducers' self-call check.
+-- The store enforces every rule below on reads as well as writes. The other
+-- write checks are store-split.allium's host ownership (D11) and the
+-- scheduled reducers' self-call check.
 --
--- Decisions taken with the user (task #98510), recorded so they are not
--- re-litigated:
+-- Decisions, cited by id from other specs:
 --   D1. A workspace is where people collaborate. A super-admin creates
 --       workspaces, adds people to them and gives anyone any role. A
 --       workspace admin adds people to their own workspace and sets roles
@@ -39,10 +35,10 @@
 --       many workspaces. A task inherits its epic's visibility. A task with
 --       no epic sits on its owner's user board, which is always private to
 --       that owner.
---   D3. A private epic or work package is seen by its creator and nobody
---       else. No admin, workspace or super, reads it. Chosen for privacy
---       over oversight. The cost, accepted: a person who leaves takes their
---       private items out of everyone's sight. The one escape hatch is
+--   D3. A private epic or work package is seen by its holder and nobody
+--       else. No admin, workspace or super, reads it: privacy is chosen over
+--       oversight. The accepted cost: a person who leaves takes their private
+--       items out of everyone's sight. The one escape hatch is
 --       SuperAdminDeletesUnseenItem: a super-admin may DELETE such an item
 --       once the person it is private to is no longer a member of its
 --       workspace, never read it.
@@ -50,14 +46,13 @@
 --       package in it, and who created it, by display name.
 --   D5. A sub-epic lives in its parent's workspace. Who a private epic is
 --       private to is decided by the NEAREST private epic at or above it
---       (core.allium: Epic.private_holder; resolved with the user, task
---       #98744). So a public sub-epic of a private epic is hidden by that
---       ancestor and seen only by the ancestor's creator, and a private
---       sub-epic of a public epic is its own creator's. Re-parenting may change who an epic or task is private to; that
+--       (core.allium: Epic.private_holder). So a public sub-epic of a private
+--       epic is hidden by that ancestor and seen only by the ancestor's
+--       creator, and a private sub-epic of any epic is its own creator's.
+--       Re-parenting may change who an epic or task is private to; that
 --       needs the authority a visibility change needs
 --       (ReParentingKeepsTheHolder). A root epic moves to another workspace
---       only through MoveEpicToWorkspace (D13), and its whole tree moves
---       with it.
+--       only through MoveEpicToWorkspace, and its whole tree moves with it.
 --   D6. A work package links only to items in its own workspace, except a
 --       main-board task, which may be linked but stays private to its owner.
 --       Seeing a package never reveals a linked item the viewer cannot see.
@@ -67,8 +62,8 @@
 --   D8. Learnings belong to a workspace: an epic- or task-scoped learning to
 --       its item's workspace, a repo-scoped learning to the workspace it was
 --       recorded in. A user-scoped learning is private to its author.
---   D9. Settings stay host-scoped (core.allium: Setting), as decided before;
---       a host's settings are visible only to the host's owner.
+--   D9. Settings are host-scoped (core.allium: Setting); a host's settings
+--       are visible only to the host's owner.
 --   D10. An agent sees what its host's owner sees. Its MCP calls reach the
 --       store through its host's board, under that board's identity.
 --   D11. The first super-admin is claimed, not configured: claiming works
@@ -79,111 +74,13 @@
 --       default workspace as public, and makes every person the store
 --       already knows a member of it.
 --
--- READ ENFORCEMENT, BY DECISION: VIEWS, NOT ROW FILTERS. SpacetimeDB 2.12
--- ships row-level filters (client_visibility_filter) behind an unstable
--- flag, and its own source says they are not yet enforced. So the store
--- enforces reads by making every table that holds task, epic, package,
--- learning, membership or setting data private and serving clients through
--- per-caller views that apply the visible_to predicates below. The store's
--- publisher identity can still read private tables with one-off SQL. The
--- operator, the trust boundary every sight check exempts, is the store's own
--- identity (the database identity: scheduled calls). The publisher is
--- recognised separately, and only for the seed_* restore reducers
--- (spacetime-seed.allium: actor Operator); it is not exempt from sight checks.
---
--- Proven on a throwaway module (docs/plans/2026-10-28-per-caller-views-spike.md).
--- A client can subscribe to a view with a WHERE; a non-owner's one-off SQL
--- and subscriptions are refused on a private table. Four facts shape the
--- build: (1) a view reads only through indexes, so every column it filters
--- on needs a btree index, and a range read re-runs the view on EVERY write
--- to that table; (2) a view cannot be joined with a private table by the
--- client, so each board ask is its own view; (3) a view's rows have no
--- primary key in the generated bindings, so an update arrives as INSERT(new)
--- then DELETE(old) with no on_update, and the board's apply path must not let
--- the delete erase the updated row; (4) one write re-runs every follower's
--- view, so cost is followers x covered-view size. A view derives a private
--- epic's holder by walking parent_id upward; no private_holder column is
--- stored, so SetEpicVisibility and re-parenting need no subtree cascade.
---
--- IMPLEMENTATION OBLIGATIONS the follow-up tasks inherit. Every new reducer
--- and every new check lives in spacetime/module/src/ and is mirrored in
--- src/sync/memory_caller/ with a pair test in tests/memory_caller_conformance.rs.
--- RULES_VERSION and BOARD_RULES_VERSION move together. New columns are
--- appended last with a default, or the module will not automigrate.
-
--- THE PER-CALLER VIEWS (task #98690). One view per question the board asks,
--- each answering for ctx.sender() and each built on the module's own
--- visible_to predicates, never a copy of them (the module and the in-memory
--- store run one function over two sets of tables). Rows are the table's own
--- row type, so a card needs no second lookup.
---
---   own_epics, own_tasks, own_packages: what the caller created, plus the
---     epic-less tasks they own, kept only while visible_to still holds (a
---     member who left a workspace loses their own items in it).
---   covered_epics: the epics the caller follows and every descendant, walked
---     by the SERVER at any depth, stopping at an epic the caller cannot see.
---   covered_tasks: the tasks of the covered epics.
---   own_tasks also serves a task run on a host the caller owns (task #98911,
---     M12): one with a current agent, or an open dispatch or session request,
---     on such a host, while the caller still sees it. Unfollowing the epic of
---     a teammate's task one dispatched must not lose the task its agent and
---     requests name.
---   visible_epics, visible_tasks, visible_packages: everything visible in a
---     workspace the caller belongs to; a client narrows with
---     WHERE workspace_id = N (WHERE epic_id = N for tasks).
---   Rows about a task (agents, dispatch_requests, session_requests,
---     unseen_tasks, task_subagents, learning_retrievals, learning_verdicts):
---     one view each, serving the rows of the tasks the board holds (own
---     tasks, which include the tasks run on the caller's hosts, and covered
---     tasks). Never wider than the task's own visibility.
---   unseen_tasks is the caller's own marks only. bookmarks
---     (core/Bookmark) likewise: the caller's own, on tasks they still see.
---   task_watchers is dead (no reducer writes it), so its view is the
---     tasks-held rule above like the rest.
---   poll_owners follow their scope: an epic-scoped row is served while the
---     epic is visible, a task-scoped row while the task is.
---   work_package_links: one row per link, served while the package AND the
---     linked item are both visible to the caller.
---   visible_learnings: the learnings LearningVisibility lets the caller see.
---   own_settings: settings of the hosts the caller owns (D9), and no one
---     else's. Host rows stay readable by all (they carry no task content).
---   visible_workspaces, visible_memberships: the workspaces the caller
---     belongs to and their membership rows (a super-admin sees every one).
---     A view cannot scan a table, so every workspace row carries an indexed
---     listed flag that is always true (appended with a default, task #98691):
---     a super-admin's view reads every row through it.
---
--- Every column a view filters on has a btree index, and every read in a view
--- is a point read, so a write to an unrelated row never re-runs it.
--- The operator (the store's own identity) is not served by views: it reads the
--- tables directly, which is what makes it the trust boundary.
---
--- DISPOSITIONS, agreed with the user (task #98690). todos, task_shells,
--- retired_feed_items and filter_presets become private with no view: no
--- client reads them. handed_out_agent_names stays public (names carry no task
--- content and every board needs the whole set). dispatch_request_timeouts and
--- session_request_timeouts become private. todos and task_shells are dead; a
--- table with rows is refused by a publish that drops it, so dropping them
--- waits for a check that every live store holds none.
---
--- THE PRIVATE FLIP (task #98691). The board subscribes through these views
--- and every table above is private in the same change. usage_events gained an
--- indexed recorded_by column, stamped with the caller by record_usage_event
--- (actor says only human or agent). An event names no task, so the held-task
--- rule cannot apply to it: an event is its recorder's alone. A row recorded
--- before the column existed is nobody's.
---
--- Usage is served ON DEMAND, not through a view (task #98756). A view is
--- recomputed whole when its read set changes, and record_usage_event fires on
--- every keybinding, hook and dispatch, so an own_usage_events view would have
--- re-run over a person's whole history (up to the 100,000-row cap) on every
--- event. The own_usage_summary procedure instead runs when query_usage asks:
--- it reads the caller's rows through the recorded_by index, applies the
--- category, actor and since filters, and returns the grouped counts. The
--- board holds no usage rows and subscribes to nothing for them.
+-- How the store serves reads (private tables plus per-caller views, the
+-- operator as the trust boundary) is in docs/architecture.md, "Read
+-- enforcement: per-caller views".
 
 use "./core.allium" as core
 use "./work-packages.allium" as wp
+use "./epics.allium" as epics
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -196,6 +93,12 @@ entity UserProfile {
     display_name: String       -- "" until the person sets one; shown as the identity's short prefix meanwhile (config.identity_prefix_length)
     is_super_admin: Boolean = false
     created_at: Timestamp
+
+    -- How every card and tool result names the person (CreatorIsShownByName).
+    -- An identity with no UserProfile row (a creator written before profiles
+    -- existed) is shown by its prefix too.
+    shown_name: if display_name != "": display_name
+                else: identity.prefix(config.identity_prefix_length)
 
     invariant OneProfilePerIdentity {
         for a in UserProfiles:
@@ -285,26 +188,6 @@ rule SetDisplayNameViaMcp {
         -- the store's reason.
 }
 
-rule ShownName {
-    when: ANameIsShown(identity)
-
-    let profile = UserProfile{identity: identity}
-
-    ensures: shown_name(identity) =
-        if exists profile and profile.display_name != "": profile.display_name
-        else: identity.prefix(config.identity_prefix_length)
-
-    @guidance
-        -- Two twins, because the board cannot link the module crate in a
-        -- release build: `shown_name` in the module's user_profile.rs, used
-        -- by the module and MemoryReducerCaller, and `models::shown_name`,
-        -- used by the board. The conformance scenario asserts they agree;
-        -- nothing else re-slices an identity. A creator with no UserProfile row
-        -- (a row written before profiles existed) is shown by prefix.
-        -- list_work_packages and the package card are today's surfaces that
-        -- name a creator: each shows the shown name (CreatorIsShownByName).
-}
-
 -- Super-admins ----------------------------------------------
 
 rule ClaimSuperAdmin {
@@ -353,10 +236,11 @@ rule RevokeSuperAdmin {
 
     let revoker = UserProfile{identity: caller()}
     let profile = UserProfile{identity: user}
+    let super_admins = UserProfiles where is_super_admin
 
     requires: exists revoker and revoker.is_super_admin
     requires: exists profile and profile.is_super_admin
-    requires: UserProfiles.where(p => p.is_super_admin).count > 1
+    requires: super_admins.count > 1
 
     ensures: profile.is_super_admin = false
 
@@ -377,6 +261,7 @@ rule CreateWorkspace {
     requires: exists creator and creator.is_super_admin
     requires: trimmed != ""
     requires: trimmed.length <= config.workspace_name_max_length
+    requires: not trimmed.has_control_or_format_characters    -- as SetDisplayName
     requires: not Workspaces.any(w => w.name = trimmed)
 
     ensures: core/Workspace.created(name: trimmed, created_by: caller(), created_at: now)
@@ -395,6 +280,7 @@ rule RenameWorkspace {
     requires: is_super_admin(caller()) or workspace.is_admin(caller())
     requires: trimmed != ""
     requires: trimmed.length <= config.workspace_name_max_length
+    requires: not trimmed.has_control_or_format_characters    -- as SetDisplayName
     requires: not Workspaces.any(w => w != workspace and w.name = trimmed)
 
     ensures: workspace.name = trimmed
@@ -465,13 +351,19 @@ rule RemoveMember {
             not exists u
         for b in Bookmarks where b.subscriber = user and b.task.epic != null and b.task.epic.workspace = workspace:
             not exists b
-        -- Task #98746 (V6). A claim must not outlive the sight that made it
-        -- workable: every epic-scoped core/PollOwner row on an epic of this
-        -- workspace held by a host `user` owns is released, as
-        -- UnsubscribeFromEpic does, so another host can claim the feed.
-        for owner_row in core/PollOwners.where(p =>
-                p.scope = epic and p.scope_id.workspace = workspace
-                    and p.host.owner = user):
+        -- A claim must not outlive the sight that made it workable: every
+        -- core/PollOwner row held by a host `user` owns, epic-scoped on an
+        -- epic of this workspace or task-scoped on a task of one, is
+        -- released, as UnsubscribeFromEpic does, so another host can claim
+        -- the feed or the PR poll.
+        for owner_row in core/PollOwners
+                where scope = epic and scope_id.workspace = workspace
+                  and host.owner = user:
+            not exists owner_row
+        for owner_row in core/PollOwners
+                where scope = task and scope_id.epic != null
+                  and scope_id.epic.workspace = workspace
+                  and host.owner = user:
             not exists owner_row
 
     @guidance
@@ -509,7 +401,7 @@ rule RepoGroupsStayPublic {
     ensures: EpicChangeAllowed(epic)
 
     @guidance
-        -- Task #98744. A repo-group sub-epic (origin = repo_group) is found
+        -- A repo-group sub-epic (origin = repo_group) is found
         -- by its title and origin by whoever routes a task into the grouped
         -- root (epics.allium: RegroupEpic, route_target), so it must be seen
         -- by everyone who sees its parent. So an epic with origin =
@@ -544,11 +436,10 @@ rule CreateEpicInWorkspace {
 
     @guidance
         -- A root epic whose workspace does not exist is refused, so no path
-        -- creates one in workspace 0. Epic 69669 (task #98727) was made on
-        -- 2026-10-30 by a build older than the commit that added that check
-        -- and kept workspace 0, the column default; MoveEpicToWorkspace is the
-        -- rescue for rows like it.
-        -- Every epic-creating path (board, create_epic MCP tool, feed
+        -- creates one in workspace 0, the column default. MoveEpicToWorkspace
+        -- is the rescue for a row that has it.
+        -- The create_epic reducer runs this check for every client. Every
+        -- epic-creating path (board, create_epic MCP tool, feed
         -- grouping) names a workspace for a root epic. For a sub-epic the
         -- workspace argument is ignored and the parent's is used (D5). A
         -- feed's grouped and role-routed sub-epics are created by the
@@ -567,15 +458,14 @@ rule SetEpicVisibility {
 
     ensures:
         epic.visibility = visibility
-        -- ClaimsFollowSight, below.
+        SightChanged(epic)
 
     @guidance
         -- An admin can act only on an epic they can see, one with no
         -- private epic at or above it. Making it private hides it from
         -- everyone but its creator, the admin included, so making a private
         -- epic public again is the creator's call only.
-        -- Who may change visibility is narrower than who may write
-        -- (resolved with the user, task #98744): changing an epic's
+        -- Who may change visibility is narrower than who may write: changing an epic's
         -- visibility, and any move that changes who an epic or task is
         -- private to (ReParentingKeepsTheHolder, which reuses this
         -- authority), are for the creator, an admin of the epic's workspace
@@ -583,55 +473,60 @@ rule SetEpicVisibility {
         -- stays open to teammates (WritesRequireSight).
 }
 
-rule ClaimsFollowSight {
-    when: SightChanged(epic)    -- RemoveMember, MoveEpicToWorkspace, SetEpicVisibility, a re-parent, the managed-root private flip
-       or TaskMoved(task, destination, owner)    -- a move into a private epic, or a detach: the task's own sight changes
+-- A poll claim must not outlive the sight that made it workable. After a
+-- change that can take an epic or a task out of someone's sight, the claims
+-- and marks of people who no longer see it end, so another host can claim the
+-- feed or the PR poll instead of it stalling. One helper serves every path
+-- (the module's `on_sight_lost` and `on_task_sight_lost`), and one conformance
+-- test (tests/memory_caller_conformance/loss_of_sight.rs) runs each path
+-- reachable by a reducer call against the module and the twin with the same
+-- steps. The managed-root private flip (epics.allium: ProvisionManagedEpics)
+-- runs the same helper; it needs a row written outside any reducer, so the
+-- module's and the twin's own tests keep it.
+-- RemoveMember and MoveEpicToWorkspace judge by membership, not sight, and
+-- release both scopes in their own ensures.
 
-    -- A poll claim must not outlive the sight that made it
-    -- workable. After ANY change that can take an epic out of someone's
-    -- sight, every epic-scoped core/PollOwner on the epic or its sub-epics
-    -- held by a host whose owner no longer sees that epic is released, so
-    -- another host can claim the feed instead of it stalling. One helper
-    -- serves every path, and one conformance test (tests/memory_caller_conformance/
-    -- loss_of_sight.rs) runs each path reachable by a reducer call against the
-    -- module and the twin with the same steps. The managed-root private flip needs a
-    -- row written outside any reducer, so the module's and the twin's own tests
-    -- keep it.
-    --
-    -- Task #98911 (M10): the same holds for TASK-scoped claims. A task claim
-    -- is made under sight of the task (ClaimPollOwner), which is sight of
-    -- its epic, so a claim on a task of the epic or its sub-epics is
-    -- released when its host's owner no longer sees that epic. Otherwise a
-    -- person removed from the workspace, or a task whose epic moves under a
-    -- private one, would keep a claim nobody else may replace and the task's
-    -- PR status would stop updating. RemoveMember and MoveEpicToWorkspace
-    -- judge by membership, the rest by sight; both release both scopes.
-    --
-    -- Task #98992 (A2, B1). A task move changes the task's own sight (a
-    -- move into a private epic, a detach onto a user board), so a task-scoped
-    -- claim on the moved task is released when its host's owner no longer
-    -- sees the task. The marks follow the claims: every unseen mark and
-    -- bookmark whose person no longer sees a task is ended by the same
-    -- helper on the same paths (Bookmark in core.allium: a bookmark ENDS on
-    -- loss of sight and does not come back when sight returns). The module's
-    -- `on_sight_lost` / `on_task_sight_lost` do both, and the conformance
-    -- test lists every path.
+rule ClaimsFollowSight {
+    when: SightChanged(epic)
+       or EpicMoved(epic, destination)    -- a re-parent
+
+    -- A task claim is made under sight of the task (ClaimPollOwner), which
+    -- is sight of its epic, so a claim on a task of the epic or its
+    -- sub-epics goes with the epic-scoped claims. A bookmark ENDS on loss of
+    -- sight and does not come back when sight returns (core.allium:
+    -- Bookmark).
     ensures:
-        for owner_row in core/PollOwners.where(p =>
-                p.scope = epic and p.scope_id in epic.subtree
-                    and not epic.visible_to(p.host.owner)):
+        for owner_row in core/PollOwners
+                where scope = epic and scope_id in epic.subtree
+                  and not epic.visible_to(host.owner):
             not exists owner_row
-        for owner_row in core/PollOwners.where(p =>
-                p.scope = task and p.scope_id.epic in epic.subtree
-                    and not p.scope_id.epic.visible_to(p.host.owner)):
+        for owner_row in core/PollOwners
+                where scope = task and scope_id.epic in epic.subtree
+                  and not scope_id.epic.visible_to(host.owner):
             not exists owner_row
-        for owner_row in core/PollOwners.where(p =>
-                p.scope = task and p.scope_id = task
-                    and not task.visible_to(p.host.owner)):
-            not exists owner_row
-        for mark in core/UnseenTasks.where(u => not u.task.visible_to(u.subscriber)):
+        for mark in core/UnseenTasks
+                where task.epic in epic.subtree and not task.visible_to(subscriber):
             not exists mark
-        for b in core/Bookmark.where(b => not b.task.visible_to(b.subscriber)):
+        for b in core/Bookmarks
+                where task.epic in epic.subtree and not task.visible_to(subscriber):
+            not exists b
+}
+
+rule ClaimsFollowTaskSight {
+    when: TaskMoved(moved, destination, owner)    -- a move into a private epic, or a detach
+
+    -- A task move changes the task's own sight, so a task-scoped claim on
+    -- the moved task is released when its host's owner no longer sees it.
+    ensures:
+        for owner_row in core/PollOwners
+                where scope = task and scope_id = moved
+                  and not moved.visible_to(host.owner):
+            not exists owner_row
+        for mark in core/UnseenTasks
+                where task = moved and not moved.visible_to(subscriber):
+            not exists mark
+        for b in core/Bookmarks
+                where task = moved and not moved.visible_to(subscriber):
             not exists b
 }
 
@@ -687,7 +582,7 @@ rule ReParentingKeepsTheHolder {
     ensures: MoveAllowed()
 
     @guidance
-        -- Task #98744, resolved with the user. A move that changes who an
+        -- A move that changes who an
         -- item is private to (into a private epic, out of one, or between
         -- two) is a visibility change, so it needs the authority
         -- SetEpicVisibility needs, on top of sight (EpicStaysInItsWorkspace,
@@ -753,13 +648,20 @@ rule MoveEpicToWorkspace {
         for mark in Bookmarks where mark.task.epic in epic.subtree:
             if not destination.has_member(mark.subscriber):
                 not exists mark
-        -- Task #98746 (V6). A host whose owner is not a member of the
-        -- destination loses sight of the tree, so its epic-scoped
-        -- core/PollOwner claims on the tree are released: the feed pauses
+        for unseen in UnseenTasks where unseen.task.epic in epic.subtree:
+            if not destination.has_member(unseen.subscriber):
+                not exists unseen
+        -- A host whose owner is not a member of the destination loses sight
+        -- of the tree, so its core/PollOwner claims on the tree, epic-scoped
+        -- and task-scoped, are released: the feed or the PR poll pauses
         -- until a host that can see the epic claims it, never stalls.
-        for owner_row in core/PollOwners.where(p =>
-                p.scope = epic and p.scope_id in epic.subtree
-                    and not destination.has_member(p.host.owner)):
+        for owner_row in core/PollOwners
+                where scope = epic and scope_id in epic.subtree
+                  and not destination.has_member(host.owner):
+            not exists owner_row
+        for owner_row in core/PollOwners
+                where scope = task and scope_id.epic in epic.subtree
+                  and not destination.has_member(host.owner):
             not exists owner_row
 
     @guidance
@@ -770,6 +672,11 @@ rule MoveEpicToWorkspace {
         -- it, and the move is the rescue. Admin of both is checked against
         -- real memberships, so a source that does not exist fails it and
         -- falls to the super-admin branch with no special case for 0.
+        -- The board and agents reach the move through update_epic with
+        -- workspace_id (epics.allium: UpdateEpicViaMcp). update_epic answers
+        -- an epic the caller cannot see as missing, except a super-admin's
+        -- bare move (a workspace and no other field), which reaches this
+        -- rule so the rescue works.
         -- A refusal for a sub-epic names its root so the caller can retry.
         -- The same workspace is refused rather than treated as a no-op,
         -- so a caller never thinks it moved something.
@@ -806,13 +713,14 @@ rule TaskMovesStayInTheWorkspace {
                 or task.epic.workspace.is_admin(caller())
                 or is_super_admin(caller())))
 
+    ensures: TaskMoveAllowed(task)
+
     @guidance
         -- A task in an epic belongs to that epic's workspace and does not
         -- leave it for another workspace's epic. It leaves for a user board
         -- (a DETACH) only by the person who created it, an admin of its
         -- workspace or a super-admin, because that hides it from the team
-        -- that was working on it (task #98852; the detach authority was
-        -- confirmed with the user, task #98916, M11). The task lands on the
+        -- that was working on it. The task lands on the
         -- CALLER's board. A teammate who is none of those is refused: "task
         -- N: only its creator or an admin may detach it from its epic". The
         -- detach is judged by this rule alone, not also by
@@ -827,13 +735,12 @@ rule TaskMovesStayInTheWorkspace {
         -- move_task_row.
         -- A detach is also refused while a person other than the caller's
         -- own hosts hold a current agent or an open request on the task: the
-        -- detach would hide the task from the host that is running it
-        -- (task #98992, A2; resolved with the user: refuse, do not serve
-        -- hosted tasks past sight). Refusal: "task N: another person's
+        -- detach would hide the task from the host that is running it (the
+        -- store refuses rather than serve a hosted task past sight). Refusal: "task N: another person's
         -- host is running it; detach it once that agent has ended".
         -- Module: task_detach_strands_a_host (shared with MemoryReducerCaller).
         -- A detach also leaves the workspace for the package links and the
-        -- task-scoped learnings, as a cross-workspace move does (A8).
+        -- task-scoped learnings, as a cross-workspace move does.
         -- Refusals: "task N: a task stays in its workspace; it cannot move
         -- into another workspace", and for a detach by someone with no
         -- authority "task N: only its creator or an admin may detach it from
@@ -843,16 +750,9 @@ rule TaskMovesStayInTheWorkspace {
 }
 
 -- Work packages ----------------------------------------------
-
-rule CreateWorkPackageInWorkspace {
-    when: WorkPackageCreated(package, workspace, visibility)
-
-    requires: workspace.has_member(caller())
-
-    ensures:
-        package.workspace = workspace
-        package.visibility = visibility
-}
+--
+-- A package is created in a workspace its creator belongs to, with a
+-- visibility (work-packages.allium: CreateWorkPackage).
 
 rule SetWorkPackageVisibility {
     when: SetWorkPackageVisibility(package, visibility)
@@ -866,90 +766,75 @@ rule SetWorkPackageVisibility {
 }
 
 rule LinkOnlyInsideTheWorkspace {
-    when: LinkRequested(package, item)
+    when: wp/LinkItem(package, item)
 
     requires: package.visible_to(caller())
     requires: item.visible_to(caller())
     requires: item_workspace(item) = null or item_workspace(item) = package.workspace
 
-    ensures: LinkItem(package, item)
+    ensures: LinkAllowed(package, item)
 
     @guidance
-        -- item_workspace is the epic's workspace for an epic, the epic's
-        -- workspace for an epic task, and null for a main-board task, which
-        -- may be linked anywhere and stays private to its owner (D6).
+        -- The store's check on every link, whichever path asks for it
+        -- (CreateWorkPackage, the link picker, update_work_package). A refused
+        -- link writes nothing. item_workspace is the epic's workspace for an
+        -- epic, the epic's workspace for an epic task, and null for a
+        -- main-board task, which may be linked anywhere and stays private to
+        -- its owner (D6).
 }
 
--- Naming a workspace and a visibility, from the board and over MCP ---------
+-- Naming a workspace and a visibility from the board ----------------------
 --
--- Task #98519. Agents are first-class users: each board rule has an MCP twin
--- (docs/mcp-tool-design.md).
-
-rule NameWorkspaceAndVisibilityViaMcp {
-    when: McpCreateEpic(title, workspace_id?, visibility?, parent_epic_id?)
-       or McpCreateWorkPackage(title, workspace_id, visibility?)
-       or McpUpdateEpic(epic, visibility)
-       or McpUpdateEpic(epic, workspace_id)
-       or McpUpdateWorkPackage(package, visibility)
-
-    ensures:
-        EpicCreated(epic, workspace_id, parent_epic_id, visibility ?? public)
-        WorkPackageCreated(package, workspace_id, visibility ?? public)
-        SetEpicVisibility(epic, visibility)
-        SetWorkPackageVisibility(package, visibility)
-        MoveEpicToWorkspace(epic, workspace_id)
-
-    @guidance
-        -- create_epic: workspace_id is required for a root epic and left
-        -- out for a sub-epic (parent_epic_id given), which takes the
-        -- parent's; naming one with a parent is refused, so a caller never
-        -- thinks it chose a workspace it did not. create_work_package:
-        -- workspace_id is always required. There is no default workspace and
-        -- no inheritance from the agent's task (a required parameter, with the
-        -- person's workspaces and their ids named in the tool description and
-        -- in the refusal for a missing or unknown one).
-        -- visibility is "public" or "private", default public. update_epic
-        -- takes visibility and workspace_id (a move, MoveEpicToWorkspace);
-        -- update_work_package takes visibility only. Every refusal is the
-        -- store's.
-        -- Results name the workspace and the visibility; list_epics and
-        -- list_work_packages show both. list_work_packages also shows the
-        -- creator by display name (CreatorIsShownByName); an epic row does
-        -- not carry its creator on the board yet.
-}
+-- Agents are first-class users: the MCP twins take workspace_id and
+-- visibility as parameters (epics.allium: CreateEpicViaMcp, UpdateEpicViaMcp;
+-- work-packages.allium: CreateWorkPackageViaMcp, UpdateWorkPackageViaMcp).
+-- create_epic requires workspace_id for a root epic and refuses one for a
+-- sub-epic, which takes its parent's, so a caller never thinks it chose a
+-- workspace it did not. create_work_package always requires it. There is no
+-- default workspace and no inheritance from the agent's task: the person's
+-- workspaces and their ids are named in the tool descriptions and in the
+-- refusal for a missing or unknown one. visibility is "public" or "private",
+-- default public. Results name the workspace and the visibility, and so do
+-- list_epics and list_work_packages; list_work_packages also names the
+-- creator (CreatorIsShownByName). The tool handler refuses a missing
+-- workspace_id, and one given with a parent, before it calls the store; every
+-- other refusal is the store's.
 
 rule NameWorkspaceAndVisibilityFromBoard {
-    when: EpicOrPackageFormOpened(kind, parent?)
+    when: EpicOrPackageFormOpened(form, parent?)
 
-    let mine = Memberships.where(m => m.user = caller())
+    let mine = Memberships where user = caller()
+
+    requires: mine.count > 0
 
     ensures:
-        if parent = null:
-            WorkspaceChosen(form, if mine.count = 1: mine.first.workspace else: ChoiceRequired)
-        VisibilityChosen(form, public)
+        WorkspaceAndVisibilityStepShown(
+            form,
+            asks_workspace: parent = null and mine.count > 1,
+            visibility: public)
 
     @guidance
         -- The new-epic and new-package forms (and the editors that create
         -- from them) end with a Workspace field and a Visibility field.
         -- Workspace shows only when the person belongs to more than one
         -- workspace, preselected to the first; with exactly one it is used
-        -- without asking. A person in none cannot create an epic or package,
-        -- and sees "You belong to no workspace; ask a super-admin to add you".
-        -- A sub-epic form has no Workspace field (the parent's is used).
+        -- without asking. A sub-epic form has no Workspace field (the
+        -- parent's is used). The workspaces are read when the form opens, so
+        -- a person in none is refused there, not at the end: "You belong to
+        -- no workspace; ask a super-admin to add you".
         -- The step is one screen after the title (and, for an epic, the
         -- description): j/k move between workspaces, Tab, BackTab or h/l
         -- toggle visibility (default public; private shows a lock marker),
         -- Space or Enter creates, as Space/Enter choose in every other
-        -- picker (task #98822), and Esc leaves nothing created (a package
-        -- returns to its picker). The workspaces are read when the form opens; a person in
-        -- none is refused there, not at the end.
+        -- picker, and Esc leaves nothing created (a package returns to its
+        -- picker).
         -- Editing an epic (`e`, the pop-out document) shows a VISIBILITY
         -- section, changeable, and a WORKSPACE section that is read-only and
-        -- ignored on save (moving an epic is MCP-only for now, see the open
-        -- question below). A package's visibility switches with `V` on its
-        -- card, which shows "private" when it is. Who may change either is
-        -- the store's call (SetEpicVisibility / SetWorkPackageVisibility);
-        -- its refusal shows in the error popup.
+        -- ignored on save (moving an epic is MCP-only, see the open question
+        -- below). A package's visibility switches with `V` on its card, which
+        -- shows "private" when it is. Who may change either is the store's
+        -- call (SetEpicVisibility / SetWorkPackageVisibility); its refusal
+        -- shows in the error popup.
 }
 
 -- The escape hatch -------------------------------------------
@@ -961,8 +846,15 @@ rule SuperAdminDeletesUnseenItem {
     requires: item_is_private(item)
     requires: item_holder(item) = null
               or not item_workspace(item).has_member(item_holder(item))
+    -- An epic's subtree holds no private epic someone still sees: that
+    -- person deletes it, or is removed first.
+    requires: item_kind(item) != epic
+              or item.subtree.all(n => n.private_holder = null
+                                       or not n.workspace.has_member(n.private_holder))
 
-    ensures: ItemDeleted(item)
+    ensures:
+        if item_kind(item) = epic: epics/DeleteEpic(item)
+        else: wp/DeleteWorkPackage(item)
 
     @guidance
         -- D3. item is a private epic (with its subtree, as any epic delete)
@@ -974,19 +866,23 @@ rule SuperAdminDeletesUnseenItem {
         -- the epic's private_holder or the package's created_by; null when
         -- the row names nobody (a legacy row). item_workspace is the epic's
         -- or the package's own workspace.
-        -- The hatch is for items NOBODY can see (task #98744): the holder
+        -- The hatch is for items NOBODY can see: the holder
         -- must no longer be a member of the item's workspace, or there must
         -- be no holder at all. A private item whose holder is still a member
         -- is theirs to delete, and is refused here ("only an item nobody can
         -- see is deleted this way"). A public item is refused too, so the
         -- hatch is no way around DeleteEpic for ordinary items. Module:
-        -- epic_is_unseen, package_is_unseen. UnseenItemListing shows the
-        -- same items, an epic tree by its topmost private epic
-        -- (admin-surfaces.allium: UnseenItemListingContents). The
-        -- super-admin chooses from that listing, which shows no titles or
-        -- contents, and the delete goes through the normal delete path: an
-        -- epic still needs every task in its subtree done (DeleteEpic's
-        -- guard), so the hatch never tears down running work.
+        -- epic_is_unseen, package_is_unseen. The super-admin chooses from
+        -- the listing of unseen items, which shows no titles or contents
+        -- (UnseenItemListingShowsNoContent). The delete is the normal delete:
+        -- an epic goes through epics.allium's DeleteEpic, so it still needs
+        -- every task in its subtree done and within the depth bound, and its
+        -- tasks' rows go as any epic delete takes them (tasks.allium:
+        -- TaskRowDeleted); a package goes through work-packages.allium's
+        -- DeleteWorkPackage. The hatch never tears down running work. It
+        -- widens who may delete, not what: the super-admin is exempt from
+        -- the sight checks (UnseenIsAsMissing), since nobody can see the
+        -- item, but never takes a private sub-epic someone still sees.
 }
 
 -- Writes ------------------------------------------------------
@@ -1015,7 +911,7 @@ rule WritesRequireSight {
         -- no-op, as for an item that is not linked (work-packages.allium:
         -- UnlinkItem).
         --
-        -- UnseenIsAsMissing (task #98519). An item the caller cannot see is
+        -- UnseenIsAsMissing. An item the caller cannot see is
         -- answered exactly as an item that does not exist: a reducer that
         -- ignores a missing id ignores an unseen one, and one that refuses a
         -- missing id refuses an unseen one with the same words. So the
@@ -1026,7 +922,8 @@ rule WritesRequireSight {
         -- someone's private sub-epic with it.
         --
         -- The operator (the store's own scheduled calls) is exempt from every
-        -- sight check: it is the trust boundary (see READ ENFORCEMENT), not a
+        -- sight check: it is the trust boundary (docs/architecture.md, "Read
+        -- enforcement: per-caller views"), not a
         -- person with a membership. The publisher is not exempt; it only may
         -- call the seed_* reducers.
         --
@@ -1036,7 +933,7 @@ rule WritesRequireSight {
         -- refuse a subscriber that is not the caller. Only the operator may
         -- name another identity.
         --
-        -- The same holds for the owner of a user-board task (task #98755, V4).
+        -- The same holds for the owner of a user-board task.
         -- A task created with no epic, or detached from its epic (set_task_epic,
         -- update_task), lands on the CALLER's own board: owner = the caller
         -- whatever the argument says. Without that, Bob could detach a
@@ -1044,8 +941,7 @@ rule WritesRequireSight {
         -- is and hide it. A created task (create_task, create_task_signalled)
         -- is also stamped created_by = the caller. The `owner` argument stays
         -- in the signatures for the operator, the one caller who may name
-        -- another person. A task that joins an epic carries no owner, as
-        -- before.
+        -- another person. A task that joins an epic carries no owner.
         --
         -- Module-made epics. A feed's grouped and role-routed sub-epics
         -- inherit the parent's workspace. A managed feed's root epics
@@ -1071,7 +967,9 @@ rule WritesRequireSight {
 -- Learnings and settings -------------------------------------
 
 rule LearningVisibility {
-    when: LearningRecorded(learning, recorder)
+    when: learning: core/Learning.created
+
+    let recorder = caller()
 
     ensures:
         learning.author = recorder
@@ -1093,8 +991,8 @@ rule LearningVisibility {
         -- recording_workspace is the workspace of the recording agent's
         -- task's epic. A repo-scoped learning recorded from a main-board
         -- task, or by a person with no task, has none, so it is private to
-        -- its author like the user board it came from (resolved with the
-        -- user, task #98523; there is no personal workspace, D2). The
+        -- its author like the user board it came from (there is no personal
+        -- workspace, D2). The
         -- same holds for a task-scoped learning on a main-board task.
         -- The workspace follows the item afterwards: an epic tree moved
         -- (MoveEpicToWorkspace), an epic-scoped learning re-scoped to another epic
@@ -1117,22 +1015,22 @@ rule MigrateStoreToWorkspaces {
     requires: Workspaces.count = 0
 
     ensures:
-        let default = core/Workspace.created(name: config.default_workspace_name,
-                                             created_by: store_publisher(),
-                                             created_at: now)
+        let first = core/Workspace.created(name: config.default_workspace_name,
+                                           created_by: store_publisher(),
+                                           created_at: now)
         for epic in Epics:
-            epic.workspace = default
+            epic.workspace = first
             epic.visibility = public
         for package in WorkPackages:
-            package.workspace = default
+            package.workspace = first
             package.visibility = public
         for learning in Learnings where learning.scope != user:
-            learning.workspace = default
+            learning.workspace = first
         for person in known_identities():
-            if not exists UserProfile where identity = person:
+            if not exists UserProfile{identity: person}:
                 UserProfile.created(identity: person, display_name: "",
                                     is_super_admin: false, created_at: now)
-            core/Membership.created(workspace: default, user: person,
+            core/Membership.created(workspace: first, user: person,
                                     role: member, created_at: now)
 
     @guidance
@@ -1164,8 +1062,6 @@ rule MigrateStoreToWorkspaces {
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
-
-open question "Should the TUI epic editor's WORKSPACE section become editable, listing the workspaces the person administers, so a move is also a board action? MoveEpicToWorkspace ships over MCP only (task #98727); the board path waits for a decision."
 
 invariant SubEpicSharesItsParentsWorkspace {
     for epic in Epics:
@@ -1213,6 +1109,7 @@ surface StoreReads {
         for profile in UserProfiles:
             profile.identity
             profile.display_name
+            profile.shown_name
             profile.is_super_admin
         for w in Workspaces where w.has_member(reader.identity) or reader.is_super_admin:
             w.name
@@ -1259,14 +1156,20 @@ surface StoreReads {
 
     @guarantee CreatorIsShownByName
         -- D4. Wherever a card or a tool result names who created an item,
-        -- it shows the creator's display name, or the identity prefix when
-        -- they have set none.
+        -- it shows UserProfile.shown_name: the creator's display name, or the
+        -- identity prefix when they have set none. list_work_packages and
+        -- the package card name a creator. The shown name has two twins,
+        -- because the board cannot link the module crate in a release build:
+        -- `shown_name` in the module's user_profile.rs (used by the module and
+        -- MemoryReducerCaller) and `models::shown_name` (used by the board).
+        -- A conformance scenario asserts they agree; nothing else re-slices
+        -- an identity.
 
     @guidance
-        -- Implemented as private tables plus per-caller views (see the
-        -- header). The board's own_creations and covered_epics asks
-        -- (sync.allium) are then answered from the views and can never
-        -- widen past them.
+        -- Implemented as private tables plus per-caller views
+        -- (docs/architecture.md, "Read enforcement: per-caller views"). The
+        -- board's own_creations and covered_epics asks (sync.allium) are
+        -- answered from the views and can never widen past them.
 }
 
 surface WorkspaceAdministration {
@@ -1278,23 +1181,26 @@ surface WorkspaceAdministration {
         workspace.memberships
 
     provides:
-        AddMember(workspace, user, role)
-        SetMemberRole(membership, role)
-        RemoveMember(membership)
-        RenameWorkspace(workspace, name)
+        AddMember(workspace, user, role) when workspace.is_admin(admin.identity)
+        SetMemberRole(membership, role) when workspace.is_admin(admin.identity)
+        RemoveMember(membership) when workspace.is_admin(admin.identity)
+        RenameWorkspace(workspace, name) when workspace.is_admin(admin.identity)
+        -- update_epic with workspace_id (epics.allium: UpdateEpicViaMcp), by
+        -- an admin of the source and of the destination.
+        MoveEpicToWorkspace(epic, destination)
+            when workspace.is_admin(admin.identity)
 
     @guidance
         -- Both a TUI surface and MCP tools (agents are first-class MCP
-        -- users): admin-surfaces.allium (task #98522) specs the screen, the
-        -- tools and how a person is found by display name.
+        -- users): admin-surfaces.allium specs the screen, the tools and how a
+        -- person is found by display name.
 }
 
 surface SuperAdministration {
-    facing admin: SuperAdmin
+    facing _: SuperAdmin
 
     exposes:
         Workspaces
-        UnseenItemListing
 
     provides:
         CreateWorkspace(name)
@@ -1305,26 +1211,90 @@ surface SuperAdministration {
         RemoveMember(membership)
         GrantSuperAdmin(user)
         RevokeSuperAdmin(user)
+        MoveEpicToWorkspace(epic, destination)
         SuperAdminDeletesUnseenItem(item)
 
     @guarantee UnseenItemListingShowsNoContent
-        -- Served by the module's `unseen_items` view (admin-surfaces.allium:
-        -- UnseenItemListingContents), which is empty for anyone but a
-        -- super-admin; task #98690 folds it into the per-caller views. The
-        -- delete keeps DeleteEpic's every-task-done guard (the code calls
-        -- validate_epic_deletable), so the hatch never tears down running work.
-        -- The listing of private items whose holder (an epic's
-        -- private_holder, a package's creator) is no longer a member of
-        -- their workspace, or who have none, shows kind, id, workspace,
-        -- creator and created date. Never a title, description or any child
-        -- row. These are the items SuperAdminDeletesUnseenItem accepts.
+        -- The listing of unseen items (admin-surfaces.allium:
+        -- UnseenItemListing, served by the module's `unseen_items` view) is
+        -- empty for anyone but a super-admin. It lists every private epic
+        -- and private package whose creator is no longer a member of its
+        -- workspace, or that has none, by kind, id, workspace, creator and
+        -- created date: never a title, description or any child row. Every
+        -- item SuperAdminDeletesUnseenItem accepts is listed, or lies in the
+        -- subtree of a listed epic (a public epic under it, whose holder is
+        -- that epic's creator).
+}
+
+-- The store's own lifecycle, as the module runs it.
+surface StoreLifecycle {
+    facing _: core/SharedStore
+
+    provides:
+        -- The module's client_connected lifecycle reducer, on every
+        -- connection and reconnection (RegisterUserProfile).
+        ClientConnected(identity)
+        -- The first connection after the module that adds workspaces is
+        -- published (MigrateStoreToWorkspaces).
+        StoreUpgradedToWorkspaces()
+}
+
+-- The checks the store runs inside its write reducers, whichever client
+-- calls them. Each names the reducers that raise it.
+surface StoreWriteChecks {
+    facing _: core/StoreClient
+
+    provides:
+        -- create_epic (CreateEpicInWorkspace).
+        EpicCreated(epic, workspace, parent_epic?, visibility)
+        -- create_epic and set_epic_visibility (EpicIsPrivateOnlyWithACreator,
+        -- RepoGroupsStayPublic).
+        EpicVisibilityRequested(epic, visibility)
+        -- patch_epic, when the patch names an origin (RepoGroupsStayPublic).
+        EpicOriginPatched(epic, origin)
+        -- patch_epic, when the patch names a parent (EpicStaysInItsWorkspace,
+        -- ReParentingKeepsTheHolder, ClaimsFollowSight).
+        EpicMoved(epic, destination?)
+        -- set_task_epic and update_task with an epic (TaskMovesStayInTheWorkspace,
+        -- ReParentingKeepsTheHolder, ClaimsFollowTaskSight).
+        TaskMoved(task, destination?, owner)
+        -- create_task and set_task_epic with an epic
+        -- (TaskEntersAnEpicTheCallerCanSee).
+        TaskPlacedInEpic(task, epic)
+        -- Every reducer that changes, dispatches, wraps up, closes, links,
+        -- subscribes to or rates a task, epic, package or learning
+        -- (WritesRequireSight).
+        WriteToItem(item)
+}
+
+-- What the operator does about their own name and an item's workspace at
+-- the board. Each key's binding is in keybindings.allium.
+surface WorkspaceBoard {
+    facing _: core/Operator
+
+    provides:
+        -- [u] in normal mode (SetOwnNameFromBoard).
+        SetOwnNameKeyPressed()
+        -- The new-epic and new-package forms reaching their last step
+        -- (NameWorkspaceAndVisibilityFromBoard).
+        EpicOrPackageFormOpened(form, parent?)
+}
+
+-- The workspace tools of the dispatch MCP server that are not admin tools
+-- (those are admin-surfaces.allium: AdminTools).
+surface WorkspaceMcpTools {
+    facing _: core/McpClient
+
+    provides:
+        -- set_display_name (SetDisplayNameViaMcp). Write, idempotent.
+        SetDisplayNameToolCalled(name)
 }
 
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
 
-open question "UnseenItemListingContents lists only private epics with no private ancestor (A5), but under the nearest-holder reading (D5) a private sub-epic of a private epic is its own creator's. When that sub-epic's creator leaves while the ancestor's creator stays, SuperAdminDeletesUnseenItem accepts it but the listing never shows it. Should the listing show every private epic whose own holder has left?"
+open question "Should the TUI epic editor's WORKSPACE section become editable, listing the workspaces the person administers, so a move is also a board action? MoveEpicToWorkspace is MCP-only; the board path waits for a decision."
 
 open question "SetWorkPackageVisibility has no counterpart to EpicIsPrivateOnlyWithACreator. The store stamps created_by on every new package, so only a package from before that stamp can lack a creator. Should such a package be refused as private?"
 

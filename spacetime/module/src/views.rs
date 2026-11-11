@@ -1,4 +1,4 @@
-//! The per-caller views (`workspaces.allium`: "THE PER-CALLER VIEWS").
+//! The per-caller views (`docs/architecture.md`: "Read enforcement: per-caller views").
 //!
 //! Each view answers one question the board asks, for `ctx.sender()`, and is a
 //! thin shell over a function here that is generic over [`StoreReads`]. The
@@ -676,7 +676,7 @@ pub struct UsageSummaryRow {
 /// so the held-task rule cannot apply; the caller sees their own.
 ///
 /// Served on demand, never as a view: a view over usage is recomputed whole on
-/// every recorded event (`workspaces.allium`, "THE PRIVATE FLIP").
+/// every recorded event (`docs/architecture.md`, "Read enforcement: per-caller views").
 pub fn usage_summary_for(
     r: &impl StoreReads,
     who: &str,

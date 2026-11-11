@@ -370,7 +370,7 @@ async fn a_non_super_admin_is_refused_even_when_the_change_would_be_a_no_op() {
     assert_error(&resp, "only a super-admin");
 }
 
-/// The store decides (`NameWorkspaceAndVisibilityViaMcp`); the handler only
+/// The store decides (`workspaces.allium: CreateEpicInWorkspace`); the handler only
 /// adds the caller's workspaces to a refusal that is about the workspace. The
 /// in-memory store runs with the workspace rules off, so the store's refusal
 /// is handed to the decoration directly, in the words the module uses.

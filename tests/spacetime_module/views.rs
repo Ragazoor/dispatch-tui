@@ -1,6 +1,7 @@
-//! The per-caller views against a live store (`workspaces.allium`: "THE
-//! PER-CALLER VIEWS"). The scenario and its expected rows are the ones
-//! `src/sync/memory_caller/tests/views.rs` runs over the in-memory store, so
+//! The per-caller views against a live store (`docs/architecture.md`: "Read
+//! enforcement: per-caller views"). The scenario and its expected rows are the
+//! ones `src/sync/memory_caller/tests/views.rs` runs over the in-memory store,
+//! so
 //! the module and its double are held to one answer.
 //!
 //! Run as the publisher identity, who holds a membership like anyone: views do

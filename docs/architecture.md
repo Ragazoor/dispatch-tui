@@ -73,3 +73,38 @@ Rule of thumb: use `ServiceError` for request validation and business rules, dom
 Quick dispatch is the same code path as normal dispatch — a request row, provisioned by this host's reactor — the difference is the task is created with defaults, skips the creation dialog entirely, and names the quick prompt variant.
 
 **Command-level shortcut:** `Command::QuickDispatch` skips the `TaskMessage::Dispatch` → `Command::DispatchAgent` hop: `exec_quick_dispatch()` creates the task and writes its request in one step. The outcome comes back like every dispatch's — `TaskMessage::Dispatched` from the reactor, or the failed request row.
+
+## Read enforcement: per-caller views
+
+`docs/specs/workspaces.allium` says who may see what. This section says how the store enforces it.
+
+<!-- allow-phantom-symbol: SpacetimeDB's own attribute, which this module deliberately does not use -->
+**Views, not row filters.** SpacetimeDB 2.12 ships row-level filters (`client_visibility_filter`) behind an unstable flag, and its own source says they are not yet enforced. So every table that holds task, epic, package, learning, membership or setting data is private, and clients read it through per-caller views that apply the module's `visible_to` predicates. The store's publisher identity can still read private tables with one-off SQL. The operator, the trust boundary every sight check exempts, is the store's own identity (the database identity: scheduled calls); it reads the tables directly and is served by no view. The publisher is recognised separately, and only for the `seed_*` restore reducers (`spacetime-seed.allium: actor Operator`); it is not exempt from sight checks.
+
+Four facts about views shape the build (proven on a throwaway module, `docs/plans/2026-10-28-per-caller-views-spike.md`):
+
+1. A view reads only through indexes, so every column it filters on needs a btree index, and a range read re-runs the view on every write to that table. So every read in a view is a point read, and a write to an unrelated row never re-runs it.
+2. A client cannot join a view with a private table, so each board ask is its own view.
+3. A view's rows have no primary key in the generated bindings, so an update arrives as INSERT(new) then DELETE(old) with no `on_update`, and the board's apply path must not let the delete erase the updated row (`sync.allium: AViewUpdateNeverErasesTheRow`).
+4. One write re-runs every follower's view, so cost is followers × covered-view size.
+
+A view derives a private epic's holder by walking `parent_id` upward. No `private_holder` column is stored, so `SetEpicVisibility` and re-parenting need no subtree cascade.
+
+**The views.** One per question the board asks, each answering for `ctx.sender()` and each built on the module's own `visible_to` predicates, never a copy (the module and the in-memory store run one function over two sets of tables). Rows are the table's own row type, so a card needs no second lookup.
+
+- `own_epics`, `own_tasks`, `own_packages`: what the caller created, plus the epic-less tasks they own, kept only while `visible_to` still holds (a member who left a workspace loses their own items in it). `own_tasks` also serves a task run on a host the caller owns (one with a current agent, or an open dispatch or session request, on such a host) while the caller still sees it, so unfollowing the epic of a teammate's task one dispatched does not lose the task its agent and requests name.
+- `covered_epics`: the epics the caller follows and every descendant, walked by the server at any depth, stopping at an epic the caller cannot see. `covered_tasks`: the tasks of the covered epics.
+- `visible_epics`, `visible_tasks`, `visible_packages`: everything visible in a workspace the caller belongs to; a client narrows with `WHERE workspace_id = N` (`WHERE epic_id = N` for tasks).
+- Rows about a task (`agents`, `dispatch_requests`, `session_requests`, `unseen_tasks`, `task_subagents`, `learning_retrievals`, `learning_verdicts`): one view each, serving the rows of the tasks the board holds (own tasks and covered tasks). Never wider than the task's own visibility. `unseen_tasks` and `bookmarks` are the caller's own, on tasks they still see. `task_watchers` has no writer, so its view follows the held-task rule like the rest.
+- `poll_owners` follow their scope: an epic-scoped row is served while the epic is visible, a task-scoped row while the task is.
+- `work_package_links`: one row per link, served while the package and the linked item are both visible.
+- `visible_learnings`: the learnings `LearningVisibility` lets the caller see.
+- `own_settings`: settings of the hosts the caller owns (D9). Host rows stay readable by all; they carry no task content.
+- `visible_workspaces`, `visible_memberships`: the workspaces the caller belongs to and their membership rows (a super-admin sees every one). A view cannot scan a table, so every workspace row carries an indexed `listed` flag that is always true, and a super-admin's view reads every row through it.
+- `unseen_items`: the super-admin's listing of private items nobody can see (`admin-surfaces.allium: UnseenItemListing`).
+
+**Private tables with no view.** `todos`, `task_shells`, `retired_feed_items` and `filter_presets` are private and served by no view: no client reads them. `dispatch_request_timeouts` and `session_request_timeouts` are private. `handed_out_agent_names` stays public: names carry no task content and every board needs the whole set. `todos` and `task_shells` have no writer; a publish that drops a table with rows is refused, so dropping them waits for a check that every live store holds none.
+
+**Usage events.** `usage_events` carries an indexed `recorded_by` column, stamped with the caller by `record_usage_event`. An event names no task, so the held-task rule cannot apply to it: an event is its recorder's alone, and a row recorded before the column existed is nobody's. Usage is served on demand, not through a view. A view is recomputed whole when its read set changes, and `record_usage_event` fires on every keybinding, hook and dispatch, so a view would re-run over a person's whole history (up to the 100,000-row cap) on every event. The `own_usage_summary` procedure runs when `query_usage` asks: it reads the caller's rows through the `recorded_by` index, applies the filters and returns grouped counts. The board holds no usage rows.
+
+**Obligations on every change.** Every new reducer and check lives in `spacetime/module/src/` and is mirrored in `src/sync/memory_caller/` with a pair test in `tests/memory_caller_conformance.rs`. `RULES_VERSION` and `BOARD_RULES_VERSION` move together. New columns are appended last with a default, or the module will not automigrate.

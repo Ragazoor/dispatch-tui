@@ -43,6 +43,7 @@
 --     longer want it. There is no archive.
 
 use "./core.allium" as core
+use "./workspaces.allium" as workspaces
 
 ------------------------------------------------------------
 -- Entities
@@ -53,7 +54,7 @@ entity WorkPackage {
     description: String         -- free text, may be empty; holds the plan for the window
     sort_order: Integer?        -- manual ordering of the package's card, and nothing else; lower sorts first via sort_order ?? id (null falls back to the package id). Written by ReorderPackage and by the update_work_package tool
     created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused). The board receives every package visible_to it (workspaces.allium: SetWorkPackageVisibility)
-    workspace: core/Workspace         -- the workspace this package lives in; chosen at creation and never moved (workspaces.allium: CreateWorkPackageInWorkspace)
+    workspace: core/Workspace         -- the workspace this package lives in; chosen at creation and never moved (CreateWorkPackage)
     visibility: core/Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetWorkPackageVisibility)
     created_at: Timestamp
     updated_at: Timestamp
@@ -122,6 +123,8 @@ rule CreateWorkPackage {
     when: CreateWorkPackage(title, description, creator, workspace, visibility, items)
 
     requires: title.trim() != ""
+    -- A package is created only in a workspace its creator belongs to.
+    requires: workspace.has_member(creator)
 
     ensures:
         let package = WorkPackage.created(
@@ -175,7 +178,7 @@ rule UpdateWorkPackageIsOneTransaction {
             UpdateWorkPackage(package, patch.title, patch.description, patch.sort_order)
     ensures:
         if visibility != null:
-            package.visibility = visibility
+            workspaces/SetWorkPackageVisibility(package, visibility)
             package.updated_at = now
     ensures:
         for item in unlink: UnlinkItem(package, item)
@@ -183,7 +186,10 @@ rule UpdateWorkPackageIsOneTransaction {
         for item in link: LinkItem(package, item)
 
     @guidance
-        -- Unlinks run before links. A link-only or unlink-only call leaves
+        -- Unlinks run before links. Every link is checked
+        -- (workspaces.allium: LinkOnlyInsideTheWorkspace) against the package
+        -- as it was before the call, so an admin who makes a package private
+        -- in the same call still links. A link-only or unlink-only call leaves
         -- updated_at alone: only the patch and the visibility touch it.
 }
 
@@ -434,8 +440,9 @@ rule CreateWorkPackageViaMcp {
                           items(link_task_ids, link_epic_ids))
 
     @guidance
-        -- Returns the new package id. workspace_id is required
-        -- (workspaces.allium: NameWorkspaceAndVisibilityViaMcp).
+        -- Returns the new package id. workspace_id is required: there is no
+        -- default workspace (workspaces.allium, "Naming a workspace and a
+        -- visibility from the board").
 }
 
 rule ListWorkPackagesViaMcp {

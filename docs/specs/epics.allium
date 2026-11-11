@@ -9,6 +9,7 @@ use "./store-split.allium" as split
 use "./tasks.allium" as tasks
 use "./settings.allium" as settings
 use "./pr-workflow.allium" as pr
+use "./workspaces.allium" as workspaces
 
 ------------------------------------------------------------
 -- Config
@@ -512,11 +513,18 @@ rule CreateEpicViaMcp {
         status: backlog,
         sort_order: sort_order,
         parent: if parent_epic_id = null: null else: core/Epic{id: parent_epic_id},
+        workspace: if parent_epic_id != null: core/Epic{id: parent_epic_id}.workspace
+                   else: core/Workspace{id: workspace_id},
+        visibility: visibility ?? public,
         created_at: now,
         updated_at: now
     )
 
     @guidance
+        -- workspace_id is required for a root epic and refused with
+        -- parent_epic_id (the sub-epic takes its parent's). The handler
+        -- refuses both before it calls the store; the store then checks the
+        -- caller may create there (workspaces.allium: CreateEpicInWorkspace).
         -- feed_command and feed_interval_secs are NOT exposed by the
         -- MCP create_epic tool — even though the underlying service
         -- accepts them, the handler hardcodes them to null. Feeds are
@@ -767,6 +775,14 @@ rule UpdateEpicViaMcp {
         -- integer = reparent under that epic, null = make this a root epic.
         if parent_epic_id != omitted:
             epic.parent = if parent_epic_id = null: null else: core/Epic{id: parent_epic_id}
+    ensures:
+        -- The store's visibility change and workspace move, with their own
+        -- authority checks, in the same update_epic transaction
+        -- (UpdateEpicIsOneTransaction).
+        if visibility != null: workspaces/SetEpicVisibility(epic, visibility)
+    ensures:
+        if workspace_id != null:
+            workspaces/MoveEpicToWorkspace(epic, core/Workspace{id: workspace_id})
 
     @guidance
         -- updated_at is refreshed automatically by the database layer
@@ -1978,8 +1994,7 @@ surface EpicMcpTools {
     facing _: core/McpClient
 
     provides:
-        -- create_epic (CreateEpicViaMcp). workspace_id and visibility:
-        -- workspaces.allium, NameWorkspaceAndVisibilityViaMcp.
+        -- create_epic (CreateEpicViaMcp).
         McpCreateEpic(title, description?, sort_order?, parent_epic_id?,
                       workspace_id?, visibility?)
         -- list_epics: one epic with epic_id (GetEpicViaMcp), else a list

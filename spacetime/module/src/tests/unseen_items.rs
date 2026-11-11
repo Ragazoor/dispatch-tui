@@ -1,5 +1,4 @@
 use super::*;
-use std::collections::HashMap;
 
 fn epic(id: i64, parent: i64, visibility: &str, creator: &str, workspace: i64) -> Epic {
     Epic {
@@ -28,7 +27,6 @@ fn package(id: i64, visibility: &str, creator: &str, workspace: i64) -> WorkPack
 /// view would read through its index) and `packages`, with `members` as
 /// (workspace, user) pairs.
 fn listing(epics: &[Epic], packages: &[WorkPackage], members: &[(i64, &str)]) -> Vec<UnseenItem> {
-    let by_id: HashMap<i64, Epic> = epics.iter().map(|e| (e.id, e.clone())).collect();
     let private_epics: Vec<Epic> = epics
         .iter()
         .filter(|e| e.visibility == VISIBILITY_PRIVATE)
@@ -42,7 +40,6 @@ fn listing(epics: &[Epic], packages: &[WorkPackage], members: &[(i64, &str)]) ->
     unseen_items_of(
         &private_epics,
         &private_packages,
-        |id| by_id.get(&id).cloned(),
         |ws, user| members.contains(&(ws, user)),
     )
 }
@@ -78,8 +75,9 @@ fn a_public_item_is_never_listed() {
 }
 
 #[test]
-fn an_epic_under_a_private_ancestor_is_part_of_the_ancestors_row() {
-    // 1 (private) -> 2 (public) -> 3 (private): only 1 is listed.
+fn every_private_epic_whose_creator_left_is_listed_even_under_a_listed_one() {
+    // 1 (private) -> 2 (public) -> 3 (private), all ann's, who left: 1 and 3
+    // are each listed (A5); 2 is public and goes with 1's subtree.
     let epics = [
         epic(1, 0, "private", "ann", 7),
         epic(2, 1, "public", "ann", 7),
@@ -89,7 +87,22 @@ fn an_epic_under_a_private_ancestor_is_part_of_the_ancestors_row() {
         .iter()
         .map(|r| r.item_id)
         .collect();
-    assert_eq!(ids, vec![1]);
+    assert_eq!(ids, vec![1, 3]);
+}
+
+#[test]
+fn a_private_sub_epic_whose_creator_left_is_listed_while_its_ancestors_creator_stays() {
+    // 1 (private, bob's, bob stays) -> 2 (private, ann's, ann left). The
+    // delete accepts 2 (its holder is ann), so the listing shows it.
+    let epics = [
+        epic(1, 0, "private", "bob", 7),
+        epic(2, 1, "private", "ann", 7),
+    ];
+    let ids: Vec<i64> = listing(&epics, &[], &[(7, "bob")])
+        .iter()
+        .map(|r| r.item_id)
+        .collect();
+    assert_eq!(ids, vec![2]);
 }
 
 #[test]

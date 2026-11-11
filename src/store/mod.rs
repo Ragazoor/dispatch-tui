@@ -1295,7 +1295,7 @@ pub const MEMORY_USER_ID: &str = "test-user";
 impl Store {
     /// `identity` as a card or tool result names them: their display name, or
     /// the identity's prefix when they have set none
-    /// (`workspaces.allium: ShownName`).
+    /// (`workspaces.allium: UserProfile.shown_name`).
     pub fn shown_name_of(&self, identity: &str) -> String {
         self.rows.shown_name_of(identity)
     }

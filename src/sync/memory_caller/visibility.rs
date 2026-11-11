@@ -81,12 +81,9 @@ impl Tables {
             .filter(|p| p.visibility == module::VISIBILITY_PRIVATE)
             .cloned()
             .collect();
-        module::unseen_items_of(
-            &private_epics,
-            &private_packages,
-            |id| self.epics.get(&id).cloned(),
-            |workspace_id, user| self.has_member(workspace_id, user),
-        )
+        module::unseen_items_of(&private_epics, &private_packages, |workspace_id, user| {
+            self.has_member(workspace_id, user)
+        })
     }
 
     fn has_member(&self, workspace_id: i64, who: &str) -> bool {
@@ -326,7 +323,7 @@ impl Tables {
         })
     }
 
-    /// `CreateWorkPackageInWorkspace`.
+    /// `work-packages.allium: CreateWorkPackage`.
     pub(super) fn settle_new_package(
         &self,
         scope: &Scope,
@@ -811,6 +808,10 @@ impl MemoryReducerCaller {
                     return refused(format!(
                         "epic {item_id}: cannot delete while task {undone} in its subtree is not done"
                     ));
+                }
+                let nodes = doomed.iter().filter_map(|id| tables.epics.get(id));
+                if scope_on && module::subtree_holds_a_seen_private_epic(&*tables, nodes) {
+                    return refused(module::SUBTREE_HOLDS_A_SEEN_PRIVATE_EPIC);
                 }
                 self.delete_epic_subtree_with_feed_cleanup(&mut tables, item_id, &doomed);
                 self.recalculate_epic_chain(&mut tables, epic.parent_epic_id);

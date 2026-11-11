@@ -22,7 +22,7 @@ pub struct CreateWorkPackageParams {
     /// Items to link once the package exists (`LinkItem`, idempotent).
     pub link: Vec<WorkPackageItem>,
     /// The workspace the package lives in; required (`0` is none, which the
-    /// store refuses). `workspaces.allium: CreateWorkPackageInWorkspace`.
+    /// store refuses). `work-packages.allium: CreateWorkPackage`.
     pub workspace_id: i64,
     pub visibility: crate::models::Visibility,
 }

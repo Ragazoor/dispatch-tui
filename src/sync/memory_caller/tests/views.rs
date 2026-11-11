@@ -1,6 +1,6 @@
-//! The per-caller views over the in-memory store (`workspaces.allium`: "THE
-//! PER-CALLER VIEWS"). The scenario and the expected rows are the ones
-//! `tests/spacetime_module/views.rs` checks against a live store.
+//! The per-caller views over the in-memory store (`docs/architecture.md`: "Read
+//! enforcement: per-caller views"). The scenario and the expected rows are the
+//! ones `tests/spacetime_module/views.rs` checks against a live store.
 
 use dispatch_spacetime_module as module;
 

@@ -160,7 +160,7 @@ struct Rows {
     /// `visible_workspaces` and `visible_memberships` views.
     workspaces: BTreeMap<i64, bindings::Workspace>,
     memberships: BTreeMap<i64, bindings::Membership>,
-    /// `admin-surfaces.allium: UnseenItem`, from the `unseen_items` view: empty
+    /// `admin-surfaces.allium: UnseenItemListing`, from the `unseen_items` view: empty
     /// unless this person is a super-admin. A view row has no primary key, so
     /// it is keyed by (kind, id), which names one item.
     unseen_items: BTreeMap<(String, i64), bindings::UnseenItem>,
@@ -759,7 +759,7 @@ impl SharedRows {
     }
 
     /// `identity` as a card or tool result names them
-    /// (`workspaces.allium: ShownName`).
+    /// (`workspaces.allium: UserProfile.shown_name`).
     pub fn shown_name_of(&self, identity: &str) -> String {
         self.read(|rows| {
             let name = rows

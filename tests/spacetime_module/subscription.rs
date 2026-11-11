@@ -92,7 +92,7 @@ const COLD_START_CEILING: Duration = Duration::from_secs(10);
 /// gap: the row is written through the CLI — a different process, standing in
 /// for a teammate's board — and the only thing connecting the two is the
 /// subscription. The board belongs to the epic's workspace and follows it, so
-/// `covered_epics` serves it (workspaces.allium, "THE PER-CALLER VIEWS").
+/// `covered_epics` serves it (`docs/architecture.md`, "Read enforcement: per-caller views").
 #[test]
 fn a_row_written_elsewhere_arrives_through_the_subscription() {
     if !spacetime_available_or_skip() {
@@ -146,9 +146,10 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
 /// **Task #4927**: following an epic brings its whole sub-epic tree, at any
 /// depth, and keeps bringing it as the tree grows.
 ///
-/// The store walks the tree (`covered_epics`, workspaces.allium "THE
-/// PER-CALLER VIEWS"); the board only follows 1. Two sub-epic levels exist
-/// before the board subscribes, which proves the walk on a cold start; a third
+/// The store walks the tree (`covered_epics`, `docs/architecture.md` "Read
+/// enforcement: per-caller views"); the board only follows 1. Two sub-epic
+/// levels exist before the board subscribes, which proves the walk on a cold
+/// start; a third
 /// level and a task inside it are written by another process once the board is
 /// up, which proves it live.
 #[test]

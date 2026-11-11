@@ -1,6 +1,6 @@
 //! Visibility on create and change, and write checks (`workspaces.allium`:
 //! `CreateEpicInWorkspace`, `SetEpicVisibility`, `EpicStaysInItsWorkspace`,
-//! `TaskEntersAnEpicTheCallerCanSee`, `CreateWorkPackageInWorkspace`,
+//! `TaskEntersAnEpicTheCallerCanSee`, `work-packages.allium: CreateWorkPackage`,
 //! `SetWorkPackageVisibility`, `LinkOnlyInsideTheWorkspace`,
 //! `SuperAdminDeletesUnseenItem`, `WritesRequireSight`), run against the
 //! in-memory store.
@@ -532,6 +532,37 @@ fn a_super_admin_deletes_a_private_epic_and_package_without_seeing_them() {
         .expect("delete package");
     assert!(store.db().epics().id().find(epic).is_none());
     assert!(store.db().work_packages().id().find(package).is_none());
+}
+
+#[test]
+fn the_escape_hatch_never_takes_a_private_sub_epic_a_member_still_holds() {
+    // Bob made a private sub-epic under alice's epic while it was public;
+    // then alice made hers private and left. Her epic is unseen, but bob still
+    // holds his sub-epic, so the hatch must not delete it with her subtree.
+    let (store, a, _) = world();
+    let hers = make_epic(&store, "alice", a, 0, "public").expect("hers");
+    let his = make_epic(&store, "bob", a, hers, "private").expect("his");
+    store
+        .call("alice", |ctx| set_epic_visibility(ctx, hers, "private".into()))
+        .expect("alice makes hers private");
+    creator_leaves(&store, a, "alice");
+    let refused = store
+        .call("root", |ctx| {
+            super_admin_delete_unseen_item(ctx, "epic".into(), hers)
+        })
+        .expect_err("a member's private sub-epic stops the delete");
+    assert!(refused.contains("someone still sees"), "{refused}");
+    assert!(store.db().epics().id().find(hers).is_some());
+    assert!(store.db().epics().id().find(his).is_some());
+
+    // Once bob leaves too, nobody sees either, and the tree goes.
+    creator_leaves(&store, a, "bob");
+    store
+        .call("root", |ctx| {
+            super_admin_delete_unseen_item(ctx, "epic".into(), hers)
+        })
+        .expect("delete the tree");
+    assert!(store.db().epics().id().find(his).is_none());
 }
 
 #[test]

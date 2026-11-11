@@ -1,4 +1,4 @@
-//! People and display names (`docs/specs/workspaces.allium`: `ShownName`).
+//! People and display names (`docs/specs/workspaces.allium`: `UserProfile.shown_name`).
 
 /// `workspaces.allium: config.identity_prefix_length`, in characters.
 const IDENTITY_PREFIX_LENGTH: usize = 8;
@@ -58,7 +58,7 @@ impl MemberRole {
     }
 }
 
-/// One person in the directory (`admin-surfaces.allium: DirectoryEntry`).
+/// One person in the directory (`workspaces.allium: UserProfile`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectoryPerson {
     pub identity: String,
@@ -92,7 +92,7 @@ pub struct WorkspaceDetail {
     pub members: Vec<WorkspaceMember>,
 }
 
-/// One row of the unseen-item listing (`admin-surfaces.allium: UnseenItem`).
+/// One row of the unseen-item listing (`admin-surfaces.allium: UnseenItemListing`).
 /// Never a title or any content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnseenItemRow {

@@ -2,7 +2,8 @@ use super::*;
 
 /// **Test 1 of Phase 11 (task #4915), against a real server**, as the private
 /// flip (task #98691) left it: a board sees the usage events it recorded and
-/// no one else's (`own_usage_summary`, workspaces.allium "THE PRIVATE FLIP").
+/// no one else's (`own_usage_summary`, `docs/architecture.md` "Read
+/// enforcement: per-caller views").
 ///
 /// Another identity records first, through the CLI — a different process,
 /// the same convention `a_row_written_elsewhere_arrives_through_the_subscription`

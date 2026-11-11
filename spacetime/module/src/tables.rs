@@ -769,7 +769,7 @@ pub struct UserProfile {
 ///
 /// Public for now, like `user_profiles`. The read-enforcement task makes it
 /// private and serves it through a per-caller view
-/// (`workspaces.allium`, "READ ENFORCEMENT, BY DECISION").
+/// (`docs/architecture.md`, "Read enforcement: per-caller views").
 #[spacetimedb::table(accessor = workspaces)]
 #[derive(Clone, Debug)]
 pub struct Workspace {
@@ -783,7 +783,7 @@ pub struct Workspace {
     pub created_at: String,
     /// Always `true`. A view cannot scan a table, so a super-admin's
     /// `visible_workspaces` reads every row through this index
-    /// (`workspaces.allium`, "READ ENFORCEMENT, BY DECISION"). Appended last,
+    /// (`docs/architecture.md`, "Read enforcement: per-caller views"). Appended last,
     /// with a default, so the table migrates in place.
     #[default(true)]
     #[index(btree)]

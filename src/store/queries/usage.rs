@@ -22,8 +22,8 @@ impl crate::store::UsageStore for Store {
     /// `query_usage` groups and counts rows — a shape a subscription's `WHERE`
     /// clause cannot express — so the store aggregates on demand
     /// (`own_usage_summary`) and the board holds no usage rows. A view over
-    /// usage would re-run on every recorded event (`workspaces.allium`, "THE
-    /// PRIVATE FLIP").
+    /// usage would re-run on every recorded event (`docs/architecture.md`,
+    /// "Read enforcement: per-caller views").
     async fn query_usage(&self, q: &UsageQuery) -> Result<Vec<UsageSummary>> {
         let limit = q.limit.unwrap_or(50).clamp(1, 500) as i64;
         let rows = self

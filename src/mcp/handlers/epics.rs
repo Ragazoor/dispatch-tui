@@ -95,7 +95,7 @@ pub(super) async fn handle_create_epic(
     };
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
-    // `workspaces.allium: NameWorkspaceAndVisibilityViaMcp`. A sub-epic takes
+    // `epics.allium: CreateEpicViaMcp`. A sub-epic takes
     // its parent's workspace, so naming one is refused rather than ignored.
     let workspace_id = match (parsed.parent_epic_id, parsed.workspace_id) {
         (Some(_), Some(_)) => {
@@ -143,7 +143,7 @@ pub(super) async fn handle_create_epic(
 
 /// The store's refusal of a create, with the caller's workspaces added to a
 /// refusal that is about the workspace. The store decides whether the caller
-/// may create there (`NameWorkspaceAndVisibilityViaMcp`); the local list only
+/// may create there (`workspaces.allium: CreateEpicInWorkspace`); the local list only
 /// helps the caller pick another. A workspace that does not exist and one the
 /// caller is not in read the same, so the answer does not tell which ids are
 /// taken.
@@ -165,7 +165,7 @@ pub(super) async fn workspace_refusal(
 }
 
 /// The workspaces the caller belongs to, for a refusal that asks for a
-/// `workspace_id` (`workspaces.allium: NameWorkspaceAndVisibilityViaMcp`).
+/// `workspace_id` (`epics.allium: CreateEpicViaMcp`).
 pub(super) async fn workspace_choices(state: &McpState) -> String {
     if state.people_svc.admin_snapshot().await.me.is_none() {
         return NOT_SETTLED.to_string();

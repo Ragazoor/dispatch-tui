@@ -222,6 +222,55 @@ pub struct TaskPatch {
     pub model: Patch<String>,
 }
 
+/// `workspaces.allium: MoveEpicToWorkspace`: `update_epic` answers an epic the
+/// caller cannot see as a missing one, except a super-admin's bare move (a
+/// workspace and nothing else). That move is the rescue for an epic nobody can
+/// see, such as one in workspace 0, and `move_epic_row` judges it on its own.
+pub fn reaches_an_unseen_epic(
+    privileged: bool,
+    patch: &EpicPatch,
+    workspace_id: Option<i64>,
+    visibility: Option<&str>,
+) -> bool {
+    privileged && workspace_id.is_some() && visibility.is_none() && patch.is_empty()
+}
+
+impl EpicPatch {
+    /// True when the patch names no field.
+    pub fn is_empty(&self) -> bool {
+        let EpicPatch {
+            title,
+            description,
+            status,
+            plan_path,
+            sort_order,
+            auto_dispatch,
+            parent_epic_id,
+            feed_command,
+            feed_interval_secs,
+            group_by_repo,
+            feed_role,
+            origin,
+            feed_append_only,
+            completed_at,
+        } = self;
+        title.is_none()
+            && description.is_none()
+            && status.is_none()
+            && plan_path.is_none()
+            && sort_order.is_none()
+            && auto_dispatch.is_none()
+            && parent_epic_id.is_none()
+            && feed_command.is_none()
+            && feed_interval_secs.is_none()
+            && group_by_repo.is_none()
+            && feed_role.is_none()
+            && origin.is_none()
+            && feed_append_only.is_none()
+            && completed_at.is_none()
+    }
+}
+
 /// The fields of an epic a patch may change.
 #[derive(spacetimedb::SpacetimeType, Clone, Debug, Default)]
 pub struct EpicPatch {
@@ -883,7 +932,11 @@ pub fn update_epic(
     visibility: Option<String>,
 ) -> Result<(), String> {
     if visible_epic(ctx, id).is_none() {
-        return Err(format!("epic {id} does not exist"));
+        let privileged = is_operator(ctx)
+            || crate::visibility::is_super_admin(ctx, &caller_identity(ctx));
+        if !reaches_an_unseen_epic(privileged, &patch, workspace_id, visibility.as_deref()) {
+            return Err(format!("epic {id} does not exist"));
+        }
     }
     patch_epic_row(ctx, id, patch)?;
     if let Some(workspace_id) = workspace_id {

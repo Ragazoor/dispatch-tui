@@ -905,8 +905,8 @@ entity Workspace {
     created_by: UserIdentity
     created_at: Timestamp
     -- The store also carries an always-true indexed `listed` column on each
-    -- row, so a super-admin's view can read them all (workspaces.allium,
-    -- "READ ENFORCEMENT, BY DECISION"). It is not a property of the workspace.
+    -- row, so a super-admin's view can read them all (docs/architecture.md,
+    -- "Read enforcement: per-caller views"). It is not a property of the workspace.
 
     memberships: Membership with workspace = this
     epics: Epic with workspace = this
@@ -940,7 +940,7 @@ entity Epic {
     origin: EpicOrigin = manual    -- system-assigned; never settable via MCP
     created_by: UserIdentity?  -- who created this epic; stamped once and never rewritten. The epic twin of Task.created_by — an epic has no `owner` field to begin with (nobody's user board holds an epic), so this is the only way sync.allium can subscribe a creator to an epic they just made, before anyone (including them) follows it. Null for an epic created before this field existed, or created by an unidentified process (e.g. a feed), and never backfilled.
     feed_command_set_by: UserIdentity?  -- who last set feed_command. A host runs the command only when its own owner is the one who set it (feeds.allium: FeedCommandRunsOnSettersHost). Stamped by the store with the caller whenever feed_command is created or changed; null for an epic whose command predates the column, which then counts as set by created_by. Never client-named.
-    workspace: Workspace     -- the workspace this epic lives in; chosen at creation for a root epic, inherited from the parent for a sub-epic, and never moved (workspaces.allium: EpicStaysInItsWorkspace). Every epic has one (workspaces.allium: MigrateStoreToWorkspaces)
+    workspace: Workspace     -- the workspace this epic lives in; chosen at creation for a root epic, inherited from the parent for a sub-epic, and moved only with its whole tree (workspaces.allium: EpicStaysInItsWorkspace, MoveEpicToWorkspace). Every epic has one (workspaces.allium: MigrateStoreToWorkspaces)
     visibility: Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetEpicVisibility)
     created_at: Timestamp
     updated_at: Timestamp

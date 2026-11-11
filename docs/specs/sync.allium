@@ -516,9 +516,9 @@ rule SubscribeOnceIdentityIsSettled {
         -- stranger.
         --
         -- THE BOARD ASKS THE VIEWS, NOT THE TABLES. Every table that carries a
-        -- person's work is private (workspaces.allium, "THE PER-CALLER
-        -- VIEWS"), and the board subscribes to the per-caller views over
-        -- them, which answer for the connection's own identity:
+        -- person's work is private (docs/architecture.md, "Read enforcement:
+        -- per-caller views"), and the board subscribes to the per-caller views
+        -- over them, which answer for the connection's own identity:
         --   own_tasks, own_epics, own_packages: what this person created,
         --     and the epic-less tasks they own (own_creations); own_tasks
         --     also the tasks run on a host this person owns (a current
@@ -766,8 +766,9 @@ rule SubscribeToAgents {
 }
 
 -- A row served through a per-caller view has no primary key in the generated
--- bindings (workspaces.allium, READ ENFORCEMENT). The store's update of such a
--- row reaches the board as an insert of the new row and a delete of the old
+-- bindings (docs/architecture.md, "Read enforcement: per-caller views"). The
+-- store's update of such a row reaches the board as an insert of the new row
+-- and a delete of the old
 -- one, with the same id, in either order.
 rule AViewUpdateNeverErasesTheRow {
     when: ViewRowUpdated(connection, row_old, row_new)

@@ -698,7 +698,14 @@ impl MemoryReducerCaller {
         {
             let scope = self.scope();
             let tables = self.lock();
-            if tables.visible_epic(&scope, id.0).is_none() {
+            if tables.visible_epic(&scope, id.0).is_none()
+                && !module::reaches_an_unseen_epic(
+                    !scope.on() || self.caller_is_super_admin(&tables),
+                    &module::EpicPatch::from(patch.clone()),
+                    workspace_id,
+                    visibility.as_deref(),
+                )
+            {
                 return Ok(ReducerOutcome::Refused(format!(
                     "epic {} does not exist",
                     id.0

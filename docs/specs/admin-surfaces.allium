@@ -6,8 +6,8 @@
 --        and the tools find people in, the listing of private items nobody
 --        can see, and the MCP tools that are the agent's twin of every key.
 -- Includes: AdminScreen and its panes, the rules each key runs, how a person
---           is named by display name (PersonResolution), UnseenItemListing
---           and its row, and the MCP tools list_workspaces, create_workspace,
+--           is named by display name (PersonResolution), UnseenItemListing,
+--           and the MCP tools list_workspaces, create_workspace,
 --           update_workspace, set_workspace_member, set_super_admin,
 --           claim_super_admin, list_unseen_items, delete_unseen_item.
 -- Excludes: What each store write does and who may do it (workspaces.allium:
@@ -17,12 +17,12 @@
 --           how a key or a tool reaches them. The store's refusal is the
 --           answer; neither surface re-checks a role.
 --           The key rows themselves (keybindings.allium owns the table).
--- Dependencies: UserProfile, Workspace, Membership and the surfaces
+-- Dependencies: UserProfile, Person, SuperAdmin and the surfaces
 --               WorkspaceAdministration and SuperAdministration from
---               workspaces.allium; Epic and WorkPackage for the listing.
+--               workspaces.allium; Workspace, Membership, Epic and WorkPackage
+--               from core.allium.
 --
--- Decisions taken with the user in task #98522's brief and recorded so they are
--- not re-litigated:
+-- Decisions, cited by id:
 --   A1. Agents are first-class users. Every key of the admin screen has an MCP
 --       twin, and the tools follow docs/mcp-tool-design.md: capability, not
 --       endpoint. A grant and a revoke are one tool (set_super_admin); a role
@@ -34,8 +34,9 @@
 --       (workspaces.allium: SetDisplayName), so a name that matches more than
 --       one person is refused, listing every match with the identity prefix,
 --       and never resolved to one of them silently. An identity (the full
---       string or a unique prefix of at least identity_prefix_length) is also
---       accepted, which is how a duplicated name is told apart.
+--       string or a unique prefix of at least
+--       workspaces.allium config.identity_prefix_length) is also accepted,
+--       which is how a duplicated name is told apart.
 --   A3. The admin screen opens for every person, not only admins. The first
 --       claim of super-admin has to be reachable by someone who is not one yet,
 --       and a person who administers nothing is told so rather than shown a
@@ -44,121 +45,48 @@
 --       filter in the board: a client never receives a private item's title,
 --       even to hide it (workspaces.allium: AClientReceivesOnlyWhatItCanSee).
 --       A person who is not a super-admin gets an empty listing from it.
---   A5. The listing names an item once. A private epic is listed alone; the
---       private epics beneath it are not, because deleting it takes the subtree
---       (workspaces.allium: SuperAdminDeletesUnseenItem).
+--   A5. The listing shows every private epic whose own creator has left its
+--       workspace, a private sub-epic included, whether or not an epic above
+--       it is listed too: under the nearest-holder reading (workspaces.allium
+--       D5) a private sub-epic is its own creator's, so the delete accepts it
+--       on its own. A public epic under a listed epic is not listed: it goes
+--       with that epic's subtree.
 --   A6. A deletion from the listing keeps DeleteEpic's every-task-done guard:
---       the hatch widens who may delete, not what may be torn down. This
---       settles the open question that said the guard was skipped.
+--       the hatch widens who may delete, not what may be torn down.
 
+use "./core.allium" as core
 use "./workspaces.allium" as workspaces
 
 ------------------------------------------------------------
--- Config
+-- Contracts
 ------------------------------------------------------------
 
-config {
-    -- A unique identity prefix shorter than this is not accepted as a way to
-    -- name a person: eight hex characters are enough to tell two people
-    -- apart, and fewer would let a typo name someone else.
-    identity_prefix_min_length: Integer = 8
-}
+-- How the screen's add-member and grant prompts and the tools' person
+-- argument find one person. One function, so a key and a tool cannot
+-- disagree. The board implements it (`models::resolve_person`).
+contract PersonResolution {
+    resolve_person: (text: String) -> workspaces/UserProfile
 
-------------------------------------------------------------
--- Values
-------------------------------------------------------------
+    @invariant AnIdentityMatchWinsOverAName
+        -- The text is trimmed; a blank text is refused before any lookup.
+        -- Matching is exact and case-sensitive: a fuzzy match picking the
+        -- wrong person for an access grant costs more than a retry.
+        -- The identity matches are the profiles whose identity equals the
+        -- text, or starts with it when the text is at least
+        -- workspaces.allium config.identity_prefix_length long. The name
+        -- matches are the profiles whose shown_name equals the text.
+        -- One identity match is the answer. Several identity matches are
+        -- ambiguous even when one name matches exactly: the text was meant
+        -- as an identity, so no name is consulted. With no identity match,
+        -- one name match is the answer and several are ambiguous. So a
+        -- person whose display name looks like somebody else's identity
+        -- cannot hijack it.
 
--- One person in the directory, as the screen and list_workspaces show them.
-value DirectoryEntry {
-    identity: String
-    shown_name: String         -- workspaces.allium: ShownName
-    is_super_admin: Boolean
-}
-
--- One row of UnseenItemListing. Never a title, description or child row.
-value UnseenItem {
-    kind: epic | work_package
-    id: Integer
-    workspace: workspaces/core/Workspace
-    creator: String            -- an identity; shown by shown_name
-    created_at: Timestamp
-}
-
-------------------------------------------------------------
--- Rules: naming a person
-------------------------------------------------------------
-
-rule PersonResolution {
-    when: PersonNamed(text)
-
-    let wanted = text.trim()
-    let by_name = DirectoryEntries.where(e => e.shown_name = wanted)
-    let by_identity = DirectoryEntries.where(e =>
-        e.identity = wanted
-        or (wanted.length >= config.identity_prefix_min_length
-            and e.identity.starts_with(wanted)))
-
-    ensures:
-        if by_identity.count = 1: PersonResolved(by_identity.first)
-        else if by_identity.count > 1: PersonAmbiguous(by_identity)
-        else if by_name.count = 1: PersonResolved(by_name.first)
-        else if by_name.count > 1: PersonAmbiguous(by_name)
-        else: PersonUnknown(wanted)
-
-    @guidance
-        -- Used by the screen's add-member and grant prompts and by the tools'
-        -- person argument; one function, so a key and a tool cannot disagree.
-        -- An identity match wins over a name match: a person whose display
-        -- name looks like somebody else's identity cannot hijack it. Several
-        -- identity matches are ambiguous even when one name matches exactly:
-        -- the text was meant as an identity, so a name is not consulted.
-        -- PersonAmbiguous is the refusal: it lists each match as
-        -- "<shown name> (<identity prefix>)" and says to name one by identity.
-        -- PersonUnknown says no one has that name and points at
-        -- list_workspaces for the directory. A blank text is refused before
-        -- any lookup. Matching is exact and case-sensitive: a fuzzy match
-        -- picking the wrong person for an access grant costs more than a retry.
-}
-
-------------------------------------------------------------
--- Rules: UnseenItemListing
-------------------------------------------------------------
-
-rule UnseenItemListingContents {
-    when: UnseenItemListingRead(reader)
-
-    ensures:
-        if reader.is_super_admin:
-            UnseenItemListing = Epics.where(e =>
-                    e.visibility = private
-                    and e.parent_is_not_private
-                    and not e.workspace.has_member(e.created_by))
-                .map(e => UnseenItem(kind: epic, id: e.id,
-                                     workspace: e.workspace,
-                                     creator: e.created_by,
-                                     created_at: e.created_at))
-              + WorkPackages.where(p =>
-                    p.visibility = private
-                    and not p.workspace.has_member(p.created_by))
-                .map(p => UnseenItem(kind: work_package, id: p.id,
-                                     workspace: p.workspace,
-                                     creator: p.created_by,
-                                     created_at: p.created_at))
-        else:
-            UnseenItemListing = {}
-
-    @guidance
-        -- "Unseen" is workspaces.allium's definition: private, and its creator
-        -- is no longer a member of its workspace, so nobody sees it (D3). A
-        -- private item whose creator is still a member is seen by that creator
-        -- and is not listed. parent_is_not_private is A5: an epic under a
-        -- private ancestor is part of that ancestor's row.
-        -- A private item with no creator counts as one whose creator is not a
-        -- member, so it is listed: it is seen by nobody (the store holds a
-        -- private epic with no creator as a private epic nobody holds).
-        -- Rows carry no title. The module serves this as the `unseen_items`
-        -- view, which returns the empty set to anyone but a super-admin.
-        -- Ordered by workspace id, then kind, then id.
+    @invariant AnAmbiguousOrUnknownNameIsRefused
+        -- An ambiguous text is refused, listing each match as
+        -- "<shown name> (<identity prefix>)" and saying to name one by
+        -- identity. A text that matches nobody is refused saying no one has
+        -- that name and pointing at list_workspaces for the directory.
 }
 
 ------------------------------------------------------------
@@ -168,7 +96,7 @@ rule UnseenItemListingContents {
 rule OpenAdminScreen {
     when: OpenAdminScreenKeyPressed()
 
-    ensures: AdminScreenOpened(pane: Workspaces)
+    ensures: AdminScreenOpened(pane: workspaces_pane)
 
     @guidance
         -- `A` ("admin") in the board's normal mode (listed in the keybinding table).
@@ -242,8 +170,8 @@ rule AddMemberFromScreen {
 
     @guidance
         -- `a`, on the Workspaces or Members pane, for the highlighted
-        -- workspace. The input takes a display name (or an identity,
-        -- PersonResolution). Enter resolves it and sends
+        -- workspace. The input takes a display name or an identity
+        -- (PersonResolution). Enter resolves it and sends
         -- AddMember(workspace, person, member); an ambiguous or unknown name
         -- shows PersonResolution's refusal in the error popup and adds
         -- nobody. The new member has the role member; `m` promotes them.
@@ -253,13 +181,15 @@ rule AddMemberFromScreen {
 rule SetMemberRoleFromScreen {
     when: ToggleRoleKeyPressed(membership)
 
-    ensures: SetMemberRole(membership, if membership.role = admin: member else: admin)
+    ensures:
+        workspaces/SetMemberRole(membership,
+                                 if membership.role = admin: member else: admin)
 
     @guidance
         -- `m`, on the Members pane. Flips the highlighted person between
         -- admin and member in one key: the roles are fixed and there are two
-        -- (D1). No confirmation: it is undone by pressing it again. An admin
-        -- may demote themselves.
+        -- (workspaces.allium D1). No confirmation: it is undone by pressing it
+        -- again. An admin may demote themselves.
 }
 
 rule RemoveMemberFromScreen {
@@ -302,13 +232,13 @@ rule ClaimSuperAdminFromScreen {
 
     requires: not UserProfiles.any(p => p.is_super_admin)
 
-    ensures: ClaimSuperAdmin()
+    ensures: workspaces/ClaimSuperAdmin()
 
     @guidance
         -- `c`, from any pane, only while the screen shows the claim hint. No
-        -- confirmation: it works once and is recoverable (D11). While a
-        -- super-admin exists the key is not in the screen's help and does
-        -- nothing.
+        -- confirmation: it works once and is recoverable (workspaces.allium
+        -- D11). While a super-admin exists the key is not in the screen's
+        -- help and does nothing.
 }
 
 rule DeleteUnseenItemFromScreen {
@@ -321,14 +251,16 @@ rule DeleteUnseenItemFromScreen {
     @guidance
         -- `D`, on the Unseen items pane. Each row reads "<kind> #<id>  <workspace>
         -- by <creator shown name>  <created date>". No title: the person
-        -- cannot read it (D3). The confirmation says the item is deleted for
-        -- good and that an epic goes with its subtree. `y` sends
-        -- SuperAdminDeletesUnseenItem(item); an epic with an unfinished task
-        -- in its subtree is refused (A6) and the popup says so.
+        -- cannot read it (workspaces.allium D3). The confirmation says the
+        -- item is deleted for good and that an epic goes with its subtree.
+        -- `y` sends SuperAdminDeletesUnseenItem(item); an epic with an
+        -- unfinished task in its subtree is refused (A6) and the popup says so.
 }
 
 rule AdminScreenRefreshesAfterAWrite {
     when: AnAdminWriteFinished(result)
+
+    requires: result = success
 
     ensures: AdminScreenReloaded()
 
@@ -346,10 +278,13 @@ rule AdminScreenRefreshesAfterAWrite {
 rule ListWorkspacesTool {
     when: ListWorkspacesToolCalled(workspace_id?)
 
+    let reader = workspaces/UserProfile{identity: caller()}
+    let super_admins = UserProfiles where is_super_admin
+
     ensures:
         ToolResult(workspaces: visible_workspaces(reader, workspace_id),
-                   super_admins: DirectoryEntries.where(e => e.is_super_admin),
-                   claimable: not UserProfiles.any(p => p.is_super_admin))
+                   super_admins: super_admins,
+                   claimable: super_admins.count = 0)
 
     @guidance
         -- visible_workspaces is every workspace for a super-admin and the
@@ -369,7 +304,7 @@ rule ListWorkspacesTool {
 rule CreateWorkspaceTool {
     when: CreateWorkspaceToolCalled(name)
 
-    ensures: CreateWorkspace(name)
+    ensures: workspaces/CreateWorkspace(name)
 
     @guidance
         -- write. Super-admin only, by the store. The result names the new
@@ -379,11 +314,13 @@ rule CreateWorkspaceTool {
 rule UpdateWorkspaceTool {
     when: UpdateWorkspaceToolCalled(workspace_id, name?, delete?)
 
+    let workspace = core/Workspace{id: workspace_id}
+
     requires: (name != null) != (delete = true)
 
     ensures:
-        if name != null: RenameWorkspace(workspace, name)
-        if delete = true: DeleteWorkspace(workspace)
+        if name != null: workspaces/RenameWorkspace(workspace, name)
+        if delete = true: workspaces/DeleteWorkspace(workspace)
 
     @guidance
         -- destructive, as update_work_package is, because delete is an
@@ -396,15 +333,16 @@ rule UpdateWorkspaceTool {
 rule SetWorkspaceMemberTool {
     when: SetWorkspaceMemberToolCalled(workspace_id, person, role?, remove?)
 
-    let resolved = PersonResolution(person)
-    let existing = Membership{workspace: workspace_id, user: resolved}
+    let workspace = core/Workspace{id: workspace_id}
+    let resolved = resolve_person(person)    -- PersonResolution
+    let existing = core/Membership{workspace: workspace, user: resolved.identity}
 
     requires: (role != null) != (remove = true)
 
     ensures:
-        if remove = true: RemoveMember(existing)
-        else if exists existing: SetMemberRole(existing, role)
-        else: AddMember(workspace_id, resolved, role)
+        if remove = true: workspaces/RemoveMember(existing)
+        else if exists existing: workspaces/SetMemberRole(existing, role)
+        else: workspaces/AddMember(workspace, resolved.identity, role)
 
     @guidance
         -- destructive, because remove is an argument of it. One tool for the
@@ -419,11 +357,11 @@ rule SetWorkspaceMemberTool {
 rule SetSuperAdminTool {
     when: SetSuperAdminToolCalled(person, super_admin)
 
-    let resolved = PersonResolution(person)
+    let resolved = resolve_person(person)    -- PersonResolution
 
     ensures:
-        if super_admin: GrantSuperAdmin(resolved)
-        else: RevokeSuperAdmin(resolved)
+        if super_admin: workspaces/GrantSuperAdmin(resolved.identity)
+        else: workspaces/RevokeSuperAdmin(resolved.identity)
 
     @guidance
         -- idempotent. Granting a person who already is one, or revoking one
@@ -434,41 +372,47 @@ rule SetSuperAdminTool {
 rule ClaimSuperAdminTool {
     when: ClaimSuperAdminToolCalled()
 
-    ensures: ClaimSuperAdmin()
+    ensures: workspaces/ClaimSuperAdmin()
 
     @guidance
         -- write. Works only while the store has no super-admin, for the person
-        -- whose board the agent runs under (D10, D11). The refusal says a
-        -- super-admin already exists.
+        -- whose board the agent runs under (workspaces.allium D10, D11). The
+        -- refusal says a super-admin already exists.
 }
 
 rule ListUnseenItemsTool {
     when: ListUnseenItemsToolCalled()
 
-    ensures: ToolResult(items: UnseenItemListing)
+    ensures: ToolResult(items: unseen_items_for(caller()))
 
     @guidance
-        -- read_only. Super-admin only: anyone else gets an empty list and a
-        -- line saying so. Each item is kind, id, workspace, creator by shown
-        -- name and created date, and never a title or content. The result
-        -- points at delete_unseen_item as the only thing to do with one.
+        -- read_only. unseen_items_for is the rows UnseenItemListing serves the
+        -- caller: every unseen item for a super-admin, nothing for anyone
+        -- else, who also gets a line saying so. Each item is kind, id,
+        -- workspace, creator by shown name and created date, and never a
+        -- title or content. The result points at delete_unseen_item as the
+        -- only thing to do with one.
 }
 
 rule DeleteUnseenItemTool {
     when: DeleteUnseenItemToolCalled(kind, item_id)
 
-    ensures: SuperAdminDeletesUnseenItem(item)
+    let item = item_named(kind, item_id)    -- the epic or the work package with that id
+
+    ensures: workspaces/SuperAdminDeletesUnseenItem(item)
 
     @guidance
         -- destructive. kind is epic or work_package, as list_unseen_items
         -- names it. A public item, an unknown id and an item the caller may
-        -- not delete are all refused in the store's words (UnseenIsAsMissing).
+        -- not delete are all refused in the store's words (workspaces.allium:
+        -- UnseenIsAsMissing).
 }
 
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
 
+-- The admin screen, at the board. Each key's binding is in keybindings.allium.
 surface AdminScreen {
     facing person: workspaces/Person
 
@@ -476,20 +420,35 @@ surface AdminScreen {
         for w in Workspaces where w.is_admin(person.identity) or person.is_super_admin:
             w.name
             w.memberships
-        for entry in DirectoryEntries: entry
-        for item in UnseenItemListing: item
+        -- The directory: every person, by shown name and identity.
+        for profile in UserProfiles:
+            profile.identity
+            profile.shown_name
+            profile.is_super_admin
 
     provides:
-        CreateWorkspaceFromScreen when person.is_super_admin
-        RenameWorkspaceFromScreen
-        DeleteWorkspaceFromScreen when person.is_super_admin
-        AddMemberFromScreen
-        SetMemberRoleFromScreen
-        RemoveMemberFromScreen
-        GrantSuperAdminFromScreen when person.is_super_admin
-        RevokeSuperAdminFromScreen when person.is_super_admin
-        ClaimSuperAdminFromScreen when not UserProfiles.any(p => p.is_super_admin)
-        DeleteUnseenItemFromScreen when person.is_super_admin
+        -- [A] in the board's normal mode (OpenAdminScreen).
+        OpenAdminScreenKeyPressed()
+        -- Tab, Shift-Tab, j/k (MoveAmongAdminPanes).
+        AdminPaneKeyPressed()
+        -- [n], [r], [d] on the Workspaces pane.
+        CreateWorkspaceKeyPressed(person) when person.is_super_admin
+        RenameWorkspaceKeyPressed(workspace)
+        DeleteWorkspaceKeyPressed(person) when person.is_super_admin
+        -- [a], [m], [x] on the Workspaces or Members pane.
+        AddMemberKeyPressed(workspace)
+        ToggleRoleKeyPressed(membership)
+        RemoveMemberKeyPressed(membership)
+        -- [g], [v] on the Super-admins pane.
+        GrantSuperAdminKeyPressed(person) when person.is_super_admin
+        RevokeSuperAdminKeyPressed(person) when person.is_super_admin
+        -- [c] from any pane while the store has no super-admin.
+        ClaimSuperAdminKeyPressed() when not UserProfiles.any(p => p.is_super_admin)
+        -- [D] on the Unseen items pane, which shows UnseenItemListing.
+        DeleteUnseenItemKeyPressed(person, item) when person.is_super_admin
+
+    contracts:
+        fulfils PersonResolution
 
     @guarantee TheScreenRefusesNothingTheStoreAllows
         -- The screen hides a key the person's role cannot use only to keep
@@ -497,7 +456,82 @@ surface AdminScreen {
         -- store's refusal is what the person reads.
 
     @guarantee UnseenItemRowsShowNoContent
-        -- A row is UnseenItem and nothing else (workspaces.allium:
-        -- UnseenItemListingShowsNoContent). The board never holds a private
-        -- item's title to draw it.
+        -- An Unseen items row shows what UnseenItemListing exposes and nothing
+        -- else (workspaces.allium: UnseenItemListingShowsNoContent). The board
+        -- never holds a private item's title to draw it.
+}
+
+-- The private items nobody can see, as the store serves them: the module's
+-- `unseen_items` view, empty for anyone but a super-admin (A4).
+surface UnseenItemListing {
+    facing _: workspaces/SuperAdmin
+
+    -- "Unseen" is workspaces.allium's definition: private, and its creator is
+    -- no longer a member of its workspace, or it has none, so nobody sees it
+    -- (D3). A private epic is its own holder (D5), so its creator is the
+    -- person it is private to. A private item whose creator is still a member
+    -- is seen by that creator and is not listed.
+    let unseen_epics = Epics
+        where visibility = private and not workspace.has_member(created_by)
+    let unseen_packages = WorkPackages
+        where visibility = private and not workspace.has_member(created_by)
+
+    exposes:
+        -- kind epic
+        for epic in unseen_epics:
+            epic.id
+            epic.workspace
+            epic.created_by
+            epic.created_at
+        -- kind work_package
+        for package in unseen_packages:
+            package.id
+            package.workspace
+            package.created_by
+            package.created_at
+
+    @guarantee ARowIsKindIdWorkspaceCreatorAndDate
+        -- Each row is kind, id, workspace, creator (an identity, "" for an
+        -- item with none; shown by shown_name) and created date. Never a
+        -- title, description or child row. Rows are ordered by workspace id,
+        -- then kind, then id. Every private epic is judged on its own (A5).
+}
+
+-- The admin tools of the dispatch MCP server.
+surface AdminTools {
+    facing _: core/McpClient
+
+    provides:
+        -- list_workspaces (ListWorkspacesTool). Read-only.
+        ListWorkspacesToolCalled(workspace_id?)
+        -- create_workspace (CreateWorkspaceTool). Write.
+        CreateWorkspaceToolCalled(name)
+        -- update_workspace (UpdateWorkspaceTool). Destructive.
+        UpdateWorkspaceToolCalled(workspace_id, name?, delete?)
+        -- set_workspace_member (SetWorkspaceMemberTool). Destructive.
+        SetWorkspaceMemberToolCalled(workspace_id, person, role?, remove?)
+        -- set_super_admin (SetSuperAdminTool). Idempotent.
+        SetSuperAdminToolCalled(person, super_admin)
+        -- claim_super_admin (ClaimSuperAdminTool). Write.
+        ClaimSuperAdminToolCalled()
+        -- list_unseen_items (ListUnseenItemsTool). Read-only.
+        ListUnseenItemsToolCalled()
+        -- delete_unseen_item (DeleteUnseenItemTool). Destructive.
+        DeleteUnseenItemToolCalled(kind, item_id)
+
+    contracts:
+        fulfils PersonResolution
+
+    @guidance
+        -- The caller is an agent or a session (core/McpClient), acting as the
+        -- person whose board it runs under (workspaces.allium D10). What it
+        -- may do is the store's to decide.
+}
+
+-- The store's answer to a write the admin screen sent.
+surface AdminWriteResults {
+    facing _: core/SharedStore
+
+    provides:
+        AnAdminWriteFinished(result)
 }

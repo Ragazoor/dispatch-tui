@@ -1,6 +1,6 @@
 //! The per-caller views' bodies (`views.rs`) over a plain in-test store, the
 //! same functions the module runs over a `ViewContext` and the in-memory store
-//! runs over its own rows. Spec: `workspaces.allium`, "THE PER-CALLER VIEWS".
+//! runs over its own rows. Spec: `docs/architecture.md`, "Read enforcement: per-caller views".
 
 use super::*;
 

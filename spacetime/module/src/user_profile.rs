@@ -9,7 +9,7 @@ pub const DISPLAY_NAME_MAX_LENGTH: usize = 64;
 pub const IDENTITY_PREFIX_LENGTH: usize = 8;
 
 /// How a person is named wherever a card or a tool result names them
-/// (`workspaces.allium: ShownName`, `CreatorIsShownByName`): their display
+/// (`workspaces.allium: UserProfile.shown_name`, `CreatorIsShownByName`): their display
 /// name, or the identity's short prefix when they have set none. `pub` so the
 /// board and `MemoryReducerCaller` call it instead of re-slicing an identity.
 pub fn shown_name(display_name: &str, identity: &str) -> String {

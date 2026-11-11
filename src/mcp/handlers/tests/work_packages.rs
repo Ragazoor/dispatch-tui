@@ -431,7 +431,7 @@ async fn list_work_packages_names_the_creator_by_display_name_or_prefix() {
 }
 
 // =======================================================================
-// Workspace and visibility (workspaces.allium: NameWorkspaceAndVisibilityViaMcp)
+// Workspace and visibility (work-packages.allium: CreateWorkPackageViaMcp, UpdateWorkPackageViaMcp)
 // =======================================================================
 
 fn is_error(resp: &JsonRpcResponse) -> bool {

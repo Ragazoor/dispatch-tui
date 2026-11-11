@@ -355,7 +355,7 @@ pub trait ReducerCaller: Send + Sync {
     ///
     /// A read, not a write, and not a reducer: usage is served on demand
     /// because a view over it would re-run on every recorded event
-    /// (`workspaces.allium`, "THE PRIVATE FLIP"). It sits here because this is
+    /// (`docs/architecture.md`, "Read enforcement: per-caller views"). It sits here because this is
     /// the one seam both the live connection and the in-memory store stand
     /// behind. `since` is in the store's `recorded_at` text.
     async fn own_usage_summary(

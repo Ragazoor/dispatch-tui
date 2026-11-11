@@ -256,7 +256,7 @@ pub fn settle_new_epic(ctx: &ReducerContext, row: Epic) -> Result<Epic, String> 
     })
 }
 
-/// `CreateWorkPackageInWorkspace`: check the workspace and return the row to
+/// `work-packages.allium: CreateWorkPackage`: check the workspace and return the row to
 /// store, `created_by` stamped with the caller (the store itself may name one).
 pub fn settle_new_package(ctx: &ReducerContext, row: WorkPackage) -> Result<WorkPackage, String> {
     validate_visibility_value(&row.visibility)?;
@@ -730,6 +730,26 @@ pub fn epic_is_unseen(r: &impl StoreReads, epic: &Epic) -> bool {
         .is_some_and(|h| h.is_empty() || !workspace_has_member(r, epic.workspace_id, &h))
 }
 
+/// `SuperAdminDeletesUnseenItem`: true when an epic of `subtree` is private
+/// to someone who is still a member of its workspace. The hatch takes only
+/// what nobody can see, so such a subtree is refused: that person deletes
+/// their epic, or is removed first. Only the private nodes need judging: a
+/// public node's holder is a private node above it in the subtree, or the
+/// subtree's root's, which is already unseen.
+pub fn subtree_holds_a_seen_private_epic(
+    r: &impl StoreReads,
+    subtree: impl IntoIterator<Item = impl std::borrow::Borrow<Epic>>,
+) -> bool {
+    subtree.into_iter().any(|node| {
+        let node = node.borrow();
+        node.visibility == VISIBILITY_PRIVATE && !epic_is_unseen(r, node)
+    })
+}
+
+/// The refusal for [`subtree_holds_a_seen_private_epic`].
+pub const SUBTREE_HOLDS_A_SEEN_PRIVATE_EPIC: &str =
+    "only an item nobody can see is deleted this way: its subtree holds a private epic someone still sees";
+
 /// `SuperAdminDeletesUnseenItem`: a private package whose creator is no longer
 /// a member of its workspace.
 pub fn package_is_unseen(r: &impl StoreReads, package: &WorkPackage) -> bool {
@@ -765,6 +785,10 @@ pub fn super_admin_delete_unseen_item(
             // The escape hatch widens who may delete, not what may be torn
             // down: the every-task-done guard of `delete_epic` still holds.
             let doomed = crate::tasks_epics::validate_epic_deletable(ctx, item_id)?;
+            let nodes = doomed.iter().filter_map(|id| ctx.db.epics().id().find(*id));
+            if subtree_holds_a_seen_private_epic(ctx, nodes) {
+                return Err(SUBTREE_HOLDS_A_SEEN_PRIVATE_EPIC.into());
+            }
             delete_epic_subtree_with_feed_cleanup(ctx, item_id, &doomed);
             recalculate_epic_chain(ctx, parent);
             Ok(())
@@ -896,7 +920,7 @@ pub(crate) fn first_workspace_of(ctx: &ReducerContext, who: &str) -> Option<i64>
         .min()
 }
 
-/// One row of the `unseen_items` view (`admin-surfaces.allium: UnseenItem`):
+/// One row of the `unseen_items` view (`admin-surfaces.allium: UnseenItemListing`):
 /// a private epic or package nobody can see. Never a title or any content.
 #[derive(spacetimedb::SpacetimeType, Clone, Debug, PartialEq, Eq)]
 pub struct UnseenItem {
@@ -909,35 +933,22 @@ pub struct UnseenItem {
     pub created_at: String,
 }
 
-/// `admin-surfaces.allium: UnseenItemListingContents`, over what a view can
-/// read, so the view and `MemoryReducerCaller` run one definition. A view reads
-/// through indexes only, so the caller hands in the private epics and packages
-/// (a point read on the `visibility` index) and a way to find one epic by id.
-/// An item is unseen when its creator is not a member of its workspace. An
-/// epic under a private ancestor is part of that ancestor's row, so only the
-/// topmost private epic is listed. Ordered by workspace id, kind, then id.
+/// `admin-surfaces.allium: UnseenItemListing`, over what a view can read, so
+/// the view and `MemoryReducerCaller` run one definition. A view reads through
+/// indexes only, so the caller hands in the private epics and packages (a
+/// point read on the `visibility` index). An item is unseen when its creator is
+/// not a member of its workspace. A private epic is its own holder, so every
+/// one is judged on its own, a private sub-epic of a listed epic included
+/// (A5): `super_admin_delete_unseen_item` accepts each of them. Ordered by
+/// workspace id, kind, then id.
 pub fn unseen_items_of(
     private_epics: &[Epic],
     private_packages: &[WorkPackage],
-    epic_by_id: impl Fn(i64) -> Option<Epic>,
     is_member: impl Fn(i64, &str) -> bool,
 ) -> Vec<UnseenItem> {
-    let under_private = |epic: &Epic| {
-        let mut parent = epic.parent_epic_id;
-        for _ in 0..PRIVATE_WALK_LIMIT {
-            let Some(p) = epic_by_id(parent) else {
-                return false;
-            };
-            if p.visibility == VISIBILITY_PRIVATE {
-                return true;
-            }
-            parent = p.parent_epic_id;
-        }
-        false
-    };
     let mut items: Vec<UnseenItem> = private_epics
         .iter()
-        .filter(|e| !under_private(e) && !is_member(e.workspace_id, &e.created_by))
+        .filter(|e| !is_member(e.workspace_id, &e.created_by))
         .map(|e| UnseenItem {
             kind: WORK_PACKAGE_ITEM_EPIC.to_string(),
             item_id: e.id,
@@ -964,7 +975,7 @@ pub fn unseen_items_of(
     items
 }
 
-/// `admin-surfaces.allium: UnseenItemListingContents`, served per caller: the
+/// `admin-surfaces.allium: UnseenItemListing`, served per caller: the
 /// private items nobody can see, for a super-admin, and nothing for anyone
 /// else. Every read is a point read: a non-super-admin's run reads one profile
 /// row, so a write to epics does not re-run it, and a super-admin's reads the
@@ -992,7 +1003,6 @@ fn unseen_items(ctx: &spacetimedb::ViewContext) -> Vec<UnseenItem> {
     unseen_items_of(
         &epics,
         &packages,
-        |id| ctx.db.epics().id().find(id),
         |workspace_id, user| {
             ctx.db
                 .memberships()

@@ -6,9 +6,10 @@ use anyhow::anyhow;
 /// The SQL this board asks the store for.
 ///
 /// Spec: `sync.allium`'s `SubscribeOnceIdentityIsSettled`. Every table that
-/// carries a person's work is private (`workspaces.allium`: "THE PER-CALLER
-/// VIEWS"), so the board subscribes to the per-caller views over them, which
-/// answer for the connection's own identity. A view ask needs no `WHERE` on
+/// carries a person's work is private (`docs/architecture.md`: "Read
+/// enforcement: per-caller views"), so the board subscribes to the per-caller
+/// views over them, which answer for the connection's own identity. A view ask
+/// needs no `WHERE` on
 /// the identity: the store applies it. What the store walks for the board, the
 /// board no longer asks for epic by epic: `covered_epics` is the followed
 /// epics and every descendant at any depth, and a follow or an unfollow

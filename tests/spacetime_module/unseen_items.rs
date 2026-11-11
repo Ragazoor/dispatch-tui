@@ -1,5 +1,5 @@
 //! The `unseen_items` view against a live store
-//! (`admin-surfaces.allium: UnseenItemListingContents`): a super-admin's
+//! (`admin-surfaces.allium: UnseenItemListing`): a super-admin's
 //! listing holds a private epic whose creator is no longer a member, an
 //! ordinary caller's is empty, and no row carries a title.
 

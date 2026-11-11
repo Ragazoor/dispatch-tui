@@ -274,5 +274,61 @@ fn memory_caller_moves_an_epic_like_the_real_reducer() {
         for rows in [&rows_real, &rows_mem] {
             assert_eq!(rows.task(task).unwrap().epic_id, Some(EpicId(loose)));
         }
+
+        // The super-admin's rescue (`MoveEpicToWorkspace`): an epic in a
+        // workspace they are not in is unseen to them, yet `update_epic` with
+        // only a workspace moves it. Leave the default workspace, so `loose`
+        // is out of sight, then move it into `Other`.
+        let own_default = |rows: &SharedRows| {
+            rows.memberships()
+                .iter()
+                .find(|m| m.workspace_id == DEFAULT_WORKSPACE && m.user == identity)
+                .map(|m| m.id)
+                .expect("the caller's default membership")
+        };
+        let (real_m, mem_m) = (own_default(&rows_real), own_default(&rows_mem));
+        real.remove_member(real_m).await.unwrap().applied().unwrap();
+        mem.remove_member(mem_m).await.unwrap().applied().unwrap();
+        // The real views drop the epic; the twin keeps every row in its cache
+        // and judges sight per call, as the refusal below shows.
+        wait_for!(rows_real.epic(EpicId(loose)).is_none());
+        real.update_epic(EpicId(loose), blank_epic_patch(), Some(other), None)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        mem.update_epic(EpicId(loose), blank_epic_patch(), Some(other), None)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        wait_for!(rows_real
+            .epic(EpicId(loose))
+            .is_some_and(|e| e.workspace_id == other));
+        assert_eq!(
+            rows_mem.epic(EpicId(loose)).map(|e| e.workspace_id),
+            Some(other),
+            "twin moved the unseen epic"
+        );
+
+        // Anything more than the bare move still needs sight of the epic.
+        let renamed = bindings::EpicPatch {
+            title: Some("renamed".into()),
+            ..blank_epic_patch()
+        };
+        let real_out = real
+            .update_epic(EpicId(parent), renamed.clone(), Some(other), None)
+            .await
+            .unwrap();
+        let mem_out = mem
+            .update_epic(EpicId(parent), renamed, Some(other), None)
+            .await
+            .unwrap();
+        for out in [real_out, mem_out] {
+            match out {
+                ReducerOutcome::Refused(why) => assert!(why.contains("does not exist"), "{why}"),
+                other => panic!("an unseen epic's patch must be refused, got {other:?}"),
+            }
+        }
     });
 }

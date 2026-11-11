@@ -1,5 +1,5 @@
 //! The per-caller views, served from this store's rows. Mirrors the module's
-//! `views.rs` (`workspaces.allium`: "THE PER-CALLER VIEWS"): the module's own
+//! `views.rs` (`docs/architecture.md`: "Read enforcement: per-caller views"): the module's own
 //! view bodies run here over [`Tables`], so the double and the module cannot
 //! disagree about who sees what. `tests/memory_caller_conformance.rs` compares
 //! the two against a live store.

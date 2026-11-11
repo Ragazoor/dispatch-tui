@@ -16,7 +16,7 @@ fn applied() -> Result<ReducerOutcome> {
 }
 
 impl MemoryReducerCaller {
-    fn caller_is_super_admin(&self, tables: &Tables) -> bool {
+    pub(super) fn caller_is_super_admin(&self, tables: &Tables) -> bool {
         tables
             .user_profiles
             .get(&self.sender)

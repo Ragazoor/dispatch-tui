@@ -1277,7 +1277,7 @@ fn there_is_no_get_epic_tool() {
 }
 
 // =======================================================================
-// Workspace and visibility (workspaces.allium: NameWorkspaceAndVisibilityViaMcp)
+// Workspace and visibility (epics.allium: CreateEpicViaMcp, UpdateEpicViaMcp)
 // =======================================================================
 
 fn is_error(resp: &JsonRpcResponse) -> bool {
