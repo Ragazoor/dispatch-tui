@@ -98,6 +98,7 @@ async fn a_guarded_cleanup_of_a_task_not_done_in_the_store_runs_no_teardown() {
         worktree: Some("/repo/.worktrees/1-reopened".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+        await_teardown: false,
         guard: Some(crate::tui::commands::DeleteGuard::Task(task.id)),
     }))
     .await;
@@ -127,6 +128,7 @@ async fn a_guarded_cleanup_of_a_done_task_still_tears_down() {
         worktree: Some("/repo/.worktrees/1-done".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+        await_teardown: false,
         guard: Some(crate::tui::commands::DeleteGuard::Task(task.id)),
     }))
     .await;
@@ -157,6 +159,7 @@ async fn a_guarded_epic_teardown_is_refused_when_a_subtree_task_is_not_done() {
         worktree: Some("/repo/.worktrees/1-live".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::Nothing,
+        await_teardown: false,
         guard: Some(crate::tui::commands::DeleteGuard::Epic(epic.id)),
     }))
     .await;
@@ -177,6 +180,7 @@ async fn a_batch_guard_refuses_the_whole_batch_when_one_item_is_not_done() {
         worktree: Some("/repo/.worktrees/1-done".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::Nothing,
+        await_teardown: false,
         guard: Some(crate::tui::commands::DeleteGuard::Batch {
             task_ids: vec![done.id, live.id],
             epic_ids: vec![],

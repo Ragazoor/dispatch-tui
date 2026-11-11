@@ -438,7 +438,7 @@ impl App {
     ) -> (Option<Command>, Vec<Command>) {
         let cleanup = self
             .find_task_mut(id)
-            .and_then(|t| Self::take_cleanup(t, follow_up, guard));
+            .and_then(|t| Self::take_cleanup(t, follow_up, false, guard));
         self.clear_agent_tracking(id);
         self.board.tasks.retain(|t| t.id != id);
         let mut respawn = self.move_skipped_epic_folds();

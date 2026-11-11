@@ -199,6 +199,7 @@ async fn dispatch_task(
             worktree,
             tmux_window,
             follow_up,
+            await_teardown,
             guard,
         } => {
             let request = super::tasks::CleanupRequest {
@@ -208,7 +209,7 @@ async fn dispatch_task(
                 tmux_window,
                 follow_up,
             };
-            run_cleanup(rt, request, guard).await;
+            run_cleanup(rt, request, await_teardown, guard).await;
             vec![]
         }
         ClearWorktreePointer(id) => {
@@ -280,6 +281,7 @@ async fn dispatch_task(
 async fn run_cleanup(
     rt: &super::TuiRuntime,
     request: super::tasks::CleanupRequest,
+    await_teardown: bool,
     guard: Option<crate::tui::commands::DeleteGuard>,
 ) {
     if let Some(guard) = guard {
@@ -287,17 +289,9 @@ async fn run_cleanup(
             return;
         }
     }
-    // Only RetryFresh (follow-up ClearPointer) is waited for: it queues a
-    // re-dispatch right behind its cleanup, and provisioning must not meet the
-    // worktree while it is being removed. A delete's teardown runs in the
-    // background so the board keeps taking keys and drawing while git works
-    // (tasks.allium: TaskTeardown).
-    let wait = matches!(
-        request.follow_up,
-        crate::tui::commands::CleanupFollowUp::ClearPointer
-    );
+    // See `TaskCommand::Cleanup::await_teardown`.
     let handle = rt.exec_cleanup(request);
-    if wait {
+    if await_teardown {
         let _ = handle.await;
     }
 }

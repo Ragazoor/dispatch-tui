@@ -270,6 +270,7 @@ impl App {
                 let cleanup = Self::take_cleanup(
                     task,
                     crate::tui::commands::CleanupFollowUp::Nothing,
+                    false,
                     Some(guard.clone()),
                 );
                 if let Some(c) = cleanup {

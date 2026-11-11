@@ -198,6 +198,13 @@ pub enum TaskCommand {
         worktree: Option<String>,
         tmux_window: Option<TmuxWindow>,
         follow_up: CleanupFollowUp,
+        /// Whether the command drain waits for the teardown to finish before
+        /// the next command runs. Only a caller that queues work behind the
+        /// teardown which must not meet the worktree mid-removal sets it
+        /// (RetryFresh's re-dispatch). Otherwise the teardown runs in the
+        /// background, so the board keeps taking keys and drawing while git
+        /// works (tasks.allium: TaskTeardown).
+        await_teardown: bool,
         /// Set by the delete paths only: re-read against the store before the
         /// teardown starts; a failed check refuses and tears nothing down.
         guard: Option<DeleteGuard>,

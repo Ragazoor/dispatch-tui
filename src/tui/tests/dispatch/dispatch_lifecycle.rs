@@ -162,9 +162,15 @@ fn retry_fresh_emits_cleanup_and_dispatch() {
     assert!(!app.is_stale(TaskId(4)));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert_eq!(app.board.tasks[0].status, TaskStatus::Backlog);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(TaskCommand::Cleanup { .. }))));
+    // The re-dispatch queued next must not meet the worktree mid-removal, so
+    // the drain waits for this teardown.
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(TaskCommand::Cleanup {
+            await_teardown: true,
+            ..
+        })
+    )));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::Task(TaskCommand::DispatchAgent { .. }))));

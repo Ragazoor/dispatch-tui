@@ -117,7 +117,9 @@ impl App {
             // derives the same worktree path either way, so retaining the
             // pointer would change nothing observable. The failure is still
             // reported and logged.
-            let cleanup = Self::take_cleanup(task, CleanupFollowUp::ClearPointer, None);
+            // Awaited: the re-dispatch queued next must not meet the worktree
+            // while it is being removed.
+            let cleanup = Self::take_cleanup(task, CleanupFollowUp::ClearPointer, true, None);
             // Retry-fresh is the likeliest leaving-Running board write to carry
             // a deferred Stop: a crashed task is still Running.
             Self::set_local_status(task, TaskStatus::Backlog);

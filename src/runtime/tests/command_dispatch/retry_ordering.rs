@@ -49,6 +49,19 @@ impl ProcessRunner for SlowKillTmux {
     }
 }
 
+/// Task 1's teardown of a worktree and a window.
+fn cleanup(follow_up: crate::tui::commands::CleanupFollowUp, await_teardown: bool) -> Command {
+    Command::Task(TaskCommand::Cleanup {
+        id: models::TaskId(1),
+        repo_path: "/repo".into(),
+        worktree: Some("/repo/.worktrees/1-x".into()),
+        tmux_window: Some(test_tmux_window("task-1")),
+        follow_up,
+        await_teardown,
+        guard: None,
+    })
+}
+
 #[tokio::test]
 async fn retry_resume_launches_only_after_the_old_window_is_gone() {
     let dir = tempfile::tempdir().unwrap();
@@ -113,14 +126,7 @@ async fn a_cleanup_is_finished_before_the_next_command_starts() {
     let mut app = App::new(db.list_all().await);
 
     commands::dispatch(
-        Command::Task(TaskCommand::Cleanup {
-            id: models::TaskId(1),
-            repo_path: "/repo".into(),
-            worktree: Some("/repo/.worktrees/1-x".into()),
-            tmux_window: Some(test_tmux_window("task-1")),
-            follow_up: crate::tui::commands::CleanupFollowUp::ClearPointer,
-            guard: None,
-        }),
+        cleanup(crate::tui::commands::CleanupFollowUp::ClearPointer, true),
         &mut app,
         &rt,
     )
@@ -137,12 +143,12 @@ async fn a_cleanup_is_finished_before_the_next_command_starts() {
 /// A runner whose first tmux call (the teardown's window probe) blocks until
 /// the test opens the gate, so a test can look at the drain while a teardown
 /// is certainly still in flight.
-struct GatedKillTmux {
+struct GatedProbeTmux {
     inner: Arc<MockProcessRunner>,
     gate: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
 }
 
-impl GatedKillTmux {
+impl GatedProbeTmux {
     fn call(&self, args: &[&str]) {
         if args.contains(&"list-windows") {
             let _ = self.gate.lock().unwrap().recv();
@@ -150,7 +156,7 @@ impl GatedKillTmux {
     }
 }
 
-impl ProcessRunner for GatedKillTmux {
+impl ProcessRunner for GatedProbeTmux {
     fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
         self.call(args);
         self.inner.run(program, args)
@@ -178,7 +184,7 @@ async fn a_delete_cleanup_does_not_hold_up_the_next_command() {
         (0..60).map(|_| MockProcessRunner::ok()).collect(),
     ));
     let (open_gate, gate) = std::sync::mpsc::channel();
-    let runner = Arc::new(GatedKillTmux {
+    let runner = Arc::new(GatedProbeTmux {
         inner: Arc::clone(&inner),
         gate: std::sync::Mutex::new(gate),
     });
@@ -190,14 +196,7 @@ async fn a_delete_cleanup_does_not_hold_up_the_next_command() {
     tokio::time::timeout(
         TEST_TIMEOUT,
         commands::dispatch(
-            Command::Task(TaskCommand::Cleanup {
-                id: models::TaskId(1),
-                repo_path: "/repo".into(),
-                worktree: Some("/repo/.worktrees/1-x".into()),
-                tmux_window: Some(test_tmux_window("task-1")),
-                follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
-                guard: None,
-            }),
+            cleanup(crate::tui::commands::CleanupFollowUp::DeleteRow, false),
             &mut app,
             &rt,
         ),

@@ -835,6 +835,7 @@ impl App {
     pub(in crate::tui) fn take_cleanup(
         task: &mut Task,
         follow_up: crate::tui::commands::CleanupFollowUp,
+        await_teardown: bool,
         guard: Option<crate::tui::commands::DeleteGuard>,
     ) -> Option<Command> {
         let worktree = task.worktree.take();
@@ -852,6 +853,7 @@ impl App {
             worktree,
             tmux_window,
             follow_up,
+            await_teardown,
             guard,
         }))
     }
