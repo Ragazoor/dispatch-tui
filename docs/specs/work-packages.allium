@@ -10,40 +10,37 @@
 -- Includes: WorkPackage and WorkPackageLink, the package card on the main
 --           board and where it is placed, the package view, the link picker,
 --           package create/rename/delete from the board, the MCP tools,
---           and the cascades when a linked task or epic is deleted.
+--           and what a deleted task or epic does to its links.
 -- Excludes: Epic card placement itself (board-layout.allium, "Epic Card
 --           Placement" — this spec reuses it); the epic view and its trail
 --           (epics.allium, "Epic Navigation"); the board filters
 --           (board-layout.allium); the store's subscription mechanics
---           (sync.allium).
+--           (sync.allium); who may see and write a package (workspaces.allium).
 -- Dependencies: Task, Epic, TaskStatus, UserIdentity from core.allium.
 --
--- Decisions taken with the user (task #45061), recorded so they are not
--- re-litigated:
+-- Decisions taken with the user:
 --   - A package is a VIEW on the board, not a to-do list. It has no status of
 --     its own and nothing to tick off: an item is done when the item itself
 --     is done, and the board's columns already say so.
 --   - A package only links; it never owns. A task created while a package
---     view is showing (n, c copy, D quick dispatch) is still a plain
---     main-board task with no epic, and is then linked to that package
---     (task #98415, reversing the earlier "nothing is created inside a
---     package": CreateTaskInPackageView). Only the package view itself
---     links: a task created in an epic view entered from a package goes into
---     that epic and is not linked, since the epic's card already carries it.
+--     view is showing (n, c copy, D quick dispatch) is a plain main-board
+--     task with no epic, linked to that package (CreateTaskInPackageView).
+--     Only the package view itself links: a task created in an epic view
+--     entered from a package goes into that epic and is not linked, since
+--     the epic's card already carries it.
 --   - Membership is many-to-many: one task or epic can be linked to any
 --     number of packages.
 --   - The cards in a package view are the linked items themselves: a linked
 --     task is a task card, a linked epic is an epic card that Space enters.
---     Linked epics are NOT opened up into their subtasks, except by the
---     flat lens: every board lens applies in a package view as it does on
---     the main board (task #98402, reversing the earlier "a package view is
---     never flattened": PackageViewCards).
+--     Linked epics are not opened up into their subtasks, except by the flat
+--     lens: every board lens applies in a package view as it does on the
+--     main board (PackageViewCards).
 --   - Package cards sit on the main board only. A package cannot hold a
 --     package, and no package card appears inside an epic view or another
 --     package view.
---   - The card stays in Backlog until the work is finished, then it ends up
---     in Done by the placement rule; the user deletes the package when they no longer want it. There
---     is no archive.
+--   - The card stays in Backlog until the work is finished, then it is in
+--     Done (PackageCardPlacement); the user deletes the package when they no
+--     longer want it. There is no archive.
 
 use "./core.allium" as core
 
@@ -55,7 +52,7 @@ entity WorkPackage {
     title: String               -- non-empty after trimming
     description: String         -- free text, may be empty; holds the plan for the window
     sort_order: Integer?        -- manual ordering of the package's card, and nothing else; lower sorts first via sort_order ?? id (null falls back to the package id). Written by ReorderPackage and by the update_work_package tool
-    created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused). Today the board subscribes to its own creator's packages only; once workspaces land it receives every package visible_to it (workspaces.allium: SetWorkPackageVisibility)
+    created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused). The board receives every package visible_to it (workspaces.allium: SetWorkPackageVisibility)
     workspace: core/Workspace         -- the workspace this package lives in; chosen at creation and never moved (workspaces.allium: CreateWorkPackageInWorkspace)
     visibility: core/Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetWorkPackageVisibility)
     created_at: Timestamp
@@ -71,6 +68,19 @@ entity WorkPackage {
     links: WorkPackageLink with work_package = this
     linked_tasks: links where kind = task -> task
     linked_epics: links where kind = epic -> epic
+
+    -- The tasks that place the package's card: the linked tasks and every
+    -- task in the subtree of every linked epic, each once. A black box over
+    -- core/Epic.subtree_tasks: linked_tasks plus each linked epic's
+    -- subtree_tasks, deduplicated.
+    placement_tasks: tasks_reached_by(this)
+
+    -- The one column the package's card is in (PackageCardPlacement): Done
+    -- when there is at least one placement task and every one is done,
+    -- Backlog in every other case. Never Running or Review.
+    placement_column: if placement_tasks.count > 0
+                         and placement_tasks.all(t => t.status = done): done
+                      else: backlog
 }
 
 enum WorkPackageItemKind { task | epic }
@@ -84,6 +94,9 @@ entity WorkPackageLink {
     epic: core/Epic?            -- set when kind = epic
     created_at: Timestamp
 
+    -- The linked task or epic, whichever is set.
+    item: task ?? epic
+
     -- At most one link per (package, item). Enforced by a derived key
     -- "<package id>/<kind>/<item id>", the same device core.allium's
     -- Subscription uses, because the store indexes single columns only.
@@ -96,27 +109,37 @@ entity WorkPackageLink {
 }
 
 ------------------------------------------------------------
--- Lifecycle
+-- Rules
 ------------------------------------------------------------
 
+-- == Lifecycle ==
+
+-- Creates the package and links the given items, in one store transaction:
+-- every item is checked before the first write, so a link to an unknown,
+-- unseen or out-of-workspace item refuses the whole create and no package is
+-- left behind (workspaces.allium: LinkOnlyInsideTheWorkspace).
 rule CreateWorkPackage {
-    when: CreateWorkPackage(title, description, creator)
+    when: CreateWorkPackage(title, description, creator, workspace, visibility, items)
 
     requires: title.trim() != ""
 
     ensures:
-        WorkPackage.created(
+        let package = WorkPackage.created(
             title: title.trim(),
             description: description,
             created_by: creator,
+            workspace: workspace,
+            visibility: visibility,
             created_at: now,
             updated_at: now
         )
+        for item in items: LinkItem(package, item)
 
     @guidance
         -- Reachable from the link picker (CreatePackageFromPicker) and from
-        -- the create_work_package MCP tool. A blank title is refused with a
-        -- validation error and nothing is created.
+        -- the create_work_package MCP tool (CreateWorkPackageViaMcp). A blank
+        -- title is refused with a validation error and nothing is created.
+        -- A repeated item is one link.
 }
 
 rule UpdateWorkPackage {
@@ -137,15 +160,6 @@ rule UpdateWorkPackage {
         -- ReorderPackage (J/K) and by that tool; there is no way to clear it.
 }
 
--- The module's work-package update reducer (update_work_package), which any
--- store client may call.
-surface WorkPackageWriteReducers {
-    facing _: core/StoreClient
-
-    provides:
-        WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
-}
-
 rule UpdateWorkPackageIsOneTransaction {
     when: WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
 
@@ -154,11 +168,21 @@ rule UpdateWorkPackageIsOneTransaction {
     -- The visibility's refusals (an unknown value, a caller who is neither the
     -- creator nor an admin) are raised before the first write, so a refused
     -- visibility leaves the title, the links and the package as they were.
-    requires: package.exists
+    requires: exists package
 
-    ensures: WorkPackagePatchAccepted(package: package, patch: patch)
+    ensures:
+        if patch.title != null or patch.description != null or patch.sort_order != null:
+            UpdateWorkPackage(package, patch.title, patch.description, patch.sort_order)
     ensures:
         if visibility != null: package.visibility = visibility
+    ensures:
+        for item in unlink: UnlinkItem(package, item)
+    ensures:
+        for item in link: LinkItem(package, item)
+
+    @guidance
+        -- Unlinks run before links. A link-only or unlink-only call leaves
+        -- updated_at alone: only the patch touches it.
 }
 
 -- J/K on a package card moves it among the package cards of its column.
@@ -170,7 +194,7 @@ rule ReorderPackage {
     when: ReorderPackage(package, direction)
     -- direction: +1 (down) or -1 (up)
 
-    let cards = package_cards(column_of(package))
+    let cards = package_cards(package.placement_column)
     let target_index = index_of(cards, package) + direction
 
     requires: target_index >= 0
@@ -198,7 +222,7 @@ rule ReorderPackage {
         -- No-op at the edge of the package block: J on the last package
         -- card and K on the first do nothing, and the cursor does not move
         -- onto an epic or task card. Both written keys are persisted.
-        -- The render (PackageCardPlacement), this rule and the
+        -- The card order (PackageCardPlacement), this rule and the
         -- update_work_package tool all read the same key.
 }
 
@@ -209,7 +233,13 @@ rule LinkItem {
 
     ensures:
         if not exists existing:
-            WorkPackageLink.created(work_package: package, item: item, created_at: now)
+            WorkPackageLink.created(
+                work_package: package,
+                kind: item_kind(item),
+                task: item_task(item),
+                epic: item_epic(item),
+                created_at: now
+            )
 
     @guidance
         -- Idempotent: linking an item that is already linked is a silent
@@ -218,15 +248,16 @@ rule LinkItem {
         -- Linking an epic and also a task inside that epic is allowed and
         -- both are kept: the user linked the task on purpose (see
         -- PackageViewCards).
+        -- Black boxes: item_kind(item) is task for a task and epic for an
+        -- epic; item_task(item) is the item when it is a task, else null;
+        -- item_epic(item) is the item when it is an epic, else null.
 }
 
 -- A task created while a package view is showing is linked to that package.
 -- The task itself is created exactly as on the main board: no epic, the same
 -- form or quick dispatch. Only the link is added.
 rule CreateTaskInPackageView {
-    when: TaskCreatedFromBoard(task, view)
-
-    requires: view = PackageView(package)
+    when: TaskCreatedInPackageView(task, package)
 
     ensures: LinkItem(package, task)
 
@@ -247,28 +278,6 @@ rule CreateTaskInPackageView {
         -- already does the same.
 }
 
-rule DeleteWorkPackageViaMcp {
-    when: McpUpdateWorkPackage(package, delete, title?, description?, sort_order?,
-                               link_task_ids?, unlink_task_ids?,
-                               link_epic_ids?, unlink_epic_ids?)
-
-    requires: delete = true
-    -- A delete is a call of its own: the same call must not also rename or
-    -- relink, since those writes would be thrown away with the package. A
-    -- call that sets delete with any other field is invalid params (-32602)
-    -- and nothing is written. The same rule as update_tasks with
-    -- status="done" (mcp-task-tools.allium).
-    requires: title = null and description = null and sort_order = null
-              and link_task_ids = null and unlink_task_ids = null
-              and link_epic_ids = null and unlink_epic_ids = null
-
-    ensures: DeleteWorkPackage(package)
-
-    @guidance
-        -- delete: false is the same as leaving it out. The reply names the
-        -- deleted package and says its tasks and epics are kept.
-}
-
 rule UnlinkItem {
     when: UnlinkItem(package, item)
 
@@ -281,11 +290,11 @@ rule UnlinkItem {
         -- Idempotent: unlinking an item that is not linked is a silent
         -- success. The task or epic itself is never touched.
         -- An item the caller cannot see is treated as not linked, so the
-        -- unlink does nothing (task #98744; workspaces.allium:
-        -- WritesRequireSight, UnseenIsAsMissing): a caller can neither
-        -- remove a link they are not shown nor learn from the answer that
-        -- one exists. This holds for unlink_work_package_item and for the
-        -- unlink lists of update_work_package_with_links alike.
+        -- unlink does nothing (workspaces.allium: WritesRequireSight,
+        -- UnseenIsAsMissing): a caller can neither remove a link they are
+        -- not shown nor learn from the answer that one exists. This holds
+        -- for unlink_work_package_item and for the unlink lists of
+        -- update_work_package_with_links alike.
 }
 
 rule DeleteWorkPackage {
@@ -301,107 +310,7 @@ rule DeleteWorkPackage {
         -- epics.allium: DeleteEpic has.
 }
 
--- A deleted task or epic takes its links with it, in every package. The
--- package itself stays, possibly empty.
-rule DeletingAnItemRemovesItsLinks {
-    when: LinkedItemDeleted(item)
-
-    ensures:
-        for link in WorkPackageLinks where link.item = item: not exists link
-
-    @guidance
-        -- LinkedItemDeleted fires for every task and epic delete, from the
-        -- board or MCP, single or batch.
-        -- An epic deleted with its subtree removes the links of every task
-        -- and sub-epic deleted with it, as well as its own.
-}
-
-------------------------------------------------------------
--- Package card on the main board
-------------------------------------------------------------
-
--- A package's card is in ONE column, never several (task #49156). It stays in
--- Backlog while its work is under way, and moves to Done only when the work
--- is finished. It never enters Running or Review: a package is a view, not
--- work an agent runs.
---
--- Placement looks at ALL the package's placement tasks:
---   - the linked tasks themselves, and
---   - every task in the subtree of every linked epic.
--- No board filter has a say in the column: not the repo filter, the
--- only-active filter, the search query or the epic hide-list
--- (board-layout.allium, "Hidden Epics and Work Packages"). The card is in
--- Done when there is at least one placement task and every one of them is
--- done. In every other case it is in Backlog: no links yet, or any task not
--- done. So changing a filter never moves a package card between columns
--- (task #98570: a finished package dropped to Backlog under the only-active
--- filter, which hides every done task). A package whose links reach no task
--- at all sits in Backlog.
--- Unlike an epic card, a package card is never hidden by the repo or
--- only-active filter, or by hiding the epics it links: a package is the
--- user's own grouping, not work in a repo. Two things take a package's card
--- off the board: the user hiding the package itself in the board-filter
--- overlay's Work packages tab, and a search query (see the guidance below).
--- Hiding a package hides its card only; its linked tasks and epics stay.
---
--- That is the whole of "finished": there is no package status.
-
-rule PackageCardPlacement {
-    when: MainBoardRendered()
-
-    -- A package the user hid (board-layout.allium: BoardHides.package_is_hidden)
-    -- is not in WorkPackages as this rule reads it: it draws no card at all.
-    ensures:
-        for package in WorkPackages:
-            let tasks = package.placement_tasks
-            if tasks != {} and tasks.all(t => t.status = done):
-                CardShown(package, column: done)
-            else:
-                CardShown(package, column: backlog)
-
-    @guidance
-        -- placement_tasks = linked_tasks + linked_epics.flat_map(e => e.subtree_tasks),
-        -- deduplicated: a task that is both linked and inside a linked epic
-        -- counts once.
-        -- Within a column, package cards sort above every epic and task card,
-        -- by sort_order ?? id ascending (so in package id order, oldest
-        -- first, until one is reordered with J/K: ReorderPackage). They do
-        -- not sit in a column section.
-        -- A search query also narrows packages by their own title: a package
-        -- whose title matches the query keeps its card even when no linked
-        -- work matches, mirroring board_search_filter's own-match clause for
-        -- epics. A package whose title does not match keeps its card only
-        -- through visible linked work. The query only decides whether the
-        -- card is drawn; the column still comes from every placement task. The title match is a case-insensitive
-        -- substring match on the title alone; a package id is not searched,
-        -- because package ids are a sequence of their own and "#7" would
-        -- match a package and a task at once.
-        -- The card shows a square glyph and the title in CYAN (an epic card's
-        -- identity is PURPLE — board-visuals.allium: WorkPackageCard), and a
-        -- second line "N items · M done" counting the linked items the board
-        -- holds and how many of them are done; "no items" when it holds none.
-        -- When the package has a creator, the line ends " · by <creator>",
-        -- the creator shown by display name or identity prefix
-        -- (workspaces.allium: CreatorIsShownByName).
-        -- A package card is a view onto work counted elsewhere, so the
-        -- column header's card count does not include it, select-all and
-        -- multi-select skip it, and H/L do nothing on it. J/K moves it among
-        -- the package cards only (ReorderPackage).
-        -- The status bar on a package card offers Space open, e rename and
-        -- x delete.
-        -- Computed on every render rather than cached: the placement reads
-        -- links, the epic tree and the filters, and a board holds few
-        -- packages.
-}
-
--- Package cards are a main-board-only surface.
-invariant PackageCardsOnlyOnMainBoard {
-    -- No package card is drawn inside an epic view or inside a package view.
-}
-
-------------------------------------------------------------
--- Package view
-------------------------------------------------------------
+-- == Package view ==
 
 rule EnterPackage {
     when: UserEntersPackage(package)
@@ -433,48 +342,6 @@ rule ExitPackage {
         -- view. Q from anywhere below a package returns to the main board.
 }
 
--- What the package view's columns hold.
-rule PackageViewCards {
-    when: PackageViewRendered(package, flat)
-    -- flat: board_layout/FlattenedView, the board lens as it applies here.
-
-    ensures:
-        for task in package.linked_tasks where task.visible:
-            CardShown(task, column: task.status)
-        for epic in package.linked_epics where epic.visible:
-            -- placed exactly as on the main board: one card per column its
-            -- subtree has visible work in, Backlog when it has none, and
-            -- only in columns the lens does not flatten.
-            for column in epic.placement_columns where flat.renders_epics(column):
-                EpicCardShown(epic, column: column)
-            -- In a flattened column the epic's contents stand in for it:
-            -- every visible task in its subtree, once each.
-            for task in epic.subtree_tasks where task.visible and flat.flattens(task.status):
-                FlattenedCardShown(task, column: task.status)
-
-    @guidance
-        -- The cards are the linked items, not their contents. A linked
-        -- task is a task card wherever it lives in the epic tree; a linked
-        -- epic is an epic card whether it is a root epic or a sub-epic.
-        -- A task that is linked AND sits inside a linked epic shows as its
-        -- own card and also counts toward the epic card's placement.
-        -- Visible is the same predicate the main board applies.
-        -- Flattened columns (board-layout.allium: FlattenedView) apply in a
-        -- package view exactly as on the main board, per column. A flattened
-        -- column draws no epic card: it holds the linked tasks plus every
-        -- task in the subtree of a linked epic, each once, grouped under
-        -- the header of the task's own epic as on the main board. Backlog is
-        -- never flattened, so the linked epic cards stay there. The
-        -- only-active half of the lens applies through `visible`.
-        -- Enter on a flattened card jumps to its epic (epics.allium:
-        -- JumpToTaskEpic) with the trail starting at the outermost linked
-        -- epic on the task's epic path, or at the task's own epic when no
-        -- linked epic is on it: the user never stepped through the
-        -- ancestors above.
-        -- A link whose task or epic this board does not hold (not in the
-        -- shared rows it subscribes to) draws nothing.
-}
-
 rule EnterEpicFromPackage {
     when: UserEntersEpicFromPackage(epic, package)
 
@@ -492,56 +359,20 @@ rule EnterEpicFromPackage {
         -- The epic view's border names the package first, then the trail.
 }
 
-------------------------------------------------------------
--- Linking from the board
-------------------------------------------------------------
-
--- `w` on a task card or an epic card, in any view, opens the link picker for
--- that item. The picker lists every package the board holds (the user's
--- own, see WorkPackage.created_by), oldest first, each marked
--- linked or not linked for this item, plus a final "new package" row.
-surface WorkPackageLinkPicker {
-    facing user: core/UserIdentity
-    context item: core/Task or core/Epic
-
-    exposes:
-        for package in WorkPackages:
-            package.title
-            package.links.any(l => l.item = item)   -- shown as a check mark
-
-    provides:
-        ToggleLink(package)     -- Space or Enter on a package row
-        CreatePackage(title)    -- Enter on the "new package" row, then type a title
-        Close                   -- Esc or q
-
-    @guidance
-        -- Toggling a row calls LinkItem or UnlinkItem at once and keeps the
-        -- picker open, so several packages can be toggled in one visit.
-        -- Creating a package from here also links the item to it, then
-        -- returns to the picker with the cursor on the row the new package
-        -- fills (packages are oldest first, so it lands last); the row shows
-        -- checked once the write's refresh arrives.
-        -- A toggle flips the check mark at once, before the store answers;
-        -- the board re-reads its packages after every write, so a refused
-        -- write puts the mark back and shows the error.
-        -- j/k (and Down/Up) move the cursor, stopping at the first and last
-        -- rows. Esc in the new-package title returns to the picker. A linked
-        -- row shows "[x]", an unlinked one "[ ]". `w` does nothing on any row
-        -- that is not a task or epic card (headers, folded rows, package
-        -- cards).
-}
+-- == Linking and managing packages from the board ==
 
 rule CreatePackageFromPicker {
-    when: UserCreatesPackageInPicker(title, item)
+    when: UserCreatesPackageInPicker(title, item, workspace, visibility)
 
     requires: title.trim() != ""
 
     ensures:
-        let package = CreateWorkPackage(title, "", creator: current_user)
-        LinkItem(package, item)
+        CreateWorkPackage(title, "", caller(), workspace, visibility, {item})
 
     @guidance
-        -- An empty title creates nothing and returns to the picker.
+        -- An empty title creates nothing and returns to the picker. The
+        -- workspace and visibility are the form's (workspaces.allium:
+        -- NameWorkspaceAndVisibilityFromBoard).
 }
 
 rule RenamePackageFromBoard {
@@ -567,26 +398,11 @@ rule DeletePackageFromBoard {
         -- y (or Y) deletes; any other key cancels.
 }
 
-------------------------------------------------------------
--- MCP tools
-------------------------------------------------------------
+-- == MCP tools ==
 
 -- Agents are first-class users of packages: everything the board can do has
--- a tool. Three tools, in the merged style of update_tasks:
---
---   create_work_package(title, description?, link_task_ids?, link_epic_ids?)
---       write. Creates the package (CreateWorkPackage) and links the given
---       items, in one store transaction: a link to an unknown task or epic
---       refuses the whole call and no package is left behind. Returns the new
---       package id.
---   list_work_packages(work_package_id?)
---       read_only. Every package the board holds, i.e. the caller's own
---       (or the one named): id, title, description (omitted when empty),
---       sort_order (omitted when unset), created_at, updated_at, and its linked items, each with
---       kind, id, title and status. A link whose item this board does not
---       hold is left out. A task item reads
---       `- task <id> [<status>] <name>: <title>`, the display name left out
---       when the task has none; an epic item has no name.
+-- a tool. Three tools, in the merged style of update_tasks: create_work_package,
+-- list_work_packages and update_work_package (WorkPackageMcpTools).
 --
 -- Replies name what they touch (mcp-task-tools.allium: "Replies name what
 -- they touch"). Every reply that names a package says
@@ -595,33 +411,343 @@ rule DeletePackageFromBoard {
 -- touched nothing is listed as `not linked: <task ref>` or
 -- `not linked: <epic ref>`; an item the store does not hold stays `task 4` or
 -- `epic 7`.
---   update_work_package(work_package_id, title?, description?, sort_order?,
---                       link_task_ids?, unlink_task_ids?, link_epic_ids?,
---                       unlink_epic_ids?, delete?)
---       destructive. Applies UpdateWorkPackage, then every unlink, then every
---       link, in one store transaction. An id appearing in both a link and an
---       unlink list is refused before anything is written, and so is a call
---       that names no field. A link-only call leaves updated_at alone. UnlinkItem
---       stays idempotent, but the reply names each requested unlink that
---       was not linked, so the caller can tell that nothing changed for it. The store leaves a link to an item the
---       caller cannot see in place, as if it were not linked (UnlinkItem).
---       delete: true is DeleteWorkPackage (DeleteWorkPackageViaMcp below).
---
--- There is no delete_work_package tool. A delete is the last update of a
--- package, so it is a field of update_work_package (docs/mcp-tool-design.md,
--- rule 1: extend the update tool; do not add a delete twin). The cost is the
--- access class: annotations describe a whole tool, so update_work_package is
--- declared destructive, as managed_feed_config is declared a write for its
--- reading form.
---
--- The package argument is `work_package_id`, not a bare `id`: every other
--- tool names its selector after the entity (task_id, epic_id), and
--- docs/mcp-tool-design.md asks for unambiguous argument names.
 --
 -- A missing package id is not-found on list and delete, and a refusal
 -- ("no work package N", invalid params) on a create or update, which the
--- store decides; so is the id of a package another user created, which this
--- board does not hold. A link to a task or epic id that does not exist is
--- refused the same way, and nothing in that call is written: the store
--- validates every id before the first write.
--- A repeated id in one list is one write.
+-- store decides; so is the id of a package the caller cannot see. A link to
+-- a task or epic id that does not exist is refused the same way, and nothing
+-- in that call is written: the store validates every id before the first
+-- write. A repeated id in one list is one write.
+--
+-- items(task_ids, epic_ids) is a black box: the tasks and epics those ids
+-- name.
+
+rule CreateWorkPackageViaMcp {
+    when: McpCreateWorkPackage(title, description?, link_task_ids?, link_epic_ids?,
+                               workspace_id, visibility?)
+
+    ensures:
+        CreateWorkPackage(title, description ?? "", caller(),
+                          core/Workspace{id: workspace_id}, visibility ?? public,
+                          items(link_task_ids, link_epic_ids))
+
+    @guidance
+        -- Returns the new package id. workspace_id is required
+        -- (workspaces.allium: NameWorkspaceAndVisibilityViaMcp).
+}
+
+rule ListWorkPackagesViaMcp {
+    when: McpListWorkPackages(work_package_id?)
+
+    requires:
+        if work_package_id != null: exists WorkPackage{id: work_package_id}
+
+    ensures: WorkPackagesListed(work_package_id: work_package_id)
+
+    @guidance
+        -- Every package the board holds (the ones visible to the caller), or
+        -- the one named: id, title, description (omitted when empty),
+        -- sort_order (omitted when unset), created_at, updated_at, and its
+        -- linked items, each with kind, id, title and status. A link whose
+        -- item this board does not hold is left out. A task item reads
+        -- `- task <id> [<status>] <name>: <title>`, the display name left
+        -- out when the task has none; an epic item has no name.
+        -- Read-only. One package is read with work_package_id: there is no
+        -- separate get tool (docs/mcp-tool-design.md, rule 1).
+}
+
+rule UpdateWorkPackageViaMcp {
+    when: McpUpdateWorkPackage(package, title?, description?, sort_order?,
+                               link_task_ids?, unlink_task_ids?,
+                               link_epic_ids?, unlink_epic_ids?, delete?,
+                               visibility?)
+
+    -- delete: false is the same as leaving it out; delete: true is
+    -- DeleteWorkPackageViaMcp.
+    requires: delete != true
+    -- A call that names no field is refused before anything is written.
+    requires: title != null or description != null or sort_order != null
+              or link_task_ids != null or unlink_task_ids != null
+              or link_epic_ids != null or unlink_epic_ids != null
+              or visibility != null
+    -- So is an id that appears in both a link and an unlink list.
+    requires: not (exists t in link_task_ids where t in unlink_task_ids)
+    requires: not (exists e in link_epic_ids where e in unlink_epic_ids)
+
+    ensures:
+        WorkPackageUpdateRequested(
+            package,
+            patch: { title: title, description: description, sort_order: sort_order },
+            visibility: visibility,
+            unlink: items(unlink_task_ids, unlink_epic_ids),
+            link: items(link_task_ids, link_epic_ids)
+        )
+
+    @guidance
+        -- One store transaction (UpdateWorkPackageIsOneTransaction): the
+        -- patch, then every unlink, then every link. UnlinkItem stays
+        -- idempotent, but the reply names each requested unlink that was not
+        -- linked, so the caller can tell that nothing changed for it. The
+        -- store leaves a link to an item the caller cannot see in place, as
+        -- if it were not linked (UnlinkItem).
+        -- The tool is declared destructive, because one of its forms deletes
+        -- (DeleteWorkPackageViaMcp): annotations describe a whole tool.
+}
+
+rule DeleteWorkPackageViaMcp {
+    when: McpUpdateWorkPackage(package, title?, description?, sort_order?,
+                               link_task_ids?, unlink_task_ids?,
+                               link_epic_ids?, unlink_epic_ids?, delete?,
+                               visibility?)
+
+    requires: delete = true
+    -- A delete is a call of its own: the same call must not also rename or
+    -- relink, since those writes would be thrown away with the package. A
+    -- call that sets delete with any other field is invalid params (-32602)
+    -- and nothing is written. The same rule as update_tasks with
+    -- status="done" (mcp-task-tools.allium).
+    requires: title = null and description = null and sort_order = null
+              and link_task_ids = null and unlink_task_ids = null
+              and link_epic_ids = null and unlink_epic_ids = null
+              and visibility = null
+
+    ensures: DeleteWorkPackage(package)
+
+    @guidance
+        -- The reply names the deleted package and says its tasks and epics
+        -- are kept.
+        -- There is no delete_work_package tool. A delete is the last update
+        -- of a package, so it is a field of update_work_package
+        -- (docs/mcp-tool-design.md, rule 1: extend the update tool; do not
+        -- add a delete twin).
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- A deleted task or epic takes its links with it, in every package; the
+-- package itself stays, possibly empty. The store's task and epic deletes
+-- (board or MCP, single or batch) remove the links in the same transaction,
+-- and an epic deleted with its subtree removes the links of every task and
+-- sub-epic deleted with it, as well as its own.
+invariant LinksNeverDangle {
+    for link in WorkPackageLinks:
+        exists link.item
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- What the operator does to packages at the board. Each key's binding is in
+-- keybindings.allium; the rule each action reaches says what it does.
+surface WorkPackageBoard {
+    facing _: core/Operator
+
+    provides:
+        -- Space on a package card (EnterPackage); q, or Esc with no search,
+        -- in a package view (ExitPackage).
+        UserEntersPackage(package)
+        UserExitsPackageView(view)
+        -- Space or Enter on a linked epic card in a package view
+        -- (EnterEpicFromPackage).
+        UserEntersEpicFromPackage(epic, package)
+        -- J/K on a package card (ReorderPackage).
+        ReorderPackage(package, direction)
+        -- [e] on a package card, saved (RenamePackageFromBoard).
+        UserRenamesPackage(package, title)
+        -- [x] on a package card, answered y (DeletePackageFromBoard).
+        UserConfirmsDeletePackage(package)
+        -- A task created by n, c or D while a package view is showing
+        -- (CreateTaskInPackageView).
+        TaskCreatedInPackageView(task, package)
+}
+
+-- A package's card on the main board, and the column it is in.
+surface PackageCardPlacement {
+    facing _: core/Operator
+    context package: WorkPackage
+
+    exposes:
+        package.title
+        package.placement_column
+
+    @guarantee OneColumnOnly
+        -- A package's card is in ONE column, never several. It stays in
+        -- Backlog while its work is under way, and is in Done only when the
+        -- work is finished. It is never in Running or Review: a package is a
+        -- view, not work an agent runs. A package whose links reach no task
+        -- at all sits in Backlog. That is the whole of "finished": there is
+        -- no package status.
+
+    @guarantee NoFilterMovesTheCard
+        -- No board filter has a say in the column: not the repo filter, the
+        -- only-active filter, the search query or the epic hide-list
+        -- (board-layout.allium, "Hidden Epics and Work Packages"). The column
+        -- reads every placement task, so changing a filter never moves a
+        -- package card between columns.
+
+    @guarantee PackageCardsOnlyOnMainBoard
+        -- No package card is drawn inside an epic view or inside a package
+        -- view.
+
+    @guidance
+        -- Unlike an epic card, a package card is never hidden by the repo or
+        -- only-active filter, or by hiding the epics it links: a package is
+        -- the user's own grouping, not work in a repo. Two things take a
+        -- package's card off the board: the user hiding the package itself
+        -- in the board-filter overlay's Work packages tab
+        -- (board-layout.allium: BoardHides.package_is_hidden), and a search
+        -- query. Hiding a package hides its card only; its linked tasks and
+        -- epics stay.
+        -- Within a column, package cards sort above every epic and task card,
+        -- by sort_order ?? id ascending (so in package id order, oldest
+        -- first, until one is reordered with J/K: ReorderPackage). They do
+        -- not sit in a column section.
+        -- A search query also narrows packages by their own title: a package
+        -- whose title matches the query keeps its card even when no linked
+        -- work matches, mirroring board_search_filter's own-match clause for
+        -- epics. A package whose title does not match keeps its card only
+        -- through visible linked work. The query only decides whether the
+        -- card is drawn; the column still comes from every placement task.
+        -- The title match is a case-insensitive substring match on the title
+        -- alone; a package id is not searched, because package ids are a
+        -- sequence of their own and "#7" would match a package and a task at
+        -- once.
+        -- The card shows a square glyph and the title in CYAN (an epic card's
+        -- identity is PURPLE — board-visuals.allium: WorkPackageCard), and a
+        -- second line "N items · M done" counting the linked items the board
+        -- holds and how many of them are done; "no items" when it holds none.
+        -- When the package has a creator, the line ends " · by <creator>",
+        -- the creator shown by display name or identity prefix
+        -- (workspaces.allium: CreatorIsShownByName).
+        -- A package card is a view onto work counted elsewhere, so the
+        -- column header's card count does not include it, select-all and
+        -- multi-select skip it, and H/L do nothing on it. J/K moves it among
+        -- the package cards only (ReorderPackage).
+        -- The status bar on a package card offers Space open, e rename and
+        -- x delete.
+        -- Computed on every render rather than cached: the placement reads
+        -- links, the epic tree and the filters, and a board holds few
+        -- packages.
+}
+
+-- What the package view's columns hold.
+surface PackageViewCards {
+    facing _: core/Operator
+    context package: WorkPackage
+
+    -- flat: board-layout.allium's FlattenedView, the board lens as it
+    -- applies here (a black box read of the board's current lens).
+    let flat = board_lens()
+
+    exposes:
+        -- A linked task is a task card in its status column.
+        for task in package.linked_tasks where visible:
+            task.status
+        for epic in package.linked_epics where visible:
+            -- Placed exactly as on the main board: one card per column its
+            -- subtree has visible work in, Backlog when it has none, and
+            -- only in columns the lens does not flatten.
+            for column in epic.placement_columns where flat.renders_epics(column):
+                column
+            -- In a flattened column the epic's contents stand in for it:
+            -- every visible task in its subtree, once each.
+            for task in epic.subtree_tasks where visible and flat.flattens(status):
+                task.status
+
+    @guidance
+        -- The cards are the linked items, not their contents. A linked
+        -- task is a task card wherever it lives in the epic tree; a linked
+        -- epic is an epic card whether it is a root epic or a sub-epic.
+        -- A task that is linked AND sits inside a linked epic shows as its
+        -- own card and also counts toward the epic card's placement.
+        -- Visible is the same predicate the main board applies.
+        -- Flattened columns (board-layout.allium: FlattenedView) apply in a
+        -- package view exactly as on the main board, per column. A flattened
+        -- column draws no epic card: it holds the linked tasks plus every
+        -- task in the subtree of a linked epic, each once, grouped under
+        -- the header of the task's own epic as on the main board. Backlog is
+        -- never flattened, so the linked epic cards stay there. The
+        -- only-active half of the lens applies through `visible`.
+        -- Enter on a flattened card jumps to its epic (epics.allium:
+        -- JumpToTaskEpic) with the trail starting at the outermost linked
+        -- epic on the task's epic path, or at the task's own epic when no
+        -- linked epic is on it: the user never stepped through the
+        -- ancestors above.
+        -- A link whose task or epic this board does not hold (not in the
+        -- shared rows it subscribes to) draws nothing.
+}
+
+-- `w` on a task card or an epic card, in any view, opens the link picker for
+-- that item. The picker lists every package the board holds (the ones
+-- visible to it, workspaces.allium), oldest first, each marked linked or not
+-- linked for this item, plus a final "new package" row.
+surface WorkPackageLinkPicker {
+    facing _: core/Operator
+    context item: core/Task or core/Epic
+
+    exposes:
+        for package in WorkPackages:
+            package.title
+            package.links.any(l => l.item = item)   -- shown as a check mark
+
+    provides:
+        -- Space or Enter on a package row: link when unlinked, unlink when
+        -- linked.
+        LinkItem(package, item) when not package.links.any(l => l.item = item)
+        UnlinkItem(package, item) when package.links.any(l => l.item = item)
+        -- Enter on the "new package" row, then type a title (and the form's
+        -- workspace and visibility).
+        UserCreatesPackageInPicker(title, item, workspace, visibility)
+
+    @guidance
+        -- Toggling a row links or unlinks at once and keeps the picker open,
+        -- so several packages can be toggled in one visit. Esc or q closes
+        -- it.
+        -- Creating a package from here also links the item to it, then
+        -- returns to the picker with the cursor on the row the new package
+        -- fills (packages are oldest first, so it lands last); the row shows
+        -- checked once the write's refresh arrives.
+        -- A toggle flips the check mark at once, before the store answers;
+        -- the board re-reads its packages after every write, so a refused
+        -- write puts the mark back and shows the error.
+        -- j/k (and Down/Up) move the cursor, stopping at the first and last
+        -- rows. Esc in the new-package title returns to the picker. A linked
+        -- row shows "[x]", an unlinked one "[ ]". `w` does nothing on any row
+        -- that is not a task or epic card (headers, folded rows, package
+        -- cards).
+}
+
+-- The module's work-package update reducer (update_work_package), which any
+-- store client may call.
+surface WorkPackageWriteReducers {
+    facing _: core/StoreClient
+
+    provides:
+        WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
+}
+
+-- The work-package tools of the dispatch MCP server.
+surface WorkPackageMcpTools {
+    facing _: core/McpClient
+
+    provides:
+        -- create_work_package (CreateWorkPackageViaMcp). Write.
+        McpCreateWorkPackage(title, description?, link_task_ids?, link_epic_ids?,
+                             workspace_id, visibility?)
+        -- list_work_packages (ListWorkPackagesViaMcp). Read-only.
+        McpListWorkPackages(work_package_id?)
+        -- update_work_package (UpdateWorkPackageViaMcp,
+        -- DeleteWorkPackageViaMcp). Destructive.
+        McpUpdateWorkPackage(package, title?, description?, sort_order?,
+                             link_task_ids?, unlink_task_ids?,
+                             link_epic_ids?, unlink_epic_ids?, delete?,
+                             visibility?)
+
+    @guidance
+        -- The package argument is `work_package_id`, not a bare `id`: every
+        -- other tool names its selector after the entity (task_id, epic_id),
+        -- and docs/mcp-tool-design.md asks for unambiguous argument names.
+}
