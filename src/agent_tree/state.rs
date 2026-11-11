@@ -78,8 +78,8 @@ impl Notice {
 }
 
 /// Which of the pane's three sections the keys act on — the spec's
-/// `AgentTreeFocus`. Tab flips between the browse view (tree and commits) and
-/// the agents view (`SwitchAgentTreeView`); `s` moves between tree and commits
+/// `AgentTreeFocus`. `s` flips between the browse view (tree and commits) and
+/// the agents view (`SwitchAgentTreeView`); Tab moves between tree and commits
 /// (`SwitchAgentTreeBrowseFocus`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Focus {
@@ -148,7 +148,7 @@ pub struct RenderState {
     /// Which section the keys act on. Starts on the agents view.
     pub focus: Focus,
     /// The browse section that had focus when the user flipped to the agents
-    /// view — where Tab flips back to. Always `Tree` or `Commits`.
+    /// view — where `s` flips back to. Always `Tree` or `Commits`.
     pub browse_focus: Focus,
     /// The agents section beneath the tree, with its own cursor.
     pub agents: AgentsSection,

@@ -339,7 +339,7 @@ fn selecting_a_source_empties_the_tree_at_once_and_publishes_the_selection() {
 
 /// press_every_row_key / RecordedActionMatchesRow for the commits section.
 /// The namespace's rows are exactly the pane-wide keys plus select_source:
-/// q, Ctrl+C, Tab, BackTab, s, j, Down, k, Up, gg, G, Ctrl+D, Ctrl+U, Space, Enter.
+/// q, Ctrl+C, s, Tab, BackTab, j, Down, k, Up, gg, G, Ctrl+D, Ctrl+U, Space, Enter.
 #[test]
 fn pressing_each_key_of_each_commits_row_records_the_rows_action() {
     let mut pressed = 0;
@@ -419,7 +419,7 @@ fn the_commits_section_sits_below_the_tree() {
     let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
 
     let tree_row = line_index(&out, "a.rs");
-    let header = line_index(&out, "Commits (s, Tab: agents)");
+    let header = line_index(&out, "Commits (Tab, s: agents)");
     let unstaged = line_index(&out, "unstaged work");
     assert!(tree_row < header && header < unstaged, "{out}");
 }
@@ -464,7 +464,7 @@ fn the_commits_section_grows_with_its_commits_up_to_its_cap() {
             state.adopt_commit_list(Ok((1..=listed).rev().map(commit).collect()));
         }
         let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 30));
-        let header = line_index(&out, "Commits (s, Tab: agents)");
+        let header = line_index(&out, "Commits (Tab, s: agents)");
         assert_eq!(30 - header - 2, rows, "{listed} commits:\n{out}");
     }
 }
@@ -542,13 +542,13 @@ fn the_commits_sections_border_shows_focus_and_reddens_with_a_notice() {
     let mut state = browse_state();
     state.focus = Focus::Commits;
     let buffer = render_pane_buffer(&mut state, &tree, 20);
-    let y = row_of(&buffer, "Commits (s, Tab: agents)");
+    let y = row_of(&buffer, "Commits (Tab, s: agents)");
     assert_eq!(buffer[(0, y)].style().fg, Some(CYAN));
 
     let mut state = browse_state();
     state.notice = Some(Notice::commit_list("no base branch"));
     let buffer = render_pane_buffer(&mut state, &tree, 20);
-    let y = row_of(&buffer, "Commits (s, Tab: agents)");
+    let y = row_of(&buffer, "Commits (Tab, s: agents)");
     assert_eq!(buffer[(0, y)].style().fg, Some(RED));
 }
 

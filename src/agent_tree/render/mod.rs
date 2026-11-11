@@ -267,7 +267,7 @@ pub fn render(
     match Tree::new(&items) {
         Ok(tree) => {
             // The cursor is drawn only in the focused section; the tree keeps
-            // its position while unfocused, so Tab back lands where it was.
+            // its position while unfocused, so switching back lands where it was.
             let highlight = if tree_focused {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else {

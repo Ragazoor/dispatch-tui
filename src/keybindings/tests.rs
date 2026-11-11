@@ -836,3 +836,36 @@ fn no_agent_tree_namespace_binds_an_all_files_key() {
         );
     }
 }
+
+/// SwitchAgentTreeView and SwitchAgentTreeBrowseFocus: `s` flips the view in
+/// all three companion-pane namespaces; Tab and BackTab move between tree and
+/// commits, so they have no row in the agents namespace.
+#[test]
+fn s_flips_the_agent_tree_view_and_tab_switches_the_browse_section() {
+    let keys_of = |ns: KeyNamespace, action: &str| -> Vec<&str> {
+        bindings_in(ns)
+            .filter(|b| b.action == action)
+            .flat_map(|b| b.keys.iter().copied())
+            .collect()
+    };
+    for ns in [
+        KeyNamespace::AgentTreeTree,
+        KeyNamespace::AgentTreeCommits,
+        KeyNamespace::AgentTreeAgents,
+    ] {
+        assert_eq!(keys_of(ns, "toggle_focus"), vec!["s"], "{ns:?}");
+    }
+    for ns in [KeyNamespace::AgentTreeTree, KeyNamespace::AgentTreeCommits] {
+        assert_eq!(
+            keys_of(ns, "switch_section"),
+            vec!["Tab", "BackTab"],
+            "{ns:?}"
+        );
+    }
+    for key in ["Tab", "BackTab"] {
+        assert!(
+            !bindings_in(KeyNamespace::AgentTreeAgents).any(|b| b.keys.contains(&key)),
+            "{key}"
+        );
+    }
+}

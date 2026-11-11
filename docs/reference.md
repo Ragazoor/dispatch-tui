@@ -22,7 +22,7 @@ Pressed inside the pane itself (no tmux prefix) while it has tmux focus. The pan
 its own process — its keys never reach the board TUI, and all of them act on the
 pane's own view only. The keys are the `agent_tree.tree`, `agent_tree.commits` and
 `agent_tree.agents` rows of the table. The pane has two views. The browse view shows the file tree above the
-**Commits** section; `s` moves the keys between them. Tab or Shift+Tab flips to the **Agents**
+**Commits** section; Tab or Shift+Tab moves the keys between them. `s` flips to the **Agents**
 list and back. Space opens a file's diff, and `v` opens the file in `$VISUAL`/`$EDITOR`, in a
 pane across the bottom of the window. One file is open at a time: opening another file
 replaces what that pane shows, the editor included (unsaved edits in it are lost), and

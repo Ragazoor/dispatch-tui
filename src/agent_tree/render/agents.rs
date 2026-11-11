@@ -62,7 +62,7 @@ pub struct AgentList {
 }
 
 /// The section's rows and its own cursor. Kept apart from the tree's cursor so
-/// Tab back and forth returns the user to where they were in each.
+/// Switching back and forth returns the user to where they were in each.
 #[derive(Debug, Default)]
 pub struct AgentsSection {
     rows: Vec<AgentRow>,
@@ -364,7 +364,7 @@ pub fn render_agents(
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(border)
-        .title(" Agents (Tab: browse) ");
+        .title(" Agents (s: browse) ");
     // The agents view is the whole pane, so a notice has no tree border to sit
     // on: it goes on this one (TwoViewsShareThePane).
     if let Some(text) = notice {
@@ -859,13 +859,13 @@ mod tests {
     }
 
     #[test]
-    fn the_title_names_tab_whichever_section_has_focus() {
+    fn the_title_names_s_whichever_section_has_focus() {
         // TwoViewsShareThePane: the hint names the key that leaves the view.
         let mut section = AgentsSection::new();
         for focused in [true, false] {
             let out = rendered(&mut section, focused, 3);
             assert!(
-                out.contains("Agents (Tab: browse)"),
+                out.contains("Agents (s: browse)"),
                 "focused={focused}: {out}"
             );
         }

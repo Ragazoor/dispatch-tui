@@ -11,75 +11,82 @@ fn the_pane_starts_on_the_agents_view() {
     assert_eq!(state.browse_focus, Focus::Tree);
 }
 
-/// SwitchAgentTreeView: Tab flips from the browse view to the agents view and
+/// SwitchAgentTreeView: `s` flips from the browse view to the agents view and
 /// back, landing on the browse section the user left.
 #[test]
-fn tab_flips_between_the_browse_view_and_the_agents_view() {
+fn s_flips_between_the_browse_view_and_the_agents_view() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(1, false)]);
+    assert_eq!(rig.press(KeyCode::Char('s')), KeyAction::Continue);
+    assert_eq!(rig.state.focus, Focus::Agents);
+    rig.press(KeyCode::Char('s'));
+    assert_eq!(rig.state.focus, Focus::Tree);
+}
+
+/// An empty agents list is a real place to be: `s` never skips it.
+#[test]
+fn s_works_with_no_agents_listed() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press(KeyCode::Char('s'));
+    assert_eq!(rig.state.focus, Focus::Agents);
+}
+
+/// SwitchAgentTreeBrowseFocus: Tab moves between tree and commits.
+#[test]
+fn tab_moves_between_the_tree_and_the_commits_section() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
     assert_eq!(rig.press(KeyCode::Tab), KeyAction::Continue);
-    assert_eq!(rig.state.focus, Focus::Agents);
-    rig.press(KeyCode::Tab);
-    assert_eq!(rig.state.focus, Focus::Tree);
-}
-
-/// SwitchAgentTreeView: with two views the two keys are the same flip.
-#[test]
-fn back_tab_flips_the_view_like_tab() {
-    let mut rig = KeyRig::new(&[modified("a.rs")]);
-    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert_eq!(rig.state.focus, Focus::Agents);
-    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert_eq!(rig.state.focus, Focus::Tree);
-}
-
-/// An empty agents list is a real place to be: Tab never skips it.
-#[test]
-fn tab_works_with_no_agents_listed() {
-    let mut rig = KeyRig::new(&[modified("a.rs")]);
-    rig.press(KeyCode::Tab);
-    assert_eq!(rig.state.focus, Focus::Agents);
-}
-
-/// SwitchAgentTreeBrowseFocus: `s` moves between tree and commits.
-#[test]
-fn s_moves_between_the_tree_and_the_commits_section() {
-    let mut rig = KeyRig::new(&[modified("a.rs")]);
-    rig.press(KeyCode::Char('s'));
     assert_eq!(rig.state.focus, Focus::Commits);
-    rig.press(KeyCode::Char('s'));
+    assert_eq!(rig.state.browse_focus, Focus::Commits);
+    rig.press(KeyCode::Tab);
     assert_eq!(rig.state.focus, Focus::Tree);
 }
 
-/// Tab returns to the browse section that was focused when the user left.
+/// SwitchAgentTreeBrowseFocus: with two sections the two keys are the same
+/// move.
+#[test]
+fn back_tab_moves_between_the_sections_like_tab() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(rig.state.focus, Focus::Commits);
+    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(rig.state.focus, Focus::Tree);
+}
+
+/// `s` returns to the browse section that was focused when the user left.
 #[test]
 fn flipping_back_returns_to_the_commits_section_when_that_is_where_you_were() {
     let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press(KeyCode::Tab);
     rig.press(KeyCode::Char('s'));
-    rig.press(KeyCode::Tab);
     assert_eq!(rig.state.focus, Focus::Agents);
-    rig.press(KeyCode::Tab);
+    rig.press(KeyCode::Char('s'));
     assert_eq!(rig.state.focus, Focus::Commits);
 }
 
-/// In the agents view there is only one section, so `s` has nowhere to go.
+/// In the agents view there is only one section, so Tab and Shift+Tab have
+/// nowhere to go, and record nothing.
 #[test]
-fn s_does_nothing_in_the_agents_view() {
+fn tab_does_nothing_in_the_agents_view() {
     let mut rig = KeyRig::new(&[modified("a.rs")]);
-    rig.press(KeyCode::Tab);
     rig.press(KeyCode::Char('s'));
+    rig.state.usage.clear();
+    rig.press(KeyCode::Tab);
+    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
     assert_eq!(rig.state.focus, Focus::Agents);
+    assert_eq!(rig.state.browse_focus, Focus::Tree);
+    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
 }
 
 #[test]
-fn tab_clears_a_notice() {
+fn s_clears_a_notice() {
     let mut rig = KeyRig::new(&[modified("a.rs")]);
     rig.state.notice = Some(Notice::agent_list("db locked"));
-    rig.press(KeyCode::Tab);
+    rig.press(KeyCode::Char('s'));
     assert_eq!(rig.state.notice, None);
 }
 
 // The agents-section tests below set focus directly: they are about the
-// section, not about how Tab reaches it (SwitchAgentTreeView, above).
+// section, not about how `s` reaches it (SwitchAgentTreeView, above).
 
 #[test]
 fn with_the_agents_section_focused_j_and_k_move_its_cursor_not_the_trees() {
@@ -441,7 +448,7 @@ fn the_agents_view_fills_the_pane_with_agents_and_hides_the_tree() {
     state.adopt_agent_list(Ok(vec![agent(4941, false), agent(4942, true)]));
     state.focus = Focus::Agents;
     let out = render_pane_to_string(&mut state, &tree, 12);
-    assert!(out.contains("Agents (Tab: browse)"), "{out}");
+    assert!(out.contains("Agents (s: browse)"), "{out}");
     assert!(
         out.contains("task 4941") && out.contains("task 4942"),
         "{out}"
@@ -463,7 +470,7 @@ fn the_commits_border_names_the_keys_that_leave_it() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
     let mut state = browse_state();
     let out = render_pane_to_string(&mut state, &tree, 12);
-    assert!(out.contains("Commits (s, Tab: agents)"), "{out}");
+    assert!(out.contains("Commits (Tab, s: agents)"), "{out}");
 }
 
 // ---- PanesReadThroughTheBoard: the agents section's read (task #4982)

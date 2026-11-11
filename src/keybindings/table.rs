@@ -1297,7 +1297,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeTree,
-        &["Tab", "BackTab"],
+        &["s"],
         None,
         "toggle_focus",
         "Flip between browsing (file tree and Commits) and the Agents list; each section keeps its own cursor, so flipping back returns you where you were",
@@ -1305,7 +1305,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeTree,
-        &["s"],
+        &["Tab", "BackTab"],
         None,
         "switch_section",
         "Move the keys between the file tree and the Commits section",
@@ -1393,7 +1393,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeCommits,
-        &["Tab", "BackTab"],
+        &["s"],
         None,
         "toggle_focus",
         "Flip to the Agents list; flipping back returns to the section you left",
@@ -1401,7 +1401,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeCommits,
-        &["s"],
+        &["Tab", "BackTab"],
         None,
         "switch_section",
         "Move the keys between the file tree and the Commits section",
@@ -1457,7 +1457,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeAgents,
-        &["Tab", "BackTab"],
+        &["s"],
         None,
         "toggle_focus",
         "Flip back to browsing (file tree and Commits)",

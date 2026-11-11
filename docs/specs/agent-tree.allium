@@ -490,10 +490,10 @@ entity AgentTreePane {
     notice_source: NoticeSource when error_notice != null
 
     -- Which section the pane's keys act on. Starts on the agents view, because
-    -- who is working is the first thing the user wants to see. Tab and Shift+Tab flip between the browse
-    -- view and the agents view (SwitchAgentTreeView); `s` moves between the
-    -- tree and the commits section inside the browse view
-    -- (SwitchAgentTreeBrowseFocus).
+    -- who is working is the first thing the user wants to see. `s` flips
+    -- between the browse view and the agents view (SwitchAgentTreeView); Tab
+    -- and Shift+Tab move between the tree and the commits section inside the
+    -- browse view (SwitchAgentTreeBrowseFocus).
     -- Per-process view state like the cursor, and modelled here only because
     -- it decides which rule a Space or Enter reaches.
     focus: AgentTreeFocus
@@ -1057,7 +1057,7 @@ rule ShowAgentTreePane {
     -- The fresh renderer's first git query runs at once.
     ensures: pane.last_rendered_at = now - config.agent_tree_refresh_interval
     -- A fresh renderer starts on the agents view: who is working is the first
-    -- thing the user wants, and the changed files are one Tab away. Focus is
+    -- thing the user wants, and the changed files are one `s` away. Focus is
     -- view state and does not survive a hide.
     ensures: pane.focus = agents
     ensures: pane.browse_focus = tree
@@ -2503,10 +2503,9 @@ rule AgentTreeAgentListFailureKeepsLastList {
 }
 
 rule SwitchAgentTreeView {
-    -- Tab or Shift+Tab flips the pane between its two views: the browse view
-    -- (tree above, commits below) and the agents view (the agents section
-    -- alone). With two views there is no direction, so the two keys do the
-    -- same thing.
+    -- `s` flips the pane between its two views: the browse view (tree above,
+    -- commits below) and the agents view (the agents section alone). With two
+    -- views there is no direction, so one key does it from either side.
     when: SwitchAgentTreeView(user, pane)
 
     requires: pane.status = shown
@@ -2527,13 +2526,14 @@ rule SwitchAgentTreeView {
         --
         -- Flipping back returns to the section that had focus, with its
         -- cursor where it was. Each section keeps its cursor while hidden.
-        -- Tab works whether or not the agents list has rows: an empty list is
+        -- `s` works whether or not the agents list has rows: an empty list is
         -- a real place to be.
 }
 
 rule SwitchAgentTreeBrowseFocus {
-    -- `s` moves the keys between the tree and the commits section while the
-    -- browse view is showing.
+    -- Tab or Shift+Tab moves the keys between the tree and the commits
+    -- section while the browse view is showing. With two sections there is
+    -- no direction, so the two keys do the same thing.
     when: SwitchAgentTreeBrowseFocus(user, pane)
 
     requires: pane.status = shown
@@ -2545,10 +2545,13 @@ rule SwitchAgentTreeBrowseFocus {
     ensures: pane.browse_focus = next
 
     @guidance
-        -- `s` for "section". h/l and the arrows are the tree's own expand and
-        -- collapse keys, and Tab is the view flip, so a fresh unbound key
-        -- keeps all three meanings apart. In the agents view `s` does nothing:
-        -- there is only one section to be in.
+        -- Tab is the conventional key for moving between the panels of one
+        -- screen, and the tree and the commits section are two panels of the
+        -- browse view, read together (pick a commit, read its files). Leaving
+        -- for the agents list is a change of activity, so it gets its own key,
+        -- `s` (for "switch"). h/l and the arrows stay the tree's own expand
+        -- and collapse keys. In the agents view Tab and Shift+Tab do nothing:
+        -- there is only one section to be in, and `s` is the way back.
 }
 
 rule JumpToAgentWindow {
@@ -3004,15 +3007,15 @@ surface AgentTreeCompanionPane {
         -- There is no all-files key: one file is open at a time
         -- (OneOpenFileAtATime).
 
-        -- The commits and agents sections. Tab and Shift+Tab flip between the
-        -- browse view (tree and commits) and the agents view; `s` moves between
-        -- tree and commits. With the commits section focused, Space and Enter
+        -- The commits and agents sections. `s` flips between the browse view
+        -- (tree and commits) and the agents view; Tab and Shift+Tab move
+        -- between tree and commits. With the commits section focused, Space and Enter
         -- select the row under the cursor as the tree's source; with the
         -- agents section focused, they jump to an attached agent and resume
         -- a detached one. See AgentKeysFollowFocus for what every other key
         -- does there.
-        SwitchAgentTreeView(user, pane)                   -- Tab, Shift+Tab
-        SwitchAgentTreeBrowseFocus(user, pane)            -- s (browse view)
+        SwitchAgentTreeView(user, pane)                   -- s
+        SwitchAgentTreeBrowseFocus(user, pane)            -- Tab, Shift+Tab (browse view)
         OpenSelectedAgentTreeFileInEditor(user, pane, node) -- v (file, tree focus)
         SelectAgentTreeSource(user, pane, commit)         -- Space, Enter (commits focus)
         JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus, attached row)
@@ -3097,11 +3100,11 @@ surface AgentTreeCompanionPane {
     @guarantee TwoViewsShareThePane
         -- The pane shows ONE view at a time. The browse view stacks the tree
         -- above the commits section; the agents view gives the whole pane to
-        -- the agents section. Tab and Shift+Tab flip between them
-        -- (SwitchAgentTreeView). The titled top borders name the keys: the
-        -- commits border reads "Commits (s, Tab: agents)" — `s` reaches it
-        -- from the tree, Tab leaves the browse view — and the agents border
-        -- reads "Agents (Tab: browse)". The tree's border names its source
+        -- the agents section. `s` flips between them (SwitchAgentTreeView).
+        -- The titled top borders name the keys: the commits border reads
+        -- "Commits (Tab, s: agents)" — Tab reaches it from the tree, `s`
+        -- leaves the browse view — and the agents border reads
+        -- "Agents (s: browse)". The tree's border names its source
         -- only (TreeTitleNamesItsSource).
         --
         -- In the browse view the commits section is as tall as its rows — the
@@ -3113,7 +3116,7 @@ surface AgentTreeCompanionPane {
         --
         -- In the agents view the section fills the pane and scrolls to keep its
         -- cursor in view. With no agents listed it still shows its border and
-        -- one empty row, so Tab always has somewhere visible to go.
+        -- one empty row, so `s` always has somewhere visible to go.
         --
         -- The focused section's border is drawn in the focus colour and the
         -- other browse section's in the ordinary border colour. A notice
@@ -3179,7 +3182,7 @@ surface AgentTreeCompanionPane {
         --
         -- The cursor highlight is drawn only in the focused section. The
         -- unfocused section keeps its cursor position without showing it, so
-        -- Tab back returns the user to where they were.
+        -- switching back returns the user to where they were.
 
     @guarantee AgentListGroupsByEpic
         -- The agents section reads like a flattened board column
@@ -3262,7 +3265,7 @@ surface AgentTreeCompanionPane {
         -- the renderer from any section — they act on the pane as a whole,
         -- not on a cursor.
         --
-        -- Every key the pane handles, Tab included, still clears a notice
+        -- Every key the pane handles, `s` and Tab included, still clears a notice
         -- (ClearAgentTreeErrorNotice).
 
     @guarantee CompanionPaneKeysAreTableRows
@@ -3270,7 +3273,8 @@ surface AgentTreeCompanionPane {
         -- (keybindings.allium), in three namespaces: agent_tree.tree while the
         -- tree has focus, agent_tree.commits while the commits section does,
         -- and agent_tree.agents while the agents section does. The pane-wide
-        -- keys (q, Ctrl-C, Tab, Shift+Tab) are rows of all three, and no key in the
+        -- keys (q, Ctrl-C, `s`) are rows of all three, Tab and Shift+Tab are rows
+        -- of agent_tree.tree and agent_tree.commits only, and no key in the
         -- commits namespace means anything new: Space/Enter is select_source
         -- there as it is jump_to_agent in the agents namespace, so focus, not
         -- a new key, decides the meaning. A press is

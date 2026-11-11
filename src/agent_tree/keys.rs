@@ -173,7 +173,7 @@ fn run_tree_action(
     let result = match action {
         "exit_pane" => KeyAction::Exit,
         "toggle_focus" => {
-            // SwitchAgentTreeView: two views, so Tab and Shift+Tab are one flip.
+            // SwitchAgentTreeView: `s` flips between the two views.
             if state.focus == Focus::Agents {
                 state.focus = state.browse_focus;
             } else {
@@ -182,8 +182,8 @@ fn run_tree_action(
             }
             KeyAction::Continue
         }
-        // SwitchAgentTreeBrowseFocus: tree <-> commits. Nothing to switch to in
-        // the agents view, so no usage is recorded there.
+        // SwitchAgentTreeBrowseFocus: Tab and Shift+Tab, tree <-> commits. The
+        // agents namespace has no row for them; the guard is belt and braces.
         "switch_section" => {
             state.focus = match state.focus {
                 Focus::Tree => Focus::Commits,
