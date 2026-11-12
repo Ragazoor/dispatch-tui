@@ -646,6 +646,18 @@ impl ReducerCaller for RecordingCaller {
         }])
     }
 
+    async fn check_deletable(
+        &self,
+        _task_ids: Vec<TaskId>,
+        _epic_ids: Vec<crate::models::EpicId>,
+    ) -> anyhow::Result<bindings::DeleteCheck> {
+        self.record(Sent::Workspace("check_deletable"))?;
+        Ok(bindings::DeleteCheck {
+            blockers: vec![],
+            refusal: None,
+        })
+    }
+
     async fn subagent_start(
         &self,
         task_id: TaskId,

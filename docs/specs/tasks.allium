@@ -1697,8 +1697,10 @@ rule DeleteTask {
         -- subscription view (DeleteKeyRouting on the Board surface), so the
         -- gesture responds at once and says why. That view can be stale: a
         -- task reopened on one board can still read as done on another. So
-        -- before ANY side effect, the delete flow re-reads the task's TRUE
-        -- status from the store and proceeds only if it is done; a failed
+        -- before ANY side effect, the delete flow reads the task's TRUE
+        -- status from the store itself (the check_deletable procedure, not
+        -- the board's replica) and proceeds only if it is done; a store that
+        -- cannot be asked refuses the delete; a failed
         -- pre-check refuses the delete (DeleteTaskRefused) and touches
         -- NOTHING: no teardown, no row removal, no retirement. Because the
         -- board dropped the card optimistically, a refusal also refreshes the
@@ -1774,8 +1776,9 @@ rule BatchDelete {
     -- epic goes through DeleteEpic, whose teardown is not gated either.
     -- subtree_depth(e) is epics.allium DeleteEpic's black box: an epic
     -- subtree nested deeper than the recursive delete reaches is refused,
-    -- by the batch_delete reducer only (the pre-check does not measure it).
-    -- The reducer also refuses an epic whose subtree holds an epic the caller
+    -- by the batch_delete reducer and by the pre-check (the store's
+    -- check_deletable), before any teardown.
+    -- Both also refuse an epic whose subtree holds an epic the caller
     -- cannot see (workspaces.allium: UnseenIsAsMissing's named exception).
     let all_pass =
         tasks.all(t => t.status = done)

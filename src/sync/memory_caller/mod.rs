@@ -739,6 +739,24 @@ impl ReducerCaller for MemoryReducerCaller {
         Ok(self.apply_own_usage_summary(category, actor, since, limit))
     }
 
+    async fn check_deletable(
+        &self,
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
+    ) -> Result<bindings::DeleteCheck> {
+        let fault = {
+            let mut faults = self.faults.lock().unwrap_or_else(|e| e.into_inner());
+            faults
+                .iter()
+                .position(|(r, _)| *r == "check_deletable")
+                .map(|i| faults.remove(i).1)
+        };
+        if fault.is_some() {
+            anyhow::bail!("injected transport failure: check_deletable was never sent");
+        }
+        Ok(self.apply_check_deletable(task_ids, epic_ids))
+    }
+
     async fn subagent_start(
         &self,
         task_id: TaskId,

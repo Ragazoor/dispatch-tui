@@ -679,6 +679,26 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             same_task(lone_task.0);
         }
 
+        // -- check_deletable: the delete pre-check reads the store ---------------
+        // The same answer from the real module and the double, for a plain
+        // task that is not done, a deep subtree (refused for its depth), and
+        // an id the store does not hold (nothing to protect).
+        for (tasks, epics) in [
+            (vec![lone_task], vec![]),
+            (vec![], vec![EpicId(deep_root)]),
+            (vec![TaskId(987_654)], vec![EpicId(987_654)]),
+        ] {
+            let real_check = real
+                .check_deletable(tasks.clone(), epics.clone())
+                .await
+                .unwrap();
+            let mem_check = mem.check_deletable(tasks, epics).await.unwrap();
+            assert_eq!(real_check, mem_check);
+        }
+        let blocked = real.check_deletable(vec![lone_task], vec![]).await.unwrap();
+        assert_eq!(blocked.blockers.len(), 1, "{blocked:?}");
+        assert_eq!(blocked.blockers[0].status, "review");
+
         // -- UniqueFeedRolePerParent / UniqueRepoGroupPerParent -----------------
         let role_epic = |feed_role: &str| bindings::Epic {
             parent_epic_id: deep_root,

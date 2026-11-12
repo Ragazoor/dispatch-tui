@@ -725,3 +725,67 @@ fn usage_is_summarised_for_whoever_recorded_it() {
     let one = UsageFilter { limit: 1, ..filter };
     assert_eq!(usage_summary_for(&store, "ann", &one).len(), 1);
 }
+
+fn status_task(id: i64, epic_id: i64, status: &str) -> Task {
+    Task {
+        status: status.to_string(),
+        ..task(id, epic_id, "ann", "")
+    }
+}
+
+#[test]
+fn delete_check_names_the_lowest_undone_task_in_a_subtree() {
+    let mut store = tree();
+    store.tasks = vec![
+        status_task(30, 5, "running"),
+        status_task(20, 2, "done"),
+        status_task(25, 2, "review"),
+    ];
+    let check = delete_check_for(&store, false, "bob", &[], &[1]);
+    assert_eq!(check.refusal, None);
+    assert_eq!(
+        check
+            .blockers
+            .iter()
+            .map(|b| (b.epic_id, b.task_id, b.status.as_str()))
+            .collect::<Vec<_>>(),
+        [(1, 25, "review")]
+    );
+}
+
+#[test]
+fn delete_check_passes_done_missing_and_unseen_rows() {
+    let mut store = tree();
+    store.tasks = vec![
+        status_task(10, 2, "done"),
+        // Epic 3 is private to bob: ann sees neither it nor its task.
+        status_task(11, 3, "running"),
+    ];
+    assert_eq!(
+        delete_check_for(&store, false, "ann", &[10, 11, 999], &[999]),
+        DeleteCheck::default()
+    );
+}
+
+#[test]
+fn delete_check_for_a_plain_task_reports_it_when_not_done() {
+    let mut store = tree();
+    store.tasks = vec![status_task(10, 2, "backlog")];
+    let check = delete_check_for(&store, false, "ann", &[10], &[]);
+    assert_eq!(check.blockers.len(), 1);
+    assert_eq!(
+        (check.blockers[0].epic_id, check.blockers[0].task_id),
+        (0, 10)
+    );
+}
+
+#[test]
+fn delete_check_refuses_a_subtree_holding_an_epic_the_caller_cannot_see() {
+    let store = tree();
+    // Epic 2's subtree holds epic 3, private to bob.
+    let check = delete_check_for(&store, false, "ann", &[], &[2]);
+    assert!(check.refusal.is_some());
+    assert!(delete_check_for(&store, false, "bob", &[], &[2])
+        .refusal
+        .is_none());
+}

@@ -22,12 +22,12 @@ use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     add_member as _, adopt_repo_path as _, apply_learning_verdicts as _,
     archive_stale_learnings as _, batch_delete as _, batch_patch_sub_status as _,
-    claim_dispatch_request as _, claim_feed_request as _, claim_poll_owner as _,
-    claim_session_request as _, claim_super_admin as _, clear_setting as _, close_task as _,
-    create_epic as _, create_learning as _, create_task as _, create_task_signalled as _,
-    create_work_package as _, create_work_package_with_links as _, create_workspace as _,
-    delete_epic as _, delete_learning as _, delete_repo_path as _, delete_task as _,
-    delete_work_package as _, delete_workspace as _, ensure_managed_epics as _,
+    check_deletable as _, claim_dispatch_request as _, claim_feed_request as _,
+    claim_poll_owner as _, claim_session_request as _, claim_super_admin as _, clear_setting as _,
+    close_task as _, create_epic as _, create_learning as _, create_task as _,
+    create_task_signalled as _, create_work_package as _, create_work_package_with_links as _,
+    create_workspace as _, delete_epic as _, delete_learning as _, delete_repo_path as _,
+    delete_task as _, delete_work_package as _, delete_workspace as _, ensure_managed_epics as _,
     expire_background_wait as _, fail_interrupted_dispatch_requests as _,
     fail_interrupted_session_requests as _, flatten_epic as _, grant_super_admin as _,
     ingest_feed as _, link_work_package_item as _, mark_pr_learnings_gate_shown as _,
@@ -711,6 +711,26 @@ impl ReducerCaller for SdkReducerCaller {
         })
         .await?;
         answer.map_err(|why| anyhow!("the shared store could not answer the usage query: {why}"))
+    }
+
+    async fn check_deletable(
+        &self,
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
+    ) -> anyhow::Result<bindings::DeleteCheck> {
+        let connection = self.connection()?;
+        let task_ids: Vec<i64> = task_ids.into_iter().map(|id| id.0).collect();
+        let epic_ids: Vec<i64> = epic_ids.into_iter().map(|id| id.0).collect();
+        let answer = awaiting_answer("the delete check", move |tx| {
+            connection
+                .procedures
+                .check_deletable_then(task_ids, epic_ids, move |_, result| {
+                    fire(tx, result);
+                });
+            Ok(())
+        })
+        .await?;
+        answer.map_err(|why| anyhow!("the shared store could not answer the delete check: {why}"))
     }
 
     // -- Agent session state (Phase 6b) --------------------------------------

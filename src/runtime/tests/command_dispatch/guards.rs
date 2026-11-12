@@ -220,3 +220,165 @@ async fn batch_deleting_with_one_item_not_done_in_the_store_changes_nothing() {
     assert!(h.rt.database.get_task(done.id).await.is_some());
     assert!(h.rt.database.get_task(live.id).await.is_some());
 }
+
+// -----------------------------------------------------------------------
+// The pre-check reads the store, not the board's subscription replica
+// -----------------------------------------------------------------------
+//
+// `tasks.allium: DeleteTask` ("ENFORCED THREE TIMES"): a task reopened on
+// another board still reads as done here until the row reaches this board.
+// Every case below plants that disagreement: the board's own rows say `done`,
+// the store's say not.
+
+/// A harness whose board copy lags the store.
+async fn lagging_harness(script: Vec<anyhow::Result<std::process::Output>>) -> Harness {
+    let db = Store::open_with_lagging_board().unwrap();
+    harness_over(Arc::new(db), MockProcessRunner::new(script)).await
+}
+
+fn guarded_cleanup(id: models::TaskId, guard: crate::tui::commands::DeleteGuard) -> Command {
+    Command::Task(TaskCommand::Cleanup {
+        id,
+        repo_path: "/repo".into(),
+        worktree: Some(format!("/repo/.worktrees/{}-lagging", id.0)),
+        tmux_window: None,
+        follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+        await_teardown: false,
+        guard: Some(guard),
+    })
+}
+
+#[tokio::test]
+async fn a_guarded_cleanup_runs_no_teardown_when_the_store_says_not_done_but_the_board_says_done() {
+    let mut h = lagging_harness(vec![]).await;
+    let id = h.db.seed_lagging_task(None, "done", "running").await;
+
+    h.dispatch(guarded_cleanup(
+        id,
+        crate::tui::commands::DeleteGuard::Task(id),
+    ))
+    .await;
+
+    let msg = h.next_msg().await;
+    assert!(refused(&msg), "got: {msg:?}");
+    assert!(
+        h.mock.recorded_calls().is_empty(),
+        "no git or tmux command may run: {:?}",
+        h.mock.recorded_calls()
+    );
+}
+
+#[tokio::test]
+async fn a_guarded_epic_cleanup_runs_no_teardown_when_the_store_holds_a_live_subtree_task() {
+    let mut h = lagging_harness(vec![]).await;
+    let epic = h.db.seed_lagging_epic().await;
+    let id = h.db.seed_lagging_task(Some(epic), "done", "running").await;
+
+    h.dispatch(guarded_cleanup(
+        id,
+        crate::tui::commands::DeleteGuard::Epic(epic),
+    ))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.mock.recorded_calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_batch_guard_runs_no_teardown_when_the_store_says_one_item_is_not_done() {
+    let mut h = lagging_harness(vec![]).await;
+    let done = h.db.seed_lagging_task(None, "done", "done").await;
+    let live = h.db.seed_lagging_task(None, "done", "review").await;
+
+    h.dispatch(guarded_cleanup(
+        done,
+        crate::tui::commands::DeleteGuard::Batch {
+            task_ids: vec![done, live],
+            epic_ids: vec![],
+        },
+    ))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.mock.recorded_calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_guarded_cleanup_still_tears_down_when_the_store_says_done_but_the_board_says_not() {
+    // The board lags the other way: the task was finished elsewhere. The TRUE
+    // status governs, so the delete goes ahead.
+    let mut h = lagging_harness(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]).await;
+    let id = h.db.seed_lagging_task(None, "running", "done").await;
+
+    h.dispatch(guarded_cleanup(
+        id,
+        crate::tui::commands::DeleteGuard::Task(id),
+    ))
+    .await;
+
+    let msg = h.next_msg().await;
+    assert!(
+        matches!(
+            msg,
+            Message::Task(crate::tui::messages::TaskMessage::CleanupSucceeded { .. })
+        ),
+        "got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_task_the_store_says_is_not_done_changes_nothing() {
+    let mut h = lagging_harness(vec![]).await;
+    let id = h.db.seed_lagging_task(None, "done", "backlog").await;
+
+    h.dispatch(Command::Task(TaskCommand::Delete(id))).await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.mock.recorded_calls().is_empty());
+}
+
+#[tokio::test]
+async fn batch_deleting_with_an_item_the_store_says_is_not_done_changes_nothing() {
+    let mut h = lagging_harness(vec![]).await;
+    let id = h.db.seed_lagging_task(None, "done", "running").await;
+
+    h.dispatch(Command::Task(TaskCommand::BatchDelete {
+        task_ids: vec![id],
+        epic_ids: vec![],
+    }))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+}
+
+#[tokio::test]
+async fn deleting_an_epic_the_store_says_holds_a_live_task_changes_nothing() {
+    let mut h = lagging_harness(vec![]).await;
+    let epic = h.db.seed_lagging_epic().await;
+    h.db.seed_lagging_task(Some(epic), "done", "running").await;
+
+    h.dispatch(Command::Epic(crate::tui::commands::EpicCommand::Delete(
+        epic,
+    )))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+}
+
+#[tokio::test]
+async fn a_guarded_cleanup_runs_no_teardown_when_the_store_cannot_be_asked() {
+    // Only a real answer from the store may let a delete through: an outage
+    // is a refusal, never a pass.
+    let mut h = lagging_harness(vec![]).await;
+    let id = h.db.seed_lagging_task(None, "done", "done").await;
+    h.db.fail_next_delete_check();
+
+    h.dispatch(guarded_cleanup(
+        id,
+        crate::tui::commands::DeleteGuard::Task(id),
+    ))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.mock.recorded_calls().is_empty());
+}

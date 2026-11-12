@@ -366,6 +366,19 @@ pub trait ReducerCaller: Send + Sync {
         limit: i64,
     ) -> Result<Vec<bindings::UsageSummaryRow>>;
 
+    /// The delete pre-check's read of the store's TRUE rows
+    /// (`check_deletable`): which of these deletes the reducers would refuse.
+    ///
+    /// A read, not a reducer, and deliberately not answered from the board's
+    /// own rows: those are a subscription replica, and a task reopened on
+    /// another board may not have reached them yet. An `Err` means the store
+    /// could not be asked; the caller must treat that as a refusal.
+    async fn check_deletable(
+        &self,
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
+    ) -> Result<bindings::DeleteCheck>;
+
     // Agent session state (Phase 6b). Every one of these acts on a row whose
     // id the caller already has, so what needs reading back is a FACT off
     // that row rather than an id to match by content — but unlike the three

@@ -43,7 +43,7 @@
 set -euo pipefail
 
 ALLOW=${SINGLE_WRITE_ALLOW:-scripts/single-write-service.allow}
-READS=" admin_snapshot dispatch_request session_request clone "
+READS=" admin_snapshot check_deletable dispatch_request session_request clone "
 
 hits=$(
     find src/service -name '*.rs' -type f 2>/dev/null | sort | while IFS= read -r f; do

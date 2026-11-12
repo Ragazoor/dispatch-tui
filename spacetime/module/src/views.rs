@@ -728,6 +728,106 @@ pub fn usage_summary_for(
     out
 }
 
+/// One task that stops a delete: what `check_deletable` returns per blocker.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug, PartialEq)]
+pub struct DeleteBlocker {
+    /// The epic whose delete this task blocks, or 0 when the task itself was
+    /// asked to be deleted.
+    pub epic_id: i64,
+    pub task_id: i64,
+    pub title: String,
+    pub status: String,
+}
+
+/// The answer of `check_deletable`: why a delete would be refused, read from
+/// the store's true rows. Empty means the reducers would not refuse it.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug, PartialEq, Default)]
+pub struct DeleteCheck {
+    /// For each requested epic, the lowest-id task in its subtree that is not
+    /// done; for each requested task, the task itself when it is not done.
+    pub blockers: Vec<DeleteBlocker>,
+    /// A refusal that names no task: a subtree this caller cannot fully see,
+    /// or one nested too deep to delete.
+    pub refusal: Option<String>,
+}
+
+/// `delete_task`, `delete_epic` and `batch_delete`'s validation pass, read-only
+/// and over one snapshot: the rules those reducers apply before they delete
+/// anything. A row the caller cannot see, or that is gone, is skipped, as in
+/// the reducers (the delete is then a no-op). Mirrored by
+/// `MemoryReducerCaller::apply_check_deletable`.
+pub fn delete_check_for(
+    r: &impl StoreReads,
+    operator: bool,
+    who: &str,
+    task_ids: &[i64],
+    epic_ids: &[i64],
+) -> DeleteCheck {
+    let mut check = DeleteCheck::default();
+    for &id in epic_ids {
+        let Some(epic) = r.epic(id) else { continue };
+        if !operator && !epic_visible_to(r, &epic, who) {
+            continue;
+        }
+        let mut doomed = std::collections::HashSet::new();
+        let mut stack = vec![id];
+        while let Some(next) = stack.pop() {
+            if doomed.insert(next) {
+                stack.extend(r.epics_under(next).into_iter().map(|e| e.id));
+            }
+        }
+        if !operator
+            && !doomed
+                .iter()
+                .all(|e| r.epic(*e).is_none_or(|e| epic_visible_to(r, &e, who)))
+        {
+            // The reducer's own wording: it must not reveal that an epic the
+            // caller cannot see exists (`workspaces.allium: UnseenIsAsMissing`).
+            check.refusal = Some(format!("epic {id}: cannot delete right now"));
+            return check;
+        }
+        if crate::rules::subtree_exceeds_depth(
+            id,
+            |epic| r.epics_under(epic).into_iter().map(|e| e.id).collect(),
+            crate::tasks_epics::MAX_EPIC_DEPTH,
+        ) {
+            check.refusal = Some(format!(
+                "epic {id}: cannot delete a subtree nested more than {} levels deep",
+                crate::tasks_epics::MAX_EPIC_DEPTH
+            ));
+            return check;
+        }
+        let first_undone = doomed
+            .iter()
+            .flat_map(|e| r.tasks_in_epic(*e))
+            .filter(|t| t.status != DONE)
+            .min_by_key(|t| t.id);
+        if let Some(t) = first_undone {
+            check.blockers.push(DeleteBlocker {
+                epic_id: id,
+                task_id: t.id,
+                title: t.title,
+                status: t.status,
+            });
+        }
+    }
+    for &id in task_ids {
+        let Some(task) = r.task(id) else { continue };
+        if !operator && !task_visible_to(r, &task, who) {
+            continue;
+        }
+        if task.status != DONE {
+            check.blockers.push(DeleteBlocker {
+                epic_id: 0,
+                task_id: task.id,
+                title: task.title,
+                status: task.status,
+            });
+        }
+    }
+    check
+}
+
 /// `visible_workspaces`: the workspaces the caller belongs to, or every one
 /// for a super-admin (read through the always-true `listed` index).
 pub fn workspaces_visible_to(r: &impl StoreReads, who: &str) -> Vec<Workspace> {

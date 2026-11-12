@@ -896,6 +896,35 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
+    /// Mirrors the module's `check_deletable` procedure: the delete rules over
+    /// this store's rows, changing nothing. With the workspace rules off
+    /// nobody is refused sight, as everywhere in this double.
+    pub(super) fn apply_check_deletable(
+        &self,
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
+    ) -> bindings::DeleteCheck {
+        let task_ids: Vec<i64> = task_ids.into_iter().map(|id| id.0).collect();
+        let epic_ids: Vec<i64> = epic_ids.into_iter().map(|id| id.0).collect();
+        let operator = !self.scope().on();
+        let tables = self.lock();
+        let check =
+            module::delete_check_for(&*tables, operator, &self.sender, &task_ids, &epic_ids);
+        bindings::DeleteCheck {
+            blockers: check
+                .blockers
+                .into_iter()
+                .map(|b| bindings::DeleteBlocker {
+                    epic_id: b.epic_id,
+                    task_id: b.task_id,
+                    title: b.title,
+                    status: b.status,
+                })
+                .collect(),
+            refusal: check.refusal,
+        }
+    }
+
     /// Mirrors the module's `batch_delete` (task #4971): validate every
     /// selected epic's whole subtree and every selected plain task FIRST,
     /// mutating nothing until all of them pass, then perform every delete

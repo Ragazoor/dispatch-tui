@@ -73,6 +73,28 @@ pub struct FeedIngestOutcome {
 // Sub-traits — focused slices of the database API
 // ---------------------------------------------------------------------------
 
+/// One task the store's own rows say stops a delete (`check_deletable`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeleteBlocker {
+    /// The epic whose delete the task blocks; `None` when the task itself was
+    /// asked to be deleted.
+    pub epic: Option<EpicId>,
+    pub task_id: TaskId,
+    pub title: String,
+    pub status: String,
+}
+
+/// What the store would refuse of a delete, read from its true rows rather
+/// than the board's subscription replica. Empty means the reducers would not
+/// refuse it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DeleteCheck {
+    pub blockers: Vec<DeleteBlocker>,
+    /// A refusal naming no task: an epic subtree this caller cannot fully see,
+    /// or one nested too deep to delete.
+    pub refusal: Option<String>,
+}
+
 /// Read-only task queries. Infallible by signature: the read traits answer
 /// from the subscription's in-memory rows, so there is no read error to handle
 /// or inject. Held (via [`TaskReadStore`]) by non-service consumers so
@@ -120,6 +142,15 @@ pub trait AgentRead: Send + Sync {
 /// the sanctioned feed subsystem — non-service consumers hold [`TaskReadStore`].
 #[async_trait::async_trait]
 pub trait TaskCrud: TaskRead {
+    /// The delete pre-check (`DeleteTask`, `DeleteEpic`, `BatchDelete`): ask
+    /// the STORE, not this board's replica, which of these deletes it would
+    /// refuse. An `Err` means the store could not be asked, and the caller
+    /// must refuse the delete: only a real answer may let it through.
+    async fn check_deletable(
+        &self,
+        task_ids: &[TaskId],
+        epic_ids: &[EpicId],
+    ) -> Result<DeleteCheck>;
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
     /// [`Self::create_task`], marking the task unseen for everyone who can see
     /// its epic in the same transaction
@@ -1419,6 +1450,95 @@ impl Store {
         );
         db.memory_caller = Some(memory);
         db
+    }
+
+    /// A handle whose board copy lags its store: the store is one private
+    /// in-process store, the handle's own rows (what the subscription would
+    /// have delivered) are another, empty one. For a test about the delete
+    /// pre-check, which must read the store (`tasks.allium: DeleteTask`,
+    /// "ENFORCED THREE TIMES"). Seed it with [`Self::seed_lagging_epic`] and
+    /// [`Self::seed_lagging_task`].
+    #[cfg(test)]
+    pub(crate) fn open_with_lagging_board() -> Result<Self> {
+        let mut lagging = Self::open_in_memory()?;
+        let store_rows = Arc::new(crate::sync::SharedRows::new());
+        let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
+        let memory = Arc::new(
+            crate::sync::memory_caller::MemoryReducerCaller::new(store_rows, clock)
+                .with_sender(MEMORY_USER_ID)
+                .with_registered_host(MEMORY_HOST_ID, MEMORY_USER_ID),
+        );
+        memory.register_user_profile();
+        memory.migrate_store_to_workspaces();
+        let caller: Arc<dyn crate::sync::ReducerCaller> = memory.clone();
+        lagging.caller = caller;
+        lagging.memory_caller = Some(memory);
+        Ok(lagging)
+    }
+
+    /// Make the next delete pre-check fail as a lost connection would.
+    #[cfg(test)]
+    #[allow(clippy::expect_used)]
+    pub(crate) fn fail_next_delete_check(&self) {
+        self.memory_caller
+            .as_ref()
+            .expect("an in-memory handle")
+            .fail_next(
+                "check_deletable",
+                crate::sync::memory_caller::InjectedFault::Unsent,
+            );
+    }
+
+    /// Create an epic in the store, and plant the same row in this handle's
+    /// own rows. For [`Self::open_with_lagging_board`].
+    #[cfg(test)]
+    #[allow(clippy::expect_used)]
+    pub(crate) async fn seed_lagging_epic(&self) -> EpicId {
+        let mut row = crate::sync::encode::create_epic_row(
+            "Lagging",
+            "",
+            None,
+            MEMORY_USER_ID,
+            "2026-10-11 12:00:00.000",
+        );
+        let id = self
+            .caller
+            .create_epic(row.clone())
+            .await
+            .expect("creating the epic in the store");
+        row.id = id.0;
+        self.rows.upsert_epic(&row);
+        id
+    }
+
+    /// Create a task in the store with `store_status`, and plant it in this
+    /// handle's own rows with `board_status`, as a board that has not yet
+    /// heard of the change would hold it. For [`Self::open_with_lagging_board`].
+    #[cfg(test)]
+    #[allow(clippy::expect_used)]
+    pub(crate) async fn seed_lagging_task(
+        &self,
+        epic: Option<EpicId>,
+        board_status: &str,
+        store_status: &str,
+    ) -> TaskId {
+        let mut row = crate::sync::encode::create_task_row(
+            &CreateTaskRequest::fixture("Reopened elsewhere", "/repo"),
+            if epic.is_some() { "" } else { MEMORY_USER_ID },
+            MEMORY_USER_ID,
+            "2026-10-11 12:00:00.000",
+        );
+        row.epic_id = epic.map(|e| e.0).unwrap_or(0);
+        row.status = store_status.into();
+        let id = self
+            .caller
+            .create_task(row.clone())
+            .await
+            .expect("creating the task in the store");
+        row.id = id.0;
+        row.status = board_status.into();
+        self.rows.upsert_task(&row);
+        id
     }
 
     /// Let [`Self::give_agent`] reach `caller`: for a test that builds its own

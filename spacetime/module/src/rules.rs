@@ -57,6 +57,10 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 50: `check_deletable` — a read-only procedure answering the delete
+///    pre-check over the store's true rows (`tasks.allium: DeleteTask`,
+///    `epics.allium: DeleteEpic`, `BatchDelete`), so a stale board view cannot
+///    pass it. A procedure the board now calls; an old module lacks it.
 /// 49: a Stop whose payload lists background work (shells, workflows,
 ///    monitors, MCP tasks) defers like one with live subagents; the subagent
 ///    drain leaves it deferred; idle_prompt is ignored during the wait; and
@@ -259,7 +263,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 49;
+pub const RULES_VERSION: i64 = 50;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

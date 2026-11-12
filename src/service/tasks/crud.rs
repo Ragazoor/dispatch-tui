@@ -448,16 +448,24 @@ impl TaskService {
 
     /// The delete pre-check (`DeleteTask`, tasks.allium): the store's TRUE row
     /// must be done. Run before any teardown.
+    ///
+    /// Asks the store itself (`TaskCrud::check_deletable`), not this board's
+    /// subscription replica, which can still read a reopened task as done. A
+    /// task the store no longer holds passes: there is nothing left to
+    /// protect. A store that cannot be asked is an error, so the delete is
+    /// refused rather than let through.
     pub async fn ensure_deletable(&self, task_id: TaskId) -> Result<(), ServiceError> {
-        let task = self.get_task(task_id).await?;
-        if task.status != TaskStatus::Done {
-            return Err(ServiceError::Validation(format!(
-                "cannot delete task {}: it is {}, not done",
-                task_id.0,
-                task.status.as_str()
-            )));
+        let check = self.db.check_deletable(&[task_id], &[]).await?;
+        if let Some(why) = check.refusal {
+            return Err(ServiceError::Validation(why));
         }
-        Ok(())
+        match check.blockers.first() {
+            Some(blocker) => Err(ServiceError::Validation(format!(
+                "cannot delete task {}: it is {}, not done",
+                task_id.0, blocker.status
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// `tasks.allium: SeeTaskByLandingOnIt`. No existence pre-check: a mark on

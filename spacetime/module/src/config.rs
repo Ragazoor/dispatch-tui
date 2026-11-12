@@ -896,3 +896,23 @@ pub fn own_usage_summary(
     };
     ctx.with_tx(|tx| usage_summary_for(tx, &who, &filter))
 }
+
+/// The delete pre-check's read of the store's TRUE rows
+/// (`tasks.allium: DeleteTask`, `epics.allium: DeleteEpic`, `BatchDelete`).
+///
+/// A read, not a write: the board's own rows are a subscription replica and a
+/// task reopened on another board may not have reached it yet, so the board
+/// asks the store before it tears anything down. Body is `delete_check_for`,
+/// which the module's native tests cover. A procedure for the same reason as
+/// `own_usage_summary`: wasm-only.
+#[cfg(target_arch = "wasm32")]
+#[spacetimedb::procedure]
+pub fn check_deletable(
+    ctx: &mut spacetimedb::ProcedureContext,
+    task_ids: Vec<i64>,
+    epic_ids: Vec<i64>,
+) -> DeleteCheck {
+    let who = ctx.sender().to_hex().to_string();
+    let operator = ctx.sender() == ctx.database_identity();
+    ctx.with_tx(|tx| delete_check_for(tx, operator, &who, &task_ids, &epic_ids))
+}

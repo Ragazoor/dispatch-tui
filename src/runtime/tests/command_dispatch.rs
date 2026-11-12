@@ -107,7 +107,10 @@ struct Harness {
 }
 
 async fn harness(mock: MockProcessRunner) -> Harness {
-    let db = test_db().await;
+    harness_over(test_db().await, mock).await
+}
+
+async fn harness_over(db: Arc<Store>, mock: MockProcessRunner) -> Harness {
     let (tx, msgs) = mpsc::unbounded_channel();
     let (call_tx, calls) = mpsc::unbounded_channel();
     let mock = Arc::new(mock);

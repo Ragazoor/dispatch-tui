@@ -6,7 +6,9 @@ use crate::models::{
 };
 use crate::sync::{encode, ReducerOutcome};
 
-use super::super::{CreateTaskRequest, FeedIngestOutcome, Store, TaskCrud, TaskPatch};
+use super::super::{
+    CreateTaskRequest, DeleteBlocker, DeleteCheck, FeedIngestOutcome, Store, TaskCrud, TaskPatch,
+};
 
 #[async_trait::async_trait]
 impl super::super::TaskRead for Store {
@@ -52,6 +54,30 @@ impl super::super::AgentRead for Store {
 
 #[async_trait::async_trait]
 impl TaskCrud for Store {
+    async fn check_deletable(
+        &self,
+        task_ids: &[TaskId],
+        epic_ids: &[EpicId],
+    ) -> Result<DeleteCheck> {
+        let answer = self
+            .caller
+            .check_deletable(task_ids.to_vec(), epic_ids.to_vec())
+            .await?;
+        Ok(DeleteCheck {
+            blockers: answer
+                .blockers
+                .into_iter()
+                .map(|b| DeleteBlocker {
+                    epic: (b.epic_id != 0).then_some(EpicId(b.epic_id)),
+                    task_id: TaskId(b.task_id),
+                    title: b.title,
+                    status: b.status,
+                })
+                .collect(),
+            refusal: answer.refusal,
+        })
+    }
+
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId> {
         // EVERY CREATE NEEDS A SETTLED IDENTITY NOW, not only an epic-less
         // one — `sync.allium: CreatesRequireASettledIdentity`. An epic-less

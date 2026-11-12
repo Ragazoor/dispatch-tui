@@ -323,11 +323,10 @@ async fn ensure_deletable_refuses_a_task_that_is_not_done_in_the_store() {
 }
 
 #[tokio::test]
-async fn ensure_deletable_reports_a_missing_task() {
+async fn ensure_deletable_passes_a_task_the_store_no_longer_holds() {
     let db = test_db().await;
     let svc = task_svc(&db);
-    let err = svc.ensure_deletable(TaskId(999)).await.unwrap_err();
-    assert!(matches!(err, ServiceError::NotFound(_)), "got {err:?}");
+    svc.ensure_deletable(TaskId(999)).await.unwrap();
 }
 
 #[tokio::test]
