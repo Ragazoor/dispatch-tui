@@ -15,6 +15,7 @@ use crate::tui::{App, ColumnItem, ColumnLayout, EpicPlacementMap, EpicStatsMap, 
 
 use super::super::shared::{
     render_folded_section_header, render_substatus_header, rounded_block, truncate,
+    BREADCRUMB_SEGMENT_MAX_CHARS, BREADCRUMB_SEPARATOR,
 };
 use super::cards::{
     build_task_list_item, render_epic_header_item, render_epic_item, render_folded_epic_header,
@@ -302,12 +303,7 @@ fn view_border_title(app: &App) -> Option<String> {
     let package_title = |id: crate::models::WorkPackageId| {
         app.board
             .find_work_package(id)
-            .map(|p| {
-                truncate(
-                    &p.title,
-                    crate::tui::ui::shared::BREADCRUMB_SEGMENT_MAX_CHARS,
-                )
-            })
+            .map(|p| truncate(&p.title, BREADCRUMB_SEGMENT_MAX_CHARS))
             .unwrap_or_default()
     };
     match app.view_mode() {
@@ -337,22 +333,14 @@ fn view_border_title(app: &App) -> Option<String> {
                     app.epics()
                         .iter()
                         .find(|e| e.id == *id)
-                        .map(|e| {
-                            truncate(
-                                &e.title,
-                                crate::tui::ui::shared::BREADCRUMB_SEGMENT_MAX_CHARS,
-                            )
-                        })
+                        .map(|e| truncate(&e.title, BREADCRUMB_SEGMENT_MAX_CHARS))
                         .unwrap_or_default()
                 })
                 .collect();
             if let ViewMode::Package { package_id, .. } = cursor {
                 segments.insert(0, format!("\u{25a3} {}", package_title(*package_id)));
             }
-            Some(format!(
-                " {} ",
-                segments.join(crate::tui::ui::shared::BREADCRUMB_SEPARATOR)
-            ))
+            Some(format!(" {} ", segments.join(BREADCRUMB_SEPARATOR)))
         }
         ViewMode::Board(_) | ViewMode::TaskDetail { .. } => None,
     }

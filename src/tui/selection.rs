@@ -128,22 +128,22 @@ impl App {
         // copy it is on, and only follows the card to the leftmost column that
         // holds it once the current one no longer does (board-layout.allium,
         // "Cursor Selection Preservation").
-        let current = self.selection().column();
+        let current = TaskStatus::from_column_index(self.selection().column().wrapping_sub(1));
         let found = self
             .layout
             .column_anchor_cache
             .as_ref()
             .and_then(|anchor_map| {
-                let row_in = |idx: usize, status: &TaskStatus| {
-                    let row = anchor_map.get(status)?.iter().position(|&a| a == anchor)?;
-                    Some((idx + 1, row))
+                let row_in = |status: TaskStatus| {
+                    let row = anchor_map.get(&status)?.iter().position(|&a| a == anchor)?;
+                    Some((status.column_index() + 1, row))
                 };
-                TaskStatus::ALL
-                    .iter()
-                    .enumerate()
-                    .filter(|&(idx, _)| idx + 1 == current)
-                    .chain(TaskStatus::ALL.iter().enumerate())
-                    .find_map(|(idx, status)| row_in(idx, status))
+                current.and_then(row_in).or_else(|| {
+                    TaskStatus::ALL
+                        .iter()
+                        .filter(|&&status| Some(status) != current)
+                        .find_map(|&status| row_in(status))
+                })
             });
 
         // Clamp every column, `found_col` included — the anchor row is
