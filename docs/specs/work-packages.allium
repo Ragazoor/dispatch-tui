@@ -666,13 +666,11 @@ surface PackageViewCards {
             -- Placed exactly as on the main board: one card per column its
             -- subtree has visible work in, Backlog when it has none, and
             -- only in columns the lens does not flatten.
-            for column in { backlog, running, review, done }
-                where view.appears_in(epic, column) and view.renders_epics(column):
+            for column in { backlog, running, review, done } where view.appears_in(epic, column) and view.renders_epics(column):
                 column
             -- In a flattened column the epic's contents stand in for it:
             -- every visible task in its subtree, once each.
-            for task in epic.subtree_tasks
-                where view.task_is_visible(task) and view.flattens(task.status):
+            for task in epic.subtree_tasks where view.task_is_visible(task) and view.flattens(task.status):
                 task.status
 
     @guidance

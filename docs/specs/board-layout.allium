@@ -1308,7 +1308,9 @@ entity BoardView {
         and (current_epic = null or task in current_epic.subtree_tasks)
         and (flattens(status) or directly_under(task))
 
-    -- The task cards a column draws.
+    -- The task cards a column draws on the main board or in an epic view.
+    -- A package view's columns are work-packages.allium's PackageViewCards;
+    -- their sections lay out the same EpicGroupTree, with no top.
     column_tasks(status): filter(tasks, t => t.status = status and in_scope(t, status))
 
     -- == Column sections ("Column Section Layout") ==
@@ -1505,8 +1507,8 @@ rule CycleLensForward {
     ensures: board_view.lens.lens = board_view.lens.next
 
     @guidance
-        -- Bound to Tab on the board (board.normal), in the main board and in
-        -- an epic view alike.
+        -- Bound to Tab on the board (board.normal), in every view of it: the
+        -- main board, an epic view and a package view.
 }
 
 rule CycleLensBackward {
@@ -1583,8 +1585,7 @@ surface BoardLensKeys {
         board_view.lens.lens
 
     provides:
-        -- Tab on the board, in the main board and an epic view alike
-        -- (CycleLensForward).
+        -- Tab on the board, in every view of it (CycleLensForward).
         CycleLensForward()
         -- BackTab (Shift+Tab) on the board (CycleLensBackward).
         CycleLensBackward()
