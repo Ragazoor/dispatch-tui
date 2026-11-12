@@ -539,3 +539,13 @@ mod scenario;
 mod schedules;
 #[path = "memory_caller_conformance/session_requests.rs"]
 mod session_requests;
+
+/// The board spells `BACKGROUND_WAIT_CAP` itself (a plain build does not link
+/// the module), so this holds the two copies equal.
+#[test]
+fn background_wait_cap_matches_the_module() {
+    assert_eq!(
+        dispatch_tui::models::BACKGROUND_WAIT_CAP,
+        dispatch_spacetime_module::BACKGROUND_WAIT_CAP
+    );
+}

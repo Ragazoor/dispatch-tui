@@ -58,7 +58,10 @@ impl BackgroundWork {
 /// `agent-health.allium: config.background_wait_cap`: how long a Stop
 /// deferred only for background work may hold the task running. The store
 /// module owns it and applies it; the board reads it only to know when to ask.
-pub use dispatch_spacetime_module::BACKGROUND_WAIT_CAP;
+/// Spelled out rather than shared, because the module is a separate crate that
+/// a plain build does not link; `tests/memory_caller_conformance.rs` pins the
+/// two values together.
+pub const BACKGROUND_WAIT_CAP: chrono::Duration = chrono::Duration::minutes(30);
 
 impl HookEventKind {
     /// Parse the event name (`pre_tool_use` | `notification` | `stop`). The

@@ -65,7 +65,12 @@ pub(crate) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
 
 /// The `BackgroundWork` argument `try_record_stop` takes.
 pub(crate) fn background_work(work: crate::models::BackgroundWork) -> bindings::BackgroundWork {
-    dispatch_spacetime_module::BackgroundWork::from(work).into()
+    bindings::BackgroundWork {
+        shells: work.shells,
+        workflows: work.workflows,
+        monitors: work.monitors,
+        mcp_tasks: work.mcp_tasks,
+    }
 }
 
 /// The `started_at` a subagent row carries: RFC 3339. That column is never compared across rows,

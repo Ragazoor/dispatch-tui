@@ -53,6 +53,9 @@ else
     cargo fmt --check
 fi
 
+echo "build without features..."
+cargo check --no-default-features --lib --bins
+
 echo "clippy..."
 cargo clippy --all-targets -- -D warnings
 
