@@ -97,8 +97,9 @@ fn a_write_that_leaves_the_sub_status_alone_is_not_judged() {
 }
 
 #[test]
-fn an_insert_is_not_judged() {
-    assert!(check_sub_status_write(None, &task_with("backlog", "approved")).is_ok());
+fn an_insert_is_judged_on_its_pair_alone() {
+    assert!(check_sub_status_write(None, &task_with("backlog", "approved")).is_err());
+    assert!(check_sub_status_write(None, &task_with("backlog", "none")).is_ok());
 }
 
 #[test]
@@ -355,6 +356,7 @@ fn migration_gate_versions_never_move() {
     assert_eq!(FEED_SETTER_CLAIMS_RULES_VERSION, 37);
     assert_eq!(WORKSPACES_RULES_VERSION, 17);
     assert_eq!(REPO_PATH_VERIFY_RULES_VERSION, 43);
+    assert_eq!(SUB_STATUS_FIT_RULES_VERSION, 51);
 }
 
 // -- The removed learning task scope (`learnings.allium: Scope Model`) --------

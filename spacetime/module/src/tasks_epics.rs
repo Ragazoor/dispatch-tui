@@ -91,6 +91,24 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
     }
 }
 
+/// Reset every stored task whose sub_status its status does not allow to
+/// `default_sub_status(status)`, once: run by `stamp_rules_version_on_connect`
+/// for a store below `SUB_STATUS_FIT_RULES_VERSION`
+/// (`tasks.allium: SubStatusAutoreset`). Written straight to the table: the
+/// reset is not a task event, so no agent or mark follows it.
+pub fn reset_unfit_sub_statuses(ctx: &ReducerContext) {
+    let odd: Vec<Task> = ctx
+        .db
+        .tasks()
+        .iter()
+        .filter(|t| validate_sub_status(&t.status, &t.sub_status).is_err())
+        .collect();
+    for task in odd {
+        let sub_status = default_sub_status(&task.status).to_string();
+        ctx.db.tasks().id().update(Task { sub_status, ..task });
+    }
+}
+
 // Seeding
 
 // One reducer per table, each taking a BATCH.

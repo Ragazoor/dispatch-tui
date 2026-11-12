@@ -501,3 +501,64 @@ fn a_later_connection_does_not_unify_again() {
     connect_after_rewinding_to(&store, REPO_PATH_VERIFY_RULES_VERSION);
     assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "one");
 }
+
+// -- `tasks.allium: InsertedTaskSubStatusMustFit` and `SubStatusAutoreset` ----
+
+fn unfit_task(id: i64) -> Task {
+    Task {
+        id,
+        sub_status: "active".into(),
+        ..user_task("odd", "alice")
+    }
+}
+
+/// An insert whose pair does not fit is refused, whichever reducer inserts it,
+/// and writes nothing.
+#[test]
+fn an_insert_with_an_unfit_sub_status_is_refused_and_writes_nothing() {
+    let store = Store::new();
+    let why = store
+        .call_as_scheduler(|ctx| seed_tasks(ctx, vec![unfit_task(7)]))
+        .expect_err("a seed carrying an unfit pair");
+    assert!(
+        why.contains("sub_status 'active' is not valid for status 'backlog'"),
+        "{why}"
+    );
+    assert_eq!(store.db().tasks().iter().count(), 0);
+    let why = store
+        .call("alice", |ctx| create_task(ctx, unfit_task(0)))
+        .expect_err("a create carrying an unfit pair");
+    assert!(why.contains("is not valid for status"), "{why}");
+    assert_eq!(store.db().tasks().iter().count(), 0);
+}
+
+/// A row stored with an unfit pair is reset once, on the first connection
+/// after the module that enforces the rule.
+#[test]
+fn the_upgrade_resets_a_stored_unfit_sub_status_once() {
+    let store = repo_store();
+    store
+        .call("alice", |ctx| {
+            ctx.db.tasks().insert(unfit_task(0));
+            Ok(())
+        })
+        .expect("plant an odd row");
+    let id = store.max_task_id();
+    connect_after_rewinding_to(&store, SUB_STATUS_FIT_RULES_VERSION - 1);
+    assert_eq!(store.task(id).sub_status, "none");
+}
+
+/// A store already at that version is left alone.
+#[test]
+fn a_later_connection_does_not_reset_again() {
+    let store = repo_store();
+    store
+        .call("alice", |ctx| {
+            ctx.db.tasks().insert(unfit_task(0));
+            Ok(())
+        })
+        .expect("plant an odd row");
+    let id = store.max_task_id();
+    connect_after_rewinding_to(&store, SUB_STATUS_FIT_RULES_VERSION);
+    assert_eq!(store.task(id).sub_status, "active");
+}

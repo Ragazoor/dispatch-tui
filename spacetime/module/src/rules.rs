@@ -74,6 +74,12 @@ use super::*;
 ///    see — the store clears the current agent's window and writes a `close`
 ///    row naming it, so its host kills it
 ///    (`store-split.allium: HandMoveReleasesAWindowTheBoardDidNotSee`).
+/// 51: an inserted task whose sub_status does not fit its status is refused
+///    (`tasks.allium: InsertedTaskSubStatusMustFit`), so a seed or restore
+///    carrying one fails; the first connection after it resets stored odd
+///    rows once (`SUB_STATUS_FIT_RULES_VERSION`, `tasks_epics.rs:
+///    reset_unfit_sub_statuses`). A board mirror that accepted such a row
+///    would disagree with the store, so the board moves with it.
 /// 46: every created task gets an `assigned` agent in the same transaction
 ///    (`agents.allium: AssignAgentOnTaskCreated`, A17), the first dispatch
 ///    claim launches it under its name, and a name is free again once no
@@ -263,7 +269,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 50;
+pub const RULES_VERSION: i64 = 51;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its
@@ -276,6 +282,12 @@ pub const TASK_SCOPE_REMOVED_RULES_VERSION: i64 = 48;
 /// connection (`config.rs: release_claims_of_non_setter_hosts`). Like
 /// [`WORKSPACES_RULES_VERSION`] it never moves: a RULES_VERSION bump leaves it.
 pub const FEED_SETTER_CLAIMS_RULES_VERSION: i64 = 37;
+
+/// The rules version that made every stored task's sub_status fit its status:
+/// a store stamped with anything older has its odd rows reset once, on its
+/// first connection (`tasks_epics.rs: reset_unfit_sub_statuses`). Never moves,
+/// like the others here.
+pub const SUB_STATUS_FIT_RULES_VERSION: i64 = 51;
 
 /// The rules version that made one verify command per repository hold for rows
 /// saved before it: a store stamped with anything older has its linked rows
@@ -583,19 +595,20 @@ pub fn check_new_task_aim(
 }
 
 /// The legality check [`write_task`] runs on every write: a row whose
-/// `sub_status` MOVES must hold one that is legal for its status.
+/// `sub_status` MOVES, or that is INSERTED, must hold one that is legal for
+/// its status (`tasks.allium: SubStatusMovesMustBeLegal`,
+/// `InsertedTaskSubStatusMustFit`).
 ///
-/// Only a move is judged, for the reason `check_task_patch` gives: a status
-/// change that leaves the old sub-status behind is the caller's to fix, and a
-/// row already holding an odd pair (a restore, an older board) must stay
-/// writable for its other fields. An insert is not judged either: a seed
-/// carries whatever the old store held.
+/// A move is judged for the reason `check_task_patch` gives: a status change
+/// that leaves the old sub-status behind is the caller's to fix, and a stored
+/// row never holds an odd pair (`SUB_STATUS_FIT_RULES_VERSION` reset the old
+/// ones), so a write that leaves it alone passes. An insert has no prior row
+/// and is judged on its pair alone: a seed or restore carrying an odd row
+/// fails loudly rather than landing it.
 pub fn check_sub_status_write(prior: Option<&Task>, row: &Task) -> Result<(), String> {
     match prior {
-        Some(prior) if prior.sub_status != row.sub_status => {
-            validate_sub_status(&row.status, &row.sub_status)
-        }
-        _ => Ok(()),
+        Some(prior) if prior.sub_status == row.sub_status => Ok(()),
+        _ => validate_sub_status(&row.status, &row.sub_status),
     }
 }
 

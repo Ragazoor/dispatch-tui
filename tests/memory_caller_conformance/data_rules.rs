@@ -143,6 +143,29 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         assert!(why.contains("sub_status 'active' is not valid for status 'backlog'"));
         same_task(task.0);
 
+        // -- an insert is judged on its pair (InsertedTaskSubStatusMustFit) -----
+        let unfit_insert = bindings::Task {
+            sub_status: "active".into(),
+            ..in_root("/x/alpha")
+        };
+        let real_why = real
+            .create_task(unfit_insert.clone())
+            .await
+            .expect_err("the store refuses an unfit insert")
+            .to_string();
+        let mem_why = mem
+            .create_task(unfit_insert)
+            .await
+            .expect_err("the memory caller refuses it too")
+            .to_string();
+        for why in [&real_why, &mem_why] {
+            assert!(
+                why.contains("sub_status 'active' is not valid for status 'backlog'"),
+                "{why}"
+            );
+        }
+        same_task(task.0);
+
         // -- unknown status (spacetime-seed.allium: StoreRefusesUnknownStatus) --
         let unknown_task_status = bindings::TaskPatch {
             status: Some("archived".into()),

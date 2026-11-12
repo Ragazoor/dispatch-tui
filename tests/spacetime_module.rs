@@ -279,7 +279,11 @@ fn task_json(id: i64, title: &str, status: &str, epic: i64, host: &str) -> serde
         "tmux_window": "",
         "plan_path": "",
         "epic_id": epic,
-        "sub_status": "none",
+        "sub_status": match status {
+            "running" => "active",
+            "review" => "awaiting_review",
+            _ => "none",
+        },
         "tag": "",
         "sort_order": {"none": []},
         "created_at": "2026-09-19 10:00:00",

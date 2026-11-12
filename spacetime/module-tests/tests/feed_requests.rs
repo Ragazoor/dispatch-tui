@@ -39,7 +39,7 @@ fn item(external_id: &str) -> FeedIngestItem {
             description: String::new(),
             repo_path: "/repo".into(),
             status: "backlog".into(),
-            sub_status: String::new(),
+            sub_status: "none".into(),
             base_branch: String::new(),
             tag: String::new(),
             labels: String::new(),

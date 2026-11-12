@@ -157,7 +157,7 @@ impl Store {
             .expect("an epic")
     }
 
-    fn max_task_id(&self) -> i64 {
+    pub fn max_task_id(&self) -> i64 {
         self.db().tasks().iter().map(|t| t.id).max().unwrap_or(0)
     }
 
@@ -194,6 +194,7 @@ pub fn epic_task(title: &str, epic_id: i64, status: &str) -> Task {
         repo_path: "/repo".into(),
         epic_id,
         status: status.into(),
+        sub_status: default_sub_status(status).into(),
         owner: String::new(),
         ..blank_task()
     }

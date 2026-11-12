@@ -1530,6 +1530,12 @@ impl Store {
         );
         row.epic_id = epic.map(|e| e.0).unwrap_or(0);
         row.status = store_status.into();
+        row.sub_status = match store_status {
+            "running" => "active",
+            "review" => "awaiting_review",
+            _ => "none",
+        }
+        .into();
         let id = self
             .caller
             .create_task(row.clone())

@@ -747,7 +747,7 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_request() {
             description: String::new(),
             repo_path: "/repo".into(),
             status: "backlog".into(),
-            sub_status: String::new(),
+            sub_status: "none".into(),
             base_branch: String::new(),
             tag: String::new(),
             labels: String::new(),
