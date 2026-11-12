@@ -36,7 +36,9 @@ STUB
 chmod +x "$STUB_BIN/allium"
 
 # jq, awk, sort and the shell come from the system; a real `allium` (usually in
-# ~/.cargo/bin) must not, or the "missing" case could not be tested.
+# ~/.cargo/bin) must not, or the "missing" case could not be tested. This
+# assumes jq is in one of these directories and allium is not, which holds on
+# Fedora and on CI's Ubuntu runner.
 SYS_PATH="/usr/local/bin:/usr/bin:/bin"
 
 failures=0

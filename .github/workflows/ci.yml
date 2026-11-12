@@ -418,8 +418,9 @@ jobs:
         run: bash ./scripts/test-bots-conf.sh
 
       # The gate needs the `allium` CLI at the version check-allium.sh pins as
-      # its floor. Cached by version, so a push installs it only when the pin
-      # moves; the runner's own cargo builds it.
+      # its floor. Cached by version, so a push builds it only when the pin
+      # moves. The build uses the toolchain rust-toolchain.toml pins, which
+      # rustup fetches here on a cache miss.
       - name: Cache the allium CLI
         id: allium-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -457,8 +458,9 @@ jobs:
       # Coverage jobs never reach it. Without these steps the crate could stop
       # compiling and every other job would stay green.
       #
-      # This is the only step in this job that needs a toolchain or a cargo
-      # cache; the rest are shell scripts over the checkout. Without the cache
+      # Apart from the allium CLI install above, this is the only step in this
+      # job that needs a toolchain or a cargo cache; the rest are shell scripts
+      # over the checkout. Without the cache
       # the module's dependency tree is compiled twice, for two targets, from
       # cold, on every push — minutes rather than seconds.
       - name: Install the wasm target for the SpacetimeDB module
