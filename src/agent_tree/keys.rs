@@ -135,9 +135,11 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
     let action = row.action;
     match run_tree_action(state, root, ns, action, key) {
         Some(result) => {
-            state
-                .usage
-                .push(crate::models::UsageEvent::pane_key(action, &label));
+            if row.records_usage {
+                state
+                    .usage
+                    .push(crate::models::UsageEvent::pane_key(action, &label));
+            }
             result
         }
         None => KeyAction::Continue,

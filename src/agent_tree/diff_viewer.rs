@@ -490,9 +490,11 @@ pub fn handle_key(state: &mut DiffState, line_count: usize, key: KeyEvent) -> Di
         }
         _ => return DiffKeyAction::Continue,
     };
-    state
-        .usage
-        .push(crate::models::UsageEvent::pane_key(action, &label));
+    if row.records_usage {
+        state
+            .usage
+            .push(crate::models::UsageEvent::pane_key(action, &label));
+    }
     result
 }
 

@@ -325,11 +325,13 @@ rule KeypressRecordsFeatureUsage {
     requires: records_usage
     requires: not is_text_entry(key)
 
+    -- detail is the key as key_label writes it: modifiers dropped and Space
+    -- as " " (keybindings.allium: KeyBinding.keys), not the lookup name.
     ensures: FeatureUsageRecorded(
         event: FeatureUsageEvent {
             category: keybinding,
             action: action,
-            detail: key,
+            detail: key_label(key),
             actor: human
         }
     )
