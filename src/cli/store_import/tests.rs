@@ -19,6 +19,8 @@ struct FakeSpawner {
     answer_on_start: bool,
     /// How many starts report that another process holds the port.
     foreign_listeners: std::sync::atomic::AtomicUsize,
+    /// How many starts fail as if another process took the port first.
+    lost_ports: std::sync::atomic::AtomicUsize,
     starts: std::sync::atomic::AtomicUsize,
 }
 
@@ -49,6 +51,14 @@ impl StoreSpawner for FakeSpawner {
                 std::io::ErrorKind::NotFound,
                 "no spacetime",
             ));
+        }
+        use std::sync::atomic::Ordering::SeqCst;
+        if self
+            .lost_ports
+            .try_update(SeqCst, SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Err(std::io::Error::from(std::io::ErrorKind::AddrInUse));
         }
         std::fs::write(log, "store output")?;
         *self.seen.lock().unwrap() = Some((address.to_string(), data_dir.to_path_buf()));
@@ -209,6 +219,49 @@ async fn a_foreign_store_on_the_port_is_not_dumped_and_the_start_is_retried() {
     .unwrap();
     assert_eq!(spawner.starts.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert_eq!(dumped.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// The port is lost at the start, not answered by a stranger: the import
+/// starts over on a fresh port. Forced here, so no real port race is needed.
+#[tokio::test]
+async fn a_port_lost_at_the_start_is_retried_on_a_fresh_port() {
+    let dir = data_folder();
+    let scratch = tempfile::tempdir().unwrap();
+    let spawner = FakeSpawner {
+        answer_on_start: true,
+        lost_ports: std::sync::atomic::AtomicUsize::new(PORT_ATTEMPTS - 1),
+        ..Default::default()
+    };
+    read_data_dir_with(
+        dir.path(),
+        scratch.path(),
+        &spawner,
+        Duration::from_secs(10),
+        &|_| Arc::new(MemoryStore::new()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(spawner.starts.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_port_lost_on_every_attempt_fails_as_a_lost_port() {
+    let dir = data_folder();
+    let scratch = tempfile::tempdir().unwrap();
+    let spawner = FakeSpawner {
+        lost_ports: std::sync::atomic::AtomicUsize::new(usize::MAX),
+        ..Default::default()
+    };
+    let err = read_data_dir_with(
+        dir.path(),
+        scratch.path(),
+        &spawner,
+        Duration::from_secs(10),
+        &|_| panic!("nothing started, nothing to read"),
+    )
+    .await
+    .unwrap_err();
+    assert!(lost_the_port(&err), "{err:#}");
 }
 
 #[tokio::test]

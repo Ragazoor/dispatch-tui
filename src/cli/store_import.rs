@@ -217,7 +217,7 @@ async fn read_data_dir_with(
 
 /// How many ports the import tries when another store keeps taking the one it
 /// picked.
-const PORT_ATTEMPTS: usize = 3;
+const PORT_ATTEMPTS: usize = 5;
 
 /// Start a store over `copy`, wait for it, and dump it. The port is picked by
 /// bind-and-drop, so another store can win it; an answer is only trusted from
