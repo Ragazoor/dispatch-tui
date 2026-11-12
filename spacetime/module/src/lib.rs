@@ -189,7 +189,7 @@ pub struct SchemaVersion {
 
 /// The publisher of this database: the one client, besides the store itself,
 /// that may use the `seed_*` restore reducers (`spacetime-seed.allium:
-/// SeedRequiresTheOperator`).
+/// StorePublisher`).
 ///
 /// One row, `id` 1, written only by `init`, in `caller_identity`'s spelling.
 /// **Private**: not in the snapshot and not readable by a board. A store
@@ -248,7 +248,7 @@ pub fn init(ctx: &ReducerContext) {
 /// A publish over an existing database does not re-run `init`, so without this
 /// the number would keep describing the schema the database was *created* with.
 /// Called by the publish step, not by a restore. Restore-only, so only the
-/// store itself or its publisher may call it (`SeedRequiresTheOperator`).
+/// store itself or its publisher may call it (`spacetime-seed.allium: StorePublisher`).
 #[spacetimedb::reducer]
 pub fn set_schema_version(ctx: &ReducerContext, version: i64) -> Result<(), String> {
     require_restore_authority(ctx)?;

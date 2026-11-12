@@ -56,7 +56,7 @@ this; `tests/spacetime_module.rs` is what catches it.
 table's SHARED columns against the live SQLite schema positionally, so a column
 added in the middle fails there before anyone reaches a server.
 
-Module-only columns (`SharedTable::module_only_columns`) are checked by presence
+Module-only columns are checked by presence
 instead, not position, and that is forced rather than lax: this module appends,
 SQLite appends, and the moment a module-only column is published every *later*
 shared column lands after it here while sitting earlier in SQLite. The two

@@ -52,7 +52,7 @@ pub fn caller_stamp(ctx: &ReducerContext, claimed: String) -> String {
 }
 
 /// Refuse a `seed_*` call from anyone but the store itself or its publisher
-/// (`spacetime-seed.allium: SeedRequiresTheOperator`).
+/// (`spacetime-seed.allium: StorePublisher`).
 pub fn require_restore_authority(ctx: &ReducerContext) -> Result<(), String> {
     if is_operator(ctx) || is_publisher(ctx) {
         Ok(())

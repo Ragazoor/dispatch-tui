@@ -42,11 +42,9 @@ fn every_table_answers_its_column_questions() {
     for table in SharedTable::ALL {
         let _ = table.sentinel_columns();
         let _ = table.assembled_columns();
-        let _ = table.module_only_columns();
         let _ = table.boolean_columns();
         let _ = table.generates_ids();
     }
     assert!(!SharedTable::RepoPaths.sentinel_columns().is_empty());
     assert!(!SharedTable::Hosts.sentinel_columns().is_empty());
-    assert!(!SharedTable::Learnings.module_only_columns().is_empty());
 }
