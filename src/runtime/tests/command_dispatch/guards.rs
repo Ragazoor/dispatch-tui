@@ -213,6 +213,7 @@ async fn batch_deleting_with_one_item_not_done_in_the_store_changes_nothing() {
     h.dispatch(Command::Task(TaskCommand::BatchDelete {
         task_ids: vec![done.id, live.id],
         epic_ids: vec![],
+        teardowns: vec![],
     }))
     .await;
 
@@ -345,6 +346,7 @@ async fn batch_deleting_with_an_item_the_store_says_is_not_done_changes_nothing(
     h.dispatch(Command::Task(TaskCommand::BatchDelete {
         task_ids: vec![id],
         epic_ids: vec![],
+        teardowns: vec![],
     }))
     .await;
 
@@ -381,4 +383,89 @@ async fn a_guarded_cleanup_runs_no_teardown_when_the_store_cannot_be_asked() {
 
     assert!(refused(&h.next_msg().await));
     assert!(h.mock.recorded_calls().is_empty());
+}
+
+// -----------------------------------------------------------------------
+// BatchDelete: one pre-check before any teardown; teardowns serial per repo
+// -----------------------------------------------------------------------
+
+fn target(id: i64, repo: &str) -> crate::tui::commands::TeardownTarget {
+    crate::tui::commands::TeardownTarget {
+        id: models::TaskId(id),
+        repo_path: repo.into(),
+        worktree: Some(format!("{repo}/.worktrees/{id}-t")),
+        tmux_window: None,
+    }
+}
+
+#[tokio::test]
+async fn a_refused_batch_starts_no_teardown_for_any_item() {
+    let mut h = lagging_harness(vec![]).await;
+    let ok = h.db.seed_lagging_task(None, "done", "done").await;
+    let bad = h.db.seed_lagging_task(None, "done", "running").await;
+
+    h.dispatch(Command::Task(TaskCommand::BatchDelete {
+        task_ids: vec![ok, bad],
+        epic_ids: vec![],
+        teardowns: vec![target(ok.0, "/repo"), target(bad.0, "/repo")],
+    }))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.mock.recorded_calls().is_empty(), "nothing torn down");
+}
+
+#[tokio::test]
+async fn a_batch_that_goes_through_reports_it_so_the_selection_can_clear() {
+    let mut h = quiet_harness().await;
+    let a = seed(&h.rt, "A", models::TaskStatus::Done).await;
+
+    h.dispatch(Command::Task(TaskCommand::BatchDelete {
+        task_ids: vec![a.id],
+        epic_ids: vec![],
+        teardowns: vec![],
+    }))
+    .await;
+
+    assert!(matches!(
+        h.next_msg().await,
+        Message::Task(crate::tui::messages::TaskMessage::BatchDeleted)
+    ));
+    assert!(h.rt.database.get_task(a.id).await.is_none());
+}
+
+#[tokio::test]
+async fn batch_teardowns_run_one_repo_at_a_time_in_order() {
+    let ok = MockProcessRunner::ok;
+    let h = harness(MockProcessRunner::new(vec![
+        ok(),
+        ok(),
+        ok(),
+        ok(),
+        ok(),
+        ok(),
+    ]))
+    .await;
+
+    let handles = h.rt.exec_cleanup_queues(vec![
+        target(1, "/repoA"),
+        target(2, "/repoA"),
+        target(3, "/repoB"),
+    ]);
+    assert_eq!(handles.len(), 2, "one queue per repo");
+    for handle in handles {
+        handle.await.unwrap();
+    }
+
+    let calls = h.mock.flattened_calls();
+    let pos = |needle: &str| {
+        calls
+            .iter()
+            .position(|c| c.contains(needle) && c.contains("worktree remove"))
+    };
+    assert!(
+        pos("/repoA/.worktrees/1-t").unwrap() < pos("/repoA/.worktrees/2-t").unwrap(),
+        "a repo's removals run in queue order, got {calls:?}"
+    );
+    assert!(pos("/repoB/.worktrees/3-t").is_some());
 }

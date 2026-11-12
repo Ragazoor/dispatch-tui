@@ -257,6 +257,13 @@ fn x_on_an_all_done_task_selection_deletes_them_all_after_confirmation() {
     deleted.sort_by_key(|t| t.0);
     assert_eq!(deleted, vec![TaskId(1), TaskId(2)]);
     assert!(
+        !app.select.tasks.is_empty(),
+        "selection stays until the delete goes through"
+    );
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::BatchDeleted,
+    ));
+    assert!(
         app.select.tasks.is_empty(),
         "selection cleared after the batch"
     );
@@ -432,6 +439,13 @@ fn batch_delete_of_done_tasks_and_a_fully_done_epic_deletes_everything() {
     assert!(app.board.tasks.is_empty());
     assert!(deleted_task_ids(&cmds).contains(&TaskId(5)));
     assert_eq!(deleted_epic_ids(&cmds), vec![EpicId(10)]);
+    assert!(
+        !app.select.tasks.is_empty() && !app.select.epics.is_empty(),
+        "selection stays until the delete goes through"
+    );
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::BatchDeleted,
+    ));
     assert!(app.select.tasks.is_empty() && app.select.epics.is_empty());
 }
 
@@ -549,8 +563,7 @@ fn an_epic_delete_teardown_carries_the_epic_guard() {
 }
 
 #[test]
-fn a_batch_delete_teardown_carries_the_whole_batch_as_its_guard() {
-    use crate::tui::commands::DeleteGuard;
+fn a_batch_delete_carries_its_teardowns_inside_the_one_command_with_no_guard_of_their_own() {
     let mut a = make_task(5, TaskStatus::Done);
     a.worktree = Some("/wt/5".to_string());
     let mut b = task_in(1, TaskStatus::Done, 10);
@@ -563,13 +576,39 @@ fn a_batch_delete_teardown_carries_the_whole_batch_as_its_guard() {
 
     let cmds = press_x_then_confirm(&mut app);
 
-    let whole = DeleteGuard::Batch {
-        task_ids: vec![TaskId(5)],
-        epic_ids: vec![EpicId(10)],
-    };
-    let guards = guards_of(&cmds);
-    assert_eq!(guards.len(), 2, "one teardown per task, got {cmds:?}");
-    assert!(guards.iter().all(|g| g.as_ref() == Some(&whole)));
+    assert!(
+        guards_of(&cmds).is_empty(),
+        "no per-item teardown command, got {cmds:?}"
+    );
+    let teardowns: Vec<TaskId> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            Command::Task(TaskCommand::BatchDelete { teardowns, .. }) => Some(teardowns),
+            _ => None,
+        })
+        .flatten()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(teardowns.len(), 2, "one teardown per task, got {cmds:?}");
+}
+
+#[test]
+fn a_refused_batch_keeps_its_selection_so_it_can_be_narrowed() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Done),
+        make_task(2, TaskStatus::Done),
+    ]);
+    select(&mut app, &[1, 2], &[]);
+
+    press_x_then_confirm(&mut app);
+    // The store refuses after the board dropped the cards.
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DeleteRefused {
+            error: "task 2 is not done".into(),
+        },
+    ));
+
+    assert_eq!(app.select.tasks.len(), 2);
 }
 
 #[test]

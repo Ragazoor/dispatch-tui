@@ -412,12 +412,8 @@ impl App {
     /// bundling every row delete in the batch into one atomic call means there
     /// is no single surviving row left to hold a retry pointer if this task's
     /// own teardown fails.
-    pub(in crate::tui) fn teardown_task_for_batch(
-        &mut self,
-        id: TaskId,
-        guard: crate::tui::commands::DeleteGuard,
-    ) -> Vec<Command> {
-        let (cleanup, respawn) = self.teardown_task(id, CleanupFollowUp::Nothing, Some(guard));
+    pub(in crate::tui) fn teardown_task_for_batch(&mut self, id: TaskId) -> Vec<Command> {
+        let (cleanup, respawn) = self.teardown_task(id, CleanupFollowUp::Nothing, None);
         let mut cmds: Vec<Command> = cleanup.into_iter().collect();
         cmds.extend(respawn);
         cmds

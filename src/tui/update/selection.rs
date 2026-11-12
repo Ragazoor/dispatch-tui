@@ -356,22 +356,40 @@ impl App {
             return vec![];
         }
 
-        // Every teardown below carries the whole batch as its guard: the
-        // pre-check is all-or-nothing (tasks.allium: BatchDelete).
-        let guard = crate::tui::commands::DeleteGuard::Batch {
-            task_ids: task_ids.clone(),
-            epic_ids: epic_ids.clone(),
-        };
+        // The runtime pre-checks the whole batch once before any teardown
+        // starts (tasks.allium: BatchDelete), so the teardowns carry no guard
+        // of their own. The selection stays until the delete goes through, so
+        // a refusal leaves it to be narrowed (`TaskMessage::BatchDeleted`).
+        let mut cleanups = Vec::new();
         let mut cmds = Vec::new();
+        let mut collect = |found: Vec<Command>| {
+            for c in found {
+                match c {
+                    Command::Task(crate::tui::commands::TaskCommand::Cleanup {
+                        id,
+                        repo_path,
+                        worktree,
+                        tmux_window,
+                        ..
+                    }) => cleanups.push(crate::tui::commands::TeardownTarget {
+                        id,
+                        repo_path,
+                        worktree,
+                        tmux_window,
+                    }),
+                    other => cmds.push(other),
+                }
+            }
+        };
         for &id in &epic_ids {
-            cmds.extend(self.teardown_epic_subtree(id, guard.clone()));
+            collect(self.teardown_epic_subtree(id, None));
         }
         let mut surviving_task_ids = Vec::new();
         for id in task_ids {
             // A task inside a deleted epic's subtree is already gone — the
             // epic teardown above dropped it from the board.
             if self.board.find_task(id).is_some() {
-                cmds.extend(self.teardown_task_for_batch(id, guard.clone()));
+                collect(self.teardown_task_for_batch(id));
                 surviving_task_ids.push(id);
             }
         }
@@ -382,9 +400,9 @@ impl App {
             crate::tui::commands::TaskCommand::BatchDelete {
                 task_ids: surviving_task_ids,
                 epic_ids,
+                teardowns: cleanups,
             },
         ));
-        self.select.clear();
         cmds
     }
 

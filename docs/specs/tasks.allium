@@ -1638,6 +1638,16 @@ contract TaskTeardown {
         -- could fabricate two rows on one path; that is not a supported
         -- input. Do NOT add a shared-worktree check on any path.
 
+    @invariant BatchTeardownsAreSerialPerRepo
+        -- BatchDelete's teardowns follow the same rule as the feed path's
+        -- (FeedTeardownsAreSerialPerRepo): a repo's removals run one after
+        -- another, because they shell git against one shared checkout and
+        -- would contend on its index lock; distinct repos run in parallel.
+        -- One failure does not stop the rest of its repo's queue. Failures are
+        -- reported and logged as TaskTeardown says; a batch's items are
+        -- exempt from the retry pointer (WorktreeReleaseIsGated). DeleteEpic's
+        -- subtree teardowns are not yet serial per repo: a known gap.
+
     @invariant FeedTeardownsAreSerialPerRepo
         -- The feed path tears down the tasks a stale delete removed. A repo's
         -- removals run one after another, because they shell git against one
@@ -1822,8 +1832,12 @@ rule BatchDelete {
         -- Teardown is best effort for the whole batch, not gated on it. One
         -- atomic call leaves no surviving row per item to hold
         -- WorktreeReleaseIsGated's retry pointer, so every item in a batch is
-        -- exempt from that gate, as DeleteEpic's subtasks are. Every item's
-        -- teardown fires without waiting, and the atomic delete follows. A
+        -- exempt from that gate, as DeleteEpic's subtasks are. The pre-check
+        -- runs ONCE, for the whole batch, and every teardown travels inside
+        -- the batch's own command: no item re-checks, so a state change
+        -- mid-batch can never refuse a later item after earlier items were
+        -- torn down. Teardowns fire without waiting, one repo at a time
+        -- (BatchTeardownsAreSerialPerRepo), and the atomic delete follows. A
         -- task whose worktree removal then fails is still deleted with the
         -- rest of the batch: that is the price of the atomicity above.
         --
@@ -1838,8 +1852,9 @@ rule BatchDelete {
         --
         -- The count prompt comes first and the per-item check runs when the
         -- user answers y: a refused batch is reported after confirmation. A
-        -- refusal leaves the selection in place so it can be narrowed; a
-        -- batch that proceeds clears it.
+        -- refusal, from the pre-check or from the batch_delete reducer,
+        -- leaves the selection in place so it can be narrowed; the selection
+        -- is cleared only once the atomic delete has gone through.
         --
         -- Epics go first. A selected task inside a selected epic's subtree is
         -- deleted once, as part of that epic's subtree, and gets DeleteEpic's

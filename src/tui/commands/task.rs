@@ -117,6 +117,15 @@ pub enum DeleteGuard {
     },
 }
 
+/// One task's live resources, to be torn down by a batch delete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeardownTarget {
+    pub id: TaskId,
+    pub repo_path: String,
+    pub worktree: Option<String>,
+    pub tmux_window: Option<TmuxWindow>,
+}
+
 /// Side-effect commands for the task domain.
 ///
 /// Wrapped by [`crate::tui::types::Command::Task`] for runtime dispatch.
@@ -147,13 +156,19 @@ pub enum TaskCommand {
     /// `tasks.allium: BatchDelete`'s atomic call — every task and epic in the
     /// selection, deleted together in ONE reducer/DB call rather than
     /// `Delete`/`EpicCommand::Delete` issued once per item. The board has
-    /// already applied every board-mutation and best-effort teardown for
-    /// these ids by the time this command is built — see
-    /// `crate::tui::update::selection::App::handle_batch_delete` — so this is
-    /// purely the row-delete-and-validate call.
+    /// already applied its board mutations for these ids by the time this
+    /// command is built — see
+    /// `crate::tui::update::selection::App::handle_batch_delete`.
+    ///
+    /// The runtime pre-checks the whole batch ONCE, then starts `teardowns`
+    /// (one repo at a time, `BatchTeardownsAreSerialPerRepo`), then makes the
+    /// atomic call. A refusal at the pre-check starts no teardown. The
+    /// teardowns carry no guard of their own. Success is reported as
+    /// `TaskMessage::BatchDeleted`, which clears the selection.
     BatchDelete {
         task_ids: Vec<TaskId>,
         epic_ids: Vec<EpicId>,
+        teardowns: Vec<TeardownTarget>,
     },
     /// Request a dispatch of `task`. `mode` `None` lets the module derive it
     /// (`store-split.allium` D3) — retry-fresh's case; the dispatch and

@@ -227,7 +227,8 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
-        let mut cmds = self.teardown_epic_subtree(id, crate::tui::commands::DeleteGuard::Epic(id));
+        let mut cmds =
+            self.teardown_epic_subtree(id, Some(crate::tui::commands::DeleteGuard::Epic(id)));
         cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Delete(id)));
         cmds
     }
@@ -241,7 +242,7 @@ impl App {
     pub(in crate::tui) fn teardown_epic_subtree(
         &mut self,
         id: EpicId,
-        guard: crate::tui::commands::DeleteGuard,
+        guard: Option<crate::tui::commands::DeleteGuard>,
     ) -> Vec<Command> {
         let mut cmds = Vec::new();
         // The DB delete drops the whole subtree (`delete_epic_recursive` walks
@@ -271,7 +272,7 @@ impl App {
                     task,
                     crate::tui::commands::CleanupFollowUp::Nothing,
                     false,
-                    Some(guard.clone()),
+                    guard.clone(),
                 );
                 if let Some(c) = cleanup {
                     cmds.push(c);

@@ -163,6 +163,9 @@ pub enum TaskMessage {
     DeleteRefused {
         error: String,
     },
+    /// A batch delete went through: the selection it acted on is spent. A
+    /// refused batch never sends this, so its selection stays to be narrowed.
+    BatchDeleted,
     ToggleSelect(TaskId),
     BatchMove {
         ids: Vec<TaskId>,
@@ -249,6 +252,10 @@ impl TaskMessage {
                 error,
             } => app.handle_cleanup_failed(id, worktree, error),
             TaskMessage::DeleteRefused { error } => app.handle_delete_refused(error),
+            TaskMessage::BatchDeleted => {
+                app.select.clear();
+                vec![]
+            }
             TaskMessage::ToggleSelect(id) => {
                 app.select.toggle_task(id);
                 vec![]

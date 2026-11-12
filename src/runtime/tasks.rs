@@ -526,7 +526,9 @@ impl TuiRuntime {
         &self,
         task_ids: Vec<TaskId>,
         epic_ids: Vec<models::EpicId>,
+        teardowns: Vec<crate::tui::commands::TeardownTarget>,
     ) {
+        // The one pre-check for the whole batch, before any teardown starts.
         let guard = crate::tui::commands::DeleteGuard::Batch {
             task_ids: task_ids.clone(),
             epic_ids: epic_ids.clone(),
@@ -534,8 +536,14 @@ impl TuiRuntime {
         if !self.pass_delete_guard(&guard).await {
             return;
         }
-        if let Err(e) = self.task_svc.batch_delete(&task_ids, &epic_ids).await {
-            self.report_delete_refused(Self::db_error("batch deleting", e));
+        drop(self.exec_cleanup_queues(teardowns));
+        match self.task_svc.batch_delete(&task_ids, &epic_ids).await {
+            Ok(()) => {
+                let _ = self.msg_tx.send(Message::Task(
+                    crate::tui::messages::TaskMessage::BatchDeleted,
+                ));
+            }
+            Err(e) => self.report_delete_refused(Self::db_error("batch deleting", e)),
         }
     }
 
@@ -1144,6 +1152,47 @@ impl TuiRuntime {
             let msg = cleanup_outcome(id, result, follow_up);
             let _ = tx.send(Message::Task(msg));
         })
+    }
+
+    /// A batch delete's teardowns (`BatchTeardownsAreSerialPerRepo` in
+    /// docs/specs/tasks.allium): one blocking job per repo, each running its
+    /// repo's teardowns one after another so they do not contend on that
+    /// repo's git index lock; distinct repos run in parallel. Nothing waits
+    /// on them. Tests await the returned handles.
+    pub(super) fn exec_cleanup_queues(
+        &self,
+        teardowns: Vec<crate::tui::commands::TeardownTarget>,
+    ) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut by_repo: Vec<(String, Vec<crate::tui::commands::TeardownTarget>)> = Vec::new();
+        for t in teardowns {
+            match by_repo.iter_mut().find(|(repo, _)| *repo == t.repo_path) {
+                Some((_, queue)) => queue.push(t),
+                None => by_repo.push((t.repo_path.clone(), vec![t])),
+            }
+        }
+        by_repo
+            .into_iter()
+            .map(|(_, queue)| {
+                let tx = self.msg_tx.clone();
+                let runner = self.runner.clone();
+                tokio::task::spawn_blocking(move || {
+                    for t in queue {
+                        let result = dispatch::teardown_task(
+                            &t.repo_path,
+                            t.worktree.as_deref(),
+                            t.tmux_window.as_ref(),
+                            &*runner,
+                        );
+                        let msg = cleanup_outcome(
+                            t.id,
+                            result,
+                            crate::tui::commands::CleanupFollowUp::Nothing,
+                        );
+                        let _ = tx.send(Message::Task(msg));
+                    }
+                })
+            })
+            .collect()
     }
 
     pub(super) async fn exec_resume(
