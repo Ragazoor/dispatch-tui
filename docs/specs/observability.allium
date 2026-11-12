@@ -41,6 +41,7 @@
 --           (startup.allium: OperatorConfigurationLocations).
 
 use "./core.allium" as core
+use "./keybindings.allium" as keybindings
 
 ------------------------------------------------------------
 -- Value Types
@@ -298,26 +299,30 @@ rule KeypressRecordsFeatureUsage {
     -- they are separate processes from the board, and each press of theirs
     -- is recorded under the same rule — by the board, to which the pane sends
     -- it (see the guidance below). The action recorded is always the action
-    -- id of the keybinding-table row that ran (keybindings.allium:
+    -- id of the keybinding-table row that ran: this rule listens to the
+    -- event that row's lookup raises (keybindings.allium:
     -- KeypressRunsItsRowsAction). This is
     -- the evidence base for deciding which bindings earn their place, so the
     -- obligation is on the surface, not on a chosen subset of it: board
     -- navigation, the task-detail overlay,
     -- every confirmation dialog and every picker all record, exactly as the
     -- action keys do.
-    when: KeypressHandled(action, key, took_effect)
+    when: keybindings/KeyActionRun(namespace, action, key, records_usage)
 
     -- A keypress that changes nothing records nothing. Counting inert
     -- keypresses would report a binding as used precisely when it is failing
     -- to do anything, which inverts the signal this data exists to give:
     -- pressing `e` with no card selected, or a key
     -- that no keybinding-table row lists at all leaves no trace.
-    requires: took_effect
+    requires: took_effect(namespace, action)
 
     -- Characters typed into a text field are data entry, not use of a
     -- binding: recording them would drown every real action in keystroke
     -- noise and answer a question nobody is asking. A text mode is recorded
-    -- once, when it is committed or abandoned.
+    -- once, when it is committed or abandoned. A typed character has no row
+    -- and raises no KeyActionRun; a field's editing keys are rows marked
+    -- records_usage false.
+    requires: records_usage
     requires: not is_text_entry(key)
 
     ensures: FeatureUsageRecorded(
@@ -338,8 +343,9 @@ rule KeypressRecordsFeatureUsage {
         -- a key preserves the action's history across the rename. That is
         -- also why the count for an action retired and later reused under the
         -- same name needs a `since` window to read correctly.
-        -- "Took effect" is judged by whether the handler produced any command
-        -- or state change, not by whether the user could see it: a key that
+        -- took_effect(namespace, action) is judged after the row's action
+        -- ran, by whether the handler produced any command or state change,
+        -- not by whether the user could see it: a key that
         -- opens a dialog, moves a cursor, or dispatches an agent all count
         -- equally. In the implementation this is the dispatch_keyed /
         -- dispatch_handler_keyed pair in src/tui/input.rs — the latter only

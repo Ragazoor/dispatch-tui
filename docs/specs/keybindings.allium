@@ -19,7 +19,8 @@
 --           not say what navigating to the last row means.
 --           Recording a keypress as feature usage (observability.allium:
 --           KeypressRecordsFeatureUsage, FeatureUsageEvent). This spec only
---           fixes WHICH action id that rule records: the row's.
+--           fixes what that rule hears: KeyActionRun names the row's action
+--           id and carries the row's records_usage.
 --           Characters typed into a text field as data (observability.allium:
 --           is_text_entry) — those are not bindings and have no rows. The
 --           editing keys of a text field (Backspace, Delete, caret and word
@@ -441,7 +442,7 @@ entity KeyBinding {
     -- nothing was recorded (UnrecordedRowsRecordNothing).
     records_usage: Boolean = true
 
-    receiver: if namespace = tmux_global: tmux else: dispatch
+    receiver: KeyReceiver = if namespace = tmux_global: tmux else: dispatch
 
     invariant HasAtLeastOneKey {
         keys.count >= 1
@@ -475,18 +476,18 @@ rule KeypressRunsItsRowsAction {
 
     requires: namespace != tmux_global
 
-    let applicable = KeyBindings.where(b =>
-        b.namespace = namespace
-        and (b.context = null or context_holds(b.context)))
-    let exact = applicable.any(b => key in b.keys)
+    let applicable = KeyBindings where this.namespace = namespace
+                                   and (context = null or context_holds(context))
+    let exact = (applicable where key in keys).first
     -- A modified press (Ctrl/Alt held) is never answered by the catch-all.
     let catch_all = if key_has_ctrl_or_alt(key): null
-                    else: applicable.any(b => "any other key" in b.keys)
+                    else: (applicable where "any other key" in keys).first
     let binding = exact ?? catch_all
 
     requires: binding != null
 
-    ensures: KeyActionRun(namespace: namespace, action: binding.action, key: key)
+    ensures: KeyActionRun(namespace: namespace, action: binding.action, key: key,
+                          records_usage: binding.records_usage)
 
     @guidance
         -- `binding` is at most one row: ContextsDoNotOverlapForAKey forbids
@@ -499,11 +500,13 @@ rule KeypressRunsItsRowsAction {
         -- open. It is the same evaluation the drift gate uses to set a row's
         -- context up, so the row and the handler cannot read the condition
         -- differently.
-        -- The action id run here is the one KeypressRecordsFeatureUsage
-        -- records (observability.allium) when the action takes effect. The
-        -- two must never name different ids for the same press. A row with
-        -- records_usage false runs its action here and is recorded by
-        -- nothing: it is the text-entry exemption of that rule.
+        -- KeyActionRun is what KeypressRecordsFeatureUsage listens to
+        -- (observability.allium), so the action id it records when the
+        -- action takes effect is the id run here: the two cannot name
+        -- different ids for the same press. The event carries the row's
+        -- records_usage; a row with records_usage false runs its action here
+        -- and is recorded by nothing: it is the text-entry exemption of that
+        -- rule.
         -- `key` is the press's full name, modifiers included ("Ctrl+D"), so
         -- a modified press only finds a row that lists the modified form
         -- (ModifiedPressMatchesOnlyItsOwnRow).
@@ -612,8 +615,8 @@ rule ListKeybindingsViaMcp {
         -- context, action id, description and note (context and note omitted
         -- when absent; context shown as its plain words). With a namespace
         -- name supplied, exactly that one group is returned; with a family
-        -- name, every group in that family (board.confirm returns all
-        -- fourteen board.confirm.* groups), in KeyNamespace order.
+        -- name, every group in that family (board.confirm returns every
+        -- board.confirm.* group), in KeyNamespace order.
         -- tmux_global rows are included and marked as handled by tmux, so an
         -- agent learns the prefix bindings exist without mistaking them for
         -- keys the board answers.
@@ -696,6 +699,9 @@ invariant LastRowKeyWarnsItDoesNotEnterAnEpic {
 
 -- The parties are core.allium's: the operator at the keyboard and the MCP
 -- client reading the catalogue.
+
+-- The repo's Rust test suite, the party the drift gate is demanded of.
+external entity TestSuite {}
 
 ------------------------------------------------------------
 -- Surfaces
