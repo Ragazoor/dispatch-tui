@@ -1,7 +1,7 @@
 use chrono::{DateTime, SubsecRound, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{ColumnSection, EpicId, TmuxWindow, UrlType};
+use super::{BackgroundWork, ColumnSection, EpicId, TmuxWindow, UrlType};
 use crate::define_id_newtype;
 use crate::define_str_enum;
 
@@ -411,10 +411,15 @@ pub struct Task {
     /// every clear point. Read by `classify_agent_activity` (live subagents
     /// outrank staleness) and by the running card label.
     pub live_subagents: i64,
-    /// A `Stop` hook arrived while subagents were still live, so the
-    /// Running -> Review flip was deferred. The last `SubagentStop` to drain
-    /// the count performs it. See `HookStop` in `docs/specs/agent-health.allium`.
+    /// A `Stop` hook arrived while subagents or background work were still
+    /// live, so the Running -> Review flip was deferred. See `HookStop` in
+    /// `docs/specs/agent-health.allium`.
     pub stop_pending: bool,
+    /// When that deferred Stop fired. Read only while `stop_pending` holds.
+    pub stop_pending_at: Option<DateTime<Utc>>,
+    /// The background work the deferred Stop listed. Read only while
+    /// `stop_pending` holds; see [`Task::waiting_on_background`].
+    pub background_work: BackgroundWork,
     /// The name of the task's current agent, `None` with no current agent.
     /// The card's lead word (`board-visuals.allium: CardLeadsWithTheAgentName`).
     pub agent_name: Option<String>,
@@ -455,6 +460,40 @@ pub fn task_reference(id: TaskId, agent_name: Option<&str>, title: &str) -> Stri
 }
 
 impl Task {
+    /// `core.allium: Agent.waiting_on_background`: a Stop is deferred and
+    /// the list it recorded holds background work.
+    pub fn waiting_on_background(&self) -> bool {
+        self.stop_pending && self.background_work.total() > 0
+    }
+
+    /// The background work the agent waits on: what its deferred Stop
+    /// listed while it waits, nothing otherwise. The one place the gating
+    /// lives; the activity classifier and the card read it from here.
+    pub fn background_in_flight(&self) -> BackgroundWork {
+        if self.waiting_on_background() {
+            self.background_work
+        } else {
+            BackgroundWork::default()
+        }
+    }
+
+    /// The agent's own live work, as `classify_agent_activity` reads it:
+    /// its live subagents, plus the background work it waits on.
+    pub fn live_work(&self) -> i64 {
+        self.live_subagents.max(0) + self.background_in_flight().total()
+    }
+
+    /// The board's pre-filter for `ExpireBackgroundWait`: a wait on
+    /// background work whose deferred Stop and latest tool call both predate
+    /// `cutoff`. Only a hint for when to ask: the store module owns the cap
+    /// and decides again against committed state.
+    pub fn background_wait_may_have_expired(&self, cutoff: DateTime<Utc>) -> bool {
+        self.waiting_on_background()
+            && self.live_subagents == 0
+            && self.stop_pending_at.is_some_and(|at| at <= cutoff)
+            && self.last_pre_tool_use_at.is_none_or(|at| at <= cutoff)
+    }
+
     /// [`task_reference`] for this task.
     pub fn reference(&self) -> String {
         task_reference(self.id, self.agent_name.as_deref(), &self.title)
@@ -794,6 +833,8 @@ impl Default for Task {
             schedule_error: None,
             live_subagents: 0,
             stop_pending: false,
+            stop_pending_at: None,
+            background_work: BackgroundWork::default(),
             agent_name: None,
         }
     }

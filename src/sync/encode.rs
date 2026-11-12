@@ -63,6 +63,11 @@ pub(crate) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
     at.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
 }
 
+/// The `BackgroundWork` argument `try_record_stop` takes.
+pub(crate) fn background_work(work: crate::models::BackgroundWork) -> bindings::BackgroundWork {
+    dispatch_spacetime_module::BackgroundWork::from(work).into()
+}
+
 /// The `started_at` a subagent row carries: RFC 3339. That column is never compared across rows,
 /// so it has no need of [`stamp`]'s sortable format.
 pub(crate) fn subagent_started_at(at: chrono::DateTime<chrono::Utc>) -> String {

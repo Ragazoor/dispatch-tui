@@ -7,7 +7,9 @@ use ratatui::{
     widgets::ListItem,
 };
 
-use crate::models::{format_age, Epic, EpicSubstatus, Staleness, SubStatus, Task, TaskStatus};
+use crate::models::{
+    format_age, BackgroundWork, Epic, EpicSubstatus, Staleness, SubStatus, Task, TaskStatus,
+};
 use crate::tui::types::EpicMarks;
 use crate::tui::{App, EpicStatsMap};
 
@@ -68,6 +70,8 @@ enum CardIndicator {
     Blocked,
     Running {
         subagents: u32,
+        /// The background work the agent waits on; zero unless it waits.
+        background: BackgroundWork,
     },
     ReviewPr {
         pr_label: String,
@@ -184,7 +188,8 @@ fn classify_card_indicator(
     }
     if status == TaskStatus::Running {
         return CardIndicator::Running {
-            subagents: task.live_subagents.max(0) as u32,
+            subagents: count_u32(task.live_subagents),
+            background: task.background_in_flight(),
         };
     }
     if let (TaskStatus::Review, Some(u)) = (status, task.url.as_ref()) {
@@ -291,6 +296,11 @@ const DISPATCHING_SPINNER: [&str; 10] = [
     "\u{2807}", "\u{280F}",
 ];
 
+/// A count as the label shows it: never negative.
+fn count_u32(n: i64) -> u32 {
+    u32::try_from(n.max(0)).unwrap_or(u32::MAX)
+}
+
 /// `"N {singular}"` / `"N {plural}"`, or `None` at zero (the card omits the
 /// suffix entirely rather than rendering e.g. "running · 0 agents").
 fn count_suffix(n: u32, singular: &str, plural: &str) -> Option<String> {
@@ -323,10 +333,21 @@ fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'s
             (label, YELLOW)
         }
         CardIndicator::Blocked => ("\u{25c9} blocked".to_string(), YELLOW),
-        CardIndicator::Running { subagents } => {
+        CardIndicator::Running {
+            subagents,
+            background,
+        } => {
             let icon = status_icon(TaskStatus::Running);
             let mut label = format!("{icon} running");
-            if let Some(suffix) = count_suffix(subagents, "agent", "agents") {
+            // agent-health.allium: ClassifyAgentActivity, "Card label".
+            let parts = [
+                count_suffix(subagents, "agent", "agents"),
+                count_suffix(count_u32(background.shells), "shell", "shells"),
+                count_suffix(count_u32(background.workflows), "workflow", "workflows"),
+                count_suffix(count_u32(background.monitors), "monitor", "monitors"),
+                count_suffix(count_u32(background.mcp_tasks), "MCP task", "MCP tasks"),
+            ];
+            for suffix in parts.into_iter().flatten() {
                 label.push_str(" \u{00b7} ");
                 label.push_str(&suffix);
             }

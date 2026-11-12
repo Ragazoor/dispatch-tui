@@ -21,6 +21,10 @@ config {
     -- How long after the last PreToolUse hook a running task still reads
     -- as active (ClassifyAgentActivity).
     active_threshold: Duration = 10.minutes
+    -- How long a task may stay running after a Stop deferred only for
+    -- background work before that Stop applies anyway
+    -- (ExpireBackgroundWait).
+    background_wait_cap: Duration = 30.minutes
 }
 
 ------------------------------------------------------------
@@ -36,7 +40,7 @@ rule ClassifyAgentActivity {
         ensures:
             if current_agent(task).last_notification_at != null and (current_agent(task).last_pre_tool_use_at = null or current_agent(task).last_notification_at > current_agent(task).last_pre_tool_use_at):
                 task.sub_status = needs_input
-            else if current_agent(task).live_subagents > 0:
+            else if current_agent(task).live_subagents > 0 or current_agent(task).waiting_on_background:
                 task.sub_status = active
             else if current_agent(task).last_pre_tool_use_at != null and now - current_agent(task).last_pre_tool_use_at <= config.active_threshold:
                 task.sub_status = active
@@ -111,18 +115,35 @@ rule ClassifyAgentActivity {
         -- distinction has to be made there or not at all -- see
         -- HookNotification's guidance for the full argument.
         --
-        -- Backgrounded shells (Bash tool with run_in_background = true) are
-        -- deliberately NOT tracked here or anywhere else in this spec. Claude
-        -- Code fires a hook for a backgrounded shell only when the agent
-        -- explicitly polls it (BashOutput/TaskOutput) or kills it
-        -- (KillBash/TaskStop), never when the shell exits on its own. A count
-        -- kept from those hooks inflates forever for a task whose agent starts
-        -- a background shell and never checks on it again, and no hook-driven
-        -- signal can correct it.
-        -- Card label: an Active running task with live_subagents = 0 renders
-        -- just "running". A positive count appends the subagent count:
-        -- "running · 1 agent" (singular) or "running · N agents" for N > 1
-        -- (plural), read straight from agent.live_subagents.
+        -- Waiting on background work outranks the staleness threshold the
+        -- same way, and for the same reason: the agent's turn is over and it
+        -- is idle by design until Claude Code wakes it. It loses to
+        -- needs_input for the reason subagents do. ExpireBackgroundWait,
+        -- not this rule, bounds how long the wait may last.
+        --
+        -- Background work is never counted from start and stop events. An
+        -- earlier design did that, and the count inflated forever: Claude
+        -- Code fires no hook when a backgrounded shell exits on its own.
+        -- What it does give is a list of the work still in flight in every
+        -- Stop payload, and each piece of work that finishes wakes the
+        -- agent into a new turn that ends in a new Stop. So the board keeps
+        -- the list from the latest Stop (Agent.background_work) and replaces
+        -- it on every Stop; it never has to see the work end. See HookStop.
+        --
+        -- Card label: an Active running task renders "running", followed
+        -- by one " · N <kind>" part per kind with a non-zero count, in this
+        -- order:
+        --   agents     -- agent.live_subagents: "1 agent", "N agents"
+        --   shells     -- background_work.shells: "1 shell", "N shells"
+        --   workflows  -- background_work.workflows: "1 workflow", "N workflows"
+        --   monitors   -- background_work.monitors: "1 monitor", "N monitors"
+        --   MCP tasks  -- background_work.mcp_tasks: "1 MCP task", "N MCP tasks"
+        -- e.g. "running · 2 agents · 1 shell". The four background kinds
+        -- are shown only while agent.waiting_on_background holds; a task
+        -- with nothing to append renders just "running". The background
+        -- counts are what the latest Stop saw, not a live count: a shell
+        -- that started mid-turn shows from the turn's Stop on, and one that
+        -- woke the agent drops out at the next Stop.
 }
 
 rule DetectCrashedAgent {
@@ -377,15 +398,16 @@ rule HookPreToolUse {
 }
 
 rule HookStop {
-    when: Stop(task)
+    when: Stop(task, background)
     let agent = current_agent(task)
 
     requires: task.status = running
 
     ensures:
-        if exists agent and agent.live_subagents > 0:
+        if exists agent and (agent.live_subagents > 0 or background.total > 0):
             agent.stop_pending = true
             agent.stop_pending_at = now
+            agent.background_work = background
         else:
             task.status = review
             task.sub_status = default_sub_status(review)
@@ -423,11 +445,126 @@ rule HookStop {
         -- comparison is only sound if the value is independent of write
         -- order — see its guidance.
         --
-        -- The flip branch is deliberately conditioned on live_subagents = 0
-        -- alone, with no stop_pending precondition: a Stop arriving with no
-        -- live subagents flips the task even if stop_pending was already
-        -- set. Requiring the bit to be clear would leave a task carrying a
-        -- stale bit unable to take either branch.
+        -- The flip branch is deliberately conditioned on the live work alone
+        -- (no live subagents and no background work in this Stop's list),
+        -- with no stop_pending precondition: such a Stop flips the task even
+        -- if stop_pending was already set. Requiring the bit to be clear
+        -- would leave a task carrying a stale bit unable to take either
+        -- branch.
+        --
+        -- == Background work ==
+        -- `background` is the Stop payload's `background_tasks` list,
+        -- counted by kind (core/BackgroundWork). The hook script does the
+        -- counting. A payload with no such list (a Claude Code that
+        -- predates the field) counts as zero of every kind, and this rule
+        -- then acts exactly as it did before background work was read. So
+        -- does a board that receives a Stop with no counts at all, from a
+        -- hook script older than the board.
+        --
+        -- The other direction of skew, a hook script newer than the
+        -- `dispatch` binary on PATH, is covered by the script: it sends the
+        -- counts only when something is in flight (an empty or absent list is
+        -- a plain stop, identical to what every build accepts), and when a
+        -- binary that predates the count flags rejects them it sends the
+        -- plain stop instead, so the Stop is never lost.
+        --
+        -- An agent whose turn ends with a shell, workflow, monitor or MCP
+        -- task still in flight is not waiting for the operator. Claude Code
+        -- wakes it when that work finishes: it submits a
+        -- `<task-notification>` prompt (UserPromptSubmit), the agent runs a
+        -- turn, and that turn ends in a new Stop whose list no longer holds
+        -- the finished work. Moving the task to review at the first Stop
+        -- sends the operator to an agent that needs nothing, and the wake-up
+        -- then pulls it back to running. Deferring the Stop instead keeps
+        -- the task running for the whole wait, and the last Stop of the
+        -- chain, the one with an empty list, moves it to review.
+        --
+        -- The defer reuses the subagent defer's bit on purpose. Every point
+        -- that voids a deferred Stop (a status write leaving running, a
+        -- crash, a new session, a new prompt, the agent ending) is equally
+        -- right for one deferred on background work, so none of them needs
+        -- a second clear. background_work rides along like stop_pending_at:
+        -- it is written by every defer and read only while the bit holds.
+        --
+        -- Each defer replaces background_work with this Stop's list, never
+        -- adds to it. The list is Claude Code's own account of what is in
+        -- flight now, so the latest one is the whole truth; there is no
+        -- count to drift.
+        --
+        -- The defer leaves last_notification_at alone, as the subagent defer
+        -- always has: a live subagent can be blocked on a permission prompt
+        -- after the main turn ends, and nulling the stamp would hide it.
+        --
+        -- Nothing tells the board when background work ends without waking
+        -- the agent, so a shell that never exits (a dev server) would hold
+        -- the task running forever. ExpireBackgroundWait bounds that.
+        --
+        -- Verified against Claude Code 2.1.322, interactive and headless:
+        -- the first Stop lists the running shell, the shell's exit fires
+        -- UserPromptSubmit with a `<task-notification>` prompt, and the
+        -- following Stop lists nothing.
+}
+
+-- A Stop deferred only for background work applies once the wait has
+-- lasted config.background_wait_cap. The cap is the backstop for work that
+-- never ends and so never wakes the agent, and for an agent that asked the
+-- operator something in plain text while such work runs.
+rule ExpireBackgroundWait {
+    when: core/Tick()
+    for task in core/Tasks where status = running and is_locally_owned:
+        let agent = current_agent(task)
+        ensures:
+            if exists agent
+                and agent.waiting_on_background
+                and agent.live_subagents = 0
+                and agent.stop_pending_at != null
+                and agent.stop_pending_at + config.background_wait_cap <= now
+                and (agent.last_pre_tool_use_at = null or agent.last_pre_tool_use_at + config.background_wait_cap <= now):
+                task.status = review
+                task.sub_status = default_sub_status(review)
+                agent.last_pre_tool_use_at = null
+                agent.last_notification_at = null
+                agent.stop_pending = false
+
+    @guidance
+        -- The cap counts from the agent's latest sign of life: the deferred
+        -- Stop's own event time or its latest tool call, whichever is later.
+        -- A wait that a later Stop renews (more work still in flight after a
+        -- wake-up) starts its clock again, which is right: the agent just
+        -- worked. The tool-call clock covers a turn that starts without a
+        -- UserPromptSubmit to void the Stop. The wake-ups verified on
+        -- 2.1.322 (shell and subagent exits) all fire one, but others (a
+        -- peer message, a scheduled wake-up) are not verified, and a turn
+        -- that runs tools is plainly not waiting.
+        --
+        -- The store decides and applies the move in one conditional write
+        -- (spacetime/module/src/agent_state.rs), the same flip HookStop's
+        -- write makes, re-checking every condition above against committed
+        -- state. A tick that read the task and then patched its status
+        -- would race the wake-up prompt: the prompt could void the Stop in
+        -- between and the patch would still move a working agent to review.
+        -- The tick only asks; a row that no longer qualifies is a silent
+        -- no-op. The module owns config.background_wait_cap and subtracts it
+        -- itself: the board sends nothing but its own clock (the one
+        -- stop_pending_at and last_pre_tool_use_at are written in), so no
+        -- value a board sends can shorten a wait. The board reads the same
+        -- constant only to avoid asking about waits that cannot have
+        -- expired. Only the host that owns the task asks, as with
+        -- DetectCrashedAgent, so two boards never race each other for it.
+        --
+        -- Live subagents hold the task as they always have, with no cap:
+        -- their own SubagentStop hooks end them, so they cannot outlive
+        -- the board's knowledge of them. Once the last one drains,
+        -- HookSubagentStop leaves the Stop deferred if background work is
+        -- still listed, and this rule's clock, already running from that
+        -- Stop, decides from there.
+        --
+        -- A null stop_pending_at predates the field and cannot have been
+        -- written by a background defer, which always stamps it; the rule
+        -- leaves such a row alone.
+        --
+        -- The move to review is the same write HookStop's flip makes, and
+        -- NotifyReview fires on it as on any other move to review.
 }
 
 -- == Subagent Counting ==
@@ -470,7 +607,7 @@ rule HookSubagentStop {
         not exists core/SubagentEntry{agent, agent_id}
         let live = core/SubagentEntries where agent = agent
         agent.live_subagents = live.count
-        if live.count = 0 and agent.stop_pending and task.status = running:
+        if live.count = 0 and agent.stop_pending and not agent.waiting_on_background and task.status = running:
             task.status = review
             task.sub_status = default_sub_status(review)
             agent.last_pre_tool_use_at = null
@@ -482,6 +619,12 @@ rule HookSubagentStop {
         -- join lookup finds nothing, the removal is trivially satisfied,
         -- and live_subagents is simply recomputed from the table either
         -- way. The conditional block is the "drain path".
+        --
+        -- The drain does not apply a Stop that was also deferred for
+        -- background work. That work is still listed as in flight, and its
+        -- end will wake the agent into a new turn and a new Stop, which
+        -- decides then; ExpireBackgroundWait bounds the wait if it never
+        -- comes. The bit stays set, so the task keeps waiting.
         --
         -- Recomputing live_subagents and applying the deferred Stop are ONE
         -- atomic step, not a count write followed by a separate flip. There
@@ -528,16 +671,27 @@ rule HookSubagentStop {
         -- and ExitSession's guidance for the one thing the close does NOT
         -- clear (the rows and live_subagents).
         --
+        -- running AND stop_pending AND live_subagents = 0 AND
+        -- waiting_on_background is a legitimate state, not a stranded one:
+        -- the task waits on background work, and the next Stop or
+        -- ExpireBackgroundWait ends it.
+        --
         -- No backstop rule is needed for the "stranded" state — running AND
-        -- stop_pending AND live_subagents = 0. The argument is an invariant
-        -- over the writes, not an enumeration of interleavings:
+        -- stop_pending AND live_subagents = 0 AND NOT waiting_on_background.
+        -- The argument is an invariant over the writes, not an enumeration
+        -- of interleavings:
         --   - stop_pending is only ever set to true by a write whose
-        --     condition requires live_subagents > 0 (HookStop's defer
-        --     branch), so the instant the bit is set the count is non-zero.
-        --     The state cannot be created directly.
+        --     condition requires live_subagents > 0 or background work in
+        --     the list it writes (HookStop's defer branch), so the instant
+        --     the bit is set the task is not in the state. The state cannot
+        --     be created directly.
+        --   - background_work is written only by that same defer, so a
+        --     waiting task cannot stop waiting without a write that also
+        --     decides the bit.
         --   - live_subagents only reaches zero in a write that applies any
-        --     deferred Stop in the same atomic step, so the state cannot be
-        --     reached by the count falling either.
+        --     deferred Stop not held by background work in the same atomic
+        --     step, so the state cannot be reached by the count falling
+        --     either.
         --   - Every other writer of stop_pending —
         --     ClearSubagentsOnSessionStart, HookUserPromptSubmit,
         --     DispatchTask, DetectCrashedAgent, and the status writes
@@ -618,6 +772,13 @@ rule HookUserPromptSubmit {
                 agent.stop_pending = false
 
     @guidance
+        -- Not every prompt is a human's. When background work finishes,
+        -- Claude Code wakes the agent by submitting a `<task-notification>`
+        -- prompt, and this rule fires for it too. The rule treats both the
+        -- same, and that is what a wait on background work needs: the wait
+        -- is over, the voided Stop's turn is over, and the wake-up turn ends
+        -- in a Stop of its own that decides again (HookStop).
+        --
         -- A human resuming the conversation voids the Stop deferred by the
         -- turn that just ended: that turn is over, and this rule now owns
         -- the resulting status (running). Leaving the bit set would let a
@@ -691,7 +852,7 @@ rule HookNotification {
 
     ensures:
         if (kind = null or kind in {permission_prompt, elicitation_dialog})
-            or (kind = idle_prompt and (not exists agent or agent.live_subagents = 0)):
+            or (kind = idle_prompt and (not exists agent or (agent.live_subagents = 0 and not agent.waiting_on_background))):
             -- Raise: agent is genuinely blocked (or the payload carries no
             -- notification_type, which reads as "needs input" as a safe
             -- default).
@@ -757,8 +918,9 @@ rule HookNotification {
         --             (running, active), last_notification_at = null.
         --   ignore -> auth_success: no state change, no timestamp write, so an
         --             auth-success toast no longer raises a false needs_input.
-        --             idle_prompt while live_subagents > 0 lands here for the
-        --             same reason -- see below.
+        --             idle_prompt while live_subagents > 0 or while the agent
+        --             is waiting on background work lands here for the same
+        --             reason -- see below.
         --
         -- Why idle_prompt is conditional. A subagent keeps running after the
         -- main agent's own turn goes idle: HookStop defers the flip to review
@@ -768,12 +930,18 @@ rule HookNotification {
         -- waiting on its own subagents -- so raising needs_input there
         -- reports a block that does not exist.
         --
-        -- A backgrounded Bash shell is live background work too, but this rule
-        -- does not suppress for it, so a task whose only live background work
-        -- is a shell can read a false Blocked. There is no fix available here:
-        -- Claude Code never says when a backgrounded shell ends on its own
-        -- (see ClassifyAgentActivity's guidance), so "is a shell still
-        -- running" is unanswerable at notification time.
+        -- The same holds for an agent waiting on background work (a Stop
+        -- deferred by HookStop because its list held a shell, workflow,
+        -- monitor or MCP task). Claude Code delays idle_prompt for live
+        -- subagents and workflows but not for shells: verified on 2.1.322,
+        -- it fires about a minute into a backgrounded shell. The wait itself
+        -- is what tells the board the agent is not blocked, so the
+        -- predicate reads agent.waiting_on_background, not a kind.
+        --
+        -- The cost is the case where the agent asked the operator a question
+        -- in plain text while such work runs: no needs_input is raised for
+        -- it. ExpireBackgroundWait moves that task to review once the cap
+        -- runs out, which is where the operator sees it.
         --
         -- Not stamping last_notification_at is the load-bearing half of the
         -- suppression, not an incidental one. ClassifyAgentActivity reads only
@@ -787,7 +955,9 @@ rule HookNotification {
         -- ClassifyAgentActivity derives from its live counts and timestamps
         -- (active, then stale). Nor does it strand one in running: when the
         -- last subagent drains, any Stop deferred behind it applies and the
-        -- task moves to review (HookSubagentStop). An idle_prompt that
+        -- task moves to review (HookSubagentStop), and a wait on background
+        -- work ends at the next Stop or at the cap (ExpireBackgroundWait).
+        -- An idle_prompt that
         -- arrived with no Stop deferred behind it leaves the task running,
         -- which is correct -- the agent's turn never ended.
         --
@@ -1042,7 +1212,10 @@ surface HookDelivery {
     provides:
         PreToolUse(task: core/Task)
         PostToolUse(task: core/Task)
-        Stop(task: core/Task)
+        -- `background` is the payload's background_tasks list counted by
+        -- kind; zero of every kind on Claude Code versions that predate the
+        -- list, and from a hook script that sends no counts (HookStop).
+        Stop(task: core/Task, background: core/BackgroundWork)
         SubagentStart(task: core/Task, agent_id: String, session_id: String)
         SubagentStop(task: core/Task, agent_id: String, session_id: String)
         SessionStart(task: core/Task)

@@ -32,6 +32,34 @@ pub enum HookEventKind {
     UserPromptSubmit,
 }
 
+/// `core.allium: BackgroundWork`: the background work one Stop hook payload
+/// listed (`background_tasks`), counted by kind. All zero when the payload
+/// carried no list, which is how an older Claude Code behaves.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BackgroundWork {
+    pub shells: i64,
+    pub workflows: i64,
+    pub monitors: i64,
+    pub mcp_tasks: i64,
+}
+
+impl BackgroundWork {
+    pub fn total(&self) -> i64 {
+        self.shells + self.workflows + self.monitors + self.mcp_tasks
+    }
+
+    /// Nothing listed. The wire leaves the field out then, so a Stop with
+    /// no background work reads exactly as it did before the field existed.
+    pub fn is_none(&self) -> bool {
+        self.total() == 0
+    }
+}
+
+/// `agent-health.allium: config.background_wait_cap`: how long a Stop
+/// deferred only for background work may hold the task running. The store
+/// module owns it and applies it; the board reads it only to know when to ask.
+pub use dispatch_spacetime_module::BACKGROUND_WAIT_CAP;
+
 impl HookEventKind {
     /// Parse the event name (`pre_tool_use` | `notification` | `stop`). The
     /// `notification_type` subtype arrives via a separate `--kind` argument
@@ -310,17 +338,18 @@ impl AgentActivity {
     }
 }
 
-/// Classify a running agent's activity from its hook event timestamps and its
-/// live subagent count.
+/// Classify a running agent's activity from its hook event timestamps and the
+/// count of its own live work: its live subagents, plus the background work
+/// the deferred Stop listed while the agent waits on it (`Task::live_work`).
 ///
-/// `live_subagents > 0` outranks the staleness threshold but loses to a pending
+/// Live work outranks the staleness threshold but loses to a pending
 /// notification: a permission prompt genuinely needs a human even while
 /// subagents churn. See `ClassifyAgentActivity` in
 /// `docs/specs/agent-health.allium`.
 pub fn classify_agent_activity(
     last_pre_tool_use_at: Option<chrono::DateTime<chrono::Utc>>,
     last_notification_at: Option<chrono::DateTime<chrono::Utc>>,
-    live_subagents: i64,
+    live_work: i64,
     now: chrono::DateTime<chrono::Utc>,
 ) -> AgentActivity {
     if let Some(notif) = last_notification_at {
@@ -329,7 +358,7 @@ pub fn classify_agent_activity(
             return AgentActivity::Waiting;
         }
     }
-    if live_subagents > 0 {
+    if live_work > 0 {
         return AgentActivity::Active;
     }
     match last_pre_tool_use_at {

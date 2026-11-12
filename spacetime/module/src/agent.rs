@@ -68,6 +68,61 @@ pub struct Agent {
     pub stop_pending: bool,
     #[default("")]
     pub stop_pending_at: String,
+    // The background work the deferred Stop's payload listed, by kind
+    // (`core.allium: BackgroundWork`, task #99124). Read only while
+    // `stop_pending` holds; every defer overwrites all four.
+    #[default(0)]
+    pub background_shells: i64,
+    #[default(0)]
+    pub background_workflows: i64,
+    #[default(0)]
+    pub background_monitors: i64,
+    #[default(0)]
+    pub background_mcp_tasks: i64,
+}
+
+/// `core.allium: BackgroundWork`: one Stop payload's in-flight background
+/// work, counted by kind. All zero when the payload carried no list.
+#[derive(spacetimedb::SpacetimeType, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BackgroundWork {
+    pub shells: i64,
+    pub workflows: i64,
+    pub monitors: i64,
+    pub mcp_tasks: i64,
+}
+
+impl BackgroundWork {
+    pub fn total(&self) -> i64 {
+        self.shells + self.workflows + self.monitors + self.mcp_tasks
+    }
+}
+
+impl Agent {
+    /// The counts the deferred Stop recorded.
+    pub fn background_work(&self) -> BackgroundWork {
+        BackgroundWork {
+            shells: self.background_shells,
+            workflows: self.background_workflows,
+            monitors: self.background_monitors,
+            mcp_tasks: self.background_mcp_tasks,
+        }
+    }
+
+    /// `this` with every count replaced by `work`'s.
+    pub fn with_background_work(self, work: BackgroundWork) -> Agent {
+        Agent {
+            background_shells: work.shells,
+            background_workflows: work.workflows,
+            background_monitors: work.monitors,
+            background_mcp_tasks: work.mcp_tasks,
+            ..self
+        }
+    }
+
+    /// `core.allium: Agent.waiting_on_background`.
+    pub fn waiting_on_background(&self) -> bool {
+        self.stop_pending && self.background_work().total() > 0
+    }
 }
 
 /// RETIRED (`agents.allium`, A4, task #99056): the ledger that once kept every

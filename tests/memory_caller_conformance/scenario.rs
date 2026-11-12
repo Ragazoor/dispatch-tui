@@ -1287,12 +1287,12 @@ fn memory_caller_matches_the_real_reducers() {
 
         // A Stop while a subagent is live defers rather than flips.
         let real_deferred = real
-            .try_record_stop(task_id_real, ts("2026-01-01 00:00:03.000"))
+            .try_record_stop(task_id_real, ts("2026-01-01 00:00:03.000"), dispatch_tui::models::BackgroundWork::default())
             .await
             .unwrap();
         wait_for!(rows_real.task(task_id_real).is_some_and(|t| t.stop_pending));
         let mem_deferred = mem
-            .try_record_stop(task_id_mem, ts("2026-01-01 00:00:03.000"))
+            .try_record_stop(task_id_mem, ts("2026-01-01 00:00:03.000"), dispatch_tui::models::BackgroundWork::default())
             .await
             .unwrap();
         assert_eq!(
@@ -1417,6 +1417,102 @@ fn memory_caller_matches_the_real_reducers() {
             .task(task_id_real)
             .is_some_and(|t| t.sub_status == dispatch_tui::models::SubStatus::Stale));
         mem.batch_patch_sub_status(updates(task_id_mem))
+            .await
+            .unwrap();
+        compare_task(task_id_real.0);
+
+        // A background wait (task #99124): a subagent and a shell live at the
+        // Stop; the subagent's end leaves the Stop deferred for the shell; an
+        // idle_prompt is ignored; the cap then applies it.
+        let shell = dispatch_tui::models::BackgroundWork {
+            shells: 1,
+            ..Default::default()
+        };
+        real.subagent_start(
+            task_id_real,
+            "agent-c".into(),
+            "session-2".into(),
+            ts("2026-01-01 00:00:05.500"),
+        )
+        .await
+        .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.live_subagents == 1));
+        mem.subagent_start(
+            task_id_mem,
+            "agent-c".into(),
+            "session-2".into(),
+            ts("2026-01-01 00:00:05.500"),
+        )
+        .await
+        .unwrap();
+        let real_waiting = real
+            .try_record_stop(task_id_real, ts("2026-01-01 00:00:05.600"), shell)
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.waiting_on_background()));
+        let mem_waiting = mem
+            .try_record_stop(task_id_mem, ts("2026-01-01 00:00:05.600"), shell)
+            .await
+            .unwrap();
+        assert_eq!(real_waiting, mem_waiting, "background stop outcome");
+        compare_task(task_id_real.0);
+
+        real.subagent_stop(task_id_real, "agent-c".into(), "session-2".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.live_subagents == 0));
+        mem.subagent_stop(task_id_mem, "agent-c".into(), "session-2".into())
+            .await
+            .unwrap();
+        assert!(
+            rows_real
+                .task(task_id_real)
+                .is_some_and(|t| t.status == dispatch_tui::models::TaskStatus::Running
+                    && t.waiting_on_background()),
+            "the subagent drain must leave a Stop held by background work deferred"
+        );
+        compare_task(task_id_real.0);
+
+        real.record_notification(
+            task_id_real,
+            NotificationWrite::RaiseIfNoOwnWorkLive,
+            ts("2026-01-01 00:00:05.700"),
+        )
+        .await
+        .unwrap();
+        mem.record_notification(
+            task_id_mem,
+            NotificationWrite::RaiseIfNoOwnWorkLive,
+            ts("2026-01-01 00:00:05.700"),
+        )
+        .await
+        .unwrap();
+        compare_task(task_id_real.0);
+
+        // Inside the module's cap (the Stop was at 00:00:05.600): nothing
+        // applies.
+        real.expire_background_wait(task_id_real, ts("2026-01-01 00:29:00.000"))
+            .await
+            .unwrap();
+        mem.expire_background_wait(task_id_mem, ts("2026-01-01 00:29:00.000"))
+            .await
+            .unwrap();
+        compare_task(task_id_real.0);
+
+        // Past it: the Stop applies.
+        real.expire_background_wait(task_id_real, ts("2026-01-01 01:00:00.000"))
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.status == dispatch_tui::models::TaskStatus::Review));
+        mem.expire_background_wait(task_id_mem, ts("2026-01-01 01:00:00.000"))
             .await
             .unwrap();
         compare_task(task_id_real.0);

@@ -95,6 +95,12 @@ enum Commands {
         /// path rather than make clap exit 2 inside a fire-and-forget hook.
         #[arg(long = "kind")]
         notification_kind: Option<String>,
+        /// The Stop payload's background work, counted by kind from its
+        /// `background_tasks` list. Only meaningful for the `stop` event;
+        /// omitted (zero) when the payload has no list. Background work keeps
+        /// the task running (`agent-health.allium: HookStop`).
+        #[command(flatten)]
+        background: hooks::BackgroundArgs,
         #[command(flatten)]
         board: hooks::BoardAddress,
     },
@@ -919,8 +925,18 @@ async fn run_async(
             id,
             kind,
             notification_kind,
+            background,
             board,
-        } => hooks::run_event(board.port, id, &kind, notification_kind.as_deref()).await?,
+        } => {
+            hooks::run_event(
+                board.port,
+                id,
+                &kind,
+                notification_kind.as_deref(),
+                background.into(),
+            )
+            .await?
+        }
         Commands::HookSubagent {
             id,
             action,
@@ -997,6 +1013,39 @@ mod tests {
     fn parse(args: &[&str]) -> Cli {
         let argv = std::iter::once("dispatch").chain(args.iter().copied());
         Cli::try_parse_from(argv).expect("the arguments parse")
+    }
+
+    /// The hook script's Stop call with counts parses into them.
+    #[test]
+    fn hook_stop_takes_background_counts() {
+        match parse(&[
+            "hook",
+            "1",
+            "stop",
+            "--shells",
+            "2",
+            "--workflows",
+            "1",
+            "--monitors",
+            "0",
+            "--mcp-tasks",
+            "3",
+        ])
+        .command
+        {
+            Commands::Hook { background, .. } => {
+                assert_eq!(
+                    dispatch_tui::models::BackgroundWork::from(background),
+                    dispatch_tui::models::BackgroundWork {
+                        shells: 2,
+                        workflows: 1,
+                        monitors: 0,
+                        mcp_tasks: 3,
+                    }
+                );
+            }
+            _ => panic!("expected the hook command"),
+        }
     }
 
     // cli.allium: DispatchCommandLine — `--data-dir` is global, like

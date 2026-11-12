@@ -377,6 +377,10 @@ fn a_seeded_agent_keeps_its_name_and_one_open_agent_per_task() {
         live_subagents: 0,
         stop_pending: false,
         stop_pending_at: String::new(),
+        background_shells: 0,
+        background_workflows: 0,
+        background_monitors: 0,
+        background_mcp_tasks: 0,
     };
     store
         .call_as_scheduler(|ctx| seed_agents(ctx, vec![agent.clone()]))

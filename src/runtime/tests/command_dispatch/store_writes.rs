@@ -577,6 +577,27 @@ async fn dispatch_task_batch_patch_sub_status_updates_every_task() {
     );
 }
 
+/// `ExpireBackgroundWait` reaches the store and asks it to end the wait. A
+/// task that is not waiting is left alone, and a refusal is not an error.
+#[tokio::test]
+async fn dispatch_expire_background_wait_reaches_the_store_and_leaves_a_running_task() {
+    let (rt, mut app) = test_runtime().await;
+    let a = seed(&rt, "A", models::TaskStatus::Running).await;
+
+    let extra = dispatch_one(
+        &rt,
+        &mut app,
+        Command::Task(TaskCommand::ExpireBackgroundWait { id: a.id }),
+    )
+    .await;
+
+    assert!(extra.is_empty());
+    assert_eq!(
+        rt.database.get_task(a.id).await.unwrap().status,
+        models::TaskStatus::Running
+    );
+}
+
 #[tokio::test]
 async fn dispatch_epic_persist_delete_and_toggles_reach_the_db() {
     use crate::tui::commands::EpicCommand;

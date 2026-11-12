@@ -400,7 +400,16 @@ pub trait ReducerCaller: Send + Sync {
         &self,
         id: TaskId,
         stop_pending_at: DateTime<Utc>,
+        background: crate::models::BackgroundWork,
     ) -> Result<Option<bool>>;
+    /// `ExpireBackgroundWait`: the module subtracts its own cap from `now` and
+    /// applies the deferred Stop if the wait still qualifies, and is a silent
+    /// no-op otherwise.
+    async fn expire_background_wait(
+        &self,
+        id: TaskId,
+        now: DateTime<Utc>,
+    ) -> Result<ReducerOutcome>;
     async fn record_pre_tool_use(
         &self,
         id: TaskId,

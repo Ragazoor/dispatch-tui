@@ -224,8 +224,14 @@ impl MemoryReducerCaller {
         Self::delete_subagent_entry(&mut tables, task_id, &agent_id);
         self.sync_subagent_count(&mut tables, task_id)
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
-        self.apply_pending_stop_if_drained(&mut tables, task_id)
-            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        // A Stop also held by background work stays deferred (module twin:
+        // `subagent_stop`); the detach drain below applies it regardless.
+        let held_by_background = module::current_agent(&self.agent_store(&mut tables), task_id)
+            .is_some_and(|agent| agent.waiting_on_background());
+        if !held_by_background {
+            self.apply_pending_stop_if_drained(&mut tables, task_id)
+                .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        }
         Ok(Self::drain_read_back(&tables, task_id))
     }
 
@@ -263,6 +269,7 @@ impl MemoryReducerCaller {
         &self,
         id: TaskId,
         stop_pending_at: DateTime<Utc>,
+        background: crate::models::BackgroundWork,
     ) -> Result<Option<bool>> {
         let id = id.0;
         let stop_pending_at = encode::stamp(stop_pending_at);
@@ -273,24 +280,55 @@ impl MemoryReducerCaller {
         if row.status != RUNNING {
             return Ok(None);
         }
-        // No current agent holds no subagents: the Stop flips at once (A15).
-        let live = module::current_agent(&self.agent_store(&mut tables), id)
-            .map_or(0, |a| a.live_subagents);
-        if live == 0 {
+        let background = module::BackgroundWork::from(background);
+        // No current agent holds no subagents and no background work: the
+        // Stop flips at once (A15).
+        let live =
+            module::current_agent(&self.agent_store(&mut tables), id).map(|a| a.live_subagents);
+        if live.is_none_or(|live| live == 0 && background.total() == 0) {
             self.flip_to_review(&mut tables, row)
                 .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         } else {
             module::update_current_agent(&mut self.agent_store(&mut tables), id, |agent| {
+                // Every defer overwrites all four counts, zeros included.
                 module::Agent {
                     stop_pending: true,
                     stop_pending_at,
                     ..agent
                 }
+                .with_background_work(background)
             });
         }
         Ok(Some(
             tables.tasks.get(&id).is_some_and(|t| t.status == REVIEW),
         ))
+    }
+
+    /// Mirrors the module's `expire_background_wait`: the same predicate,
+    /// `module::background_wait_expired`, and the same flip.
+    pub(super) fn apply_expire_background_wait(
+        &self,
+        id: TaskId,
+        now: DateTime<Utc>,
+    ) -> Result<ReducerOutcome> {
+        let id = id.0;
+        let cutoff = match module::background_wait_cutoff(&encode::stamp(now)) {
+            Ok(cutoff) => cutoff,
+            Err(why) => return Ok(ReducerOutcome::Refused(why)),
+        };
+        let mut tables = self.lock();
+        let Some(row) = tables.tasks.get(&id).cloned() else {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        };
+        let Some(agent) = module::current_agent(&self.agent_store(&mut tables), id) else {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        };
+        if module::background_wait_expired(&row, &agent, &cutoff) {
+            if let Err(why) = self.flip_to_review(&mut tables, row) {
+                return Ok(ReducerOutcome::Refused(why));
+            }
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     pub(super) fn apply_record_pre_tool_use(
@@ -336,8 +374,10 @@ impl MemoryReducerCaller {
         if row.status != RUNNING {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
-        let live = module::current_agent(&self.agent_store(&mut tables), id)
-            .map_or(0, |a| a.live_subagents);
+        // Read from the committed row: live subagents, or a wait on
+        // background work.
+        let busy = module::current_agent(&self.agent_store(&mut tables), id)
+            .is_some_and(|a| a.live_subagents > 0 || a.waiting_on_background());
         let raised = |row: module::Task| module::Task {
             sub_status: NEEDS_INPUT.into(),
             ..row
@@ -366,7 +406,7 @@ impl MemoryReducerCaller {
                 stamp(self, &mut tables, at);
                 self.write_task(&mut tables, raised(row))
             }
-            NotificationWrite::RaiseIfNoOwnWorkLive if live == 0 => {
+            NotificationWrite::RaiseIfNoOwnWorkLive if !busy => {
                 stamp(self, &mut tables, at);
                 self.write_task(&mut tables, raised(row))
             }

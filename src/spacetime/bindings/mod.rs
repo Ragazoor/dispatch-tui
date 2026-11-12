@@ -12,6 +12,7 @@ pub mod agent_type;
 pub mod apply_learning_verdicts_reducer;
 pub mod archive_stale_learnings_reducer;
 pub mod backfill_agents_reducer;
+pub mod background_work_type;
 pub mod batch_delete_reducer;
 pub mod batch_patch_sub_status_reducer;
 pub mod bookmark_type;
@@ -44,6 +45,7 @@ pub mod dispatch_request_type;
 pub mod ensure_managed_epics_reducer;
 pub mod epic_patch_type;
 pub mod epic_type;
+pub mod expire_background_wait_reducer;
 pub mod fail_interrupted_dispatch_requests_reducer;
 pub mod fail_interrupted_session_requests_reducer;
 pub mod feed_ingest_item_type;
@@ -213,6 +215,7 @@ pub use agent_type::Agent;
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
 pub use archive_stale_learnings_reducer::archive_stale_learnings;
 pub use backfill_agents_reducer::backfill_agents;
+pub use background_work_type::BackgroundWork;
 pub use batch_delete_reducer::batch_delete;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use bookmark_type::Bookmark;
@@ -245,6 +248,7 @@ pub use dispatch_request_type::DispatchRequest;
 pub use ensure_managed_epics_reducer::ensure_managed_epics;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
+pub use expire_background_wait_reducer::expire_background_wait;
 pub use fail_interrupted_dispatch_requests_reducer::fail_interrupted_dispatch_requests;
 pub use fail_interrupted_session_requests_reducer::fail_interrupted_session_requests;
 pub use feed_ingest_item_type::FeedIngestItem;
@@ -517,6 +521,10 @@ pub enum Reducer {
         reviews_interval_secs: i64,
         cve_command: String,
         cve_interval_secs: i64,
+    },
+    ExpireBackgroundWait {
+        id: i64,
+        now: String,
     },
     FailInterruptedDispatchRequests {
         host: String,
@@ -849,6 +857,7 @@ pub enum Reducer {
     TryRecordStop {
         id: i64,
         stop_pending_at: String,
+        background: BackgroundWork,
     },
     UnlinkWorkPackageItem {
         work_package_id: i64,
@@ -920,6 +929,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
             Reducer::DeleteWorkspace { .. } => "delete_workspace",
             Reducer::EnsureManagedEpics { .. } => "ensure_managed_epics",
+            Reducer::ExpireBackgroundWait { .. } => "expire_background_wait",
             Reducer::FailInterruptedDispatchRequests { .. } => "fail_interrupted_dispatch_requests",
             Reducer::FailInterruptedSessionRequests { .. } => "fail_interrupted_session_requests",
             Reducer::FlattenEpic { .. } => "flatten_epic",
@@ -1193,6 +1203,13 @@ Reducer::ClearSetting{
                 reviews_interval_secs: reviews_interval_secs.clone(),
                 cve_command: cve_command.clone(),
                 cve_interval_secs: cve_interval_secs.clone(),
+}),
+            Reducer::ExpireBackgroundWait{
+                id,
+                now,
+}             => __sats::bsatn::to_vec(&expire_background_wait_reducer::ExpireBackgroundWaitArgs {
+                id: id.clone(),
+                now: now.clone(),
 }),
             Reducer::FailInterruptedDispatchRequests{
                 host,
@@ -1771,9 +1788,11 @@ Reducer::RecordBaseBranch{
             Reducer::TryRecordStop{
                 id,
                 stop_pending_at,
+                background,
 }             => __sats::bsatn::to_vec(&try_record_stop_reducer::TryRecordStopArgs {
                 id: id.clone(),
                 stop_pending_at: stop_pending_at.clone(),
+                background: background.clone(),
 }),
             Reducer::UnlinkWorkPackageItem{
                 work_package_id,

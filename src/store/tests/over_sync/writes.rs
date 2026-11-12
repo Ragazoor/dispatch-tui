@@ -85,6 +85,7 @@ enum Sent {
     SubagentClear(i64),
     SubagentClearAndVoidPendingStop(i64),
     TryRecordStop(i64, String),
+    ExpireBackgroundWait(i64, String),
     RecordPreToolUse(i64, String, String),
     RecordNotification(i64, String, String),
     RecordUserPromptSubmit(i64, String, String),
@@ -692,6 +693,7 @@ impl ReducerCaller for RecordingCaller {
         &self,
         id: TaskId,
         stop_pending_at: DateTime<Utc>,
+        _background: crate::models::BackgroundWork,
     ) -> anyhow::Result<Option<bool>> {
         let id = id.0;
         let stop_pending_at = encode::stamp(stop_pending_at);
@@ -706,6 +708,14 @@ impl ReducerCaller for RecordingCaller {
             .unwrap()
             .push(Sent::TryRecordStop(id, stop_pending_at));
         Ok(Some(self.stop_flag))
+    }
+
+    async fn expire_background_wait(
+        &self,
+        id: TaskId,
+        now: DateTime<Utc>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ExpireBackgroundWait(id.0, encode::stamp(now)))
     }
 
     async fn record_pre_tool_use(

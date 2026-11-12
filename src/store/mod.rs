@@ -236,7 +236,18 @@ pub trait TaskCrud: TaskRead {
         &self,
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
+        background: crate::models::BackgroundWork,
     ) -> Result<StopOutcome>;
+    /// `ExpireBackgroundWait`: ask the store to apply `id`'s deferred Stop if
+    /// it has waited on background work for the store's cap, counted from
+    /// the Stop and from the latest tool call. The module owns the cap and
+    /// decides against committed state; a row that does not qualify is left
+    /// alone.
+    async fn expire_background_wait(
+        &self,
+        id: TaskId,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()>;
     /// Apply a `PreToolUse`/`PostToolUse` hook to `id`: stamp
     /// `last_pre_tool_use_at` and set `sub_status`, only while the task is
     /// still running.

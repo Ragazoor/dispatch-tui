@@ -104,6 +104,8 @@ mod tests {
                 last_notification_at: None,
                 live_subagents: 0,
                 stop_pending: false,
+                stop_pending_at: None,
+                background_work: crate::models::BackgroundWork::default(),
             },
             Agent {
                 id: AgentId(2),
@@ -120,6 +122,8 @@ mod tests {
                 last_notification_at: None,
                 live_subagents: 0,
                 stop_pending: false,
+                stop_pending_at: None,
+                background_work: crate::models::BackgroundWork::default(),
             },
             Agent {
                 id: AgentId(3),
@@ -136,6 +140,8 @@ mod tests {
                 last_notification_at: None,
                 live_subagents: 0,
                 stop_pending: false,
+                stop_pending_at: None,
+                background_work: crate::models::BackgroundWork::default(),
             },
         ]
     }

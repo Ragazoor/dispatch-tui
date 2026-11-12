@@ -1347,7 +1347,7 @@ rule AttachPlanViaCli {
 --   • `dispatch prune-repo-paths` — drops the core/SavedRepoPath rows THIS host
 --     saved whose path no longer exists on its filesystem; other hosts' rows
 --     are left alone (cli.allium: PruneRepoPathsViaCli). Operator-only housekeeping.
---   • `dispatch hook <id> <kind> [--kind K]` — see HookNotification in agent-health.allium.
+--   • `dispatch hook <id> <kind> [--kind K] [--shells N --workflows N --monitors N --mcp-tasks N]` — see HookNotification and HookStop in agent-health.allium.
 --   • `dispatch pr-gate <id>` — see PrLearningsGate in pr-workflow.allium.
 --   • `dispatch caller-headers` — prints the session identity header and
 --     exits 0, always. Reads nothing: not its arguments, not its working

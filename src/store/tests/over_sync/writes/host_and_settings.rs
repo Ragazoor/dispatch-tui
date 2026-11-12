@@ -496,7 +496,9 @@ async fn every_store_mutation_reaches_the_transport() {
     db.subagent_clear_and_void_pending_stop(TaskId(1))
         .await
         .unwrap();
-    db.try_record_stop(TaskId(1), now).await.unwrap();
+    db.try_record_stop(TaskId(1), now, crate::models::BackgroundWork::default())
+        .await
+        .unwrap();
     db.record_pre_tool_use(TaskId(1), SubStatus::Active, now)
         .await
         .unwrap();

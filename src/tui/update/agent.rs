@@ -210,6 +210,7 @@ impl App {
 
         let mut cmds = self.tick_window_checks();
         cmds.extend(self.tick_sub_status());
+        cmds.extend(self.tick_background_wait());
         cmds.extend(self.tick_pr_poll());
         cmds.extend(self.tick_split_pane_check());
         cmds.extend(self.tick_stale_learning());
@@ -366,7 +367,7 @@ impl App {
                 let activity = crate::models::classify_agent_activity(
                     t.last_pre_tool_use_at,
                     t.last_notification_at,
-                    t.live_subagents,
+                    t.live_work(),
                     now,
                 );
                 let target = activity.to_sub_status();
@@ -389,6 +390,27 @@ impl App {
                 crate::tui::commands::TaskCommand::BatchPatchSubStatus { updates },
             )]
         }
+    }
+
+    /// `ExpireBackgroundWait`: ask the store to end each wait on background
+    /// work that has passed [`BACKGROUND_WAIT_CAP`](crate::models::BACKGROUND_WAIT_CAP),
+    /// counted from the deferred Stop and from the latest tool call. Only this
+    /// host's tasks, as for the crash check. The store re-checks against
+    /// committed state, so a wake-up that landed since this board's copy
+    /// was read leaves nothing to apply.
+    pub(in crate::tui) fn tick_background_wait(&self) -> Vec<Command> {
+        let cutoff = chrono::Utc::now() - crate::models::BACKGROUND_WAIT_CAP;
+        let local_host_id = self.local_host_id();
+        self.board
+            .tasks
+            .iter()
+            .filter(|t| t.background_wait_may_have_expired(cutoff))
+            .filter(|t| t.status == TaskStatus::Running)
+            .filter(|t| t.is_locally_owned(local_host_id))
+            .map(|t| {
+                Command::Task(crate::tui::commands::TaskCommand::ExpireBackgroundWait { id: t.id })
+            })
+            .collect()
     }
 
     /// Poll PR status for review tasks with open PRs, throttled per task by
@@ -1011,5 +1033,97 @@ mod tick_tests {
         let t = app.board.find_task(TaskId(63)).unwrap();
         assert!(t.tmux_window.is_some());
         assert_ne!(t.sub_status, SubStatus::Crashed);
+    }
+
+    /// A local running task whose agent waits on background work since `ago`.
+    fn waiting_task(id: i64, ago: chrono::Duration) -> Task {
+        let mut task = make_task(id, TaskStatus::Running);
+        task.host = Some("this-host".into());
+        task.tmux_window = Some(crate::models::test_tmux_window(&format!("task-{id}")));
+        task.sub_status = SubStatus::Active;
+        task.stop_pending = true;
+        task.stop_pending_at = Some(chrono::Utc::now() - ago);
+        task.last_pre_tool_use_at = Some(chrono::Utc::now() - ago);
+        task.background_work = crate::models::BackgroundWork {
+            shells: 1,
+            ..Default::default()
+        };
+        task
+    }
+
+    fn expiry_requests(cmds: &[Command]) -> Vec<TaskId> {
+        cmds.iter()
+            .filter_map(|c| match c {
+                Command::Task(crate::tui::commands::TaskCommand::ExpireBackgroundWait { id }) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `ClassifyAgentActivity`: waiting on background work outranks the
+    /// staleness threshold, like live subagents.
+    #[test]
+    fn a_task_waiting_on_background_work_does_not_go_stale() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        app.board
+            .tasks
+            .push(waiting_task(70, chrono::Duration::minutes(20)));
+
+        app.tick_sub_status();
+
+        let t = app.board.find_task(TaskId(70)).unwrap();
+        assert_eq!(t.sub_status, SubStatus::Active);
+    }
+
+    /// `ExpireBackgroundWait`: past the cap, the tick asks the store.
+    #[test]
+    fn the_tick_asks_the_store_to_end_a_wait_past_the_cap() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        app.board.tasks.push(waiting_task(
+            71,
+            crate::models::BACKGROUND_WAIT_CAP + chrono::Duration::minutes(1),
+        ));
+
+        assert_eq!(
+            expiry_requests(&app.tick_background_wait()),
+            vec![TaskId(71)]
+        );
+    }
+
+    /// Inside the cap, or with recent activity, it does not ask.
+    #[test]
+    fn the_tick_leaves_a_wait_inside_the_cap_alone() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        app.board
+            .tasks
+            .push(waiting_task(72, chrono::Duration::minutes(5)));
+        let mut active = waiting_task(
+            73,
+            crate::models::BACKGROUND_WAIT_CAP + chrono::Duration::minutes(1),
+        );
+        active.last_pre_tool_use_at = Some(chrono::Utc::now());
+        app.board.tasks.push(active);
+
+        assert!(expiry_requests(&app.tick_background_wait()).is_empty());
+    }
+
+    /// Only the owning host asks.
+    #[test]
+    fn the_tick_does_not_ask_for_a_task_hosted_on_another_machine() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        let mut foreign = waiting_task(
+            74,
+            crate::models::BACKGROUND_WAIT_CAP + chrono::Duration::minutes(1),
+        );
+        foreign.host = Some("other-host".into());
+        app.board.tasks.push(foreign);
+
+        assert!(expiry_requests(&app.tick_background_wait()).is_empty());
     }
 }

@@ -284,12 +284,23 @@ impl TaskCrud for Store {
         &self,
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
+        background: crate::models::BackgroundWork,
     ) -> Result<StopOutcome> {
-        Ok(match self.caller.try_record_stop(id, now).await? {
-            None => StopOutcome::NoOp,
-            Some(true) => StopOutcome::Flipped,
-            Some(false) => StopOutcome::Deferred,
-        })
+        Ok(
+            match self.caller.try_record_stop(id, now, background).await? {
+                None => StopOutcome::NoOp,
+                Some(true) => StopOutcome::Flipped,
+                Some(false) => StopOutcome::Deferred,
+            },
+        )
+    }
+
+    async fn expire_background_wait(
+        &self,
+        id: TaskId,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        self.caller.expire_background_wait(id, now).await?.applied()
     }
 
     async fn record_pre_tool_use(

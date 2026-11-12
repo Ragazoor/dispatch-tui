@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use http_body_util::BodyExt;
 use hyper_util::rt::TokioIo;
 
-use crate::models::{HookEventKind, NotificationKind, TaskId};
+use crate::models::{BackgroundWork, HookEventKind, NotificationKind, TaskId};
 use wire::{Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, Question, HOOK_PATH};
 
 /// How long a hook waits on the board before giving up on it.
@@ -142,12 +142,44 @@ where
     })
 }
 
-/// `dispatch hook <id> <kind> [--kind <notification_kind>]`.
+/// A Stop payload's background work as `dispatch hook <id> stop` takes it:
+/// one count per kind the hook script counts (`core.allium: BackgroundWork`).
+/// Each defaults to zero, so a hook script that sends none, or a Claude Code
+/// whose payload has no list, reads as nothing listed.
+#[derive(Debug, Clone, Copy, Default, clap::Args)]
+pub struct BackgroundArgs {
+    /// Background shells in flight (a backgrounded Bash call, and `Monitor`).
+    #[arg(long, default_value_t = 0)]
+    pub shells: i64,
+    /// Workflows in flight.
+    #[arg(long, default_value_t = 0)]
+    pub workflows: i64,
+    /// MCP monitors in flight.
+    #[arg(long, default_value_t = 0)]
+    pub monitors: i64,
+    /// MCP tasks (long MCP tool calls run as jobs) in flight.
+    #[arg(long = "mcp-tasks", default_value_t = 0)]
+    pub mcp_tasks: i64,
+}
+
+impl From<BackgroundArgs> for BackgroundWork {
+    fn from(args: BackgroundArgs) -> Self {
+        BackgroundWork {
+            shells: args.shells.max(0),
+            workflows: args.workflows.max(0),
+            monitors: args.monitors.max(0),
+            mcp_tasks: args.mcp_tasks.max(0),
+        }
+    }
+}
+
+/// `dispatch hook <id> <kind> [--kind <notification_kind>] [--shells N ...]`.
 pub async fn run_event(
     port: u16,
     id: TaskId,
     kind: &str,
     notification_kind: Option<&str>,
+    background: BackgroundWork,
 ) -> Result<()> {
     // The notification subtype (from `--kind`) is only meaningful for the
     // `notification` event; build it directly instead of parsing then
@@ -167,6 +199,8 @@ pub async fn run_event(
         ObservedEvent::Event {
             task_id: id,
             kind: parsed,
+            // Only a Stop reads them; the board ignores them on any other kind.
+            background,
         },
     )
     .await
@@ -365,12 +399,60 @@ mod tests {
         let request = HookRequest::Observe(ObservedEvent::Event {
             task_id: TaskId(7),
             kind: HookEventKind::Notification(Some(NotificationKind::AuthSuccess)),
+            background: crate::models::BackgroundWork::default(),
         });
         let json = serde_json::to_string(&request).unwrap();
         assert_eq!(
             serde_json::from_str::<HookRequest>(&json).unwrap(),
             request,
             "json was: {json}"
+        );
+    }
+
+    /// A Stop's background work survives the wire, and a Stop with none is
+    /// sent exactly as before the field existed, so a board on an older build
+    /// still accepts it and this board reads an older hook's Stop as one with
+    /// nothing listed.
+    #[test]
+    fn a_stops_background_work_is_on_the_wire_only_when_there_is_some() {
+        let with = HookRequest::Observe(ObservedEvent::Event {
+            task_id: TaskId(7),
+            kind: HookEventKind::Stop,
+            background: BackgroundWork {
+                shells: 2,
+                ..BackgroundWork::default()
+            },
+        });
+        let json = serde_json::to_string(&with).unwrap();
+        assert_eq!(serde_json::from_str::<HookRequest>(&json).unwrap(), with);
+
+        let without = HookRequest::Observe(ObservedEvent::Event {
+            task_id: TaskId(7),
+            kind: HookEventKind::Stop,
+            background: BackgroundWork::default(),
+        });
+        let json = serde_json::to_string(&without).unwrap();
+        assert!(!json.contains("background"), "json was: {json}");
+        assert_eq!(serde_json::from_str::<HookRequest>(&json).unwrap(), without);
+    }
+
+    /// Counts below zero read as zero.
+    #[test]
+    fn background_args_parse_into_counts_and_never_go_negative() {
+        let work = BackgroundWork::from(BackgroundArgs {
+            shells: 2,
+            workflows: -1,
+            monitors: 0,
+            mcp_tasks: 3,
+        });
+        assert_eq!(
+            work,
+            BackgroundWork {
+                shells: 2,
+                workflows: 0,
+                monitors: 0,
+                mcp_tasks: 3,
+            }
         );
     }
 

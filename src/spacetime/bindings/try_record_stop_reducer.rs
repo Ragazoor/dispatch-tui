@@ -4,11 +4,14 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+use super::background_work_type::BackgroundWork;
+
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct TryRecordStopArgs {
     pub id: i64,
     pub stop_pending_at: String,
+    pub background: BackgroundWork,
 }
 
 impl From<TryRecordStopArgs> for super::Reducer {
@@ -16,6 +19,7 @@ impl From<TryRecordStopArgs> for super::Reducer {
         Self::TryRecordStop {
             id: args.id,
             stop_pending_at: args.stop_pending_at,
+            background: args.background,
         }
     }
 }
@@ -35,8 +39,13 @@ pub trait try_record_stop {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`try_record_stop:try_record_stop_then`] to run a callback after the reducer completes.
-    fn try_record_stop(&self, id: i64, stop_pending_at: String) -> __sdk::Result<()> {
-        self.try_record_stop_then(id, stop_pending_at, |_, _| {})
+    fn try_record_stop(
+        &self,
+        id: i64,
+        stop_pending_at: String,
+        background: BackgroundWork,
+    ) -> __sdk::Result<()> {
+        self.try_record_stop_then(id, stop_pending_at, background, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `try_record_stop` to run as soon as possible,
@@ -49,6 +58,7 @@ pub trait try_record_stop {
         &self,
         id: i64,
         stop_pending_at: String,
+        background: BackgroundWork,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -61,6 +71,7 @@ impl try_record_stop for super::RemoteReducers {
         &self,
         id: i64,
         stop_pending_at: String,
+        background: BackgroundWork,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -70,6 +81,7 @@ impl try_record_stop for super::RemoteReducers {
             TryRecordStopArgs {
                 id,
                 stop_pending_at,
+                background,
             },
             callback,
         )

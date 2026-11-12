@@ -298,5 +298,9 @@ pub fn blank_agent() -> Agent {
         live_subagents: 0,
         stop_pending: false,
         stop_pending_at: String::new(),
+        background_shells: 0,
+        background_workflows: 0,
+        background_monitors: 0,
+        background_mcp_tasks: 0,
     }
 }

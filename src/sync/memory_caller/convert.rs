@@ -31,6 +31,30 @@ macro_rules! mirror {
     };
 }
 
+// One list of the background kinds for the module <-> bindings pair; the board
+// type converts into the module's (a kind added to one and not the other is a
+// compile error here, not a silent drop).
+mirror!(
+    module::BackgroundWork,
+    bindings::BackgroundWork {
+        shells,
+        workflows,
+        monitors,
+        mcp_tasks,
+    }
+);
+
+impl From<crate::models::BackgroundWork> for module::BackgroundWork {
+    fn from(work: crate::models::BackgroundWork) -> Self {
+        Self {
+            shells: work.shells,
+            workflows: work.workflows,
+            monitors: work.monitors,
+            mcp_tasks: work.mcp_tasks,
+        }
+    }
+}
+
 mirror!(
     module::UnseenItem,
     bindings::UnseenItem {
@@ -515,5 +539,9 @@ mirror!(
         live_subagents,
         stop_pending,
         stop_pending_at,
+        background_shells,
+        background_workflows,
+        background_monitors,
+        background_mcp_tasks,
     }
 );

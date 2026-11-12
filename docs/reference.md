@@ -147,6 +147,7 @@ dispatch uninstall [-y] [--purge]                # --purge also forgets host.jso
 # reachable on --port the event is dropped and the command fails. See `HookDelivery` in
 # docs/specs/agent-health.allium.
 dispatch hook <id> <kind> [--kind <notification-kind>] [--port <port>]
+    [--shells N] [--workflows N] [--monitors N] [--mcp-tasks N]   # stop only: the payload's background work, which keeps the task running (HookStop)
 dispatch hook-subagent <id> <start|stop|clear> [--agent-id <id>] [--session-id <id>] [--port <port>]
 dispatch hook-peer-message <id> --target <session> --body <text> [--port <port>]
 dispatch pr-gate <id> [--port <port>]            # PreToolUse gate on the first PR-creation attempt.

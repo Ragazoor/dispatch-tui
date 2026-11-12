@@ -204,7 +204,10 @@ async fn subagent_stop_drains_and_flips_a_pending_stop_to_review() {
     run(&caller, id).await;
     start_subagent(&caller, id, "agent-a", "session-1").await;
     // Live subagents means `try_record_stop` defers rather than flips.
-    let deferred = caller.try_record_stop(id, at(TEST_STAMP)).await.unwrap();
+    let deferred = caller
+        .try_record_stop(id, at(TEST_STAMP), crate::models::BackgroundWork::default())
+        .await
+        .unwrap();
     assert_eq!(deferred, Some(false));
     assert!(rows.task(id).unwrap().stop_pending);
 
@@ -239,7 +242,10 @@ async fn subagent_clear_and_void_pending_stop_clears_the_flag_without_flipping()
     caller.start_agent_for(id.0);
     run(&caller, id).await;
     start_subagent(&caller, id, "agent-a", "session-1").await;
-    caller.try_record_stop(id, at(TEST_STAMP)).await.unwrap();
+    caller
+        .try_record_stop(id, at(TEST_STAMP), crate::models::BackgroundWork::default())
+        .await
+        .unwrap();
     assert!(rows.task(id).unwrap().stop_pending);
 
     caller
@@ -258,7 +264,10 @@ async fn subagent_clear_and_void_pending_stop_clears_the_flag_without_flipping()
 async fn try_record_stop_refuses_when_the_task_is_not_running() {
     let (caller, _rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
-    let outcome = caller.try_record_stop(id, at(TEST_STAMP)).await.unwrap();
+    let outcome = caller
+        .try_record_stop(id, at(TEST_STAMP), crate::models::BackgroundWork::default())
+        .await
+        .unwrap();
     assert_eq!(outcome, None);
 }
 
@@ -267,7 +276,10 @@ async fn try_record_stop_flips_immediately_with_no_live_subagents() {
     let (caller, rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
     run(&caller, id).await;
-    let outcome = caller.try_record_stop(id, at(TEST_STAMP)).await.unwrap();
+    let outcome = caller
+        .try_record_stop(id, at(TEST_STAMP), crate::models::BackgroundWork::default())
+        .await
+        .unwrap();
     assert_eq!(outcome, Some(true));
     assert_eq!(
         rows.task(id).unwrap().status,
@@ -359,7 +371,11 @@ async fn record_user_prompt_submit_resumes_from_review_and_voids_a_stale_pending
     run(&caller, id).await;
     start_subagent(&caller, id, "agent-a", "session-1").await;
     caller
-        .try_record_stop(id, at("2026-01-01 00:00:00.000"))
+        .try_record_stop(
+            id,
+            at("2026-01-01 00:00:00.000"),
+            crate::models::BackgroundWork::default(),
+        )
         .await
         .unwrap();
     assert!(rows.task(id).unwrap().stop_pending);

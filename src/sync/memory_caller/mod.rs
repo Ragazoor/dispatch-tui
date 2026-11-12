@@ -773,8 +773,17 @@ impl ReducerCaller for MemoryReducerCaller {
         &self,
         id: TaskId,
         stop_pending_at: DateTime<Utc>,
+        background: crate::models::BackgroundWork,
     ) -> Result<Option<bool>> {
-        self.apply_try_record_stop(id, stop_pending_at)
+        self.apply_try_record_stop(id, stop_pending_at, background)
+    }
+
+    async fn expire_background_wait(
+        &self,
+        id: TaskId,
+        now: DateTime<Utc>,
+    ) -> Result<ReducerOutcome> {
+        self.apply_expire_background_wait(id, now)
     }
 
     async fn record_pre_tool_use(

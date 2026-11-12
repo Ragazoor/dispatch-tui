@@ -210,7 +210,8 @@ rule DetachTmux {
             not exists entry
     ensures: agent.live_subagents = 0
     ensures:
-        -- live_subagents is zero after this rule, so a pending stop drains.
+        -- live_subagents is zero after this rule, so a pending stop drains,
+        -- whatever it was deferred for.
         if agent.stop_pending and task.status = running:
             task.status = review
             task.sub_status = default_sub_status(review)
@@ -237,7 +238,10 @@ rule DetachTmux {
         -- agent along with any subagents it spawned, so a stop_pending
         -- task that had been waiting on them to finish resolves to
         -- Review right here rather than staying stuck in Running with no
-        -- agent left to drain it.
+        -- agent left to drain it. A Stop deferred for background work
+        -- (agent-health.allium: HookStop) applies here too, unlike in
+        -- HookSubagentStop's drain: killing the window ends that work along
+        -- with the agent, so no wake-up is coming.
 }
 
 rule BatchDetachTmux {

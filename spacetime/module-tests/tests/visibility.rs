@@ -309,12 +309,12 @@ fn a_hook_for_a_task_in_a_private_epic_is_answered_as_for_a_missing_task() {
     let task = store.create("alice", epic_task("t", private, "running"));
     let unseen = store
         .call("bob", |ctx| {
-            try_record_stop(ctx, task, "2026-09-19T10:00:00.000".into())
+            try_record_stop(ctx, task, "2026-09-19T10:00:00.000".into(), BackgroundWork::default())
         })
         .expect_err("refused");
     let missing = store
         .call("bob", |ctx| {
-            try_record_stop(ctx, 999_999, "2026-09-19T10:00:00.000".into())
+            try_record_stop(ctx, 999_999, "2026-09-19T10:00:00.000".into(), BackgroundWork::default())
         })
         .expect_err("refused");
     assert_eq!(

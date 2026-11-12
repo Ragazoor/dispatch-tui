@@ -30,13 +30,13 @@
 use chrono::{DateTime, Utc};
 
 use crate::models::{
-    Agent, AgentEndReason, AgentId, AgentState, DispatchMode, DispatchOrigin, DispatchRequest,
-    DispatchRequestId, DispatchRequestState, Epic, EpicId, EpicOrigin, FeedRequest, FeedRequestId,
-    FeedRequestKind, FeedRequestState, FeedRole, Learning, LearningId, LearningKind,
-    LearningRetrieval, LearningScope, LearningStatus, RetrievalSource, SessionRequest,
-    SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus, Task, TaskId, TaskModel,
-    TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, UsageSummary, WorkPackage, WorkPackageId,
-    WorkPackageItem, WorkPackageLink, WrapUpMode,
+    Agent, AgentEndReason, AgentId, AgentState, BackgroundWork, DispatchMode, DispatchOrigin,
+    DispatchRequest, DispatchRequestId, DispatchRequestState, Epic, EpicId, EpicOrigin,
+    FeedRequest, FeedRequestId, FeedRequestKind, FeedRequestState, FeedRole, Learning, LearningId,
+    LearningKind, LearningRetrieval, LearningScope, LearningStatus, RetrievalSource,
+    SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus, Task,
+    TaskId, TaskModel, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, UsageSummary,
+    WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 use crate::spacetime::bindings;
 
@@ -188,6 +188,8 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         schedule_error: text(&row.schedule_error).map(str::to_owned),
         live_subagents: 0,
         stop_pending: false,
+        stop_pending_at: None,
+        background_work: BackgroundWork::default(),
         // The current agent's name too, laid over the same way.
         agent_name: None,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
@@ -579,6 +581,15 @@ pub fn agent(row: &bindings::Agent) -> Decoded<Agent> {
         )?,
         live_subagents: row.live_subagents,
         stop_pending: row.stop_pending,
+        // Lenient: only the board's background-wait tick reads it, and a
+        // value it cannot parse just means it does not ask the store yet.
+        stop_pending_at: text(&row.stop_pending_at).and_then(|raw| super::parse_datetime(raw).ok()),
+        background_work: BackgroundWork {
+            shells: row.background_shells,
+            workflows: row.background_workflows,
+            monitors: row.background_monitors,
+            mcp_tasks: row.background_mcp_tasks,
+        },
     })
 }
 

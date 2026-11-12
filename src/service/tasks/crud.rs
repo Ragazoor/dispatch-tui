@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use crate::models::{
-    classify_agent_activity, EpicId, HookEventKind, NotificationWrite, SubagentEvent, Task, TaskId,
-    TaskStatus, WrapUpBlock, DEFAULT_BASE_BRANCH,
+    classify_agent_activity, BackgroundWork, EpicId, HookEventKind, NotificationWrite,
+    SubagentEvent, Task, TaskId, TaskStatus, WrapUpBlock, DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
 use crate::store::{self, CreateTaskRequest, TaskPatch};
@@ -615,7 +615,8 @@ impl TaskService {
         // agent-health.allium.
         match kind {
             HookEventKind::Stop => {
-                self.db.try_record_stop(id, now).await?;
+                // A Stop with no counts is one with nothing in flight.
+                self.record_stop(id, BackgroundWork::default()).await?;
             }
             HookEventKind::UserPromptSubmit => {
                 self.db.record_user_prompt_submit(id, now).await?;
@@ -637,7 +638,7 @@ impl TaskService {
                 let activity = classify_agent_activity(
                     Some(now),
                     task.last_notification_at,
-                    task.live_subagents,
+                    task.live_work(),
                     now,
                 );
                 self.db
@@ -648,6 +649,28 @@ impl TaskService {
         // Only Stop and UserPromptSubmit move task.status, and the module
         // recalculates their epic in the same transaction (store-split.allium
         // X3).
+        Ok(())
+    }
+
+    /// `HookStop` with the Stop payload's background work, counted by kind.
+    /// Background work in the list defers the Stop like live subagents do;
+    /// the store decides at write time (`agent-health.allium: HookStop`).
+    pub async fn record_stop(
+        &self,
+        id: TaskId,
+        background: BackgroundWork,
+    ) -> Result<(), ServiceError> {
+        let now = self.clock.now();
+        self.db.try_record_stop(id, now, background).await?;
+        Ok(())
+    }
+
+    /// `ExpireBackgroundWait`: ask the store to apply `id`'s deferred Stop
+    /// if it has waited on background work for the store's cap,
+    /// counted from the Stop and from the latest tool call. The store
+    /// re-checks both against committed state.
+    pub async fn expire_background_wait(&self, id: TaskId) -> Result<(), ServiceError> {
+        self.db.expire_background_wait(id, self.clock.now()).await?;
         Ok(())
     }
 

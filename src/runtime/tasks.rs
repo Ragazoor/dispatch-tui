@@ -431,6 +431,16 @@ impl TuiRuntime {
         }
     }
 
+    /// Ask the store to end a background wait past its cap. The store
+    /// decides; the subscription brings the move to review back.
+    pub(super) async fn exec_expire_background_wait(&self, app: &mut App, id: models::TaskId) {
+        if let Err(e) = self.task_svc.expire_background_wait(id).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("ending a background wait", e),
+            )));
+        }
+    }
+
     /// Move a task to a different epic (or detach it when `new_epic` is None),
     /// then refresh the board so the new membership and recalculated epic
     /// statuses are reflected. Returns the refresh follow-on commands.

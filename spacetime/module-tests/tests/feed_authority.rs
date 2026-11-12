@@ -558,6 +558,10 @@ fn a_detach_is_refused_while_another_persons_host_runs_an_agent_on_it() {
         live_subagents: 0,
         stop_pending: false,
         stop_pending_at: String::new(),
+        background_shells: 0,
+        background_workflows: 0,
+        background_monitors: 0,
+        background_mcp_tasks: 0,
     });
     let why = store
         .call("boss", |ctx| set_task_epic(ctx, task, 0, String::new()))
@@ -588,6 +592,10 @@ fn a_detach_is_not_refused_for_an_agent_on_the_callers_own_host() {
         live_subagents: 0,
         stop_pending: false,
         stop_pending_at: String::new(),
+        background_shells: 0,
+        background_workflows: 0,
+        background_monitors: 0,
+        background_mcp_tasks: 0,
     });
     store
         .call("alice", |ctx| set_task_epic(ctx, task, 0, String::new()))

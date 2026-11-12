@@ -22,6 +22,10 @@ pub struct Agent {
     pub live_subagents: i64,
     pub stop_pending: bool,
     pub stop_pending_at: String,
+    pub background_shells: i64,
+    pub background_workflows: i64,
+    pub background_monitors: i64,
+    pub background_mcp_tasks: i64,
 }
 
 impl __sdk::InModule for Agent {
@@ -47,6 +51,10 @@ pub struct AgentCols {
     pub live_subagents: __sdk::__query_builder::Col<Agent, i64>,
     pub stop_pending: __sdk::__query_builder::Col<Agent, bool>,
     pub stop_pending_at: __sdk::__query_builder::Col<Agent, String>,
+    pub background_shells: __sdk::__query_builder::Col<Agent, i64>,
+    pub background_workflows: __sdk::__query_builder::Col<Agent, i64>,
+    pub background_monitors: __sdk::__query_builder::Col<Agent, i64>,
+    pub background_mcp_tasks: __sdk::__query_builder::Col<Agent, i64>,
 }
 
 impl __sdk::__query_builder::HasCols for Agent {
@@ -74,6 +82,19 @@ impl __sdk::__query_builder::HasCols for Agent {
             live_subagents: __sdk::__query_builder::Col::new(table_name, "live_subagents"),
             stop_pending: __sdk::__query_builder::Col::new(table_name, "stop_pending"),
             stop_pending_at: __sdk::__query_builder::Col::new(table_name, "stop_pending_at"),
+            background_shells: __sdk::__query_builder::Col::new(table_name, "background_shells"),
+            background_workflows: __sdk::__query_builder::Col::new(
+                table_name,
+                "background_workflows",
+            ),
+            background_monitors: __sdk::__query_builder::Col::new(
+                table_name,
+                "background_monitors",
+            ),
+            background_mcp_tasks: __sdk::__query_builder::Col::new(
+                table_name,
+                "background_mcp_tasks",
+            ),
         }
     }
 }

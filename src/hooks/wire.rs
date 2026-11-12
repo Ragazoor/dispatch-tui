@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{EpicId, HookEventKind, SubagentEvent, TaskId};
+use crate::models::{BackgroundWork, EpicId, HookEventKind, SubagentEvent, TaskId};
 
 /// The path the board serves hook deliveries on, beside `/mcp`.
 pub const HOOK_PATH: &str = "/hook";
@@ -41,6 +41,13 @@ pub enum ObservedEvent {
     Event {
         task_id: TaskId,
         kind: HookEventKind,
+        /// A Stop's background work, counted by kind (`--shells` and the rest).
+        /// Left off the wire when nothing is listed, so a Stop with none reads
+        /// exactly as it did before the field: a board on an older build
+        /// still accepts it, and this board reads an older hook's Stop as one
+        /// with nothing listed.
+        #[serde(default, skip_serializing_if = "BackgroundWork::is_none")]
+        background: BackgroundWork,
     },
     /// `dispatch hook-subagent <id> start|stop`.
     ///

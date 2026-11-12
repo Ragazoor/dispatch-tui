@@ -57,6 +57,12 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 49: a Stop whose payload lists background work (shells, workflows,
+///    monitors, MCP tasks) defers like one with live subagents; the subagent
+///    drain leaves it deferred; idle_prompt is ignored during the wait; and
+///    `expire_background_wait` (the module owns the cap) applies it
+///    (`agent-health.allium: HookStop`, `ExpireBackgroundWait`). A reducer
+///    argument an old board does not send.
 /// 48: the learning task scope is gone — `create_learning` refuses
 ///    `scope=task` (`validate_learning_scope`) and a store from an older module
 ///    has its task-scoped learnings archived once (`retire_task_scoped_learnings`).
@@ -253,7 +259,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 48;
+pub const RULES_VERSION: i64 = 49;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

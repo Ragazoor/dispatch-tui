@@ -404,7 +404,15 @@ pub fn subagent_stop(
     fence_subagent_session(ctx, task_id, &session_id);
     delete_subagent_entry(ctx, task_id, &agent_id);
     sync_subagent_count(ctx, task_id)?;
-    apply_pending_stop_if_drained(ctx, task_id)?;
+    // A Stop also held by background work stays deferred: that work's end
+    // wakes the agent into a new Stop, which decides then. (`subagent_clear`,
+    // for `DetachTmux`, drains regardless: the window and the work die
+    // together, so no wake-up is coming.)
+    let held_by_background = current_agent(&AgentTables(ctx), task_id)
+        .is_some_and(|agent| agent.waiting_on_background());
+    if !held_by_background {
+        apply_pending_stop_if_drained(ctx, task_id)?;
+    }
     Ok(())
 }
 
@@ -459,6 +467,7 @@ pub fn try_record_stop(
     ctx: &ReducerContext,
     id: i64,
     stop_pending_at: String,
+    background: BackgroundWork,
 ) -> Result<(), String> {
     let Some(row) = visible_task(ctx, id) else {
         return Err(format!("task {id} not found"));
@@ -466,18 +475,74 @@ pub fn try_record_stop(
     if row.status != RUNNING {
         return Err(format!("task {id} is not running"));
     }
-    // No current agent holds no subagents: the Stop flips at once (A15).
-    let live = current_agent(&AgentTables(ctx), id).map_or(0, |a| a.live_subagents);
-    if live == 0 {
+    // No current agent holds no subagents and no background work: the Stop
+    // flips at once (A15).
+    let Some(agent) = current_agent(&AgentTables(ctx), id) else {
+        return flip_to_review(ctx, row);
+    };
+    if agent.live_subagents == 0 && background.total() == 0 {
         flip_to_review(ctx, row)?;
     } else {
-        update_current_agent(&mut AgentTables(ctx), id, |agent| Agent {
-            stop_pending: true,
-            stop_pending_at,
-            ..agent
+        // Every defer overwrites all four counts, zeros included.
+        update_current_agent(&mut AgentTables(ctx), id, |agent| {
+            Agent {
+                stop_pending: true,
+                stop_pending_at,
+                ..agent
+            }
+            .with_background_work(background)
         });
     }
     Ok(())
+}
+
+/// `agent-health.allium: config.background_wait_cap`: how long a Stop deferred
+/// for background work may hold a task running. The module owns it, so a
+/// board cannot shorten the wait by sending a different cutoff.
+pub const BACKGROUND_WAIT_CAP: chrono::Duration = chrono::Duration::minutes(30);
+
+/// The instant `BACKGROUND_WAIT_CAP` before `now`, in the store's timestamp
+/// format: what `stop_pending_at` and `last_pre_tool_use_at` are compared
+/// against. `now` is the board's clock, the one those two are written in.
+pub fn background_wait_cutoff(now: &str) -> Result<String, String> {
+    let now = chrono::NaiveDateTime::parse_from_str(now, SQLITE_TIMESTAMP)
+        .map_err(|e| format!("not a store timestamp: {now:?} ({e})"))?;
+    Ok((now - BACKGROUND_WAIT_CAP)
+        .format(SQLITE_TIMESTAMP)
+        .to_string())
+}
+
+/// `ExpireBackgroundWait` in `docs/specs/agent-health.allium`. The board's
+/// tick asks; this write decides, against committed state, so a wake-up
+/// prompt that voided the Stop in between leaves nothing to apply. A row that
+/// does not qualify is a silent no-op. `now` is the board's clock, in the
+/// format `stop_pending_at` and `last_pre_tool_use_at` are written in; the
+/// module owns the cap and subtracts it itself.
+#[spacetimedb::reducer]
+pub fn expire_background_wait(ctx: &ReducerContext, id: i64, now: String) -> Result<(), String> {
+    let cutoff = background_wait_cutoff(&now)?;
+    let Some(row) = visible_task(ctx, id) else {
+        return Ok(());
+    };
+    let Some(agent) = current_agent(&AgentTables(ctx), id) else {
+        return Ok(());
+    };
+    if background_wait_expired(&row, &agent, &cutoff) {
+        flip_to_review(ctx, row)?;
+    }
+    Ok(())
+}
+
+/// The condition [`expire_background_wait`] applies the Stop under; shared
+/// with the board's in-memory twin. Both clocks must have passed `cutoff`: a
+/// turn that started without voiding the Stop is not waiting.
+pub fn background_wait_expired(row: &Task, agent: &Agent, cutoff: &str) -> bool {
+    row.status == RUNNING
+        && agent.waiting_on_background()
+        && agent.live_subagents == 0
+        && !agent.stop_pending_at.is_empty()
+        && agent.stop_pending_at.as_str() <= cutoff
+        && (agent.last_pre_tool_use_at.is_empty() || agent.last_pre_tool_use_at.as_str() <= cutoff)
 }
 
 /// `HookPreToolUse` in `docs/specs/agent-health.allium`. A missing task, or
@@ -560,9 +625,11 @@ pub fn record_notification(
             )
         }
         "raise_if_no_own_work_live" => {
-            // Read at write time, from the agent's committed count.
-            let live = current_agent(&AgentTables(ctx), id).map_or(0, |a| a.live_subagents);
-            if live == 0 {
+            // Read at write time, from the agent's committed state: live
+            // subagents, or a wait on background work.
+            let busy = current_agent(&AgentTables(ctx), id)
+                .is_some_and(|a| a.live_subagents > 0 || a.waiting_on_background());
+            if !busy {
                 stamp(ctx, at);
                 write_task(
                     ctx,

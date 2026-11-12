@@ -1,6 +1,6 @@
 use super::*;
 use crate::models::test_tmux_window;
-use crate::models::SubStatus;
+use crate::models::{BackgroundWork, SubStatus};
 use crate::tui::tests::{make_task, make_unprovisioned_task};
 
 /// Every `CardIndicator` variant, paired with the border colour it claims.
@@ -59,7 +59,14 @@ fn every_indicator() -> Vec<(CardIndicator, Option<Color>, &'static str)> {
             "detached review",
         ),
         (CardIndicator::Detached, None, "detached"),
-        (CardIndicator::Running { subagents: 0 }, None, "running"),
+        (
+            CardIndicator::Running {
+                subagents: 0,
+                background: BackgroundWork::default(),
+            },
+            None,
+            "running",
+        ),
         (
             CardIndicator::ReviewPr {
                 pr_label: "PR #1".to_string(),
@@ -308,7 +315,10 @@ fn freshly_claimed_task_not_in_dispatching_map_still_shows_running() {
     );
     assert_eq!(
         classify_card_indicator(&task, task.status, &app, now),
-        CardIndicator::Running { subagents: 0 },
+        CardIndicator::Running {
+            subagents: 0,
+            background: BackgroundWork::default(),
+        },
     );
 }
 
@@ -351,7 +361,10 @@ fn running_with_worktree_and_window_stays_running() {
     let app = App::new(vec![]);
     assert_eq!(
         classify_card_indicator(&task, task.status, &app, now),
-        CardIndicator::Running { subagents: 0 },
+        CardIndicator::Running {
+            subagents: 0,
+            background: BackgroundWork::default(),
+        },
     );
 }
 
@@ -365,20 +378,84 @@ fn label_of(indicator: CardIndicator) -> String {
 
 #[test]
 fn running_card_shows_subagent_count() {
-    let text = label_of(CardIndicator::Running { subagents: 3 });
+    let text = label_of(CardIndicator::Running {
+        subagents: 3,
+        background: BackgroundWork::default(),
+    });
     assert!(text.contains("running \u{00b7} 3 agents"), "got: {text:?}");
 }
 
 #[test]
 fn running_card_uses_the_singular_for_one_subagent() {
-    let text = label_of(CardIndicator::Running { subagents: 1 });
+    let text = label_of(CardIndicator::Running {
+        subagents: 1,
+        background: BackgroundWork::default(),
+    });
     assert!(text.contains("running \u{00b7} 1 agent"), "got: {text:?}");
     assert!(!text.contains("1 agents"), "got: {text:?}");
 }
 
 #[test]
+fn running_card_names_each_background_kind_after_the_agents() {
+    let text = label_of(CardIndicator::Running {
+        subagents: 2,
+        background: BackgroundWork {
+            shells: 1,
+            workflows: 2,
+            monitors: 1,
+            mcp_tasks: 3,
+        },
+    });
+    assert!(
+        text.contains(
+            "running \u{00b7} 2 agents \u{00b7} 1 shell \u{00b7} 2 workflows \u{00b7} 1 monitor \u{00b7} 3 MCP tasks"
+        ),
+        "got: {text:?}"
+    );
+}
+
+#[test]
+fn running_card_skips_background_kinds_at_zero() {
+    let text = label_of(CardIndicator::Running {
+        subagents: 0,
+        background: BackgroundWork {
+            shells: 2,
+            ..BackgroundWork::default()
+        },
+    });
+    assert!(text.ends_with("running \u{00b7} 2 shells"), "got: {text:?}");
+}
+
+/// The counts show only while the agent waits on them: once the deferred
+/// Stop is gone, the recorded counts are history.
+#[test]
+fn a_running_task_shows_background_work_only_while_waiting_on_it() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Active;
+    task.background_work = BackgroundWork {
+        shells: 1,
+        ..BackgroundWork::default()
+    };
+
+    task.stop_pending = true;
+    assert!(matches!(
+        classify_card_indicator(&task, task.status, &App::new(vec![]), Utc::now()),
+        CardIndicator::Running { background, .. } if background.shells == 1
+    ));
+
+    task.stop_pending = false;
+    assert!(matches!(
+        classify_card_indicator(&task, task.status, &App::new(vec![]), Utc::now()),
+        CardIndicator::Running { background, .. } if background == BackgroundWork::default()
+    ));
+}
+
+#[test]
 fn running_card_omits_the_suffix_at_zero() {
-    let text = label_of(CardIndicator::Running { subagents: 0 });
+    let text = label_of(CardIndicator::Running {
+        subagents: 0,
+        background: BackgroundWork::default(),
+    });
     assert!(
         !text.contains("agent"),
         "zero subagents must render no suffix; got: {text:?}"

@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{DispatchMode, Task, TaskId, TmuxWindow};
+use super::{BackgroundWork, DispatchMode, Task, TaskId, TmuxWindow};
 use crate::define_id_newtype;
 use crate::define_str_enum;
 
@@ -61,13 +61,16 @@ pub struct Agent {
     pub ended_at: Option<DateTime<Utc>>,
     pub end_reason: Option<AgentEndReason>,
     // The live-session facts, moved off the task by agents A4. Each keeps the
-    // meaning `core.allium` gives it. `stop_pending_at` is not carried: only
-    // the module compares it, and it does so as a string.
+    // meaning `core.allium` gives it. The module alone compares
+    // `stop_pending_at`, as a string; the board reads it only to know when to
+    // ask the store to end a background wait.
     pub tmux_window: Option<TmuxWindow>,
     pub last_pre_tool_use_at: Option<DateTime<Utc>>,
     pub last_notification_at: Option<DateTime<Utc>>,
     pub live_subagents: i64,
     pub stop_pending: bool,
+    pub stop_pending_at: Option<DateTime<Utc>>,
+    pub background_work: BackgroundWork,
 }
 
 /// `display_agent(task)` over the task's agents (agents A18): the one not
@@ -101,6 +104,8 @@ pub fn with_session_of(task: &Task, agent: Option<&Agent>, display_name: Option<
             task.last_notification_at = agent.last_notification_at;
             task.live_subagents = agent.live_subagents;
             task.stop_pending = agent.stop_pending;
+            task.stop_pending_at = agent.stop_pending_at;
+            task.background_work = agent.background_work;
         }
         None => {
             task.tmux_window = None;
@@ -108,6 +113,8 @@ pub fn with_session_of(task: &Task, agent: Option<&Agent>, display_name: Option<
             task.last_notification_at = None;
             task.live_subagents = 0;
             task.stop_pending = false;
+            task.stop_pending_at = None;
+            task.background_work = BackgroundWork::default();
         }
     }
     task

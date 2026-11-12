@@ -149,7 +149,10 @@ async fn try_record_stop_reads_flipped_back() {
     let (writer, _) = writer_with(RecordingCaller::returning_stop_flag(true));
 
     assert_eq!(
-        writer.try_record_stop(TaskId(1), at()).await.unwrap(),
+        writer
+            .try_record_stop(TaskId(1), at(), crate::models::BackgroundWork::default())
+            .await
+            .unwrap(),
         StopOutcome::Flipped
     );
 }
@@ -159,7 +162,10 @@ async fn try_record_stop_reads_deferred_back() {
     let (writer, _) = writer_with(RecordingCaller::returning_stop_flag(false));
 
     assert_eq!(
-        writer.try_record_stop(TaskId(1), at()).await.unwrap(),
+        writer
+            .try_record_stop(TaskId(1), at(), crate::models::BackgroundWork::default())
+            .await
+            .unwrap(),
         StopOutcome::Deferred
     );
 }
@@ -171,7 +177,10 @@ async fn try_record_stop_reads_a_refusal_as_no_op() {
     let (writer, _) = writer_with(RecordingCaller::rejecting());
 
     assert_eq!(
-        writer.try_record_stop(TaskId(1), at()).await.unwrap(),
+        writer
+            .try_record_stop(TaskId(1), at(), crate::models::BackgroundWork::default())
+            .await
+            .unwrap(),
         StopOutcome::NoOp
     );
 }
@@ -183,7 +192,14 @@ async fn try_record_stop_reads_a_refusal_as_no_op() {
 async fn try_record_stop_stamps_the_passed_now_not_this_connections_clock() {
     let (writer, caller) = writer_with(RecordingCaller::returning_stop_flag(true));
 
-    writer.try_record_stop(TaskId(1), call_at()).await.unwrap();
+    writer
+        .try_record_stop(
+            TaskId(1),
+            call_at(),
+            crate::models::BackgroundWork::default(),
+        )
+        .await
+        .unwrap();
 
     assert_eq!(
         caller.sent(),
@@ -351,5 +367,23 @@ async fn subagent_clear_and_void_pending_stop_is_a_plain_applied_call() {
     assert_eq!(
         caller.sent(),
         vec![Sent::SubagentClearAndVoidPendingStop(1)]
+    );
+}
+
+/// `ExpireBackgroundWait`: the board's `now` reaches the store, in the
+/// fixed-width format `stop_pending_at` and `last_pre_tool_use_at` are
+/// written in; the module subtracts its own cap.
+#[tokio::test]
+async fn expire_background_wait_sends_the_boards_now_in_the_store_format() {
+    let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
+
+    writer
+        .expire_background_wait(TaskId(1), call_at())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        caller.sent(),
+        vec![Sent::ExpireBackgroundWait(1, CALL_AT_STORED.to_string())]
     );
 }

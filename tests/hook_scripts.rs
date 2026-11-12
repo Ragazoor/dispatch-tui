@@ -121,6 +121,69 @@ fn stop_falls_back_to_the_branch_without_the_env() {
     assert_eq!(calls.trim(), "hook 7 stop");
 }
 
+/// A Stop payload's `background_tasks` list counted by kind. Subagents and
+/// kinds the board does not keep are left out (`core.allium:
+/// BackgroundWork`). The `shell` and `subagent` entries have the shape Claude
+/// Code 2.1.322 sent in a live capture (ids and commands scrubbed); the
+/// `workflow`, `monitor`, `MCP task` and `dream` type labels are the ones in
+/// that binary's own label table, not from a capture.
+#[test]
+fn stop_counts_the_background_work_by_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_on_branch(dir.path(), "7-hotfix");
+    let list = r#","background_tasks":[
+        {"id":"a1","type":"subagent","status":"running","description":"d","agent_type":"general-purpose"},
+        {"id":"b1","type":"shell","status":"running","description":"d","command":"sleep 25"},
+        {"id":"b2","type":"shell","status":"running","description":"d","command":"cargo test"},
+        {"id":"w1","type":"workflow","status":"running","description":"d","name":"review"},
+        {"id":"m1","type":"monitor","status":"running","description":"d","server":"s","tool":"t"},
+        {"id":"t1","type":"MCP task","status":"pending","description":"d","server":"s","tool":"t"},
+        {"id":"x1","type":"dream","status":"running","description":"d"}
+    ]"#;
+    let input = payload(&repo, "Stop", list);
+    let (code, calls) = run_script("task-status-hook", &input, Some("42"), 0, &repo, dir.path());
+    assert_eq!(code, Some(0));
+    assert_eq!(
+        calls.trim(),
+        "hook 42 stop --shells 2 --workflows 1 --monitors 1 --mcp-tasks 1"
+    );
+}
+
+/// An empty list and an absent one (older Claude Code) both send a plain
+/// stop, which the board reads as nothing in flight.
+#[test]
+fn stop_with_an_empty_or_absent_background_list_is_a_plain_stop() {
+    for extra in [r#","background_tasks":[]"#, ""] {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_on_branch(dir.path(), "7-hotfix");
+        let input = payload(&repo, "Stop", extra);
+        let (_, calls) = run_script("task-status-hook", &input, Some("42"), 0, &repo, dir.path());
+        assert_eq!(calls.trim(), "hook 42 stop", "extra: {extra:?}");
+    }
+}
+
+/// A `dispatch` binary that predates the count flags rejects them. The
+/// script then sends the plain stop, so the Stop is not lost.
+#[test]
+fn stop_falls_back_to_a_plain_stop_when_the_counts_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_on_branch(dir.path(), "7-hotfix");
+    let input = payload(
+        &repo,
+        "Stop",
+        r#","background_tasks":[{"id":"b1","type":"shell","status":"running","description":"d","command":"sleep 25"}]"#,
+    );
+    let (_, calls) = run_script("task-status-hook", &input, Some("42"), 2, &repo, dir.path());
+    let lines: Vec<&str> = calls.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "hook 42 stop --shells 1 --workflows 0 --monitors 0 --mcp-tasks 0",
+            "hook 42 stop"
+        ]
+    );
+}
+
 #[test]
 fn session_start_clears_the_launch_task_not_the_branch() {
     let dir = tempfile::tempdir().unwrap();

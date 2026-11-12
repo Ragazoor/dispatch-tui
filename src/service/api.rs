@@ -265,6 +265,22 @@ macro_rules! task_service_api {
                 kind: $crate::models::HookEventKind
             ) -> Result<(), $crate::service::ServiceError>;
 
+            /// `agent-health.allium: HookStop` with the payload's background
+            /// work counted by kind; `record_hook_event(Stop)` is this with
+            /// none.
+            async fn record_stop(
+                &self,
+                id: $crate::models::TaskId,
+                background: $crate::models::BackgroundWork
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            /// `agent-health.allium: ExpireBackgroundWait`: ask the store to
+            /// end `id`'s background wait if the cap has passed.
+            async fn expire_background_wait(
+                &self,
+                id: $crate::models::TaskId
+            ) -> Result<(), $crate::service::ServiceError>;
+
             /// Mark the PR-learnings gate as shown, answering whether this
             /// was the first attempt for the task — the one that gets the
             /// reminder. The write carries its own condition, so a task that

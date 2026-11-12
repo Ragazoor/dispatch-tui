@@ -288,6 +288,11 @@ pub enum TaskCommand {
     BatchPatchSubStatus {
         updates: Vec<(TaskId, SubStatus)>,
     },
+    /// Ask the store to end `id`'s wait on background work once the cap has
+    /// passed (`agent-health.allium: ExpireBackgroundWait`).
+    ExpireBackgroundWait {
+        id: TaskId,
+    },
     RefreshFromDb,
     /// Drop every `task_subagents` entry for a task. See [`DrainMode`] for what
     /// the two modes mean and which callers pick which.

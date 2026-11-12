@@ -72,6 +72,7 @@ async fn make_task(svc: &TaskService, epic_id: Option<EpicId>) -> TaskId {
     .unwrap()
 }
 
+mod background_wait;
 mod crud;
 mod dispatch;
 mod dispatch_requests;

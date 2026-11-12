@@ -271,6 +271,10 @@ async fn dispatch_task(
             rt.exec_batch_patch_sub_status(app, updates).await;
             vec![]
         }
+        ExpireBackgroundWait { id } => {
+            rt.exec_expire_background_wait(app, id).await;
+            vec![]
+        }
         RefreshFromDb => rt.exec_refresh_from_db(app).await,
     }
 }

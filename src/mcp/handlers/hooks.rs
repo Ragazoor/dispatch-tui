@@ -20,7 +20,7 @@ use crate::hooks::wire::{
     PaneResumeAnswer, PaneResumeRequest, PaneTask, PaneView, PaneViewRequest, Question,
 };
 use crate::mcp::{trajectory, BackgroundWrite, McpState};
-use crate::models::{TaskId, TaskStatus};
+use crate::models::{HookEventKind, TaskId, TaskStatus};
 use crate::service::ServiceError;
 
 /// The reminder the gate blocks a task's first PR-creation attempt with.
@@ -239,6 +239,11 @@ async fn apply(
     event: ObservedEvent,
 ) -> Result<(), ServiceError> {
     match event {
+        ObservedEvent::Event {
+            kind: HookEventKind::Stop,
+            background,
+            ..
+        } => state.task_svc.record_stop(task_id, background).await,
         ObservedEvent::Event { kind, .. } => state.task_svc.record_hook_event(task_id, kind).await,
         ObservedEvent::Subagent {
             agent_id,

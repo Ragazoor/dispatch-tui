@@ -93,7 +93,36 @@ case "$EVENT" in
             fi
         fi
         ;;
-    Stop)               dispatch hook "$ID" stop ;;
+    Stop)
+        # Background work still in flight keeps the task running: Claude Code
+        # wakes the agent when it ends, and that turn's Stop decides again
+        # (HookStop in docs/specs/agent-health.allium). Count the payload's
+        # background_tasks list by kind; subagents are counted live by their
+        # own hooks, and other kinds never wake the agent for the operator.
+        # Claude Code lists only running or pending work, so no status filter.
+        # Counts are sent only when something is in flight: no list, or an
+        # empty one, is a plain stop, which the board reads as zero of every
+        # kind. That also keeps the common Stop identical to the one older
+        # boards and `dispatch` binaries accept. When something is in flight
+        # and the binary on PATH predates the count flags, it rejects them;
+        # fall back to the plain stop rather than lose the Stop, which would
+        # leave the task running.
+        COUNTS=$(echo "$INPUT" | jq -r '[.background_tasks // [] | .[].type] as $t
+            | [($t | map(select(. == "shell")) | length),
+               ($t | map(select(. == "workflow")) | length),
+               ($t | map(select(. == "monitor")) | length),
+               ($t | map(select(. == "MCP task")) | length)]
+            | @tsv')
+        read -r SHELLS WORKFLOWS MONITORS MCP_TASKS <<< "${COUNTS:-0 0 0 0}"
+        if [ $((SHELLS + WORKFLOWS + MONITORS + MCP_TASKS)) -gt 0 ]; then
+            if ! dispatch hook "$ID" stop --shells "$SHELLS" --workflows "$WORKFLOWS" \
+                --monitors "$MONITORS" --mcp-tasks "$MCP_TASKS"; then
+                dispatch hook "$ID" stop
+            fi
+        else
+            dispatch hook "$ID" stop
+        fi
+        ;;
     Notification)
         # Forward the payload's notification_type as --kind and classify
         # nothing here: the Rust side decides which kinds are a real block

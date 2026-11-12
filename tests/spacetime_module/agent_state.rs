@@ -88,7 +88,14 @@ fn try_record_stop_defers_while_a_subagent_is_live_and_the_drain_applies_it() {
         &["1", "agent-1", "session-1", "2026-09-19T10:00:00Z"],
     );
 
-    let stopped = instance.call("try_record_stop", &["1", "2026-09-19T10:00:01.000"]);
+    let stopped = instance.call(
+        "try_record_stop",
+        &[
+            "1",
+            "2026-09-19T10:00:01.000",
+            "{\"shells\":0,\"workflows\":0,\"monitors\":0,\"mcp_tasks\":0}",
+        ],
+    );
     assert!(stopped.status.success(), "{}", describe(&stopped));
     assert_eq!(
         column(&instance, "SELECT status FROM tasks WHERE id = 1"),
@@ -105,4 +112,40 @@ fn try_record_stop_defers_while_a_subagent_is_live_and_the_drain_applies_it() {
         "draining the last subagent must apply the deferred Stop"
     );
     assert_eq!(current_agent_column(&instance, "stop_pending", 1), "false");
+}
+
+/// A Stop that lists background work defers, and the subagent drain leaves it
+/// deferred (that work's end wakes the agent into a new Stop). `HookStop` and
+/// `HookSubagentStop` in `docs/specs/agent-health.allium`.
+#[test]
+fn a_stop_listing_background_work_survives_the_subagent_drain() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    running_task(&instance, 1);
+    instance.call(
+        "subagent_start",
+        &["1", "agent-1", "session-1", "2026-09-19T10:00:00Z"],
+    );
+
+    let stopped = instance.call(
+        "try_record_stop",
+        &[
+            "1",
+            "2026-09-19T10:00:01.000",
+            "{\"shells\":1,\"workflows\":0,\"monitors\":0,\"mcp_tasks\":0}",
+        ],
+    );
+    assert!(stopped.status.success(), "{}", describe(&stopped));
+    assert_eq!(current_agent_column(&instance, "background_shells", 1), "1");
+
+    let drained = instance.call("subagent_stop", &["1", "agent-1", "session-1"]);
+    assert!(drained.status.success(), "{}", describe(&drained));
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "running",
+        "a shell still listed must keep the task running past the drain"
+    );
+    assert_eq!(current_agent_column(&instance, "stop_pending", 1), "true");
 }

@@ -395,7 +395,18 @@ mod unconnected {
         refused(
             "try_record_stop",
             caller
-                .try_record_stop(TaskId(1), Utc::now())
+                .try_record_stop(
+                    TaskId(1),
+                    Utc::now(),
+                    crate::models::BackgroundWork::default(),
+                )
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "expire_background_wait",
+            caller
+                .expire_background_wait(TaskId(1), Utc::now())
                 .await
                 .unwrap_err(),
         );

@@ -18,7 +18,11 @@ async fn assert_pushes_task_changed(kind: HookEventKind) {
     .await;
     let task_id = create_task_fixture(&state).await;
 
-    let request = HookRequest::Observe(ObservedEvent::Event { task_id, kind });
+    let request = HookRequest::Observe(ObservedEvent::Event {
+        task_id,
+        kind,
+        background: crate::models::BackgroundWork::default(),
+    });
     let _ = handle_hook(State(state), Json(request)).await;
 
     match notify_rx.recv().await {
@@ -55,6 +59,7 @@ async fn missing_task_does_not_push_task_changed() {
     let request = HookRequest::Observe(ObservedEvent::Event {
         task_id: TaskId(999_999),
         kind: HookEventKind::PreToolUse,
+        background: crate::models::BackgroundWork::default(),
     });
     let _ = handle_hook(State(state), Json(request)).await;
 
@@ -86,6 +91,7 @@ async fn a_hook_for_an_undecodable_task_answers_not_found() {
     let request = HookRequest::Observe(ObservedEvent::Event {
         task_id: TaskId(42),
         kind: HookEventKind::PreToolUse,
+        background: crate::models::BackgroundWork::default(),
     });
     let Json(resp) = handle_hook(State(state), Json(request)).await;
     assert!(
