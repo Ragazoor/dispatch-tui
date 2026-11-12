@@ -104,6 +104,14 @@ bash ./scripts/test-fetch-cve.sh
 echo "bots.conf validation..."
 bash ./scripts/test-bots-conf.sh
 
+# The Allium specs: errors fail, and so does a warning not in
+# scripts/allium-check.baseline. Needs `allium` (cargo install allium-cli).
+echo "allium check..."
+./scripts/check-allium.sh
+
+echo "allium check self-test..."
+bash ./scripts/test-check-allium.sh
+
 # The module the board embeds and publishes must match spacetime/module's
 # source. Cheap (hashes files, builds nothing), so it runs before the slow one.
 echo "embedded module stamp..."

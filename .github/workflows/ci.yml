@@ -417,6 +417,26 @@ jobs:
       - name: Self-test the bots.conf validation
         run: bash ./scripts/test-bots-conf.sh
 
+      # The gate needs the `allium` CLI at the version check-allium.sh pins as
+      # its floor. Cached by version, so a push installs it only when the pin
+      # moves; the runner's own cargo builds it.
+      - name: Cache the allium CLI
+        id: allium-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/allium
+          key: allium-cli-3.6.1-${{ runner.os }}
+
+      - name: Install the allium CLI
+        if: steps.allium-cache.outputs.cache-hit != 'true'
+        run: cargo install allium-cli --locked --version 3.6.1
+
+      - name: Check the Allium specs against the warning baseline
+        run: ./scripts/check-allium.sh
+
+      - name: Self-test the allium checker
+        run: bash ./scripts/test-check-allium.sh
+
       # The module the board embeds (`src/spacetime/module.wasm`) is committed
       # prebuilt. A wasm build is not byte-reproducible across machines, so this
       # compares a stamp of the module's source, not a rebuild -- see the

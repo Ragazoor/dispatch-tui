@@ -130,6 +130,8 @@ fn pre_push_hook_runs_full_check_sequence() {
         "scripts/test-check-commit-msg.sh",
         "scripts/test-fetch-reviews.sh",
         "scripts/test-bots-conf.sh",
+        "scripts/check-allium.sh",
+        "scripts/test-check-allium.sh",
         "scripts/build-managed-module.sh",
         "scripts/check-spacetime-module.sh",
     ] {

@@ -1,0 +1,40 @@
+# Warnings `allium check` reports that are expected: checker gaps, where the
+# spec is right and the checker misreads it. scripts/check-allium.sh fails on
+# any warning not listed here, and on every error.
+#
+# Format: one warning per line, three tab-separated fields:
+#   <spec file>	<diagnostic code>	<message, exactly as the checker prints it>
+# No line numbers, so an edit elsewhere in a spec does not break an entry.
+# Lines starting with `#` and blank lines are ignored.
+#
+# Add an entry only with a comment beside the declaration in the spec saying
+# why the warning is expected. When the checker stops reporting one, the gate
+# prints a note; remove the line then.
+#
+# Gaps behind the entries (filed on juxt/allium-tools):
+#   definition.unused: a value or enum used only as a contract return type
+#     (#106) or only through literals of a trigger parameter is not credited.
+#   externalEntity.missingSourceHint: an external entity governed by a tool
+#     (git, tmux) or the store, with no spec to import, cannot silence it.
+#   entity.unused: storage's DataDirectory is the anchor other specs cite in
+#     prose; no rule names it.
+
+docs/specs/agent-tree.allium	allium.definition.unused	Value 'PaneView' is declared but not referenced elsewhere.
+docs/specs/agent-tree.allium	allium.definition.unused	Value 'PaneResumeAnswer' is declared but not referenced elsewhere.
+docs/specs/dispatch-prompt.allium	allium.definition.unused	Value 'Bump' is declared but not referenced elsewhere.
+docs/specs/dispatch-prompt.allium	allium.definition.unused	Value 'Preceding' is declared but not referenced elsewhere.
+docs/specs/feeds.allium	allium.definition.unused	Value 'FeedCommandRun' is declared but not referenced elsewhere.
+docs/specs/startup.allium	allium.definition.unused	Value 'StartupConfigOutcome' is declared but not referenced elsewhere.
+docs/specs/startup.allium	allium.definition.unused	Value 'SessionLaunchFailure' is declared but not referenced elsewhere.
+docs/specs/startup.allium	allium.definition.unused	Value 'RetireOutcome' is declared but not referenced elsewhere.
+docs/specs/startup.allium	allium.definition.unused	Value 'ManagedAddressState' is declared but not referenced elsewhere.
+docs/specs/startup.allium	allium.definition.unused	Value 'ModulePublishOutcome' is declared but not referenced elsewhere.
+docs/specs/startup.allium	allium.definition.unused	Value 'StartupAbortReason' is declared but not referenced elsewhere.
+docs/specs/startup.allium	allium.definition.unused	Value 'BoardExitCause' is declared but not referenced elsewhere.
+
+docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'Worktree' has no obvious governing specification import in this module.
+docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'TmuxWindow' has no obvious governing specification import in this module.
+docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'TmuxPane' has no obvious governing specification import in this module.
+docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'UserIdentity' has no obvious governing specification import in this module.
+
+docs/specs/storage.allium	allium.entity.unused	Entity 'DataDirectory' is declared but not referenced elsewhere in this specification.
