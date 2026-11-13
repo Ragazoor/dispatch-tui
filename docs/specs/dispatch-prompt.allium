@@ -507,7 +507,7 @@ rule RenderPrReviewRunbook {
         -- runbook: find the PR, run the review command on it, present the
         -- findings and wait. One command, no diff-size branch. The command
         -- is this host's `review_command` setting (settings.allium:
-        -- ReviewCommandSetting), `/code-review` when none is set; the
+        -- ReviewCommandSetting), `/dispatch:preference-review` when none is set; the
         -- runbook names it in step 2 and nowhere else. The dispatching host
         -- reads it when it builds the prompt, so a change reaches the next
         -- launch and never an agent already running. The trailing

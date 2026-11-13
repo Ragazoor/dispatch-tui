@@ -391,3 +391,47 @@ fn decompose_review_skill_carries_decision_items_into_the_plan() {
          the user with AskUserQuestion"
     );
 }
+
+/// /preference-review reviews a PR against the operator's preference files.
+/// The files are personal and the skill is shared, so it must find them
+/// through `DISPATCH_REVIEW_CONTEXT` or the documented default, never a
+/// hardcoded vault path, and must still review when they are missing. Its
+/// findings are verified before the "Do not raise" filter, and both drop
+/// counts are shown, so over-filtering stays visible. It must never post to
+/// GitHub unasked, and writes a preference edit only on approval.
+#[test]
+fn preference_review_skill_loads_preferences_verifies_then_filters() {
+    let content = skill_body("preference-review");
+    for needle in [
+        "DISPATCH_REVIEW_CONTEXT",
+        "~/.local/share/dispatch/review-context",
+        "general.md",
+        "languages/",
+        "repos/<owner>__<repo>.md",
+        "without preferences",
+        "**Do not raise**",
+        "**Look for**",
+        "Never post to GitHub",
+        "only after the user approves",
+    ] {
+        assert!(
+            content.contains(needle),
+            "preference-review skill must mention {needle}"
+        );
+    }
+    assert!(
+        !content.contains("staff_engineer"),
+        "preference-review skill must not hardcode a personal vault path"
+    );
+    let at = |needle: &str| {
+        content
+            .find(needle)
+            .unwrap_or_else(|| panic!("preference-review skill must have {needle}"))
+    };
+    assert!(
+        at("## Step 4: Verify") < at("## Step 5: Filter")
+            && at("## Step 5: Filter") < at("## Step 6: Present")
+            && at("## Step 6: Present") < at("## Step 7: Learn"),
+        "preference-review must verify, then filter, then present, then learn"
+    );
+}

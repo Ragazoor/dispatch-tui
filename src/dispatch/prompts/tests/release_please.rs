@@ -43,7 +43,7 @@ fn build_prompt_with_release_please_tag_renders_the_release_runbook() {
         "a release PR must not get the dependabot runbook, got: {text}"
     );
     assert!(
-        !text.contains("/code-review"),
+        !text.contains("/dispatch:preference-review"),
         "a release PR must not get the pr-review runbook, got: {text}"
     );
 }

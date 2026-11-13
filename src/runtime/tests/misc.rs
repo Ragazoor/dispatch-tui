@@ -300,7 +300,7 @@ mod prepare_inputs {
 }
 
 /// `RenderPrReviewRunbook` reads the host's `review_command` setting through
-/// the dispatch prologue; unset and blank both mean `/code-review`.
+/// the dispatch prologue; unset and blank both mean `/dispatch:preference-review`.
 mod review_command_input {
     use super::*;
 
@@ -326,7 +326,10 @@ mod review_command_input {
 
     #[tokio::test]
     async fn unset_is_the_default() {
-        assert_eq!(prologue_review_command(None).await, "/code-review");
+        assert_eq!(
+            prologue_review_command(None).await,
+            "/dispatch:preference-review"
+        );
     }
 
     #[tokio::test]
@@ -339,7 +342,10 @@ mod review_command_input {
 
     #[tokio::test]
     async fn a_blank_command_is_the_default() {
-        assert_eq!(prologue_review_command(Some("")).await, "/code-review");
+        assert_eq!(
+            prologue_review_command(Some("")).await,
+            "/dispatch:preference-review"
+        );
     }
 }
 

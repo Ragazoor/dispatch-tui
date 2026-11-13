@@ -21,7 +21,7 @@ async fn no_command_reads_the_default_and_writes_nothing() {
     let state = test_state().await;
     let resp = call_tool(&state, json!({})).await;
     let text = extract_response_text(&resp);
-    assert!(text.contains("/code-review"), "got: {text}");
+    assert!(text.contains("/dispatch:preference-review"), "got: {text}");
     assert_eq!(
         state.db.get_setting_string("review_command").await.unwrap(),
         None
@@ -48,7 +48,7 @@ async fn a_blank_command_restores_the_default() {
     call_tool(&state, json!({"command": "/review-pr"})).await;
     let resp = call_tool(&state, json!({"command": "  "})).await;
     let text = extract_response_text(&resp);
-    assert!(text.contains("/code-review"), "got: {text}");
+    assert!(text.contains("/dispatch:preference-review"), "got: {text}");
 }
 
 #[tokio::test]

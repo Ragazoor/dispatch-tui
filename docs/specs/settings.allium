@@ -50,9 +50,13 @@ config {
     managed_feed_interval_keys: Set<String> = {"reviews_feed_interval_secs", "cve_feed_interval_secs"}
     -- The review command a pr_review task's runbook runs
     -- (dispatch-prompt.allium: RenderPrReviewRunbook), and what it is when
-    -- the setting is absent.
+    -- the setting is absent. The default is dispatch's own plugin skill,
+    -- named with its plugin namespace so no bundled or other plugin skill
+    -- (`/code-review`, `review-pr`) can shadow it. That skill reviews
+    -- without preferences when the host has no preference folder, so the
+    -- default suits every host.
     review_command_key: String = "review_command"
-    default_review_command: String = "/code-review"
+    default_review_command: String = "/dispatch:preference-review"
 }
 
 -- `review_command()` (used by dispatch-prompt.allium: RenderPrReviewRunbook)

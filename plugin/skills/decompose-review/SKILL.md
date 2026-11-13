@@ -2,7 +2,7 @@
 name: decompose-review
 description: >-
   Create work packages from code review findings, grouped by files they touch.
-  Use after running "/code-review", "/review-pr" or any code review that
+  Use after running "/preference-review", "/code-review", "/review-pr" or any code review that
   produces findings with file:line references. Creates an epic with subtasks
   and attaches a plan to each subtask.
 ---

@@ -81,7 +81,7 @@ fn build_prompt_with_pr_review_tag_includes_review_commands() {
     );
 
     assert!(
-        text.contains("/code-review"),
+        text.contains("/dispatch:preference-review"),
         "pr-review prompt must name the review command, got: {text}"
     );
     // The diff-size branch is gone: the command it routes to takes a PR
@@ -114,10 +114,10 @@ fn build_prompt_without_pr_review_tag_omits_the_review_runbook() {
         None,
         &PromptContext::default(),
     );
-    // `/code-review` is step 2 of prompts/pr-review.md, so its absence
+    // `/dispatch:preference-review` is step 2 of prompts/pr-review.md, so its absence
     // already implies the whole addendum's — no second assertion needed.
     assert!(
-        !text.contains("/code-review"),
+        !text.contains("/dispatch:preference-review"),
         "an untagged prompt must not carry the pr-review runbook, got: {text}"
     );
 }
@@ -892,7 +892,7 @@ fn a_pr_url_alone_does_not_make_a_task_feed_created() {
 }
 
 /// `RenderPrReviewRunbook`: the runbook runs the host's `review_command`
-/// setting, and `/code-review` when none is set.
+/// setting, and `/dispatch:preference-review` when none is set.
 #[test]
 fn build_prompt_with_pr_review_tag_runs_the_default_review_command() {
     let ctx = PromptContext {
@@ -908,8 +908,8 @@ fn build_prompt_with_pr_review_tag_runs_the_default_review_command() {
         &ctx,
     );
     assert!(
-        text.contains("Run `/code-review` on that PR."),
-        "default review command must be /code-review, got: {text}"
+        text.contains("Run `/dispatch:preference-review` on that PR."),
+        "default review command must be /dispatch:preference-review, got: {text}"
     );
 }
 
@@ -933,16 +933,25 @@ fn build_prompt_with_pr_review_tag_runs_the_configured_review_command() {
         "configured command must be rendered, got: {text}"
     );
     assert!(
-        !text.contains("/code-review"),
+        !text.contains("/dispatch:preference-review"),
         "the default must not appear beside a configured command, got: {text}"
     );
 }
 
 #[test]
 fn effective_review_command_falls_back_for_unset_and_blank() {
-    assert_eq!(effective_review_command(None), "/code-review");
-    assert_eq!(effective_review_command(Some("  ".into())), "/code-review");
-    assert_eq!(effective_review_command(Some("".into())), "/code-review");
+    assert_eq!(
+        effective_review_command(None),
+        "/dispatch:preference-review"
+    );
+    assert_eq!(
+        effective_review_command(Some("  ".into())),
+        "/dispatch:preference-review"
+    );
+    assert_eq!(
+        effective_review_command(Some("".into())),
+        "/dispatch:preference-review"
+    );
     assert_eq!(
         effective_review_command(Some(" /review-pr ".into())),
         "/review-pr"

@@ -808,7 +808,7 @@ fn pr_review_addendum(review_command: &str) -> String {
 
 /// What a `pr_review` task runs when the host has no `review_command`
 /// setting (`config.default_review_command` in `docs/specs/settings.allium`).
-pub const DEFAULT_REVIEW_COMMAND: &str = "/code-review";
+pub const DEFAULT_REVIEW_COMMAND: &str = "/dispatch:preference-review";
 
 /// The review command in effect for a saved `review_command` setting: the
 /// trimmed value, or [`DEFAULT_REVIEW_COMMAND`] when it is absent or blank.

@@ -632,7 +632,7 @@ exist.",
 
     async idempotent "set_review_command" => review_command::handle_set_review_command,
         "Read or set the command a PR review task runs on its PR, for this machine. It \
-defaults to /code-review and shows up in the task's prompt, so it applies to the next launch, \
+defaults to /dispatch:preference-review and shows up in the task's prompt, so it applies to the next launch, \
 not an agent already running. Call it with no arguments to only read the command in effect; that \
 call changes nothing. Pass command to set it, for example a personal skill such as /review-pr; a \
 blank command restores the default. The reply names the command now in effect.",
@@ -641,7 +641,7 @@ blank command restores the default. The reply names the command now in effect.",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The single-line review command, e.g. /review-pr. Blank restores /code-review. Omit to read."
+                    "description": "The single-line review command, e.g. /review-pr. Blank restores /dispatch:preference-review. Omit to read."
                 }
             }
         };

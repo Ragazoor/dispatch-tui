@@ -987,7 +987,7 @@ and `aarch64-apple-darwin` and uploads `dispatch-<target>.tar.gz` plus a
 
 ## Agent-Facing Skill Copy
 
-`plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/decompose-review`, `/allium-loop`, `/fix`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when `dispatch tui`'s startup configuration check reports the plugin stale and the operator accepts (`docs/specs/startup.allium`) — editing the installed copy is editing a build artifact.
+`plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/decompose-review`, `/allium-loop`, `/fix`, `/preference-review`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when `dispatch tui`'s startup configuration check reports the plugin stale and the operator accepts (`docs/specs/startup.allium`) — editing the installed copy is editing a build artifact.
 
 A SKILL.md carries the flow every invocation walks; detail only one branch needs lives in a `references/` file beside it, and SKILL.md names that file where the branch is taken (`SkillCopyIsJustInTime` in `docs/specs/mcp-task-tools.allium`). Changes are asserted by the `contains` tests in `src/setup/plugins/tests.rs` (via its `skill_body` and `skill_text` helpers); see [testing.md](testing.md).
 
@@ -997,4 +997,4 @@ A SKILL.md carries the flow every invocation walks; detail only one branch needs
 
 ## Review Command
 
-The command a `pr_review` task's prompt tells its agent to run on the PR. It is the per-host `review_command` setting, `/code-review` when unset or blank. Read or set it with the `set_review_command` MCP tool (no arguments reads; a blank command restores the default). It is read when a task launches, so a change reaches the next launch, not a running agent. See `RenderPrReviewRunbook` in `docs/specs/dispatch-prompt.allium` and `SetReviewCommandViaMcp` in `docs/specs/mcp-task-tools.allium`.
+The command a `pr_review` task's prompt tells its agent to run on the PR. It is the per-host `review_command` setting, `/dispatch:preference-review` when unset or blank. That skill reads the operator's review preference files from `$DISPATCH_REVIEW_CONTEXT`, else `~/.local/share/dispatch/review-context` (general.md, languages/<language>.md, repos/<owner>__<repo>.md), and reviews without preferences when the folder is missing. Read or set it with the `set_review_command` MCP tool (no arguments reads; a blank command restores the default). It is read when a task launches, so a change reaches the next launch, not a running agent. See `RenderPrReviewRunbook` in `docs/specs/dispatch-prompt.allium` and `SetReviewCommandViaMcp` in `docs/specs/mcp-task-tools.allium`.
