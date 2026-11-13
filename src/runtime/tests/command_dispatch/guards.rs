@@ -359,9 +359,10 @@ async fn deleting_an_epic_the_store_says_holds_a_live_task_changes_nothing() {
     let epic = h.db.seed_lagging_epic().await;
     h.db.seed_lagging_task(Some(epic), "done", "running").await;
 
-    h.dispatch(Command::Epic(crate::tui::commands::EpicCommand::Delete(
-        epic,
-    )))
+    h.dispatch(Command::Epic(crate::tui::commands::EpicCommand::Delete {
+        id: epic,
+        teardowns: vec![],
+    }))
     .await;
 
     assert!(refused(&h.next_msg().await));
@@ -468,4 +469,21 @@ async fn batch_teardowns_run_one_repo_at_a_time_in_order() {
         "a repo's removals run in queue order, got {calls:?}"
     );
     assert!(pos("/repoB/.worktrees/3-t").is_some());
+}
+
+#[tokio::test]
+async fn a_refused_epic_delete_starts_no_teardown_for_any_subtask() {
+    let mut h = lagging_harness(vec![]).await;
+    let epic = h.db.seed_lagging_epic().await;
+    let ok = h.db.seed_lagging_task(Some(epic), "done", "done").await;
+    let bad = h.db.seed_lagging_task(Some(epic), "done", "running").await;
+
+    h.dispatch(Command::Epic(crate::tui::commands::EpicCommand::Delete {
+        id: epic,
+        teardowns: vec![target(ok.0, "/repo"), target(bad.0, "/repo")],
+    }))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.mock.recorded_calls().is_empty(), "nothing torn down");
 }

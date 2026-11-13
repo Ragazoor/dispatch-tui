@@ -1646,7 +1646,8 @@ contract TaskTeardown {
         -- One failure does not stop the rest of its repo's queue. Failures are
         -- reported and logged as TaskTeardown says; a batch's items are
         -- exempt from the retry pointer (WorktreeReleaseIsGated). DeleteEpic's
-        -- subtree teardowns are not yet serial per repo: a known gap.
+        -- subtree teardowns follow the same rule: it pre-checks once, then
+        -- runs them through the same per-repo queues.
 
     @invariant FeedTeardownsAreSerialPerRepo
         -- The feed path tears down the tasks a stale delete removed. A repo's

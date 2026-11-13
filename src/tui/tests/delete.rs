@@ -56,7 +56,7 @@ fn deleted_epic_ids(cmds: &[Command]) -> Vec<EpicId> {
     let mut ids: Vec<EpicId> = cmds
         .iter()
         .filter_map(|c| match c {
-            Command::Epic(EpicCommand::Delete(id)) => Some(*id),
+            Command::Epic(EpicCommand::Delete { id, .. }) => Some(*id),
             _ => None,
         })
         .collect();
@@ -549,8 +549,7 @@ fn a_task_delete_teardown_carries_the_task_guard() {
 }
 
 #[test]
-fn an_epic_delete_teardown_carries_the_epic_guard() {
-    use crate::tui::commands::DeleteGuard;
+fn an_epic_delete_carries_its_teardowns_inside_the_one_command_with_no_guard_of_their_own() {
     let mut app = app_with_nested_epic(None);
     app.board.tasks[1].worktree = Some("/wt/2-test".to_string());
     app.selection_mut().set_column(4);
@@ -559,7 +558,24 @@ fn an_epic_delete_teardown_carries_the_epic_guard() {
     press(&mut app, 'x');
     let cmds = press(&mut app, 'y');
 
-    assert_eq!(guards_of(&cmds), vec![Some(DeleteGuard::Epic(EpicId(10)))]);
+    assert!(
+        guards_of(&cmds).is_empty(),
+        "no per-teardown Cleanup (and so no per-teardown guard) is emitted"
+    );
+    let carried: Vec<Option<String>> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            Command::Epic(EpicCommand::Delete { id, teardowns }) if *id == EpicId(10) => Some(
+                teardowns
+                    .iter()
+                    .map(|t| t.worktree.clone())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(carried, vec![Some("/wt/2-test".to_string())]);
 }
 
 #[test]

@@ -401,6 +401,14 @@ rule DeleteEpic {
         -- retirement; the board is refreshed from the store, restoring the
         -- cards it dropped optimistically. A passing pre-check runs the flow
         -- unchanged: best-effort subtree teardown, then the guarded reducer.
+        --
+        -- ONE CHECK, SERIAL TEARDOWNS. As for BatchDelete (tasks.allium:
+        -- BatchTeardownsAreSerialPerRepo), the delete command carries the
+        -- subtree's teardowns itself; they carry no guard of their own. The
+        -- pre-check runs ONCE for the epic, not once per subtask, and only
+        -- then are the teardowns started, one repo at a time, so a repo's
+        -- removals do not contend on its git index lock; distinct repos run
+        -- in parallel. One failure does not stop the rest of its repo's queue.
         -- The reducer stays the final authority, and the residual is the
         -- one DeleteTask's guidance states: a subtree task reopened between
         -- the pre-check read and the reducer call is refused by the reducer

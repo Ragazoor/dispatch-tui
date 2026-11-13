@@ -227,15 +227,20 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
-        let mut cmds =
-            self.teardown_epic_subtree(id, Some(crate::tui::commands::DeleteGuard::Epic(id)));
-        cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Delete(id)));
+        // The runtime pre-checks the subtree once before any teardown starts
+        // (epics.allium: DeleteEpic), so the teardowns carry no guard of their
+        // own and ride on the delete command.
+        let (mut cmds, teardowns) = split_teardowns(self.teardown_epic_subtree(id, None));
+        cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Delete {
+            id,
+            teardowns,
+        }));
         cmds
     }
 
     /// Board-mutation and best-effort teardown for `id`'s whole subtree,
-    /// shared by [`Self::handle_delete_epic`] (single-epic `x`, which still
-    /// issues its own `EpicCommand::Delete` afterwards) and
+    /// shared by [`Self::handle_delete_epic`] (single-epic `x`, which carries the
+    /// teardowns on its own `EpicCommand::Delete`) and
     /// `handle_batch_delete`'s atomic path (which bundles every epic's
     /// subtree into ONE `TaskCommand::BatchDelete` call instead — see
     /// `docs/specs/tasks.allium: BatchDelete`).
@@ -372,4 +377,32 @@ impl App {
         }
         cmds
     }
+}
+
+/// Split the teardown commands out of `found` into `TeardownTarget`s, for a
+/// delete command that carries them itself; every other command is returned
+/// as is.
+pub(in crate::tui) fn split_teardowns(
+    found: Vec<Command>,
+) -> (Vec<Command>, Vec<crate::tui::commands::TeardownTarget>) {
+    let mut cmds = Vec::new();
+    let mut teardowns = Vec::new();
+    for c in found {
+        match c {
+            Command::Task(crate::tui::commands::TaskCommand::Cleanup {
+                id,
+                repo_path,
+                worktree,
+                tmux_window,
+                ..
+            }) => teardowns.push(crate::tui::commands::TeardownTarget {
+                id,
+                repo_path,
+                worktree,
+                tmux_window,
+            }),
+            other => cmds.push(other),
+        }
+    }
+    (cmds, teardowns)
 }

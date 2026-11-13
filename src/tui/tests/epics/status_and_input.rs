@@ -301,7 +301,7 @@ fn confirm_delete_epic_y_deletes() {
     assert!(app.board.epics.is_empty());
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete(id)) if *id == EpicId(10))));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete { id, .. }) if *id == EpicId(10))));
 }
 
 #[test]
@@ -312,7 +312,7 @@ fn confirm_delete_epic_uppercase_y_deletes() {
     assert!(app.board.epics.is_empty());
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete(id)) if *id == EpicId(10))));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete { id, .. }) if *id == EpicId(10))));
 }
 
 #[test]

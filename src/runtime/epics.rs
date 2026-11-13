@@ -65,13 +65,21 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) async fn exec_delete_epic(&self, id: models::EpicId) {
+    /// `epics.allium: DeleteEpic`. The one pre-check for the epic's subtree
+    /// runs before any teardown starts; the teardowns then run one repo at a
+    /// time (`BatchTeardownsAreSerialPerRepo`).
+    pub(super) async fn exec_delete_epic(
+        &self,
+        id: models::EpicId,
+        teardowns: Vec<crate::tui::commands::TeardownTarget>,
+    ) {
         if !self
             .pass_delete_guard(&crate::tui::commands::DeleteGuard::Epic(id))
             .await
         {
             return;
         }
+        drop(self.exec_cleanup_queues(teardowns));
         if let Err(e) = self.epic_svc.delete_epic(id).await {
             self.report_delete_refused(Self::db_error("deleting epic", e));
         }

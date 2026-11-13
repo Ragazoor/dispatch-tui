@@ -313,7 +313,7 @@ async fn dispatch_epic(
     use crate::tui::commands::EpicCommand::*;
     match cmd {
         Insert(draft) => rt.exec_insert_epic(app, draft).await,
-        Delete(id) => rt.exec_delete_epic(id).await,
+        Delete { id, teardowns } => rt.exec_delete_epic(id, teardowns).await,
         Persist {
             id,
             status,

@@ -153,7 +153,7 @@ fn delete_epic_removes_from_state_and_tasks() {
     assert_eq!(app.board.tasks[0].id, TaskId(2));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete(id)) if *id == EpicId(10))));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete { id, .. }) if *id == EpicId(10))));
 }
 
 /// #4096 on the epic-delete path: the subtree's rows all go, so a subtask that
@@ -174,17 +174,34 @@ fn delete_epic_tears_down_a_subtask_that_owns_only_a_window() {
         EpicId(10),
     )));
 
+    let teardowns = epic_delete_teardowns(&cmds);
     assert!(
-        cmds.iter().any(|c| matches!(
-            c,
-            Command::Task(crate::tui::commands::TaskCommand::Cleanup {
-                worktree: None,
-                tmux_window: Some(w),
-                ..
-            }) if w == "task-1"
-        )),
+        teardowns
+            .iter()
+            .any(|t| t.worktree.is_none() && t.tmux_window.as_ref().is_some_and(|w| w == "task-1")),
         "the subtask's window must be reclaimed with its row, got: {cmds:?}"
     );
+}
+
+/// The teardowns the epic's delete command carries (`DeleteEpic` pre-checks
+/// once, then runs them serially per repo). No per-subtask `Cleanup` is emitted.
+fn epic_delete_teardowns(cmds: &[Command]) -> Vec<crate::tui::commands::TeardownTarget> {
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+        )),
+        "no per-subtask Cleanup, got: {cmds:?}"
+    );
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::Epic(crate::tui::commands::EpicCommand::Delete { teardowns, .. }) => {
+                Some(teardowns.clone())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
 }
 
 #[test]
@@ -210,14 +227,10 @@ fn delete_epic_cleans_up_worktrees_of_sub_epic_subtasks() {
         EpicId(10),
     )));
 
-    let cleaned: Vec<&str> = cmds
+    let teardowns = epic_delete_teardowns(&cmds);
+    let cleaned: Vec<&str> = teardowns
         .iter()
-        .filter_map(|c| match c {
-            Command::Task(crate::tui::commands::TaskCommand::Cleanup { worktree, .. }) => {
-                worktree.as_deref()
-            }
-            _ => None,
-        })
+        .filter_map(|t| t.worktree.as_deref())
         .collect();
     assert!(
         cleaned.contains(&"/repo/.worktrees/1-direct"),
@@ -226,25 +239,6 @@ fn delete_epic_cleans_up_worktrees_of_sub_epic_subtasks() {
     assert!(
         cleaned.contains(&"/repo/.worktrees/2-nested"),
         "sub-epic subtask worktree must be cleaned up, got: {cleaned:?}"
-    );
-    // The epic delete drops every subtask row in one operation, so a successful
-    // teardown has nothing left to write back — asking it to clear a column on a
-    // deleted row would only produce a spurious failure. This is the documented
-    // exemption from WorktreeReleaseIsGated (docs/specs/tasks.allium).
-    let follow_ups: Vec<crate::tui::commands::CleanupFollowUp> = cmds
-        .iter()
-        .filter_map(|c| match c {
-            Command::Task(crate::tui::commands::TaskCommand::Cleanup { follow_up, .. }) => {
-                Some(*follow_up)
-            }
-            _ => None,
-        })
-        .collect();
-    assert!(
-        follow_ups
-            .iter()
-            .all(|f| *f == crate::tui::commands::CleanupFollowUp::Nothing),
-        "epic-delete teardowns have no follow-up to apply, got: {follow_ups:?}"
     );
 }
 

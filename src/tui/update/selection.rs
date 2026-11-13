@@ -363,23 +363,9 @@ impl App {
         let mut cleanups = Vec::new();
         let mut cmds = Vec::new();
         let mut collect = |found: Vec<Command>| {
-            for c in found {
-                match c {
-                    Command::Task(crate::tui::commands::TaskCommand::Cleanup {
-                        id,
-                        repo_path,
-                        worktree,
-                        tmux_window,
-                        ..
-                    }) => cleanups.push(crate::tui::commands::TeardownTarget {
-                        id,
-                        repo_path,
-                        worktree,
-                        tmux_window,
-                    }),
-                    other => cmds.push(other),
-                }
-            }
+            let (rest, targets) = super::epics::split_teardowns(found);
+            cmds.extend(rest);
+            cleanups.extend(targets);
         };
         for &id in &epic_ids {
             collect(self.teardown_epic_subtree(id, None));

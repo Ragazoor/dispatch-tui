@@ -29,7 +29,7 @@ mod epic_tests {
             .create_epic("Doomed", "bye", None)
             .await
             .unwrap();
-        rt.exec_delete_epic(epic.id).await;
+        rt.exec_delete_epic(epic.id, vec![]).await;
         assert!(rt.database.list_epics().await.is_empty());
         assert!(app.error_popup().is_none());
     }

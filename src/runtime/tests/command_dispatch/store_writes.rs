@@ -648,7 +648,15 @@ async fn dispatch_epic_persist_delete_and_toggles_reach_the_db() {
     dispatch_one(&rt, &mut app, Command::Epic(EpicCommand::RefreshFromDb)).await;
     assert!(app.epics().iter().any(|e| e.id == epic.id));
 
-    dispatch_one(&rt, &mut app, Command::Epic(EpicCommand::Delete(epic.id))).await;
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::Epic(EpicCommand::Delete {
+            id: epic.id,
+            teardowns: vec![],
+        }),
+    )
+    .await;
     assert!(rt.database.get_epic(epic.id).await.is_none());
 }
 

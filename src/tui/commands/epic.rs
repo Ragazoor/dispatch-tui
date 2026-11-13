@@ -10,7 +10,15 @@ use super::super::types::EpicDraft;
 #[derive(Debug, Clone)]
 pub enum EpicCommand {
     Insert(EpicDraft),
-    Delete(EpicId),
+    /// `epics.allium: DeleteEpic`. The runtime pre-checks the epic's subtree
+    /// ONCE, then starts `teardowns` (one repo at a time,
+    /// `BatchTeardownsAreSerialPerRepo`), then makes the guarded delete. A
+    /// refusal at the pre-check starts no teardown. The teardowns carry no
+    /// guard of their own.
+    Delete {
+        id: EpicId,
+        teardowns: Vec<super::TeardownTarget>,
+    },
     Persist {
         id: EpicId,
         status: Option<TaskStatus>,
