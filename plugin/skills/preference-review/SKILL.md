@@ -45,6 +45,17 @@ branch, not the PR's. Reviewers and verifiers must read files at
   then fetch and read the same way inside that clone. The scratch dir is your
   session's scratchpad, not `/tmp`.
 
+The code before the PR is the merge base (`git merge-base <base> <headRefOid>`
+after fetching `baseRefName`), never `<headRefOid>^`: a head that merged the
+base branch in has the PR's own changes in its parent too.
+
+Put every file you or your agents write for this review (diff, agent briefs,
+unpacked sources) in a folder named for the PR, such as
+`<scratch dir>/<repo>-<number>/`, and tell each agent that folder. Other
+reviews may share the scratchpad.
+
+If the PR is already merged or closed, say so in one line and review it anyway.
+
 Read the repo's `CLAUDE.md` at `headRefOid` too, if it has one.
 
 ## Step 2: Load preferences
@@ -74,20 +85,22 @@ Start three `general-purpose` agents in one message, so they run in parallel.
 Do not use reviewer agent types from other plugins: they are not on every host.
 Give each one:
 
-- the PR title, body and full diff;
+- the PR title, body and full diff (inline, or as a file path when the diff is
+  large);
 - how to read files at `headRefOid` (step 1);
 - the full text of every loaded preference file, inline;
 - the repo's `CLAUDE.md`, inline;
 - one focus:
   1. **Correctness** — bugs, wrong edge cases, broken error handling, races.
-  2. **Design and boundaries** — does the code belong where it is, contracts,
-     coupling, scope creep, naming that misleads.
+  2. **Preferences** — walk every **Look for** entry in the loaded files, one
+     by one, against each changed hunk, and report each hit. This is where
+     the operator's own points come from (types, naming, where code lives,
+     failure handling), so a small point counts. Without preference files,
+     this agent reviews design and boundaries instead.
   3. **Tests** — do the tests prove the new behaviour, and would they fail if
      it broke.
 
-Tell each agent: the **Look for** entries are what this operator cares about,
-so check every one that applies to the diff. Report only problems the PR
-introduces. Return each finding as `file`, `line`, `claim` (one sentence) and
+Report only problems the PR introduces. Return each finding as `file`, `line`, `claim` (one sentence) and
 `failure scenario` (concrete input or state → wrong result). No praise, no
 summary.
 
