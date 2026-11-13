@@ -82,6 +82,8 @@ Tell the user which files you loaded, by path, before you review.
 ## Step 3: Review
 
 Start three `general-purpose` agents in one message, so they run in parallel.
+For a tiny diff (a few lines, one file), start one agent with all three
+focuses instead.
 Do not use reviewer agent types from other plugins: they are not on every host.
 Give each one:
 
@@ -104,7 +106,10 @@ Report only problems the PR introduces. Return each finding as `file`, `line`, `
 `failure scenario` (concrete input or state → wrong result). No praise, no
 summary.
 
-Merge the three lists and drop duplicates.
+Merge the three lists and drop duplicates. Mark each finding that comes from a
+**Look for** entry as a preference finding, naming the entry. Save the merged
+list to `findings.md` in the PR folder; step 4 and step 5 add each verdict
+there, so a missed point can be traced to the step that dropped it.
 
 ## Step 4: Verify
 
@@ -112,7 +117,14 @@ Start one `general-purpose` agent for all findings (or one per finding when
 there are more than about eight). Give it each finding and the way to read code
 at `headRefOid`. Its job is to **disprove** each finding against the real code:
 read the lines, follow the callers, check the tests. It returns `confirmed`,
-`plausible` or `refuted` with one line of evidence.
+`plausible` or `refuted` with one line of evidence. It compares against the
+merge base (step 1), never `<headRefOid>^`.
+
+A preference finding is a matter of taste, not a bug, so it cannot be
+disproved the same way. For it, the verifier checks only that the code is as
+the finding says (the type, the name, the throw, the unused value is really
+there and the PR added it). "Existing code does the same" or "it works" is not
+a refutation of a preference finding.
 
 Drop `refuted`. Keep `plausible` but mark it. Count what you dropped.
 

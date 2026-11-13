@@ -85,7 +85,7 @@ fn build_prompt_with_pr_review_tag_includes_review_commands() {
         "pr-review prompt must name the review command, got: {text}"
     );
     // The diff-size branch is gone: the command it routes to takes a PR
-    // target and an effort level of its own, so measuring the diff was a
+    // target and sizes its own review, so measuring the diff was a
     // proxy for a choice that command already makes. See
     // AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch-prompt.allium.
     assert!(

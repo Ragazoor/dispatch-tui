@@ -507,7 +507,7 @@ rule RenderPrReviewRunbook {
         -- runbook: find the PR, run the review command on it, present the
         -- findings and wait. One command, no diff-size branch. The command
         -- is this host's `review_command` setting (settings.allium:
-        -- ReviewCommandSetting), `/dispatch:preference-review` when none is set; the
+        -- ReviewCommandIsASetting), `/dispatch:preference-review` when none is set; the
         -- runbook names it in step 2 and nowhere else. The dispatching host
         -- reads it when it builds the prompt, so a change reaches the next
         -- launch and never an agent already running. The trailing
@@ -1367,9 +1367,9 @@ surface AgentPrompt {
         -- PR review. There is no diff-size branch. The runbook named one
         -- review command for a small diff and another for a large one, which
         -- made the agent shell out to `gh pr diff | wc -l` to pick between
-        -- them. The command it routes to accepts a PR target and an effort
-        -- level of its own, so the size was a proxy for a choice that command
-        -- already makes. Deleting the branch is the harness absorbing it — the
+        -- them. The command it routes to takes a PR target and sizes its own
+        -- review (/preference-review runs one reviewer for a tiny diff), so
+        -- the size was a proxy for a choice that command already makes. Deleting the branch is the harness absorbing it — the
         -- routing does not move, it stops existing.
 
     -- == RenderReleasePrRunbook ==
