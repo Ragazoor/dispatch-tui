@@ -41,7 +41,8 @@
 --       items out of everyone's sight. The one escape hatch is
 --       SuperAdminDeletesUnseenItem: a super-admin may DELETE such an item
 --       once the person it is private to is no longer a member of its
---       workspace, never read it.
+--       workspace, never read it. The options weighed against this are in
+--       docs/adr/0001-super-admin-does-not-see-private-items.md.
 --   D4. Every member of a workspace sees every public epic and work
 --       package in it, and who created it, by display name.
 --   D5. A sub-epic lives in its parent's workspace. Who a private epic is
