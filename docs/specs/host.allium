@@ -441,7 +441,7 @@ rule RefuseAChangedUserIdentity {
 -- launch, and a specified surface nobody can open describes something that
 -- does not exist.
 --
--- The only surface that sets a label today is the mandatory startup prompt, and
+-- The only surface that sets a label is the mandatory startup prompt, and
 -- it lives in startup.allium (HostLabelPrompt) because what it really governs
 -- is whether the board may draw. RenameHost above stays: it is the write, it is
 -- reachable from that prompt, and it is ready for a genuine "rename later"
@@ -453,6 +453,6 @@ rule RefuseAChangedUserIdentity {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "Whether two hosts may hold the same label. It is unconstrained today: nothing compares labels, and a uniqueness rule over a registry of a handful of rows has barely been tested against the case it exists for. Should the registry refuse a label another host already holds?"
+open question "Whether two hosts may hold the same label. It is unconstrained: nothing compares labels, and a uniqueness rule over a registry of a handful of rows has barely been tested against the case it exists for. Should the registry refuse a label another host already holds?"
 
 open question "What a stale label should look like to a reader. RenameHost and its mirror (sync.allium: RegisterHostOnRename) send the row but record no time, so a colleague's board cannot tell how old its copy of this machine's label is. Does a reader need a staleness clock, and where would it live?"
