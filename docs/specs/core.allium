@@ -1124,7 +1124,7 @@ entity Learning {
                              --   scope=user    → null (no qualifier needed)
     tags: Set<String>        -- free-form labels for filtering (e.g. "rust", "testing")
     status: LearningStatus
-    source_task: Task?       -- the task whose agent proposed this entry; null for human-authored entries
+    source_task: Task?       -- the task whose agent proposed this entry; null for human-authored entries. Kept as the archived id when that task is deleted (ArchivedTask); cleared only by the feed stale delete
     upvote_count: Integer -- net score: +1 per `helped` verdict, -1 per `wrong`, 0 per `not_applicable`
                           -- verdict. May be negative. Feeds retrieval ranking and
                           -- the stale-cleanup eligibility check (upvote_count <= 0).
@@ -1161,8 +1161,9 @@ entity Learning {
     -- True when tasks in the given repo have found this learning off-topic:
     -- their standing verdicts on it hold at least
     -- config.off_topic_verdicts_to_mute not_applicable and no helped. wrong
-    -- verdicts count neither way, and a deleted task's verdicts are gone with
-    -- it (LearningVerdict). Derived from the verdict rows when asked, never
+    -- verdicts count neither way, and only verdicts on tasks a board holds
+    -- reach it, so an archived task's kept verdicts do not count
+    -- (LearningVerdict, ArchivedTask). Derived from the verdict rows when asked, never
     -- stored. Dispatch injection leaves such a learning out for that repo
     -- only; query_learnings ignores it (learnings.allium:
     -- AugmentDispatchPromptWithLearnings).
@@ -1199,8 +1200,9 @@ entity Retrieval {
 -- repeat rate_learning call from the same task replaces it, and the learning's
 -- upvote_count moves by the difference, so one task moves a learning's score by
 -- at most one in either direction (learnings.allium: RateLearningViaMcp; the
--- store's apply_learning_verdicts reducer). A task's verdicts go with it when
--- it is deleted.
+-- store's apply_learning_verdicts reducer). A task a person deletes is
+-- archived and keeps its verdicts (tasks.allium: ArchiveDeletedTask); a task
+-- the feed stale delete removes loses them.
 entity LearningVerdict {
     task: Task
     learning: Learning
@@ -1248,8 +1250,8 @@ entity PollOwner {
 }
 
 -- A feed item the human deleted from the board, remembered so the feed does
--- not put it straight back. Deleting a task is permanent (tasks.allium:
--- DeleteTask), but a feed task is a mirror of something upstream that is
+-- not put it straight back. A deleted task never returns to the board
+-- (tasks.allium: DeleteTask), but a feed task is a mirror of something upstream that is
 -- usually still there: without a record the very next cycle would see the
 -- same external_id, find no row, and insert a fresh task. This row is what
 -- turns "delete" into "I am done with this item" for a feed.
@@ -1289,6 +1291,82 @@ entity RetiredFeedItem {
         -- feed_epic carries a feed_command at the moment of writing, but that
         -- is not an invariant: clearing the command later does not drop the
         -- epic's records. They simply stop being read, since no cycle runs.
+}
+
+-- A read-only record of a task a person deleted: soft delete. Deleting a task
+-- still removes its row, its worktree, branch and window (tasks.allium:
+-- DeleteTask); in the same write the store keeps this snapshot of what the
+-- task was, so an agent can later read what was done and why
+-- (mcp-task-tools.allium: GetArchivedTaskViaMcp, ListArchivedTasksViaMcp).
+--
+-- NOT A TASK STATUS. The board once had an `archived` status and removed it
+-- (sync.allium: RowsWithARemovedStatusAreDropped), because every reader of the
+-- task table had to skip it. An ArchivedTask is a separate record: no board
+-- column, epic progress, feed match or dispatch path ever sees it, and that is
+-- what makes "it cannot be resumed or started again" hold by construction.
+-- Rows an older store still carries with the removed status stay dropped;
+-- they never become ArchivedTasks.
+--
+-- Which removals write one: the deletes a person makes — DeleteTask and
+-- BatchDelete (tasks.allium) and every task in a DeleteEpic subtree
+-- (epics.allium, which a super-admin's delete of an unseen epic also runs,
+-- workspaces.allium: SuperAdminDeletesUnseenItem). NOT the feed stale delete
+-- (feeds.allium): it removes only items nobody worked on, and archiving them
+-- would bury the real history under upstream churn.
+--
+-- Lifetime: kept forever. There is no expiry, no purge, no restore and no
+-- edit. Redoing the work means creating a new task.
+entity ArchivedTask {
+    id: Integer               -- the deleted task's own id, kept as-is
+    title: String
+    description: String
+    repo_path: String
+    base_branch: String
+    tag: String?
+    labels: String
+    url: String?              -- the task's PR or link, if it had one
+    plan_path: String?
+    external_id: String?      -- the feed item id, for a feed task
+    created_by: UserIdentity?
+    owner: UserIdentity?              -- set for an epic-less task, as on Task
+    created_at: Timestamp
+    completed_at: Timestamp?
+    epic_id: Integer?         -- the epic it sat in; that epic may since be gone
+    epic_title: String?       -- that epic's title at archive time
+    agent_name: String?       -- the task's display agent at archive time
+    workspace_id: Integer?    -- the epic's workspace at archive time
+    private_holder: UserIdentity?     -- the epic chain's private holder at archive time
+    archived_at: Timestamp
+    archived_by: UserIdentity         -- the person whose delete wrote it
+
+    @guidance
+        -- WHO MAY READ IT is frozen at archive time: the same answer
+        -- Task.visible_to gave the moment before the delete, from what was
+        -- copied then. An epic-less record is its owner's alone; one that sat
+        -- in an epic is seen by members of workspace_id, and only by
+        -- private_holder when that is set. The operator sees every record. Its
+        -- epic may be deleted or re-parented later; the record does not
+        -- follow, because a record that changed audience with a live epic it
+        -- no longer belongs to would leak or lose history arbitrarily.
+        --
+        -- NEVER REISSUED. No live Task ever carries an ArchivedTask's id. Task
+        -- ids are never reused, and a restore's id ceiling counts archived ids
+        -- (spacetime-seed.allium: BurnIdSequences).
+        --
+        -- The live-session columns of a Task (worktree, window, host,
+        -- sub_status, hook timestamps, PR poll state) are not copied: none of
+        -- them means anything once the task is gone. agent_name is copied
+        -- because a task's agents are deleted with it, which frees the name
+        -- (agents.allium: AgentsGoWithTheirTask).
+        --
+        -- The task's learnings stay linked to it: Learning.source_task keeps
+        -- the archived id, and its Retrieval and LearningVerdict rows are kept
+        -- (tasks.allium: DeleteTask). A board receives those rows only for
+        -- tasks its user holds, so the kept rows change nothing a board
+        -- computes (off_topic_in_repo included); they keep the history whole.
+        --
+        -- Read on demand, never subscribed: the record grows without bound,
+        -- and no board needs it to draw anything.
 }
 
 ------------------------------------------------------------

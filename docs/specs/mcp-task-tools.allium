@@ -898,6 +898,7 @@ rule GetTaskViaMcp {
     when: McpGetTask(task_id)
 
     requires: exists core/Task{id: task_id}
+    -- An id with no live task but an ArchivedTask is GetArchivedTaskViaMcp's.
 
     -- Read-only. Returns the task detail view for task_id; no state changes.
     ensures: TaskRetrieved(task_id)
@@ -968,10 +969,121 @@ rule GetTaskViaMcp {
         -- such line, as an unset field has none.
 }
 
+rule GetArchivedTaskViaMcp {
+    when: McpGetTask(task_id)
+
+    requires: not exists core/Task{id: task_id}
+    requires: exists core/ArchivedTask{id: task_id}
+
+    -- Read-only, read from the store on demand (the board does not hold
+    -- archived records). Visibility is the record's own, frozen at archive
+    -- time (core/ArchivedTask); a record the caller may not see is answered
+    -- exactly as an id that never existed.
+    ensures: ArchivedTaskRetrieved(task_id)
+
+    @guidance
+        -- get_task needs no new parameter: an agent holding an old task id
+        -- (from a commit, a learning's source, a plan) asks for it the usual
+        -- way and gets what is left. Detail lines, in render order
+        -- ([brackets] only when set):
+        --   Task <id>: <title>
+        --   Status: archived
+        --   Archived: <archived_at>
+        --   Repo, Description,
+        --   [Agent: <agent_name> (archived)],
+        --   [Epic: "<epic_title> (#<epic_id>)"], [Tag], [Plan],
+        --   [<url label>: <url>], Base branch, Created, [Completed].
+        -- "Status: archived" is the first thing after the title so a reader
+        -- cannot mistake the record for a live task. Nothing that only a live
+        -- task has (worktree, window, sub-status, verify command, dispatch
+        -- request, model, schedule, bookmark) is shown.
+        --
+        -- An id that is neither live nor archived (or not the caller's to
+        -- see) stays the not-found condition GetTaskViaMcp describes.
+}
+
+rule ListArchivedTasksViaMcp {
+    when: McpListTasks(caller_identity,
+                       epic_id?, repo_paths?, status?, recursive?, base_branch?,
+                       query?, limit?, bookmarked?, archived?)
+
+    requires: archived = true
+
+    -- status, recursive and bookmarked mean nothing for an archived record
+    -- (it has no status, its sub-epics may be gone, its bookmarks went with
+    -- the task): any of them alongside archived = true is rejected as
+    -- invalid params (-32602).
+    requires: status = null and not recursive and bookmarked = null
+    requires:
+        if limit != null: limit >= 1
+
+    ensures: ArchivedTasksQueried(
+        caller_identity: caller_identity,
+        epic_id: epic_id,
+        repo_paths: repo_paths,
+        base_branch: base_branch,
+        query: query,
+        limit: limit
+    )
+
+    @guidance
+        -- archived (default false) switches list_tasks from the board's live
+        -- tasks to the caller-visible core/ArchivedTasks, read from the store
+        -- on demand. It never mixes the two: archived = true lists only
+        -- archived records, and the default lists only live tasks.
+        --
+        -- The other filters work as in ListTasksViaMcp, over the record's
+        -- copied fields: epic_id matches the record's epic_id (the epic it sat
+        -- in, which may since be gone), repo_paths and base_branch match
+        -- exactly, query matches every word against title or description,
+        -- and limit cuts with the same "Showing <limit> of <total>." line.
+        -- Auto-scoping is the same too: a dispatched agent with no explicit
+        -- epic_id or repo_paths lists its own epic's archive.
+        --
+        -- Order: newest archived first, ties by id descending. History is
+        -- read backwards from now.
+        --
+        -- Output line per record:
+        --   #<id>: <title> | archived <archived_at>
+        --   [| epic: <epic_title> (#<epic_id>)] [| agent:<agent_name>]
+        --   | Base: <base_branch> [| <url label>: <url>]
+        --   | Goal: <description preview ≤200 chars>
+        -- The plan file is not read: its worktree is gone, so a plan inside
+        -- it no longer exists. Nothing found replies "No archived tasks found".
+}
+
+rule ArchivedTaskIsReadOnly {
+    when: McpResumeTask(task_id) or McpDispatchTask(task_id)
+          or McpUpdateTasks(task_id)
+
+    requires: not exists core/Task{id: task_id}
+    requires: exists core/ArchivedTask{id: task_id}
+
+    -- Nothing changes. The caller is told the task is archived, not that it
+    -- does not exist.
+    ensures: McpRefused(code: not_found, reason: task_archived, task_id: task_id)
+
+    @guidance
+        -- An archived task cannot be resumed, dispatched, edited or moved:
+        -- there is no live row to act on, and nothing turns a record back
+        -- into a task (tasks.allium: ArchiveDeletedTask). The refusal keeps
+        -- the not-found code (-32001) every missing task gets, so existing
+        -- callers branch the same way, and its message says
+        -- "task <id> is archived and cannot be <resumed|dispatched|changed>"
+        -- so an agent learns why and does not retry. In update_tasks the
+        -- archived id fails like any missing id in a batch.
+        --
+        -- A record the caller may not see is answered as an id that never
+        -- existed: the refusal must not reveal it.
+}
+
 rule ListTasksViaMcp {
     when: McpListTasks(caller_identity,
                        epic_id?, repo_paths?, status?, recursive?, base_branch?,
-                       query?, limit?, bookmarked?)
+                       query?, limit?, bookmarked?, archived?)
+
+    -- archived = true is ListArchivedTasksViaMcp's.
+    requires: archived != true
 
     -- A limit of zero is meaningless: rejected as invalid params (-32602).
     requires:
@@ -2098,7 +2210,7 @@ surface McpTaskTools {
                       schedule?, signal?)
         McpGetTask(task_id)
         McpListTasks(client, epic_id?, repo_paths?, status?, recursive?,
-                     base_branch?, query?, limit?, bookmarked?)
+                     base_branch?, query?, limit?, bookmarked?, archived?)
         McpQueryUsage(category?, actor?, since?)
         McpDispatchTask(task)
         McpResumeTask(task, message?)

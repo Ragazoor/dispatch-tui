@@ -345,6 +345,7 @@ rule DeleteEpic {
         for task in epic.subtree_tasks:
             not exists task
             tasks/TaskRowDeleted(task: task)
+            tasks/TaskArchived(task: task)
     ensures:
         for item in core/RetiredFeedItems where item.feed_epic in doomed_epics:
             not exists item
@@ -354,8 +355,10 @@ rule DeleteEpic {
     ensures: not exists epic
 
     @guidance
-        -- Permanent removal, like DeleteTask: there is no archived state for an
-        -- epic to fall back to. The guard lives on the rule as well as on the
+        -- The epic itself is removed for good: there is no archived state for
+        -- an epic. Each task of its subtree is archived like a DeleteTask
+        -- (tasks.allium: ArchiveDeletedTask), keeping the epic's title, so
+        -- its history stays readable after the epic is gone. The guard lives on the rule as well as on the
         -- confirmation because DeleteEpic has internal callers besides the
         -- TUI — FlattenEpic and the feed's empty repo-group cleanup
         -- (feeds.allium: FlatFeedReconcile, delete_if_empty_repo_group) — and

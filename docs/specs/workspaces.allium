@@ -878,7 +878,10 @@ rule SuperAdminDeletesUnseenItem {
         -- an epic goes through epics.allium's DeleteEpic, so it still needs
         -- every task in its subtree done and within the depth bound, and its
         -- tasks' rows go as any epic delete takes them (tasks.allium:
-        -- TaskRowDeleted); a package goes through work-packages.allium's
+        -- TaskRowDeleted) and are archived as any epic delete archives them
+        -- (tasks.allium: ArchiveDeletedTask). The records keep the epic's
+        -- holder, so they stay as unseen as the epic was: only the operator
+        -- reads them. A package goes through work-packages.allium's
         -- DeleteWorkPackage. The hatch never tears down running work. It
         -- widens who may delete, not what: the super-admin is exempt from
         -- the sight checks (UnseenIsAsMissing), since nobody can see the

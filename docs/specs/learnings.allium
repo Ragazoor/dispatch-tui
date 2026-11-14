@@ -168,7 +168,8 @@ rule AugmentDispatchPromptWithLearnings {
         -- core/LearningVerdict rows on it from tasks with this task's
         -- repo_path, at least core/config.off_topic_verdicts_to_mute are
         -- not_applicable and none is helped. wrong verdicts count neither
-        -- way; a deleted task's verdicts are gone with it.
+        -- way; an archived task's verdicts are kept but never reach a board,
+        -- since boards receive verdicts only for tasks they hold.
         --   - Dispatch injection only. QueryLearningsViaMcp is unchanged, so
         --     an agent that asks can still find a muted entry.
         --   - Per repo. An entry muted in repo A still injects in repo B.

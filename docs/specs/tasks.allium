@@ -1708,6 +1708,7 @@ rule DeleteTask {
         if released:
             not exists task
             TaskRowDeleted(task: task)
+            TaskArchived(task: task)
             if retires and not exists core/RetiredFeedItem{feed_epic: feed_epic, external_id: task.external_id}:
                 core/RetiredFeedItem.created(
                     feed_epic:   feed_epic,
@@ -1716,8 +1717,10 @@ rule DeleteTask {
                 )
 
     @guidance
-        -- Permanent removal: the only way a task leaves the board. There is no
-        -- soft state to fall back to and no undo. That is why the TUI puts a
+        -- Soft delete: the task leaves the board for good, and a read-only
+        -- core/ArchivedTask keeps what it was (ArchiveDeletedTask). The board
+        -- row, worktree, branch and window are gone exactly as before; there
+        -- is no undo and no way back onto the board. That is why the TUI puts a
         -- y/n confirmation in front of it (ConfirmDeleteTask) and why no MCP
         -- tool reaches it — deleting is a human decision taken at the board.
         --
@@ -1824,6 +1827,7 @@ rule BatchDelete {
             for task in tasks where not epics.any(e => task in e.subtree_tasks):
                 not exists task
                 TaskRowDeleted(task: task)
+                TaskArchived(task: task)
                 if task.external_id != null
                    and task.epic != null
                    and task.epic.nearest_feed_epic != null
@@ -1881,6 +1885,75 @@ rule BatchDelete {
         -- deleted once, as part of that epic's subtree, and gets DeleteEpic's
         -- semantics: its teardown is not gated, and it is retired only when
         -- its feed epic survives the delete.
+}
+
+-- == Archive (soft delete) ==
+
+-- TaskArchived(task): a person's delete removed this task row. Raised, in the
+-- same transaction as TaskRowDeleted, by DeleteTask's released arm, by
+-- BatchDelete for each plain task, and by DeleteEpic for each task of the
+-- subtree (epics.allium). The feed stale delete does not raise it
+-- (core/ArchivedTask says why).
+rule ArchiveDeletedTask {
+    when: TaskArchived(task)
+
+    -- Read as the task stood at delete time, before its agents and its
+    -- epic (in a DeleteEpic) went with it.
+    let epic = task.epic
+
+    ensures:
+        core/ArchivedTask.created(
+            id:             task.id,
+            title:          task.title,
+            description:    task.description,
+            repo_path:      task.repo_path,
+            base_branch:    task.base_branch,
+            tag:            task.tag,
+            labels:         task.labels,
+            url:            task.url,
+            plan_path:      task.plan_path,
+            external_id:    task.external_id,
+            created_by:     task.created_by,
+            owner:          task.owner,
+            created_at:     task.created_at,
+            completed_at:   task.completed_at,
+            epic_id:        if epic != null: epic.id else: null,
+            epic_title:     if epic != null: epic.title else: null,
+            agent_name:     task.display_agent_name,
+            workspace_id:   if epic != null: epic.workspace else: null,
+            private_holder: if epic != null: epic.private_holder else: null,
+            archived_at:    now,
+            archived_by:    caller
+        )
+    -- Learnings stay linked to the archived id (core/ArchivedTask).
+    ensures:
+        for l in core/Learnings where l.source_task = task:
+            l.source_task = task
+        for r in core/Retrievals where r.task = task:
+            exists r
+        for v in core/LearningVerdicts where v.task = task:
+            exists v
+
+    @guidance
+        -- ONE WRITE. The record is written by the same reducer that deletes
+        -- the row, so a delete that lands always leaves its record and a
+        -- refused delete leaves none. A gated DeleteTask (worktree not
+        -- released) deletes nothing and archives nothing.
+        --
+        -- A record for an id that already has one is not written twice. That
+        -- cannot happen through the delete paths, since the row is gone after
+        -- the first; it is stated so a replay is harmless.
+        --
+        -- WHAT STILL GOES. Everything TaskRowDeleted's listeners remove (the
+        -- task's agents, request rows, marks, work-package links, agent state)
+        -- still goes: none of it is history an agent reads. Only the learning
+        -- links are kept, which a delete used to clear: the learning keeps its
+        -- source task id, and retrievals and verdicts stay. The feed stale
+        -- delete still clears them as before, since it archives nothing.
+        --
+        -- NO WAY BACK. Nothing turns an ArchivedTask into a Task. A request to
+        -- resume, dispatch or change one is refused as archived
+        -- (mcp-task-tools.allium: ArchivedTaskIsReadOnly).
 }
 
 -- == Copy Task ==

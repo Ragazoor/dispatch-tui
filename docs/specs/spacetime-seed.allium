@@ -149,6 +149,7 @@ enum SharedTable {
     learning_verdicts
     usage_events
     retired_feed_items
+    archived_tasks
     work_packages
     work_package_links
     agents
@@ -509,7 +510,15 @@ rule BurnIdSequences {
     when: BurnIdSequences(snapshot)
 
     for sequence in IdSequences:
-        let restored_ceiling = snapshot.highest_id(sequence.table)
+        -- The task sequence also passes every archived id: an archived task
+        -- keeps the id its live row had, and that id must never be handed to
+        -- a new task (core/ArchivedTask: never reissued). archived_tasks
+        -- generates no ids of its own.
+        let restored_ceiling =
+            if sequence.table = tasks:
+                max(snapshot.highest_id(tasks), snapshot.highest_id(archived_tasks))
+            else:
+                snapshot.highest_id(sequence.table)
 
         ensures:
             sequence.next_value > restored_ceiling
@@ -977,7 +986,7 @@ rule ImportOldStore {
         -- hosts, settings, task_watchers, task_subagents, poll_owners,
         -- subscriptions, learnings (with their embeddings and upvotes),
         -- learning_retrievals, learning_verdicts, usage_events, retired_feed_items,
-        -- work_packages, work_package_links, agents, handed_out_agent_names,
+        -- archived_tasks, work_packages, work_package_links, agents, handed_out_agent_names,
         -- user_profiles, workspaces and memberships cross as well as tasks
         -- and epics. A table that cannot be imported is a
         -- refusal (incomplete), not a quiet omission.
