@@ -31,6 +31,15 @@ allium analyse docs/specs/*.allium
 
 The gate (`scripts/check-allium.sh`) passes: 0 errors, 17 baselined warnings.
 
+**Landed on `main` after the review read `10b68974`** (merged before this plan
+shipped; the gate still passes: 39 specs, 0 errors, 17 baselined warnings, 75 info):
+`allium-loop-skill.allium` and `decompose-review-skill.allium` are new (epic #69698) and
+were NOT reviewed here. `feeds.allium` (+188 lines, commit 37f6b697: worked-on feed tasks
+stay in done), `pr-workflow.allium` (+17), `store-split.allium` (12 lines), `core.allium` and
+`mcp-task-tools.allium` (1 line each) changed: packages 7, 8, 9, 1 and 16 search by symbol.
+`RULES_VERSION` is now 52 (Appendix D says 51). Every acceptance check was re-run on the
+merged tree and still fails, as it should before its package runs.
+
 field.unused triage (core): 61 are read in another spec (the checker never credits a
 cross-file field read) or are stored data with no spec reader; 8 are read only in code;
 `Agent.is_assigned` is read by agents.allium unqualified. Only `Task.pr_number` and
@@ -504,7 +513,7 @@ Coverage: sync, snapshot, memory-store read in full. store-split 811-2084 and
 spacetime-seed 200-800: rule bodies read, remaining prose grep-scanned only.
 
 Checker: 0 diagnostics here. Mirror spot-checks pass (RequestFeedRefresh, both prunes,
-release_unseen_window); config literals match; RULES_VERSION = BOARD_RULES_VERSION = 51.
+release_unseen_window); config literals match; RULES_VERSION = BOARD_RULES_VERSION = 51 at `10b68974` (52 after the merge).
 All old Appendix D items resolved in all five specs.
 
 sync analyse conflicts (BoardConnection.status from connected): not ruled on last time.
