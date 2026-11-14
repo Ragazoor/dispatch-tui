@@ -781,7 +781,15 @@ fn no_hook_source_names_the_database() {
     files.sort();
     assert!(!files.is_empty(), "expected hook sources under src/hooks");
 
-    const FORBIDDEN: &[&str] = &["db::", "Store", "rusqlite", "TaskService", "TaskStore"];
+    const FORBIDDEN: &[&str] = &[
+        "db::",
+        "Store",
+        "rusqlite",
+        "TaskService",
+        "TaskStore",
+        "store_connection",
+        "open_cli_store",
+    ];
     for file in &files {
         let source = std::fs::read_to_string(file).unwrap();
         for needle in FORBIDDEN {

@@ -1240,15 +1240,14 @@ surface HookDelivery {
 
     @guarantee HooksWriteThroughTheBoard
         -- A hook delivers its event to the running board and never to the
-        -- shared store. The board is this machine's one store client, so two
-        -- hooks firing at the same instant are two requests to one process,
-        -- not two more clients of the store. The board turns each event into
-        -- one reducer call, and the store applies each call as one
-        -- transaction that recounts live_subagents from the agent's
-        -- SubagentEntry rows
-        -- (spacetime/module/src/agent_state.rs::sync_subagent_count). So the
-        -- denormalised counter stays right under concurrent hooks: no hook
-        -- process reads it and writes it back. See core.allium:
+        -- shared store. The board is the only store client a hook goes
+        -- through, so two hooks firing at the same instant are two requests
+        -- to one process, not two more clients of the store. Each subagent
+        -- event becomes one reducer call, and the store applies it as one
+        -- transaction that recounts live_subagents from the SubagentEntry
+        -- rows (spacetime/module/src/agent_state.rs::sync_subagent_count).
+        -- So the denormalised counter stays right under concurrent hooks: no
+        -- hook process reads it and writes it back. See core.allium:
         -- LiveSubagentCountMatchesEntries.
         --
         -- Its read-side counterpart is agent-tree.allium's
