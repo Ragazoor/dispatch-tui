@@ -314,7 +314,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["m"],
         Some(C::OnTaskCard),
         "move_task_to_epic",
-        "Move the task to another epic, or detach it, via the tree picker",
+        "Move the task (or every selected task) to another epic, or detach it, via the tree picker",
     ),
     // ---- board.normal: creating and editing ----
     normal(&["n"], None, "create_task", "Create a new task"),

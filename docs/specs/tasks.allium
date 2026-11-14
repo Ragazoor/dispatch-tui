@@ -1183,6 +1183,25 @@ rule ReorderItem {
 
 -- == Move To Epic ==
 
+rule BatchMoveToEpic {
+    when: BatchMoveToEpic(tasks, new_epic?)
+
+    -- One target for the whole selection, chosen and confirmed once. Each
+    -- task then moves exactly as MoveTaskToEpic moves it, so a refusal for
+    -- one task (the store's workspace checks) leaves the others moved and is
+    -- reported on its own.
+    ensures:
+        for task in tasks:
+            MoveTaskToEpic(task, new_epic)
+        selection.selected_tasks = {}
+
+    @guidance
+        -- [m] with one or more tasks selected and the cursor on a task
+        -- card. With no selection `m` keeps acting on the card under the
+        -- cursor alone (MoveTaskToEpic). The confirm prompt names the
+        -- count, not a title.
+}
+
 rule MoveTaskToEpic {
     when: MoveTaskToEpic(task, new_epic?)
 
@@ -1207,7 +1226,8 @@ rule MoveTaskToEpic {
         -- Triggered from the kanban board or an epic view by pressing `m`
         -- on a task card (when `m` is pressed on an epic card it runs the
         -- epic ReparentEpic flow instead — see epics.allium). Operates on
-        -- the single selected task. The epic-existence precondition is
+        -- the task under the cursor; with tasks selected, `m` moves the whole
+        -- selection (BatchMoveToEpic). The epic-existence precondition is
         -- enforced by the handler, so the MCP relink path (update_tasks with
         -- an epic_id, mcp-task-tools.allium) is held to it too. So are the
         -- store's checks on who may move what (workspaces.allium:
@@ -2134,8 +2154,10 @@ surface Board {
         BatchMoveTasks(tasks, direction) when not selection.is_empty
         -- Reorder keys on a task or epic card (ReorderItem).
         ReorderItem(item, direction)
-        -- [m] on a task card, the target confirmed (MoveTaskToEpic).
+        -- [m] on a task card, the target confirmed (MoveTaskToEpic), or on a
+        -- multi-selection (BatchMoveToEpic).
         MoveTaskToEpic(task, new_epic?)
+        BatchMoveToEpic(tasks, new_epic?) when not selection.is_empty
         -- [a], or Enter on a column header (SelectAllColumn); Esc
         -- (ClearSelection).
         SelectAllColumn(tasks, epics)

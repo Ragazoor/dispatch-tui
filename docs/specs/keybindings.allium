@@ -276,7 +276,8 @@ enum KeyReceiver { dispatch | tmux }
 --                                                                w: link_work_package
 --   on_work_package_card      "on a work package card"          Space: enter_work_package
 --   on_task_card              "on a task card"                  i: open_task_detail;
---                                                                m: move_task_to_epic;
+--                                                                m: move_task_to_epic (the whole
+--                                                                selection when tasks are selected);
 --                                                                w: link_work_package
 --   on_flattened_task_card    "on a task card in a flattened    Enter: jump_to_task_epic
 --                              column" (BoardView.flattens;      (does nothing when the task

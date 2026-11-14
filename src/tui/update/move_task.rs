@@ -20,8 +20,19 @@ impl App {
             .find(|t| t.id == task_id)
             .and_then(|t| t.epic_id);
         let tree_state = crate::tui::ui::tree_state_at(&items, current);
+        let batch: Vec<TaskId> = if self.select.tasks.is_empty() {
+            vec![]
+        } else {
+            self.board
+                .tasks
+                .iter()
+                .filter(|t| self.select.tasks.contains(&t.id))
+                .map(|t| t.id)
+                .collect()
+        };
         self.interaction.move_task_picker = Some(MoveTaskPickerState {
             task_id,
+            batch,
             tree_state: std::cell::RefCell::new(tree_state),
             items,
         });
@@ -65,7 +76,16 @@ impl App {
             .map(|t| truncate_title(&t.title, TITLE_DISPLAY_LENGTH))
             .unwrap_or_default();
 
+        let batch_len = self
+            .interaction
+            .move_task_picker
+            .as_ref()
+            .map_or(0, |p| p.batch.len());
+
         let msg = match new_epic {
+            None if batch_len > 0 => {
+                format!("Detach {batch_len} tasks from their epics? [y/n]")
+            }
             None => format!("Detach {moving_title} from its epic? [y/n]"),
             Some(eid) => {
                 let epic_label = self
@@ -75,7 +95,11 @@ impl App {
                     .find(|e| e.id == eid)
                     .map(|e| truncate_title(&e.title, TITLE_DISPLAY_LENGTH))
                     .unwrap_or_else(|| "the epic".to_string());
-                format!("Move {moving_title} to {epic_label}? [y/n]")
+                if batch_len > 0 {
+                    format!("Move {batch_len} tasks to {epic_label}? [y/n]")
+                } else {
+                    format!("Move {moving_title} to {epic_label}? [y/n]")
+                }
             }
         };
 
@@ -95,13 +119,18 @@ impl App {
             InputMode::ConfirmMoveTaskToEpic { task_id, new_epic } => (task_id, new_epic),
             _ => return vec![],
         };
+        let ids = match self.interaction.move_task_picker.as_ref() {
+            Some(p) if !p.batch.is_empty() => p.batch.clone(),
+            _ => vec![task_id],
+        };
         self.clear_move_task_state();
-        vec![Command::Task(
-            crate::tui::commands::TaskCommand::MoveToEpic {
-                id: task_id,
-                new_epic,
-            },
-        )]
+        if ids.len() > 1 || self.select.tasks.iter().any(|t| ids.contains(t)) {
+            self.select.tasks.clear();
+            self.dirty = true;
+        }
+        ids.into_iter()
+            .map(|id| Command::Task(crate::tui::commands::TaskCommand::MoveToEpic { id, new_epic }))
+            .collect()
     }
 
     /// Cancel the move flow entirely (Esc/q from the confirm prompt), returning

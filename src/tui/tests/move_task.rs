@@ -9,6 +9,7 @@ use crossterm::event::KeyCode;
 fn make_move_task_picker(task_id: TaskId) -> crate::tui::MoveTaskPickerState {
     crate::tui::MoveTaskPickerState {
         task_id,
+        batch: vec![],
         tree_state: std::cell::RefCell::new(tui_tree_widget::TreeState::default()),
         items: vec![],
     }
@@ -231,4 +232,72 @@ fn space_confirms_in_move_to_epic_picker_and_does_not_expand() {
         "got {:?}",
         app.input.mode
     );
+}
+
+// ---- BatchMoveToEpic (tasks.allium): `m` with tasks selected moves them all ----
+
+#[test]
+fn move_to_epic_with_selection_moves_every_selected_task() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+    ]);
+    app.board.epics = vec![make_epic(20)];
+    app.select.tasks.insert(TaskId(1));
+    app.select.tasks.insert(TaskId(3));
+
+    app.update(Message::Task(TaskMessage::StartMoveToEpic(TaskId(1))));
+    if let Some(picker) = &app.interaction.move_task_picker {
+        picker.tree_state.borrow_mut().select_first();
+    }
+    app.update(Message::Task(TaskMessage::MoveToEpicConfirm));
+    let msg = app.status.message.clone().unwrap_or_default();
+    assert!(
+        msg.contains("2 tasks"),
+        "prompt should name the count: {msg}"
+    );
+
+    let cmds = app.update(Message::Task(TaskMessage::MoveToEpicExecute));
+
+    let moved: Vec<TaskId> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            Command::Task(crate::tui::commands::TaskCommand::MoveToEpic { id, new_epic: None }) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(moved, vec![TaskId(1), TaskId(3)]);
+    assert!(
+        app.select.tasks.is_empty(),
+        "selection clears after the move"
+    );
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn move_to_epic_without_selection_moves_only_the_cursor_task() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    app.update(Message::Task(TaskMessage::StartMoveToEpic(TaskId(2))));
+    if let Some(picker) = &app.interaction.move_task_picker {
+        picker.tree_state.borrow_mut().select_first();
+    }
+    app.update(Message::Task(TaskMessage::MoveToEpicConfirm));
+    let cmds = app.update(Message::Task(TaskMessage::MoveToEpicExecute));
+
+    let n = cmds
+        .iter()
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::MoveToEpic { .. })
+            )
+        })
+        .count();
+    assert_eq!(n, 1);
 }

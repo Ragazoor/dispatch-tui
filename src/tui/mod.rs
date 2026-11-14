@@ -162,6 +162,10 @@ impl ReparentPickerState {
 /// card). Mirrors [`ReparentPickerState`] but targets a task instead of an epic.
 pub(in crate::tui) struct MoveTaskPickerState {
     pub(in crate::tui) task_id: TaskId,
+    /// The selected tasks when the picker opened with a selection
+    /// (`tasks.allium: BatchMoveToEpic`), in board order; empty means only
+    /// `task_id` moves.
+    pub(in crate::tui) batch: Vec<TaskId>,
     pub(in crate::tui) tree_state: std::cell::RefCell<tui_tree_widget::TreeState<String>>,
     /// Pre-built tree items. Computed once when the picker opens so the render
     /// path never calls `move_task_target_epics` or `build_reparent_tree` per frame.
