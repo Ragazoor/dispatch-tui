@@ -1,5 +1,6 @@
 use super::*;
 
+/// IterationBudgetAndModelDefault (docs/specs/allium-loop-skill.allium).
 /// A loop iteration does rebase, tend, propagate, red check, implement,
 /// verify and weed, and repeats up to the loop's configured maximum — so an
 /// iteration agent left on the session model (Opus) multiplies that cost by
@@ -15,6 +16,7 @@ fn allium_loop_dispatches_iteration_agents_on_sonnet() {
     );
 }
 
+/// IterationsAreFreshAgentsOnThePinnedModel (docs/specs/allium-loop-skill.allium).
 /// The no-fork rule and the model override are load-bearing together: a
 /// `fork` ignores `model` entirely and runs on the session model, so losing
 /// the no-fork constraint would silently undo the sonnet pin even with the
@@ -41,6 +43,7 @@ fn allium_loop_dispatch_instruction() -> String {
         .expect("allium-loop skill must have an 'Each Iteration' section")
 }
 
+/// ConvergenceIsGated (docs/specs/allium-loop-skill.allium).
 /// Both halves of the loop's convergence gate, added after two iterations of
 /// one run reported `CONVERGED: yes` while their own prose named an
 /// unresolved item. The driver acts on the label, not the prose, so a

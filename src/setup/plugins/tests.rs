@@ -111,6 +111,7 @@ fn skill_file(skill: &str, file: &str) -> &'static str {
         .unwrap_or_else(|| panic!("{path} must be UTF-8"))
 }
 
+mod allium_loop_skill;
 mod decompose_review_skill;
 mod feed_scripts;
 mod grill_skill;

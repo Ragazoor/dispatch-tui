@@ -2173,6 +2173,7 @@ surface McpTaskTools {
         --
         -- The /fix skill files a defect as a task in the repo that owns it. Its
         -- behaviour is specified in its own file (fix-skill.allium: FixSession).
+        -- So is /allium-loop's (allium-loop-skill.allium: AlliumLoopSession).
         --
         -- The /preference-review skill reviews one PR against the operator's review
         -- preference files. Its behaviour is specified in its own file

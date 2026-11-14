@@ -90,7 +90,7 @@ magic numbers. Do NOT edit the generated tests.
 ### 7. Weed
 
 Use the Agent tool with `subagent_type: "allium:weed"` in check mode to compare all of
-`docs/specs/` against the implementation in `src/` (weed already sweeps the whole directory — no
+`docs/specs/` against the implementation (weed already sweeps the whole directory — no
 target file needed here). Reconcile divergence: update the spec for undocumented behavior or
 spec bugs; for code bugs that contradict a correct spec, ask the user before fixing.
 
