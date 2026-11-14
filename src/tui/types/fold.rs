@@ -71,7 +71,7 @@ impl SectionFoldState {
     /// Read back [`Self::serialise`]'s output, skipping any entry this binary
     /// cannot resolve. A fold naming an unknown status or section is a display
     /// preference that cannot be honoured, not the data-integrity bug the
-    /// storage-boundary hard-fail rule guards against — see the carve-out under
+    /// storage-boundary drop rule guards against — see the carve-out under
     /// "Storage Boundary Validation" in `docs/specs/core.allium`.
     pub fn parse(text: &str) -> Self {
         let folded = text

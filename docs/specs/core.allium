@@ -23,9 +23,10 @@
 --           the specs that state them.
 --
 -- Derived values: a derived value is declared here when some spec reads it
---           by name. A one-line test of a single field (`sub_status =
---           stale`) is inlined by its reader unless some spec reads it by
---           name (Task.has_plan, Agent.is_current).
+--           by name or when it carries a rule of its own. A one-line test
+--           of a single field (`sub_status = stale`) is inlined by its
+--           reader unless some spec reads it by name (Task.has_plan,
+--           Agent.is_current).
 --
 -- Expected checker warnings: most fields here are read only by other specs,
 --           and `allium check` does not credit a field read from another
@@ -1296,7 +1297,8 @@ entity RetiredFeedItem {
 config {
     tick_interval: Duration = 2.seconds
     gg_chord_timeout: Duration = 150.milliseconds   -- window for completing the vim-style `gg` chord (see board-layout.allium, "Board Columns", row navigation)
-    -- How long a status-bar message stays up. A code constant; no rule reads it.
+    -- How long a status-bar message stays up (src/tui/mod.rs::STATUS_MESSAGE_TTL).
+    -- No rule reads it.
     status_message_expiry: Duration = 5.seconds
     -- How long a delivered message's flash stays on the target task's card.
     -- Long enough that a human whose attention is elsewhere still catches it;
