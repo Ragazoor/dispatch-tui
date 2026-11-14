@@ -22,13 +22,7 @@ cargo run -- tui
 
 **`spacetime/module/` is a separate wasm crate.** Root `cargo test` does not cover it; its checks, the committed `module.wasm` and the client bindings are in [docs/testing.md](docs/testing.md) ("SpacetimeDB module and CI details"). Reducers have in-memory tests in `spacetime/module-tests/` (own crate, needs `gcc-c++` and `openssl-devel`). Rebuild with `./scripts/build-managed-module.sh` after a module change, and regenerate bindings with `./scripts/regenerate-spacetime-bindings.sh`. Once a module change is on `main`, rebuild the startup smoke test's committed store with `./scripts/rotate-previous-store.sh` (docs/testing.md, startup smoke tests).
 
-**The full suite needs `tmux` and `spacetime` on `PATH`.** Without tmux the `tmux_*` targets print `skipping: tmux not available on PATH` and pass, so a green local run isn't proof they ran; without `spacetime` the live-store targets skip the same way (docs/testing.md, "The live-store tests skip without `spacetime`, except under CI").
-
-**Don't pipe `cargo test` into `tail`/`head`/`grep`.** A pipeline's exit code is the last command's, so a failing suite reads as a clean pass. Redirect instead: `cargo test > /tmp/t.txt 2>&1; echo $?`.
-
-**Run `cargo test --no-fail-fast`.** Plain `cargo test` stops at the first failing target, so later targets never run. The live-store tests in `tests/spacetime_module.rs` can flake on a one-off transport error (`Connection reset by peer`, or `error sending request … connection error`); `Instance::publish` and `Instance::sql` each retry once on one, so a failure that survives is real.
-
-**Run it in the foreground. Warm it takes ~60s; a fresh worktree's first run took ~6 minutes**, past Claude Code's default 120s Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
+**Run the suite as `cargo test --no-fail-fast > /tmp/t.txt 2>&1; echo $?`, in the foreground, with an explicit Bash `timeout` on a worktree's first run (~6 minutes; warm ~60s).** Never pipe it into `tail`/`head`/`grep`: the pipeline's exit code is the last command's, so a failing suite reads as a pass. It needs `tmux` and `spacetime` on `PATH`; without them the `tmux_*` and live-store targets print `skipping` and pass, so a green local run is not proof they ran. Live-store flakes (`Connection reset by peer`) are retried once, so a failure that survives is real. Reasons and details: [docs/testing.md](docs/testing.md).
 
 Everything else about tests — the per-target command list, snapshot workflow, where a new test belongs, the no-wall-clock-sleep rule, timings, coverage (always `--engine llvm`, plus CI's exclusions) — is in [docs/testing.md](docs/testing.md).
 

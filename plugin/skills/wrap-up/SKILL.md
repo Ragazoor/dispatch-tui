@@ -32,12 +32,7 @@ A preset mode is the user's earlier answer, not a pause. Run everything from her
 
 ## Step 3: Simplify code changes (conditional)
 
-If the branch changed only docs, configs, snapshots or lock files, skip this step. Otherwise sum added plus removed source lines, committed and not:
-
-```bash
-git diff {base_branch}..HEAD --numstat -- '*.rs' '*.py' '*.ts' '*.js' '*.tsx' '*.jsx' '*.go' '*.java' '*.cpp' '*.c' '*.h' '*.swift' '*.kt' '*.rb' '*.cs'
-git diff --numstat -- '*.rs' '*.py' '*.ts' '*.js' '*.tsx' '*.jsx' '*.go' '*.java' '*.cpp' '*.c' '*.h' '*.swift' '*.kt' '*.rb' '*.cs'
-```
+Count the source lines added plus removed, committed and not (`git diff {base_branch}..HEAD --numstat` and `git diff --numstat`). Docs, configs, snapshots and lock files do not count.
 
 Under **100** changed lines, skip (task #4973's retrospective: review sub-agents rarely find anything on a diff that small). At 100 or more, run `Skill({ skill: "simplify" })`; its changes are committed in Step 6. Its summary is not a stopping point: go straight on to Step 4.
 
@@ -69,6 +64,6 @@ Run `git status --porcelain`. If it is not clean, `git add` the relevant files b
 
 Run these back to back in one turn; any pause risks going idle with `{base_branch}` already fast-forwarded and the task still in its old status.
 
-1. **Rate retrieved knowledge.** `rate_learning(learning_id, task_id, verdict)` for each entry from "## Validated knowledge for this task" or `query_learnings` that you acted on and have not rated: `helped` if you applied it, `wrong` if it misled you (or `delete_learning` if clearly wrong). Rate each injected entry that did not fit this task `not_applicable`. See the `learnings` skill.
+1. **Rate retrieved knowledge** you acted on and have not rated yet, as the `learnings` skill describes.
 2. **`wrap_up(task_id, action)`.** It returns an **Exit token**. After a rebase, if its response tells you to re-run the verify command, do that and commit any fix before `exit_session`. If it refuses — uncommitted changes, a rebase conflict — show the user the exact message. For a dirty tree, commit (Step 6) and call `wrap_up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `exit_session` without a token.
 3. **`exit_session(task_id, token, action)`**, plus `pr_url` on the pr path only. Make it your final action. If it errors, or succeeds but reports that the close did not take effect, read `references/exit-session-errors.md` before reacting.
