@@ -710,7 +710,7 @@ pub trait ReducerCaller: Send + Sync {
 ///
 /// # The host registry is a decision, not an omission
 ///
-/// `ensure_host_identity`, `adopt_user_identity` and `rename_host` are NOT
+/// `ensure_host_identity`, `adopt_user_identity_with_credential` and `rename_host` are NOT
 /// store writes and never will be: the identity handshake writes this
 /// install's identity to `host.json`, before any connection exists, and that
 /// write must keep happening unconditionally — it is the durable local

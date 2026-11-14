@@ -1399,7 +1399,7 @@ fn cleanup_outcome(
 #[cfg(test)]
 mod step_shared_store_tests {
     use super::{report_connection, step_shared_store};
-    use crate::store::{HostStore, IdentityCredentialStore, Store};
+    use crate::store::{HostStore, Store};
     use crate::sync::memory_caller::MemoryReducerCaller;
     use crate::sync::tests::{accepted, ScriptedConnector};
     use crate::sync::{SettledIdentity, SharedRows, SyncSession};
@@ -1427,8 +1427,9 @@ mod step_shared_store_tests {
     #[tokio::test]
     async fn a_conflict_tells_the_board_to_leave_and_records_the_reason() {
         let db = Store::open_in_memory().unwrap();
-        db.set_user_identity_token("token-a").await.unwrap();
-        db.adopt_user_identity("user-a").await.unwrap();
+        db.adopt_user_identity_with_credential("user-a", "token-a")
+            .await
+            .unwrap();
         let connector = ScriptedConnector::new(vec![accepted("user-b", "token-b")]);
         let mut session = SyncSession::open("store.example", connector);
         let identity = SettledIdentity::default();

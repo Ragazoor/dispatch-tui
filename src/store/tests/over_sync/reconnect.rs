@@ -179,8 +179,9 @@ async fn every_reconnect_presents_the_stored_credential() {
 #[tokio::test]
 async fn a_changed_identity_stops_the_connection_for_good() {
     let db = store().await;
-    db.set_user_identity_token("token-a").await.unwrap();
-    db.adopt_user_identity("user-a").await.unwrap();
+    db.adopt_user_identity_with_credential("user-a", "token-a")
+        .await
+        .unwrap();
     let connector = ScriptedConnector::new(vec![accepted("user-b", "token-b")]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let now = Instant::now();
@@ -222,8 +223,9 @@ async fn a_changed_identity_stops_the_connection_for_good() {
 #[tokio::test]
 async fn a_conflicted_connection_never_subscribes() {
     let db = store().await;
-    db.set_user_identity_token("token-a").await.unwrap();
-    db.adopt_user_identity("user-a").await.unwrap();
+    db.adopt_user_identity_with_credential("user-a", "token-a")
+        .await
+        .unwrap();
     db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
     let connector = ScriptedConnector::new(vec![accepted("user-b", "token-b")]);
     let mut session = SyncSession::open("store.example", connector.clone());
@@ -390,9 +392,6 @@ impl HostStore for FlakyAdopt {
     async fn user_identity(&self) -> anyhow::Result<Option<String>> {
         self.inner.user_identity().await
     }
-    async fn adopt_user_identity(&self, identity: &str) -> anyhow::Result<()> {
-        self.inner.adopt_user_identity(identity).await
-    }
     async fn adopt_user_identity_with_credential(
         &self,
         identity: &str,
@@ -411,9 +410,6 @@ impl HostStore for FlakyAdopt {
 impl IdentityCredentialStore for FlakyAdopt {
     async fn user_identity_token(&self) -> anyhow::Result<Option<String>> {
         self.inner.user_identity_token().await
-    }
-    async fn set_user_identity_token(&self, token: &str) -> anyhow::Result<()> {
-        self.inner.set_user_identity_token(token).await
     }
 }
 

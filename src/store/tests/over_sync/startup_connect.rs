@@ -70,8 +70,9 @@ async fn an_unreachable_store_fails_the_start_with_its_reason() {
 #[tokio::test]
 async fn an_identity_conflict_fails_the_start() {
     let db = Store::open_in_memory().unwrap();
-    db.set_user_identity_token("token-a").await.unwrap();
-    db.adopt_user_identity("aaaa").await.unwrap();
+    db.adopt_user_identity_with_credential("aaaa", "token-a")
+        .await
+        .unwrap();
     let connector = ScriptedConnector::new(vec![accepted("bbbb", "token-b")]);
     let mut session = SyncSession::open("store.example", connector.clone());
 

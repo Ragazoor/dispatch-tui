@@ -1,5 +1,6 @@
 //! The identity a shared store issued, kept by this install's [`Store`]: it
-//! persists across restarts, is written once, and its credential refreshes.
+//! persists across restarts, is written once with its credential, and its
+//! credential refreshes.
 //!
 //! `docs/specs/host.allium`: AdoptUserIdentity. The verdict on an offered
 //! identity is tested beside `settle_identity`, in `sync`'s own tests.
@@ -29,8 +30,9 @@ async fn a_user_identity_survives_a_restart() {
 
     {
         let db = Store::in_memory_with_host_file(dir.path());
-        db.set_user_identity_token("token-a").await.unwrap();
-        db.adopt_user_identity("user-a").await.unwrap();
+        db.adopt_user_identity_with_credential("user-a", "token-a")
+            .await
+            .unwrap();
         assert_eq!(db.user_identity().await.unwrap().as_deref(), Some("user-a"));
     }
 
@@ -50,21 +52,30 @@ async fn a_user_identity_survives_a_restart() {
 /// refuses a conflict.
 ///
 /// The store layer must not quietly do what `settle_identity` refuses. If it
-/// did, a caller that forgot to consult the verdict would silently adopt.
+/// did, a caller that forgot to consult the verdict would silently adopt, or
+/// pair one person with another's credential (`host.allium:
+/// AdoptUserIdentity`).
 #[tokio::test]
-async fn adopting_a_second_identity_does_not_overwrite_the_first() {
+async fn adopting_a_second_identity_is_refused_and_writes_nothing() {
     let db = Store::open_in_memory().unwrap();
-    db.set_user_identity_token("token-a").await.unwrap();
-    db.adopt_user_identity("user-a").await.unwrap();
+    db.adopt_user_identity_with_credential("user-a", "token-a")
+        .await
+        .unwrap();
 
-    db.set_user_identity_token("token-b").await.unwrap();
+    let second = db
+        .adopt_user_identity_with_credential("user-b", "token-b")
+        .await;
 
-    db.adopt_user_identity("user-b").await.unwrap();
-
+    assert!(second.is_err(), "a different identity must be refused");
     assert_eq!(
         db.user_identity().await.unwrap().as_deref(),
         Some("user-a"),
         "the stored identity is written once and never again"
+    );
+    assert_eq!(
+        db.user_identity_token().await.unwrap().as_deref(),
+        Some("token-a"),
+        "the stored owner keeps its own credential"
     );
 }
 
@@ -72,12 +83,13 @@ async fn adopting_a_second_identity_does_not_overwrite_the_first() {
 #[tokio::test]
 async fn the_credential_is_refreshed_for_the_same_identity() {
     let db = Store::open_in_memory().unwrap();
-    db.set_user_identity_token("token-a").await.unwrap();
-    db.adopt_user_identity("user-a").await.unwrap();
+    db.adopt_user_identity_with_credential("user-a", "token-a")
+        .await
+        .unwrap();
 
-    db.set_user_identity_token("token-a2").await.unwrap();
-
-    db.adopt_user_identity("user-a").await.unwrap();
+    db.adopt_user_identity_with_credential("user-a", "token-a2")
+        .await
+        .unwrap();
 
     assert_eq!(db.user_identity().await.unwrap().as_deref(), Some("user-a"));
     assert_eq!(
@@ -96,10 +108,19 @@ async fn the_credential_is_refreshed_for_the_same_identity() {
 async fn a_blank_identity_or_credential_is_refused() {
     let db = Store::open_in_memory().unwrap();
 
-    assert!(db.set_user_identity_token("").await.is_err());
-    assert!(db.set_user_identity_token("   ").await.is_err());
-    assert!(db.adopt_user_identity("").await.is_err());
-    assert!(db.adopt_user_identity("   ").await.is_err());
+    for (identity, credential) in [
+        ("user-a", ""),
+        ("user-a", "   "),
+        ("", "token-a"),
+        ("   ", "token-a"),
+    ] {
+        assert!(
+            db.adopt_user_identity_with_credential(identity, credential)
+                .await
+                .is_err(),
+            "({identity:?}, {credential:?}) must be refused"
+        );
+    }
     assert_eq!(db.user_identity().await.unwrap(), None);
     assert_eq!(db.user_identity_token().await.unwrap(), None);
 }
@@ -130,8 +151,9 @@ async fn two_installs_of_one_person_hold_one_identity_and_two_host_ids() {
         let stored = db.user_identity().await.unwrap();
         let verdict = settle_identity(stored.as_deref(), "user-a");
         assert!(verdict.is_adoption());
-        db.set_user_identity_token("token-a").await.unwrap();
-        db.adopt_user_identity("user-a").await.unwrap();
+        db.adopt_user_identity_with_credential("user-a", "token-a")
+            .await
+            .unwrap();
     }
 
     assert_ne!(

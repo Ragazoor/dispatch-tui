@@ -236,26 +236,3 @@ pub fn adopt_user_identity(
         Ok(())
     })
 }
-
-/// Store or refresh the credential alone. Rejects an empty credential.
-pub fn set_credential(data_dir: &Path, credential: &str) -> anyhow::Result<HostIdentity> {
-    let credential = credential.trim();
-    if credential.is_empty() {
-        anyhow::bail!("user identity credential must not be empty");
-    }
-    update(data_dir, |host| {
-        host.credential = Some(credential.to_string());
-        Ok(())
-    })
-}
-
-/// Store the user identity once: a second call with a different identity
-/// leaves the stored one alone.
-pub fn adopt_user_identity_once(data_dir: &Path, identity: &str) -> anyhow::Result<HostIdentity> {
-    let identity = checked_identity(identity)?;
-    update(data_dir, |host| {
-        host.user_identity
-            .get_or_insert_with(|| identity.to_string());
-        Ok(())
-    })
-}

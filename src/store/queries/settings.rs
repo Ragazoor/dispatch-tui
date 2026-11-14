@@ -234,20 +234,6 @@ impl super::super::HostStore for Store {
         .await?;
         Ok(())
     }
-
-    async fn adopt_user_identity(&self, identity: &str) -> Result<()> {
-        let identity = identity.trim();
-        if identity.is_empty() {
-            anyhow::bail!("user identity must not be empty");
-        }
-        let dir = &self.host_file_dir;
-        let identity = identity.to_string();
-        host_file_call(dir, move |dir| {
-            crate::host_file::adopt_user_identity_once(dir, &identity)
-        })
-        .await?;
-        Ok(())
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -261,24 +247,6 @@ impl super::super::IdentityCredentialStore for Store {
         Ok(host_file_call(dir, crate::host_file::read_for_cli)
             .await?
             .credential)
-    }
-
-    async fn set_user_identity_token(&self, token: &str) -> Result<()> {
-        let token = token.trim();
-        if token.is_empty() {
-            // Refused rather than stored, because an identity with no
-            // credential is one this install cannot prove again — it would
-            // survive exactly until the next connection and then present as a
-            // conflict, which is the worst of both answers.
-            anyhow::bail!("user identity credential must not be empty");
-        }
-        let dir = &self.host_file_dir;
-        let token = token.to_string();
-        host_file_call(dir, move |dir| {
-            crate::host_file::set_credential(dir, &token)
-        })
-        .await?;
-        Ok(())
     }
 }
 

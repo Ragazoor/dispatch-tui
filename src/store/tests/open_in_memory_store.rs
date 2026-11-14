@@ -32,7 +32,10 @@ async fn a_handle_with_no_host_file_refuses_identity() {
     let db = Store::in_memory_with_host_file(dir.path());
     assert!(db.ensure_host_identity().await.is_err());
     assert!(db.user_identity().await.is_err());
-    assert!(db.adopt_user_identity("user-a").await.is_err());
+    assert!(db
+        .adopt_user_identity_with_credential("user-a", "token-a")
+        .await
+        .is_err());
 }
 
 #[tokio::test]

@@ -72,19 +72,6 @@ pub trait HostStore: Send + Sync {
     /// `None`, so every caller handles the absence rather than unwrapping it.
     async fn user_identity(&self) -> Result<Option<String>>;
 
-    /// Store the identity a shared store issued.
-    ///
-    /// **Writes once.** A second call with a DIFFERENT identity leaves the
-    /// stored one alone rather than overwriting it — the decision about a
-    /// changed identity belongs to `crate::sync::settle_identity`, which
-    /// refuses it, and this method must not quietly do the opposite underneath.
-    ///
-    /// Rejects an empty identity. The CREDENTIAL that proves this identity is
-    /// deliberately not written here: it is local and secret, so it lives on
-    /// the other half of the seam — see
-    /// [`IdentityCredentialStore::set_user_identity_token`].
-    async fn adopt_user_identity(&self, identity: &str) -> Result<()>;
-
     /// Adopt `identity` together with the `credential` that proves it, as ONE
     /// write: on a handle that keeps its identity in the host file, one
     /// whole-file replacement, so the file never holds the one without the
@@ -122,14 +109,6 @@ pub trait HostStore: Send + Sync {
 pub trait IdentityCredentialStore: Send + Sync {
     /// The stored credential, or `None` on an install that has never connected.
     async fn user_identity_token(&self) -> Result<Option<String>>;
-
-    /// Store or refresh the credential.
-    ///
-    /// Overwrites, unlike the identity it proves: refreshing the proof of the
-    /// SAME identity is ordinary. Rejects an empty credential — an identity
-    /// this install cannot prove again survives until the next connection and
-    /// then presents as a conflict, which is worse than not storing it.
-    async fn set_user_identity_token(&self, token: &str) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
