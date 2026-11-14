@@ -366,10 +366,56 @@ async fn generate_previous_store_fixture() {
     let ub = boot(&user_dir, &user_paths, target())
         .await
         .expect("user's board starts");
+    // *other*: a second person on the same store, minting their own identity.
+    let other_root = dir.path().join("other");
+    let (other_dir, other_paths) = board_dir(&other_root);
+    let ob = boot(&other_dir, &other_paths, target())
+        .await
+        .expect("other's board starts");
+
+    // A fresh store has no workspace, and every root epic needs one. The
+    // user publishes, so they can claim super-admin and make one workspace
+    // for each person; *other* is added to theirs by display name.
+    let _ = ub.runtime.people_svc.claim_super_admin().await;
+    ub.runtime
+        .people_svc
+        .set_display_name("smoke user")
+        .await
+        .unwrap();
+    ob.runtime
+        .people_svc
+        .set_display_name("smoke other")
+        .await
+        .unwrap();
+    let people = &ub.runtime.people_svc;
+    people.create_workspace("smoke user").await.unwrap();
+    people.create_workspace("smoke other").await.unwrap();
+    let workspace_of = |name: &'static str| async move {
+        let snapshot = people.admin_snapshot().await;
+        snapshot
+            .workspaces
+            .iter()
+            .find(|w| w.name == name)
+            .map(|w| w.id)
+            .expect("the workspace exists")
+    };
+    let user_ws = workspace_of("smoke user").await;
+    let other_ws = workspace_of("smoke other").await;
+    people
+        .add_member(user_ws, "smoke user", crate::models::MemberRole::Admin)
+        .await
+        .unwrap();
+    people
+        .add_member(other_ws, "smoke other", crate::models::MemberRole::Admin)
+        .await
+        .unwrap();
     let epic = ub
         .runtime
         .epic_svc
-        .create_epic(crate::service::CreateEpicParams::fixture("smoke epic"))
+        .create_epic(crate::service::CreateEpicParams {
+            workspace_id: user_ws,
+            ..crate::service::CreateEpicParams::fixture("smoke epic")
+        })
         .await
         .unwrap();
     let mut created = Vec::new();
@@ -393,16 +439,13 @@ async fn generate_previous_store_fixture() {
         await_task(&ub, *task).await;
     }
 
-    // *other*: a second person on the same store, minting their own identity.
-    let other_root = dir.path().join("other");
-    let (other_dir, other_paths) = board_dir(&other_root);
-    let ob = boot(&other_dir, &other_paths, target())
-        .await
-        .expect("other's board starts");
     let other_epic = ob
         .runtime
         .epic_svc
-        .create_epic(crate::service::CreateEpicParams::fixture("other's epic"))
+        .create_epic(crate::service::CreateEpicParams {
+            workspace_id: other_ws,
+            ..crate::service::CreateEpicParams::fixture("other's epic")
+        })
         .await
         .unwrap();
     let other_task = ob
