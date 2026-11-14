@@ -39,14 +39,13 @@
 --     held it means one agent, and through it one task. Deleting a task
 --     deletes its agents (AgentsGoWithTheirTask), and that frees their names
 --     for reuse. When every name in the list is held a number is appended
---     ("ada2"). Changed 2026-11-09 (task #99056): names used to be handed
---     out once ever, through a HandedOutAgentName ledger that kept a deleted
---     task's names taken. With an agent on every task (A17) and feeds
---     creating and deleting tasks often, that used the list up for nothing.
---     The ledger is retired: nothing reads or writes it. Its table stays in
---     the store module only because SpacetimeDB cannot drop a table that
---     holds rows. The cost, accepted: an old log line or message naming a
---     freed name can later point at a different task.
+--     ("ada2"). Names are not held past their task: every task has an agent
+--     (A17) and feeds create and delete tasks often, so names held forever
+--     would use the list up for nothing. The cost, accepted: an old log line
+--     or message naming a freed name can later point at a different task.
+--     The store keeps a name-ledger table (handed_out_agent_names) only
+--     because SpacetimeDB cannot drop a table that holds rows; the name
+--     picker never reads it.
 --   - A5, names are fixed. There is no rename. The store picks the name when
 --     the agent is assigned or starts, and it never changes.
 --   - A6, the name is the task's only second name. Tasks have no alias.
@@ -61,8 +60,6 @@
 --     Claude Code session name (`--name ada`), so ListAgents and SendMessage
 --     address it by name. The tmux WINDOW keeps its `task-<id>` name: the
 --     window belongs to the task's worktree and the board finds it by task.
---   - A10, one epic. The agent model was built under one epic of its own, one
---     task per step.
 --   - A11, the name list. Over six hundred short first names (three to seven
 --     lowercase ASCII letters) from many cultures, easy to read and say. The
 --     list leaves out names that are also common English words or tool names
@@ -74,8 +71,8 @@
 --     request fails and the task still has no worktree — the claim released
 --     (store-split.allium: ReleaseClaimOfFailedRequest), or the task moved on
 --     to backlog or done meanwhile — the agent ends with end reason
---     launch_failed (EndAgentWhenLaunchFails). It is ended, not deleted: it
---     was handed a name, and the ledger keeps that name either way.
+--     launch_failed (EndAgentWhenLaunchFails). It is ended, not deleted, so
+--     its name stays held until its task goes (A4).
 --   - A13, where Agent lives. The Agent entity is in core.allium, because
 --     SubagentEntry.agent and the Task derivations is_detached and
 --     is_unprovisioned refer to it. Its rules are here.
@@ -90,7 +87,7 @@
 --   - A16, an agent that ends takes its SubagentEntry rows with it
 --     (EndedAgentLetsGoOfItsSession), so every entry belongs to a current
 --     agent.
---   - A17, every task gets an agent when it is created (task #99056). Task
+--   - A17, every task gets an agent when it is created. Task
 --     ids grow in jumps (the store reserves them in blocks and drops the
 --     rest of a block on restart), so ids make poor names for people. The
 --     agent is created in state `assigned`, in the same write as the task,
@@ -159,8 +156,6 @@ rule AssignAgentOnTaskCreated {
 -- new agent. It launches a fresh Claude session, not a resume, so it is a new
 -- person picking up the work.
 rule StartAgentOnFreshLaunch {
-    -- Reported unreachable until store-split.allium declares the module
-    -- reducer surface that provides DispatchRequested.
     when: store_split/DispatchRequested(task, requester, origin, mode?)
 
     -- Fires only when the claim succeeds (every requires of
@@ -168,12 +163,10 @@ rule StartAgentOnFreshLaunch {
 
     let previous = current_agent(task)
     let waiting = assigned_agent(task)
-    -- The mode RequestDispatch derives (its `chosen_mode`): the caller's when
-    -- it names one, else research for an unplanned research-tagged task and
-    -- dispatch otherwise. A `quick` request starts a `quick` agent.
-    let start_mode =
-        if mode != null: mode
-        else: if task.has_plan or task.tag != research: dispatch else: research
+    -- The mode RequestDispatch claims with (its `chosen_mode`): the caller's
+    -- when it names one, else the task's default. A `quick` request starts a
+    -- `quick` agent.
+    let start_mode = if mode != null: mode else: task.default_dispatch_mode
 
     ensures:
         if exists previous:
@@ -391,106 +384,6 @@ rule AgentNameResolvesToTask {
 }
 
 ------------------------------------------------------------
--- Surfaces
-------------------------------------------------------------
-
--- What an MCP client sees of a task's agent, and how it names one. `state`
--- shows as live, paused or ended.
-surface AgentIdentity {
-    facing _: core/McpClient
-
-    context task: core/Task
-
-    exposes:
-        -- get_task and list_tasks show the task's display name (A18) and
-        -- the state of the agent it comes from: live, paused, not started
-        -- (assigned) or ended.
-        task.display_name
-        display_agent(task).state
-        display_agent(task).is_live
-
-    provides:
-        -- Every MCP tool that takes a task id (mcp-task-tools.allium:
-        -- McpTaskTools, TaskRefAcceptsAgentName).
-        McpToolCalled(task_ref)
-
-    @guarantee ResumeKeepsTheAgent
-        -- A resume continues the current agent and never starts one, so the
-        -- name a client saw before the resume is the name after it (A2, A7).
-        -- Only AssignAgentOnTaskCreated, StartAgentOnFreshLaunch and
-        -- BackfillCurrentAgents create an agent, and a resume (dispatch.allium: ResumeTask, RetryResume)
-        -- emits no DispatchRequested. The resume's window write lands on the
-        -- current agent's window: that write is what brings the agent back.
-        -- A task with no current agent has nothing to resume into;
-        -- ResumeTask's own worktree requirement refuses that case
-        -- (CurrentAgentTracksWorktree).
-
-    @guarantee PromptNamesTheAgent
-        -- A dispatched agent's prompt tells it its own name (a line in the
-        -- task block, for every mode). That other agents are reached by their
-        -- agent names, which each task's details and listing show, is stated
-        -- once for every session by the MCP server instructions
-        -- (mcp-task-tools.allium: ServerInstructionsStateDispatchConventions),
-        -- not in each prompt. Nothing says siblings run as `task-<id>`
-        -- (dispatch-prompt.allium).
-}
-
--- How tasks and epics are named to people (A18, task #99056). Ids stay the
--- key every tool takes and every row is stored under; they are poor names
--- for people because they grow in jumps. So what a person reads names a task
--- by its display name and an epic by its title.
-surface NamesForPeople {
-    facing _: core/Operator
-
-    context task: core/Task
-    context epic: core/Epic
-
-    exposes:
-        task.display_name
-        task.title
-        epic.title
-
-    @guarantee BoardMessagesNameTasksAndEpics
-        -- Every status line, error popup, notice and desktop notification
-        -- the board or the agent tree shows names a task by its display
-        -- name, or by its title when it has none yet, and an epic by its
-        -- title. None shows a bare `#<id>` or `task <id>`: "Bookmarked
-        -- nevena2", not "Bookmarked #99056"; "Auto-dispatch of nevena2
-        -- failed — epic Dispatch stalled", not "#99056 … epic #314". The
-        -- unseen-items admin view is the one exception: it shows ids and no
-        -- titles on purpose (admin-surfaces.allium). Exact wording is each
-        -- message's own spec.
-
-    @guarantee McpRepliesNameWhatTheyTouch
-        -- An MCP reply that names a task keeps its id, as the key, and adds
-        -- the task's display name and title beside it; one that names an
-        -- epic adds the epic's title. That covers the replies that today
-        -- give a bare id — create_task, update_tasks (one, several, done),
-        -- update_epic, dispatch_task, resume_task, wrap_up, exit_session,
-        -- and the work-package replies and their item lists — and the rows
-        -- that name a parent by id alone (list_epics' `(parent:<id>)`).
-        -- Work-package task items show their display name. The exact reply
-        -- strings are in mcp-task-tools.allium, epics.allium and
-        -- work-packages.allium. Epic titles are not unique, and a tool never
-        -- resolves an epic by title: an agent that is given an ambiguous
-        -- title asks which epic was meant.
-}
-
--- The shared store runs the agent backfill on its own: on the first
--- connection after a publish that changed its rules version, where it
--- re-stamps that version
--- (spacetime/module/src/lib.rs::stamp_rules_version_on_connect), so an
--- upgraded store is backfilled before any board reads it. `store import`
--- also asks for it, through the backfill_agents reducer, once its rows are
--- written (spacetime-seed.allium: ImportOldStore).
-surface AgentBackfill {
-    facing _: core/SharedStore
-
-    provides:
-        AgentBackfillRequested()
-}
-
-------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
 
@@ -574,4 +467,104 @@ invariant EveryTaskHasAnAgent {
 invariant AgentNameIsNotAnId {
     for a in core/Agents:
         not is_all_digits(a.name)
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- What an MCP client sees of a task's agent, and how it names one. `state`
+-- shows as live, paused or ended.
+surface AgentIdentity {
+    facing _: core/McpClient
+
+    context task: core/Task
+
+    exposes:
+        -- get_task and list_tasks show the task's display name (A18) and
+        -- the state of the agent it comes from: live, paused, not started
+        -- (assigned) or ended.
+        task.display_name
+        display_agent(task).state
+        display_agent(task).is_live
+
+    provides:
+        -- Every MCP tool that takes a task id (mcp-task-tools.allium:
+        -- McpTaskTools, TaskRefAcceptsAgentName).
+        McpToolCalled(task_ref)
+
+    @guarantee ResumeKeepsTheAgent
+        -- A resume continues the current agent and never starts one, so the
+        -- name a client saw before the resume is the name after it (A2, A7).
+        -- Only AssignAgentOnTaskCreated, StartAgentOnFreshLaunch and
+        -- BackfillCurrentAgents create an agent, and a resume (dispatch.allium: ResumeTask, RetryResume)
+        -- emits no DispatchRequested. The resume's window write lands on the
+        -- current agent's window: that write is what brings the agent back.
+        -- A task with no current agent has nothing to resume into;
+        -- ResumeTask's own worktree requirement refuses that case
+        -- (CurrentAgentTracksWorktree).
+
+    @guarantee PromptNamesTheAgent
+        -- A dispatched agent's prompt tells it its own name (a line in the
+        -- task block, for every mode). That other agents are reached by their
+        -- agent names, which each task's details and listing show, is stated
+        -- once for every session by the MCP server instructions
+        -- (mcp-task-tools.allium: ServerInstructionsStateDispatchConventions),
+        -- not in each prompt. Nothing says siblings run as `task-<id>`
+        -- (dispatch-prompt.allium).
+}
+
+-- How tasks and epics are named to people (A18). Ids stay the
+-- key every tool takes and every row is stored under; they are poor names
+-- for people because they grow in jumps. So what a person reads names a task
+-- by its display name and an epic by its title.
+surface NamesForPeople {
+    facing _: core/Operator
+
+    context task: core/Task
+    context epic: core/Epic
+
+    exposes:
+        task.display_name
+        task.title
+        epic.title
+
+    @guarantee BoardMessagesNameTasksAndEpics
+        -- Every status line, error popup, notice and desktop notification
+        -- the board or the agent tree shows names a task by its display
+        -- name, or by its title when it has none yet, and an epic by its
+        -- title. None shows a bare `#<id>` or `task <id>`: "Bookmarked
+        -- nevena2", not "Bookmarked #99056"; "Auto-dispatch of nevena2
+        -- failed — epic Dispatch stalled", not "#99056 … epic #314". The
+        -- unseen-items admin view is the one exception: it shows ids and no
+        -- titles on purpose (admin-surfaces.allium). Exact wording is each
+        -- message's own spec.
+
+    @guarantee McpRepliesNameWhatTheyTouch
+        -- An MCP reply that names a task keeps its id, as the key, and adds
+        -- the task's display name and title beside it; one that names an
+        -- epic adds the epic's title. That covers the replies that today
+        -- give a bare id — create_task, update_tasks (one, several, done),
+        -- update_epic, dispatch_task, resume_task, wrap_up, exit_session,
+        -- and the work-package replies and their item lists — and the rows
+        -- that name a parent by id alone (list_epics' `(parent:<id>)`).
+        -- Work-package task items show their display name. The exact reply
+        -- strings are in mcp-task-tools.allium, epics.allium and
+        -- work-packages.allium. Epic titles are not unique, and a tool never
+        -- resolves an epic by title: an agent that is given an ambiguous
+        -- title asks which epic was meant.
+}
+
+-- The shared store runs the agent backfill on its own: on the first
+-- connection after a publish that changed its rules version, where it
+-- re-stamps that version
+-- (spacetime/module/src/lib.rs::stamp_rules_version_on_connect), so an
+-- upgraded store is backfilled before any board reads it. `store import`
+-- also asks for it, through the backfill_agents reducer, once its rows are
+-- written (spacetime-seed.allium: ImportOldStore).
+surface AgentBackfill {
+    facing _: core/SharedStore
+
+    provides:
+        AgentBackfillRequested()
 }

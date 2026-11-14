@@ -692,6 +692,12 @@ entity Task {
 
     has_plan: plan_path != null
 
+    -- The mode a dispatch claim uses when its caller names none
+    -- (store-split.allium: RequestDispatch, D3): research for an unplanned
+    -- research-tagged task, dispatch otherwise. Never quick. The store's
+    -- spacetime/module/src/dispatch_request.rs::choose_dispatch_mode.
+    default_dispatch_mode: if has_plan or tag != research: dispatch else: research
+
     -- The review set (see TaskTag): the task reviews a PR someone else
     -- authored. Every reader of the set reads it through this.
     is_review_tagged: tag in {pr_review, dependabot, release_please}

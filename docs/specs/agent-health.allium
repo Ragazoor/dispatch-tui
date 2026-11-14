@@ -36,7 +36,7 @@ config {
 rule ClassifyAgentActivity {
     -- Derives sub_status for running tasks from hook event timestamps.
     when: core/Tick()
-    for task in core/Tasks where status = running and current_window != null and sub_status not in {crashed, conflict}:
+    for task in core/Tasks where status = running and current_window != null and is_locally_owned and sub_status not in {crashed, conflict}:
         ensures:
             if current_agent(task).last_notification_at != null and (current_agent(task).last_pre_tool_use_at = null or current_agent(task).last_notification_at > current_agent(task).last_pre_tool_use_at):
                 task.sub_status = needs_input
@@ -121,9 +121,9 @@ rule ClassifyAgentActivity {
         -- needs_input for the reason subagents do. ExpireBackgroundWait,
         -- not this rule, bounds how long the wait may last.
         --
-        -- Background work is never counted from start and stop events. An
-        -- earlier design did that, and the count inflated forever: Claude
-        -- Code fires no hook when a backgrounded shell exits on its own.
+        -- Background work is never counted from start and stop events: such
+        -- a count would only grow, because Claude Code fires no hook when a
+        -- backgrounded shell exits on its own.
         -- What it does give is a list of the work still in flight in every
         -- Stop payload, and each piece of work that finishes wakes the
         -- agent into a new turn that ends in a new Stop. So the board keeps
@@ -306,7 +306,7 @@ rule NotifyReview {
 }
 
 rule ToggleNotifications {
-    when: ToggleNotifications()
+    when: NotificationsKeyPressed()
 
     ensures:
         settings/SaveSetting(key: "notifications_enabled",
@@ -986,7 +986,7 @@ rule HookNotification {
         -- `kind = null` guard and raise.
         --
         -- CLI surface note: `dispatch hook <id> notification [--kind K]` is a
-        -- non-MCP, hook-driven entry point implemented by cmd_hook. Unlike the
+        -- non-MCP, hook-driven entry point (src/main.rs, Commands::Hook). Unlike the
         -- MCP update_tasks tool — which blocks generic transitions into `done`
         -- so agents cannot self-promote past Review — the hook CLI drives the
         -- lifecycle steps that agents must not perform on their own.
@@ -1036,7 +1036,7 @@ rule HookPeerMessageSent {
         -- `sender.last_peer_message_sent_at` is stamped in that case.
         --
         -- Implemented by `dispatch hook-peer-message <sender_id> --target
-        -- <to> --body <message>` (src/main.rs, `hooks::run_peer_message`),
+        -- <to> --body <message>` (`src/hooks/mod.rs::run_peer_message`),
         -- invoked from `plugin/hooks/scripts/task-status-hook`'s
         -- `PostToolUse` case — one of that case's additive observers, gated
         -- on `tool_name == "SendMessage"`
@@ -1061,10 +1061,10 @@ rule HookPeerMessageSent {
         -- tool call completes. A send that fails also reaches PostToolUse;
         -- that is UndeliveredPeerMessage below, not this rule, so a message
         -- nobody received never flashes a card as having received one.
-    -- The trajectory entry for the send is best-effort: it is appended off
-    -- the response path, and a failed append is logged, not reported. The
-    -- hook answers as applied either way, because the stamps above are the
-    -- observation and the trajectory is only an audit trail.
+        -- The trajectory entry for the send is best-effort: it is appended off
+        -- the response path, and a failed append is logged, not reported. The
+        -- hook answers as applied either way, because the stamps above are the
+        -- observation and the trajectory is only an audit trail.
 }
 
 rule UndeliveredPeerMessage {
@@ -1181,7 +1181,7 @@ rule UndeliveredPeerMessage {
 -- a hook runs on every tool call of every live session. What that process
 -- is allowed to touch is therefore the whole subject of this surface.
 --
--- Two further commands travel this way as questions rather than
+-- Two more commands travel this way as questions rather than
 -- observations: the PR gate (pr-workflow.allium: PrLearningsGate), and
 -- `hook-peer-message --undelivered` (UndeliveredPeerMessage), whose
 -- answer is printed as the PostToolUse hook's additionalContext for the
@@ -1189,7 +1189,7 @@ rule UndeliveredPeerMessage {
 -- guarantees below do not, because an event they could merely drop is
 -- not what they have.
 --
--- A second travels this way from the agent-tree companion and diff
+-- A third kind travels this way from the agent-tree companion and diff
 -- panes rather than from a hook: ObservedEvent::PaneKey, one per
 -- keypress that takes effect in a pane, which the board records as
 -- keybinding usage (keybindings.allium: PanesRecordUsageLikeTheBoard).
@@ -1240,13 +1240,16 @@ surface HookDelivery {
 
     @guarantee HooksWriteThroughTheBoard
         -- A hook delivers its event to the running board and never to the
-        -- task database. The board is the single writer on a machine, so two
-        -- hooks firing at the same instant are two requests to one process
-        -- rather than two processes contending for one database file. This is
-        -- what makes a denormalised counter — live_subagents — safe to
-        -- maintain under concurrent hooks: a read and its dependent
-        -- write are serialised by the board, not racing across process
-        -- boundaries. See SubagentCountIsDerivedNotIncremented.
+        -- shared store. The board is this machine's one store client, so two
+        -- hooks firing at the same instant are two requests to one process,
+        -- not two more clients of the store. The board turns each event into
+        -- one reducer call, and the store applies each call as one
+        -- transaction that recounts live_subagents from the agent's
+        -- SubagentEntry rows
+        -- (spacetime/module/src/agent_state.rs::sync_subagent_count). So the
+        -- denormalised counter stays right under concurrent hooks: no hook
+        -- process reads it and writes it back. See core.allium:
+        -- LiveSubagentCountMatchesEntries.
         --
         -- Its read-side counterpart is agent-tree.allium's
         -- PanesReadThroughTheBoard: the companion panes in the same agent
@@ -1266,12 +1269,13 @@ surface HookDelivery {
         -- sub_status label waits on to catch up: this guarantee is.
 
     @guarantee HookNeverOpensTheDatabase
-        -- A process delivering one of the events above opens no database, not
-        -- even to read, and does not bring one into existence by being run.
-        -- This is structural, not incidental: it is what
-        -- HooksWriteThroughTheBoard rests on, and a new event added beside
-        -- these that reached for the database directly would reintroduce
-        -- exactly the contention this surface exists to remove.
+        -- A process delivering one of the events above opens no store, not
+        -- even to read: no connection to the shared store and no local file.
+        -- Running it does not create the data directory. This is
+        -- structural, not incidental: it is what HooksWriteThroughTheBoard
+        -- rests on. A new event added beside these that reached for the
+        -- store directly would make every hook process a store client and
+        -- bring back the read-then-write race on the counters.
         --
         -- The scope is every command Claude Code runs from a hook dispatch
         -- installs, which is these events plus the PR gate (see
@@ -1279,8 +1283,8 @@ surface HookDelivery {
         -- in every other respect — it answers the tool call rather than
         -- observing it, and so has its own rule for an unreachable board —
         -- but not in this one: it too is a read-modify-write on a single task
-        -- row, fired from a hook, and running it in its own process was the
-        -- same race. Nothing a hook runs opens the database.
+        -- row, fired from a hook, and running it in its own process would be
+        -- the same race. Nothing a hook runs opens a store.
 
     @guarantee DeliveryIsBounded
         -- A hook waits a bounded time for its board and then gives up,
@@ -1393,7 +1397,7 @@ surface NotificationKeys {
 
     provides:
         -- The N key.
-        ToggleNotifications()
+        NotificationsKeyPressed()
 }
 
 ------------------------------------------------------------

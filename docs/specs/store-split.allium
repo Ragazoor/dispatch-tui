@@ -839,9 +839,7 @@ rule RequestDispatch {
     requires: origin != schedule or (task.next_due != null and task.next_due <= now)
 
     -- D3: the caller's mode when it names one, else the derivation.
-    let chosen_mode =
-        if mode != null: mode
-        else: if task.has_plan or task.tag != research: dispatch else: research
+    let chosen_mode = if mode != null: mode else: task.default_dispatch_mode
 
     -- The claim: one write, conditional on the checks above.
     ensures: task.status = running
