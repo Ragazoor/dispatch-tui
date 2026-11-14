@@ -233,7 +233,8 @@ rule StartPreferenceReview {
         -- line and reviewed anyway.
         --
         -- The PR's code is read at its head, never from the reviewing
-        -- agent's own checkout, which sits on its own branch
+        -- agent's own checkout, which may sit on another branch or lag
+        -- the head even when dispatch made it from the PR's branch
         -- (ReviewReadsThePrHead). The code before the PR is the merge base,
         -- never head^ (BeforeIsTheMergeBase).
 }
@@ -643,13 +644,14 @@ surface PreferenceReviewSession {
 
     @guarantee LoadedFilesAreReportedBeforeReviewing
         -- Before any reviewer starts, the operator is told which preference
-        -- files loaded, by absolute path — or, with no folder, in one line
+        -- files loaded, by the absolute path the folder resolves to — or, with no folder, in one line
         -- that the review runs without preferences (LoadPreferences,
         -- ReviewWithoutPreferences).
 
     @guarantee ReviewReadsThePrHead
         -- Reviewers and the verifier read the PR's code at its head commit,
-        -- never the reviewing agent's own checkout, and the PR branch is
+        -- never the reviewing agent's own checkout (which may be on another
+        -- branch or behind the head), and the PR branch is
         -- never checked out in that checkout. A PR in another repo is read
         -- from a clone in the session's scratch space.
 
@@ -663,10 +665,15 @@ surface PreferenceReviewSession {
         -- review, verify, filter by Do not raise, present, learn
         -- (PreferenceReview.stage). Verify comes before filter, so the two
         -- drop counts are separate and a filtered finding was a real one.
+        -- Every step runs whatever the diff size: a tiny diff changes the
+        -- reviewer count, never whether verify runs.
 
     @guarantee ReviewerCountFollowsDiffSize
         -- Three reviewers in parallel, one each for correctness, preferences
-        -- and tests; one reviewer carrying all three for a tiny diff.
+        -- and tests; one reviewer carrying all three for a tiny diff. Never
+        -- none: the reviewing agent does not review the diff inline, however
+        -- small. A hand test showed an agent doing so and skipping verify
+        -- with it, reading "one reviewer" as licence for zero.
 
     @guarantee PreferenceReviewerWalksEveryLookFor
         -- The preferences reviewer walks every Look for entry of every loaded
@@ -692,7 +699,7 @@ surface PreferenceReviewSession {
 
     @guarantee MissedPointsAreTraceable
         -- The merged findings and each one's verify and filter verdict are
-        -- saved as findings.md in a folder named for the PR, in the session's
+        -- saved as findings.md, each verdict as soon as its step decides it, in a folder named for the PR, in the session's
         -- scratch space, so a point the operator expected can be traced to
         -- the step that dropped it. Every file the review writes for itself
         -- goes in that folder, because other reviews may share the scratch

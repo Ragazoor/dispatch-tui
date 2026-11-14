@@ -34,9 +34,9 @@ gh pr diff <pr>
 `owner` and `repo` come from the URL (or `gh repo view --json nameWithOwner`
 for a bare number).
 
-**Get the PR's code, not your checkout's.** A dispatch worktree sits on its own
-branch, not the PR's. Reviewers and verifiers must read files at
-`headRefOid`:
+**Get the PR's code, not your checkout's.** Your checkout may be on another
+branch or behind the PR's head, even when dispatch made it from the PR's
+branch. Reviewers and verifiers must read files at `headRefOid`:
 
 - If the current repo is `<owner>/<repo>`: `git fetch origin pull/<number>/head`,
   then read a file with `git show <headRefOid>:<path>`. Do not check out the
@@ -77,13 +77,15 @@ Each file has a **Look for** and a **Do not raise** section. A missing file is
 normal. If the folder does not exist, review without preferences: say so in
 one line, run steps 3–6 with only the repo's `CLAUDE.md`, and skip step 7.
 
-Tell the user which files you loaded, by path, before you review.
+Tell the user which files you loaded, by the resolved path, before step 3
+starts. Do this as its own message, not in the final report.
 
 ## Step 3: Review
 
 Start three `general-purpose` agents in one message, so they run in parallel.
 For a tiny diff (a few lines, one file), start one agent with all three
-focuses instead.
+focuses instead. Never review the diff inline yourself, however small: a
+reviewer with a fresh context is the point of this step.
 Do not use reviewer agent types from other plugins: they are not on every host.
 Give each one:
 
@@ -109,11 +111,13 @@ summary.
 Merge the three lists and drop duplicates. Mark each finding that comes from a
 **Look for** entry as a preference finding, naming the entry. Save the merged
 list to `findings.md` in the PR folder; step 4 and step 5 add each verdict
-there, so a missed point can be traced to the step that dropped it.
+there as soon as it is known, so a missed point can be traced to the step
+that dropped it.
 
 ## Step 4: Verify
 
-Start one `general-purpose` agent for all findings. With more than about
+Step 4 always runs, whatever the diff size. Start one `general-purpose` agent
+for all findings. With more than about
 eight, split them by file into groups of about eight, one agent per group, in
 one message. Give each agent its findings and the way to read code
 at `headRefOid`. Its job is to **disprove** each finding against the real code:

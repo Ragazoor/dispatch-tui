@@ -436,6 +436,14 @@ fn preference_review_skill_text_holds_each_session_guarantee() {
         ("BeforeIsTheMergeBase", "never `<headRefOid>^`"),
         ("ReviewerCountFollowsDiffSize", "For a tiny diff"),
         (
+            "ReviewerCountFollowsDiffSize",
+            "Never review the diff inline",
+        ),
+        ("PipelineOrder", "Step 4 always runs"),
+        ("LoadedFilesAreReportedBeforeReviewing", "the resolved path"),
+        ("MissedPointsAreTraceable", "as soon as"),
+        ("ReviewReadsThePrHead", "behind the PR's head"),
+        (
             "PreferenceReviewerWalksEveryLookFor",
             "walk every **Look for** entry",
         ),
@@ -472,6 +480,12 @@ fn preference_review_skill_text_holds_each_session_guarantee() {
             "preference-review skill must hold {guarantee}: missing {needle:?}"
         );
     }
+    // ReviewReadsThePrHead: a dispatch review worktree is made from the PR's
+    // branch, so "sits on its own branch" was a wrong reason to give.
+    assert!(
+        !content.contains("sits on its own branch"),
+        "preference-review must not claim the worktree is on another branch"
+    );
     // The folder is personal and the skill is shared: no vault path in it.
     assert!(
         !content.contains("staff_engineer"),
