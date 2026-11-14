@@ -32,7 +32,7 @@
 use "./core.allium" as core
 
 ------------------------------------------------------------
--- Entities
+-- Entities and Variants
 ------------------------------------------------------------
 
 -- One run of the skill for one issue.
@@ -45,18 +45,15 @@ entity FixRequest {
     -- The main repo root of the owning repo; absent until resolved.
     repo_path: String?
     -- The caller's own epic; absent for a caller with none.
-    caller_epic: Integer?
+    caller_epic: core/Epic?
     -- An open task in the owning repo that already covers the defect.
-    duplicate_task: Integer?
+    duplicate_task: core/Task?
     -- Set when the fix belongs to the caller's epic.
-    epic_id: Integer?
+    epic_id: core/Epic?
     -- The task the skill created; absent until created.
-    task_id: Integer?
+    task_id: core/Task?
     -- The user has said dispatch, after seeing title, repo and epic.
     confirmed: Boolean
-    -- The skill has edited, or switched the branch of, the owning repo.
-    -- Never true.
-    repo_touched: Boolean
 
     stage: writing | locating | checking | confirming | creating | dispatching | reported | stopped
 
@@ -82,8 +79,6 @@ entity FixRequest {
 ------------------------------------------------------------
 
 config {
-    -- The board label that says a person asked for this fix.
-    fix_tag: String = "fix"
     -- The command that gives the main repo root once its trailing /.git is
     -- stripped.
     repo_root_command: String = "git rev-parse --path-format=absolute --git-common-dir"
@@ -107,7 +102,6 @@ rule StartFix {
         epic_id: null,
         task_id: null,
         confirmed: false,
-        repo_touched: false,
         stage: writing
     )
     ensures: FixAnnounced()
@@ -119,6 +113,9 @@ rule StartFix {
         -- text, file and symbol, repo and branch), what is ruled out and the
         -- fix if known (TaskIsSelfContained). If the context does not say
         -- what is wrong, the skill asks the user one question.
+        --
+        -- The skill opens with the sentence "I'm using the fix skill to
+        -- dispatch a task for this."
 }
 
 rule TaskWritten {
@@ -178,7 +175,7 @@ rule CheckForDuplicate {
     ensures:
         if request.is_duplicate:
             DuplicateReported(task_id: request.duplicate_task)
-            and request.stage = stopped
+            request.stage = stopped
         else:
             request.stage = confirming
 
@@ -207,7 +204,31 @@ rule ConfirmWithUser {
         -- Asked with AskUserQuestion, showing the title, the repo and the
         -- epic (ConfirmBeforeCreate). The choices are dispatch, edit the
         -- title or description, or cancel; an edit is applied and the
-        -- question asked again.
+        -- question asked again (ApplyEditAndAskAgain).
+}
+
+rule ApplyEditAndAskAgain {
+    when: UserChoseEdit(request, title, description)
+
+    requires: request.stage = confirming
+
+    ensures:
+        if title != null:
+            request.title = title
+    ensures:
+        if description != null:
+            request.description = description
+    ensures: ConfirmationAsked(
+        title: title ?? request.title,
+        repo_path: request.repo_path,
+        epic_id: request.epic_id,
+        choices: {dispatch, edit, cancel}
+    )
+
+    @guidance
+        -- The stage stays confirming: the user confirms the version that
+        -- gets created, so the question is asked again with the edit
+        -- applied (ConfirmBeforeCreate).
 }
 
 rule UserConfirmed {
@@ -238,17 +259,18 @@ rule CreateFixTask {
         title: request.title,
         description: request.description,
         repo_path: request.repo_path,
-        tag: config.fix_tag,
+        -- core/TaskTag.fix
+        tag: fix,
         epic_id: request.epic_id
     )
 
     ensures:
         if created.failed:
             CreateFailureReported(error: created.error)
-            and request.stage = stopped
+            request.stage = stopped
         else:
-            request.task_id = created.id
-            and request.stage = dispatching
+            request.task_id = created.task
+            request.stage = dispatching
 
     @guidance
         -- create_task carries tag "fix", the board label that says a person
@@ -266,7 +288,7 @@ rule DispatchFixTask {
     ensures:
         if dispatched.failed:
             DispatchFailureReported(task_id: request.task_id, error: dispatched.error)
-            and request.stage = stopped
+            request.stage = stopped
         else:
             request.stage = reported
 
@@ -305,12 +327,6 @@ invariant DuplicatesAreNeverCreated {
         request.is_duplicate implies request.task_id = null and not request.confirmed
 }
 
--- The skill never touches the owning repo.
-invariant OwningRepoIsNeverTouched {
-    for request in FixRequests:
-        not request.repo_touched
-}
-
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
@@ -342,6 +358,7 @@ surface FixSession {
 
     provides:
         UserChoseDispatch(request) when request.stage = confirming
+        UserChoseEdit(request, title?, description?) when request.stage = confirming
         UserChoseCancel(request) when request.stage = confirming
 
     @guarantee TaskIsSelfContained
@@ -367,9 +384,11 @@ surface FixSession {
     @guarantee ConfirmBeforeCreate
         -- Nothing is created until the user confirms, after being shown the
         -- title, the repo and the epic, with choices to dispatch, edit or
-        -- cancel. Dispatch launches the new agent in auto mode and that agent
-        -- may invoke /fix itself, so this confirmation is the only bound on a
-        -- chain of fix tasks (ConfirmWithUser, NothingIsCreatedUnconfirmed).
+        -- cancel. An edit is applied and the question asked again. Dispatch
+        -- launches the new agent in auto mode and that agent may invoke /fix
+        -- itself, so this confirmation is the only bound on a chain of fix
+        -- tasks (ConfirmWithUser, ApplyEditAndAskAgain,
+        -- NothingIsCreatedUnconfirmed).
 
     @guarantee FixTaskIsTagged
         -- The created task carries tag "fix", the board label that says a
@@ -387,11 +406,10 @@ surface FixSession {
         -- stays in backlog (CreateFixTask, DispatchFixTask).
 
     @guarantee NeverEditsTheOwningRepo
-        -- The skill edits no code in any repo (the owning repo is the one the
-        -- model tracks) and does not switch the branch of the
-        -- owning repo, which may not be the repo it runs in. The task is how
-        -- work reaches that repo; the new agent works in its own worktree
-        -- (OwningRepoIsNeverTouched).
+        -- The skill edits no code in any repo and does not switch the branch
+        -- of the owning repo, which may not be the repo it runs in. The task
+        -- is how work reaches that repo; the new agent works in its own
+        -- worktree (ResolveOwningRepo).
 
     @guarantee ReportsTheOutcome
         -- The caller is told the task id, the repo, that it is dispatched and
