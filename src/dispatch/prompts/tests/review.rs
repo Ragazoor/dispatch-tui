@@ -957,3 +957,61 @@ fn effective_review_command_falls_back_for_unset_and_blank() {
         "/review-pr"
     );
 }
+
+/// `APrReviewRunbookStatesThePrItWasHanded`: a feed review task carries the
+/// PR as a pr-typed url and the PR body as its description, so step 1 states
+/// the url instead of sending the agent to a description that lacks it.
+#[test]
+fn pr_review_runbook_states_the_pr_url_when_the_task_has_one() {
+    let ctx = PromptContext {
+        tag: Some(TaskTag::PrReview),
+        pr_url: Some("https://github.com/example/repo/pull/99"),
+        from_feed: true,
+        ..PromptContext::default()
+    };
+    let text = build_prompt(
+        TaskId(42),
+        "#99 Add new login flow",
+        "This PR adds a login flow.",
+        None,
+        None,
+        &ctx,
+    );
+
+    assert!(
+        text.contains("1. The PR is https://github.com/example/repo/pull/99."),
+        "step 1 must state the PR, got: {text}"
+    );
+    assert!(
+        !text.contains("Find the PR number or URL in the task description."),
+        "a task with a pr url must not be told to find it, got: {text}"
+    );
+    assert!(
+        text.contains("2. Run `/dispatch:preference-review` on that PR."),
+        "step 2 must still name the review command, got: {text}"
+    );
+}
+
+/// The no-url half of `APrReviewRunbookStatesThePrItWasHanded`: a hand-made
+/// review task keeps the find-it step.
+#[test]
+fn pr_review_runbook_keeps_the_find_step_without_a_pr_url() {
+    let ctx = PromptContext {
+        tag: Some(TaskTag::PrReview),
+        ..PromptContext::default()
+    };
+    let text = build_prompt(
+        TaskId(42),
+        "Review PR",
+        "https://github.com/example/repo/pull/99",
+        None,
+        None,
+        &ctx,
+    );
+
+    assert!(
+        text.contains("1. Find the PR number or URL in the task description."),
+        "got: {text}"
+    );
+    assert!(!text.contains("The PR is "), "got: {text}");
+}

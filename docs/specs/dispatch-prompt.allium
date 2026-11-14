@@ -487,7 +487,8 @@ rule RenderDependencyBumpRunbook {
 
 rule RenderPrReviewRunbook {
     -- What the agent is owed: AgentPrompt
-    -- (TheReviewCommandMakesTheSizeChoiceItself).
+    -- (TheReviewCommandMakesTheSizeChoiceItself,
+    -- APrReviewRunbookStatesThePrItWasHanded).
 
     when: dispatch/AgentLaunched(task, mode)
 
@@ -513,6 +514,9 @@ rule RenderPrReviewRunbook {
         -- launch and never an agent already running. The trailing
         -- block is reduced the same way, because the PR review agent
         -- presents findings and waits for the user's instructions.
+        -- Step 1 states the PR from the task's pr-typed url when it
+        -- carries one (APrReviewRunbookStatesThePrItWasHanded); otherwise
+        -- it tells the agent to find the PR in the task description.
 }
 
 rule RenderReleasePrRunbook {
@@ -1371,6 +1375,18 @@ surface AgentPrompt {
         -- review (/preference-review runs one reviewer for a tiny diff), so
         -- the size was a proxy for a choice that command already makes. Deleting the branch is the harness absorbing it — the
         -- routing does not move, it stops existing.
+
+    @guarantee APrReviewRunbookStatesThePrItWasHanded
+        -- PR review. When the task carries a pr-typed url, step 1 reads
+        -- "The PR is <url>." instead of "Find the PR number or URL in the
+        -- task description." The review feed sets that url at insert time
+        -- and fills the description with the PR body, so the old step
+        -- pointed the agent at text that does not hold the PR. This follows
+        -- TheRunbookStatesThePrItWasHandedRatherThanAskingForIt, without its
+        -- author check: nothing in a PR review merges, so there is nothing
+        -- to gate. A task with no pr-typed url (a hand-made review task)
+        -- keeps the find-it step, and the review command is still named in
+        -- step 2 only.
 
     -- == RenderReleasePrRunbook ==
 

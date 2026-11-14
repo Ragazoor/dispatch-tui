@@ -687,7 +687,7 @@ pub(super) fn build_prompt(
         (Some(TaskTag::Dependabot), _) => {
             dependabot_review_addendum(task_id, title, description, ctx.pr_url, ctx.from_feed)
         }
-        (Some(TaskTag::PrReview), _) => pr_review_addendum(ctx.review_command),
+        (Some(TaskTag::PrReview), _) => pr_review_addendum(ctx.review_command, ctx.pr_url),
         (Some(TaskTag::ReleasePlease), _) => {
             release_please_addendum(task_id, ctx.pr_url, ctx.from_feed)
         }
@@ -800,9 +800,16 @@ fn dependabot_decision(kind: BumpKind) -> (&'static str, &'static str) {
 /// One command: the diff-size branch that used to pick between two was a proxy
 /// for an effort level the command takes itself. Nothing here forbids
 /// `/wrap-up` — `wrap_up` refuses a review-tagged task (`Task::wrap_up_block`).
-fn pr_review_addendum(review_command: &str) -> String {
+fn pr_review_addendum(review_command: &str, pr_url: Option<&str>) -> String {
+    // A feed review task's description is the PR body, so the PR is stated
+    // from its pr-typed url when it has one (APrReviewRunbookStatesThePrItWasHanded).
+    let find_pr = match pr_url {
+        Some(url) => format!("The PR is {url}."),
+        None => "Find the PR number or URL in the task description.".to_string(),
+    };
     include_str!("prompts/pr-review.md")
         .trim_end_matches('\n')
+        .replace("{find_pr}", &find_pr)
         .replace("{review_command}", review_command)
 }
 
