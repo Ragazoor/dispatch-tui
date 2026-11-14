@@ -393,57 +393,20 @@ fn decompose_review_skill_carries_decision_items_into_the_plan() {
 }
 
 /// /preference-review reviews a PR against the operator's preference files.
-/// The files are personal and the skill is shared, so it must find them
-/// through `DISPATCH_REVIEW_CONTEXT` or the documented default, never a
-/// hardcoded vault path, and must still review when they are missing. Its
-/// findings are verified before the "Do not raise" filter, and both drop
-/// counts are shown, so over-filtering stays visible. It must never post to
-/// GitHub unasked, and writes a preference edit only on approval.
-#[test]
-fn preference_review_skill_loads_preferences_verifies_then_filters() {
-    let content = skill_body("preference-review");
-    for needle in [
-        "DISPATCH_REVIEW_CONTEXT",
-        "~/.local/share/dispatch/review-context",
-        "general.md",
-        "languages/",
-        "repos/<owner>__<repo>.md",
-        "without preferences",
-        "**Do not raise**",
-        "**Look for**",
-        "Never post to GitHub",
-        "only after the user approves",
-    ] {
-        assert!(
-            content.contains(needle),
-            "preference-review skill must mention {needle}"
-        );
-    }
-    assert!(
-        !content.contains("staff_engineer"),
-        "preference-review skill must not hardcode a personal vault path"
-    );
-    let at = |needle: &str| {
-        content
-            .find(needle)
-            .unwrap_or_else(|| panic!("preference-review skill must have {needle}"))
-    };
-    assert!(
-        at("## Step 4: Verify") < at("## Step 5: Filter")
-            && at("## Step 5: Filter") < at("## Step 6: Present")
-            && at("## Step 6: Present") < at("## Step 7: Learn"),
-        "preference-review must verify, then filter, then present, then learn"
-    );
-}
-
 /// Each guarantee of `PreferenceReviewSession` in
-/// `docs/specs/preference-review.allium` that the skill text can hold, with
-/// the words in `SKILL.md` that hold it. The skill is followed by an agent,
-/// so the text is the behaviour a test can pin.
+/// `docs/specs/preference-review.allium` that the skill text can hold is
+/// pinned here by the words in `SKILL.md` that hold it; the skill is followed
+/// by an agent, so the text is the behaviour a test can pin.
 #[test]
 fn preference_review_skill_text_holds_each_session_guarantee() {
     let content = skill_body("preference-review");
     for (guarantee, needle) in [
+        ("LoadPreferences", "DISPATCH_REVIEW_CONTEXT"),
+        ("LoadPreferences", "~/.local/share/dispatch/review-context"),
+        ("LoadPreferences", "general.md"),
+        ("LoadPreferences", "languages/"),
+        ("LoadPreferences", "repos/<owner>__<repo>.md"),
+        ("ReviewWithoutPreferences", "without preferences"),
         (
             "LoadedFilesAreReportedBeforeReviewing",
             "Tell the user which files you loaded",
@@ -465,17 +428,23 @@ fn preference_review_skill_text_holds_each_session_guarantee() {
             "PreferenceFindingsAreCheckedOnlyForBeingAsClaimed",
             "a refutation of a preference finding",
         ),
+        ("FilterByDoNotRaise", "**Do not raise**"),
         ("MoreSpecificFileWins", "A more specific file wins"),
         ("BothDropCountsAreShown", "Dropped N unconfirmed (step 4)"),
         ("MissedPointsAreTraceable", "findings.md"),
         ("NeverPostsToGitHubUnlessAsked", "Never post to GitHub"),
         ("NeverEditsThePrsCode", "Never edit the PR's code"),
+        ("ProposeLookForMissed", "**Look for**"),
         ("MostSpecificFittingFile", "most specific file that fits"),
+        (
+            "PreferenceFileWrittenOnlyOnApproval",
+            "only after the user approves",
+        ),
+        ("EditsLandInTheResolvedFolder", "resolved in step 2"),
         (
             "NeverCommitsInThePreferenceFolder",
             "Do not commit in the folder",
         ),
-        ("EditsLandInTheResolvedFolder", "resolved in step 2"),
         ("FinishWithoutPreferences", "Skip this step if no"),
     ] {
         assert!(
@@ -483,18 +452,33 @@ fn preference_review_skill_text_holds_each_session_guarantee() {
             "preference-review skill must hold {guarantee}: missing {needle:?}"
         );
     }
-    let at = |needle: &str| {
-        content
-            .find(needle)
-            .unwrap_or_else(|| panic!("preference-review skill must have {needle}"))
-    };
-    // PipelineOrder, first half (the second half is in
-    // preference_review_skill_loads_preferences_verifies_then_filters).
+    // The folder is personal and the skill is shared: no vault path in it.
     assert!(
-        at("## Step 1: Resolve") < at("## Step 2: Load")
-            && at("## Step 2: Load") < at("Tell the user which files you loaded")
-            && at("Tell the user which files you loaded") < at("## Step 3: Review")
-            && at("## Step 3: Review") < at("## Step 4: Verify"),
-        "preference-review must resolve, load and report, then review, then verify"
+        !content.contains("staff_engineer"),
+        "preference-review skill must not hardcode a personal vault path"
+    );
+    // PipelineOrder: resolve, load and report, review, verify, filter,
+    // present, learn.
+    let order = [
+        "## Step 1: Resolve",
+        "## Step 2: Load",
+        "Tell the user which files you loaded",
+        "## Step 3: Review",
+        "## Step 4: Verify",
+        "## Step 5: Filter",
+        "## Step 6: Present",
+        "## Step 7: Learn",
+    ];
+    let positions: Vec<usize> = order
+        .iter()
+        .map(|n| {
+            content
+                .find(n)
+                .unwrap_or_else(|| panic!("preference-review skill must have {n}"))
+        })
+        .collect();
+    assert!(
+        positions.windows(2).all(|w| w[0] < w[1]),
+        "preference-review must follow PipelineOrder: {order:?}"
     );
 }

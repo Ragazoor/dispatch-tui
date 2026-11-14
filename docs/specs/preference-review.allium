@@ -124,7 +124,7 @@ entity PreferenceReview {
     -- A Do not raise entry in some loaded file matches the finding, and no
     -- Look for entry in a MORE specific loaded file matches it. A tie between
     -- files of the same specificity, or within one file, goes to Do not raise
-    -- here only provisionally: the skill does not say (see Open Questions).
+    -- (settled 2026-11-14, see the end of this file).
     drops_by_taste(f): loaded.any(d =>
         matches_do_not_raise(d, f)
             and not loaded.any(l => matches_look_for(l, f) and more_specific(l.scope, d.scope)))
@@ -198,7 +198,8 @@ config {
     repo_file_pattern: String = "repos/<owner>__<repo>.md"
     -- The findings trace, inside the review's PR folder.
     trace_file: String = "findings.md"
-    -- Above this many findings, one verifier per finding ("about eight").
+    -- Most findings one verifier takes ("about eight"); above it, findings
+    -- are split by file into groups of about this size, one verifier each.
     single_verifier_max_findings: Integer = 8
 }
 
@@ -388,8 +389,9 @@ rule VerifyFindings {
         -- at head: it reads the lines, follows the callers and checks the
         -- tests, and answers confirmed, plausible or refuted with one line of
         -- evidence. It compares against the merge base, never head^. One
-        -- verifier takes every finding, or one per finding when there are
-        -- more than config.single_verifier_max_findings.
+        -- verifier takes every finding; with more than
+        -- config.single_verifier_max_findings they are split by file into
+        -- groups of about that size, one verifier per group.
         --
         -- Refuted is dropped and counted; plausible is kept and marked
         -- (RefutedIsDroppedPlausibleIsMarked).
@@ -725,9 +727,13 @@ surface PreferenceReviewSession {
 }
 
 ------------------------------------------------------------
--- Open Questions
+-- Settled questions (operator, 2026-11-14)
 ------------------------------------------------------------
 
-open question "What counts as a tiny diff? The skill says 'a few lines, one file' and gives no threshold, so whether a diff gets one reviewer or three is the running agent's judgement."
-open question "How does the filter resolve a Look for and a Do not raise that match the same finding from one file, or from two files of the same specificity (two language files)? The skill states only that a more specific file wins."
-open question "Should a preference folder that exists but holds none of the three files behave like no folder? Today it does not: the review has preferences, loads nothing, and the learn step still proposes edits, creating the missing file."
+-- A tiny diff has no exact threshold: "a few lines, one file" is the
+-- running agent's judgement (ReviewerCountFollowsDiffSize).
+-- A Look for and a Do not raise matching the same finding from one file, or
+-- from two files of the same specificity, resolve to Do not raise
+-- (PreferenceReview.drops_by_taste).
+-- A folder that exists but holds none of the files is a folder with
+-- preferences: nothing loads, and the learn step may create a missing file.

@@ -114,10 +114,10 @@ fn build_prompt_without_pr_review_tag_omits_the_review_runbook() {
         None,
         &PromptContext::default(),
     );
-    // `/dispatch:preference-review` is step 2 of prompts/pr-review.md, so its absence
+    // Step 1 of prompts/pr-review.md, so its absence
     // already implies the whole addendum's — no second assertion needed.
     assert!(
-        !text.contains("/dispatch:preference-review"),
+        !text.contains("Find the PR number or URL in the task description."),
         "an untagged prompt must not carry the pr-review runbook, got: {text}"
     );
 }
@@ -933,7 +933,7 @@ fn build_prompt_with_pr_review_tag_runs_the_configured_review_command() {
         "configured command must be rendered, got: {text}"
     );
     assert!(
-        !text.contains("/dispatch:preference-review"),
+        !text.contains(DEFAULT_REVIEW_COMMAND),
         "the default must not appear beside a configured command, got: {text}"
     );
 }

@@ -2177,16 +2177,7 @@ surface McpTaskTools {
         -- invoke /fix itself; the confirmation is the only bound on that chain.
         --
         -- The /preference-review skill reviews one PR against the operator's review
-        -- preference files: general.md, languages/<language>.md and
-        -- repos/<owner>__<repo>.md in the folder named by DISPATCH_REVIEW_CONTEXT,
-        -- else ~/.local/share/dispatch/review-context. The files are personal and
-        -- the skill is shared, so the folder is never a path in the skill; a host
-        -- without one gets a review without preferences, and the skill says so.
-        -- Reviewer findings are verified against the PR's code, then filtered by
-        -- the files' "Do not raise" entries, and the counts dropped at each step
-        -- are shown. It never posts to GitHub unless asked, and it writes a
-        -- preference file only after the operator approves the shown edit.
-        -- The full behaviour is specified in its own file
+        -- preference files. Its behaviour is specified in its own file
         -- (preference-review.allium: PreferenceReviewSession).
 
     @guarantee ToolDefinitionsFollowTheAuthoringStandard

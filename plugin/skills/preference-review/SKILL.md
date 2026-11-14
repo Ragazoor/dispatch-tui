@@ -113,8 +113,9 @@ there, so a missed point can be traced to the step that dropped it.
 
 ## Step 4: Verify
 
-Start one `general-purpose` agent for all findings (or one per finding when
-there are more than about eight). Give it each finding and the way to read code
+Start one `general-purpose` agent for all findings. With more than about
+eight, split them by file into groups of about eight, one agent per group, in
+one message. Give each agent its findings and the way to read code
 at `headRefOid`. Its job is to **disprove** each finding against the real code:
 read the lines, follow the callers, check the tests. It returns `confirmed`,
 `plausible` or `refuted` with one line of evidence. It compares against the
