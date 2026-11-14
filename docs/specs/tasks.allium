@@ -1677,9 +1677,9 @@ contract TaskTeardown {
         -- reconciliation is background work.
 }
 
--- Removing the task row removes every agent the task has had, current and
--- ended; their names stay in the ledger (agents.allium: AgentsGoWithTheirTask,
--- since A1). BatchDelete removes them the same way.
+-- Removing the task row removes every agent the task has had, assigned,
+-- current and ended, which frees their names (agents.allium:
+-- AgentsGoWithTheirTask, A4). BatchDelete removes them the same way.
 rule DeleteTask {
     when: DeleteTask(task)
 

@@ -543,8 +543,8 @@ surface NamesForPeople {
     @guarantee McpRepliesNameWhatTheyTouch
         -- An MCP reply that names a task keeps its id, as the key, and adds
         -- the task's display name and title beside it; one that names an
-        -- epic adds the epic's title. That covers the replies that today
-        -- give a bare id — create_task, update_tasks (one, several, done),
+        -- epic adds the epic's title. That covers the replies that would
+        -- otherwise give a bare id — create_task, update_tasks (one, several, done),
         -- update_epic, dispatch_task, resume_task, wrap_up, exit_session,
         -- and the work-package replies and their item lists — and the rows
         -- that name a parent by id alone (list_epics' `(parent:<id>)`).

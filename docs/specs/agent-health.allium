@@ -917,7 +917,7 @@ rule HookNotification {
         --   clear  -> elicitation_complete, elicitation_response: back to
         --             (running, active), last_notification_at = null.
         --   ignore -> auth_success: no state change, no timestamp write, so an
-        --             auth-success toast no longer raises a false needs_input.
+        --             auth-success toast never raises a false needs_input.
         --             idle_prompt while live_subagents > 0 or while the agent
         --             is waiting on background work lands here for the same
         --             reason -- see below.
@@ -1265,8 +1265,8 @@ surface HookDelivery {
         -- scales with how often this task's hooks fire, not with how many
         -- tasks the board has. Tick-driven reclassification still runs on
         -- every task on its own schedule and remains the backstop for any
-        -- write this push misses, but is no longer what the operator's
-        -- sub_status label waits on to catch up: this guarantee is.
+        -- write this push misses; the operator's sub_status label does not
+        -- wait on it to catch up.
 
     @guarantee HookNeverOpensTheDatabase
         -- A process delivering one of the events above opens no store, not
