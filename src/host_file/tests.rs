@@ -111,6 +111,27 @@ fn a_later_launch_reads_back_the_identity_it_minted() {
     );
 }
 
+/// MintHostIdentity's guard is the file: a launch that finds no host file and
+/// mints, but loses the race to another launch that wrote one in between,
+/// keeps the winner's identity rather than replacing it.
+#[test]
+fn a_mint_that_loses_the_race_reads_back_the_winners_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    write_raw(dir.path(), &named("host-winner", "laptop"), HOST_FILE_MODE);
+    let loser = HostIdentity {
+        host_id: "host-loser".to_string(),
+        label: None,
+        user_identity: None,
+        credential: None,
+        extra: Default::default(),
+    };
+
+    let identity = mint_if_absent(dir.path(), &loser).unwrap();
+
+    assert_eq!(identity, named("host-winner", "laptop"));
+    assert_eq!(stored(dir.path()), named("host-winner", "laptop"));
+}
+
 /// A named host file is read as it is, and is not rewritten by reading it.
 #[test]
 fn a_launch_with_a_host_file_returns_it_unchanged() {

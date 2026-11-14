@@ -57,6 +57,19 @@ pub fn write_with(
             Err(e) => return Err(anyhow::Error::new(e).context(format!("stat {}", path.display()))),
         },
     };
+    let temp = filled_temp(dir, mode, fill)?;
+    temp.persist(path)
+        .map_err(|e| e.error)
+        .with_context(|| format!("replace {}", path.display()))?;
+    Ok(())
+}
+
+/// A synced temporary file in `dir` with `mode` set before `fill` writes it.
+fn filled_temp(
+    dir: &Path,
+    mode: u32,
+    fill: impl FnOnce(&mut dyn Write) -> anyhow::Result<()>,
+) -> anyhow::Result<tempfile::NamedTempFile> {
     let mut temp = tempfile::Builder::new()
         .prefix(".atomic-write.")
         .tempfile_in(dir)
@@ -71,10 +84,25 @@ pub fn write_with(
     temp.as_file()
         .sync_all()
         .context("sync the temporary file")?;
-    temp.persist(path)
-        .map_err(|e| e.error)
-        .with_context(|| format!("replace {}", path.display()))?;
-    Ok(())
+    Ok(temp)
+}
+
+/// Create `path` with `bytes` and `mode`, only if nothing is there yet.
+///
+/// Whole-file like [`write_bytes`], but never replaces: `Ok(false)` when
+/// `path` already exists, which is then left as it was. Two processes racing
+/// to create the same file end with exactly one's content.
+pub fn create_new_bytes(path: &Path, mode: u32, bytes: &[u8]) -> anyhow::Result<bool> {
+    let dir = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let temp = filled_temp(dir, mode, |w| w.write_all(bytes).context("write the file"))?;
+    match temp.persist_noclobber(path) {
+        Ok(_) => Ok(true),
+        Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(anyhow::Error::new(e.error).context(format!("create {}", path.display()))),
+    }
 }
 
 /// [`write_with`] for content already in memory.

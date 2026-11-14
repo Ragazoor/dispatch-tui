@@ -6,6 +6,25 @@ fn mode_of(path: &Path) -> u32 {
 }
 
 #[test]
+fn create_new_writes_a_missing_file_with_the_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("f");
+    assert!(create_new_bytes(&path, 0o600, b"new").unwrap());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    assert_eq!(mode_of(&path), 0o600);
+}
+
+#[test]
+fn create_new_leaves_an_existing_file_and_no_temp_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("f");
+    std::fs::write(&path, "old").unwrap();
+    assert!(!create_new_bytes(&path, 0o600, b"new").unwrap());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "old");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn keep_mode_preserves_the_old_files_mode() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("f");

@@ -48,16 +48,15 @@ pub trait HostStore: Send + Sync {
     /// (`dispatch.allium: DispatchTask`).
     fn host_id(&self) -> &str;
 
-    /// Mint this install's Host id if it does not already exist — an opaque
-    /// generated id, nothing else — and return the current `(id, label)`
-    /// either way. `label` is `None` until an operator names this machine via
-    /// `rename_host` (see `docs/specs/startup.allium`: `HostLabelPrompt`,
-    /// which asks for exactly that before the board's first launch draws).
-    ///
-    /// Idempotent by construction: the insert is `ON CONFLICT DO NOTHING`, so
-    /// a second call (or a race between several dispatch processes on first
-    /// run) never re-mints the id. Never call anything that mutates `id`
-    /// after this — `RenameHost` only ever touches the label.
+    /// This install's current `(id, label)`, read from the host file. It
+    /// never mints: the board launch mints on first run
+    /// (`crate::host_file::resolve_for_launch`, which keeps whichever id
+    /// reaches the file first when several launches race), and a handle with
+    /// no host file fails. `label` is `None` until an operator names this
+    /// machine via `rename_host` (see `docs/specs/startup.allium`:
+    /// `HostLabelPrompt`, which asks for exactly that before the board's
+    /// first launch draws). Never call anything that mutates `id` — `RenameHost`
+    /// only ever touches the label.
     async fn ensure_host_identity(&self) -> Result<(String, Option<String>)>;
 
     /// Change this install's Host label. Rejects an empty (or

@@ -161,8 +161,23 @@ pub fn resolve_for_launch(data_dir: &Path) -> Result<HostIdentity, StartupAbort>
         credential: None,
         extra: Default::default(),
     };
-    write_whole(data_dir, &minted).map_err(unavailable)?;
-    Ok(minted)
+    mint_if_absent(data_dir, &minted).map_err(unavailable)
+}
+
+/// Write `minted` as the host file only if there is none, and return the
+/// identity the file holds afterwards. A launch that loses a first-run race
+/// to another one reads back the winner's identity instead of replacing it,
+/// so every process on the data directory ends up with the same host id
+/// (`host.allium: MintHostIdentity`).
+fn mint_if_absent(data_dir: &Path, minted: &HostIdentity) -> anyhow::Result<HostIdentity> {
+    std::fs::create_dir_all(data_dir)
+        .with_context(|| format!("create data directory {}", data_dir.display()))?;
+    let bytes = serde_json::to_vec_pretty(minted).context("encode the host identity")?;
+    if crate::atomic_write::create_new_bytes(&host_file_path(data_dir), HOST_FILE_MODE, &bytes)? {
+        return Ok(minted.clone());
+    }
+    read_existing(data_dir)?
+        .with_context(|| format!("{} vanished after another launch wrote it", HOST_FILE_NAME))
 }
 
 /// A one-shot CLI command's read (`cli.allium: CliCommandsNeedAHostFile`).

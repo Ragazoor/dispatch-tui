@@ -216,8 +216,7 @@ rule MintHostIdentity {
         -- (startup.allium: PromptForHostLabelWhenUnnamed) needs exactly that
         -- distinction to know whether to ask.
         --
-        -- The hostname is only a suggestion: it is the
-        -- value the startup prompt arrives pre-filled with, so accepting it is
+        -- The hostname is the value the startup prompt arrives pre-filled with, so accepting it is
         -- one keypress, and it reaches the label through RenameHost below like
         -- any other answer. It is a suggestion, not an identity — the id is
         -- untouched by whatever is chosen, and no rule ever compares labels.
@@ -229,6 +228,10 @@ rule MintHostIdentity {
         -- The guard is the file, not a count of core/Hosts: the store's host
         -- registry holds other machines' rows (core.allium:
         -- ExactlyOneLocalHost), so no count says whether this one has an id.
+        -- The mint creates the file only if it is still absent: two launches
+        -- racing on one data directory end with one id, and the launch whose
+        -- mint finds a file already there reads that identity back instead
+        -- of its own.
         --
         -- == Black boxes ==
         -- data_directory() is this install's storage/DataDirectory;
