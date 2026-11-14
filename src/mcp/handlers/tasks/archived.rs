@@ -8,11 +8,15 @@ use crate::mcp::McpState;
 use crate::models::{ArchivedTask, EpicId, TaskId};
 
 use super::super::types::NOT_FOUND_CODE;
-use super::{description_preview, JsonRpcResponse, INTERNAL_ERROR};
+use super::{description_preview, utc_stamp, JsonRpcResponse, INTERNAL_ERROR};
 
-/// The store's timestamp, as `get_task`'s Created line shows one.
-fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
-    at.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+/// The record's epic as `"<title> (#<id>)"`, or `"#<id>"` with no title.
+fn epic_label(a: &ArchivedTask) -> Option<String> {
+    let id = a.epic_id?;
+    Some(match &a.epic_title {
+        Some(title) => format!("{title} (#{id})"),
+        None => format!("#{id}"),
+    })
 }
 
 /// `GetArchivedTaskViaMcp`'s detail lines.
@@ -21,18 +25,14 @@ pub(super) fn archived_detail_text(a: &ArchivedTask) -> String {
         "Task {id}: {title}\nStatus: archived\nArchived: {archived}\nRepo: {repo}\nDescription: {desc}",
         id = a.id,
         title = a.title,
-        archived = stamp(a.archived_at),
+        archived = utc_stamp(a.archived_at),
         repo = a.repo_path,
         desc = a.description,
     );
     if let Some(agent) = &a.agent_name {
         text.push_str(&format!("\nAgent: {agent} (archived)"));
     }
-    if let Some(epic_id) = a.epic_id {
-        let label = match &a.epic_title {
-            Some(title) => format!("{title} (#{epic_id})"),
-            None => format!("#{epic_id}"),
-        };
+    if let Some(label) = epic_label(a) {
         text.push_str(&format!("\nEpic: {label}"));
     }
     if let Some(tag) = &a.tag {
@@ -45,20 +45,18 @@ pub(super) fn archived_detail_text(a: &ArchivedTask) -> String {
         text.push_str(&format!("\n{}: {}", u.label(), u.url));
     }
     text.push_str(&format!("\nBase branch: {}", a.base_branch));
-    text.push_str(&format!("\nCreated: {}", stamp(a.created_at)));
+    text.push_str(&format!("\nCreated: {}", utc_stamp(a.created_at)));
     if let Some(done) = a.completed_at {
-        text.push_str(&format!("\nCompleted: {}", stamp(done)));
+        text.push_str(&format!("\nCompleted: {}", utc_stamp(done)));
     }
     text
 }
 
 /// One `ListArchivedTasksViaMcp` row.
 fn archived_line(a: &ArchivedTask) -> String {
-    let epic = match (a.epic_id, &a.epic_title) {
-        (Some(id), Some(title)) => format!(" | epic: {title} (#{id})"),
-        (Some(id), None) => format!(" | epic: #{id}"),
-        (None, _) => String::new(),
-    };
+    let epic = epic_label(a)
+        .map(|label| format!(" | epic: {label}"))
+        .unwrap_or_default();
     let agent = a
         .agent_name
         .as_ref()
@@ -73,7 +71,7 @@ fn archived_line(a: &ArchivedTask) -> String {
         "#{id}: {title} | archived {archived}{epic}{agent} | Base: {base}{url} | Goal: {goal}",
         id = a.id,
         title = a.title,
-        archived = stamp(a.archived_at),
+        archived = utc_stamp(a.archived_at),
         base = a.base_branch,
         goal = description_preview(&a.description),
     )

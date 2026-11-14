@@ -117,12 +117,7 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         .ok_or_else(|| refuse(format!("unknown status {:?}", row.status)))?;
     let sub_status = SubStatus::parse(&row.sub_status)
         .ok_or_else(|| refuse(format!("unknown sub_status {:?}", row.sub_status)))?;
-    let tag = match text(&row.tag) {
-        None => None,
-        Some(raw) => {
-            Some(TaskTag::parse(raw).ok_or_else(|| refuse(format!("unknown tag {raw:?}")))?)
-        }
-    };
+    let tag = task_tag(&row.tag).map_err(refuse)?;
     let wrap_up_mode = match text(&row.wrap_up_mode) {
         None => None,
         Some(raw) => Some(
@@ -153,7 +148,7 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         plan_path: text(&row.plan_path).map(str::to_owned),
         epic_id: id(row.epic_id).map(EpicId),
         sub_status,
-        url: task_url(row).map_err(refuse)?,
+        url: url_pair(&row.url, &row.url_type).map_err(refuse)?,
         tag,
         // NOT sentinel-encoded, and the one column in this table that is not.
         // `sort_order` is a real integer whose zero is meaningful — it is the
@@ -201,11 +196,6 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
 /// A url without a type (or the reverse) is a row the application cannot
 /// produce, so it fails rather than being coerced to `None` — for the same reason
 /// every decoder here refuses an inconsistent pair.
-fn task_url(row: &bindings::Task) -> Result<Option<TaskUrl>, String> {
-    url_pair(&row.url, &row.url_type)
-}
-
-/// [`task_url`]'s rule over the two raw columns, shared with the archive.
 fn url_pair(url: &str, url_type: &str) -> Result<Option<TaskUrl>, String> {
     match (text(url), text(url_type)) {
         (None, None) => Ok(None),
@@ -223,12 +213,7 @@ fn url_pair(url: &str, url_type: &str) -> Result<Option<TaskUrl>, String> {
 pub fn archived_task(row: &bindings::ArchivedTask) -> Decoded<ArchivedTask> {
     const T: &str = "archived_tasks";
     let refuse = |detail: String| DecodeError::new(T, row.id, detail);
-    let tag = match text(&row.tag) {
-        None => None,
-        Some(raw) => {
-            Some(TaskTag::parse(raw).ok_or_else(|| refuse(format!("unknown tag {raw:?}")))?)
-        }
-    };
+    let tag = task_tag(&row.tag).map_err(refuse)?;
     Ok(ArchivedTask {
         id: TaskId(row.id),
         title: row.title.clone(),
@@ -245,6 +230,13 @@ pub fn archived_task(row: &bindings::ArchivedTask) -> Decoded<ArchivedTask> {
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
         archived_at: required_timestamp(T, row.id, "archived_at", &row.archived_at)?,
     })
+}
+
+/// An optional tag column: `""` is none, anything else must be a known tag.
+fn task_tag(raw: &str) -> Result<Option<TaskTag>, String> {
+    text(raw)
+        .map(|raw| TaskTag::parse(raw).ok_or_else(|| format!("unknown tag {raw:?}")))
+        .transpose()
 }
 
 /// A malformed window name is dropped, not refused.

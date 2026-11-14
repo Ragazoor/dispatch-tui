@@ -499,6 +499,17 @@ impl SharedTable {
         }
     }
 
+    /// The table whose rows keep ids from this table's counter, if any:
+    /// archived records keep their task's id (`core.allium: ArchivedTask`).
+    /// Read by the restore's burn and its plausibility check, so the two
+    /// cannot disagree.
+    pub fn shares_ids_with(self) -> Option<SharedTable> {
+        match self {
+            SharedTable::Tasks => Some(SharedTable::ArchivedTasks),
+            _ => None,
+        }
+    }
+
     /// Whether this table's identity comes from a counter the store advances,
     /// and therefore whether it needs burning after a restore.
     pub fn generates_ids(self) -> bool {
@@ -616,9 +627,13 @@ impl TableExtract {
     /// starting at 1 is already past it, so the burn is a no-op rather than a
     /// special case.
     pub fn highest_id(&self) -> i64 {
-        let Some(column) = self.table.id_column() else {
-            return 0;
-        };
+        self.table
+            .id_column()
+            .map_or(0, |column| self.max_of(column))
+    }
+
+    /// The largest integer `column` holds across the rows, or 0.
+    fn max_of(&self, column: &str) -> i64 {
         self.rows
             .iter()
             .filter_map(|row| row.get(column).and_then(serde_json::Value::as_i64))
@@ -672,31 +687,21 @@ impl Snapshot {
     /// `tasks` every archived task's id too, since an archived task keeps the
     /// id its row had and that id must never be handed out again.
     pub fn burn_ceiling(&self, table: SharedTable) -> i64 {
-        let own = self.highest_id(table);
-        if table != SharedTable::Tasks {
-            return own;
-        }
-        let archived = self
-            .extract(SharedTable::ArchivedTasks)
-            .and_then(|e| {
-                e.rows
-                    .iter()
-                    .filter_map(|row| row.get("id").and_then(serde_json::Value::as_i64))
-                    .max()
-            })
-            .unwrap_or(0);
-        own.max(archived)
+        std::iter::once(table)
+            .chain(table.shares_ids_with())
+            .filter_map(|t| self.extract(t))
+            .map(|e| e.max_of("id"))
+            .max()
+            .unwrap_or(0)
     }
 
-    /// The rows that claim [`Self::burn_ceiling`]'s ids: `tasks` counts its
-    /// archived records too.
+    /// The rows that claim [`Self::burn_ceiling`]'s ids.
     pub fn rows_claiming_ids(&self, table: SharedTable) -> usize {
-        let rows = |t| self.extract(t).map_or(0, |e| e.rows.len());
-        if table == SharedTable::Tasks {
-            rows(SharedTable::Tasks) + rows(SharedTable::ArchivedTasks)
-        } else {
-            rows(table)
-        }
+        std::iter::once(table)
+            .chain(table.shares_ids_with())
+            .filter_map(|t| self.extract(t))
+            .map(|e| e.rows.len())
+            .sum()
     }
 
     /// Rows in a deterministic order, for comparing two snapshots. A dump does

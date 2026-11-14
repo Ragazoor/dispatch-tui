@@ -77,6 +77,17 @@ impl MemoryReducerCaller {
     pub(super) fn delete_task_row(&self, tables: &mut Tables, id: i64) {
         if tables.tasks.remove(&id).is_some() {
             self.rows.remove_task(TaskId(id));
+            // A board receives retrievals only for tasks it holds
+            // (`visible_learning_retrievals`), so a gone task's retrievals
+            // leave the board's rows, whether the store keeps them (an
+            // archived task) or not.
+            for r in tables
+                .learning_retrievals
+                .values()
+                .filter(|r| r.task_id == id)
+            {
+                self.rows.remove_learning_retrieval(r.id);
+            }
         }
     }
 
@@ -253,17 +264,6 @@ impl MemoryReducerCaller {
         };
         let record = module::archive_record(&*tables, &task, self.now(), self.sender.clone());
         tables.archived_tasks.insert(task_id, record);
-        // The store keeps the task's retrievals, but a board receives
-        // retrievals only for tasks it holds (`visible_learning_retrievals`),
-        // so they leave the board's rows as they do on a live connection.
-        for id in tables
-            .learning_retrievals
-            .values()
-            .filter(|r| r.task_id == task_id)
-            .map(|r| r.id)
-        {
-            self.rows.remove_learning_retrieval(id);
-        }
     }
 
     /// Mirrors the module's `delete_epic_subtree_with_feed_cleanup`.
@@ -979,7 +979,7 @@ impl MemoryReducerCaller {
     pub(super) fn apply_read_archived_task(&self, id: TaskId) -> Option<bindings::ArchivedTask> {
         let operator = !self.scope().on();
         let tables = self.lock();
-        module::archived_task_for(&*tables, operator, &self.sender, id.0).map(archived_binding)
+        module::archived_task_for(&*tables, operator, &self.sender, id.0).map(Into::into)
     }
 
     /// Mirrors the module's `list_archived_tasks` procedure, through the
@@ -999,7 +999,7 @@ impl MemoryReducerCaller {
             &repo_paths,
         )
         .into_iter()
-        .map(archived_binding)
+        .map(Into::into)
         .collect()
     }
 
@@ -1071,34 +1071,5 @@ impl MemoryReducerCaller {
             self.recalculate_epic_chain(&mut tables, epic_id);
         }
         Ok(ReducerOutcome::Applied(vec![]))
-    }
-}
-
-/// The module's record as the client binding the procedures return.
-fn archived_binding(a: module::ArchivedTask) -> bindings::ArchivedTask {
-    bindings::ArchivedTask {
-        id: a.id,
-        title: a.title,
-        description: a.description,
-        repo_path: a.repo_path,
-        base_branch: a.base_branch,
-        tag: a.tag,
-        labels: a.labels,
-        url: a.url,
-        url_type: a.url_type,
-        plan_path: a.plan_path,
-        external_id: a.external_id,
-        created_by: a.created_by,
-        owner: a.owner,
-        created_at: a.created_at,
-        completed_at: a.completed_at,
-        epic_id: a.epic_id,
-        epic_title: a.epic_title,
-        agent_name: a.agent_name,
-        workspace_id: a.workspace_id,
-        private: a.private,
-        private_holder: a.private_holder,
-        archived_at: a.archived_at,
-        archived_by: a.archived_by,
     }
 }

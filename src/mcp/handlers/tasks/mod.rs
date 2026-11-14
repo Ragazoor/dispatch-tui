@@ -500,14 +500,8 @@ fn format_task_detail(
     if bookmarked {
         text.push_str("\nBookmarked: yes");
     }
-    text.push_str(&format!(
-        "\nCreated: {}",
-        task.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-    ));
-    text.push_str(&format!(
-        "\nUpdated: {}",
-        task.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
-    ));
+    text.push_str(&format!("\nCreated: {}", utc_stamp(task.created_at)));
+    text.push_str(&format!("\nUpdated: {}", utc_stamp(task.updated_at)));
     text
 }
 
@@ -515,6 +509,11 @@ async fn plan_goal(path: &str) -> Option<String> {
     let content = tokio::fs::read_to_string(path).await.ok()?;
     let description = crate::plan::parse_plan(&content).ok()?.description;
     (!description.is_empty()).then_some(description)
+}
+
+/// A timestamp as the task detail views show it.
+fn utc_stamp(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.format("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 
 fn description_preview(s: &str) -> String {

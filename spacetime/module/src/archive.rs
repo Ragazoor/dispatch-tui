@@ -36,24 +36,15 @@ pub fn archive_record(
         completed_at: task.completed_at.clone(),
         epic_id: task.epic_id,
         epic_title: epic.as_ref().map(|e| e.title.clone()).unwrap_or_default(),
-        agent_name: display_agent_name(&r.agents_of(task.id)),
+        agent_name: display_agent(&r.agents_of(task.id))
+            .map(|a| a.name.clone())
+            .unwrap_or_default(),
         workspace_id: epic.as_ref().map_or(0, |e| e.workspace_id),
         private: holder.is_some(),
         private_holder: holder.unwrap_or_default(),
         archived_at,
         archived_by,
     }
-}
-
-/// The task's display agent (`agents.allium`: A18): the one not ended, else
-/// the last to end. `""` for a task with no agent.
-fn display_agent_name(agents: &[Agent]) -> String {
-    agents
-        .iter()
-        .find(|a| a.state != AGENT_ENDED)
-        .or_else(|| agents.iter().max_by(|a, b| a.ended_at.cmp(&b.ended_at)))
-        .map(|a| a.name.clone())
-        .unwrap_or_default()
 }
 
 /// `tasks.allium: ArchiveDeletedTask`. Called by every person-made task
@@ -94,12 +85,15 @@ pub fn archived_task_for(
 }
 
 /// Every archived task the caller may see, narrowed by `epic_id` (`0` for
-/// any) and `repo_paths` (empty for any), in id order. The host applies the
-/// remaining `list_tasks` filters and the newest-first order.
+/// any) and `repo_paths` (empty for any), newest archived first, ties by id
+/// descending (`mcp-task-tools.allium: ListArchivedTasksViaMcp`). The host
+/// applies the remaining `list_tasks` filters.
 ///
-/// Read through the indexes a caller can reach: their own epic-less records
-/// and the records of each workspace they belong to. The operator also reads
-/// every listed workspace's records.
+/// Read through the indexes a caller can reach, which settle most of the
+/// visibility rule on their own: the owner index holds only the caller's
+/// epic-less records, and the workspace index is read only for workspaces
+/// the caller belongs to, so a workspace record needs just the privacy check.
+/// The operator also reads every listed workspace's records.
 pub fn archived_tasks_for(
     r: &impl StoreReads,
     operator: bool,
@@ -113,19 +107,19 @@ pub fn archived_tasks_for(
     }
     workspaces.sort_unstable();
     workspaces.dedup();
+    let held_in_workspace = workspaces
+        .into_iter()
+        .flat_map(|ws| r.archived_tasks_in_workspace(ws))
+        .filter(|a| operator || !a.private || (!a.private_holder.is_empty() && a.private_holder == who));
     let mut rows: Vec<ArchivedTask> = r
         .archived_tasks_owned_by(who)
         .into_iter()
-        .chain(
-            workspaces
-                .into_iter()
-                .flat_map(|ws| r.archived_tasks_in_workspace(ws)),
-        )
-        .filter(|a| operator || archived_task_visible_to(r, a, who))
+        .filter(|a| a.epic_id == 0)
+        .chain(held_in_workspace)
         .filter(|a| epic_id == 0 || a.epic_id == epic_id)
         .filter(|a| repo_paths.is_empty() || repo_paths.contains(&a.repo_path))
         .collect();
-    rows.sort_by_key(|a| a.id);
+    rows.sort_by(|a, b| b.archived_at.cmp(&a.archived_at).then(b.id.cmp(&a.id)));
     rows.dedup_by_key(|a| a.id);
     rows
 }

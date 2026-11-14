@@ -37,10 +37,8 @@ impl super::super::TaskRead for Store {
     }
 
     async fn archived_task(&self, id: TaskId) -> Result<Option<ArchivedTask>> {
-        match self.caller.read_archived_task(id).await? {
-            None => Ok(None),
-            Some(row) => Ok(Some(decode::archived_task(&row)?)),
-        }
+        let row = self.caller.read_archived_task(id).await?;
+        Ok(row.as_ref().map(decode::archived_task).transpose()?)
     }
 
     async fn archived_tasks(
@@ -52,13 +50,11 @@ impl super::super::TaskRead for Store {
             .caller
             .list_archived_tasks(epic_id, repo_paths.to_vec())
             .await?;
-        let mut records = rows
+        // Already newest archived first (`archived_tasks_for`).
+        Ok(rows
             .iter()
             .map(decode::archived_task)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        // `ListArchivedTasksViaMcp`: newest archived first, ties by id descending.
-        records.sort_by(|a, b| b.archived_at.cmp(&a.archived_at).then(b.id.0.cmp(&a.id.0)));
-        Ok(records)
+            .collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
     async fn bookmarked_task_ids(&self) -> Vec<TaskId> {

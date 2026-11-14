@@ -317,6 +317,35 @@ mirror!(
 mirror!(module::Host, bindings::Host { id, label, owner });
 
 mirror!(
+    module::ArchivedTask,
+    bindings::ArchivedTask {
+        id,
+        title,
+        description,
+        repo_path,
+        base_branch,
+        tag,
+        labels,
+        url,
+        url_type,
+        plan_path,
+        external_id,
+        created_by,
+        owner,
+        created_at,
+        completed_at,
+        epic_id,
+        epic_title,
+        agent_name,
+        workspace_id,
+        private,
+        private_holder,
+        archived_at,
+        archived_by
+    }
+);
+
+mirror!(
     module::RetiredFeedItem,
     bindings::RetiredFeedItem {
         id,

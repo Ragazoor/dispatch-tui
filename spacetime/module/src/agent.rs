@@ -513,6 +513,22 @@ pub fn assigned_agent<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> Option
     agent_in_state(store, task_id, AGENT_ASSIGNED)
 }
 
+/// `display_agent(task)` over the task's agents (A18): the one not ended
+/// (assigned or current), else the one that ended last; on a tie, the first.
+/// The module twin of the host's `models::display_agent`, with its tie rule.
+pub fn display_agent(agents: &[Agent]) -> Option<&Agent> {
+    let mut last_ended: Option<&Agent> = None;
+    for agent in agents {
+        if agent.state != AGENT_ENDED {
+            return Some(agent);
+        }
+        if last_ended.is_none_or(|l| agent.ended_at > l.ended_at) {
+            last_ended = Some(agent);
+        }
+    }
+    last_ended
+}
+
 /// Pick a free name for `task_id`: the first one no Agent row holds (A4).
 /// The task id is mixed into the store's seed: the clock does not move inside
 /// one reducer, so a backfill naming many tasks would otherwise start every
