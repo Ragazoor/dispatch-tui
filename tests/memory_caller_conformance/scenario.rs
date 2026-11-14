@@ -2202,9 +2202,10 @@ fn memory_caller_matches_the_real_reducers() {
         mem.delete_work_package(package_mem).await.unwrap();
         assert!(rows_mem.work_packages().is_empty());
 
+        // ArchiveDeletedTask: the learning keeps naming its archived source.
         wait_for!(rows_real
             .learning(sourced_real)
-            .is_some_and(|l| l.source_task_id.is_none()));
+            .is_some_and(|l| l.source_task_id == Some(task_id_real)));
         compare_learning(sourced_real);
         assert!(rows_real.retrievals_for_task(task_id_real).is_empty());
         assert!(rows_mem.retrievals_for_task(task_id_mem).is_empty());

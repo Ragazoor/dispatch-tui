@@ -102,7 +102,10 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         | "filter_presets"
         | "work_package_links"
         | "user_profiles"
-        | "handed_out_agent_names" => {}
+        | "handed_out_agent_names"
+        // An archived task keeps its task's id; the burn of `tasks` passes
+        // over it (`spacetime-seed.allium: BurnIdSequences`).
+        | "archived_tasks" => {}
         other => return Err(format!("unknown table {other}")),
     }
     Ok(())

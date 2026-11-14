@@ -68,7 +68,7 @@ async fn full_epic_lifecycle() {
 /// `DeleteEpic` runs `DELETE FROM tasks WHERE epic_id = ?` (recursively, for
 /// the whole subtree); `learnings.source_task_id` is `ON DELETE SET NULL`, so
 /// a learning that names a doomed task as its source must survive the delete
-/// with that column cleared, not block it with a FK violation.
+/// and keep naming the archived task, not block it.
 #[tokio::test]
 async fn delete_epic_with_a_learning_referencing_a_subtask_succeeds() {
     let db = Store::open_in_memory().unwrap();
@@ -112,8 +112,9 @@ async fn delete_epic_with_a_learning_referencing_a_subtask_succeeds() {
         .unwrap()
         .expect("the learning row survives the delete");
     assert_eq!(
-        learning.source_task_id, None,
-        "source_task_id is cleared, not left dangling"
+        learning.source_task_id,
+        Some(task_id),
+        "source_task_id keeps naming the archived task (ArchiveDeletedTask)"
     );
 }
 

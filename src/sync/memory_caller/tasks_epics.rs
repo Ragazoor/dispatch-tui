@@ -253,6 +253,17 @@ impl MemoryReducerCaller {
         };
         let record = module::archive_record(&*tables, &task, self.now(), self.sender.clone());
         tables.archived_tasks.insert(task_id, record);
+        // The store keeps the task's retrievals, but a board receives
+        // retrievals only for tasks it holds (`visible_learning_retrievals`),
+        // so they leave the board's rows as they do on a live connection.
+        for id in tables
+            .learning_retrievals
+            .values()
+            .filter(|r| r.task_id == task_id)
+            .map(|r| r.id)
+        {
+            self.rows.remove_learning_retrieval(id);
+        }
     }
 
     /// Mirrors the module's `delete_epic_subtree_with_feed_cleanup`.

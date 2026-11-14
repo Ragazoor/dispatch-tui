@@ -356,11 +356,12 @@ async fn archive_stale_learnings_archives_eligible_rows_only() {
     assert_eq!(rows.learning(recent).unwrap().status.as_str(), "approved");
 }
 
-/// `delete_task`'s cascade: a learning it sourced loses that link rather
-/// than being deleted (`SET NULL`), and every retrieval recorded against
-/// it is dropped — mirrors the module's `detach_learnings_from_task`.
+/// `delete_task` archives the task and keeps its learning links
+/// (`tasks.allium: ArchiveDeletedTask`): a learning it sourced still names
+/// it, and its retrievals stay in the store but leave the board's rows, since
+/// a board receives retrievals only for tasks it holds.
 #[tokio::test]
-async fn delete_task_detaches_source_task_id_and_cascades_retrievals() {
+async fn delete_task_keeps_source_task_id_and_hides_retrievals_from_the_board() {
     let (caller, rows) = caller();
     let task_id = caller
         .create_task(bindings::Task {
@@ -384,7 +385,11 @@ async fn delete_task_detaches_source_task_id_and_cascades_retrievals() {
 
     caller.delete_task(task_id).await.unwrap();
 
-    assert_eq!(rows.learning(sourced).unwrap().source_task_id, None);
+    assert_eq!(
+        rows.learning(sourced).unwrap().source_task_id,
+        Some(task_id)
+    );
     assert!(rows.learning(unrelated).is_some());
     assert!(rows.retrievals_for_task(task_id).is_empty());
+    assert!(caller.read_archived_task(task_id).await.unwrap().is_some());
 }
