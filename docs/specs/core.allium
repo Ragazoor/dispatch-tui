@@ -960,7 +960,7 @@ entity Epic {
     feed_append_only: Boolean = false   -- when true, the feed only ever adds: no stale removal, ever (see feeds.allium: AppendOnlyFeed)
     feed_role: FeedRole = none      -- routing role within a feed hierarchy; `none` for ordinary epics (see feeds.allium: Signal)
     origin: EpicOrigin = manual    -- system-assigned; never settable via MCP
-    created_by: UserIdentity?  -- who created this epic; stamped once and never rewritten. The epic twin of Task.created_by — an epic has no `owner` field to begin with (nobody's user board holds an epic), so this is the only way sync.allium can subscribe a creator to an epic they just made, before anyone (including them) follows it. Null when no creator is recorded, e.g. for an epic created by an unidentified process such as a feed; nothing fills it in later.
+    created_by: UserIdentity?  -- who created this epic; stamped once and never rewritten. The epic twin of Task.created_by — an epic has no `owner` field to begin with (nobody's user board holds an epic), so this is the only way sync.allium can subscribe a creator to an epic they just made, before anyone (including them) follows it. Null when no creator is recorded: every write but the operator path stamps the caller, a feed host included, and nothing fills it in later.
     feed_command_set_by: UserIdentity?  -- who last set feed_command. A host runs the command only when its own owner is the one who set it (feeds.allium: FeedCommandRunsOnSettersHost). Stamped by the store with the caller whenever feed_command is created or changed; null when no setter is recorded, and the command then counts as set by created_by. Never client-named.
     workspace: Workspace     -- the workspace this epic lives in; chosen at creation for a root epic, inherited from the parent for a sub-epic, and moved only with its whole tree (workspaces.allium: EpicStaysInItsWorkspace, MoveEpicToWorkspace). Every epic has one (workspaces.allium: MigrateStoreToWorkspaces)
     visibility: Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetEpicVisibility)
@@ -1039,8 +1039,10 @@ entity SavedRepoPath {
     last_used: Timestamp     -- updated on each use; drives recency ordering
     verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
                              -- Belongs to the REPOSITORY, not to the row (VerifyCommandIsPerRepository).
-                             -- A store stamped below rules version 43 gives every row of a repository the command of
-                             -- its most recently used row that has one, once, on connect. A save stamps github_path
+                             -- A store stamped below rules version 43 gives every row the command of the most recently
+                             -- used row that has one in its group, once, on connect. That pass groups rows by
+                             -- github_path, else by path, and does not bridge the two
+                             -- (spacetime/module/src/config.rs::unify_repo_verify_commands). A save stamps github_path
                              -- and creates the saving host's own row; `repo set-verify` saves a missing own row.
     github_path: String?     -- the repository's GitHub path ("org/repo"), read by the saving host from its clone's
                              -- origin remote; null when unknown (no origin, not GitHub). Rows with the same
@@ -1498,9 +1500,10 @@ config {
 -- Storage Boundary Validation
 ------------------------------------------------------------
 
--- A row the shared store delivers whose enum fields hold an unrecognised
--- string value is dropped from the board with a warning, never defaulted to
--- a fallback variant (src/sync/decode_support.rs::drop_undecodable). The
+-- A row of any kind the shared store delivers that the board cannot decode
+-- (an unrecognised enum value, a malformed timestamp or JSON column, a url
+-- whose type does not fit it) is dropped from the board with a warning,
+-- never defaulted to a fallback variant (src/sync/decode_support.rs::drop_undecodable). The
 -- drop is counted as well as logged, so a board quietly dropping rows shows
 -- in one number. An undecodable task is still remembered by id and epic, so
 -- the epic delete guard can count it (epics.allium: DeleteEpic, decodable).
@@ -1509,8 +1512,10 @@ config {
 -- than sitting on it with a plausible wrong status, which is hard to trace
 -- back to its cause.
 --
--- This applies to all enum columns: TaskStatus, SubStatus, TaskTag,
--- WrapUpMode, TaskModel, LearningKind, LearningScope and LearningStatus.
+-- This applies to every enum column, for example TaskStatus, SubStatus,
+-- TaskTag, WrapUpMode, TaskModel, LearningKind, LearningScope,
+-- LearningStatus, Visibility and AgentState, on tasks, epics, learnings,
+-- agents, work packages and the request rows alike.
 -- It also applies to JSON-encoded columns (e.g. labels, tags): malformed
 -- JSON drops the row rather than reading as an empty list.
 --
@@ -1529,11 +1534,12 @@ config {
 -- forward-compatibility gap, not the wrong-status risk the drop rule
 -- guards against.
 --
--- Exception: tmux_window soft-fails too, for a different reason — corruption
--- tolerance, not forward compatibility. A stored value that is not a window
--- name (see TmuxWindow) logs a warning and reads back as no window at all,
--- which is exactly what a task whose agent is gone looks like, so the board
--- still renders it; dropping the row would take the card off the board.
+-- Exception: tmux_window (on agent and request rows) soft-fails too, for a
+-- different reason — corruption tolerance, not forward compatibility. A
+-- stored value that is not a window name (see TmuxWindow) logs a warning and
+-- reads back as no window at all, which is exactly what an agent whose
+-- session is gone looks like, so the board still renders its task; dropping
+-- the row would take the agent off the board.
 --
 -- Not covered at all: the stored list of folded sub-status sections
 -- (board-layout.allium: "Collapsed Sections"). It is a settings row rather than an enum column on an
