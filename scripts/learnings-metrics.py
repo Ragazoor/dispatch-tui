@@ -291,6 +291,39 @@ def mute_metrics():
           f" {len({l for l, _ in muted})} learnings; by repo: {dict(repos.most_common())}")
 
 
+DUPLICATES_DELETED_AT = "2026-11-14 18:30"  # run 10 (task 99042) deleted 10 copies of always-loaded rules
+
+
+def repo_helped_metrics():
+    """Rated-only helped share of injected pairs, per repo, before and after a cut point.
+
+    The whole-store share mixes repos, and the repo mix shifts week to week (Scala repos
+    arrived after the mute), which hid the mute's effect in dispatch. Read the dispatch row:
+    the not_applicable share is the precision signal, helped is the usefulness signal.
+    """
+    R, V, T = table("learning_retrievals"), table("learning_verdicts"), table("tasks")
+    standing = {(v["task_id"], v["learning_id"]): v["verdict"] for v in V}
+    repo = {t["id"]: os.path.basename(t["repo_path"]) for t in T}
+    pairs = {}
+    for r in R:
+        if r["source"] == "prompt_injection" and r["retrieved_at"] >= NOT_APPLICABLE_FROM:
+            pairs.setdefault((r["task_id"], r["learning_id"]), r["retrieved_at"])
+    cuts = [("before mute", NOT_APPLICABLE_FROM, MUTE_FROM + " 13:42"),
+            ("mute, dups kept", MUTE_FROM + " 13:42", DUPLICATES_DELETED_AT),
+            ("dups deleted", DUPLICATES_DELETED_AT, "9999")]
+    print("rated-only verdict share of injected pairs, top repos (helped / not_applicable of rated):")
+    for name, lo, hi in cuts:
+        c = collections.defaultdict(collections.Counter)
+        for (t, l), ts in pairs.items():
+            if lo <= ts < hi and (t, l) in standing:
+                c[repo.get(t, "?")][standing[(t, l)]] += 1
+        rows = sorted(c.items(), key=lambda kv: -sum(kv[1].values()))[:3]
+        cells = "   ".join(
+            f"{r} {k['helped']}/{sum(k.values())} {100 * k['helped'] // sum(k.values())}% h,"
+            f" {100 * k['not_applicable'] // sum(k.values())}% na" for r, k in rows)
+        print(f"  {name:16} {cells or '(no rated pairs yet)'}")
+
+
 def pr_metrics():
     prs = {}
     for f in glob.glob(TRAJ):
@@ -327,5 +360,6 @@ if __name__ == "__main__":
     user_scope_metrics()
     verdict_coverage_metrics()
     mute_metrics()
+    repo_helped_metrics()
     if "--prs" in sys.argv:
         pr_metrics()

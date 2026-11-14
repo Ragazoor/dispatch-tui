@@ -6,6 +6,7 @@ What not to record, how to pick a kind and scope, and how to write the summary. 
 
 - Code patterns readable from source code — the code is self-documenting
 - Things already in CLAUDE.md, README, or existing docs
+- Anything an agent here already sees every session: the dispatch prompt itself (the design step, the wrap-up and rating instructions), a skill it loads, or a line in the operator's memory index. A copy takes one of the five injection slots from an entry the agent does not have, and its `helped` ratings prove nothing, because the agent had the rule anyway. Ten such copies once filled about one dispatch-prompt slot in five.
 - Git history — visible via `git log` / `git blame`
 - Debugging solutions where the fix is in the commit
 - Things too specific to generalise — if it won't apply to other tasks, skip it
