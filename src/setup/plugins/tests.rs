@@ -112,6 +112,7 @@ fn skill_file(skill: &str, file: &str) -> &'static str {
 }
 
 mod feed_scripts;
+mod grill_skill;
 mod plugin_install;
 mod reference_files;
 mod retro_skill;
