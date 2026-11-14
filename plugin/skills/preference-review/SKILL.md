@@ -139,7 +139,9 @@ Drop `refuted`. Keep `plausible` but mark it. Count what you dropped.
 
 Drop each remaining finding that matches a **Do not raise** entry in a loaded
 file. A more specific file wins: a repo file's **Look for** keeps a finding that
-`general.md`'s **Do not raise** would drop. Count what you dropped, and keep a
+`general.md`'s **Do not raise** would drop. When a **Look for** and a
+**Do not raise** entry both match and come from one file, or from files of
+the same specificity, **Do not raise** wins. Count what you dropped, and keep a
 one-line note of which entry dropped each, in case the user asks.
 
 ## Step 6: Present

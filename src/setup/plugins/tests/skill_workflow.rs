@@ -531,6 +531,10 @@ fn preference_review_skill_text_holds_each_session_guarantee() {
         ),
         ("FilterByDoNotRaise", "**Do not raise**"),
         ("MoreSpecificFileWins", "A more specific file wins"),
+        (
+            "MoreSpecificFileWins",
+            "the same specificity, **Do not raise** wins",
+        ),
         ("BothDropCountsAreShown", "Dropped N unconfirmed (step 4)"),
         ("MissedPointsAreTraceable", "findings.md"),
         ("NeverPostsToGitHubUnlessAsked", "Never post to GitHub"),

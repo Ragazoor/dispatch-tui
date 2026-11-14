@@ -22,7 +22,8 @@
 -- Design decisions:
 --   - The preference files are personal and the skill is shared, so the
 --     folder is never a path written in the skill: it comes from the
---     environment, else a fixed default under the dispatch data directory.
+--     environment, else the fixed default ~/.local/share/dispatch/review-context,
+--     which does not follow --data-dir.
 --   - No folder is a normal host, not an error. The review still runs, with
 --     only the repo's CLAUDE.md, says so, and has nothing to learn into.
 --   - Findings are verified before they are filtered, so a Do not raise
@@ -123,8 +124,7 @@ entity PreferenceReview {
 
     -- A Do not raise entry in some loaded file matches the finding, and no
     -- Look for entry in a MORE specific loaded file matches it. A tie between
-    -- files of the same specificity, or within one file, goes to Do not raise
-    -- (settled 2026-11-14, see the end of this file).
+    -- files of the same specificity, or within one file, goes to Do not raise.
     drops_by_taste(f): loaded.any(d =>
         matches_do_not_raise(d, f)
             and not loaded.any(l => matches_look_for(l, f) and more_specific(l.scope, d.scope)))
@@ -273,16 +273,18 @@ rule LoadPreferences {
         -- blank, else the default, resolved to an absolute path and kept:
         -- WriteApprovedPreferenceEdit writes there. Files are listed and
         -- read under the resolved path, never the configured one: the
-        -- default is often a symlink, and a hand test listed it with
-        -- `find`, which does not follow a symlinked start path, and
-        -- reviewed a full folder as empty.
+        -- default is often a symlink, and `find` does not follow a
+        -- symlinked start path, so a listing of the configured path reads a
+        -- full folder as empty.
         --
         -- Whichever of these exist load: general.md; languages/<language>.md
         -- for each language the changed files use, matched by file
         -- extension (.py -> python.md, .scala/.sc/.sbt -> scala.md, .rs ->
         -- rust.md, .ts/.tsx -> typescript.md, ...); and
         -- repos/<owner>__<repo>.md for this repo. A missing file is normal
-        -- and loads nothing.
+        -- and loads nothing. A folder that exists but holds none of the files
+        -- is still a folder with preferences: nothing loads, and the learn
+        -- step may create a missing file.
         --
         -- The loaded files are reported by path before any reviewer starts
         -- (LoadedFilesAreReportedBeforeReviewing).
@@ -676,8 +678,10 @@ surface PreferenceReviewSession {
         -- Three reviewers in parallel, one each for correctness, preferences
         -- and tests; one reviewer carrying all three for a tiny diff. Never
         -- none: the reviewing agent does not review the diff inline, however
-        -- small. A hand test showed an agent doing so and skipping verify
-        -- with it, reading "one reviewer" as licence for zero.
+        -- small: "one reviewer" is not licence for zero, and an inline
+        -- review tends to skip verify with it. A tiny diff has no exact
+        -- threshold; "a few lines, one file" is the running agent's
+        -- judgement.
 
     @guarantee PreferenceReviewerWalksEveryLookFor
         -- The preferences reviewer walks every Look for entry of every loaded
@@ -696,6 +700,8 @@ surface PreferenceReviewSession {
     @guarantee MoreSpecificFileWins
         -- A Do not raise entry drops a finding unless a more specific loaded
         -- file's Look for entry matches it: repo over language over general.
+        -- Between entries of the same specificity, in one file or two, Do not
+        -- raise wins.
 
     @guarantee BothDropCountsAreShown
         -- The presented list is worst first and ends with both counts: those
@@ -736,15 +742,3 @@ surface PreferenceReviewSession {
         -- there, even after writing an approved edit.
 
 }
-
-------------------------------------------------------------
--- Settled questions (operator, 2026-11-14)
-------------------------------------------------------------
-
--- A tiny diff has no exact threshold: "a few lines, one file" is the
--- running agent's judgement (ReviewerCountFollowsDiffSize).
--- A Look for and a Do not raise matching the same finding from one file, or
--- from two files of the same specificity, resolve to Do not raise
--- (PreferenceReview.drops_by_taste).
--- A folder that exists but holds none of the files is a folder with
--- preferences: nothing loads, and the learn step may create a missing file.
