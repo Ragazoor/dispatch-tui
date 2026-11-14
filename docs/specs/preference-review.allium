@@ -12,7 +12,7 @@
 --           the preference folder's resolution and which files load; the
 --           filter's specificity rule; the four things it never does.
 -- Excludes: when dispatch runs it (the pr_review runbook names the review
---           command: settings.allium: ReviewCommandIsASetting,
+--           command: settings.allium: review_command(),
 --           dispatch-prompt.allium: TheReviewCommandMakesTheSizeChoiceItself);
 --           how the skill's copy reaches an agent (mcp-task-tools.allium:
 --           SkillCopyIsJustInTime); the tools behind each step (gh, git,

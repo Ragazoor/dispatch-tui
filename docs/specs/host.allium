@@ -44,7 +44,7 @@
 -- it live here, in the spec that owns that behaviour.
 --
 -- NO RULE HERE READS OR WRITES ANOTHER MACHINE'S ROW, and that is the line to
--- keep. Hosts is a registry now — a shared store puts your colleague's laptop
+-- keep. Hosts is a registry — a shared store puts your colleague's laptop
 -- and your own desktop in it — but every rule below resolves the LOCAL row and
 -- acts on that. What this file guarantees is that this machine has a stable
 -- name for itself, and knows whose it is, before anything is built that needs
@@ -62,6 +62,7 @@
 
 use "./core.allium" as core
 use "./startup.allium" as startup
+use "./storage.allium" as storage
 use "./sync.allium" as sync
 
 ------------------------------------------------------------
@@ -69,7 +70,7 @@ use "./sync.allium" as sync
 ------------------------------------------------------------
 
 -- The file this install keeps who it is in: `host.json` in the data
--- directory (storage.allium: DataDirectory), beside --data-dir.
+-- directory (storage.allium: DataDirectory), the one --data-dir names.
 --
 -- It holds the LOCAL Host row's three fields — core/Host's id, label and
 -- owner — and the credential that proves that owner to the store. Nothing
@@ -77,6 +78,7 @@ use "./sync.allium" as sync
 -- SettingsAreStoredPerHost), and a key the file does not know is not a
 -- setting it should start holding.
 entity HostFile {
+    directory: storage/DataDirectory  -- the data directory the file sits in
     path: String               -- <data directory>/config.host_file_name
     permissions: String        -- the file's mode; always config.host_file_mode
     credential: String?        -- the user identity's login credential; null until the first connection hands one out
@@ -149,6 +151,7 @@ rule MintHostIdentity {
             label: null
         )
         HostFile.created(
+            directory: data_directory(),
             path: host_file_path(),
             permissions: config.host_file_mode,
             credential: null
@@ -226,9 +229,10 @@ rule MintHostIdentity {
         -- ExactlyOneLocalHost), so no count says whether this one has an id.
         --
         -- == Black boxes ==
-        -- host_file_present() asks whether a host file exists in the data
-        -- directory, readable or not; host_file_path() is the data directory
-        -- joined with config.host_file_name.
+        -- data_directory() is this install's storage/DataDirectory;
+        -- host_file_present() asks whether a host file exists in it, readable
+        -- or not; host_file_path() is its path joined with
+        -- config.host_file_name.
 }
 
 -- == Naming ==
@@ -274,8 +278,8 @@ rule RenameHost {
         --
         -- WHAT HAPPENS WHEN THE WRITE ITSELF DOES NOT TAKE is not this rule's
         -- to say; the caller says it. On the first write the caller is
-        -- startup.allium's NameHostFromStartupPrompt, and a store that will not
-        -- accept the label leaves the machine exactly as unnamed as it was:
+        -- startup.allium's NameHostFromStartupPrompt, and a host file that cannot
+        -- be written leaves the machine exactly as unnamed as it was:
         -- that caller treats the failure as its own substrate failing and
         -- stops the launch with the same named reason a failed identity
         -- read/mint gets (startup.allium: AbortWhenTheHostIdentityStoreIsUnusable
@@ -283,7 +287,7 @@ rule RenameHost {
         -- it for a write, since it is the one place that attempts one), rather
         -- than drawing a board for a name nothing kept. This rule keeps
         -- describing the write it performs; it does not grow an arm for the
-        -- store refusing it.
+        -- host file refusing it.
         --
         -- WHAT A RENAME MEANS BEYOND THIS INSTALL. The label is a SHARED
         -- DISPLAY VALUE, not a local preference, and this rule takes effect

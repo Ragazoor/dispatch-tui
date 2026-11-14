@@ -20,8 +20,6 @@
 #   externalEntity.missingSourceHint: the external entities are governed by a
 #     tool (git, tmux) or the store, with no spec to import. Any `use` in
 #     core.allium silences all four, but meaninglessly, so the entries stay.
-#   entity.unused: storage's DataDirectory is the anchor other specs cite in
-#     prose; no rule names it.
 #
 # Worked around in the specs, so no entry here: only an entity's last
 # `transitions` block is honoured, as the graph for `status`
@@ -45,4 +43,3 @@ docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity '
 docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'TmuxPane' has no obvious governing specification import in this module.
 docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'UserIdentity' has no obvious governing specification import in this module.
 
-docs/specs/storage.allium	allium.entity.unused	Entity 'DataDirectory' is declared but not referenced elsewhere in this specification.

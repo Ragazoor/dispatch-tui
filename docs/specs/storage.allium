@@ -52,8 +52,8 @@
 -- default data directory (spacetime-snapshot.allium:
 -- ManagedStoreDataIgnoresTheBoardDatabase).
 --
--- No rule names DataDirectory, so the checker reports it unused: it is the
--- anchor the two invariants below and other specs' path citations hang on.
+-- The two invariants below hang on it, and the host file names the directory
+-- it sits in (host.allium: HostFile.directory).
 entity DataDirectory {
     path: String
 
