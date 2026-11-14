@@ -127,6 +127,7 @@ pub mod save_setting_reducer;
 pub mod schema_version_table;
 pub mod schema_version_type;
 pub mod seed_agents_reducer;
+pub mod seed_archived_tasks_reducer;
 pub mod seed_epics_reducer;
 pub mod seed_filter_presets_reducer;
 pub mod seed_handed_out_agent_names_reducer;
@@ -336,6 +337,7 @@ pub use save_setting_reducer::save_setting;
 pub use schema_version_table::*;
 pub use schema_version_type::SchemaVersion;
 pub use seed_agents_reducer::seed_agents;
+pub use seed_archived_tasks_reducer::seed_archived_tasks;
 pub use seed_epics_reducer::seed_epics;
 pub use seed_filter_presets_reducer::seed_filter_presets;
 pub use seed_handed_out_agent_names_reducer::seed_handed_out_agent_names;
@@ -728,6 +730,9 @@ pub enum Reducer {
     SeedAgents {
         rows: Vec<Agent>,
     },
+    SeedArchivedTasks {
+        rows: Vec<ArchivedTask>,
+    },
     SeedEpics {
         rows: Vec<Epic>,
     },
@@ -985,6 +990,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SaveSetting { .. } => "save_setting",
             Reducer::SeedAgents { .. } => "seed_agents",
+            Reducer::SeedArchivedTasks { .. } => "seed_archived_tasks",
             Reducer::SeedEpics { .. } => "seed_epics",
             Reducer::SeedFilterPresets { .. } => "seed_filter_presets",
             Reducer::SeedHandedOutAgentNames { .. } => "seed_handed_out_agent_names",
@@ -1559,6 +1565,11 @@ Reducer::RecordBaseBranch{
             Reducer::SeedAgents{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_agents_reducer::SeedAgentsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedArchivedTasks{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_archived_tasks_reducer::SeedArchivedTasksArgs {
                 rows: rows.clone(),
 }),
             Reducer::SeedEpics{
