@@ -39,6 +39,7 @@ fn plugin_embeds_required_files() {
     }
 }
 
+/// Pins SimplifyOnlyForLargeChanges of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_uses_simplify_not_code_simplifier() {
     let content = skill_body("wrap-up");
@@ -67,6 +68,8 @@ fn wrap_up_step3_section() -> String {
 /// extension alone (whether *any* source line changed) spins those four
 /// agents up for single-digit-line fixes that consistently came back
 /// empty.
+///
+/// Pins SimplifyOnlyForLargeChanges of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_step3_gates_simplify_on_changed_line_count() {
     let section = wrap_up_step3_section();
@@ -85,6 +88,8 @@ fn wrap_up_step3_gates_simplify_on_changed_line_count() {
 /// The size gate is additional to the file-type filter, not a replacement
 /// for it — a docs/config-only change must still skip Step 3 outright,
 /// regardless of how many lines it touches.
+///
+/// Pins SimplifyOnlyForLargeChanges of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_step3_still_skips_docs_only_changes_regardless_of_size() {
     let section = wrap_up_step3_section().to_lowercase();
@@ -113,6 +118,8 @@ fn wrap_up_skill_does_not_instruct_calling_dispatch_next() {
 /// close leaves a live tmux window and a task stuck in its old status, when one
 /// more call would have closed it. The close is one
 /// all-or-nothing module step, so it is an ERROR that changed nothing.
+///
+/// Pins FailedCloseReadsTheReference of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_says_a_failed_close_is_an_error_that_changed_nothing() {
     let section = failed_close_guidance();
@@ -127,6 +134,8 @@ fn wrap_up_skill_says_a_failed_close_is_an_error_that_changed_nothing() {
 /// transaction), so calling `exit_session` again is the way out, and a fresh
 /// `wrap_up` is not. Asserted positively — a negative check would also pass if
 /// the guidance were deleted outright, which is the regression that matters.
+///
+/// Pins FailedCloseReadsTheReference of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_tells_the_agent_to_call_exit_session_again_after_a_failed_close() {
     let section = failed_close_guidance();
@@ -151,6 +160,8 @@ fn wrap_up_skill_tells_the_agent_to_call_exit_session_again_after_a_failed_close
 /// drifted precisely because nothing pinned it. Scoped to lines that pair
 /// `update_task` with a URL, so an unrelated future use of the tool is not
 /// blocked.
+///
+/// Pins PrPathIsAuthoredByTheAgent of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_does_not_record_the_pr_url_via_update_task() {
     for line in skill_text("wrap-up").lines() {
@@ -186,6 +197,8 @@ fn pr_body_draft_section() -> String {
 /// must keep the reviewer-minute test that makes the principles checkable.
 /// The phrases "no template" and "under a minute" are anchors: if you
 /// reword them, re-anchor here, and keep the 500-character feed note.
+///
+/// Pins PrBodyIsWrittenForAReviewer of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_pr_body_states_principles_not_a_template() {
     let section = pr_body_draft_section();
@@ -219,6 +232,8 @@ fn wrap_up_skill_pr_body_states_principles_not_a_template() {
 /// GitHub auto-links `#N` to an unrelated issue/PR in the target repo.
 /// The old template's `Implements #{task_id}.` line was a live
 /// contradiction of both learnings until this test locked it out.
+///
+/// Pins PrBodyIsWrittenForAReviewer of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_pr_body_omits_task_references() {
     let section = pr_body_draft_section();
@@ -240,6 +255,8 @@ fn wrap_up_skill_pr_body_omits_task_references() {
 /// Distilled from the shared PR-description knowledge base (learning
 /// #188): the Test plan section is opt-in for dangerous/breaking PRs,
 /// not a default part of every PR body.
+///
+/// Pins PrBodyIsWrittenForAReviewer of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_pr_body_test_plan_is_opt_in_not_default() {
     let section = pr_body_draft_section();
@@ -274,4 +291,187 @@ fn failed_close_guidance() -> String {
         "wrap-up skill must document that an exit_session error can report \
          that the close did not take effect",
     )
+}
+
+/// /wrap-up is the agent-side flow around `wrap_up` and `exit_session`. Each
+/// guarantee of `WrapUpSession` in `docs/specs/wrap-up-skill.allium` that the
+/// skill text can hold is pinned here by the words in `SKILL.md` that hold it;
+/// the skill is followed by an agent, so the text is the behaviour a test can
+/// pin. Guarantees with their own test carry a `Pins` line on it instead.
+#[test]
+fn wrap_up_skill_text_holds_each_session_guarantee() {
+    let content = skill_body("wrap-up");
+    // Line breaks in the source are not behaviour.
+    let flat = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    for (guarantee, needle) in [
+        (
+            "AnnouncesItself",
+            "I'm using the wrap-up skill to complete this task.",
+        ),
+        (
+            "TaskIdComesFromTheBranch",
+            "leading integer of the `{id}-{slug}` branch name",
+        ),
+        (
+            "TaskIdComesFromTheBranch",
+            "doesn't follow the dispatch naming convention",
+        ),
+        ("PathIsTheOperatorsChoice", "Ignore any other argument"),
+        ("PathIsTheOperatorsChoice", "use `AskUserQuestion` and wait"),
+        (
+            "PathIsTheOperatorsChoice",
+            "even work that looks like a PR may want a rebase",
+        ),
+        (
+            "RefusedTaskStopsEarly",
+            "`Wrap-up: refused — <reason>` line means the task cannot be wrapped up",
+        ),
+        (
+            "RefusedTaskStopsEarly",
+            "stop, before the retro or any commit",
+        ),
+        ("CancelCallsNothing", "exit without calling any tool"),
+        (
+            "PresetAnswerIsNotAPause",
+            "do not stop before `exit_session` returns",
+        ),
+        (
+            "PresetAnswerIsNotAPause",
+            "Its summary is not a stopping point",
+        ),
+        (
+            "VerifyBeforeWrapUp",
+            "run it in your worktree now, whatever the path",
+        ),
+        (
+            "VerifyBeforeWrapUp",
+            "Dispatch does not run it for you and does not check that you did",
+        ),
+        ("VerifyBeforeWrapUp", "keeps a red build out of the push"),
+        (
+            "VerifyFailureIsNotWrappedPast",
+            "do not wrap up past it alone",
+        ),
+        (
+            "VerifyFailureIsNotWrappedPast",
+            "coordinate with other agents and the board",
+        ),
+        ("CommitBeforeWrapUp", "`git add` the relevant files by name"),
+        ("CommitBeforeWrapUp", "review `git diff --cached`"),
+        ("CommitBeforeWrapUp", "`wrap_up` refuses a dirty worktree"),
+        ("RateBeforeClosing", "Rate retrieved knowledge"),
+        ("ClosingSequenceRunsInOneTurn", "back to back in one turn"),
+        (
+            "RebaseReverifiesWhenTold",
+            "if its response tells you to re-run the verify command",
+        ),
+        (
+            "RebaseReverifiesWhenTold",
+            "commit any fix before `exit_session`",
+        ),
+        ("RefusalIsShownAsWritten", "show the user the exact message"),
+        ("RefusalIsShownAsWritten", "suggest resolution steps"),
+        ("RefusalIsShownAsWritten", "show the exact message and stop"),
+        (
+            "ExitSessionNeedsAToken",
+            "Do not call `exit_session` without a token",
+        ),
+        ("ExitSessionIsMandatoryAndLast", "mandatory on every path"),
+        ("ExitSessionIsMandatoryAndLast", "Make it your final action"),
+        (
+            "ExitSessionIsMandatoryAndLast",
+            "plus `pr_url` on the pr path only",
+        ),
+        (
+            "FailedCloseReadsTheReference",
+            "read `references/exit-session-errors.md` before reacting",
+        ),
+        (
+            "BranchDetailLivesInReferences",
+            "read `references/pr.md` when this path is chosen",
+        ),
+        ("PrPathIsAuthoredByTheAgent", "Write a real title and body"),
+    ] {
+        assert!(
+            flat.contains(needle),
+            "wrap-up skill must hold {guarantee}: missing {needle:?}"
+        );
+    }
+    // BranchDetailLivesInReferences: the files SKILL.md names exist.
+    for file in ["pr.md", "exit-session-errors.md"] {
+        assert!(
+            skill_references("wrap-up")
+                .iter()
+                .any(|(name, _)| name == file),
+            "wrap-up must ship references/{file}"
+        );
+    }
+    // The steps run in the order the spec gives: task, simplify, path, retro,
+    // verify and commit, then rate, wrap_up and exit_session.
+    let order = [
+        "## Step 1: Get the task ID",
+        "## Step 2: Get task details",
+        "## Step 3: Simplify",
+        "## Step 4: Ask the user to choose",
+        "## Step 5: Run the retro",
+        "## Step 6: Verify, then commit",
+        "## Step 7: The closing sequence",
+        "Rate retrieved knowledge",
+        "**`wrap_up(task_id, action)`.**",
+        "**`exit_session(task_id, token, action)`**",
+    ];
+    let positions: Vec<usize> = order
+        .iter()
+        .map(|n| {
+            content
+                .find(n)
+                .unwrap_or_else(|| panic!("wrap-up skill must have {n}"))
+        })
+        .collect();
+    assert!(
+        positions.windows(2).all(|w| w[0] < w[1]),
+        "wrap-up must follow the spec's step order: {order:?}"
+    );
+}
+
+/// The reference files are read from inside the flow, so a step number they
+/// cite must be one SKILL.md has. The pr reference once sent the agent to
+/// "Step 8" and "Step C", which do not exist.
+///
+/// Pins BranchDetailLivesInReferences of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
+#[test]
+fn wrap_up_references_cite_only_steps_the_skill_has() {
+    let body = skill_body("wrap-up");
+    let steps: Vec<u32> = body
+        .lines()
+        .filter_map(|l| l.strip_prefix("## Step "))
+        .filter_map(|l| l.split(':').next()?.parse().ok())
+        .collect();
+    assert!(!steps.is_empty(), "wrap-up skill must have numbered steps");
+    for (name, text) in skill_references("wrap-up") {
+        for (at, _) in text.match_indices("Step ") {
+            let token: String = text[at + 5..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric())
+                .collect();
+            let n: u32 = token.parse().unwrap_or_else(|_| {
+                panic!("references/{name} cites \"Step {token}\", which is not a step number")
+            });
+            assert!(
+                steps.contains(&n),
+                "references/{name} cites Step {n}, which SKILL.md does not have"
+            );
+        }
+    }
+}
+
+/// The PR body is for a reviewer with a minute: short prose, never bullets.
+///
+/// Pins PrBodyIsWrittenForAReviewer of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
+#[test]
+fn wrap_up_skill_pr_body_is_prose_not_bullets() {
+    assert!(
+        pr_body_draft_section().contains("Write short prose paragraphs, never bullet lists"),
+        "PR body guidance must say to write prose and never bullet lists"
+    );
 }

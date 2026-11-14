@@ -854,7 +854,7 @@ rule WrapUpDone {
         -- /wrap-up skill path: if task.wrap_up_mode = done (from get_task),
         -- or if the user selects "done" in Step 4, the skill calls
         -- wrap_up(action="done"), then exit_session(token,
-        -- action="done") — no git commands.
+        -- action="done") — no git integration; the commit check still applies.
         --
         -- wrap_up(action="done") is commit-checked exactly like
         -- the other two actions (WrapUpRefusesUnfinishedWork in

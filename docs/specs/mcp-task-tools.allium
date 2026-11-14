@@ -2344,8 +2344,9 @@ surface McpTaskTools {
     @guarantee TheNextCallIsNamedJustInTime
         -- The instruction to call exit_session next, as the session's final
         -- action, is stated in wrap_up's success RESPONSE — the moment it
-        -- applies, with the token it needs beside it — and by one short clause
-        -- in the /wrap-up skill. It is stated nowhere else.
+        -- applies, with the token it needs beside it — and in the /wrap-up skill's
+        -- closing sequence (wrap-up-skill.allium: ExitSessionIsMandatoryAndLast).
+        -- It is stated in no tool description.
         --
         -- The wrap_up and exit_session tool DESCRIPTIONS say only what each
         -- tool does: wrap_up performs the chosen action and returns an exit

@@ -1,0 +1,842 @@
+-- allium: 3
+-- wrap-up-skill.allium
+--
+-- Scope: The /wrap-up skill (plugin/skills/wrap-up/SKILL.md and its
+--        references/): what an agent running it guarantees to the operator
+--        whose task it finishes. It settles one of three paths, runs the
+--        retro, verifies and commits, asks dispatch for an exit token and
+--        closes the session.
+-- Includes: WrapUp (one per invocation) and its pipeline — read the task,
+--           simplify a large change, settle the path, retro, verify and
+--           commit, rate knowledge, wrap_up, exit_session; where the path
+--           comes from; the order the steps run in; the single turn the
+--           closing sequence runs in; how a refused wrap_up is answered; the
+--           pr path's authoring duty and the pointers to the reference files.
+-- Excludes: what wrap_up and exit_session do (mcp-task-tools.allium:
+--           WrapUpViaMcp, ExitSessionViaMcp; pr-workflow.allium: WrapUpRebase,
+--           WrapUpPr, WrapUpDone, ExitSession; store-split.allium: the session
+--           seam and the exit token); what refuses a dirty tree or a review
+--           task (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork,
+--           ReviewTasksAreNotWrappedUp); that wrap_up neither runs nor checks
+--           the verify command (mcp-task-tools.allium:
+--           AgentsRunTheVerifyCommand); the retro's own behaviour
+--           (retro-skill.allium); rating and recording knowledge
+--           (learnings-skill.allium); how the skill's copy reaches an agent
+--           (mcp-task-tools.allium: SkillCopyIsJustInTime); the tools behind
+--           each step (git, gh, AskUserQuestion) — those are the skill's
+--           mechanics, not what it promises.
+--
+-- Design decisions:
+--   - The path is the operator's and is settled before the retro, the
+--     commit and wrap_up (the simplify step only edits code and runs ahead of
+--     it). Rebase fast-forwards a
+--     shared branch, the pr path opens a PR under the operator's identity and
+--     done integrates nothing, so the skill never picks one for itself. An
+--     argument or a preset wrap_up_mode is the operator's earlier answer.
+--   - A preset answer is not a pause. A skill that skipped the question and
+--     then stopped left agents idle at a blank prompt with the branch
+--     unmerged and the task still running, so every step after the answer
+--     runs without further input.
+--   - The retro runs after the path is settled (on done a fix would be
+--     stranded, so the retro files a task instead) and before the commit (so
+--     its fixes travel with the work).
+--   - The board does not run the verify command and cannot tell that the
+--     agent did, so the skill is where it is held. It runs before the push on
+--     the pr path, because the PR is open once wrap_up is called.
+--   - The closing sequence runs in one turn. A pause between wrap_up and
+--     exit_session risks going idle with the base branch already
+--     fast-forwarded and the task still in its old status.
+--   - A refusal is shown as it was written. The skill does not work around
+--     one, and never calls exit_session without a token.
+--   - The pr path's detail and the exit_session error handling live in
+--     references/, loaded only by the branch that needs them.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- Where the settled path came from.
+enum ActionSource { argument | preset_mode | operator_choice }
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+-- One run of the skill, for one task, in that task's worktree.
+entity WrapUp {
+    -- The leading integer of the branch name {id}-{slug}.
+    task_id: Integer
+    -- From get_task's "Base branch" line; main when the line is absent.
+    base_branch: String
+    -- The path given as the skill's argument; any other argument is ignored.
+    argument: core/WrapUpMode?
+    -- get_task's "Wrap-up mode" line; printed only when set.
+    preset_mode: core/WrapUpMode?
+    -- The settled path; absent until settled.
+    action: core/WrapUpMode?
+    action_source: ActionSource?
+    -- Source lines added plus removed, committed and not. Docs, configs,
+    -- snapshots and lock files do not count.
+    changed_source_lines: Integer
+    -- get_task's "Verify command" line; absent when none is printed.
+    verify_command: String?
+    -- The agent has run verify_command, in its worktree, and it passed.
+    verify_passed: Boolean
+    -- `git status --porcelain` printed nothing.
+    worktree_clean: Boolean
+    -- wrap_up's exit token; absent until wrap_up answers with one.
+    exit_token: String?
+    -- get_task's "Wrap-up: refused" reason; printed only for a task that
+    -- cannot be wrapped up.
+    refusal: String?
+    -- The PR the agent created, on the pr path only.
+    pr_url: String?
+    -- Times the skill has invoked the retro.
+    retro_runs: Integer
+    -- Times exit_session has been called with a token.
+    exit_calls: Integer
+
+    stage: started | task_read | simplified | settled | retro_done | verified | committed | pr_ready | wrap_up_asked | closing | closed | stopped | cancelled
+
+    transitions stage {
+        started -> task_read
+        started -> stopped
+        task_read -> stopped
+        task_read -> simplified
+        simplified -> settled
+        simplified -> cancelled
+        settled -> retro_done
+        retro_done -> verified
+        verified -> committed
+        committed -> wrap_up_asked
+        committed -> pr_ready
+        committed -> stopped
+        pr_ready -> wrap_up_asked
+        pr_ready -> stopped
+        wrap_up_asked -> committed
+        wrap_up_asked -> closing
+        wrap_up_asked -> stopped
+        closing -> wrap_up_asked
+        closing -> closed
+        closing -> stopped
+        retro_done -> stopped
+        terminal: closed, stopped, cancelled
+    }
+
+    -- A path was given before the question: the operator already answered.
+    is_preset: argument != null or preset_mode != null
+    needs_question: not is_preset
+    needs_verify: verify_command != null
+    is_large_change: changed_source_lines >= config.simplify_threshold_lines
+    has_token: exit_token != null
+    is_pr: action = pr
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- What the skill says first.
+    announcement: String = "I'm using the wrap-up skill to complete this task."
+    -- The base branch when get_task prints none.
+    default_base_branch: String = "main"
+    -- At or above this many changed source lines the skill runs simplify.
+    simplify_threshold_lines: Integer = 100
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Step 1: the task ID ==
+
+rule StartWrapUp {
+    when: WrapUpRequested(argument?)
+
+    ensures: WrapUp.created(
+        task_id: task_id_from_branch(current_branch()),
+        base_branch: config.default_base_branch,
+        argument: argument,
+        preset_mode: null,
+        action: null,
+        action_source: null,
+        changed_source_lines: 0,
+        verify_command: null,
+        verify_passed: false,
+        worktree_clean: false,
+        exit_token: null,
+        refusal: null,
+        pr_url: null,
+        retro_runs: 0,
+        exit_calls: 0,
+        stage: started
+    )
+    ensures: WrapUpAnnounced(text: config.announcement)
+
+    @guidance
+        -- The task ID is the leading integer of the branch name
+        -- `{id}-{slug}` (`42-fix-login-bug` is task 42), read from
+        -- `git rev-parse --abbrev-ref HEAD`. The argument is `rebase`, `pr`
+        -- or `done` and is the chosen path; any other argument is ignored
+        -- (PathIsTheOperatorsChoice).
+}
+
+rule RefuseUnnamedBranch {
+    when: run: WrapUp.created
+
+    requires: not follows_naming_convention(current_branch())
+
+    ensures: BranchNameRefused(text: "This branch doesn't follow the dispatch naming convention ({id}-{slug}). Cannot determine task ID.")
+    ensures: run.stage = stopped
+
+    @guidance
+        -- The skill stops and says so; nothing else runs.
+}
+
+-- == Step 2: the task's details ==
+
+rule ReadTask {
+    when: run: WrapUp.created
+
+    requires: follows_naming_convention(current_branch())
+
+    let task = get_task(run.task_id)
+
+    ensures: run.refusal = wrap_up_refusal_line(task)
+    ensures: run.base_branch = base_branch_line(task) ?? config.default_base_branch
+    ensures: run.preset_mode = wrap_up_mode_line(task)
+    ensures: run.verify_command = verify_command_line(task)
+    ensures: run.stage = task_read
+
+    @guidance
+        -- get_task answers in prose with one labelled line per field, and a
+        -- missing line means the field is unset. "Base branch: <name>" is
+        -- the base branch, main when absent. "Wrap-up mode: <mode>" is
+        -- printed only when set; with no argument it is treated as one
+        -- (PathIsTheOperatorsChoice). "Verify command:" is read in
+        -- VerifyBeforeWrapUp. "Wrap-up: refused — <reason>" is printed only
+        -- for a task that cannot be wrapped up (RefusedTaskStopsEarly).
+}
+
+rule StopOnRefusedTask {
+    when: run: WrapUp.stage transitions_to task_read
+
+    requires: run.refusal != null
+
+    ensures: RefusalShown(run: run, text: run.refusal)
+    ensures: run.stage = stopped
+
+    @guidance
+        -- The skill shows the refusal line and stops, so no retro or commit
+        -- is run for a wrap-up dispatch would refuse at wrap_up anyway
+        -- (RefusedTaskStopsEarly).
+}
+
+-- == Step 3: simplify a large change ==
+
+rule SimplifyLargeChange {
+    when: run: WrapUp.stage transitions_to task_read
+
+    requires: run.refusal = null
+
+    ensures:
+        if run.is_large_change:
+            SimplifyRun(run: run)
+        else:
+            SimplifySkipped(run: run)
+    ensures: run.stage = simplified
+
+    @guidance
+        -- The count is source lines added plus removed, committed and not
+        -- (`git diff {base_branch}..HEAD --numstat` and `git diff
+        -- --numstat`). Docs, configs, snapshots and lock files do not count.
+        -- At config.simplify_threshold_lines or more the skill runs the
+        -- simplify skill and commits its changes in the commit step; under
+        -- it the step is skipped, because review sub-agents rarely find
+        -- anything on a diff that small (SimplifyOnlyForLargeChanges). The
+        -- simplify summary is not a stopping point: the skill goes straight
+        -- on to settling the path (PresetAnswerIsNotAPause).
+}
+
+-- == Step 4: settle the path ==
+
+rule UsePresetPath {
+    when: run: WrapUp.stage transitions_to simplified
+
+    requires: run.is_preset
+
+    ensures: run.action = run.argument ?? run.preset_mode
+    ensures: run.action_source = if run.argument != null: argument else: preset_mode
+    ensures: run.stage = settled
+
+    @guidance
+        -- The question is skipped. An argument beats a preset mode. The
+        -- answer is the operator's, given earlier, so the skill goes on
+        -- without input (PathIsTheOperatorsChoice,
+        -- PresetAnswerIsNotAPause).
+}
+
+rule AskForPath {
+    when: run: WrapUp.stage transitions_to simplified
+
+    requires: run.needs_question
+
+    ensures: PathQuestionAsked(
+        task_id: run.task_id,
+        choices: {rebase, pr, done, cancel}
+    )
+
+    @guidance
+        -- Asked with AskUserQuestion; the skill waits. The question names the
+        -- task and its title and says what each path does: rebase has
+        -- dispatch fast-forward the base branch and kill this tmux window;
+        -- pr has the agent draft the title and body, run `gh pr create` and
+        -- record the URL via exit_session; done does no git operations. Even
+        -- work that looks like a PR may want a rebase, so the skill does not
+        -- choose (PathIsTheOperatorsChoice).
+}
+
+rule OperatorChoseAPath {
+    when: OperatorChosePath(run, action)
+
+    requires: run.stage = simplified
+    requires: run.needs_question
+
+    ensures: run.action = action
+    ensures: run.action_source = operator_choice
+    ensures: run.stage = settled
+}
+
+rule OperatorCancelled {
+    when: OperatorCancelledWrapUp(run)
+
+    requires: run.stage = simplified
+    requires: run.needs_question
+
+    ensures: run.stage = cancelled
+
+    @guidance
+        -- On cancel the skill exits without calling any tool
+        -- (CancelCallsNothing).
+}
+
+-- == Step 5: the retro ==
+
+rule RunRetro {
+    when: run: WrapUp.stage transitions_to settled
+
+    ensures: RetroInvoked(run: run, action: run.action)
+    ensures: run.retro_runs = run.retro_runs + 1
+    ensures: run.stage = retro_done
+
+    @guidance
+        -- The skill runs the retro skill and tells it the action. It runs
+        -- once, after the path is settled and before the commit
+        -- (RetroRunsBetweenTheChoiceAndTheCommit). The follow-up tasks it
+        -- files are left alone.
+}
+
+-- == Step 6: verify, then commit ==
+
+rule VerifyBeforeCommit {
+    when: run: WrapUp.stage transitions_to retro_done
+
+    ensures:
+        if run.needs_verify:
+            VerifyCommandRun(run: run, command: run.verify_command)
+            and run.verify_passed = true
+        else:
+            run.verify_passed = true
+    ensures: run.stage = verified
+
+    @guidance
+        -- When get_task printed a "Verify command:" line, the agent runs it
+        -- in its worktree now, whatever the path, and fixes any failure
+        -- before going on. Dispatch does not run it and does not check that
+        -- the agent did (VerifyBeforeWrapUp). When it fails for a reason the
+        -- change did not cause, including a broken main, the agent does not
+        -- wrap up past it alone: it coordinates with other agents and the
+        -- board, as the repo's CLAUDE.md says (VerifyFailureIsNotWrappedPast).
+}
+
+rule VerifyFailedForOtherReasons {
+    when: VerifyFailedNotByTheChange(run)
+
+    requires: run.stage = retro_done
+
+    ensures: CoordinationStarted(run: run)
+    ensures: run.stage = stopped
+
+    @guidance
+        -- A failure the change did not cause, including a broken main: the
+        -- agent does not wrap up past it alone. It looks for a task already
+        -- fixing it (list_tasks, ListAgents) and otherwise proposes a fix or
+        -- creates and dispatches a task for it
+        -- (VerifyFailureIsNotWrappedPast).
+}
+
+rule CommitRemainingChanges {
+    when: run: WrapUp.stage transitions_to verified
+
+    ensures:
+        if not run.worktree_clean:
+            ChangesCommitted(run: run)
+            and run.worktree_clean = true
+    ensures: run.stage = committed
+
+    @guidance
+        -- `git status --porcelain`; when it is not clean the agent adds the
+        -- relevant files by name, reviews `git diff --cached` and commits
+        -- with a short message. wrap_up refuses a dirty worktree, so this is
+        -- also what lets the next step succeed (CommitBeforeWrapUp).
+}
+
+-- == Step 7: the closing sequence ==
+
+rule DraftPullRequest {
+    when: run: WrapUp.stage transitions_to committed
+
+    requires: run.is_pr
+    requires: run.worktree_clean
+    requires: run.verify_passed
+
+    ensures: PrPathStarted(run: run)
+
+    @guidance
+        -- The pr path's steps live in references/pr.md, which the skill
+        -- reads when this path is chosen: inspect the diff, draft the title
+        -- and body, push the branch and create the draft PR. If code changed
+        -- since the verify step the agent runs the verify command again
+        -- before the push. A PR that already exists for the branch is
+        -- reused: its URL is the one recorded
+        -- (PrPathIsAuthoredByTheAgent).
+}
+
+rule DraftPullRequestOpened {
+    when: DraftPrOpened(run, url)
+
+    requires: run.stage = committed
+    requires: run.is_pr
+
+    ensures: run.pr_url = url
+    ensures: run.stage = pr_ready
+}
+
+rule PushRejected {
+    when: PushWasRejected(run)
+
+    requires: run.stage = committed
+    requires: run.is_pr
+
+    ensures: PushErrorShown(run: run)
+    ensures: run.stage = stopped
+
+    @guidance
+        -- A push rejected as non-fast-forward is the one stop that is not an
+        -- operator's choice: the agent shows the error and asks how to
+        -- proceed, and does not force-push without the operator's explicit
+        -- say-so. It is the sanctioned exception to PresetAnswerIsNotAPause.
+}
+
+rule RateKnowledgeAndWrapUp {
+    when: run: WrapUp.stage transitions_to committed
+
+    requires: not run.is_pr
+    requires: run.worktree_clean
+    requires: run.verify_passed
+
+    ensures: KnowledgeRated(run: run)
+    ensures: WrapUpAsked(run: run, task_id: run.task_id, action: run.action)
+    ensures: run.stage = wrap_up_asked
+
+    @guidance
+        -- Knowledge the agent acted on and has not rated is rated first, as
+        -- the learnings skill describes (RateBeforeClosing). Then wrap_up is
+        -- called with the task and the action. The three steps of the
+        -- closing sequence run back to back (ClosingSequenceRunsInOneTurn).
+}
+
+rule RateKnowledgeAndWrapUpWithPr {
+    when: run: WrapUp.stage transitions_to pr_ready
+
+    ensures: KnowledgeRated(run: run)
+    ensures: WrapUpAsked(run: run, task_id: run.task_id, action: run.action)
+    ensures: run.stage = wrap_up_asked
+
+    @guidance
+        -- As RateKnowledgeAndWrapUp, once the PR exists.
+}
+
+rule WrapUpAnswered {
+    when: WrapUpReturnedToken(run, token)
+
+    requires: run.stage = wrap_up_asked
+
+    ensures: run.exit_token = token
+    ensures: run.stage = closing
+
+    @guidance
+        -- wrap_up returns an exit token. After a rebase, when the response
+        -- says to re-run the verify command, the agent does that and commits
+        -- any fix before exit_session (RebaseReverifiesWhenTold).
+}
+
+rule WrapUpRefusedDirty {
+    when: WrapUpRefused(run, reason)
+
+    requires: run.stage = wrap_up_asked
+    requires: reason = uncommitted_changes
+
+    ensures: RefusalShown(run: run, text: exact_message(reason))
+    ensures: ChangesCommitted(run: run)
+    ensures: run.stage = committed
+
+    @guidance
+        -- The agent shows the exact message, commits as in the commit step
+        -- and calls wrap_up again, through the same rating and call rule
+        -- (RefusalIsShownAsWritten).
+}
+
+rule WrapUpRefusedConflict {
+    when: WrapUpRefused(run, reason)
+
+    requires: run.stage = wrap_up_asked
+    requires: reason = rebase_conflict
+
+    ensures: RefusalShown(run: run, text: exact_message(reason))
+    ensures: ResolutionStepsSuggested(run: run)
+
+    @guidance
+        -- The agent shows the exact message and suggests steps to resolve
+        -- the conflict, and calls wrap_up again once it is resolved
+        -- (WrapUpAnswered; RefusalIsShownAsWritten).
+}
+
+rule WrapUpRefusedOther {
+    when: WrapUpRefused(run, reason)
+
+    requires: run.stage = wrap_up_asked
+    requires: reason = other
+
+    ensures: RefusalShown(run: run, text: exact_message(reason))
+    ensures: run.stage = stopped
+
+    @guidance
+        -- A backlog or review-tagged task, no worktree, or a main checkout
+        -- not on the base branch: the agent shows the exact message and
+        -- stops. No token was issued, so exit_session is not called
+        -- (RefusalIsShownAsWritten, ExitSessionNeedsAToken).
+}
+
+rule CloseSession {
+    when: run: WrapUp.stage transitions_to closing
+
+    requires: run.has_token
+
+    ensures: ExitSessionCalled(
+        task_id: run.task_id,
+        token: run.exit_token,
+        action: run.action,
+        pr_url: if run.is_pr: run.pr_url else: null
+    )
+    ensures: run.exit_calls = run.exit_calls + 1
+
+    @guidance
+        -- exit_session is mandatory on every path: without it the task does
+        -- not move and the session does not close. It carries pr_url on the
+        -- pr path only, and is the agent's final action
+        -- (ExitSessionIsMandatoryAndLast). When it errors, or succeeds but
+        -- reports that the close did not take effect, the agent reads
+        -- references/exit-session-errors.md before reacting
+        -- (FailedCloseReadsTheReference).
+}
+
+rule ExitSessionClosed {
+    when: ExitSessionReturned(run, outcome)
+
+    requires: run.stage = closing
+    requires: outcome in {closed, no_active_session}
+
+    ensures: run.stage = closed
+
+    @guidance
+        -- "has no active session" means something else already tore the
+        -- session down: it counts as wrapped up, is not retried and, on the
+        -- pr path, the PR is not created again.
+}
+
+rule ExitSessionDidNotTakeEffect {
+    when: ExitSessionReturned(run, outcome)
+
+    requires: run.stage = closing
+    requires: outcome = not_taken_effect
+
+    ensures: ExitSessionCalled(
+        task_id: run.task_id,
+        token: run.exit_token,
+        action: run.action,
+        pr_url: if run.is_pr: run.pr_url else: null
+    )
+    ensures: run.exit_calls = run.exit_calls + 1
+
+    @guidance
+        -- The close is one all-or-nothing step, so the error changed nothing
+        -- and the token is still valid: exit_session is called again with the
+        -- same arguments, and wrap_up is not. If it keeps failing the agent
+        -- tells the operator the close did not take effect and the window can
+        -- be closed by hand from the TUI.
+}
+
+rule ExitSessionTokenRefused {
+    when: ExitSessionReturned(run, outcome)
+
+    requires: run.stage = closing
+    requires: outcome = token_refused
+
+    ensures: run.stage = wrap_up_asked
+
+    @guidance
+        -- A missing or invalid token: it was used, or a newer wrap_up or a
+        -- new dispatch replaced it. The agent calls wrap_up again for a fresh
+        -- token (WrapUpAnswered), then exit_session with that one.
+}
+
+rule ExitSessionActionMismatch {
+    when: ExitSessionReturned(run, outcome)
+
+    requires: run.stage = closing
+    requires: outcome = action_mismatch
+
+    ensures: RefusalShown(run: run, text: exact_message(outcome))
+    ensures: run.stage = stopped
+
+    @guidance
+        -- The token does not match the action being closed with: the agent
+        -- shows the exact error rather than guessing which action was meant.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- The retro runs once, and never before the path is settled.
+invariant RetroRunsOncePerWrapUp {
+    for run in WrapUps:
+        run.retro_runs <= 1
+        and (run.retro_runs = 1 implies run.action != null)
+}
+
+-- A session is closed only with a token wrap_up issued.
+invariant NoCloseWithoutAToken {
+    for run in WrapUps:
+        run.exit_calls > 0 implies run.has_token
+}
+
+-- A task reaches wrap_up only with its work committed and, when the repo
+-- has one, its verify command run.
+invariant WrapUpFollowsCommitAndVerify {
+    for run in WrapUps:
+        run.stage in {wrap_up_asked, closing, closed}
+            implies run.worktree_clean and run.verify_passed
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface WrapUpInvocation {
+    facing _: core/Operator
+
+    provides:
+        WrapUpRequested(argument?)
+
+    @guidance
+        -- The operator says /wrap-up (optionally `rebase`, `pr` or `done`),
+        -- or says to wrap up, finish, close out or finalise; an agent
+        -- invokes it when its work in a dispatch worktree is complete. The
+        -- plugin skill is /dispatch:wrap-up. A task that has a preset
+        -- wrap_up_mode is wrapped up with it and no question.
+}
+
+-- What the wrap_up and exit_session tools and the agent's own commands answer.
+surface WrapUpToolAnswers {
+    facing _: core/McpClient
+
+    context run: WrapUp
+
+    provides:
+        WrapUpReturnedToken(run, token) when run.stage = wrap_up_asked
+        WrapUpRefused(run, reason) when run.stage = wrap_up_asked
+        ExitSessionReturned(run, outcome) when run.stage = closing
+        VerifyFailedNotByTheChange(run) when run.stage = retro_done
+        DraftPrOpened(run, url) when run.stage = committed
+        PushWasRejected(run) when run.stage = committed
+
+    @guidance
+        -- wrap_up answers with an exit token or a refusal (reason one of
+        -- uncommitted_changes, rebase_conflict, other); exit_session answers
+        -- closed, no_active_session, not_taken_effect, token_refused or
+        -- action_mismatch (mcp-task-tools.allium: WrapUpViaMcp,
+        -- ExitSessionViaMcp). The verify and push outcomes are the agent's
+        -- own commands.
+}
+
+surface WrapUpSession {
+    facing _: core/Operator
+
+    context run: WrapUp
+
+    exposes:
+        run.action
+        run.action_source
+        run.stage
+
+    provides:
+        OperatorChosePath(run, action) when run.stage = simplified and run.needs_question
+        OperatorCancelledWrapUp(run) when run.stage = simplified and run.needs_question
+
+    @guarantee AnnouncesItself
+        -- The skill says "I'm using the wrap-up skill to complete this task."
+        -- at the start (StartWrapUp).
+
+    @guarantee TaskIdComesFromTheBranch
+        -- The task ID is the leading integer of the branch name `{id}-{slug}`.
+        -- A branch that does not follow the convention stops the skill with a
+        -- message saying the task ID cannot be determined (StartWrapUp,
+        -- RefuseUnnamedBranch).
+
+    @guarantee PathIsTheOperatorsChoice
+        -- One of rebase, pr and done is settled before the retro, the commit
+        -- and wrap_up, and it is the operator's: an argument, else the task's
+        -- preset wrap_up_mode, else the operator's answer to a question the
+        -- skill asks and waits for. The skill never chooses for itself, even
+        -- when the work looks like a PR. Any argument other than the three
+        -- paths is ignored (UsePresetPath, AskForPath, OperatorChoseAPath).
+
+    @guarantee RefusedTaskStopsEarly
+        -- When get_task prints a "Wrap-up: refused" line the skill shows it and
+        -- stops before the simplify, retro and commit steps, because wrap_up
+        -- would refuse the task and those steps would be wasted
+        -- (mcp-task-tools.allium: ReviewTasksAreNotWrappedUp; ReadTask,
+        -- StopOnRefusedTask).
+
+    @guarantee CancelCallsNothing
+        -- When the operator cancels the question, the skill exits without
+        -- calling any tool: no retro, no commit, no wrap_up (OperatorCancelled).
+
+    @guarantee PresetAnswerIsNotAPause
+        -- An argument or a preset wrap_up_mode is an answer given earlier,
+        -- not a pause. Everything after it runs without further input and the
+        -- skill does not stop before exit_session returns, including after the
+        -- simplify skill's summary. The failure is silent: agents went idle at
+        -- a blank prompt with the branch unmerged and the task stuck in
+        -- running (SimplifyLargeChange, UsePresetPath).
+
+    @guarantee SimplifyOnlyForLargeChanges
+        -- The simplify skill runs only when the changed source lines, committed
+        -- and not, reach the threshold (100). Docs, configs, snapshots and lock
+        -- files do not count, so a change to them alone skips the step whatever
+        -- its size (SimplifyLargeChange).
+
+    @guarantee RetroRunsBetweenTheChoiceAndTheCommit
+        -- The retro runs exactly once, after the path is settled (on done a fix
+        -- would be stranded, so the retro files a task instead) and before the
+        -- commit (so its fixes travel with the work). It is not run again
+        -- between wrap_up and exit_session. The follow-up tasks it files are
+        -- left alone (RunRetro, RetroRunsOncePerWrapUp).
+
+    @guarantee VerifyBeforeWrapUp
+        -- When get_task prints a Verify command, the agent runs it in its own
+        -- worktree on every path and fixes any failure before wrap_up is
+        -- called. Dispatch does not run it and does not check that the agent
+        -- did (mcp-task-tools.allium: AgentsRunTheVerifyCommand). On the pr
+        -- path this also comes before the push, so a red build is not pushed
+        -- (VerifyBeforeCommit).
+
+    @guarantee VerifyFailureIsNotWrappedPast
+        -- A verify failure the change did not cause, including a broken main, is
+        -- not wrapped up past alone: the agent coordinates with other agents and
+        -- the board, as the repo's CLAUDE.md says (VerifyBeforeCommit).
+
+    @guarantee CommitBeforeWrapUp
+        -- Before wrap_up the worktree is clean: the agent adds the relevant files
+        -- by name, reviews the staged diff and commits with a short message.
+        -- wrap_up refuses a dirty worktree
+        -- (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork), which is what
+        -- makes this step the tool's to enforce and the skill's to run
+        -- (CommitRemainingChanges).
+
+    @guarantee RateBeforeClosing
+        -- Knowledge the agent acted on and has not rated yet is rated before
+        -- wrap_up is called, as the learnings skill describes
+        -- (RateKnowledgeAndWrapUp).
+
+    @guarantee ClosingSequenceRunsInOneTurn
+        -- Rating, wrap_up and exit_session run back to back in one turn. A
+        -- pause between them risks going idle with the base branch already
+        -- fast-forwarded and the task still in its old status
+        -- (RateKnowledgeAndWrapUp, CloseSession).
+
+    @guarantee RebaseReverifiesWhenTold
+        -- After a rebase, when wrap_up's response tells the agent to re-run the
+        -- verify command, the agent does that and commits any fix before
+        -- exit_session (WrapUpAnswered; mcp-task-tools.allium:
+        -- AgentsRunTheVerifyCommand).
+
+    @guarantee RefusalIsShownAsWritten
+        -- A refused wrap_up is shown to the operator as the tool wrote it. A
+        -- dirty tree is committed and wrap_up called again; a rebase conflict
+        -- gets suggested resolution steps and the skill stops; any other
+        -- refusal (a backlog or review-tagged task, no worktree, the main
+        -- checkout not on the base branch) stops the skill (WrapUpRefusedDirty,
+        -- WrapUpRefusedConflict, WrapUpRefusedOther). Once the cause of a
+        -- conflict is fixed, wrap_up is called again.
+
+    @guarantee ExitSessionNeedsAToken
+        -- exit_session is called only with the token a wrap_up answered with. A
+        -- refusal issues none, so the skill never calls exit_session after one
+        -- (CloseSession, NoCloseWithoutAToken).
+
+    @guarantee ExitSessionIsMandatoryAndLast
+        -- exit_session is called on every path, because without it the task does
+        -- not move and the session does not close. It is the agent's final
+        -- action, and carries pr_url on the pr path only (CloseSession).
+
+    @guarantee FailedCloseReadsTheReference
+        -- When exit_session errors, or succeeds but reports that the close did
+        -- not take effect, the agent reads references/exit-session-errors.md
+        -- before reacting. That file says the close is one all-or-nothing step:
+        -- a failed close is an error that changed nothing, the token is still
+        -- valid, so exit_session is called again and wrap_up is not, unless the
+        -- error says the token is missing or invalid, when wrap_up is called
+        -- again for a fresh one. "has no active session" counts as already
+        -- wrapped up (pr-workflow.allium: ExitSession; CloseSession,
+        -- ExitSessionDidNotTakeEffect, ExitSessionTokenRefused,
+        -- ExitSessionClosed).
+
+    @guarantee PrPathIsAuthoredByTheAgent
+        -- On the pr path the agent writes the PR itself, from its own diff: a
+        -- title and a body that describe the work actually shipped, then
+        -- `gh pr create --draft`. Dispatch neither pushes nor authors it, and
+        -- the PR URL travels with exit_session, never with update_task
+        -- (pr-workflow.allium: WrapUpPr; CloseSession).
+
+    @guarantee PrBodyIsWrittenForAReviewer
+        -- The body states principles, not a template: no category labels and no
+        -- Summary heading. It opens with the situation and the consequence
+        -- because the review feed shows only the first 500 characters, is short
+        -- prose and not bullet lists, and passes the test of a reviewer parsing
+        -- it in under a minute. It never references the dispatch task, whose
+        -- number GitHub would link to an unrelated issue, and carries a Test
+        -- plan only for a dangerous or breaking change (PrPathIsAuthoredByTheAgent).
+
+    @guarantee BranchDetailLivesInReferences
+        -- The pr path's steps and the exit_session error handling live in
+        -- references/pr.md and references/exit-session-errors.md, which
+        -- SKILL.md names at the branch that needs them, so an agent on another
+        -- path never loads them (mcp-task-tools.allium:
+        -- SkillCopyIsJustInTime).
+}

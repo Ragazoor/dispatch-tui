@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: Use to finish a dispatch task and close its session — whenever work in a dispatch worktree is complete and the user says to wrap up, finish, close out, finalise, or "we're done here", even if they don't name this skill. The user first chooses one of three paths: rebase onto the task's base_branch (dispatch-driven), author and open a draft GitHub PR yourself (you write the title and body), or done with no git operations. It then runs the retro, commits remaining changes, and runs the repo's verify command, commits, and calls wrap_up, which checks the commit. Always use this rather than calling wrap_up/exit_session by hand — the path must be settled before the retro, and the retro must run before the commit.
+description: Use to finish a dispatch task and close its session — whenever work in a dispatch worktree is complete and the user says to wrap up, finish, close out, finalise, or "we're done here", even if they don't name this skill. The user first chooses one of three paths: rebase onto the task's base_branch (dispatch-driven), author and open a draft GitHub PR yourself (you write the title and body), or done with no git operations. It then runs the retro, runs the repo's verify command, commits remaining changes, and calls wrap_up, which checks the commit. Always use this rather than calling wrap_up/exit_session by hand — the path must be settled before the retro, and the retro must run before the commit.
 ---
 
 # Wrap Up
@@ -27,6 +27,8 @@ Call `get_task`. The response is prose with one labelled line per field; a missi
 
 - `Base branch: <name>` is `{base_branch}`; fall back to `main` if absent.
 - `Wrap-up mode: <mode>` (`rebase`, `pr` or `done`) is printed only when set. If present and no argument was given, treat it as an argument: skip Step 4 and use that action.
+
+A `Wrap-up: refused — <reason>` line means the task cannot be wrapped up: show the user that line and stop, before the retro or any commit.
 
 A preset mode is the user's earlier answer, not a pause. Run everything from here without further input and do not stop before `exit_session` returns. The failure is silent: agents have gone idle at a blank prompt with the branch unmerged and the task stuck in `running`.
 

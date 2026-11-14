@@ -90,8 +90,8 @@ EOF
 
 `{owner}` is the first part of the repo slug. The `{owner}:{branch}` format is required so `gh` resolves the branch in the same repo as `--repo` (rather than your authenticated user's namespace).
 
-`gh pr create` prints the PR URL on stdout. Capture it — it is the `pr_url` you pass to `exit_session` in Step C.
+`gh pr create` prints the PR URL on stdout. Capture it — it is the `pr_url` you pass to `exit_session` in the closing sequence (Step 7).
 
 If `gh` reports `a pull request for branch '...' already exists`, parse the URL it returns and use that — the PR already exists and your job is just to record it.
 
-Then go to Step 8 with `action="pr"` and pass the captured URL as `pr_url`.
+Then go to the closing sequence (Step 7) with `action="pr"` and pass the captured URL as `pr_url`.

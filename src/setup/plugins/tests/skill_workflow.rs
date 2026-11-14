@@ -42,6 +42,8 @@ fn decompose_review_skill_does_not_pass_repo_path_to_create_epic() {
 /// the question without carrying the wrap-up through leaves the agent idle
 /// with the question it was told not to ask unanswered, and nothing reaches
 /// base_branch until a human notices (task #4505, observed twice).
+///
+/// Pins PresetAnswerIsNotAPause of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_carries_a_preset_mode_through_without_asking_or_stopping() {
     let content = skill_body("wrap-up");
@@ -89,6 +91,7 @@ fn retro_skill_tells_agent_to_resume_the_caller() {
     );
 }
 
+/// Pins RetroRunsBetweenTheChoiceAndTheCommit of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
 fn wrap_up_skill_runs_retro_between_the_action_choice_and_the_commit() {
     // Retro is bracketed on both sides, and each bound fixes a real defect:
