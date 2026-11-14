@@ -291,7 +291,7 @@ def mute_metrics():
           f" {len({l for l, _ in muted})} learnings; by repo: {dict(repos.most_common())}")
 
 
-DUPLICATES_DELETED_AT = "2026-11-14 18:30"  # run 10 (task 99042) deleted 10 copies of always-loaded rules
+DUPLICATES_DELETED_AT = "2026-11-14 17:30"  # UTC, as the store keeps it; run 10 (task 99042) deleted 10 copies of always-loaded rules
 
 
 def repo_helped_metrics():
@@ -308,8 +308,8 @@ def repo_helped_metrics():
     for r in R:
         if r["source"] == "prompt_injection" and r["retrieved_at"] >= NOT_APPLICABLE_FROM:
             pairs.setdefault((r["task_id"], r["learning_id"]), r["retrieved_at"])
-    cuts = [("before mute", NOT_APPLICABLE_FROM, MUTE_FROM + " 13:42"),
-            ("mute, dups kept", MUTE_FROM + " 13:42", DUPLICATES_DELETED_AT),
+    cuts = [("before mute", NOT_APPLICABLE_FROM, MUTE_FROM + " 12:42"),
+            ("mute, dups kept", MUTE_FROM + " 12:42", DUPLICATES_DELETED_AT),
             ("dups deleted", DUPLICATES_DELETED_AT, "9999")]
     print("rated-only verdict share of injected pairs, top repos (helped / not_applicable of rated):")
     for name, lo, hi in cuts:

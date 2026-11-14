@@ -153,6 +153,26 @@ fn learnings_skill_forbids_code_citations() {
     );
 }
 
+/// Entries that restate what every session already loads (the dispatch
+/// prompt, a skill, the operator's memory index) took about one dispatch
+/// injection slot in five, and their `helped` ratings were a false signal
+/// (task #99042). "Already in CLAUDE.md" alone did not keep them out.
+#[test]
+fn learnings_skill_forbids_copies_of_always_loaded_context() {
+    let section = section_after(&skill_text("learnings"), "### Do NOT record:")
+        .expect("learnings skill must have a 'Do NOT record' section");
+    for term in ["dispatch prompt", "skill", "memory index"] {
+        assert!(
+            section.contains(term),
+            "the Do NOT record list must name the {term} as always-loaded context: {section}"
+        );
+    }
+    assert!(
+        section.contains("prove nothing"),
+        "the rule must say why: a copy's helped ratings prove nothing: {section}"
+    );
+}
+
 /// The two skills that both tell an agent to rate a learning must not
 /// disagree about *when*. `learnings` says at the moment you act on the
 /// entry, explicitly "not deferred to wrap-up"; wrap-up's own copy used to
