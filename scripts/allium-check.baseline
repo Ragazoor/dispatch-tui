@@ -11,13 +11,21 @@
 # why the warning is expected. When the checker stops reporting one, the gate
 # prints a note; remove the line then.
 #
-# Gaps behind the entries (filed on juxt/allium-tools):
+# Gaps behind the entries:
 #   definition.unused: a value or enum used only as a contract return type
-#     (#106) or only through literals of a trigger parameter is not credited.
-#   externalEntity.missingSourceHint: an external entity governed by a tool
-#     (git, tmux) or the store, with no spec to import, cannot silence it.
+#     (juxt/allium-tools#106) or only through literals of a chained trigger
+#     parameter (juxt/allium-tools#118) is not credited. No form types such a
+#     parameter: a typed `provides:` entry clears the warning but is not
+#     validated, so do not use it.
+#   externalEntity.missingSourceHint: the external entities are governed by a
+#     tool (git, tmux) or the store, with no spec to import. Any `use` in
+#     core.allium silences all four, but meaninglessly, so the entries stay.
 #   entity.unused: storage's DataDirectory is the anchor other specs cite in
 #     prose; no rule names it.
+#
+# Worked around in the specs, so no entry here: only an entity's last
+# `transitions` block is honoured, as the graph for `status`
+# (juxt/allium-tools#104). Declare `transitions status` last.
 
 docs/specs/agent-tree.allium	allium.definition.unused	Value 'PaneView' is declared but not referenced elsewhere.
 docs/specs/agent-tree.allium	allium.definition.unused	Value 'PaneResumeAnswer' is declared but not referenced elsewhere.
