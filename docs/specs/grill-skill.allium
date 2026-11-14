@@ -43,11 +43,13 @@ use "./core.allium" as core
 enum DecisionRecord { spec | adr | spec_and_adr | none }
 
 ------------------------------------------------------------
--- Entities
+-- Entities and Variants
 ------------------------------------------------------------
 
 -- One run of the skill against one plan or design.
 entity GrillSession {
+    -- What the user asked to be grilled on: whatever they described.
+    plan: String
     -- The decisions the plan needs, found by walking its design tree.
     decisions: Decision with session = this
 
@@ -61,8 +63,12 @@ entity GrillSession {
 
     -- Not yet resolved: still to be asked, or asked and waiting for the answer.
     open_decisions: decisions where status in {open, asked}
-    -- Every decision the plan needs is resolved: a shared understanding.
+    -- Resolved, but not yet looked at for the decisions its answer opens.
+    unexplored_decisions: decisions where status = resolved and not follow_ups_found
+    -- Every decision the plan needs is resolved, and no answer opens a new
+    -- one: a shared understanding.
     shared_understanding: stage = interviewing and open_decisions.count = 0
+        and unexplored_decisions.count = 0
     unrecorded_decisions: decisions where status = resolved
     capture_complete: stage = capturing and unrecorded_decisions.count = 0
 }
@@ -94,6 +100,10 @@ entity Decision {
     is_obvious: Boolean
     -- The answer uses a term that is fuzzy or used two ways.
     fuzzy_term: Boolean
+    -- The spec already captures it: no ADR.
+    already_in_a_spec: Boolean
+    -- The skill has looked for the decisions this one's answer opens.
+    follow_ups_found: Boolean
     record: DecisionRecord?
 
     status: open | asked | resolved | recorded
@@ -111,7 +121,6 @@ entity Decision {
     needs_adr: hard_to_reverse and surprising_without_context and had_real_alternatives
         and not is_implementation_detail and not is_obvious and not already_in_a_spec
     needs_spec: is_domain_concept and not is_implementation_detail
-    already_in_a_spec: Boolean
     -- The session is capturing and this decision still has to be recorded.
     ready_to_record: session.stage = capturing and status = resolved
 }
@@ -126,7 +135,6 @@ config {
     adr_file_pattern: String = "NNNN-slug.md"
     -- The sections an ADR has, in order.
     adr_sections: List<String> = ["Status", "Context", "Decision", "Consequences"]
-    spec_glob: String = "docs/specs/*.allium"
 }
 
 ------------------------------------------------------------
@@ -145,18 +153,44 @@ rule FindDecisions {
             recommended_answer: need.recommended_answer,
             depends_on: need.depends_on,
             answered_by_code: need.answered_by_code,
+            follow_ups_found: false,
             status: open
         )
 
     @guidance
         -- The skill walks the plan's design tree; each decision it finds is
-        -- one Decision. New ones can turn up as answers arrive.
+        -- one Decision. Answers can open more (FindFollowUpDecisions).
+}
+
+rule FindFollowUpDecisions {
+    when: decision: Decision.status transitions_to resolved
+
+    requires: decision.session.stage = interviewing
+
+    for need in follow_up_decisions(decision):
+        ensures: Decision.created(
+            session: decision.session,
+            question: need.question,
+            recommended_answer: need.recommended_answer,
+            depends_on: decision,
+            answered_by_code: need.answered_by_code,
+            follow_ups_found: false,
+            status: open
+        )
+    ensures: decision.follow_ups_found = true
+
+    @guidance
+        -- An answer can open a branch of the design tree the plan did not
+        -- show. Each decision on it depends on the one whose answer opened
+        -- it (DependenciesBeforeDependents), and the interview does not end
+        -- while a resolved decision is still unexplored
+        -- (TheInterviewEndsAtSharedUnderstanding).
 }
 
 rule StartGrill {
     when: GrillRequested(plan)
 
-    ensures: GrillSession.created(stage: interviewing)
+    ensures: GrillSession.created(plan: plan, stage: interviewing)
     ensures: GrillAnnounced()
 
     @guidance
@@ -164,38 +198,29 @@ rule StartGrill {
         -- interview you about this." (AnnouncesItself).
 }
 
-rule AskTheNextQuestion {
+rule TakeUpTheNextDecision {
     when: decision: Decision.ready
 
     requires: decision.status = open
     requires: decision.session.stage = interviewing
-    requires: not decision.answered_by_code
 
-    ensures: QuestionAsked(
-        decision: decision,
-        recommended_answer: decision.recommended_answer
-    )
-    ensures: decision.status = asked
-
-    @guidance
-        -- One question, with the recommended answer, then the skill waits for
-        -- the user (OneQuestionAtATime, EveryQuestionCarriesARecommendation).
-        -- A decision is asked only after the one it depends on is resolved
-        -- (DependenciesBeforeDependents).
-}
-
-rule ReadTheCodebaseInstead {
-    when: decision: Decision.ready
-
-    requires: decision.status = open
-    requires: decision.session.stage = interviewing
-    requires: decision.answered_by_code
-
-    ensures: decision.status = resolved
+    ensures:
+        if decision.answered_by_code:
+            decision.status = resolved
+        else:
+            QuestionAsked(
+                decision: decision,
+                recommended_answer: decision.recommended_answer
+            )
+            decision.status = asked
 
     @guidance
         -- When the codebase can answer, the skill reads it and does not ask
-        -- (CodebaseAnswersBeforeTheUserIsAsked).
+        -- (CodebaseAnswersBeforeTheUserIsAsked). Otherwise it asks one
+        -- question, with the recommended answer, then waits for the user
+        -- (OneQuestionAtATime, EveryQuestionCarriesARecommendation). A
+        -- decision is taken up only after the one it depends on is resolved
+        -- (DependenciesBeforeDependents).
 }
 
 rule ResolveDecision {
