@@ -480,6 +480,9 @@ struct RoutedItems {
     all_external_ids: HashSet<String>,
     repo_group_cache: HashMap<(i64, String), i64>,
     new_review_requests: HashMap<i64, HashSet<String>>,
+    /// Every PR inserted this cycle, by target epic, with the model its role
+    /// gives it (`feeds.allium: ReviewTaskModelIsSetByRole`).
+    new_review_models: HashMap<i64, HashMap<String, &'static str>>,
 }
 
 /// Index every feed task under the reviews `parent` by `external_id`, and
@@ -522,6 +525,7 @@ fn route_and_move(
     let mut all_external_ids: HashSet<String> = HashSet::new();
     let mut repo_group_cache: HashMap<(i64, String), i64> = HashMap::new();
     let mut new_review_requests: HashMap<i64, HashSet<String>> = HashMap::new();
+    let mut new_review_models: HashMap<i64, HashMap<String, &'static str>> = HashMap::new();
     for entry in items {
         let item = &entry.item;
         if dropped.contains(item.external_id.as_str()) {
@@ -552,11 +556,22 @@ fn route_and_move(
             if task.epic_id != target {
                 move_feed_task(store, &mut task.clone(), target);
             }
-        } else if role_target == my || role_target == team {
-            new_review_requests
+        } else {
+            if role_target == my || role_target == team {
+                new_review_requests
+                    .entry(target)
+                    .or_default()
+                    .insert(item.external_id.clone());
+            }
+            let model = if role_target == bots {
+                BOTS_REVIEW_MODEL
+            } else {
+                PEOPLE_REVIEW_MODEL
+            };
+            new_review_models
                 .entry(target)
                 .or_default()
-                .insert(item.external_id.clone());
+                .insert(item.external_id.clone(), model);
         }
         groups.entry(target).or_default().push(item.clone());
     }
@@ -565,8 +580,14 @@ fn route_and_move(
         all_external_ids,
         repo_group_cache,
         new_review_requests,
+        new_review_models,
     }
 }
+
+/// `feeds.allium: ReviewTaskModelIsSetByRole`: the model a PR inserted into My
+/// Reviews or Team Reviews starts on, and the one a Bots PR starts on.
+const PEOPLE_REVIEW_MODEL: &str = "opus";
+const BOTS_REVIEW_MODEL: &str = "sonnet";
 
 /// `RoleRoutedFeedSync`: reconcile the whole `reviews-parent` subtree from one
 /// emission. Phase order matters and is the board's old order: every
@@ -612,10 +633,22 @@ fn ingest_role_routed(
         all_external_ids,
         repo_group_cache,
         new_review_requests,
+        new_review_models,
     } = routed;
 
     for (sub, group) in groups {
         store.upsert_feed_tasks(sub, group, created_by, !additive)?;
+    }
+    // `feeds.allium: ReviewTaskModelIsSetByRole`: a PR inserted this cycle
+    // takes its role's model. A refresh or a move writes none, so a model
+    // chosen by hand survives and a moved task keeps the one it had.
+    for (target, models) in new_review_models {
+        for mut task in store.tasks_in_epic(target) {
+            if let Some(model) = models.get(&task.external_id) {
+                task.model = (*model).to_string();
+                store.update_task(task);
+            }
+        }
     }
     // `feeds.allium: NewReviewRequestIsSignalled`: an insert into My Reviews
     // or Team Reviews is a signalled create. A refresh or a move is not.

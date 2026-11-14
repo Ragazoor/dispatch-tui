@@ -851,3 +851,144 @@ async fn new_pr_in_a_my_reviews_repo_group_is_signalled() {
         .unwrap();
     assert_eq!(unseen(&db).await, vec![task.id], "a refresh keeps the mark");
 }
+
+// --- ReviewTaskModelIsSetByRole (feeds.allium) ---
+
+async fn first_task_model(
+    db: &Store,
+    parent: crate::models::EpicId,
+    role: FeedRole,
+) -> Option<crate::models::TaskModel> {
+    let epic = role_sub_epic(db, parent, role).await;
+    db.list_tasks_for_epic(epic).await.remove(0).model
+}
+
+#[tokio::test]
+async fn new_review_pr_gets_the_model_of_its_role() {
+    use crate::models::TaskModel;
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = reviews_parent(&db).await;
+    let items = vec![
+        make_signal_item(
+            "pr-my",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::DirectRequest],
+        ),
+        make_signal_item(
+            "pr-team",
+            "https://github.com/org/repo/pull/2",
+            vec![Signal::TeamRequest],
+        ),
+        make_signal_item(
+            "pr-bot",
+            "https://github.com/org/repo/pull/3",
+            vec![Signal::AuthorBot],
+        ),
+    ];
+
+    run_role_routed_feed_sync(
+        &*db,
+        parent,
+        entries(&items, &["", "", ""], &["main", "main", "main"]),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        first_task_model(&db, parent, FeedRole::MyReviews).await,
+        Some(TaskModel::Opus)
+    );
+    assert_eq!(
+        first_task_model(&db, parent, FeedRole::TeamReviews).await,
+        Some(TaskModel::Opus)
+    );
+    assert_eq!(
+        first_task_model(&db, parent, FeedRole::Bots).await,
+        Some(TaskModel::Sonnet)
+    );
+}
+
+#[tokio::test]
+async fn refresh_keeps_a_model_chosen_by_hand() {
+    use crate::models::TaskModel;
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = reviews_parent(&db).await;
+    let items = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::DirectRequest],
+    )];
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+    let my = role_sub_epic(&db, parent, FeedRole::MyReviews).await;
+    let id = db.list_tasks_for_epic(my).await.remove(0).id;
+    db.patch_task(id, &TaskPatch::new().model(Some(TaskModel::Haiku)))
+        .await
+        .unwrap();
+
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        first_task_model(&db, parent, FeedRole::MyReviews).await,
+        Some(TaskModel::Haiku)
+    );
+}
+
+#[tokio::test]
+async fn role_move_keeps_the_model() {
+    use crate::models::TaskModel;
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = reviews_parent(&db).await;
+    let bot_item = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::AuthorBot],
+    )];
+    run_role_routed_feed_sync(&*db, parent, entries(&bot_item, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    let team_item = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::TeamRequest],
+    )];
+    run_role_routed_feed_sync(&*db, parent, entries(&team_item, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        first_task_model(&db, parent, FeedRole::TeamReviews).await,
+        Some(TaskModel::Sonnet),
+        "moved, not inserted: the model it had stays"
+    );
+}
+
+#[tokio::test]
+async fn additive_insert_gets_the_model_of_its_role() {
+    use crate::models::TaskModel;
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = reviews_parent(&db).await;
+    let items = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::DirectRequest],
+    )];
+
+    run_role_routed_feed_sync_with_mode(
+        &*db,
+        parent,
+        entries(&items, &[""], &["main"]),
+        SyncMode::Additive,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        first_task_model(&db, parent, FeedRole::MyReviews).await,
+        Some(TaskModel::Opus)
+    );
+}

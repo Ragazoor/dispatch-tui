@@ -1851,8 +1851,10 @@ rule UpsertFeedTasks {
     --     an item that drops out of an emission and later reappears is
     --     deleted and reinserted, taking the feed's wrap_up_mode again, the
     --     same reappear-caveat as status/repo_path). model is not touched
-    --     either: a feed never sets it, so the user's choice survives a
-    --     re-poll, and a reinserted item starts on the default again.
+    --     either, so the user's choice survives a re-poll, and a reinserted
+    --     item starts from the insert value again. A flat or grouped feed
+    --     never sets it, so that value is the default; a reviews_parent feed
+    --     sets it on insert by the routed role (ReviewTaskModelIsSetByRole).
     --     url (and its url_type) are
     --     backfilled TOGETHER from item.url when the existing Task's url
     --     is null, so a feed task inserted from a script revision that did
@@ -2759,6 +2761,51 @@ rule NewReviewRequestIsSignalled {
         -- src/feed/ingest/tests/role_routing.rs::pr_moved_into_my_reviews_is_not_signalled,
         -- src/feed/ingest/tests/role_routing.rs::new_pr_in_a_my_reviews_repo_group_is_signalled,
         -- tests/memory_caller_conformance/feeds.rs::memory_caller_ingests_a_feed_like_the_real_module.
+}
+
+-- == Review tasks run on a model chosen by their role ==
+
+rule ReviewTaskModelIsSetByRole {
+    when: FeedIngested(epic, items, additive, host)
+
+    requires: epic.feed_role = reviews_parent
+
+    -- A PR that RoleRoutedFeedSync INSERTS (the "Absent from the subtree"
+    -- branch) is created with its model set by route(item.signals): opus for
+    -- my_reviews and team_reviews, sonnet for bots. The model is written in
+    -- the same store transaction as the insert, so the agent never launches on
+    -- a stale default.
+    ensures:
+        for task in inserted_tasks(epic, items):
+            task.model = if route(signals) = bots: sonnet else: opus
+
+    @guidance
+        -- INSERT ONLY. A refresh of a PR already on the board writes no model,
+        -- so a model the operator picked by hand survives a re-poll. A MOVE
+        -- between role sub-epics (Team Reviews into My Reviews, Bots into Team
+        -- Reviews) keeps the model it had: the task is not new, and a move is
+        -- not a change the operator asked for. A PR already on the board when
+        -- this rule shipped keeps its model; a PR retired and later re-inserted
+        -- is a new insert and takes the role's model.
+        --
+        -- FIXED, NOT CONFIGURED. The mapping is written in the rule. No role
+        -- sub-epic carries a model setting.
+        --
+        -- BOTS ARE SET EXPLICITLY. Sonnet is also the default for a task with no
+        -- model (core.allium: TaskModel), but the feed writes it, so a change to
+        -- the default does not change Bots.
+        --
+        -- The additive path (DegradedNonEmptyEmission, AppendOnlyFeed) inserts
+        -- the same way and sets the model the same way. Flat, grouped, CVE and
+        -- every other feed insert with no model (UpsertFeedTasks).
+        --
+        -- Implementation: spacetime/module/src/feed_ingest.rs::route_and_move
+        -- (records each insert's model) and
+        -- spacetime/module/src/feed_ingest.rs::ingest_into (writes it).
+        -- Tests: src/feed/ingest/tests/role_routing.rs::new_review_pr_gets_the_model_of_its_role,
+        -- src/feed/ingest/tests/role_routing.rs::refresh_keeps_a_model_chosen_by_hand,
+        -- src/feed/ingest/tests/role_routing.rs::role_move_keeps_the_model,
+        -- src/feed/ingest/tests/role_routing.rs::additive_insert_gets_the_model_of_its_role.
 }
 
 -- == Failure handling ==

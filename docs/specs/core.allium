@@ -381,7 +381,8 @@ enum WrapUpMode { rebase | pr | done }
 -- A task with no model set runs on sonnet (dispatch.allium:
 -- EveryTaskAgentLaunchesOnItsModel): sonnet is the default everywhere, for a
 -- task made in the wizard, over MCP or by a feed alike, and for a task made
--- before the field existed.
+-- before the field existed. The one exception is a reviews_parent feed, which
+-- sets the model on insert by role (feeds.allium: ReviewTaskModelIsSetByRole).
 enum TaskModel { haiku | sonnet | opus | fable }
 
 -- Visibility of an epic or a work package inside its workspace
