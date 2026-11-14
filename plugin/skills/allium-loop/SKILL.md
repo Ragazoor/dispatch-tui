@@ -16,8 +16,7 @@ This skill drives the Allium spec-first convergence loop (Loop A) from a design/
 toward converged spec, tests, and code. It is the spec-first sibling of `allium-weed-loop`. It is
 language- and stack-agnostic: it never assumes a particular test runner or toolchain.
 
-Unlike a ralph-loop-style skill, this skill does not rely on an external Stop hook or a
-`.claude/ralph-loop.local.md` state file. The session that invokes this skill becomes the loop
+The session that invokes this skill becomes the loop
 **driver**: it dispatches one fresh subagent per iteration (via the Agent tool, never `fork` —
 each iteration has no memory of prior ones, only the repo's own state carries over) and decides
 whether to continue based on that subagent's final report. The driver never does the
@@ -43,11 +42,7 @@ rebase/tend/implement/verify/weed work itself.
    2. **Recent context** — otherwise scan the recent conversation for a design/spec document
       created or referenced this session (e.g. an Allium spec just written or extended under
       `docs/specs/`, or a file under `docs/superpowers/specs/` or `docs/plans/`, or a path the
-      user just named). An `.allium` file is a first-class input here, not a fallback: in a repo
-      that keeps Allium specs the dispatch prompt's own design step produces one, and handing the
-      loop that spec is the normal way a dispatched agent enters it. In a repo that keeps none,
-      the design step is brainstorming instead, so expect a `docs/plans/` doc here rather than a
-      spec. If exactly one clear candidate exists, use it and
+      user just named). An `.allium` file is a first-class input here, not a fallback. If exactly one clear candidate exists, use it and
       **tell the user which document was picked** so they can catch a wrong guess.
    3. **Ask** — if args and context yield nothing, or multiple candidates are ambiguous, ask for
       the doc path via AskUserQuestion.
@@ -58,8 +53,7 @@ rebase/tend/implement/verify/weed work itself.
       the user named, or one recorded for this repo via a project's task-management
       tooling).
    2. **Project docs** — a documented test/build command in this repo's `CLAUDE.md`, `AGENTS.md`,
-      `README`, or equivalent (e.g. `cargo test`, `npm test`, `pytest`, `go test ./...`,
-      `mvn test`).
+      `README`, or equivalent.
    3. **Ask** — if none is found, ask the user for the command via AskUserQuestion before
       starting the loop.
 
@@ -76,10 +70,7 @@ rebase/tend/implement/verify/weed work itself.
    one when invoking the skill (e.g. "run allium-loop on opus"), use it; otherwise default to
    `sonnet`. A run does up to `max_iterations` full iterations, so the iteration agent's model <!-- allow-phantom-symbol: allium-loop's own state-file field, schema declared only in this skill's prose -->
    multiplies across the whole loop; sonnet is the default because the iteration agent's own work
-   (rebase, `/propagate`, red check, implement, verify, commit) is mechanical. The judgement-heavy
-   spec steps are not affected — see the note in step 2 of the prompt file. Recording this as a
-   loop parameter is what lets a hard convergence opt back into a stronger model without editing
-   this skill.
+   is mechanical. The spec steps are not affected — see step 2 of the prompt file.
 
 7. **Read the prompt file** at
    `~/.claude/plugins/local/dispatch/skills/allium-loop/prompt.md`.
@@ -119,9 +110,7 @@ started_at: "TIMESTAMP"
    "fork"`), passing `model` set to the state file's `model` value (`sonnet` unless this run
    resolved otherwise in kickoff step 6), and this filled-in prompt as its task.
 
-   The two rules reinforce each other: a `fork` ignores the `model` override entirely and runs on
-   the session model, so dispatching a fork would silently discard the pin — passing a fresh
-   subagent is what makes the model override take effect at all. Read `model` from the state file
+   A fork ignores the `model` override. Read `model` from the state file
    rather than remembering it, for the same reason the iteration number is derived there: a resume
    or a context compaction must not lose it.
 

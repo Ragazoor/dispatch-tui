@@ -31,9 +31,6 @@ gh pr view <pr> --json number,title,body,url,author,baseRefName,headRefOid,files
 gh pr diff <pr>
 ```
 
-`owner` and `repo` come from the URL (or `gh repo view --json nameWithOwner`
-for a bare number).
-
 **Get the PR's code, not your checkout's.** Your checkout may be on another
 branch or behind the PR's head, even when dispatch made it from the PR's
 branch. Reviewers and verifiers must read files at `headRefOid`:
@@ -121,9 +118,7 @@ that dropped it.
 ## Step 4: Verify
 
 Step 4 always runs, whatever the diff size. Start one `general-purpose` agent
-for all findings. With more than about
-eight, split them by file into groups of about eight, one agent per group, in
-one message. Give each agent its findings and the way to read code
+for all findings. With many, split them by file across agents, in one message. Give each agent its findings and the way to read code
 at `headRefOid`. Its job is to **disprove** each finding against the real code:
 read the lines, follow the callers, check the tests. It returns `confirmed`,
 `plausible` or `refuted` with one line of evidence. It compares against the
@@ -151,9 +146,8 @@ one-line note of which entry dropped each, in case the user asks.
 Show a short list, worst first. For each finding:
 
 - `path:line` and a severity (blocking, should fix, nit);
-- the comment, written as the operator would write it on the PR: short and
-  direct, a question when the point is a question ("is this used?"), no
-  hedging and no praise. Follow any voice notes in `general.md`;
+- the comment, written as the operator would write it on the PR. Follow any
+  voice notes in `general.md`;
 - the failure scenario in one line;
 - `(plausible)` when step 4 could not confirm it.
 

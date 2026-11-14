@@ -50,3 +50,40 @@ no claim). `docs/mcp-tool-design.md` already audits the tools.
 Do 1, 2 and 3 now: small, mostly deletion, and 3 is eval-guarded. Treat 4 and 5
 as follow-up tasks, one per skill, since each needs its own read and eval run.
 Per the approval-before-removal rule, nothing is removed until this list is agreed.
+
+## Proposal 4 follow-up: skill line-by-line read (task #99188)
+
+Read `allium-loop` (`SKILL.md`, `prompt.md`, `references/handling-results.md`),
+`preference-review` and `decompose-review` (`SKILL.md`, plan template). All three
+have an Allium spec and a test that pins each guarantee by phrase, so every cut
+below avoids a pinned phrase. A phrase-pin test fails if the words go, but no test
+checks that an agent still behaves the same: the guard column says which cuts have
+more than that. No eval runs these skills, so **every cut is behaviour-unguarded**.
+
+Left alone on purpose: the convergence gate, the red check, never weaken tests,
+never commit the state file, the dirty-tree rule, the retry and stall limits, the
+`fork` ban, "never post to GitHub", "never edit the PR's code", the `headRefOid` and
+merge-base reading rules, the plan-directory reuse check, `auto_run_plan` and
+decision items.
+
+| Skill | Cut | Why it restated | Guard |
+|---|---|---|---|
+| allium-loop `SKILL.md` | "Unlike a ralph-loop-style skill…" contrast | Describes a skill the agent is not running | none (unguarded) |
+| allium-loop `SKILL.md` | design-doc step: how a dispatched agent reaches a spec, brainstorm vs spec | Model picks the candidate from context | `allium_loop_text_holds_each_session_guarantee` pins "first-class input" and "tell the user which document was picked", kept |
+| allium-loop `SKILL.md` | verify-command examples (`cargo test`, `npm test`…) | Examples of what the model knows | pins `**Project docs**`, kept; behaviour unguarded |
+| allium-loop `SKILL.md` | `model` cost rationale and the "two rules reinforce" paragraph | Cost reasoning and a fact the Agent tool description states (a fork ignores `model`) | `allium_loop_dispatches_iteration_agents_on_sonnet`, `allium_loop_dispatch_still_forbids_fork`, and the pinned "passing `model` set to the state file's `model` value"; all kept |
+| allium-loop `prompt.md` | "language- and stack-agnostic" sentence | Repeats `SKILL.md`, which the test pins | none |
+| allium-loop `prompt.md` | model-override rationale; the step 7 repeat of it | Same rule stated three times | pinned "Do NOT pass a `model` override to `allium:tend` (or to `allium:weed`", kept once |
+| allium-loop `prompt.md` | `git status` vs `git diff` explanation | Model knows the difference | pins the `git status --porcelain -- docs/specs/` command, kept |
+| allium-loop `prompt.md` | three guardrail lines (escalate, honour parameters, fix code) | Each repeats a step: 2, 5 and 6 | pins "no magic numbers" (step 5), "fix the CODE, not the tests" and the AskUserQuestion rule (step 6), kept in place |
+| preference-review | "`owner` and `repo` come from the URL…" | Trivial | none |
+| preference-review | step 4 "groups of about eight" | Numeric rule where "split many" is enough | none |
+| preference-review | comment voice adjectives (short, direct, no hedging) | The model has the operator's voice notes in `general.md` | none; the voice notes remain |
+| decompose-review | "Low findings are small issues to fix in passing…" | Reason; "Low ones included" stays | `decompose_review_skill_text_holds_each_session_guarantee` pins "Take **every** finding, Low ones included" |
+| decompose-review | grouping step 1 (extract paths), naming examples | Trivial | none |
+| decompose-review | "This confirmation is also why Step 6 sets `auto_run_plan`" | Repeated in 6b | pins "`auto_run_plan`: `true`" and the Decisions exception in 6b, kept |
+| decompose-review | `wrap_up_mode` reason and the four-line report template | Model writes the list; "Dispatch the epic from the TUI" stays | pinned "Display the created epic and all task IDs", kept |
+
+Not cut, though it reads like judgment: `preference-review` step 3 "never review the
+diff inline yourself" (spec `ReviewerCountFollowsDiffSize`, a user-chosen rule) and
+the `plan-template.md` decision text (pinned).

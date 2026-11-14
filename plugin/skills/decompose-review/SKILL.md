@@ -18,18 +18,17 @@ package becomes a subtask in an epic, with a plan file attached.
 
 ## Step 1: Extract Review Findings
 
-Read the code review report from conversation context. Take **every** finding, Low ones included: for each, take its severity, its file references (`file:line`; some name several files or omit the line), the issue and the suggested fix. Low findings are small issues to fix in passing, not only to report, so do not drop them for being minor. If the report has no findings, tell the user there is nothing to decompose and stop.
+Read the code review report from conversation context. Take **every** finding, Low ones included: for each, take its severity, its file references (`file:line`; some name several files or omit the line), the issue and the suggested fix. If the report has no findings, tell the user there is nothing to decompose and stop.
 
 ## Step 2: Group into Work Packages
 
 Group findings by the files they touch:
 
-1. Extract file paths from all `file:line` references
-2. Group by directory prefix (first 2 path components, e.g., `src/mcp`, `src/tui`, `src/db`)
-3. If a single finding references files in multiple groups, merge those groups
-4. A Low finding stays in its group when that group also has a higher-severity finding. Move the Low findings of every Low-only group into one "Cleanups" work package, so Low findings do not each become a tiny package of their own
-5. Order work packages by maximum severity (blockers first, then high, then medium, then low); "Cleanups" goes last
-6. Name each work package after its primary directory or module (e.g., "MCP Handler Cleanup", "TUI Rendering Improvements")
+1. Group by directory prefix (first 2 path components, e.g., `src/mcp`, `src/tui`, `src/db`)
+2. If a single finding references files in multiple groups, merge those groups
+3. A Low finding stays in its group when that group also has a higher-severity finding. Move the Low findings of every Low-only group into one "Cleanups" work package, so Low findings do not each become a tiny package of their own
+4. Order work packages by maximum severity (blockers first, then high, then medium, then low); "Cleanups" goes last
+5. Name each work package after its primary directory or module
 
 Mark a finding as a **decision item** when the agent that implements it cannot choose the fix alone: the review offers more than one fix, the fix changes behaviour or a spec, or it removes something the user may want to keep. A decision item stays in its work package. Do not leave it out, and do not pick an option for the user.
 
@@ -38,8 +37,6 @@ Mark a finding as a **decision item** when the agent that implements it cannot c
 Nothing is created until the user confirms. Show a numbered list — each package's name, finding count by severity, decision item count, files and a one-line summary — and ask with `AskUserQuestion` whether to confirm all, drop or merge some. Apply what they ask for.
 
 Every finding goes into a package by default. Under the list, add a "Not included" section that names each finding left out of every package, with the reason (for example, the review marks it as no change needed, or it duplicates another finding). Write "Not included: none" when nothing is left out, so the user can see that nothing was dropped.
-
-This confirmation is also why Step 6 sets `auto_run_plan`.
 
 ## Step 4: Resolve Repository Path
 
@@ -101,17 +98,13 @@ Call the `dispatch` MCP tool `create_task` with:
   questions in the plan's Decisions section, which the agent asks before it
   implements those findings
 - `wrap_up_mode`: `"rebase"` — so the agent rebases onto `base_branch` at
-  wrap-up without asking which path to take. Review work packages are small and
-  land on main; they don't each need their own PR.
+  wrap-up without asking which path to take.
 
 ## Step 7: Report Results
 
 Display the created epic and all task IDs:
 
 > Created epic #<id>: "Code Review: <date>" with <N> subtasks:
-> - Task #<id>: <name> (blocker)
-> - Task #<id>: <name> (high priority)
-> - Task #<id>: <name> (medium)
-> - Task #<id>: Cleanups (low)
+> - Task #<id>: <name> (<top severity>)
 >
 > Dispatch the epic from the TUI to start working through the tasks.

@@ -3,9 +3,7 @@
 You are one iteration of a fresh-agent-per-run loop that drives the Allium spec-first
 convergence loop (Loop A) from a design document toward converged spec, tests, and code. You
 have NO memory of any previous iteration — everything you need to know about prior progress is
-in the git history and the current state of the repo. This loop is language- and stack-agnostic —
-do not assume any particular test runner, build tool, or toolchain beyond what this repo actually
-uses.
+in the git history and the current state of the repo.
 
 **Input design/spec document:** `{{DESIGN_DOC}}`
 **Verify command:** `{{VERIFY_COMMAND}}`
@@ -35,21 +33,16 @@ resolving silently.
   Read/Glob/Grep access to the whole directory and its own mandate to push back on ambiguity.
 - On later iterations, only re-invoke `allium:tend` if this run's work reveals a spec error (a
   test or implementation detail that contradicts what the spec says).
-- Do NOT pass a `model` override to `allium:tend` (or to `allium:weed` in step 7). Both agents pin
-  a strong model in their own definitions, which wins over inheriting yours — so spec reasoning
-  keeps that model even though you were dispatched on a cheaper one. Adding an override "for
-  consistency" with your own model would downgrade the two judgement-heavy steps of this loop,
-  which is exactly what the cheaper iteration model is meant to avoid.
+- Do NOT pass a `model` override to `allium:tend` (or to `allium:weed` in step 7). Both pin a
+  strong model of their own, and an override would downgrade it to yours.
 - Determine which specs this run touched:
 
   ```bash
   git status --porcelain -- docs/specs/
   ```
 
-  This step runs BEFORE this run's commit (step 8), and every iteration always commits before it
-  ends — so "specs touched this run" is exactly the currently-uncommitted working-tree state under
-  `docs/specs/`. Use `git status --porcelain` rather than `git diff`: it reports both modified
-  tracked specs and brand-new untracked ones that `allium:tend` may have created.
+  This runs before the commit (step 8), so "specs touched this run" is the uncommitted state
+  under `docs/specs/`. `git status --porcelain` also reports new untracked specs.
 - Read the `open questions` section of EACH touched spec (not the whole directory). If any is
   non-empty, STOP and resolve it with the user via AskUserQuestion before proceeding — do not
   guess. Once resolved, write the resolution into the spec (clear or update the open-questions
@@ -93,8 +86,6 @@ Use the Agent tool with `subagent_type: "allium:weed"` in check mode to compare 
 `docs/specs/` against the implementation (weed already sweeps the whole directory — no
 target file needed here). Reconcile divergence: update the spec for undocumented behavior or
 spec bugs; for code bugs that contradict a correct spec, ask the user before fixing.
-
-As in step 2, do not pass a `model` override here — `allium:weed` pins its own.
 
 ### 8. Commit
 
@@ -157,11 +148,6 @@ Two ways runs have falsely claimed convergence. Both are disqualifying:
 - Never skip the rebase step.
 - Confirm new tests fail before implementing (spec-first red check).
 - Never weaken or hand-edit generated tests.
-- Escalate ambiguity, open questions, and any code-vs-test conflict by PAUSING and asking the
-  user via AskUserQuestion — never guess silently. Resolve it in the same run: get the answer,
-  write it into the spec (or wherever it belongs), commit that resolution, then continue.
-- Honor spec parameters; no magic numbers.
-- Fix code, not the contract, when the spec is correct.
 - Never stage or commit the loop's own state file `.claude/allium-loop-state.local.md`.
 - Never end with a dirty tree: always commit this run's work before ending, using the
   `wip(allium-loop):` prefix if verification is not green. There is no "skip committing" escape
