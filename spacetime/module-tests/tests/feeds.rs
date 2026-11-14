@@ -704,11 +704,11 @@ fn batch_delete_deletes_a_task_and_an_epic_subtree_together() {
     );
 }
 
-/// Deleting an epic detaches its subtasks' learnings and cascades their
-/// retrievals, as `delete_task` does: each path that removes task rows must
-/// reproduce it.
+/// Deleting an epic archives its subtasks and keeps their learnings linked,
+/// as `delete_task` does (`tasks.allium: ArchiveDeletedTask`): each person's
+/// delete path that removes task rows must reproduce it.
 #[test]
-fn deleting_an_epic_detaches_its_subtasks_learnings_and_cascades_their_retrievals() {
+fn deleting_an_epic_archives_its_subtasks_and_keeps_their_learnings() {
     let store = Store::new();
     let epic = plain_epic(&store, "E", 0);
     // `done`: this test is about learning detachment, not the delete guard.
@@ -764,14 +764,16 @@ fn deleting_an_epic_detaches_its_subtasks_learnings_and_cascades_their_retrieval
         .find(1)
         .expect("the learning survives");
     assert_eq!(
-        learning.source_task_id, None,
-        "the learning is detached from its deleted source task"
+        learning.source_task_id,
+        Some(task),
+        "the learning still names its archived source task"
     );
     assert_eq!(
         store.db().learning_retrievals().iter().count(),
-        0,
-        "a retrieval naming a task inside the deleted epic must go with it"
+        1,
+        "a retrieval naming an archived task is kept"
     );
+    assert!(store.db().archived_tasks().id().find(task).is_some());
 }
 
 /// Deleting a feed epic is a reset: its feed tasks are retired under nothing
