@@ -119,11 +119,8 @@ fn a_mint_that_loses_the_race_reads_back_the_winners_identity() {
     let dir = tempfile::tempdir().unwrap();
     write_raw(dir.path(), &named("host-winner", "laptop"), HOST_FILE_MODE);
     let loser = HostIdentity {
-        host_id: "host-loser".to_string(),
         label: None,
-        user_identity: None,
-        credential: None,
-        extra: Default::default(),
+        ..named("host-loser", "")
     };
 
     let identity = mint_if_absent(dir.path(), &loser).unwrap();

@@ -222,9 +222,9 @@ async fn a_foreign_store_on_the_port_is_not_dumped_and_the_start_is_retried() {
 }
 
 /// The port is lost at the start, not answered by a stranger: the import
-/// starts over on a fresh port. Forced here, so no real port race is needed.
-/// Only the first start is forced to lose, so the attempts left over absorb a
-/// real race for a port under a loaded suite.
+/// starts over on a fresh port. The first start is forced to lose. The fake
+/// still binds a real port on the later starts, so the attempts left over
+/// absorb a real race for a port under a loaded suite.
 #[tokio::test]
 async fn a_port_lost_at_the_start_is_retried_on_a_fresh_port() {
     let dir = data_folder();

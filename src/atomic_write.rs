@@ -45,10 +45,7 @@ pub fn write_with(
         }
         _ => path,
     };
-    let dir = match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        _ => Path::new("."),
-    };
+    let dir = parent_dir(path);
     let mode = match mode {
         Mode::Fixed(mode) => mode,
         Mode::KeepOr { default } => match std::fs::metadata(path) {
@@ -62,6 +59,15 @@ pub fn write_with(
         .map_err(|e| e.error)
         .with_context(|| format!("replace {}", path.display()))?;
     Ok(())
+}
+
+/// The directory `path` sits in, where its temporary file goes: `.` for a
+/// bare file name.
+fn parent_dir(path: &Path) -> &Path {
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    }
 }
 
 /// A synced temporary file in `dir` with `mode` set before `fill` writes it.
@@ -93,11 +99,9 @@ fn filled_temp(
 /// `path` already exists, which is then left as it was. Two processes racing
 /// to create the same file end with exactly one's content.
 pub fn create_new_bytes(path: &Path, mode: u32, bytes: &[u8]) -> anyhow::Result<bool> {
-    let dir = match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        _ => Path::new("."),
-    };
-    let temp = filled_temp(dir, mode, |w| w.write_all(bytes).context("write the file"))?;
+    let temp = filled_temp(parent_dir(path), mode, |w| {
+        w.write_all(bytes).context("write the file")
+    })?;
     match temp.persist_noclobber(path) {
         Ok(_) => Ok(true),
         Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),

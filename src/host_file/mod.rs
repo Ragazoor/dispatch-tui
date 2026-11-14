@@ -96,12 +96,18 @@ fn repair_mode(file: &std::fs::File, path: &Path) {
     }
 }
 
-/// Replace the host file with `identity`, atomically and privately.
-fn write_whole(data_dir: &Path, identity: &HostIdentity) -> anyhow::Result<()> {
+/// Create the data directory if needed, and encode `identity` for the host
+/// file: the shared first half of every host-file write.
+fn prepare_write(data_dir: &Path, identity: &HostIdentity) -> anyhow::Result<(PathBuf, Vec<u8>)> {
     std::fs::create_dir_all(data_dir)
         .with_context(|| format!("create data directory {}", data_dir.display()))?;
-    let path = host_file_path(data_dir);
     let bytes = serde_json::to_vec_pretty(identity).context("encode the host identity")?;
+    Ok((host_file_path(data_dir), bytes))
+}
+
+/// Replace the host file with `identity`, atomically and privately.
+fn write_whole(data_dir: &Path, identity: &HostIdentity) -> anyhow::Result<()> {
+    let (path, bytes) = prepare_write(data_dir, identity)?;
     // The mode is a spec obligation (`HostFileIsPrivate`), so it is fixed
     // rather than inherited.
     crate::atomic_write::write_bytes(
@@ -170,10 +176,9 @@ pub fn resolve_for_launch(data_dir: &Path) -> Result<HostIdentity, StartupAbort>
 /// so every process on the data directory ends up with the same host id
 /// (`host.allium: MintHostIdentity`).
 fn mint_if_absent(data_dir: &Path, minted: &HostIdentity) -> anyhow::Result<HostIdentity> {
-    std::fs::create_dir_all(data_dir)
-        .with_context(|| format!("create data directory {}", data_dir.display()))?;
-    let bytes = serde_json::to_vec_pretty(minted).context("encode the host identity")?;
-    if crate::atomic_write::create_new_bytes(&host_file_path(data_dir), HOST_FILE_MODE, &bytes)? {
+    let (path, bytes) = prepare_write(data_dir, minted)?;
+    // Private from creation (`HostFileIsPrivate`), like every other write.
+    if crate::atomic_write::create_new_bytes(&path, HOST_FILE_MODE, &bytes)? {
         return Ok(minted.clone());
     }
     read_existing(data_dir)?
