@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: Use to finish a dispatch task and close its session — whenever work in a dispatch worktree is complete and the user says to wrap up, finish, close out, finalise, or "we're done here", even if they don't name this skill. The user first chooses one of three paths: rebase onto the task's base_branch (dispatch-driven), author and open a draft GitHub PR yourself (you write the title and body), or done with no git operations. It then runs the retro, runs the repo's verify command, commits remaining changes, and calls wrap_up, which checks the commit. Always use this rather than calling wrap_up/exit_session by hand — the path must be settled before the retro, and the retro must run before the commit.
+description: Use to finish a dispatch task and close its session, when the work is done and the user says to wrap up, finish or close out. The user chooses the path first (rebase, draft PR, or done); it then runs the retro, verifies, commits and calls wrap_up. Always use this, never retro or a hand-called wrap_up/exit_session, to finish a task.
 ---
 
 # Wrap Up
