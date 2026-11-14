@@ -115,6 +115,7 @@ mod allium_loop_skill;
 mod decompose_review_skill;
 mod feed_scripts;
 mod grill_skill;
+mod learnings_skill;
 mod plugin_install;
 mod reference_files;
 mod retro_skill;

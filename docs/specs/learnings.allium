@@ -486,5 +486,7 @@ surface LearningMcpTools {
         -- The skill also carries the triage an agent applies before writing
         -- prose about code: could a failing check for a violation be written
         -- from the source alone? If yes, it is a lint rule: write the check
-        -- and record nothing. If no, it is judgment, and prose is right.
+        -- and record nothing. If no, it is judgment, and prose is right. If
+        -- neither, the code is shaped wrong: a smell, fixed by a refactor
+        -- (learnings-skill.allium: TriageDecidesTheHome).
 }

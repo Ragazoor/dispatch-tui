@@ -140,6 +140,8 @@ fn wrap_up_skill_runs_retro_between_the_action_choice_and_the_commit() {
 /// Scoped to that one section: the rest of the skill mentions plenty of
 /// backticked identifiers (tool names) that would make a whole-document
 /// check pass even with this specific rule missing.
+///
+/// Pins NoEntryNamesImplementation of `LearningsSkillSession` in `docs/specs/learnings-skill.allium`.
 #[test]
 fn learnings_skill_forbids_code_citations() {
     let section = section_after(&skill_text("learnings"), "### Do NOT record:")
@@ -158,6 +160,8 @@ fn learnings_skill_forbids_code_citations() {
 /// prompt, a skill, the operator's memory index) took about one dispatch
 /// injection slot in five, and their `helped` ratings were a false signal
 /// (task #99042). "Already in CLAUDE.md" alone did not keep them out.
+///
+/// Pins ExcludedCasesAreNeverRecorded of `LearningsSkillSession` in `docs/specs/learnings-skill.allium`.
 #[test]
 fn learnings_skill_forbids_copies_of_always_loaded_context() {
     let section = section_after(&skill_text("learnings"), "### Do NOT record:")
@@ -181,6 +185,8 @@ fn learnings_skill_forbids_copies_of_always_loaded_context() {
 /// agent reads whichever it loaded, so the looser wording wins whenever
 /// wrap-up is the one in context — and rating a batch at the end is the
 /// behaviour the immediate rule exists to prevent.
+///
+/// Pins RateAtTheMomentOfActing of `LearningsSkillSession` in `docs/specs/learnings-skill.allium`.
 #[test]
 fn wrap_up_and_learnings_agree_that_rating_is_not_deferred() {
     let learnings = skill_text("learnings");
@@ -200,6 +206,8 @@ fn wrap_up_and_learnings_agree_that_rating_is_not_deferred() {
 /// #4402: no regex separates `TuiRuntime` from `GitHub`). The skill copy
 /// is therefore the only thing keeping those out, so it has to state the
 /// rule in full rather than deferring to what `record_learning` rejects.
+///
+/// Pins NoEntryNamesImplementation of `LearningsSkillSession` in `docs/specs/learnings-skill.allium`.
 #[test]
 fn learnings_skill_forbids_naming_implementation_detail_a_validator_misses() {
     let section = section_after(&skill_text("learnings"), "### Do NOT record:")
@@ -223,6 +231,8 @@ fn learnings_skill_forbids_naming_implementation_detail_a_validator_misses() {
 /// has to pattern-match against; with it there is one question that
 /// decides, and it routes a whole class of would-be entries to a lint
 /// instead of to prose.
+///
+/// Pins TriageDecidesTheHome of `LearningsSkillSession` in `docs/specs/learnings-skill.allium`.
 #[test]
 fn learnings_skill_carries_the_machine_check_triage() {
     let content = skill_text("learnings").to_lowercase();
@@ -246,6 +256,8 @@ fn learnings_skill_carries_the_machine_check_triage() {
 /// What the detail must contain — the case where the agent stops and asks
 /// a human — is convention, and this copy is where it lives (task #4402,
 /// ported from OKF's required `# Escalate` section).
+///
+/// Pins ProceduralEntriesNameWhereTheyStop of `LearningsSkillSession` in `docs/specs/learnings-skill.allium`.
 #[test]
 fn learnings_skill_requires_a_boundary_on_procedural_entries() {
     let content = skill_text("learnings").to_lowercase();
@@ -285,6 +297,8 @@ fn learnings_skill_scope_table_has_no_project_row() {
 /// The `wrong` verdict bullet must not claim a human-review step exists
 /// (learnings.allium: no human gate, no needs_review state, no status
 /// change on either verdict).
+///
+/// Pins VerdictsMeanWhatTheySay of `LearningsSkillSession` in `docs/specs/learnings-skill.allium`.
 #[test]
 fn learnings_skill_wrong_verdict_does_not_claim_human_review() {
     // The correct text says "there is no human review step", which itself

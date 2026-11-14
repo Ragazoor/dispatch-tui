@@ -1,0 +1,386 @@
+-- allium: 3
+-- learnings-skill.allium
+--
+-- Scope: The /learnings skill (plugin/skills/learnings/SKILL.md and its
+--        references/recording.md): what an agent running it guarantees to the
+--        next agents who read the knowledge base. It says when to query, when
+--        to rate, whether to record and how, and when to delete.
+-- Includes: Candidate (one thing the agent thinks of recording) and its
+--           triage; the four moments of the skill flow — query, rate, record,
+--           delete; what is never recorded; the boundary of a procedural
+--           entry.
+-- Excludes: what the four tools do and refuse (learnings.allium:
+--           RecordLearningViaMcp, QueryLearningsViaMcp, RateLearningViaMcp,
+--           DeleteLearningViaMcp); how entries are ranked, scoped, muted and
+--           swept (learnings.allium: Ranking, Scope Model, ArchiveStaleLearning);
+--           the rating instruction in the dispatch prompt and the wrap_up
+--           nudge (learnings.allium: AugmentDispatchPromptWithLearnings,
+--           WrapUpRateLearningNudge); where /retro sits in a wrap-up
+--           (retro-skill.allium); how the skill's copy reaches an agent
+--           (mcp-task-tools.allium: SkillCopyIsJustInTime); the tools'
+--           mechanics (the MCP calls) — those are the skill's means, not
+--           what it promises.
+--
+-- What learnings.allium already holds, so this spec does not repeat it:
+--   - the tool contracts: record_learning's validation (non-blank summary,
+--     scope and scope_ref, no code citation of the shapes a validator can
+--     see, a non-blank detail on a procedural entry), query_learnings'
+--     ranking, soft tag_filter and 50-entry cap, rate_learning's
+--     retrieval-first check and one standing verdict per task and learning,
+--     delete_learning's permanence;
+--   - that no verdict changes an entry's status and no human reviews one;
+--   - that the record_learning description is one sentence and every
+--     authoring rule lives in this skill (TheAuthoringRulesHaveOneHome).
+--
+-- Design decisions:
+--   - The tools can refuse only what a pattern shows. The rest of the bar
+--     for an entry — judgment over lint, no always-loaded copy, no bare code
+--     name, a procedural boundary — is the skill's alone, so the skill
+--     states it in full and does not defer to what record_learning rejects.
+--   - A rating is made when the entry is acted on, not at wrap-up: a batch
+--     rated at the end is rated from memory, and the entries that were not
+--     acted on get rated with the ones that were.
+--   - An entry that was clearly wrong is deleted, not rated wrong: a wrong
+--     verdict lowers the score but leaves the entry retrievable.
+--   - A knowledge base entry carries what a machine cannot check. What a
+--     machine can check becomes a check.
+
+use "./core.allium" as core
+use "./learnings.allium" as learnings
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- The answer to the triage question: could a failing check for a violation
+-- be written from the source alone, without knowing what the author meant?
+--   lint     — yes; the home is a lint, a test or a gate script.
+--   judgment — no; the home is prose, in the knowledge base.
+--   smell    — neither; the code is shaped wrong, so the home is a refactor.
+enum Triage { lint | judgment | smell }
+
+-- Why a candidate is not recorded, whatever its triage.
+enum Exclusion {
+    readable_from_code
+    already_documented
+    always_loaded_context
+    in_git_history
+    fix_is_in_the_commit
+    too_specific
+    generic_idiom
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+-- One finding the agent considers recording, and what becomes of it.
+entity Candidate {
+    task: core/Task
+    triage: Triage
+    -- Set when one of the Do NOT record cases applies.
+    exclusion: Exclusion?
+    -- The kind the entry would be written as; set only when it is
+    -- recorded.
+    kind: core/LearningKind?
+    -- The entry's detail, when it has one.
+    detail: String?
+    -- The detail names the case where the agent stops following the entry
+    -- and asks a human. Judged by the running agent, not by a mechanism.
+    detail_names_boundary: Boolean
+
+    status: considered | recorded | dropped | routed
+
+    transitions status {
+        considered -> recorded
+        considered -> dropped
+        considered -> routed
+        terminal: recorded, dropped, routed
+    }
+
+    -- Prose is the right home and nothing excludes it.
+    worth_recording: triage = judgment and exclusion = null
+    is_procedural: kind = procedural
+    -- A procedural entry is not ready to record until its detail names a
+    -- boundary.
+    has_boundary: not is_procedural or (detail != null and detail_names_boundary)
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Record ==
+
+rule ConsiderRecording {
+    when: RecordingConsidered(task, triage, kind?, exclusion?, detail?, detail_names_boundary)
+
+    ensures: Candidate.created(
+        task: task,
+        triage: triage,
+        kind: kind,
+        exclusion: exclusion,
+        detail: detail,
+        detail_names_boundary: detail_names_boundary,
+        status: considered
+    )
+
+    @guidance
+        -- One Candidate for each finding the agent weighs before it finishes
+        -- a task (ReflectBeforeFinishing). The triage, the exclusion and the
+        -- boundary are the running agent's judgement, not a mechanism's.
+}
+
+rule TriageFirst {
+    when: candidate: Candidate.created
+
+    requires: candidate.status = considered
+    requires: candidate.triage in {lint, smell}
+
+    ensures: candidate.status = routed
+    ensures: CandidateRouted(candidate: candidate, triage: candidate.triage)
+
+    @guidance
+        -- Before writing any prose about code the agent answers the triage
+        -- question (TriageDecidesTheHome). A lint is written as a lint, a
+        -- test or a gate script and nothing is recorded; a smell is fixed by
+        -- a refactor and nothing is recorded.
+}
+
+rule RecordJudgment {
+    when: CandidateRecorded(candidate)
+
+    requires: candidate.status = considered
+    requires: candidate.worth_recording
+    requires: candidate.has_boundary
+
+    ensures: candidate.status = recorded
+    ensures: RecordLearningCalled(candidate: candidate)
+
+    @guidance
+        -- The skill lists the cases where the agent records: an explicit user
+        -- preference not already in CLAUDE.md, a landscape understanding of
+        -- a codebase area, a convention not visible from reading the code, a
+        -- workflow pattern that solved a cross-repo or cross-task problem, or
+        -- a procedural step every agent working in the epic or project
+        -- should follow (RecordingCasesAreListed). It reads
+        -- references/recording.md before the call (RecordingDetailIsReadFirst).
+        -- The summary, scope and detail are the agent's; this rule states
+        -- only the gate in front of the call, so the call's arguments are
+        -- left to learnings.allium: RecordLearningViaMcp.
+}
+
+rule DeclineRecording {
+    when: RecordingDeclined(candidate)
+
+    requires: candidate.status = considered
+
+    ensures: candidate.status = dropped
+
+    @guidance
+        -- The answer to "did I discover anything worth recording" can be no
+        -- with no excluded case in play. A procedural candidate whose detail
+        -- names no boundary is not recorded as it stands: the agent writes
+        -- the boundary into the detail and considers it again as a new
+        -- candidate.
+}
+
+rule DropExcluded {
+    when: candidate: Candidate.created
+
+    requires: candidate.status = considered
+    requires: candidate.triage = judgment
+    requires: candidate.exclusion != null
+
+    ensures: candidate.status = dropped
+
+    @guidance
+        -- A candidate that fits a Do NOT record case is not recorded
+        -- (ExcludedCasesAreNeverRecorded), however useful it looked.
+}
+
+-- == Rate ==
+
+rule RateWhenYouAct {
+    when: EntryActedOn(task, learning, verdict)
+
+    requires: exists core/Retrieval{task: task, learning: learning}
+    requires: verdict in {helped, wrong}
+
+    ensures:
+        learnings/McpRateLearning(
+            learning: learning,
+            task: task,
+            verdict: verdict
+        )
+
+    @guidance
+        -- The agent rates at the moment it acts on an entry surfaced to it,
+        -- by the dispatch prompt or by query_learnings, and not at wrap-up
+        -- (RateAtTheMomentOfActing). helped: the entry saved the agent from
+        -- a pitfall or guided a decision. wrong: it misled the agent or is
+        -- out of date (VerdictsMeanWhatTheySay).
+}
+
+rule RateOffTopicEntry {
+    when: EntryReadButUnfit(task, learning)
+
+    requires: exists core/Retrieval{task: task, learning: learning, source: prompt_injection}
+
+    ensures: learnings/McpRateLearning(learning: learning, task: task, verdict: not_applicable)
+
+    @guidance
+        -- An entry from "## Validated knowledge for this task" that the
+        -- agent read and that did not fit gets not_applicable
+        -- (NotApplicableForAnEntryThatDidNotFit). It leaves the score alone
+        -- and feeds the per-repo dispatch mute (learnings.allium:
+        -- AugmentDispatchPromptWithLearnings). A query_learnings result the
+        -- agent skimmed and did not act on is not rated at all
+        -- (SkimmedResultsAreNotRated).
+}
+
+-- == Delete ==
+
+rule DeleteWrongEntry {
+    when: EntryClearlyWrong(learning)
+
+    ensures: learnings/McpDeleteLearning(learning_id: learning.id)
+
+    @guidance
+        -- An entry that is incorrect, out of date or should be gone is
+        -- deleted, not left to a wrong verdict (ClearlyWrongIsDeleted). The
+        -- agent finds the id with query_learnings first when it knows only
+        -- the content. Deletion is permanent (learnings.allium:
+        -- DeleteLearningViaMcp).
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface LearningsSkillInvocation {
+    facing _: core/McpClient
+
+    @guidance
+        -- An agent loads the skill at wrap-up or whenever it wants to
+        -- contribute to the shared knowledge base. Querying needs no skill
+        -- (QueryDirectlyWhenUnclear), so the skill is mostly for rating,
+        -- recording and deleting.
+}
+
+surface LearningsSkillSession {
+    facing _: core/McpClient
+
+    provides:
+        RecordingConsidered(task, triage, kind?, exclusion?, detail?, detail_names_boundary)
+        RecordingDeclined(candidate)
+        CandidateRecorded(candidate)
+        EntryActedOn(task, learning, verdict)
+        EntryReadButUnfit(task, learning)
+        EntryClearlyWrong(learning)
+
+    @guarantee AnnouncesItself
+        -- The skill opens with "I'm using the learnings skill to interact
+        -- with the knowledge base."
+
+    @guarantee QueryDirectlyWhenUnclear
+        -- Mid-task, the agent calls query_learnings itself, with its task_id
+        -- and a description of what it is working on in query, whenever
+        -- anything is unclear, before guessing and before asking the user.
+        -- The skill is not needed to query.
+
+    @guarantee TagFilterOnlyForAKnownTag
+        -- The agent passes tag_filter only for a tag it already knows. The
+        -- filter is a soft score boost, so a guessed tag demotes every other
+        -- entry until limit drops it, and the agent never learns what it
+        -- missed.
+
+    @guarantee RateAtTheMomentOfActing
+        -- An entry surfaced to the agent (injected into its prompt or
+        -- returned by query_learnings) is rated when the agent acts on it,
+        -- not deferred to wrap-up.
+
+    @guarantee VerdictsMeanWhatTheySay
+        -- helped means the entry saved the agent from a pitfall or guided a
+        -- decision; wrong means it misled the agent or is out of date. No
+        -- verdict changes an entry's status, and there is no human review
+        -- step.
+
+    @guarantee NotApplicableForAnEntryThatDidNotFit
+        -- An entry from "## Validated knowledge for this task" that did not
+        -- fit the task gets not_applicable, which leaves the score alone and
+        -- tells the store the entry was off-topic here; enough of them from
+        -- one repo keep the entry out of that repo's dispatch prompts.
+
+    @guarantee SkimmedResultsAreNotRated
+        -- A query_learnings result the agent skimmed and did not act on gets
+        -- no verdict.
+
+    @guarantee ClearlyWrongIsDeleted
+        -- An entry that is clearly wrong is deleted with delete_learning, not
+        -- rated wrong. The agent uses query_learnings to find the id when it
+        -- knows only the content.
+
+    @guarantee ReflectBeforeFinishing
+        -- Before finishing a task the agent asks whether it discovered
+        -- anything non-obvious that a future agent would benefit from
+        -- knowing.
+
+    @guarantee TriageDecidesTheHome
+        -- Before writing prose about code the agent asks one question: could
+        -- a failing check for a violation be written from the source alone,
+        -- without knowing what the author meant? Yes: it is a lint rule and
+        -- prose is the wrong home anywhere, so the agent writes the lint, the
+        -- test or the gate script and records nothing. No: it is judgment
+        -- and prose is right. Neither, because the code is shaped wrong
+        -- rather than a rule existing: it is a smell, and the fix is a
+        -- refactor, not a sentence.
+
+    @guarantee RecordingCasesAreListed
+        -- The agent records when the user stated a preference that is not
+        -- already in CLAUDE.md, when it built a landscape understanding of a
+        -- codebase area worth sharing, when it found a convention that
+        -- applies broadly and cannot be seen from reading the code, when a
+        -- workflow pattern solved a cross-repo or cross-task problem, or
+        -- when the epic or project has a procedural step every agent working
+        -- there should follow.
+
+    @guarantee RecordingDetailIsReadFirst
+        -- Before calling record_learning the agent reads
+        -- references/recording.md: what not to record, the kinds and scopes
+        -- and how to write the one-sentence summary. The detail is read at
+        -- the point of use, so the skill's body stays short.
+
+    @guarantee ExcludedCasesAreNeverRecorded
+        -- The agent records none of: code patterns readable from the source,
+        -- what CLAUDE.md, the README or existing docs say, anything every
+        -- session already sees (the dispatch prompt, a loaded skill, the
+        -- operator's memory index — a copy takes an injection slot from an
+        -- entry the agent does not have, and its helped ratings prove
+        -- nothing), git history, a debugging fix that is in the commit,
+        -- anything too specific to generalise, how it fixed one specific problem,
+        -- or a generic language idiom
+        -- not tied to this repo.
+
+    @guarantee KindScopeAndSummaryFollowTheRecordingFile
+        -- references/recording.md picks the kind from a table, picks the
+        -- scope from a table (omit scope_ref except for a family of repos
+        -- sharing a parent directory; repo for code conventions, user for
+        -- workflow preferences; never a task scope), and fixes the summary
+        -- as one sentence about behaviour, leading with what a future agent
+        -- should do differently. The tool checks none of this beyond shape.
+
+    @guarantee NoEntryNamesImplementation
+        -- An entry names no function, type, macro, fixture, test or file
+        -- behind a behaviour, bare names included, because a refactor
+        -- invalidates a name with nothing to re-check it. record_learning
+        -- rejects only the shapes prose never produces, so a successful call
+        -- is not approval. A stable MCP tool name, a root manifest or a spec
+        -- file is fine. A fact worth stating precisely goes in the Allium
+        -- spec or a doc comment.
+
+    @guarantee ProceduralEntriesNameWhereTheyStop
+        -- A procedural entry's detail names the case where the agent stops
+        -- following the entry and asks a human. record_learning enforces
+        -- only that the detail is present.
+}
