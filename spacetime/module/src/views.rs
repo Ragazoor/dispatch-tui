@@ -60,6 +60,9 @@ pub trait StoreReads {
     fn hosts_owned_by(&self, owner: &str) -> Vec<Host>;
     fn settings_of(&self, host: &str) -> Vec<Setting>;
     fn usage_events_recorded_by(&self, who: &str) -> Vec<UsageEvent>;
+    fn archived_task(&self, id: i64) -> Option<ArchivedTask>;
+    fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<ArchivedTask>;
+    fn archived_tasks_owned_by(&self, who: &str) -> Vec<ArchivedTask>;
 }
 
 /// `StoreReads` over a context whose `db` is a table set: the reducers' and the
@@ -280,6 +283,23 @@ macro_rules! impl_store_reads {
                 self.db
                     .usage_events()
                     .recorded_by()
+                    .filter(&who.to_string())
+                    .collect()
+            }
+            fn archived_task(&self, id: i64) -> Option<ArchivedTask> {
+                self.db.archived_tasks().id().find(id)
+            }
+            fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<ArchivedTask> {
+                self.db
+                    .archived_tasks()
+                    .workspace_id()
+                    .filter(&workspace_id)
+                    .collect()
+            }
+            fn archived_tasks_owned_by(&self, who: &str) -> Vec<ArchivedTask> {
+                self.db
+                    .archived_tasks()
+                    .owner()
                     .filter(&who.to_string())
                     .collect()
             }

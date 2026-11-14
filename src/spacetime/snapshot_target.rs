@@ -146,6 +146,7 @@ pub(super) fn key_columns(table: SharedTable) -> &'static [&'static str] {
         | SharedTable::LearningVerdicts
         | SharedTable::UsageEvents
         | SharedTable::RetiredFeedItems
+        | SharedTable::ArchivedTasks
         | SharedTable::WorkPackages
         | SharedTable::WorkPackageLinks
         | SharedTable::Workspaces

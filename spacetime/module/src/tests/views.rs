@@ -25,6 +25,7 @@ struct Store {
     settings: Vec<Setting>,
     workspaces: Vec<Workspace>,
     usage_events: Vec<UsageEvent>,
+    archived_tasks: Vec<ArchivedTask>,
 }
 
 fn keep<T: Clone>(rows: &[T], f: impl Fn(&T) -> bool) -> Vec<T> {
@@ -142,6 +143,15 @@ impl StoreReads for Store {
     }
     fn usage_events_recorded_by(&self, who: &str) -> Vec<UsageEvent> {
         keep(&self.usage_events, |e| e.recorded_by == who)
+    }
+    fn archived_task(&self, id: i64) -> Option<ArchivedTask> {
+        self.archived_tasks.iter().find(|a| a.id == id).cloned()
+    }
+    fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<ArchivedTask> {
+        keep(&self.archived_tasks, |a| a.workspace_id == workspace_id)
+    }
+    fn archived_tasks_owned_by(&self, who: &str) -> Vec<ArchivedTask> {
+        keep(&self.archived_tasks, |a| a.owner == who)
     }
 }
 

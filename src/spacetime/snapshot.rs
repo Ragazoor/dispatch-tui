@@ -37,8 +37,9 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// `work_package_links`, the eighteenth and nineteenth, once more; `agents`
 /// and `handed_out_agent_names`, the twentieth and twenty-first, again;
 /// `learning_verdicts`, the twenty-second, once more; `user_profiles`,
-/// `workspaces` and `memberships`, the twenty-third to twenty-fifth, again).
-pub const SHARED_TABLE_COUNT: usize = 25;
+/// `workspaces` and `memberships`, the twenty-third to twenty-fifth, again;
+/// `archived_tasks`, the twenty-sixth, once more).
+pub const SHARED_TABLE_COUNT: usize = 26;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -72,6 +73,7 @@ pub enum SharedTable {
     LearningVerdicts,
     UsageEvents,
     RetiredFeedItems,
+    ArchivedTasks,
     WorkPackages,
     WorkPackageLinks,
     Agents,
@@ -103,6 +105,7 @@ impl SharedTable {
         SharedTable::LearningVerdicts,
         SharedTable::UsageEvents,
         SharedTable::RetiredFeedItems,
+        SharedTable::ArchivedTasks,
         SharedTable::WorkPackages,
         SharedTable::WorkPackageLinks,
         SharedTable::Agents,
@@ -132,6 +135,7 @@ impl SharedTable {
             SharedTable::LearningVerdicts => "learning_verdicts",
             SharedTable::UsageEvents => "usage_events",
             SharedTable::RetiredFeedItems => "retired_feed_items",
+            SharedTable::ArchivedTasks => "archived_tasks",
             SharedTable::WorkPackages => "work_packages",
             SharedTable::WorkPackageLinks => "work_package_links",
             SharedTable::Agents => "agents",
@@ -175,6 +179,9 @@ impl SharedTable {
             // A link's id is derived (`"<package>/<kind>/<item>"`), like a
             // subscription's: nothing generated, nothing to burn.
             SharedTable::WorkPackageLinks
+            // A record keeps its task's id: the TASK sequence handed it out,
+            // and the burn passes that sequence over it (`BurnIdSequences`).
+            | SharedTable::ArchivedTasks
             // A ledger row is its name.
             | SharedTable::HandedOutAgentNames
             // A profile is its identity, minted by the store.
@@ -205,6 +212,7 @@ impl SharedTable {
             SharedTable::Tasks => &["auto_run_plan", "stop_pending", "phoenix"],
             SharedTable::Epics => &["auto_dispatch", "group_by_repo", "feed_append_only"],
             SharedTable::UserProfiles => &["is_super_admin"],
+            SharedTable::ArchivedTasks => &["private"],
             // `todos` is dumped as always-empty since #4970, so it never
             // passes through the SQLite read that applies this list.
             SharedTable::Todos
@@ -367,6 +375,9 @@ impl SharedTable {
             // `retired_feed_items.feed_epic_id` is already required on both
             // sides — nothing here to sentinel.
             | SharedTable::RetiredFeedItems
+            // Only ever in the store, so nothing converts it to or from a
+            // local row: its sentinels stay as the module wrote them.
+            | SharedTable::ArchivedTasks
             | SharedTable::WorkPackageLinks
             | SharedTable::HandedOutAgentNames
             | SharedTable::UserProfiles
@@ -477,6 +488,7 @@ impl SharedTable {
             | SharedTable::LearningVerdicts
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
+            | SharedTable::ArchivedTasks
             | SharedTable::WorkPackages
             | SharedTable::WorkPackageLinks
             | SharedTable::Agents
@@ -653,6 +665,38 @@ impl Snapshot {
 
     pub fn highest_id(&self, table: SharedTable) -> i64 {
         self.extract(table).map_or(0, TableExtract::highest_id)
+    }
+
+    /// The id `table`'s counter must pass after a restore
+    /// (`spacetime-seed.allium: BurnIdSequences`): its own highest id, and for
+    /// `tasks` every archived task's id too, since an archived task keeps the
+    /// id its row had and that id must never be handed out again.
+    pub fn burn_ceiling(&self, table: SharedTable) -> i64 {
+        let own = self.highest_id(table);
+        if table != SharedTable::Tasks {
+            return own;
+        }
+        let archived = self
+            .extract(SharedTable::ArchivedTasks)
+            .and_then(|e| {
+                e.rows
+                    .iter()
+                    .filter_map(|row| row.get("id").and_then(serde_json::Value::as_i64))
+                    .max()
+            })
+            .unwrap_or(0);
+        own.max(archived)
+    }
+
+    /// The rows that claim [`Self::burn_ceiling`]'s ids: `tasks` counts its
+    /// archived records too.
+    pub fn rows_claiming_ids(&self, table: SharedTable) -> usize {
+        let rows = |t| self.extract(t).map_or(0, |e| e.rows.len());
+        if table == SharedTable::Tasks {
+            rows(SharedTable::Tasks) + rows(SharedTable::ArchivedTasks)
+        } else {
+            rows(table)
+        }
     }
 
     /// Rows in a deterministic order, for comparing two snapshots. A dump does

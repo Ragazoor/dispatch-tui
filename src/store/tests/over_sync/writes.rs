@@ -658,6 +658,23 @@ impl ReducerCaller for RecordingCaller {
         })
     }
 
+    async fn read_archived_task(
+        &self,
+        _id: TaskId,
+    ) -> anyhow::Result<Option<bindings::ArchivedTask>> {
+        self.record(Sent::Workspace("read_archived_task"))?;
+        Ok(None)
+    }
+
+    async fn list_archived_tasks(
+        &self,
+        _epic_id: Option<crate::models::EpicId>,
+        _repo_paths: Vec<String>,
+    ) -> anyhow::Result<Vec<bindings::ArchivedTask>> {
+        self.record(Sent::Workspace("list_archived_tasks"))?;
+        Ok(vec![])
+    }
+
     async fn subagent_start(
         &self,
         task_id: TaskId,

@@ -1,10 +1,10 @@
 use anyhow::Result;
 
 use crate::models::{
-    Agent, EpicId, FeedItem, NotificationWrite, StopOutcome, SubStatus, SubagentDrain, Task,
-    TaskId, TaskStatus, UserPromptOutcome,
+    Agent, ArchivedTask, EpicId, FeedItem, NotificationWrite, StopOutcome, SubStatus,
+    SubagentDrain, Task, TaskId, TaskStatus, UserPromptOutcome,
 };
-use crate::sync::{encode, ReducerOutcome};
+use crate::sync::{decode, encode, ReducerOutcome};
 
 use super::super::{
     CreateTaskRequest, DeleteBlocker, DeleteCheck, FeedIngestOutcome, Store, TaskCrud, TaskPatch,
@@ -34,6 +34,31 @@ impl super::super::TaskRead for Store {
 
     async fn find_task_by_plan(&self, plan: &str) -> Option<Task> {
         self.rows.task_by_plan(plan)
+    }
+
+    async fn archived_task(&self, id: TaskId) -> Result<Option<ArchivedTask>> {
+        match self.caller.read_archived_task(id).await? {
+            None => Ok(None),
+            Some(row) => Ok(Some(decode::archived_task(&row)?)),
+        }
+    }
+
+    async fn archived_tasks(
+        &self,
+        epic_id: Option<EpicId>,
+        repo_paths: &[String],
+    ) -> Result<Vec<ArchivedTask>> {
+        let rows = self
+            .caller
+            .list_archived_tasks(epic_id, repo_paths.to_vec())
+            .await?;
+        let mut records = rows
+            .iter()
+            .map(decode::archived_task)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        // `ListArchivedTasksViaMcp`: newest archived first, ties by id descending.
+        records.sort_by(|a, b| b.archived_at.cmp(&a.archived_at).then(b.id.0.cmp(&a.id.0)));
+        Ok(records)
     }
 
     async fn bookmarked_task_ids(&self) -> Vec<TaskId> {

@@ -28,6 +28,9 @@ pub(crate) async fn handle_resume_task(
         Err(resp) => return resp,
     };
     let task_id = parsed.task_id;
+    if let Some(refused) = super::archived::archived_refusal(state, &id, task_id, "resumed").await {
+        return refused;
+    }
     let task = match state.task_svc.get_task(task_id).await {
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),

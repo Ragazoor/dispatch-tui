@@ -17,7 +17,9 @@ use super::{
 };
 
 impl MemoryReducerCaller {
-    /// Delete every `task_subagents` row for `task_id`, and detach/cascade its learnings.
+    /// Delete every `task_subagents` row for `task_id`. Learnings are not
+    /// touched here: a person's delete archives and keeps them, and only the
+    /// feed stale delete detaches them, itself.
     /// Mirrors the module's `delete_task_side_effects` — called at every
     /// point that deletes a task row, exactly the set of call sites the
     /// module itself uses (`delete_task`, `batch_delete`'s task pass,
@@ -29,7 +31,6 @@ impl MemoryReducerCaller {
         self.clear_task_marks(tables, task_id);
         // agents.allium: AgentsGoWithTheirTask.
         module::delete_agents_of(&mut self.agent_store(tables), task_id);
-        self.detach_learnings_from_task(tables, task_id);
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_TASK, task_id);
         // store-split.allium: DeletingATaskFailsItsOpenRequest (D8).
         self.fail_open_dispatch_requests_of(tables, task_id, module::DISPATCH_REASON_TASK_DELETED);

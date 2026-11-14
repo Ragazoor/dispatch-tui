@@ -286,6 +286,9 @@ fn delete_feed_task(ctx: &ReducerContext, task: Task, ingest_host: &str) {
     let window = session_window(&AgentTables(ctx), task.id);
     ctx.db.tasks().id().delete(task.id);
     delete_task_side_effects(ctx, task.id);
+    // Not archived (`core.allium: ArchivedTask`), so nothing keeps the
+    // learning links: detach them as a delete always did.
+    detach_learnings_from_task(ctx, task.id);
     // feeds.allium / store-split.allium:
     // StaleDeleteRequestsTeardownOnTheHoldingHost. After the side effects,
     // so the new row is not swept with the task's own request rows.

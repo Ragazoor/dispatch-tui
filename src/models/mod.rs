@@ -60,6 +60,8 @@ pub use learnings::*;
 
 pub mod review;
 pub use review::*;
+pub mod archived;
+pub use archived::ArchivedTask;
 pub mod tasks;
 pub use tasks::*;
 

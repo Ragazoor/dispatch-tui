@@ -30,10 +30,10 @@
 use chrono::{DateTime, Utc};
 
 use crate::models::{
-    Agent, AgentEndReason, AgentId, AgentState, BackgroundWork, DispatchMode, DispatchOrigin,
-    DispatchRequest, DispatchRequestId, DispatchRequestState, Epic, EpicId, EpicOrigin,
-    FeedRequest, FeedRequestId, FeedRequestKind, FeedRequestState, FeedRole, Learning, LearningId,
-    LearningKind, LearningRetrieval, LearningScope, LearningStatus, RetrievalSource,
+    Agent, AgentEndReason, AgentId, AgentState, ArchivedTask, BackgroundWork, DispatchMode,
+    DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState, Epic, EpicId,
+    EpicOrigin, FeedRequest, FeedRequestId, FeedRequestKind, FeedRequestState, FeedRole, Learning,
+    LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus, RetrievalSource,
     SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus, Task,
     TaskId, TaskModel, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, UsageSummary,
     WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
@@ -202,7 +202,12 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
 /// produce, so it fails rather than being coerced to `None` — for the same reason
 /// every decoder here refuses an inconsistent pair.
 fn task_url(row: &bindings::Task) -> Result<Option<TaskUrl>, String> {
-    match (text(&row.url), text(&row.url_type)) {
+    url_pair(&row.url, &row.url_type)
+}
+
+/// [`task_url`]'s rule over the two raw columns, shared with the archive.
+fn url_pair(url: &str, url_type: &str) -> Result<Option<TaskUrl>, String> {
+    match (text(url), text(url_type)) {
         (None, None) => Ok(None),
         (Some(url), Some(raw)) => {
             let url_type =
@@ -211,6 +216,35 @@ fn task_url(row: &bindings::Task) -> Result<Option<TaskUrl>, String> {
         }
         (url, url_type) => Err(format!("inconsistent url={url:?} url_type={url_type:?}")),
     }
+}
+
+/// The store's `archived_tasks` record (`core.allium: ArchivedTask`), read
+/// through the `read_archived_task`/`list_archived_tasks` procedures.
+pub fn archived_task(row: &bindings::ArchivedTask) -> Decoded<ArchivedTask> {
+    const T: &str = "archived_tasks";
+    let refuse = |detail: String| DecodeError::new(T, row.id, detail);
+    let tag = match text(&row.tag) {
+        None => None,
+        Some(raw) => {
+            Some(TaskTag::parse(raw).ok_or_else(|| refuse(format!("unknown tag {raw:?}")))?)
+        }
+    };
+    Ok(ArchivedTask {
+        id: TaskId(row.id),
+        title: row.title.clone(),
+        description: row.description.clone(),
+        repo_path: row.repo_path.clone(),
+        base_branch: row.base_branch.clone(),
+        tag,
+        url: url_pair(&row.url, &row.url_type).map_err(refuse)?,
+        plan_path: text(&row.plan_path).map(str::to_owned),
+        epic_id: id(row.epic_id).map(EpicId),
+        epic_title: text(&row.epic_title).map(str::to_owned),
+        agent_name: text(&row.agent_name).map(str::to_owned),
+        created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
+        completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
+        archived_at: required_timestamp(T, row.id, "archived_at", &row.archived_at)?,
+    })
 }
 
 /// A malformed window name is dropped, not refused.

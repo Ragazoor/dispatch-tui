@@ -127,6 +127,9 @@ struct Tables {
     poll_owners: BTreeMap<i64, module::PollOwner>,
     hosts: BTreeMap<String, module::Host>,
     retired_feed_items: BTreeMap<i64, module::RetiredFeedItem>,
+    /// Not mirrored into `SharedRows`: no board subscribes to the archive; it
+    /// is read through the `read_archived_task`/`list_archived_tasks` procedures.
+    archived_tasks: BTreeMap<i64, module::ArchivedTask>,
     learnings: BTreeMap<i64, module::Learning>,
     learning_retrievals: BTreeMap<i64, module::LearningRetrieval>,
     /// Not mirrored into `SharedRows`: the board never reads a verdict, only
@@ -755,6 +758,18 @@ impl ReducerCaller for MemoryReducerCaller {
             anyhow::bail!("injected transport failure: check_deletable was never sent");
         }
         Ok(self.apply_check_deletable(task_ids, epic_ids))
+    }
+
+    async fn read_archived_task(&self, id: TaskId) -> Result<Option<bindings::ArchivedTask>> {
+        Ok(self.apply_read_archived_task(id))
+    }
+
+    async fn list_archived_tasks(
+        &self,
+        epic_id: Option<EpicId>,
+        repo_paths: Vec<String>,
+    ) -> Result<Vec<bindings::ArchivedTask>> {
+        Ok(self.apply_list_archived_tasks(epic_id, repo_paths))
     }
 
     async fn subagent_start(

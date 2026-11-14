@@ -28,7 +28,7 @@ Agreed with the operator on 2026-11-14.
 - **Learnings stay linked.** `source_task_id` keeps the archived id; retrieval
   and verdict rows are kept. (Feed stale deletes still detach and cascade.)
 - **Read path.** Boards do not subscribe to the archive. Two procedures read it
-  on demand: `archived_task(id)` and `archived_tasks(filter)`.
+  on demand: `read_archived_task(id)` and `list_archived_tasks(filter)`.
 - **MCP.** `get_task` falls back to the archive and marks the record archived.
   `list_tasks` takes `archived: true` with the usual filters. `resume_task`,
   `dispatch_task`, `update_tasks` on an archived id refuse with "archived".

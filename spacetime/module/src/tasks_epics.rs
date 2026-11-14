@@ -589,14 +589,11 @@ pub(crate) fn patch_task_row(
     Ok(())
 }
 
-/// Delete a task and everything that only referred to it.
+/// Delete a task and everything that only referred to it, keeping a
+/// read-only archive record of it (`tasks.allium: ArchiveDeletedTask`).
 ///
-/// Also detaches this task's learnings (`source_task_id` set to `None`, a
-/// learning outlives its source as orphaned provenance) and cascades its
-/// `learning_retrievals` rows — reproducing, as explicit reducer logic, the
-/// two SQLite `ON DELETE` clauses `learnings.source_task_id` and
-/// `learning_retrievals.task_id` used to carry
-/// (`docs/specs/learnings.allium`'s Storage Backend section).
+/// The task's learnings stay linked to the archived id: `source_task_id`, its
+/// `learning_retrievals` and its `learning_verdicts` are kept.
 ///
 /// `tasks.allium: DeleteTask`'s `requires: task.status = done` is checked
 /// again HERE, over this row's true status, not only by the TUI's
@@ -615,6 +612,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     }
     let epic_id = row.epic_id;
     retire_task_if_feed_backed(ctx, epic_id, &row.external_id);
+    archive_task_row(ctx, &row);
     ctx.db.tasks().id().delete(id);
     delete_task_side_effects(ctx, id);
     recalculate_epic_chain(ctx, epic_id);
@@ -622,7 +620,11 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 }
 
 /// Every non-row side effect a task removal owes, beyond deleting the `tasks`
-/// row itself: live-session state, learning detachment/retrieval-cascade, failing the task's open requests and deleting all of its request rows. SQLite gets most of
+/// row itself: live-session state, failing the task's open requests and
+/// deleting all of its request rows. NOT the learning links: a person's delete
+/// archives the task and keeps them (`tasks.allium: ArchiveDeletedTask`), so
+/// only `feed.rs`'s `delete_feed_task`, which archives nothing, detaches them
+/// itself. SQLite gets most of
 /// this for free from `ON DELETE CASCADE`/`SET NULL`; the module has no such
 /// mechanism, so every path that deletes a task row explicitly reproduces it
 /// by calling here — `delete_task` itself, `batch_delete`'s plain-task pass,
@@ -634,7 +636,6 @@ pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     clear_task_marks(ctx, task_id);
     // agents.allium: AgentsGoWithTheirTask. That frees their names (A4).
     delete_agents_of(&mut AgentTables(ctx), task_id);
-    detach_learnings_from_task(ctx, task_id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
     // store-split.allium: DeletingATaskFailsItsOpenRequest (D8).
     fail_open_dispatch_requests_of(ctx, task_id, DISPATCH_REASON_TASK_DELETED);
@@ -1230,6 +1231,7 @@ pub fn batch_delete(
         };
         let epic_id = row.epic_id;
         retire_task_if_feed_backed(ctx, epic_id, &row.external_id);
+        archive_task_row(ctx, &row);
         ctx.db.tasks().id().delete(id);
         delete_task_side_effects(ctx, id);
         recalc.insert(epic_id);
@@ -1333,7 +1335,9 @@ pub(crate) const MAX_EPIC_DEPTH: usize = 64;
 /// validated delete.
 ///
 /// Each removed task owes [`delete_task_side_effects`] the same as any other
-/// task removal — see that function's doc comment.
+/// task removal — see that function's doc comment — and is archived first
+/// (`tasks.allium: ArchiveDeletedTask`): every caller is a person's delete,
+/// or the empty repo-group cleanup, whose subtree holds no task.
 pub(crate) fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
     if depth > MAX_EPIC_DEPTH {
         return;
@@ -1348,6 +1352,8 @@ pub(crate) fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
         delete_epic_subtree(ctx, child.id, depth + 1);
     }
     for task in ctx.db.tasks().epic_id().filter(&id).collect::<Vec<_>>() {
+        // Before the row, its agents and (above us) its epic chain go.
+        archive_task_row(ctx, &task);
         ctx.db.tasks().id().delete(task.id);
         delete_task_side_effects(ctx, task.id);
     }

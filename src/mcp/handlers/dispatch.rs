@@ -183,7 +183,7 @@ or failure, then a count.",
         (tasks::update_tasks_schema());
 
     async read_only "get_task" => tasks::handle_get_task,
-        "Get the details of a task by ID.",
+        "Get the details of a task by ID, including a deleted (archived) one.",
         {
             "type": "object",
             "properties": {
@@ -308,6 +308,10 @@ usually the right answer.",
                 "bookmarked": {
                     "type": "boolean",
                     "description": "true lists only tasks the board's person has bookmarked; false only those they have not. Combines with the other filters and does not widen your epic scope. A bookmarked task's row says 'bookmarked' after its title."
+                },
+                "archived": {
+                    "type": "boolean",
+                    "description": "true lists archived (deleted) tasks instead of live ones, newest first, with their title, epic, agent and a description preview. epic_id, repo_paths, base_branch, query and limit apply; status, recursive and bookmarked are rejected. Defaults to false."
                 }
             }
         };

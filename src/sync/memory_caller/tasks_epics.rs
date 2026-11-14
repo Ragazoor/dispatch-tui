@@ -232,11 +232,27 @@ impl MemoryReducerCaller {
             .map(|t| t.id)
             .collect();
         for task_id in tasks {
+            self.archive_task_row(tables, task_id);
             self.delete_task_row(tables, task_id);
             self.delete_task_side_effects(tables, task_id);
         }
         self.delete_epic_row(tables, id);
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_EPIC, id);
+    }
+
+    /// Mirrors the module's `archive_task_row` (`tasks.allium:
+    /// ArchiveDeletedTask`): the record is built by the module's own
+    /// `archive_record`, so the two cannot disagree about its fields. Called
+    /// before the row and its agents go.
+    pub(super) fn archive_task_row(&self, tables: &mut Tables, task_id: i64) {
+        if tables.archived_tasks.contains_key(&task_id) {
+            return;
+        }
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
+            return;
+        };
+        let record = module::archive_record(&*tables, &task, self.now(), self.sender.clone());
+        tables.archived_tasks.insert(task_id, record);
     }
 
     /// Mirrors the module's `delete_epic_subtree_with_feed_cleanup`.
@@ -588,6 +604,7 @@ impl MemoryReducerCaller {
         }
         let epic_id = row.epic_id;
         self.retire_task_if_feed_backed(&mut tables, epic_id, &row.external_id);
+        self.archive_task_row(&mut tables, id.0);
         self.delete_task_row(&mut tables, id.0);
         self.delete_task_side_effects(&mut tables, id.0);
         self.recalculate_epic_chain(&mut tables, epic_id);
@@ -946,6 +963,35 @@ impl MemoryReducerCaller {
         }
     }
 
+    /// Mirrors the module's `read_archived_task` procedure, through the
+    /// module's own `archived_task_for`.
+    pub(super) fn apply_read_archived_task(&self, id: TaskId) -> Option<bindings::ArchivedTask> {
+        let operator = !self.scope().on();
+        let tables = self.lock();
+        module::archived_task_for(&*tables, operator, &self.sender, id.0).map(archived_binding)
+    }
+
+    /// Mirrors the module's `list_archived_tasks` procedure, through the
+    /// module's own `archived_tasks_for`.
+    pub(super) fn apply_list_archived_tasks(
+        &self,
+        epic_id: Option<EpicId>,
+        repo_paths: Vec<String>,
+    ) -> Vec<bindings::ArchivedTask> {
+        let operator = !self.scope().on();
+        let tables = self.lock();
+        module::archived_tasks_for(
+            &*tables,
+            operator,
+            &self.sender,
+            epic_id.map_or(0, |e| e.0),
+            &repo_paths,
+        )
+        .into_iter()
+        .map(archived_binding)
+        .collect()
+    }
+
     /// Mirrors the module's `batch_delete` (task #4971): validate every
     /// selected epic's whole subtree and every selected plain task FIRST,
     /// mutating nothing until all of them pass, then perform every delete
@@ -1006,6 +1052,7 @@ impl MemoryReducerCaller {
             };
             recalc.insert(row.epic_id);
             self.retire_task_if_feed_backed(&mut tables, row.epic_id, &row.external_id);
+            self.archive_task_row(&mut tables, id);
             self.delete_task_row(&mut tables, id);
             self.delete_task_side_effects(&mut tables, id);
         }
@@ -1013,5 +1060,34 @@ impl MemoryReducerCaller {
             self.recalculate_epic_chain(&mut tables, epic_id);
         }
         Ok(ReducerOutcome::Applied(vec![]))
+    }
+}
+
+/// The module's record as the client binding the procedures return.
+fn archived_binding(a: module::ArchivedTask) -> bindings::ArchivedTask {
+    bindings::ArchivedTask {
+        id: a.id,
+        title: a.title,
+        description: a.description,
+        repo_path: a.repo_path,
+        base_branch: a.base_branch,
+        tag: a.tag,
+        labels: a.labels,
+        url: a.url,
+        url_type: a.url_type,
+        plan_path: a.plan_path,
+        external_id: a.external_id,
+        created_by: a.created_by,
+        owner: a.owner,
+        created_at: a.created_at,
+        completed_at: a.completed_at,
+        epic_id: a.epic_id,
+        epic_title: a.epic_title,
+        agent_name: a.agent_name,
+        workspace_id: a.workspace_id,
+        private: a.private,
+        private_holder: a.private_holder,
+        archived_at: a.archived_at,
+        archived_by: a.archived_by,
     }
 }

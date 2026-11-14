@@ -431,6 +431,25 @@ pub fn seed_retired_feed_items(
     Ok(())
 }
 
+/// Restore the archive (`core.allium: ArchivedTask`). Each record keeps the id
+/// its task had; the restore's burn passes the task sequence over these ids
+/// too (`spacetime-seed.allium: BurnIdSequences`).
+#[spacetimedb::reducer]
+pub fn seed_archived_tasks(ctx: &ReducerContext, rows: Vec<ArchivedTask>) -> Result<(), String> {
+    require_restore_authority(ctx)?;
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_archived_tasks needs each row's real id".into());
+        }
+        if ctx.db.archived_tasks().id().find(row.id).is_some() {
+            ctx.db.archived_tasks().id().update(row);
+        } else {
+            ctx.db.archived_tasks().insert(row);
+        }
+    }
+    Ok(())
+}
+
 /// Refuse a visibility other than `public` or `private`, so a snapshot cannot
 /// plant a row the read predicate has no rule for.
 fn validate_visibility(kind: &str, id: i64, visibility: &str) -> Result<(), String> {

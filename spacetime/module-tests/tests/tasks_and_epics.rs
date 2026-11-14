@@ -266,31 +266,6 @@ fn a_task_created_in_done_is_stamped_as_completed() {
 }
 
 #[test]
-fn deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals() {
-    let store = Store::new();
-    let id = store.create("alice", user_task("source", "alice"));
-    store
-        .call("alice", |ctx| patch_task(ctx, id, status_patch("done")))
-        .expect("patch_task");
-    store
-        .call_as_scheduler(|ctx| {
-            seed_learnings(ctx, vec![blank_learning(1, "A learning", Some(id))])
-        })
-        .expect("seed_learnings");
-    store
-        .call_as_scheduler(|ctx| seed_learning_retrievals(ctx, vec![retrieval(1, id, 1)]))
-        .expect("seed_learning_retrievals");
-
-    store
-        .call("alice", |ctx| delete_task(ctx, id))
-        .expect("delete_task");
-
-    let learning = store.db().learnings().id().find(1).expect("it survives");
-    assert_eq!(learning.source_task_id, None, "detached from its task");
-    assert_eq!(store.db().learning_retrievals().iter().count(), 0);
-}
-
-#[test]
 fn deleting_a_learning_cascades_its_retrievals_and_refuses_when_missing() {
     let store = Store::new();
     store

@@ -379,6 +379,19 @@ pub trait ReducerCaller: Send + Sync {
         epic_ids: Vec<EpicId>,
     ) -> Result<bindings::DeleteCheck>;
 
+    /// One archived task the caller may see (`read_archived_task`), or
+    /// `None`. A read, not a reducer: no board subscribes to the archive
+    /// (`core.allium: ArchivedTask`).
+    async fn read_archived_task(&self, id: TaskId) -> Result<Option<bindings::ArchivedTask>>;
+
+    /// The caller-visible archived tasks in `epic_id` (`None` for any) and
+    /// `repo_paths` (empty for any) (`list_archived_tasks`).
+    async fn list_archived_tasks(
+        &self,
+        epic_id: Option<EpicId>,
+        repo_paths: Vec<String>,
+    ) -> Result<Vec<bindings::ArchivedTask>>;
+
     // Agent session state (Phase 6b). Every one of these acts on a row whose
     // id the caller already has, so what needs reading back is a FACT off
     // that row rather than an id to match by content — but unlike the three

@@ -123,6 +123,18 @@ pub trait TaskRead: Send + Sync {
     /// Bookmark`), ascending. Drives the board's bookmark mark and the MCP
     /// `bookmarked` line and filter.
     async fn bookmarked_task_ids(&self) -> Vec<TaskId>;
+    /// One archived task the caller may see (`core.allium: ArchivedTask`),
+    /// asked of the STORE: the board holds no archived records. `Ok(None)` is
+    /// both "never archived" and "not yours to see"; `Err` means the store
+    /// could not be asked.
+    async fn archived_task(&self, id: TaskId) -> Result<Option<crate::models::ArchivedTask>>;
+    /// The caller-visible archived tasks in `epic_id` (`None` for any) and
+    /// `repo_paths` (empty for any), newest archived first.
+    async fn archived_tasks(
+        &self,
+        epic_id: Option<EpicId>,
+        repo_paths: &[String],
+    ) -> Result<Vec<crate::models::ArchivedTask>>;
 }
 
 /// Reading the agent rows the board's subscription holds, current and ended

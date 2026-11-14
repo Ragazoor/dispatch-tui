@@ -24,6 +24,11 @@ pub(crate) async fn handle_dispatch_task(
         Err(resp) => return resp,
     };
     let task_id = parsed.task_id;
+    if let Some(refused) =
+        super::archived::archived_refusal(state, &id, task_id, "dispatched").await
+    {
+        return refused;
+    }
 
     let task = match state.task_svc.get_task(task_id).await {
         Ok(t) => t,

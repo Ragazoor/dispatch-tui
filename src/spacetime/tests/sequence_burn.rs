@@ -273,3 +273,38 @@ async fn burning_before_loading_completes() {
         "the burn's throwaway rows were not cleaned up"
     );
 }
+
+/// An archived task keeps the id its row had (`core.allium: ArchivedTask`),
+/// so a restore passes the TASK counter over archived ids as well, even when
+/// they are above every live task's (`spacetime-seed.allium: BurnIdSequences`).
+#[tokio::test]
+async fn a_task_created_after_a_restore_never_takes_an_archived_id() {
+    use serde_json::json;
+    let snapshot = crate::spacetime::Snapshot::new(
+        SharedTable::ALL
+            .iter()
+            .copied()
+            .map(|table| {
+                let rows = match table {
+                    SharedTable::Tasks => vec![vec![("id", json!(3))]],
+                    SharedTable::ArchivedTasks => vec![vec![("id", json!(9000))]],
+                    _ => vec![],
+                };
+                super::module_extract(table, &rows)
+            })
+            .collect(),
+    );
+    assert_eq!(snapshot.burn_ceiling(SharedTable::Tasks), 9000);
+
+    let store = super::store_for(&snapshot);
+    restore(&store, &snapshot).await.unwrap();
+
+    let fresh = store
+        .insert_generating_id(SharedTable::Tasks)
+        .await
+        .unwrap();
+    assert!(
+        fresh > 9000,
+        "a new task got id {fresh}, an archived task's id or below"
+    );
+}

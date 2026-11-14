@@ -283,6 +283,55 @@ pub struct RetiredFeedItem {
     pub retired_at: String,
 }
 
+/// A read-only record of a task a person deleted: soft delete
+/// (`core.allium: ArchivedTask`, `tasks.allium: ArchiveDeletedTask`).
+///
+/// Written by [`crate::archive_task_row`] in the same reducer that deletes the
+/// task row. Never subscribed by a board and never public: reads go through
+/// the `read_archived_task`/`list_archived_tasks` procedures, which apply
+/// [`crate::archived_task_visible_to`]. Every absent-able column is a `""`/`0`
+/// sentinel for the reason the module header gives.
+#[spacetimedb::table(accessor = archived_tasks)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArchivedTask {
+    /// The deleted task's own id. Not generated: the task sequence already
+    /// handed it out, and never hands it out again.
+    #[primary_key]
+    pub id: i64,
+    pub title: String,
+    pub description: String,
+    pub repo_path: String,
+    pub base_branch: String,
+    pub tag: String,
+    pub labels: String,
+    pub url: String,
+    pub url_type: String,
+    pub plan_path: String,
+    pub external_id: String,
+    pub created_by: String,
+    /// The owner of an epic-less task; `""` for one that sat in an epic.
+    /// Indexed: an epic-less record is listed by its owner.
+    #[index(btree)]
+    pub owner: String,
+    pub created_at: String,
+    pub completed_at: String,
+    /// The epic it sat in, `0` for none. That epic may since be gone.
+    pub epic_id: i64,
+    pub epic_title: String,
+    pub agent_name: String,
+    /// The epic's workspace at archive time, `0` for an epic-less task.
+    /// Indexed: an epic record is listed per workspace the caller belongs to.
+    #[index(btree)]
+    pub workspace_id: i64,
+    /// Whether the epic chain was private at archive time. A separate flag
+    /// because a private epic with no recorded creator has an empty holder,
+    /// which is "nobody", not "everyone".
+    pub private: bool,
+    pub private_holder: String,
+    pub archived_at: String,
+    pub archived_by: String,
+}
+
 /// DEAD TABLE, kept for the same reason `Task.live_shells`/
 /// `Task.oldest_live_shell_started_at` are: this store's migrations are
 /// append-only and there is no supported way to drop a table short of

@@ -237,8 +237,8 @@ pub(super) fn implausible_ceiling(snapshot: &Snapshot) -> Option<Refusal> {
         .copied()
         .filter(|t| t.generates_ids())
     {
-        let ceiling = snapshot.highest_id(table);
-        let rows = snapshot.extract(table).map_or(0, |e| e.rows.len()) as i64;
+        let ceiling = snapshot.burn_ceiling(table);
+        let rows = snapshot.rows_claiming_ids(table) as i64;
         if ceiling < 0 {
             return Some(Refusal::new(
                 RefusalReason::Incomplete,
@@ -276,7 +276,7 @@ pub(super) async fn burn_id_sequences(
         .filter(|t| t.generates_ids())
     {
         store
-            .advance_id_sequence_past(table, snapshot.highest_id(table))
+            .advance_id_sequence_past(table, snapshot.burn_ceiling(table))
             .await
             .map_err(RestoreError::Failed)?;
     }

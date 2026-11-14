@@ -895,6 +895,7 @@ pub(super) fn extract_created_task_id(resp: &JsonRpcResponse) -> crate::models::
     crate::models::TaskId(id_str.parse().expect("numeric id"))
 }
 
+mod archived;
 mod base_branch;
 mod epic_tree;
 mod mock_service;

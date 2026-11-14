@@ -298,5 +298,32 @@ fn memory_caller_serves_agents_like_the_real_module() {
         wait_for!(rows_real.agents().iter().all(|a| a.task_id != task));
         same_agents();
         assert!(rows_mem.agents().iter().all(|a| a.task_id != task));
+
+        // -- ArchiveDeletedTask: both keep the same record, agent name included --------
+        let mut real_record = real
+            .read_archived_task(task)
+            .await
+            .unwrap()
+            .expect("the store archived the deleted task");
+        let mut mem_record = mem
+            .read_archived_task(task)
+            .await
+            .unwrap()
+            .expect("the twin archived the deleted task");
+        assert!(!real_record.agent_name.is_empty(), "{real_record:?}");
+        assert!(!mem_record.agent_name.is_empty(), "{mem_record:?}");
+        // Each side stamps its own clock and draws its own agent name.
+        for record in [&mut real_record, &mut mem_record] {
+            record.archived_at.clear();
+            record.completed_at.clear();
+            record.agent_name.clear();
+        }
+        assert_eq!(real_record, mem_record);
+        let real_list = real.list_archived_tasks(None, vec![]).await.unwrap();
+        let mem_list = mem.list_archived_tasks(None, vec![]).await.unwrap();
+        assert_eq!(
+            real_list.iter().map(|a| a.id).collect::<Vec<_>>(),
+            mem_list.iter().map(|a| a.id).collect::<Vec<_>>()
+        );
     });
 }

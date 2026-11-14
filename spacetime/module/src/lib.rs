@@ -64,6 +64,7 @@ macro_rules! apply_patch {
 }
 
 mod agent;
+mod archive;
 mod agent_state;
 mod blanks;
 mod bookmark;
@@ -93,6 +94,7 @@ mod visibility;
 mod workspace;
 
 pub use agent::*;
+pub use archive::*;
 pub use agent_state::*;
 pub use blanks::*;
 pub use bookmark::*;

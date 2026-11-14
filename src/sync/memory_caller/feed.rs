@@ -249,6 +249,8 @@ impl MemoryReducerCaller {
         let window = module::session_window(&self.agent_store(tables), task.id);
         self.delete_task_row(tables, task.id);
         self.delete_task_side_effects(tables, task.id);
+        // Not archived, so the learning links go, as the module.
+        self.detach_learnings_from_task(tables, task.id);
         // StaleDeleteRequestsTeardownOnTheHoldingHost, as the module.
         self.write_teardown_request_if_owed(tables, &task, &window, ingest_host);
     }

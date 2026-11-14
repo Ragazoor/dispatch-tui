@@ -27,6 +27,9 @@ async fn handle_update_task(
     };
     let task_id = parsed.task_id;
     tracing::info!(task_id = task_id.0, status = ?parsed.status, "MCP update_tasks (one task)");
+    if let Some(refused) = super::archived::archived_refusal(state, &id, task_id, "changed").await {
+        return refused;
+    }
 
     // status="done" is a dedicated close-only path (MarkTaskDoneViaMcp,
     // mcp-task-tools.allium). Checked FIRST, against the raw parsed args —
@@ -479,6 +482,17 @@ pub(crate) async fn handle_get_task(
             let text = super::task_detail_text(state, &task).await;
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
+        // GetArchivedTaskViaMcp: an id with no live task may be archived.
+        Err(e @ crate::service::ServiceError::NotFound(_)) => {
+            match state.db.archived_task(parsed.task_id).await {
+                Ok(Some(record)) => {
+                    let text = super::archived::archived_detail_text(&record);
+                    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+                }
+                Ok(None) => service_err_to_response(id, e),
+                Err(read) => JsonRpcResponse::err(id, super::INTERNAL_ERROR, read.to_string()),
+            }
+        }
         Err(e) => service_err_to_response(id, e),
     }
 }
@@ -534,11 +548,36 @@ pub(crate) async fn handle_list_tasks(
     };
     tracing::info!(status = ?parsed.status, identity = ?identity, "MCP list_tasks");
 
+    if parsed.archived
+        && (parsed.status.is_some() || parsed.recursive || parsed.bookmarked.is_some())
+    {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            "status, recursive and bookmarked do not apply to archived tasks".to_string(),
+        );
+    }
+
     let (derived_epic_id, exclude_task_id) =
         match resolve_list_scope(state, &id, identity, &parsed).await {
             Ok(scope) => scope,
             Err(resp) => return resp,
         };
+
+    if parsed.archived {
+        return super::archived::list_archived(
+            state,
+            id,
+            super::archived::ArchivedFilter {
+                epic_id: parsed.epic_id.or(derived_epic_id),
+                repo_paths: parsed.repo_paths.unwrap_or_default(),
+                base_branch: parsed.base_branch,
+                query: parsed.query,
+                limit: parsed.limit,
+            },
+        )
+        .await;
+    }
 
     let status_filter: Option<Vec<TaskStatus>> = parsed.status.map(StatusFilter::into_vec);
     let epic_id = parsed.epic_id.or(derived_epic_id);

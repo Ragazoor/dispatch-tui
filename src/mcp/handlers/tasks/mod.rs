@@ -17,6 +17,7 @@ pub(super) use super::types::{
     JsonRpcResponse, StatusFilter, INTERNAL_ERROR, INVALID_PARAMS,
 };
 
+mod archived;
 mod crud;
 // `pub(super)` so the handler tests under `handlers::tests` can reach
 // `dispatched_text`, the success wording `dispatch_task` pins.
@@ -228,6 +229,10 @@ pub(super) struct ListTasksArgs {
     /// (false). Not a scope filter.
     #[serde(default)]
     pub(super) bookmarked: Option<bool>,
+    /// List archived (deleted) tasks instead of live ones
+    /// (`ListArchivedTasksViaMcp`).
+    #[serde(default)]
+    pub(super) archived: bool,
 }
 
 #[derive(Deserialize)]

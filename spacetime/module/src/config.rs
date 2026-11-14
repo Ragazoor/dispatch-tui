@@ -916,3 +916,29 @@ pub fn check_deletable(
     let operator = ctx.sender() == ctx.database_identity();
     ctx.with_tx(|tx| delete_check_for(tx, operator, &who, &task_ids, &epic_ids))
 }
+
+/// One archived task, when the caller may see it (`mcp-task-tools.allium:
+/// GetArchivedTaskViaMcp`). A procedure, not a view: no board subscribes to
+/// the archive, which grows without bound. Body is [`archived_task_for`].
+#[cfg(target_arch = "wasm32")]
+#[spacetimedb::procedure]
+pub fn read_archived_task(ctx: &mut spacetimedb::ProcedureContext, id: i64) -> Option<ArchivedTask> {
+    let who = ctx.sender().to_hex().to_string();
+    let operator = ctx.sender() == ctx.database_identity();
+    ctx.with_tx(|tx| archived_task_for(tx, operator, &who, id))
+}
+
+/// The caller-visible archived tasks in `epic_id` (`0` for any) and
+/// `repo_paths` (empty for any) (`mcp-task-tools.allium:
+/// ListArchivedTasksViaMcp`). Body is [`archived_tasks_for`].
+#[cfg(target_arch = "wasm32")]
+#[spacetimedb::procedure]
+pub fn list_archived_tasks(
+    ctx: &mut spacetimedb::ProcedureContext,
+    epic_id: i64,
+    repo_paths: Vec<String>,
+) -> Vec<ArchivedTask> {
+    let who = ctx.sender().to_hex().to_string();
+    let operator = ctx.sender() == ctx.database_identity();
+    ctx.with_tx(|tx| archived_tasks_for(tx, operator, &who, epic_id, &repo_paths))
+}

@@ -158,6 +158,17 @@ impl StoreReads for Tables {
             e.recorded_by == who
         })
     }
+    fn archived_task(&self, id: i64) -> Option<module::ArchivedTask> {
+        self.archived_tasks.get(&id).cloned()
+    }
+    fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<module::ArchivedTask> {
+        keep(self.archived_tasks.values().cloned(), |a| {
+            a.workspace_id == workspace_id
+        })
+    }
+    fn archived_tasks_owned_by(&self, who: &str) -> Vec<module::ArchivedTask> {
+        keep(self.archived_tasks.values().cloned(), |a| a.owner == who)
+    }
 }
 
 impl MemoryReducerCaller {
