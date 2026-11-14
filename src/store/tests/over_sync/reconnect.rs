@@ -392,6 +392,13 @@ impl HostStore for FlakyAdopt {
     async fn user_identity(&self) -> anyhow::Result<Option<String>> {
         self.inner.user_identity().await
     }
+}
+
+#[async_trait::async_trait]
+impl IdentityCredentialStore for FlakyAdopt {
+    async fn user_identity_token(&self) -> anyhow::Result<Option<String>> {
+        self.inner.user_identity_token().await
+    }
     async fn adopt_user_identity_with_credential(
         &self,
         identity: &str,
@@ -403,13 +410,6 @@ impl HostStore for FlakyAdopt {
         self.inner
             .adopt_user_identity_with_credential(identity, credential)
             .await
-    }
-}
-
-#[async_trait::async_trait]
-impl IdentityCredentialStore for FlakyAdopt {
-    async fn user_identity_token(&self) -> anyhow::Result<Option<String>> {
-        self.inner.user_identity_token().await
     }
 }
 

@@ -122,6 +122,23 @@ entity HostFile {
         -- A field the file holds that this binary does not know is kept
         -- through every rewrite, so an older binary never drops what a newer
         -- one added.
+
+    @invariant HostFileWritersAreSerialised
+        -- Whole-file replacement protects readers, not writers: two processes
+        -- that each read, change and write back can lose one change. The board
+        -- and a one-shot CLI command are two such processes. So every
+        -- read-modify-write of the file (RenameHost, AdoptUserIdentity) holds
+        -- an exclusive advisory lock, on a separate lock file beside the host
+        -- file, from before the read until after the replacement. A writer
+        -- that finds the lock held waits for it. Therefore a rename racing an
+        -- adoption keeps both the new label and the adopted owner with its
+        -- credential. The first-run mint needs no lock: it creates the file
+        -- only if absent (MintHostIdentity), so two racing mints leave one id.
+        --
+        -- A plain read takes no lock: it sees the old file or the new one
+        -- (HostFileIsWrittenWhole). The lock file holds no data and is never
+        -- removed, since removing it would let two writers lock two different
+        -- files.
 }
 
 ------------------------------------------------------------

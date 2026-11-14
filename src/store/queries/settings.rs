@@ -220,20 +220,6 @@ impl super::super::HostStore for Store {
             .await?
             .user_identity)
     }
-
-    async fn adopt_user_identity_with_credential(
-        &self,
-        identity: &str,
-        credential: &str,
-    ) -> Result<()> {
-        let dir = &self.host_file_dir;
-        let (identity, credential) = (identity.to_string(), credential.to_string());
-        host_file_call(dir, move |dir| {
-            crate::host_file::adopt_user_identity(dir, &identity, &credential)
-        })
-        .await?;
-        Ok(())
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +233,20 @@ impl super::super::IdentityCredentialStore for Store {
         Ok(host_file_call(dir, crate::host_file::read_for_cli)
             .await?
             .credential)
+    }
+
+    async fn adopt_user_identity_with_credential(
+        &self,
+        identity: &str,
+        credential: &str,
+    ) -> Result<()> {
+        let dir = &self.host_file_dir;
+        let (identity, credential) = (identity.to_string(), credential.to_string());
+        host_file_call(dir, move |dir| {
+            crate::host_file::adopt_user_identity(dir, &identity, &credential)
+        })
+        .await?;
+        Ok(())
     }
 }
 

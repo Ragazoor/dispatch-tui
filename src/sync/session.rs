@@ -71,20 +71,6 @@ pub trait HostStore: Send + Sync {
     /// process that has not — a failed first attempt, a test — still sees
     /// `None`, so every caller handles the absence rather than unwrapping it.
     async fn user_identity(&self) -> Result<Option<String>>;
-
-    /// Adopt `identity` together with the `credential` that proves it, as ONE
-    /// write: on a handle that keeps its identity in the host file, one
-    /// whole-file replacement, so the file never holds the one without the
-    /// other (`host.allium: AdoptUserIdentity`). Re-adopting the stored owner
-    /// refreshes its credential; a different identity is refused with nothing
-    /// written, so the file never pairs one owner with another's credential
-    /// (`settle_identity` refuses that case before it gets here). Rejects an
-    /// empty identity or credential.
-    async fn adopt_user_identity_with_credential(
-        &self,
-        identity: &str,
-        credential: &str,
-    ) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,12 +89,27 @@ pub trait HostStore: Send + Sync {
 /// place for it is here.
 ///
 /// Adoption writes the identity and its credential together, in one host-file
-/// replacement (`adopt_user_identity_with_credential`), so the file never holds
-/// one without the other.
+/// replacement ([`Self::adopt_user_identity_with_credential`]), so the file
+/// never holds one without the other. That write is here, not on
+/// [`HostStore`], because it carries the credential.
 #[async_trait::async_trait]
 pub trait IdentityCredentialStore: Send + Sync {
     /// The stored credential, or `None` on an install that has never connected.
     async fn user_identity_token(&self) -> Result<Option<String>>;
+
+    /// Adopt `identity` together with the `credential` that proves it, as ONE
+    /// write: on a handle that keeps its identity in the host file, one
+    /// whole-file replacement, so the file never holds the one without the
+    /// other (`host.allium: AdoptUserIdentity`). Re-adopting the stored owner
+    /// refreshes its credential; a different identity is refused with nothing
+    /// written, so the file never pairs one owner with another's credential
+    /// (`settle_identity` refuses that case before it gets here). Rejects an
+    /// empty identity or credential.
+    async fn adopt_user_identity_with_credential(
+        &self,
+        identity: &str,
+        credential: &str,
+    ) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

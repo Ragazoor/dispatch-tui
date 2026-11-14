@@ -351,14 +351,16 @@ fn every_write_replaces_the_whole_file_with_the_private_mode() {
          than rewriting it in place"
     );
     assert_eq!(mode_of(&path), HOST_FILE_MODE, "HostFileIsPrivate");
-    let names: Vec<_> = std::fs::read_dir(dir.path())
+    let mut names: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
+    names.sort();
     assert_eq!(
         names,
-        vec!["host.json".to_string()],
-        "no temporary file is left behind"
+        vec!["host.json".to_string(), "host.json.lock".to_string()],
+        "no temporary file is left behind (the lock file stays, \
+         HostFileWritersAreSerialised)"
     );
 
     adopt_user_identity(dir.path(), "c0ffee", "secret-token").unwrap();
@@ -440,4 +442,57 @@ fn an_unknown_field_survives_a_round_trip() {
     .unwrap();
     let back = serde_json::to_value(&parsed).unwrap();
     assert_eq!(back["newer"], serde_json::json!({"a": 1}));
+}
+
+// `host.allium: HostFileWritersAreSerialised`. Each thread takes its own lock
+// file descriptor, which is what two processes do, so threads are a fair stand-in.
+
+#[test]
+fn a_rename_racing_an_adoption_keeps_both_changes() {
+    for round in 0..40 {
+        let dir = tempfile::tempdir().unwrap();
+        resolve_for_launch(dir.path()).unwrap();
+        let path = dir.path().to_path_buf();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let (p1, b1) = (path.clone(), barrier.clone());
+        let rename = std::thread::spawn(move || {
+            b1.wait();
+            rename_host(&p1, "laptop").unwrap();
+        });
+        let (p2, b2) = (path.clone(), barrier);
+        let adopt = std::thread::spawn(move || {
+            b2.wait();
+            adopt_user_identity(&p2, "alice", "token-1").unwrap();
+        });
+        rename.join().unwrap();
+        adopt.join().unwrap();
+        let file = stored(&path);
+        assert_eq!(file.label.as_deref(), Some("laptop"), "round {round}");
+        assert_eq!(
+            file.user_identity.as_deref(),
+            Some("alice"),
+            "round {round}"
+        );
+        assert_eq!(file.credential.as_deref(), Some("token-1"), "round {round}");
+    }
+}
+
+#[test]
+fn two_first_launches_end_with_one_identity() {
+    for round in 0..40 {
+        let dir = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let (path, barrier) = (dir.path().to_path_buf(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    resolve_for_launch(&path).unwrap().host_id
+                })
+            })
+            .collect();
+        let ids: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(ids[0], ids[1], "round {round}");
+        assert_eq!(stored(dir.path()).host_id, ids[0], "round {round}");
+    }
 }

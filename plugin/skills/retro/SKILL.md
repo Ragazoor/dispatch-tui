@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Sub-step of wrap-up, never a way to finish a task: to finish a task use wrap-up, which runs this itself. Use it directly only when the user runs /retro or asks for a session retrospective.
+description: Sub-step of the wrap-up skill, not a way to finish a task. The wrap-up skill invokes this automatically before its commit step — to complete, finish, wrap up, or end a task, always use the wrap-up skill, never this one. Use it directly only when the user explicitly runs /retro or asks for a session retrospective. Reflects on whether the user corrected or steered you this session, fixes small agent-context drift in place so the next agent does better, and opens follow-up tasks only for what it must not fix itself.
 ---
 
 # Retro

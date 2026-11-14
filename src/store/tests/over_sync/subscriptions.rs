@@ -5,7 +5,10 @@
 //! worktree gating still keys on host.
 
 use crate::models::EpicId;
-use crate::store::{CreateTaskRequest, EpicCrud, HostStore, Store, SubscriptionStore, TaskCrud};
+use crate::store::{
+    CreateTaskRequest, EpicCrud, HostStore, IdentityCredentialStore, Store, SubscriptionStore,
+    TaskCrud,
+};
 use crate::sync::tests::{accepted, ScriptedConnector};
 use crate::sync::{StepOutcome, SubscriptionRequest, SyncSession};
 use std::sync::Arc;

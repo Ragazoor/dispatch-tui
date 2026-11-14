@@ -1399,7 +1399,7 @@ fn cleanup_outcome(
 #[cfg(test)]
 mod step_shared_store_tests {
     use super::{report_connection, step_shared_store};
-    use crate::store::{HostStore, Store};
+    use crate::store::{IdentityCredentialStore, Store};
     use crate::sync::memory_caller::MemoryReducerCaller;
     use crate::sync::tests::{accepted, ScriptedConnector};
     use crate::sync::{SettledIdentity, SharedRows, SyncSession};

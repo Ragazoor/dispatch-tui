@@ -96,6 +96,41 @@ fn repair_mode(file: &std::fs::File, path: &Path) {
     }
 }
 
+/// Name of the lock file beside the host file
+/// (`host.allium: HostFileWritersAreSerialised`).
+const LOCK_FILE_NAME: &str = "host.json.lock";
+
+/// Run `body` holding an exclusive advisory lock on the lock file in
+/// `data_dir`, blocking until it is free. The lock file is created if absent
+/// and never removed, so every writer locks the same file. The lock drops when
+/// the file is closed, including when the process dies.
+fn with_write_lock<T>(
+    data_dir: &Path,
+    body: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    use std::os::unix::io::AsRawFd;
+    std::fs::create_dir_all(data_dir)
+        .with_context(|| format!("create data directory {}", data_dir.display()))?;
+    let path = data_dir.join(LOCK_FILE_NAME);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("open {}", path.display()))?;
+    loop {
+        // SAFETY: `file` owns a valid open descriptor for the whole call.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            break;
+        }
+        let err = std::io::Error::last_os_error();
+        if err.kind() != std::io::ErrorKind::Interrupted {
+            return Err(anyhow::Error::new(err).context(format!("lock {}", path.display())));
+        }
+    }
+    body()
+}
+
 /// Create the data directory if needed, and encode `identity` for the host
 /// file: the shared first half of every host-file write.
 fn prepare_write(data_dir: &Path, identity: &HostIdentity) -> anyhow::Result<(PathBuf, Vec<u8>)> {
@@ -126,13 +161,15 @@ fn update(
     data_dir: &Path,
     change: impl FnOnce(&mut HostIdentity) -> anyhow::Result<()>,
 ) -> anyhow::Result<HostIdentity> {
-    let mut identity = read_for_cli(data_dir)?;
-    let before = identity.clone();
-    change(&mut identity)?;
-    if identity != before {
-        write_whole(data_dir, &identity)?;
-    }
-    Ok(identity)
+    with_write_lock(data_dir, || {
+        let mut identity = read_for_cli(data_dir)?;
+        let before = identity.clone();
+        change(&mut identity)?;
+        if identity != before {
+            write_whole(data_dir, &identity)?;
+        }
+        Ok(identity)
+    })
 }
 
 /// A user identity, trimmed; an empty one is refused.
