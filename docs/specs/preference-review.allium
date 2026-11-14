@@ -1,0 +1,733 @@
+-- allium: 3
+-- preference-review.allium
+--
+-- Scope: The /preference-review skill (plugin/skills/preference-review/SKILL.md):
+--        what an agent running it guarantees to the operator who asked for
+--        the review. It reviews one GitHub pull request the way the operator
+--        reviews, using the operator's review preference files.
+-- Includes: PreferenceReview (one per invocation) and its pipeline —
+--           resolve the target, load preferences, review, verify, filter,
+--           present, learn; Finding and its fate; ProposedEdit, the only
+--           write the skill makes outside the review's own scratch folder;
+--           the preference folder's resolution and which files load; the
+--           filter's specificity rule; the four things it never does.
+-- Excludes: when dispatch runs it (the pr_review runbook names the review
+--           command: settings.allium: ReviewCommandIsASetting,
+--           dispatch-prompt.allium: TheReviewCommandMakesTheSizeChoiceItself);
+--           how the skill's copy reaches an agent (mcp-task-tools.allium:
+--           SkillCopyIsJustInTime); the tools behind each step (gh, git,
+--           realpath, subagent types) — those are the skill's mechanics,
+--           not what it promises; the content of anyone's preference files.
+--
+-- Design decisions:
+--   - The preference files are personal and the skill is shared, so the
+--     folder is never a path written in the skill: it comes from the
+--     environment, else a fixed default under the dispatch data directory.
+--   - No folder is a normal host, not an error. The review still runs, with
+--     only the repo's CLAUDE.md, says so, and has nothing to learn into.
+--   - Findings are verified before they are filtered, so a Do not raise
+--     entry never hides a bug the verifier would have refuted anyway, and
+--     the counts dropped at each step are told apart.
+--   - A preference finding is taste, not a bug: the verifier checks only
+--     that the code is as claimed.
+--   - Every write but the review's own scratch files waits for the
+--     operator: GitHub, the PR's code and the preference files alike.
+
+use "./core.allium" as core
+use "./settings.allium" as settings
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- One loaded preference file. Each has a Look for and a Do not raise list.
+value PreferenceFile {
+    scope: PreferenceScope
+    -- Absolute: the resolved folder joined with the file's relative path.
+    path: String
+    look_for: List<String>
+    do_not_raise: List<String>
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- How narrowly a preference file applies, least specific first. A repo
+-- file is more specific than a language file, which is more specific than
+-- general.md (FilterByDoNotRaise, ProposePreferenceEdits).
+enum PreferenceScope { general | language | repo }
+
+-- The three things a reviewer looks for.
+enum ReviewFocus { correctness | preferences | tests }
+
+-- The verifier's verdict on one finding.
+enum Verdict { confirmed | plausible | refuted }
+
+enum Severity { blocking | should_fix | nit }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- One run of the skill against one PR.
+entity PreferenceReview {
+    owner: String
+    repo: String
+    number: Integer
+    -- The PR's head commit. Every reviewer and the verifier read code here.
+    head: String
+    -- The code before the PR: the merge base of the base branch and head.
+    merge_base: String
+    -- Merged or closed when the review started. Reviewed anyway.
+    already_closed: Boolean
+    -- A few lines in one file: one reviewer carries all three focuses.
+    tiny_diff: Boolean
+    -- Every file the review writes for itself (diff, briefs, unpacked
+    -- sources, the findings trace) goes under here, named for the PR.
+    pr_folder: String
+    -- The resolved, absolute preference folder; absent when none exists.
+    folder: String?
+    loaded: Set<PreferenceFile>
+
+    findings: Finding with review = this
+    edits: ProposedEdit with review = this
+
+    stage: resolving | loading | reviewing | verifying | filtering | presented | learning | done
+
+    transitions stage {
+        resolving -> loading
+        loading -> reviewing
+        reviewing -> verifying
+        verifying -> filtering
+        filtering -> presented
+        presented -> learning
+        presented -> done
+        learning -> done
+        terminal: done
+    }
+
+    has_preferences: folder != null
+    trace_path: pr_folder + "/" + config.trace_file
+
+    shown_findings: findings where status = shown
+    refuted_findings: findings where status = refuted
+    filtered_findings: findings where status = filtered_out
+    open_edits: edits where status = proposed
+    all_edits_resolved: open_edits.count = 0
+    -- Every finding has a verdict, so the review may move on to filter. True
+    -- at once for a review with no findings.
+    verification_complete: stage = verifying and findings.all(f => f.status != raised)
+    -- Every verified finding is shown or filtered out.
+    filtering_complete: stage = filtering and findings.all(f => f.status != verified)
+
+    -- A Do not raise entry in some loaded file matches the finding, and no
+    -- Look for entry in a MORE specific loaded file matches it. A tie between
+    -- files of the same specificity, or within one file, goes to Do not raise
+    -- here only provisionally: the skill does not say (see Open Questions).
+    drops_by_taste(f): loaded.any(d =>
+        matches_do_not_raise(d, f)
+            and not loaded.any(l => matches_look_for(l, f) and more_specific(l.scope, d.scope)))
+}
+
+-- One point a reviewer raised, and what became of it.
+entity Finding {
+    review: PreferenceReview
+    path: String
+    line: Integer
+    -- One sentence.
+    claim: String
+    -- A concrete input or state and the wrong result it leads to.
+    failure_scenario: String
+    focus: ReviewFocus
+    -- Set when the finding comes from a Look for entry: the entry's text.
+    look_for_entry: String?
+    -- Judged when the finding is kept for presenting; reviewers do not
+    -- report one.
+    severity: Severity?
+    verdict: Verdict?
+    -- Set when FilterByDoNotRaise drops it: the entry that dropped it.
+    dropped_by: String?
+
+    status: raised | verified | refuted | shown | filtered_out
+
+    transitions status {
+        raised -> verified
+        raised -> refuted
+        verified -> shown
+        verified -> filtered_out
+        terminal: refuted, shown, filtered_out
+    }
+
+    is_preference_finding: look_for_entry != null
+    is_plausible: verdict = plausible
+}
+
+-- One edit to a preference file, proposed after the operator reacts.
+entity ProposedEdit {
+    review: PreferenceReview
+    -- Absolute, inside the review's resolved folder.
+    path: String
+    -- Do not raise for a rejected finding, Look for for a missed point.
+    section: do_not_raise | look_for
+    -- The exact lines to add: a bold lead and one or two sentences.
+    lines: String
+    status: proposed | approved | declined
+
+    transitions status {
+        proposed -> approved
+        proposed -> declined
+        terminal: approved, declined
+    }
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- The command dispatch's pr_review runbook runs by default.
+    invoked_as: String = settings/config.default_review_command
+    -- Names the preference folder when set and not blank.
+    folder_env_var: String = "DISPATCH_REVIEW_CONTEXT"
+    -- The preference folder otherwise.
+    default_folder: String = "~/.local/share/dispatch/review-context"
+    -- The three file kinds, relative to the folder.
+    general_file: String = "general.md"
+    language_file_pattern: String = "languages/<language>.md"
+    repo_file_pattern: String = "repos/<owner>__<repo>.md"
+    -- The findings trace, inside the review's PR folder.
+    trace_file: String = "findings.md"
+    -- Above this many findings, one verifier per finding ("about eight").
+    single_verifier_max_findings: Integer = 8
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Step 1: resolve the target ==
+
+rule StartPreferenceReview {
+    when: PreferenceReviewRequested(pr)
+
+    ensures: PreferenceReview.created(
+        owner: pr_owner(pr),
+        repo: pr_repo(pr),
+        number: pr_number(pr),
+        head: pr_head(pr),
+        merge_base: merge_base(pr_base_branch(pr), pr_head(pr)),
+        already_closed: pr_is_merged_or_closed(pr),
+        tiny_diff: is_tiny_diff(pr),
+        pr_folder: scratch_folder_for(pr),
+        loaded: {},
+        stage: resolving
+    )
+    ensures: ReviewAnnounced(pr: pr)
+
+    @guidance
+        -- `pr` is the argument (a number or URL); with none, the task
+        -- description or the conversation; with still none, the skill asks
+        -- the operator one question. A merged or closed PR is said so in one
+        -- line and reviewed anyway.
+        --
+        -- The PR's code is read at its head, never from the reviewing
+        -- agent's own checkout, which sits on its own branch
+        -- (ReviewReadsThePrHead). The code before the PR is the merge base,
+        -- never head^ (BeforeIsTheMergeBase).
+}
+
+rule TargetResolved {
+    when: review: PreferenceReview.created
+
+    requires: review.stage = resolving
+
+    ensures: review.stage = loading
+}
+
+-- == Step 2: load preferences ==
+
+rule LoadPreferences {
+    when: review: PreferenceReview.stage transitions_to loading
+
+    let configured = env(config.folder_env_var)
+    let chosen = if is_blank(configured): config.default_folder else: configured
+    let resolved = absolute_path(chosen)
+
+    requires: folder_exists(resolved)
+
+    ensures: review.folder = resolved
+    ensures: review.loaded = existing_preference_files(
+        resolved,
+        config.general_file,
+        language_files(config.language_file_pattern, changed_file_languages(review)),
+        repo_file(config.repo_file_pattern, review.owner, review.repo)
+    )
+    ensures: PreferencesReported(review: review, paths: loaded_paths(review.loaded))
+    ensures: review.stage = reviewing
+
+    @guidance
+        -- The folder is the environment variable when it is set and not
+        -- blank, else the default, resolved to an absolute path and kept:
+        -- WriteApprovedPreferenceEdit writes there.
+        --
+        -- Whichever of these exist load: general.md; languages/<language>.md
+        -- for each language the changed files use, matched by file
+        -- extension (.py -> python.md, .scala/.sc/.sbt -> scala.md, .rs ->
+        -- rust.md, .ts/.tsx -> typescript.md, ...); and
+        -- repos/<owner>__<repo>.md for this repo. A missing file is normal
+        -- and loads nothing.
+        --
+        -- The loaded files are reported by path before any reviewer starts
+        -- (LoadedFilesAreReportedBeforeReviewing).
+}
+
+rule ReviewWithoutPreferences {
+    when: review: PreferenceReview.stage transitions_to loading
+
+    let configured = env(config.folder_env_var)
+    let chosen = if is_blank(configured): config.default_folder else: configured
+    let resolved = absolute_path(chosen)
+
+    requires: not folder_exists(resolved)
+
+    ensures: review.folder = null
+    ensures: NoPreferencesReported(review: review)
+    ensures: review.stage = reviewing
+
+    @guidance
+        -- No folder is a normal host. The review runs steps 3 to 6 with only
+        -- the repo's CLAUDE.md, says in one line that it has no preferences,
+        -- and skips the learn step (FinishWithoutPreferences). A set
+        -- variable naming a folder that does not exist means no
+        -- preferences: there is no fallback to the default folder.
+}
+
+-- == Step 3: review ==
+
+rule ReviewTheDiff {
+    when: review: PreferenceReview.stage transitions_to reviewing
+
+    let reviewers = if review.tiny_diff: 1 else: 3
+
+    ensures: ReviewersStarted(
+        review: review,
+        count: reviewers,
+        focuses: {correctness, preferences, tests}
+    )
+    ensures: FindingsTraceSaved(review: review, path: review.trace_path)
+    ensures: review.stage = verifying
+
+    @guidance
+        -- Three reviewers run in parallel, one per focus; a tiny diff (a few
+        -- lines, one file) gets one reviewer carrying all three
+        -- (ReviewerCountFollowsDiffSize). Each gets the PR's title, body and
+        -- full diff, how to read files at head, the full text of every
+        -- loaded preference file and the repo's CLAUDE.md:
+        --
+        --   correctness — bugs, wrong edge cases, broken error handling,
+        --                 races;
+        --   preferences — walks every Look for entry of every loaded file,
+        --                 one by one, against each changed hunk, and reports
+        --                 each hit; a small point counts
+        --                 (PreferenceReviewerWalksEveryLookFor). Without
+        --                 preference files it reviews design and boundaries;
+        --   tests       — do the tests prove the new behaviour, and would
+        --                 they fail if it broke.
+        --
+        -- A reviewer reports only problems the PR introduces, each as file,
+        -- line, a one-sentence claim and a concrete failure scenario. No
+        -- praise, no summary. The lists are merged, duplicates dropped, and
+        -- each finding from a Look for entry names the entry. The merged list
+        -- is saved as the findings trace; verify and filter add each verdict
+        -- to it (MissedPointsAreTraceable).
+}
+
+rule RaiseFindings {
+    when: review: PreferenceReview.stage transitions_to reviewing
+
+    for hit in merged_reviewer_findings(review):
+        ensures: Finding.created(
+            review: review,
+            path: hit.path,
+            line: hit.line,
+            claim: hit.claim,
+            failure_scenario: hit.failure_scenario,
+            focus: hit.focus,
+            look_for_entry: hit.look_for_entry,
+            status: raised
+        )
+
+    @guidance
+        -- One Finding per merged, de-duplicated reviewer finding, before the
+        -- review moves on to verify (ReviewTheDiff).
+}
+
+-- == Step 4: verify ==
+
+rule VerifyFindings {
+    when: review: PreferenceReview.stage transitions_to verifying
+
+    for finding in review.findings:
+        requires: finding.status = raised
+
+        let verdict =
+            if finding.is_preference_finding:
+                check_as_claimed(finding, review.head, review.merge_base)
+            else: disprove(finding, review.head, review.merge_base)
+
+        ensures: finding.verdict = verdict
+        ensures:
+            if verdict = refuted:
+                finding.status = refuted
+            else:
+                finding.status = verified
+
+    @guidance
+        -- The verifier tries to DISPROVE each finding against the real code
+        -- at head: it reads the lines, follows the callers and checks the
+        -- tests, and answers confirmed, plausible or refuted with one line of
+        -- evidence. It compares against the merge base, never head^. One
+        -- verifier takes every finding, or one per finding when there are
+        -- more than config.single_verifier_max_findings.
+        --
+        -- Refuted is dropped and counted; plausible is kept and marked
+        -- (RefutedIsDroppedPlausibleIsMarked).
+        --
+        -- A preference finding cannot be disproved that way. The verifier
+        -- checks only that the code is as the finding says — the type, the
+        -- name, the throw, the unused value is really there and the PR added
+        -- it. "Existing code does the same" or "it works" does not refute it
+        -- (PreferenceFindingsAreCheckedOnlyForBeingAsClaimed). It answers
+        -- the same three verdicts.
+}
+
+rule VerificationDone {
+    when: review: PreferenceReview.verification_complete
+
+    requires: review.stage = verifying
+
+    ensures: FindingsTraceUpdated(review: review, path: review.trace_path)
+    ensures: review.stage = filtering
+
+    @guidance
+        -- Moves on once VerifyFindings has given every finding a verdict;
+        -- each verdict is added to the findings trace.
+}
+
+-- == Step 5: filter ==
+
+rule FilterByDoNotRaise {
+    when: review: PreferenceReview.stage transitions_to filtering
+
+    for finding in review.findings:
+        requires: finding.status = verified
+
+        ensures:
+            if review.drops_by_taste(finding):
+                finding.status = filtered_out
+                finding.dropped_by = dropping_entry(finding, review.loaded)
+            else:
+                finding.status = shown
+                finding.severity = judged_severity(finding)
+
+    @guidance
+        -- A finding is dropped when some loaded file's Do not raise entry
+        -- matches it and no MORE specific loaded file's Look for entry does
+        -- (PreferenceReview.drops_by_taste, MoreSpecificFileWins). So a repo
+        -- file's Look for keeps a finding general.md's Do not raise would
+        -- drop. Each drop is counted, and the entry that dropped it is kept
+        -- as a one-line note in case the operator asks.
+}
+
+rule FilteringDone {
+    when: review: PreferenceReview.filtering_complete
+
+    requires: review.stage = filtering
+
+    ensures: FindingsTraceUpdated(review: review, path: review.trace_path)
+    ensures: review.stage = presented
+
+    @guidance
+        -- Moves on once FilterByDoNotRaise has decided every verified
+        -- finding; each decision is added to the findings trace.
+}
+
+-- == Step 6: present ==
+
+rule PresentFindings {
+    when: review: PreferenceReview.stage transitions_to presented
+
+    ensures: FindingsPresented(
+        review: review,
+        findings: worst_first(review.shown_findings),
+        dropped_unconfirmed: review.refuted_findings.count,
+        dropped_by_do_not_raise: review.filtered_findings.count
+    )
+
+    @guidance
+        -- A short list, worst first (blocking, should fix, nit). Each entry
+        -- has path:line and a severity; the comment as the operator would
+        -- write it on the PR (short, direct, a question when the point is a
+        -- question, no hedging, no praise, following any voice notes in
+        -- general.md); the failure scenario in one line; and "(plausible)"
+        -- when the verifier could not confirm it. It ends with one line:
+        -- "Dropped N unconfirmed (step 4) and M by Do not raise (step 5)."
+        -- Then the skill stops and waits for the operator
+        -- (BothDropCountsAreShown).
+}
+
+-- == Step 7: learn ==
+
+rule ProposePreferenceEdits {
+    when: OperatorReacted(review, rejected, missed)
+
+    requires: review.stage = presented
+    requires: review.has_preferences
+
+    ensures:
+        if rejected.count = 0 and missed.count = 0:
+            review.stage = done
+        else:
+            review.stage = learning
+
+    @guidance
+        -- A finding the operator rejects becomes a proposed Do not raise
+        -- entry (ProposeDoNotRaiseForRejected); a point the operator raises
+        -- that the review missed becomes a proposed Look for entry
+        -- (ProposeLookForMissed). With neither, there is nothing to learn
+        -- and the review ends.
+}
+
+rule ProposeDoNotRaiseForRejected {
+    when: OperatorReacted(review, rejected, missed)
+
+    requires: review.stage = presented
+    requires: review.has_preferences
+
+    for finding in rejected:
+        ensures: ProposedEdit.created(
+            review: review,
+            path: most_specific_fitting_file(review, finding),
+            section: do_not_raise,
+            lines: preference_entry(finding),
+            status: proposed
+        )
+
+    @guidance
+        -- Each goes in the most specific file that fits:
+        -- repos/<owner>__<repo>.md, then languages/<language>.md, then
+        -- general.md, under the folder resolved in LoadPreferences
+        -- (MostSpecificFittingFile). Each edit is shown as its absolute path
+        -- and the exact lines to add.
+}
+
+rule ProposeLookForMissed {
+    when: OperatorReacted(review, rejected, missed)
+
+    requires: review.stage = presented
+    requires: review.has_preferences
+
+    for point in missed:
+        ensures: ProposedEdit.created(
+            review: review,
+            path: most_specific_fitting_file(review, point),
+            section: look_for,
+            lines: preference_entry(point),
+            status: proposed
+        )
+
+    @guidance
+        -- Placed and shown as ProposeDoNotRaiseForRejected places and shows
+        -- its edits.
+}
+
+rule FinishWithoutPreferences {
+    when: OperatorReacted(review, rejected, missed)
+
+    requires: review.stage = presented
+    requires: not review.has_preferences
+
+    ensures: review.stage = done
+
+    @guidance
+        -- No folder, nothing to learn into: the learn step is skipped.
+}
+
+rule WriteApprovedPreferenceEdit {
+    when: OperatorApprovedEdit(edit)
+
+    requires: edit.status = proposed
+
+    ensures: edit.status = approved
+    ensures: PreferenceFileWritten(path: edit.path, section: edit.section, lines: edit.lines)
+
+    @guidance
+        -- The only write the skill makes outside its own scratch folder
+        -- (PreferenceFileWrittenOnlyOnApproval). Nothing is committed in the
+        -- folder (NeverCommitsInThePreferenceFolder).
+}
+
+rule DeclinePreferenceEdit {
+    when: OperatorDeclinedEdit(edit)
+
+    requires: edit.status = proposed
+
+    ensures: edit.status = declined
+}
+
+rule FinishLearning {
+    when: review: PreferenceReview.all_edits_resolved
+
+    requires: review.stage = learning
+
+    ensures: review.stage = done
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- Only a review with a preference folder proposes an edit, and every edit's
+-- path lies inside that folder.
+invariant EditsLandInTheResolvedFolder {
+    for edit in ProposedEdits:
+        edit.review.has_preferences and is_inside(edit.path, edit.review.folder)
+}
+
+-- A finding is shown only if the verifier did not refute it.
+invariant ShownFindingsSurvivedVerification {
+    for finding in Findings:
+        finding.status = shown implies finding.verdict in {confirmed, plausible}
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface PreferenceReviewInvocation {
+    facing _: core/Operator
+
+    provides:
+        PreferenceReviewRequested(pr)
+
+    @guidance
+        -- The operator invokes the skill as /preference-review, or dispatch's
+        -- pr_review runbook runs it as config.invoked_as unless the host's
+        -- review_command setting names another command. `pr` may be absent;
+        -- StartPreferenceReview says where the target comes from then.
+}
+
+surface PreferenceReviewSession {
+    facing _: core/Operator
+
+    context review: PreferenceReview
+
+    exposes:
+        review.loaded
+        review.has_preferences
+        review.already_closed
+        review.shown_findings
+        for finding in review.shown_findings:
+            finding.is_plausible
+        review.refuted_findings.count
+        review.filtered_findings.count
+        review.open_edits
+
+    provides:
+        OperatorReacted(review, rejected, missed) when review.stage = presented
+        OperatorApprovedEdit(edit) when review.stage = learning
+        OperatorDeclinedEdit(edit) when review.stage = learning
+
+    @guarantee LoadedFilesAreReportedBeforeReviewing
+        -- Before any reviewer starts, the operator is told which preference
+        -- files loaded, by absolute path — or, with no folder, in one line
+        -- that the review runs without preferences (LoadPreferences,
+        -- ReviewWithoutPreferences).
+
+    @guarantee ReviewReadsThePrHead
+        -- Reviewers and the verifier read the PR's code at its head commit,
+        -- never the reviewing agent's own checkout, and the PR branch is
+        -- never checked out in that checkout. A PR in another repo is read
+        -- from a clone in the session's scratch space.
+
+    @guarantee BeforeIsTheMergeBase
+        -- "Before the PR" is the merge base of the base branch and head,
+        -- never head^: a head that merged the base branch in has the PR's own
+        -- changes in its parent too.
+
+    @guarantee PipelineOrder
+        -- The steps run in one order: resolve the target, load preferences,
+        -- review, verify, filter by Do not raise, present, learn
+        -- (PreferenceReview.stage). Verify comes before filter, so the two
+        -- drop counts are separate and a filtered finding was a real one.
+
+    @guarantee ReviewerCountFollowsDiffSize
+        -- Three reviewers in parallel, one each for correctness, preferences
+        -- and tests; one reviewer carrying all three for a tiny diff.
+
+    @guarantee PreferenceReviewerWalksEveryLookFor
+        -- The preferences reviewer walks every Look for entry of every loaded
+        -- file against each changed hunk, so no entry goes unchecked because
+        -- the point looked small.
+
+    @guarantee RefutedIsDroppedPlausibleIsMarked
+        -- A refuted finding is never shown. A plausible one is shown, marked
+        -- "(plausible)".
+
+    @guarantee PreferenceFindingsAreCheckedOnlyForBeingAsClaimed
+        -- A preference finding is refuted only when the code is not as the
+        -- finding says or the PR did not add it. That existing code does the
+        -- same, or that the code works, does not refute it.
+
+    @guarantee MoreSpecificFileWins
+        -- A Do not raise entry drops a finding unless a more specific loaded
+        -- file's Look for entry matches it: repo over language over general.
+
+    @guarantee BothDropCountsAreShown
+        -- The presented list is worst first and ends with both counts: those
+        -- dropped as unconfirmed by verify, and those dropped by Do not raise.
+
+    @guarantee MissedPointsAreTraceable
+        -- The merged findings and each one's verify and filter verdict are
+        -- saved as findings.md in a folder named for the PR, in the session's
+        -- scratch space, so a point the operator expected can be traced to
+        -- the step that dropped it. Every file the review writes for itself
+        -- goes in that folder, because other reviews may share the scratch
+        -- space.
+
+    @guarantee NeverPostsToGitHubUnlessAsked
+        -- No comment, review, approval or label is posted unless the
+        -- operator asks for it in this session.
+
+    @guarantee NeverEditsThePrsCode
+        -- The skill reads the PR's code and never changes it.
+
+    @guarantee PreferenceFileWrittenOnlyOnApproval
+        -- A preference file is written only after the operator approves the
+        -- edit shown to them, at the absolute path resolved when the
+        -- preferences loaded (WriteApprovedPreferenceEdit,
+        -- EditsLandInTheResolvedFolder). No other write lands in the folder.
+
+    @guarantee MostSpecificFittingFile
+        -- After the operator reacts, a rejected finding is proposed as a Do
+        -- not raise entry and a missed point as a Look for entry, each in the
+        -- most specific file that fits: repos/<owner>__<repo>.md, then
+        -- languages/<language>.md, then general.md. A missing file is
+        -- proposed with both section headings, and an entry matches the
+        -- existing ones' style: a bold lead and one or two sentences. With no
+        -- preference folder nothing is proposed.
+
+    @guarantee NeverCommitsInThePreferenceFolder
+        -- The folder belongs to the operator; the skill makes no commit
+        -- there, even after writing an approved edit.
+
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "What counts as a tiny diff? The skill says 'a few lines, one file' and gives no threshold, so whether a diff gets one reviewer or three is the running agent's judgement."
+open question "How does the filter resolve a Look for and a Do not raise that match the same finding from one file, or from two files of the same specificity (two language files)? The skill states only that a more specific file wins."
+open question "Should a preference folder that exists but holds none of the three files behave like no folder? Today it does not: the review has preferences, loads nothing, and the learn step still proposes edits, creating the missing file."

@@ -435,3 +435,66 @@ fn preference_review_skill_loads_preferences_verifies_then_filters() {
         "preference-review must verify, then filter, then present, then learn"
     );
 }
+
+/// Each guarantee of `PreferenceReviewSession` in
+/// `docs/specs/preference-review.allium` that the skill text can hold, with
+/// the words in `SKILL.md` that hold it. The skill is followed by an agent,
+/// so the text is the behaviour a test can pin.
+#[test]
+fn preference_review_skill_text_holds_each_session_guarantee() {
+    let content = skill_body("preference-review");
+    for (guarantee, needle) in [
+        (
+            "LoadedFilesAreReportedBeforeReviewing",
+            "Tell the user which files you loaded",
+        ),
+        ("ReviewReadsThePrHead", "git show <headRefOid>:<path>"),
+        ("BeforeIsTheMergeBase", "git merge-base"),
+        ("BeforeIsTheMergeBase", "never `<headRefOid>^`"),
+        ("ReviewerCountFollowsDiffSize", "For a tiny diff"),
+        (
+            "PreferenceReviewerWalksEveryLookFor",
+            "walk every **Look for** entry",
+        ),
+        ("RefutedIsDroppedPlausibleIsMarked", "Drop `refuted`"),
+        (
+            "RefutedIsDroppedPlausibleIsMarked",
+            "Keep `plausible` but mark it",
+        ),
+        (
+            "PreferenceFindingsAreCheckedOnlyForBeingAsClaimed",
+            "a refutation of a preference finding",
+        ),
+        ("MoreSpecificFileWins", "A more specific file wins"),
+        ("BothDropCountsAreShown", "Dropped N unconfirmed (step 4)"),
+        ("MissedPointsAreTraceable", "findings.md"),
+        ("NeverPostsToGitHubUnlessAsked", "Never post to GitHub"),
+        ("NeverEditsThePrsCode", "Never edit the PR's code"),
+        ("MostSpecificFittingFile", "most specific file that fits"),
+        (
+            "NeverCommitsInThePreferenceFolder",
+            "Do not commit in the folder",
+        ),
+        ("EditsLandInTheResolvedFolder", "resolved in step 2"),
+        ("FinishWithoutPreferences", "Skip this step if no"),
+    ] {
+        assert!(
+            content.contains(needle),
+            "preference-review skill must hold {guarantee}: missing {needle:?}"
+        );
+    }
+    let at = |needle: &str| {
+        content
+            .find(needle)
+            .unwrap_or_else(|| panic!("preference-review skill must have {needle}"))
+    };
+    // PipelineOrder, first half (the second half is in
+    // preference_review_skill_loads_preferences_verifies_then_filters).
+    assert!(
+        at("## Step 1: Resolve") < at("## Step 2: Load")
+            && at("## Step 2: Load") < at("Tell the user which files you loaded")
+            && at("Tell the user which files you loaded") < at("## Step 3: Review")
+            && at("## Step 3: Review") < at("## Step 4: Verify"),
+        "preference-review must resolve, load and report, then review, then verify"
+    );
+}

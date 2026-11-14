@@ -2186,6 +2186,8 @@ surface McpTaskTools {
         -- the files' "Do not raise" entries, and the counts dropped at each step
         -- are shown. It never posts to GitHub unless asked, and it writes a
         -- preference file only after the operator approves the shown edit.
+        -- The full behaviour is specified in its own file
+        -- (preference-review.allium: PreferenceReviewSession).
 
     @guarantee ToolDefinitionsFollowTheAuthoringStandard
         -- Anthropic's guidance on tool definitions (platform.claude.com "Define
