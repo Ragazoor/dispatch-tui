@@ -381,8 +381,7 @@ enum WrapUpMode { rebase | pr | done }
 -- always names the latest model of that family rather than a pinned version.
 -- A task with no model set runs on sonnet (dispatch.allium:
 -- EveryTaskAgentLaunchesOnItsModel): sonnet is the default everywhere, for a
--- task made in the wizard, over MCP or by a feed alike, and for a task made
--- before the field existed. The one exception is a reviews_parent feed, which
+-- task made in the wizard, over MCP or by a feed alike. The one exception is a reviews_parent feed, which
 -- sets the model on insert by role (feeds.allium: ReviewTaskModelIsSetByRole).
 enum TaskModel { haiku | sonnet | opus | fable }
 
@@ -1049,7 +1048,7 @@ entity SavedRepoPath {
                              -- verify_command and base-branch history (SavedRepoBranch) even though their paths
                              -- differ. A row without one shares a repository with every row at its path,
                              -- and so bridges their groups (a verify command shared through it reaches each).
-    host: Host?              -- the install that owns this row; null on a row saved before the stamp existed.
+    host: Host?              -- the install that owns this row; null when no host is recorded.
                              -- A path is a place on ONE machine's disk, so only that host can say it is gone:
                              -- prune-repo-paths (cli.allium: PruneRepoPathsViaCli) touches only its own host's rows.
                              -- A save by a host takes the row it owns, else adopts a null-host row of the path,
