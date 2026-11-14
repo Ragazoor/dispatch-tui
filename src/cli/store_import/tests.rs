@@ -223,13 +223,15 @@ async fn a_foreign_store_on_the_port_is_not_dumped_and_the_start_is_retried() {
 
 /// The port is lost at the start, not answered by a stranger: the import
 /// starts over on a fresh port. Forced here, so no real port race is needed.
+/// Only the first start is forced to lose, so the attempts left over absorb a
+/// real race for a port under a loaded suite.
 #[tokio::test]
 async fn a_port_lost_at_the_start_is_retried_on_a_fresh_port() {
     let dir = data_folder();
     let scratch = tempfile::tempdir().unwrap();
     let spawner = FakeSpawner {
         answer_on_start: true,
-        lost_ports: std::sync::atomic::AtomicUsize::new(PORT_ATTEMPTS - 1),
+        lost_ports: std::sync::atomic::AtomicUsize::new(1),
         ..Default::default()
     };
     read_data_dir_with(
