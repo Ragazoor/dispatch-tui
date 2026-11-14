@@ -390,6 +390,7 @@ rule VerifyFindings {
                 finding.status = refuted
             else:
                 finding.status = verified
+        ensures: FindingsTraceUpdated(review: review, finding: finding, path: review.trace_path)
 
     @guidance
         -- The verifier tries to DISPROVE each finding against the real code
@@ -416,12 +417,12 @@ rule VerificationDone {
 
     requires: review.stage = verifying
 
-    ensures: FindingsTraceUpdated(review: review, path: review.trace_path)
     ensures: review.stage = filtering
 
     @guidance
-        -- Moves on once VerifyFindings has given every finding a verdict;
-        -- each verdict is added to the findings trace.
+        -- Moves on once VerifyFindings has given every finding a verdict.
+        -- Each verdict is already in the findings trace: VerifyFindings adds
+        -- it as soon as it is known (MissedPointsAreTraceable).
 }
 
 -- == Step 5: filter ==
@@ -439,6 +440,7 @@ rule FilterByDoNotRaise {
             else:
                 finding.status = shown
                 finding.severity = judged_severity(finding)
+        ensures: FindingsTraceUpdated(review: review, finding: finding, path: review.trace_path)
 
     @guidance
         -- A finding is dropped when some loaded file's Do not raise entry
@@ -454,12 +456,13 @@ rule FilteringDone {
 
     requires: review.stage = filtering
 
-    ensures: FindingsTraceUpdated(review: review, path: review.trace_path)
     ensures: review.stage = presented
 
     @guidance
         -- Moves on once FilterByDoNotRaise has decided every verified
-        -- finding; each decision is added to the findings trace.
+        -- finding. Each decision is already in the findings trace:
+        -- FilterByDoNotRaise adds it as soon as it is known
+        -- (MissedPointsAreTraceable).
 }
 
 -- == Step 6: present ==

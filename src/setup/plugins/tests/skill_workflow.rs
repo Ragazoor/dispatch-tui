@@ -500,6 +500,7 @@ fn preference_review_skill_text_holds_each_session_guarantee() {
         ("LoadPreferences", "languages/"),
         ("LoadPreferences", "repos/<owner>__<repo>.md"),
         ("ReviewWithoutPreferences", "without preferences"),
+        ("ReviewWithoutPreferences", "fall back to the default."),
         (
             "LoadedFilesAreReportedBeforeReviewing",
             "Tell the user which files you loaded",

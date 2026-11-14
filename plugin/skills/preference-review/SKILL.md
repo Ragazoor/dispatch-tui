@@ -78,6 +78,8 @@ From that folder, read whichever of these exist:
 Each file has a **Look for** and a **Do not raise** section. A missing file is
 normal. If the folder does not exist, review without preferences: say so in
 one line, run steps 3–6 with only the repo's `CLAUDE.md`, and skip step 7.
+This holds when `$DISPATCH_REVIEW_CONTEXT` names a missing folder too: do not
+fall back to the default.
 
 Tell the user which files you loaded, by the resolved path, before step 3
 starts. Do this as its own message, not in the final report.

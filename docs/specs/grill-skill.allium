@@ -63,6 +63,8 @@ entity GrillSession {
 
     -- Not yet resolved: still to be asked, or asked and waiting for the answer.
     open_decisions: decisions where status in {open, asked}
+    -- A question is out and the skill waits for its answer.
+    awaiting_answer: (decisions where status = asked).count > 0
     -- Resolved, but not yet looked at for the decisions its answer opens.
     unexplored_decisions: decisions where status = resolved and not follow_ups_found
     -- Every decision the plan needs is resolved, and no answer opens a new
@@ -100,7 +102,7 @@ entity Decision {
     is_obvious: Boolean
     -- The answer uses a term that is fuzzy or used two ways.
     fuzzy_term: Boolean
-    -- The spec already captures it: no ADR.
+    -- The spec already captures it: no spec change and no ADR.
     already_in_a_spec: Boolean
     -- The skill has looked for the decisions this one's answer opens.
     follow_ups_found: Boolean
@@ -116,11 +118,14 @@ entity Decision {
         terminal: recorded
     }
 
-    -- The interview may ask it: every decision it depends on is resolved.
+    -- The interview may take it up: every decision it depends on is
+    -- resolved, and no other question waits for its answer.
     ready: status = open and (depends_on = null or depends_on.status in {resolved, recorded})
+        and not session.awaiting_answer
     needs_adr: hard_to_reverse and surprising_without_context and had_real_alternatives
         and not is_implementation_detail and not is_obvious and not already_in_a_spec
-    needs_spec: is_domain_concept and not is_implementation_detail
+    -- A new or changed domain concept: one the spec already captures is not.
+    needs_spec: is_domain_concept and not is_implementation_detail and not already_in_a_spec
     -- The session is capturing and this decision still has to be recorded.
     ready_to_record: session.stage = capturing and status = resolved
 }
@@ -358,6 +363,12 @@ rule FinishGrill {
 invariant AdrNeedsAllThree {
     for decision in Decisions:
         decision.record in {adr, spec_and_adr} implies decision.needs_adr
+}
+
+-- One question at a time: the skill waits for an answer before the next.
+invariant AtMostOneQuestionAwaitsAnAnswer {
+    for session in GrillSessions:
+        (session.decisions where status = asked).count <= 1
 }
 
 -- A question is never asked when the codebase answers it.
