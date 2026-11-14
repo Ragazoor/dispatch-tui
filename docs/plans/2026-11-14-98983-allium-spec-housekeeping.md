@@ -158,33 +158,33 @@ code bugs found in passing, and `record_learning` for new conventions. Also:
 
 ## Work packages
 
-Epic: EPIC_ID. No package has to run first. Each one edits mostly its own files; the
+Epic: #69699. No package has to run first. Each one edits mostly its own files; the
 "Run after" column lists the few orderings that matter. Where a package edits a file
 owned by another package, the package says so. Merge `main` before wrap-up.
 
 | # | Task | Package | Files | Findings (appendix) | Run after | Questions for the user |
 |---|---|---|---|---|---|---|
-| 0 | T0 | Checker gaps upstream + baseline header | scripts/allium-check.baseline | Checker facts (transitions block; literal-only enums; typed `provides`; missingSourceHint wording) | — | none |
-| 1 | T1 | core: present tense, built-ins, drift | core | A core C1–C8 (C8's pr-workflow read is package 8), B1, D1, D2, the `waiting_on_background` move | — | none |
-| 2 | T2 | storage, settings, host | storage, settings, host, baseline (+ citers dispatch-prompt, preference-review) | A storage S1, settings T1, host H1–H2 | — | none |
-| 3 | T3 | Skill specs: grill, fix, preference-review | the three specs, plugin/skills/preference-review/SKILL.md | A2 all | package 2 | G3: add a follow-up-decisions rule or drop the sentence? |
-| 4 | T4 | agents + agent-health | agents, agent-health (+ core or store-split for A-n7's shared `chosen_mode`) | B agents A-n1–A-n8, agent-health H-n1–H-n9 | — | none |
-| 5 | T5 | split-pane + one owner for the deferred-Stop flip | split-pane, agent-health (X-1 only) | B split-pane S-n1–S-n12, X-1 | package 4 | none (S-n4 follows Decision 1) |
-| 6 | T6 | agent-tree | agent-tree | B agent-tree T-n1–T-n14 | — | T-n2: keep DiscardAgentTreePaneOnWindowGone or delete it? |
-| 7 | T7 | feeds, feed-scripts, schedules | the three specs | C feeds (all but the PollOwner seam), feed-scripts, schedules | — | none (the v37 sweep follows N2) |
-| 8 | T8 | pr-workflow + the poll-owner claim seam | pr-workflow, feeds (FeedTick, ManualFeedTrigger) | C pr-workflow all, feeds PollOwner seam drift, A core C8 backoff read | package 7 | ClosePrOnDone: route emission or guard? |
-| 9 | T9 | store-split: close-row rules match the module | store-split | D store-split all | — | none |
-| 10 | T10 | sync, spacetime-seed, spacetime-snapshot | the three specs | D sync, seed, snapshot | — | StorePublisher: keep in seed with a comment, or move to core? |
-| 11 | T11 | startup, cli, keep-awake, onboarding, observability + code comments | the five specs, src comment fixes | E startup S1–S3, cli, keep-awake, onboarding, observability, code-comment drift | — | Q-S1: StartupAbortReport contract? C3: how CliInvocation.exit is written |
-| 12 | T12 | dispatch + dispatch-prompt mechanical | dispatch, dispatch-prompt | E dispatch D1, D3–D6; dispatch-prompt P1–P3; B split-pane S-n5's dispatch side (AgentRelaunch provides `ResumeTask` without `go_to_task`) | package 2 | none |
-| 13 | T13 | Split ProvisionDispatch into a contract | dispatch (+ dispatch-prompt citations) | E dispatch D2 / Q-D1 | package 12 | Q-D1: split, or leave it? |
-| 14 | T14 | tasks | tasks | F tasks old 2, T1–T9 | — | none |
-| 15 | T15 | epics: RecalculateEpicStatus rule | epics, core (`Epic.children` only) | F epics E1–E8, A core B2 | — | none |
-| 16 | T16 | mcp-task-tools, learnings, work-packages | the three specs, cli (M6) | F mcp M1–M7, learnings L1–L5, work-packages W1–W4, B A-n9 | package 11 | M3: sub-epic vs repo routing; M2 one-line confirm |
-| 17 | T17 | workspaces: guards, union triggers, tidy | workspaces | G workspaces W1–W9, the `*Allowed` guards | — | W-Q1: guard form ((b) contract recommended) |
-| 18 | T18 | admin-surfaces + own-name commit entry points | admin-surfaces, workspaces (SetOwnNameFromBoard) | G admin A1–A4, workspaces W10 | package 17 | none |
-| 19 | T19 | board-layout + board-visuals | the two specs | G board-layout L1–L6, board-visuals V1–V2 | — | L-Q1: TextInputField as entity, or guarantees only? |
-| 20 | T20 | keybindings | keybindings, src/keybindings/table.rs (one description) | G keybindings K1–K7 | — | none |
+| 0 | #99191 | Checker gaps upstream + baseline header | scripts/allium-check.baseline | Checker facts (transitions block; literal-only enums; typed `provides`; missingSourceHint wording) | — | none |
+| 1 | #99192 | core: present tense, built-ins, drift | core | A core C1–C8 (C8's pr-workflow read is package 8), B1, D1, D2, the `waiting_on_background` move | — | none |
+| 2 | #99193 | storage, settings, host | storage, settings, host, baseline (+ citers dispatch-prompt, preference-review) | A storage S1, settings T1, host H1–H2 | — | none |
+| 3 | #99205 | Skill specs: grill, fix, preference-review | the three specs, plugin/skills/preference-review/SKILL.md | A2 all | package 2 | G3: add a follow-up-decisions rule or drop the sentence? |
+| 4 | #99194 | agents + agent-health | agents, agent-health (+ core or store-split for A-n7's shared `chosen_mode`) | B agents A-n1–A-n8, agent-health H-n1–H-n9 | — | none |
+| 5 | #99206 | split-pane + one owner for the deferred-Stop flip | split-pane, agent-health (X-1 only) | B split-pane S-n1–S-n12, X-1 | package 4 | none (S-n4 follows Decision 1) |
+| 6 | #99195 | agent-tree | agent-tree | B agent-tree T-n1–T-n14 | — | T-n2: keep DiscardAgentTreePaneOnWindowGone or delete it? |
+| 7 | #99196 | feeds, feed-scripts, schedules | the three specs | C feeds (all but the PollOwner seam), feed-scripts, schedules | — | none (the v37 sweep follows N2) |
+| 8 | #99207 | pr-workflow + the poll-owner claim seam | pr-workflow, feeds (FeedTick, ManualFeedTrigger) | C pr-workflow all, feeds PollOwner seam drift, A core C8 backoff read | package 7 | ClosePrOnDone: route emission or guard? |
+| 9 | #99197 | store-split: close-row rules match the module | store-split | D store-split all | — | none |
+| 10 | #99198 | sync, spacetime-seed, spacetime-snapshot | the three specs | D sync, seed, snapshot | — | StorePublisher: keep in seed with a comment, or move to core? |
+| 11 | #99199 | startup, cli, keep-awake, onboarding, observability + code comments | the five specs, src comment fixes | E startup S1–S3, cli, keep-awake, onboarding, observability, code-comment drift | — | Q-S1: StartupAbortReport contract? C3: how CliInvocation.exit is written |
+| 12 | #99208 | dispatch + dispatch-prompt mechanical | dispatch, dispatch-prompt | E dispatch D1, D3–D6; dispatch-prompt P1–P3; B split-pane S-n5's dispatch side (AgentRelaunch provides `ResumeTask` without `go_to_task`) | package 2 | none |
+| 13 | #99211 | Split ProvisionDispatch into a contract | dispatch (+ dispatch-prompt citations) | E dispatch D2 / Q-D1 | package 12 | Q-D1: split, or leave it? |
+| 14 | #99200 | tasks | tasks | F tasks old 2, T1–T9 | — | none |
+| 15 | #99201 | epics: RecalculateEpicStatus rule | epics, core (`Epic.children` only) | F epics E1–E8, A core B2 | — | none |
+| 16 | #99209 | mcp-task-tools, learnings, work-packages | the three specs, cli (M6) | F mcp M1–M7, learnings L1–L5, work-packages W1–W4, B A-n9 | package 11 | M3: sub-epic vs repo routing; M2 one-line confirm |
+| 17 | #99202 | workspaces: guards, union triggers, tidy | workspaces | G workspaces W1–W9, the `*Allowed` guards | — | W-Q1: guard form ((b) contract recommended) |
+| 18 | #99210 | admin-surfaces + own-name commit entry points | admin-surfaces, workspaces (SetOwnNameFromBoard) | G admin A1–A4, workspaces W10 | package 17 | none |
+| 19 | #99203 | board-layout + board-visuals | the two specs | G board-layout L1–L6, board-visuals V1–V2 | — | L-Q1: TextInputField as entity, or guarantees only? |
+| 20 | #99204 | keybindings | keybindings, src/keybindings/table.rs (one description) | G keybindings K1–K7 | — | none |
 
 Shared remedies that cross packages, so do not duplicate them:
 
