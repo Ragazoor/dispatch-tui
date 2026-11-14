@@ -1069,8 +1069,12 @@ fn batch_delete_fails_the_open_session_requests_of_the_tasks_it_deletes() {
     assert_eq!(timer_count(&store), 0);
 }
 
+/// `feeds.allium: KeepWorkedOnFeedTask`: a running feed task mid wrap-up is
+/// worked on, so a trusted ingest without its item keeps it in done. The move
+/// releases its window through a close row, and that row fails the open
+/// wrap-up first ("task closed"), as any close does.
 #[test]
-fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_session_request() {
+fn a_feed_ingest_that_keeps_a_stale_task_fails_its_open_session_request() {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
     let epic = store.create_epic("alice", "Feed", false);
@@ -1129,7 +1133,14 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_session_request() {
 
     ingest(vec![]).expect("second ingest");
 
-    assert!(store.db().tasks().id().find(task).is_none());
-    assert!(session_rows(&store, task, SESSION_KIND_WRAP_UP).is_empty());
-    assert_eq!(timer_count(&store), 0);
+    let kept = store.db().tasks().id().find(task).expect("kept, not deleted");
+    assert_eq!(kept.status, "done");
+    let wrap_ups = session_rows(&store, task, SESSION_KIND_WRAP_UP);
+    assert_eq!(wrap_ups.len(), 1);
+    assert_eq!(wrap_ups[0].state, SESSION_FAILED);
+    assert_eq!(wrap_ups[0].reason, "task closed");
+    let closes = session_rows(&store, task, SESSION_KIND_CLOSE);
+    assert_eq!(closes.len(), 1, "{closes:?}");
+    assert!(!closes[0].tmux_window.is_empty(), "the close names the window");
+    assert_eq!(timer_count(&store), 1, "only the close row's backstop");
 }

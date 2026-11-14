@@ -142,6 +142,14 @@ pub struct Task {
     /// `wrap_up_mode`. Appended last, as every column since `owner` is.
     #[default("")]
     pub model: String,
+    /// True while this feed task's item is absent from its feed: a trusted
+    /// cycle kept the worked-on task (moved it to done) instead of deleting
+    /// it, and the item's return reopens it (`feeds.allium:
+    /// KeepWorkedOnFeedTask`, `UpsertFeedTasks`' match arm). Written only by
+    /// feed ingest, never shown. Appended last, as every column since `owner`
+    /// is.
+    #[default(false)]
+    pub left_feed: bool,
 }
 
 #[spacetimedb::table(accessor = epics)]

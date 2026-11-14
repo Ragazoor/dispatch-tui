@@ -1089,6 +1089,13 @@ fn a_close_needs_a_teardown_only_for_a_window_or_a_pr_url() {
         ..no_window.clone()
     };
     assert!(close_has_host_work(&with_pr, ""));
+    // A feed task's PR is upstream state, never one to close.
+    let feed_pr = Task {
+        external_id: "review:a/b#1".into(),
+        ..with_pr.clone()
+    };
+    assert!(!close_has_host_work(&feed_pr, ""));
+    assert!(close_has_host_work(&feed_pr, WINDOW), "its window still goes");
     let other_url = Task {
         url: "https://example.com".into(),
         url_type: "issue".into(),

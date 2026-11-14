@@ -191,6 +191,7 @@ fn blank_task_in_epic(epic_id: i64) -> bindings::Task {
         next_due: String::new(),
         schedule_error: String::new(),
         model: String::new(),
+        left_feed: false,
     }
 }
 

@@ -265,8 +265,12 @@ threaded down like `--data-dir` and `--port`.
 A **feed epic** is an epic with a `feed_command`: dispatch polls the command on
 an interval, parses its stdout as a JSON array of feed items, and upserts each
 as a task under the epic. The feed is the source of truth — a task whose
-`external_id` is absent from the latest emission is removed (manual tasks, which
-have no `external_id`, are never touched). Per-epic poll cadence is
+`external_id` is absent from the latest emission is removed while it is still in
+Backlog. A task someone worked on (Running, Review or Done) is kept and moved to
+Done instead, and goes back to Backlog if its item returns, such as a review
+requested again (`KeepWorkedOnFeedTask` in `docs/specs/feeds.allium`). Manual
+tasks, which have no `external_id`, are never touched. Moving a feed task to
+Done never closes its PR. Per-epic poll cadence is
 `feed_interval_secs`, falling back to the default feed interval (60s) when unset.
 
 **The cadence has a floor of 60 seconds.** A feed command is a shell command on

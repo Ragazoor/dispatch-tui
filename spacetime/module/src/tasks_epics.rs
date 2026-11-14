@@ -477,7 +477,7 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
 /// completion alone, because its callers (seeds, feeds, a manual Done reorder)
 /// name one on purpose; the board's `update_task` does not, and what it
 /// forwards is whatever its in-memory row holds, which may be stale.
-fn patch_task_row(
+pub(crate) fn patch_task_row(
     ctx: &ReducerContext,
     id: i64,
     patch: TaskPatch,
@@ -626,7 +626,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// this for free from `ON DELETE CASCADE`/`SET NULL`; the module has no such
 /// mechanism, so every path that deletes a task row explicitly reproduces it
 /// by calling here — `delete_task` itself, `batch_delete`'s plain-task pass,
-/// `delete_epic_subtree`, and `delete_stale_feed_tasks_in_epic`. A second, hand-copied version of this
+/// `delete_epic_subtree`, and `feed.rs`'s `delete_feed_task`. A second, hand-copied version of this
 /// list is exactly how the latter two DRIFTED from `delete_task` and shipped
 /// without it (task #4971's design doc flagged the gap).
 pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {

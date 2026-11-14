@@ -110,6 +110,7 @@ mirror!(
         next_due,
         schedule_error,
         model,
+        left_feed,
     }
 );
 

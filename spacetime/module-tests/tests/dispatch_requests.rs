@@ -723,8 +723,12 @@ fn deleting_an_epic_fails_the_open_requests_of_its_subtree_tasks() {
     assert_eq!(store.db().dispatch_request_timeouts().iter().count(), 0);
 }
 
+/// `feeds.allium: KeepWorkedOnFeedTask`: a claimed feed task is worked on, so
+/// a trusted ingest that no longer carries its item keeps it in done rather
+/// than deleting it, and the move cancels the launch still waiting for its
+/// host (`GivingUpTheLaunchCancelsTheDispatch`).
 #[test]
-fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_request() {
+fn a_feed_ingest_that_keeps_a_claimed_stale_task_fails_its_open_request() {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
     let epic = store.create_epic("alice", "Feed", false);
@@ -782,8 +786,13 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_request() {
 
     ingest(vec![]).expect("second ingest");
 
-    assert!(store.db().tasks().id().find(task).is_none());
-    assert_eq!(store.db().dispatch_requests().iter().count(), 0);
+    let kept = store.db().tasks().id().find(task).expect("kept, not deleted");
+    assert_eq!(kept.status, "done");
+    assert!(kept.left_feed);
+    let rows: Vec<_> = store.db().dispatch_requests().iter().collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].state, DISPATCH_FAILED);
+    assert_eq!(rows[0].reason, "task moved to done");
     assert_eq!(store.db().dispatch_request_timeouts().iter().count(), 0);
 }
 

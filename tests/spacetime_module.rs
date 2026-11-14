@@ -269,7 +269,7 @@ fn published_instance() -> Instance {
 /// calls: a task's host is the machine holding its worktree, and it is the only
 /// thing in the row that says which board's work it is.
 fn task_json(id: i64, title: &str, status: &str, epic: i64, host: &str) -> serde_json::Value {
-    serde_json::json!({
+    let mut row = serde_json::json!({
         "id": id,
         "title": title,
         "description": "",
@@ -315,7 +315,10 @@ fn task_json(id: i64, title: &str, status: &str, epic: i64, host: &str) -> serde
         "next_due": "",
         "schedule_error": "",
         "model": "",
-    })
+    });
+    // Outside the literal: one more field passes `json!`'s recursion limit.
+    row["left_feed"] = serde_json::json!(false);
+    row
 }
 
 /// `host-a` and `host-b`, both owned by the identity this instance calls as,

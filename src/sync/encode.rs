@@ -205,6 +205,8 @@ pub fn create_task_row(
             .unwrap_or_default(),
         next_due: String::new(),
         schedule_error: String::new(),
+        // Written only by feed ingest (`feeds.allium: KeepWorkedOnFeedTask`).
+        left_feed: false,
     }
 }
 

@@ -347,7 +347,7 @@ impl TaskService {
 
     /// `pr-workflow.allium: ClosePrOnDone` for a close through exit_session: when
     /// the close took the task into Done (action rebase or done) and the task
-    /// carries a pr-typed url, run `gh pr close` on it.
+    /// carries a pr-typed url and is not a feed task, run `gh pr close` on it.
     async fn close_pr_of_exit(&self, request: &SessionRequest) {
         if request.action == WrapUpMode::Pr {
             return;
@@ -356,6 +356,11 @@ impl TaskService {
             return;
         };
         if task.status != TaskStatus::Done {
+            return;
+        }
+        // A feed task's PR is upstream state the feed mirrors — a review
+        // card's is a colleague's — never one to close.
+        if task.external_id.is_some() {
             return;
         }
         if let Some(url) = task.url.as_ref().filter(|u| u.is_pr()) {

@@ -21,7 +21,7 @@ impl MemoryReducerCaller {
     /// Mirrors the module's `delete_task_side_effects` — called at every
     /// point that deletes a task row, exactly the set of call sites the
     /// module itself uses (`delete_task`, `batch_delete`'s task pass,
-    /// `delete_epic_subtree`, `delete_stale_feed_tasks_in_epic`), on the same
+    /// `delete_epic_subtree`, `delete_feed_task`), on the same
     /// reasoning its own doc comment gives for keeping this in one place
     /// rather than four hand-copied ones.
     pub(super) fn delete_task_side_effects(&self, tables: &mut Tables, task_id: i64) {

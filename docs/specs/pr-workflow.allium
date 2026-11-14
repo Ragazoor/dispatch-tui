@@ -532,10 +532,27 @@ rule ClosePrOnDone {
     when: task: core/Task.status transitions_to done
 
     requires: task.url != null and task.url.url_type = pr
+    -- A feed task's PR is upstream state the feed mirrors, not something
+    -- this task opened: a review card's PR is a colleague's, a Dependabot
+    -- card's is the bot's. Finishing the card says the user is done with it,
+    -- not that the PR should close — and for a review just approved, closing
+    -- it would undo the approval's purpose. Only a task with no external_id
+    -- (one the user created, whose PR wrap-up or the user attached) closes
+    -- its PR on entering done.
+    requires: task.external_id = null
 
     ensures: PrCloseRequested(task: task, url: task.url.url)
 
     @guidance
+        -- The feed exemption holds on every route below: the module writes
+        -- no windowless close row for a feed task (UpdateTaskDoneWritesACloseRow
+        -- asks spacetime/module/src/session_request.rs::close_has_host_work,
+        -- which ignores a feed task's url), and a host serving any close or
+        -- exit_session row skips gh pr close for one
+        -- (src/service/tasks/session.rs::close_pr_of_exit). The second check is
+        -- what covers a close row that kills a window: a hand move, wrap-up's
+        -- done path, and feeds.allium: KeepWorkedOnFeedTask.
+        --
         -- Every route into Done but one carries this: the trigger is the
         -- status transition itself, not any one operator action.
         -- transitions_to reaches all five routes — see PhoenixRespawn's

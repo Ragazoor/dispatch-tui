@@ -580,9 +580,12 @@ pub fn apply_done_close(task: Task, now: &str) -> Task {
 }
 
 /// Whether a close has host work: a live window to kill or a pr-typed url to
-/// close (`RequestCloseTask`'s `needs_teardown`).
+/// close (`RequestCloseTask`'s `needs_teardown`). A feed task's url is never
+/// one to close (`pr-workflow.allium: ClosePrOnDone`): its PR is upstream
+/// state the feed mirrors, such as a colleague's PR on a review card.
 pub fn close_has_host_work(task: &Task, window: &str) -> bool {
-    !window.is_empty() || (!task.url.is_empty() && task.url_type == "pr")
+    !window.is_empty()
+        || (!task.url.is_empty() && task.url_type == "pr" && task.external_id.is_empty())
 }
 
 /// `RequestCloseTask`'s close row. `task` is the task as it was BEFORE the

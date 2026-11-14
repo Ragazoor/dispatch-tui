@@ -203,7 +203,37 @@ impl MemoryReducerCaller {
         keep: &std::collections::HashSet<&str>,
         ingest_host: &str,
     ) {
-        let stale: Vec<module::Task> = tables
+        for task in Self::feed_tasks_in_epic(tables, epic_id, keep) {
+            // KeepWorkedOnFeedTask, as the module: only an untouched task goes.
+            if module::left_feed_is_deleted(&task) {
+                self.delete_feed_task(tables, task, ingest_host);
+            } else {
+                self.keep_left_feed_task(tables, task, ingest_host);
+            }
+        }
+    }
+
+    /// Mirrors the module's `delete_all_feed_tasks_in_epic`
+    /// (`RoleRoutedFeedSync`'s parent sweep): every feed task goes.
+    pub(super) fn delete_all_feed_tasks_in_epic(
+        &self,
+        tables: &mut Tables,
+        epic_id: i64,
+        ingest_host: &str,
+    ) {
+        let none = std::collections::HashSet::new();
+        for task in Self::feed_tasks_in_epic(tables, epic_id, &none) {
+            self.delete_feed_task(tables, task, ingest_host);
+        }
+    }
+
+    /// Mirrors the module's `feed_tasks_in_epic`.
+    fn feed_tasks_in_epic(
+        tables: &Tables,
+        epic_id: i64,
+        keep: &std::collections::HashSet<&str>,
+    ) -> Vec<module::Task> {
+        tables
             .tasks
             .values()
             .filter(|t| {
@@ -212,13 +242,44 @@ impl MemoryReducerCaller {
                     && !keep.contains(t.external_id.as_str())
             })
             .cloned()
-            .collect();
-        for task in stale {
-            let window = module::session_window(&self.agent_store(tables), task.id);
-            self.delete_task_row(tables, task.id);
-            self.delete_task_side_effects(tables, task.id);
-            // StaleDeleteRequestsTeardownOnTheHoldingHost, as the module.
-            self.write_teardown_request_if_owed(tables, &task, &window, ingest_host);
+            .collect()
+    }
+
+    fn delete_feed_task(&self, tables: &mut Tables, task: module::Task, ingest_host: &str) {
+        let window = module::session_window(&self.agent_store(tables), task.id);
+        self.delete_task_row(tables, task.id);
+        self.delete_task_side_effects(tables, task.id);
+        // StaleDeleteRequestsTeardownOnTheHoldingHost, as the module.
+        self.write_teardown_request_if_owed(tables, &task, &window, ingest_host);
+    }
+
+    /// Mirrors the module's `keep_left_feed_task` (`KeepWorkedOnFeedTask`).
+    fn keep_left_feed_task(&self, tables: &mut Tables, task: module::Task, ingest_host: &str) {
+        let Some(finishing) = module::left_feed_moves_to_done(&task) else {
+            return;
+        };
+        if finishing {
+            let scope = self.scope();
+            let moved = self.patch_task_row_in(
+                tables,
+                &scope,
+                crate::models::TaskId(task.id),
+                module::left_feed_done_patch(),
+                true,
+                Some(ingest_host),
+            );
+            if !matches!(moved, Ok(ReducerOutcome::Applied(_))) {
+                return;
+            }
+        }
+        if let Some(row) = tables.tasks.get(&task.id).cloned() {
+            let _ = self.write_task(
+                tables,
+                module::Task {
+                    left_feed: true,
+                    ..row
+                },
+            );
         }
     }
 
@@ -552,6 +613,11 @@ impl module::IngestStore for TablesIngest<'_> {
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>) {
         self.caller
             .delete_stale_feed_tasks_in_epic(self.tables, epic_id, keep, &self.host);
+    }
+
+    fn delete_all_feed_tasks_in_epic(&mut self, epic_id: i64) {
+        self.caller
+            .delete_all_feed_tasks_in_epic(self.tables, epic_id, &self.host);
     }
 
     fn recalculate_epic_chain(&mut self, epic_id: i64) {

@@ -515,3 +515,17 @@ fn a_repeated_status_keeps_the_sub_status() {
     apply_task_patch(&mut row, patch);
     assert_eq!(row.sub_status, "needs_input");
 }
+
+/// `feeds.allium: KeepWorkedOnFeedTask`'s decision, all four cases.
+#[test]
+fn a_task_that_left_its_feed_moves_to_done_only_from_running_or_review() {
+    let task = |status: &str, left_feed: bool| Task {
+        status: status.into(),
+        left_feed,
+        ..blank_task()
+    };
+    assert_eq!(left_feed_moves_to_done(&task("running", false)), Some(true));
+    assert_eq!(left_feed_moves_to_done(&task("review", false)), Some(true));
+    assert_eq!(left_feed_moves_to_done(&task("done", false)), Some(false), "marked only");
+    assert_eq!(left_feed_moves_to_done(&task("done", true)), None, "nothing to write");
+}

@@ -396,15 +396,15 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         wait_for!(task_of(&rows_real).is_some());
         let id9 = task_of(&rows_mem).unwrap();
         assert_eq!(task_of(&rows_real), Some(id9), "task id");
-        // Hand the task to host-b (the caller's own), running; the window is the
+        // Hand the task to host-b (the caller's own), still in backlog: only
+        // an untouched task is deleted when its item leaves; a worked-on one
+        // is kept in done (`KeepWorkedOnFeedTask`). The window is the
         // current agent's, so back-fill the agent, then give it the window.
         for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
             caller
                 .patch_task(
                     id9,
                     bindings::TaskPatch {
-                        status: Some("running".into()),
-                        sub_status: Some("active".into()),
                         worktree: Some("/repo/.worktrees/9-pr".into()),
                         host: Some("host-b".into()),
                         ..blank_task_patch()
@@ -618,5 +618,162 @@ fn grouped_ingest_moves_a_task_between_present_sub_epics() {
             unchanged_mem,
             "the in-memory caller rewrote an unchanged feed item"
         );
+    });
+}
+
+/// `feeds.allium: KeepWorkedOnFeedTask` and `UpsertFeedTasks`' coming-back
+/// clause, on the real module and the twin alike: a trusted cycle deletes the
+/// untouched item and keeps the worked-on one in done; the item's return puts
+/// it back in backlog.
+#[test]
+fn ingest_keeps_a_worked_on_feed_task_like_the_real_module() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+
+    let instance = Instance::start("memory-caller-keep-left-feed");
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let rows_real = Arc::new(SharedRows::new());
+    let rows_mem = Arc::new(SharedRows::new());
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(async move {
+        let connector = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows_real.clone(),
+        ));
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
+            .with_sender(accepted.identity.clone())
+            .with_workspace_rules();
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                "host-a",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        join_default_workspace(&real, &mem, &accepted.identity).await;
+        let identity = accepted.identity.clone();
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .register_host("host-a".into(), String::new(), identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+
+        let mut woken = rows_real.changed();
+        macro_rules! wait_for {
+            ($cond:expr) => {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !$cond {
+                        woken.changed().await.expect("subscription must deliver");
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| panic!("real store never reached the expected state"))
+            };
+        }
+
+        let flat = bindings::Epic {
+            title: "Feed".into(),
+            feed_command: "gh-feed".into(),
+            feed_interval_secs: 60,
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let root = real.create_epic(flat.clone()).await.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(root)).is_some());
+        assert_eq!(mem.create_epic(flat).await.unwrap().0, root);
+
+        let ingest = |items: Vec<bindings::FeedIngestItem>| {
+            let real = &real;
+            let mem = &mem;
+            let identity = identity.clone();
+            async move {
+                real.ingest_feed(
+                    EpicId(root),
+                    items.clone(),
+                    false,
+                    identity.clone(),
+                    "host-a".into(),
+                )
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+                mem.ingest_feed(EpicId(root), items, false, identity, "host-a".into())
+                    .await
+                    .unwrap()
+                    .applied()
+                    .unwrap();
+            }
+        };
+        // `(external_id, status)` of every feed task, sorted.
+        let statuses = |rows: &SharedRows| {
+            let mut out: Vec<(String, String)> = rows
+                .tasks()
+                .into_iter()
+                .filter_map(|t| {
+                    t.external_id
+                        .clone()
+                        .map(|e| (e, t.status.as_str().to_string()))
+                })
+                .collect();
+            out.sort();
+            out
+        };
+        let id_of = |rows: &SharedRows, ext: &str| {
+            rows.tasks()
+                .into_iter()
+                .find(|t| t.external_id.as_deref() == Some(ext))
+                .unwrap()
+                .id
+        };
+
+        ingest(vec![
+            ingest_item("x-1", "", &[]),
+            ingest_item("x-2", "", &[]),
+        ])
+        .await;
+        wait_for!(statuses(&rows_real).len() == 2);
+
+        // x-1 is worked on: in review on both sides.
+        let review = bindings::TaskPatch {
+            status: Some("review".into()),
+            sub_status: Some("awaiting_review".into()),
+            ..blank_task_patch()
+        };
+        real.patch_task(id_of(&rows_real, "x-1"), review.clone())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        mem.patch_task(id_of(&rows_mem, "x-1"), review)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+
+        // Both items leave: x-2 (backlog) goes, x-1 is kept in done.
+        ingest(vec![]).await;
+        let want = vec![("x-1".to_string(), "done".to_string())];
+        assert_eq!(statuses(&rows_mem), want);
+        wait_for!(statuses(&rows_real) == want);
+
+        // x-1 comes back: new work, in backlog.
+        ingest(vec![ingest_item("x-1", "", &[])]).await;
+        let want = vec![("x-1".to_string(), "backlog".to_string())];
+        assert_eq!(statuses(&rows_mem), want);
+        wait_for!(statuses(&rows_real) == want);
     });
 }

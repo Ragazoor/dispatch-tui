@@ -613,6 +613,7 @@ entity Task {
                                -- board-visuals.allium.
     base_branch: String = config.default_branch -- the branch this task rebases onto / targets for PRs
     external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
+    left_feed: Boolean = false  -- true while this feed task's item is absent from its feed: set by a trusted, mirroring cycle that kept the task rather than deleting it, cleared by the next emission that carries the item again (feeds.allium: KeepWorkedOnFeedTask sets it, UpsertFeedTasks' match arm clears it). Never shown on the card. Always false when external_id is null.
     -- The live-session facts (the window, the two hook timestamps, the live
     -- subagent count, the deferred Stop and its time) sit on the task's
     -- current Agent, not here.

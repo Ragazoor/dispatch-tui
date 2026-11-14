@@ -275,7 +275,7 @@
 --     and logged (pr-workflow.allium: ExitSessionTeardown). The host serving
 --     the teardown row also runs ClosePrOnDone's gh pr close for a close that
 --     took a task with a pr-typed url into Done, reading the url from the
---     task. A row that fails before its host serves it (the backstop, the
+--     task — never for a feed task, whose PR is upstream state. A row that fails before its host serves it (the backstop, the
 --     restart sweep, the task's deletion, a close that fails an earlier row)
 --     leaves the PR open: KillWindowOfFailedExitSession kills the window
 --     only. Accepted as built.
@@ -1088,7 +1088,8 @@ rule HandMoveReleasesAWindowTheBoardDidNotSee {
         -- (ExitSessionTeardown: the host kills the window it names), same
         -- backstop timer; action stays done, so CloseRowsCarryNoTokenAndNoChain
         -- holds. A backlog move leaves the task not done, so the row's gh pr
-        -- close step finds nothing to close. An open session request on the
+        -- close step finds nothing to close; nor does a feed task's
+        -- (pr-workflow.allium: ClosePrOnDone). An open session request on the
         -- task is failed first, as for any close row.
         --
         -- WHEN NO HOST IS KNOWN OR OWNED BY THE CALLER (patch_task from a
@@ -1988,7 +1989,8 @@ rule RequestCloseTask {
     -- Bound before the ensures, because the close clears the window and the
     -- row must name the window as this transaction read it.
     let window = current_agent(task).tmux_window
-    let has_pr_url = task.url != null and task.url.url_type = pr
+    -- A feed task's PR is never one to close (pr-workflow.allium: ClosePrOnDone).
+    let has_pr_url = task.url != null and task.url.url_type = pr and task.external_id = null
     -- The machine the window is on: the task's own host, or the caller's
     -- when the task has none (a task never dispatched, with a PR linked by
     -- hand).
@@ -2126,7 +2128,9 @@ rule UpdateTaskDoneWritesACloseRow {
     -- a window, and still does not. (A window the store itself finds held
     -- on a move into Done is HandMoveReleasesAWindowTheBoardDidNotSee's.)
     let was_already_done = task.status = done
-    let has_pr_url = task.url != null and task.url.url_type = pr
+    -- A feed task's url never asks for a close (pr-workflow.allium:
+    -- ClosePrOnDone): the PR is upstream state, not this task's.
+    let has_pr_url = task.url != null and task.url.url_type = pr and task.external_id = null
     let teardown_host = if task.host != null: task.host else: host
     let may_tear_down = teardown_host.owner != null and teardown_host.owner = caller()
 

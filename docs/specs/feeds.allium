@@ -1973,7 +1973,29 @@ rule UpsertFeedTasks {
                 if existing.url = null and item.url != "":
                     existing.url = core/TaskUrl{url: item.url, url_type: resolved_url_type}
                 -- existing.status, existing.sub_status, existing.repo_path,
-                -- existing.wrap_up_mode preserved
+                -- existing.wrap_up_mode preserved, with ONE exception: a task
+                -- that left the feed and has now come back.
+                --
+                -- COMING BACK. existing.left_feed says a trusted cycle found
+                -- this item absent and kept the task (KeepWorkedOnFeedTask).
+                -- Its item is present again — a review re-requested after an
+                -- approval, a reopened PR — so there is work to do again. A
+                -- task that is in done goes back to backlog as new work; a
+                -- task the user already moved out of done stays where they
+                -- put it. Either way the flag clears, so a task that never
+                -- leaves the emission is never touched by this clause: a task
+                -- the user marked done while its item was still emitted stays
+                -- in done on every later poll (status preservation above).
+                -- Runs on additive cycles too: presence is evidence, it is
+                -- only absence an additive cycle distrusts. completed_at is
+                -- left as it is (core/Task.completed_at survives a move back
+                -- out of done), and so are the worktree and the agent history:
+                -- the card returns with them.
+                if existing.left_feed:
+                    existing.left_feed = false
+                    if existing.status = done:
+                        existing.status = backlog
+                        existing.sub_status = default_sub_status(backlog)
                 -- existing.updated_at moves to now only when one of the
                 -- assignments above changed a value; otherwise the row is
                 -- not written at all (UnchangedFeedItemIsNotRewritten)
@@ -1995,13 +2017,22 @@ rule UpsertFeedTasks {
         -- emission is not evidence of anything, because the source emits
         -- events that are never retracted. Either way this clause is where
         -- that missing evidence would be acted on irreversibly.
+        --
+        -- ONLY UNTOUCHED TASKS ARE REMOVED. A task still in backlog is one
+        -- nobody worked on, and it goes. A task anywhere else — running,
+        -- review or done — is one the user worked on, and deleting it would
+        -- erase the record of that work the moment the PR merged or the
+        -- review was approved. It is kept, in done (KeepWorkedOnFeedTask).
         if not additive:
             for task in core/Tasks where task.epic = epic and task.external_id != null:
                 if not items.any(i => i.external_id = task.external_id):
-                    not exists task
-                    tasks/TaskRowDeleted(task: task)
-                    FeedTaskRemovedAsStale(task: task, ingest_host: host)
-                    TaskTeardown(task)
+                    if task.status = backlog:
+                        not exists task
+                        tasks/TaskRowDeleted(task: task)
+                        FeedTaskRemovedAsStale(task: task, ingest_host: host)
+                        TaskTeardown(task)
+                    else:
+                        FeedTaskLeftFeed(task: task, ingest_host: host)
 
     @guidance
         -- created_by = core/local_host().owner records which host's feed run
@@ -2074,6 +2105,109 @@ rule UpsertFeedTasks {
         -- never OVER-reports: nothing is torn down that the reducer did not
         -- itself remove. Both properties are deliberate: a missed orphan is
         -- caught later, a wrongly torn-down worktree is not recoverable.
+}
+
+rule KeepWorkedOnFeedTask {
+    when: FeedTaskLeftFeed(task, ingest_host)
+
+    -- A trusted, mirroring cycle found a worked-on feed task's item absent
+    -- (UpsertFeedTasks, RoleRoutedFeedSync). The item closed upstream, or
+    -- stopped being work for this user: a PR merged or closed, a review
+    -- approved or un-requested, an alert fixed. The feed cannot tell which,
+    -- and this rule does not need to.
+    --
+    -- WHY KEEP IT. Deleting it — what every mirroring feed did before — took
+    -- the record of a finished review with it, so a past review could not be
+    -- followed up. A task outside backlog is one the user chose to work on;
+    -- it stays on the board, in done, until the user deletes it
+    -- (tasks.allium: DeleteTask). Nothing prunes these automatically.
+    --
+    -- WHAT MOVES. A running or review task moves to done, stamped like any
+    -- completion, and its agent window closes. The worktree stays, as it does
+    -- for a merged PR (pr-workflow.allium: PrMerged): deleting the card later
+    -- removes it. A task already in done stays exactly as it is.
+    --
+    -- "WORKED ON" MEANS "NOT IN BACKLOG". Every shipped feed script inserts
+    -- its cards in backlog (feed-scripts.allium), so the test is exact for
+    -- them. ACCEPTED CONSEQUENCE: a feed that inserts its cards straight into
+    -- review or done has every card kept, touched or not — its cards start
+    -- out as records rather than as work.
+    --
+    -- NO VISIBLE DIFFERENCE. A kept task looks like any other done card.
+    -- left_feed is stored only so that the item's return can reopen it
+    -- (UpsertFeedTasks' match arm). It is set on a done task too, so a card
+    -- the user finished by hand reopens if its item leaves and later returns.
+    --
+    -- IDEMPOTENT. The item stays absent on every later trusted cycle, so this
+    -- rule fires again each time. The second firing finds the task in done
+    -- with left_feed set and writes nothing: no new completed_at, no
+    -- updated_at bump, no second close row.
+    --
+    -- NEVER CLOSES THE PR. The close row is the one a hand move to done
+    -- writes (store-split.allium: HandMoveReleasesAWindowTheBoardDidNotSee),
+    -- and its host kills the window it names. Its gh pr close step skips a
+    -- feed task (pr-workflow.allium: ClosePrOnDone), and this task always is
+    -- one: the PR is upstream state the feed mirrors — often a colleague's
+    -- open PR the user has just approved.
+    --
+    -- Additive cycles never reach this rule: the clauses that fire it are
+    -- skipped there, as every removal is (AppendOnlyFeed,
+    -- DegradedNonEmptyEmission).
+
+    requires: task.external_id != null and task.status != backlog
+
+    let window = task.current_window
+    let teardown_host = if task.host != null: task.host else: ingest_host
+    let may_tear_down = teardown_host != null
+        and teardown_host.owner != null and teardown_host.owner = caller()
+
+    ensures:
+        if not task.left_feed:
+            task.left_feed = true
+        if task.status in {running, review}:
+            task.status = done
+            task.sub_status = default_sub_status(done)
+            task.completed_at = now
+            task.updated_at = now
+            if window != null and may_tear_down:
+                current_agent(task).tmux_window = null
+                -- As for any close row: an open session request on the
+                -- task fails first (split/OneOpenSessionRequestPerTask).
+                for request in split/SessionRequests where task = task and is_open:
+                    request.state = failed
+                    request.finished_at = now
+                    request.reason = "task closed"
+                split/SessionRequest.created(
+                    task: task,
+                    kind: close,
+                    action: done,
+                    host: teardown_host,
+                    requested_by: caller(),
+                    state: requested,
+                    requested_at: now,
+                    tmux_window: window
+                )
+
+    @guidance
+        -- The move is a status write into done like any other — the same
+        -- write a hand move makes: it stamps completed_at, voids a deferred
+        -- Stop, runs the epic rollup, cancels a launch still waiting for its
+        -- host (store-split.allium: GivingUpTheLaunchCancelsTheDispatch), and
+        -- a phoenix task respawns (tasks.allium: PhoenixRespawn). A window on a host the caller does not own is left
+        -- to that host, as for a hand move: clearing it with no kill would
+        -- orphan it.
+        --
+        -- The board's removal report (see UpsertFeedTasks, "HOW THE REPORT IS
+        -- BUILT") reports only rows confirmed gone, so a kept task is never
+        -- reported and never gets TaskTeardown.
+        --
+        -- Implementation: spacetime/module/src/feed.rs::delete_stale_feed_tasks_in_epic
+        -- splits backlog from worked-on tasks and keeps the latter through
+        -- spacetime/module/src/feed.rs::keep_left_feed_task, which moves the
+        -- task with spacetime/module/src/tasks_epics.rs::patch_task_row and
+        -- then sets left_feed; mirrored in src/sync/memory_caller/feed.rs.
+        -- The pure decision is
+        -- spacetime/module/src/feed.rs::left_feed_moves_to_done, shared by both.
 }
 
 rule GroupedFeedUpsert {
@@ -2328,10 +2462,11 @@ rule RoleRoutedFeedSync {
     -- elsewhere — it does not exist for this reconcile.
     --
     -- The consequence for an item that WAS present is deliberate: because it
-    -- is absent from the keep-set, the subtree delete removes its task exactly
-    -- as it removes a merged PR, TaskTeardown included. So enabling this
-    -- exclusion cleans out excluded PRs already sitting in the subtree on
-    -- the next poll, rather than leaving them stranded until they merge. A
+    -- is absent from the keep-set, the stale pass treats it exactly as a
+    -- merged PR — an untouched (backlog) task is removed, TaskTeardown
+    -- included, and a worked-on one is kept in done (KeepWorkedOnFeedTask).
+    -- So an approved PR's untouched card is cleaned out on the next poll,
+    -- and the card of a review the user did stays as its record. A
     -- MANUAL task (external_id = null) is never touched, so a task the user
     -- created for their own PR by hand — or a dispatch task that opened it —
     -- is unaffected.
@@ -2518,10 +2653,12 @@ rule RoleRoutedFeedSync {
         -- pass runs ALWAYS, even for roles with grouping off, so orphaned
         -- repo-group tasks are cleaned up. Both levels are captured here by
         -- matching any feed task whose epic is a child of the parent OR a child
-        -- of a role sub-epic. Removal deletes the row, reports it, and then
-        -- performs tasks.allium's TaskTeardown on the reported row — this is
-        -- the path a merged PR's in-flight review agent travels, so its tmux
-        -- window and worktree must be released, not orphaned. Skipped
+        -- of a role sub-epic. Removal (of a backlog task) deletes the row,
+        -- reports it, and then performs tasks.allium's TaskTeardown on the
+        -- reported row, so a worktree it holds is released, not orphaned. A
+        -- merged PR's in-flight review agent is not removed: its task is
+        -- running, so KeepWorkedOnFeedTask moves it to done and closes the
+        -- window, keeping the worktree. Skipped
         -- entirely when the cycle is additive (DegradedNonEmptyEmission or
         -- AppendOnlyFeed): this
         -- is the exact clause that would destroy a live review agent's
@@ -2530,11 +2667,18 @@ rule RoleRoutedFeedSync {
             for task in core/Tasks where (task.epic.parent = epic
                                      or task.epic.parent in {my, team, bots})
                                 and task.external_id != null:
+                -- Same split as UpsertFeedTasks: only a backlog task is
+                -- removed; a worked-on one is kept (KeepWorkedOnFeedTask).
+                -- "Left the feed" is judged against `kept`, the FILTERED
+                -- set, so an approved PR (ExcludeFromReviews) counts as left.
                 if not kept.any(i => i.external_id = task.external_id):
-                    not exists task
-                    tasks/TaskRowDeleted(task: task)
-                    FeedTaskRemovedAsStale(task: task, ingest_host: host)
-                    TaskTeardown(task)
+                    if task.status = backlog:
+                        not exists task
+                        tasks/TaskRowDeleted(task: task)
+                        FeedTaskRemovedAsStale(task: task, ingest_host: host)
+                        TaskTeardown(task)
+                    else:
+                        FeedTaskLeftFeed(task: task, ingest_host: host)
 
         -- Parent sweep: the reviews_parent epic must hold NO feed task directly
         -- (NoFlatFeedTasksOnReviewsParent). Present parent-stranded tasks were
@@ -2546,6 +2690,9 @@ rule RoleRoutedFeedSync {
         -- additive: this sweep deletes on position alone, with no reference to
         -- the emission at all, so on a tainted cycle it is the least
         -- discriminating delete of the three and the first to go.
+        -- It removes whatever the status, unlike the two clauses above: a
+        -- task left on the parent is a stray or a duplicate, not a record of
+        -- work, and KeepWorkedOnFeedTask would only keep the duplicate.
         if not additive:
             for task in core/Tasks where task.epic = epic and task.external_id != null:
                 not exists task
@@ -2722,8 +2869,11 @@ rule NewReviewRequestIsSignalled {
     -- in the same store transaction as the insert. "The epic it lands in" is
     -- the repo group under the role sub-epic when that sub-epic groups by
     -- repo, else the role sub-epic itself.
+    -- A task REOPENED by UpsertFeedTasks' coming-back clause (a done task
+    -- with left_feed whose item is back — a review requested again) is
+    -- signalled the same way: it is new review work, not a refresh.
     ensures:
-        for task in inserted_tasks(epic, items) where route(signals) in {my_reviews, team_reviews}:
+        for task in inserted_or_reopened_tasks(epic, items) where route(signals) in {my_reviews, team_reviews}:
             for m in task.epic.workspace.memberships where task.epic.visible_to(user):
                 core/UnseenTask.created(subscriber: m.user, task: task)
 
@@ -2734,7 +2884,7 @@ rule NewReviewRequestIsSignalled {
         -- (tasks.allium: SeeTaskByLandingOnIt,
         -- UnseenMarkEndsWithTheTaskLeavingItsEpic).
         --
-        -- ONLY AN INSERT IS SIGNALLED. A refresh of a PR already on the board
+        -- ONLY AN INSERT OR A REOPEN IS SIGNALLED. A refresh of a PR already on the board
         -- (new commits, a new title, a changed CI label) writes no mark, and
         -- neither does a MOVE between role sub-epics (Team Reviews into My
         -- Reviews, Bots into Team Reviews): the task is not new, and the

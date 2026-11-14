@@ -80,6 +80,12 @@ use super::*;
 ///    rows once (`SUB_STATUS_FIT_RULES_VERSION`, `tasks_epics.rs:
 ///    reset_unfit_sub_statuses`). A board mirror that accepted such a row
 ///    would disagree with the store, so the board moves with it.
+/// 52: a trusted feed cycle deletes only a backlog task whose item left; a
+///    worked-on one moves to done, marked `left_feed`, with a `close` row for
+///    its window, and reopens to backlog when its item returns
+///    (`feeds.allium: KeepWorkedOnFeedTask`); a feed task's PR is never closed
+///    on done (`pr-workflow.allium: ClosePrOnDone`). An old board serving the
+///    new close rows would run `gh pr close` on a colleague's PR.
 /// 46: every created task gets an `assigned` agent in the same transaction
 ///    (`agents.allium: AssignAgentOnTaskCreated`, A17), the first dispatch
 ///    claim launches it under its name, and a name is free again once no
@@ -269,7 +275,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 51;
+pub const RULES_VERSION: i64 = 52;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

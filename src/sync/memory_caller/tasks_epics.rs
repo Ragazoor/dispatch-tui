@@ -314,17 +314,38 @@ impl MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         let scope = self.scope();
         let mut tables = self.lock();
-        let Some(mut row) = tables.visible_task(&scope, id.0) else {
+        self.patch_task_row_in(
+            &mut tables,
+            &scope,
+            id,
+            module::TaskPatch::from(patch),
+            store_owns_completion,
+            close_host,
+        )
+    }
+
+    /// [`Self::patch_task_row`] on tables the caller already holds: feed
+    /// ingest moves a kept task into done this way (`KeepWorkedOnFeedTask`),
+    /// as the module's ingest calls its `patch_task_row`.
+    pub(super) fn patch_task_row_in(
+        &self,
+        tables: &mut Tables,
+        scope: &super::visibility::Scope,
+        id: TaskId,
+        patch: module::TaskPatch,
+        store_owns_completion: bool,
+        close_host: Option<&str>,
+    ) -> Result<ReducerOutcome> {
+        let Some(mut row) = tables.visible_task(scope, id.0) else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
-        let patch = module::TaskPatch::from(patch);
         if let Err(why) = module::check_task_patch(&row, &patch) {
             return Ok(ReducerOutcome::Refused(why));
         }
-        if let Err(why) = self.check_task_aim(&tables, &row, &patch) {
+        if let Err(why) = self.check_task_aim(tables, &row, &patch) {
             return Ok(ReducerOutcome::Refused(why));
         }
-        let has_agent = module::current_agent(&self.agent_store(&mut tables), id.0).is_some();
+        let has_agent = module::current_agent(&self.agent_store(tables), id.0).is_some();
         if let Err(why) = module::check_session_patch(has_agent, &patch) {
             return Ok(ReducerOutcome::Refused(why));
         }
@@ -350,11 +371,11 @@ impl MemoryReducerCaller {
         row = module::schedule_after_status_write(&prior_status, row, &self.now());
         // Before the first side effect below: a refused patch leaves nothing
         // behind, as the module's rolled-back transaction does.
-        if let Err(why) = Self::validate_task_write(&tables, &row, &self.now()) {
+        if let Err(why) = Self::validate_task_write(tables, &row, &self.now()) {
             return Ok(ReducerOutcome::Refused(why));
         }
         // The session facts go to the current agent (agents.allium, A4).
-        module::update_current_agent(&mut self.agent_store(&mut tables), id.0, |agent| {
+        module::update_current_agent(&mut self.agent_store(tables), id.0, |agent| {
             module::apply_session_patch(agent, &session_patch)
         });
 
@@ -366,7 +387,7 @@ impl MemoryReducerCaller {
         row.updated_at = self.now();
         // store-split.allium X2: the module's two transition rules on a patch.
         if module::patch_voids_pending_stop(&prior_status, &row.status, caller_named_stop_pending) {
-            module::update_current_agent(&mut self.agent_store(&mut tables), id.0, |agent| {
+            module::update_current_agent(&mut self.agent_store(tables), id.0, |agent| {
                 module::Agent {
                     stop_pending: false,
                     ..agent
@@ -375,7 +396,7 @@ impl MemoryReducerCaller {
         }
         let stamp = self.now();
         if module::should_respawn_phoenix(&prior_status, &row)
-            && self.respawn_phoenix_successor_of(&mut tables, &row, &stamp)
+            && self.respawn_phoenix_successor_of(tables, &row, &stamp)
         {
             row.phoenix = false;
         }
@@ -388,31 +409,31 @@ impl MemoryReducerCaller {
             (close_host.is_some() && finished && module::close_has_host_work(&row, ""))
                 .then(|| row.clone());
         let given_up = module::launch_given_up_by(&prior_status, &row.status);
-        if let Err(why) = self.write_task(&mut tables, row) {
+        if let Err(why) = self.write_task(tables, row) {
             return Ok(ReducerOutcome::Refused(why));
         }
         // Mirrors the module: `HandMoveReleasesAWindowTheBoardDidNotSee`; its
         // row stands in for the windowless close row.
         let released_window =
-            given_up.is_some() && self.release_unseen_window(&mut tables, id.0, close_host);
+            given_up.is_some() && self.release_unseen_window(tables, id.0, close_host);
         if let (Some(task), Some(host), false) = (closed_task, close_host, released_window) {
-            self.request_close_teardown(&mut tables, &task, "", host, &self.now());
+            self.request_close_teardown(tables, &task, "", host, &self.now());
         }
         // Mirrors the module: `GivingUpTheLaunchCancelsTheDispatch`.
         // The module's refusal here rolls its whole patch back; this double
         // has no transaction, and a schedule mark on a task that just left
         // running is legal, so it cannot refuse in practice.
         if let Some(reason) = given_up {
-            if let Err(why) = self.fail_waiting_dispatch_requests_of(&mut tables, id.0, reason) {
+            if let Err(why) = self.fail_waiting_dispatch_requests_of(tables, id.0, reason) {
                 return Ok(ReducerOutcome::Refused(why));
             }
         }
 
         if status_changed {
-            self.recalculate_epic_chain(&mut tables, was_in_epic);
+            self.recalculate_epic_chain(tables, was_in_epic);
         }
         if repo_changed_in_place {
-            if let Err(why) = self.reroute_on_repo_change(&mut tables, id.0) {
+            if let Err(why) = self.reroute_on_repo_change(tables, id.0) {
                 return Ok(ReducerOutcome::Refused(why));
             }
         }

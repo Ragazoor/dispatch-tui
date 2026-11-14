@@ -105,6 +105,46 @@ impl Fx {
             .create_task(make_task_params_on_branch(REPO, "main"))
             .await
             .unwrap();
+        self.dispatch_at(id, worktree).await;
+        id
+    }
+
+    /// A review card as the feed creates it: a backlog task with an
+    /// external_id, in a feed epic, carrying a colleague's PR url.
+    async fn feed_review_task(&self) -> TaskId {
+        let epic = self.db.create_epic("Reviews", "", None).await.unwrap();
+        let item = crate::models::FeedItem {
+            external_id: "review:acme/repo#42".to_string(),
+            title: "#42".to_string(),
+            description: String::new(),
+            url: EDIT_PR_URL.to_string(),
+            url_type: None,
+            status: TaskStatus::Backlog,
+            tag: crate::models::TaskTag::PrReview,
+            labels: vec![],
+            sort_order: None,
+            signals: vec![],
+            wrap_up_mode: None,
+        };
+        self.db
+            .ingest_feed(
+                epic.id,
+                &[item],
+                &[REPO.to_string()],
+                &["main".to_string()],
+                false,
+            )
+            .await
+            .unwrap();
+        let task = self.db.list_tasks_for_epic(epic.id).await.remove(0);
+        assert!(task.url.as_ref().is_some_and(|u| u.is_pr()), "{task:?}");
+        task.id
+    }
+
+    /// Dispatch the existing task `id` on this host, with `worktree` and a
+    /// window, through the dispatch request path.
+    async fn dispatch_at(&self, id: TaskId, worktree: &str) {
+        let svc = self.svc(MockProcessRunner::unused());
         let request = match svc
             .request_dispatch(
                 id,
@@ -131,7 +171,6 @@ impl Fx {
         // The token is voided by a dispatch that finished at or after it
         // (`store-split.allium`, W3), so the wrap-ups that follow start later.
         self.clock.advance(chrono::Duration::seconds(1));
-        id
     }
 
     async fn row(&self, id: SessionRequestId) -> SessionRequest {
@@ -1468,4 +1507,57 @@ async fn a_failed_pr_close_leaves_the_edit_done() {
 
     assert_eq!(runner.recorded_calls().len(), 1, "the close was attempted");
     assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
+}
+
+// ===========================================================================
+// ClosePrOnDone skips a feed task (`pr-workflow.allium: ClosePrOnDone`)
+// ===========================================================================
+
+/// A review card's PR is a colleague's: finishing the card writes no close
+/// row, so nothing runs `gh pr close` on it.
+#[tokio::test]
+async fn an_edit_into_done_of_a_feed_task_leaves_no_close_row() {
+    let fx = fx();
+    let id = fx.feed_review_task().await;
+
+    fx.svc(MockProcessRunner::unused())
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fx.svc(MockProcessRunner::unused())
+            .get_task(id)
+            .await
+            .unwrap()
+            .status,
+        TaskStatus::Done
+    );
+    assert!(close_rows_of(&fx, id).await.is_empty());
+}
+
+/// A close row that kills a feed task's window (a hand move, wrap-up's done
+/// path, or the feed keeping a task that left) kills the window and runs no
+/// `gh pr close`: the runner holds exactly one answer, for the kill.
+#[tokio::test]
+async fn serving_a_close_row_of_a_feed_task_kills_the_window_and_leaves_the_pr() {
+    let fx = fx();
+    let id = fx.feed_review_task().await;
+    fx.dispatch_at(id, WORKTREE).await;
+    fx.svc(MockProcessRunner::unused())
+        .close_task(id)
+        .await
+        .unwrap();
+    let row = fx.close_row(id).await;
+    assert!(row.tmux_window.is_some(), "{row:?}");
+    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let svc = fx.svc(runner.clone());
+
+    let served = svc.serve_session_request(row.clone()).await;
+    svc.wait_for_background_pr_closes().await;
+
+    assert!(matches!(served.outcome, SessionOutcome::Done), "{served:?}");
+    let calls = runner.flattened_calls();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("kill-window"), "{calls:?}");
 }

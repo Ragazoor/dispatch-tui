@@ -74,6 +74,7 @@ pub trait IngestStore {
         delete_absent: bool,
     ) -> Result<(), String>;
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>);
+    fn delete_all_feed_tasks_in_epic(&mut self, epic_id: i64);
     fn recalculate_epic_chain(&mut self, epic_id: i64);
     /// Mark `task_id` unseen for everyone who can see `epic_id`, as a
     /// signalled create does (`mcp-task-tools.allium:
@@ -138,6 +139,9 @@ impl IngestStore for ReducerStore<'_> {
     }
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>) {
         delete_stale_feed_tasks_in_epic(self.0, epic_id, keep, &self.1)
+    }
+    fn delete_all_feed_tasks_in_epic(&mut self, epic_id: i64) {
+        delete_all_feed_tasks_in_epic(self.0, epic_id, &self.1)
     }
     fn recalculate_epic_chain(&mut self, epic_id: i64) {
         recalculate_epic_chain(self.0, epic_id)
@@ -552,17 +556,20 @@ fn route_and_move(
 
         all_external_ids.insert(item.external_id.clone());
 
-        if let Some(task) = existing.get(&item.external_id) {
-            if task.epic_id != target {
-                move_feed_task(store, &mut task.clone(), target);
-            }
-        } else {
-            if role_target == my || role_target == team {
-                new_review_requests
-                    .entry(target)
-                    .or_default()
-                    .insert(item.external_id.clone());
-            }
+        // `NewReviewRequestIsSignalled`: an insert, or a kept task coming back
+        // (`UpsertFeedTasks` reopens a done task marked `left_feed`).
+        let found = existing.get(&item.external_id);
+        if let Some(task) = found.filter(|t| t.epic_id != target) {
+            move_feed_task(store, &mut task.clone(), target);
+        }
+        if found.is_none_or(reopens_on_return) && (role_target == my || role_target == team) {
+            new_review_requests
+                .entry(target)
+                .or_default()
+                .insert(item.external_id.clone());
+        }
+        // `ReviewTaskModelIsSetByRole`: an insert only.
+        if found.is_none() {
             let model = if role_target == bots {
                 BOTS_REVIEW_MODEL
             } else {
@@ -667,8 +674,9 @@ fn ingest_role_routed(
             delete_stale_in_children(store, sub, &keep);
         }
         // A reviews parent holds no feed task directly: whatever is left on it
-        // is a merged stray or a duplicate of a routed copy.
-        store.delete_stale_feed_tasks_in_epic(parent.id, &HashSet::new());
+        // is a merged stray or a duplicate of a routed copy, removed whatever
+        // its status.
+        store.delete_all_feed_tasks_in_epic(parent.id);
     }
 
     let repo_groups: HashSet<i64> = repo_group_cache

@@ -167,6 +167,7 @@ async fn role_sub_epic(db: &Store, parent: EpicId, role: FeedRole) -> EpicId {
 
 mod additive_sync;
 mod excluded_prs;
+mod left_feed;
 mod repo_grouping;
 mod retired_records;
 mod role_routing;

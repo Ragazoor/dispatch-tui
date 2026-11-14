@@ -189,6 +189,13 @@ pub(crate) fn upsert_feed_item(
     let _ = write_task(ctx, row);
 }
 
+/// `UpsertFeedTasks`' coming-back clause: a task kept in done when its item
+/// left (`KeepWorkedOnFeedTask`) goes back to backlog when the item returns.
+/// Also what `NewReviewRequestIsSignalled` signals besides an insert.
+pub fn reopens_on_return(task: &Task) -> bool {
+    task.left_feed && task.status == DONE
+}
+
 /// The match arm of `feeds.allium: UpsertFeedTasks`: `existing` with the
 /// item's feed-owned values applied, stamped `now` — or `None` when applying
 /// them changes nothing (`UnchangedFeedItemIsNotRewritten`), so the caller
@@ -202,6 +209,13 @@ pub fn refreshed_feed_task(existing: &Task, item: &FeedTaskUpsertItem, now: Stri
     } else {
         (existing.url.clone(), existing.url_type.clone())
     };
+    // `UpsertFeedTasks`' coming-back clause: a task kept when its item left
+    // (`KeepWorkedOnFeedTask`) is new work again if it is still in done.
+    let (status, sub_status) = if reopens_on_return(existing) {
+        (BACKLOG.to_string(), default_sub_status(BACKLOG).to_string())
+    } else {
+        (existing.status.clone(), existing.sub_status.clone())
+    };
     let refreshed = Task {
         title: item.title.clone(),
         description: item.description.clone(),
@@ -210,6 +224,9 @@ pub fn refreshed_feed_task(existing: &Task, item: &FeedTaskUpsertItem, now: Stri
         sort_order: item.sort_order,
         url,
         url_type,
+        status,
+        sub_status,
+        left_feed: false,
         ..existing.clone()
     };
     (refreshed != *existing).then(|| Task {
@@ -218,35 +235,113 @@ pub fn refreshed_feed_task(existing: &Task, item: &FeedTaskUpsertItem, now: Stri
     })
 }
 
-/// Delete every task in `epic_id` whose `external_id` is set and not in
-/// `keep`. Shared by [`upsert_feed_tasks_inner`]'s single-epic pass and
-/// `feed_ingest.rs`'s per-child-epic loop.
-///
-/// Owes each removed row [`delete_task_side_effects`] the same as any other
-/// task removal — see that function's doc comment.
+/// The stale pass of `feeds.allium: UpsertFeedTasks` for one epic: every
+/// task in `epic_id` whose `external_id` is set and not in `keep` has left
+/// the feed. An untouched (backlog) one is deleted; a worked-on one is kept
+/// in done ([`keep_left_feed_task`]). Shared by [`upsert_feed_tasks_inner`]'s
+/// single-epic pass and `feed_ingest.rs`'s per-child-epic loop.
 pub(crate) fn delete_stale_feed_tasks_in_epic(
     ctx: &ReducerContext,
     epic_id: i64,
     keep: &std::collections::HashSet<&str>,
     ingest_host: &str,
 ) {
-    let stale: Vec<Task> = ctx
-        .db
+    for task in feed_tasks_in_epic(ctx, epic_id, keep) {
+        if left_feed_is_deleted(&task) {
+            delete_feed_task(ctx, task, ingest_host);
+        } else {
+            keep_left_feed_task(ctx, task, ingest_host);
+        }
+    }
+}
+
+/// `RoleRoutedFeedSync`'s parent sweep: every feed task on `epic_id` goes,
+/// whatever its status. A task left on a reviews parent is a stray or a
+/// duplicate of a routed copy, not a record of work.
+pub(crate) fn delete_all_feed_tasks_in_epic(ctx: &ReducerContext, epic_id: i64, ingest_host: &str) {
+    for task in feed_tasks_in_epic(ctx, epic_id, &std::collections::HashSet::new()) {
+        delete_feed_task(ctx, task, ingest_host);
+    }
+}
+
+fn feed_tasks_in_epic(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    keep: &std::collections::HashSet<&str>,
+) -> Vec<Task> {
+    ctx.db
         .tasks()
         .epic_id()
         .filter(&epic_id)
         .filter(|t| !t.external_id.is_empty() && !keep.contains(t.external_id.as_str()))
-        .collect();
-    for task in stale {
-        // The window lives on the current agent row, which the side effects
-        // delete: read it first.
-        let window = session_window(&AgentTables(ctx), task.id);
-        ctx.db.tasks().id().delete(task.id);
-        delete_task_side_effects(ctx, task.id);
-        // feeds.allium / store-split.allium:
-        // StaleDeleteRequestsTeardownOnTheHoldingHost. After the side effects,
-        // so the new row is not swept with the task's own request rows.
-        write_teardown_request_if_owed(ctx, &task, &window, ingest_host);
+        .collect()
+}
+
+/// Remove a feed task the feed no longer emits. Owes the row
+/// [`delete_task_side_effects`] the same as any other task removal — see that
+/// function's doc comment.
+fn delete_feed_task(ctx: &ReducerContext, task: Task, ingest_host: &str) {
+    // The window lives on the current agent row, which the side effects
+    // delete: read it first.
+    let window = session_window(&AgentTables(ctx), task.id);
+    ctx.db.tasks().id().delete(task.id);
+    delete_task_side_effects(ctx, task.id);
+    // feeds.allium / store-split.allium:
+    // StaleDeleteRequestsTeardownOnTheHoldingHost. After the side effects,
+    // so the new row is not swept with the task's own request rows.
+    write_teardown_request_if_owed(ctx, &task, &window, ingest_host);
+}
+
+/// The stale pass's split (`UpsertFeedTasks`): a task still in backlog is
+/// untouched and is deleted when its item leaves; any other is kept
+/// (`KeepWorkedOnFeedTask`). Shared with the board's in-memory caller.
+pub fn left_feed_is_deleted(task: &Task) -> bool {
+    task.status == BACKLOG
+}
+
+/// `feeds.allium: KeepWorkedOnFeedTask`'s decision for a feed task whose
+/// item left: `None` when the task is already marked and not running or in
+/// review, so a later absent cycle writes nothing; otherwise whether it also
+/// moves into done. Shared with the board's in-memory caller, so the two
+/// cannot drift.
+pub fn left_feed_moves_to_done(task: &Task) -> Option<bool> {
+    let finishing = task.status == RUNNING || task.status == REVIEW;
+    (finishing || !task.left_feed).then_some(finishing)
+}
+
+/// The patch [`keep_left_feed_task`] moves a task into done with: the same
+/// status write a hand move makes, so it stamps the completion, voids a
+/// deferred Stop, respawns a phoenix, cancels a launch still waiting, releases
+/// the window through a close row and rolls the epic up. The close row never
+/// closes the task's PR: a feed task's PR is upstream state
+/// (`pr-workflow.allium: ClosePrOnDone`).
+pub fn left_feed_done_patch() -> TaskPatch {
+    TaskPatch {
+        status: Some(DONE.into()),
+        sub_status: Some(default_sub_status(DONE).into()),
+        ..TaskPatch::default()
+    }
+}
+
+/// `feeds.allium: KeepWorkedOnFeedTask`: move a running or review task into
+/// done, then mark it as having left its feed.
+pub(crate) fn keep_left_feed_task(ctx: &ReducerContext, task: Task, ingest_host: &str) {
+    let Some(finishing) = left_feed_moves_to_done(&task) else {
+        return;
+    };
+    if finishing
+        && patch_task_row(ctx, task.id, left_feed_done_patch(), true, Some(ingest_host)).is_err()
+    {
+        return;
+    }
+    if let Some(row) = ctx.db.tasks().id().find(task.id) {
+        let _ = write_task(
+            ctx,
+            Task {
+                left_feed: true,
+                ..row
+            },
+        );
     }
 }
 
