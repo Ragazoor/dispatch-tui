@@ -61,7 +61,7 @@ config {
 
 -- `review_command()` (used by dispatch-prompt.allium: RenderPrReviewRunbook)
 -- is the review command in effect on this host: this host's saved
--- `review_command` Setting when present and not blank, else
+-- `review_command` Setting, trimmed, when present and not blank, else
 -- config.default_review_command.
 --
 -- The review command is an ordinary per-host Setting row under

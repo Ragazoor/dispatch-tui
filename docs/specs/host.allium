@@ -84,8 +84,10 @@ entity HostFile {
     credential: String?        -- the user identity's login credential; null until the first connection hands one out
 
     -- The file holds a login credential, so only its owner may read it. Every
-    -- write sets the mode (HostFileIsWrittenWhole), and every read puts a
-    -- loosened file back to it, logging that it did.
+    -- write sets the mode (HostFileIsWrittenWhole), and every read of a file
+    -- that parses puts a loosened file back to it, logging that it did. The
+    -- repair is best effort: one that fails is logged and the read still
+    -- answers. A file that does not parse is refused with its mode as found.
     invariant HostFileIsPrivate {
         permissions = config.host_file_mode
     }
@@ -214,7 +216,7 @@ rule MintHostIdentity {
         -- (startup.allium: PromptForHostLabelWhenUnnamed) needs exactly that
         -- distinction to know whether to ask.
         --
-        -- The hostname keeps its old job and loses only its silence: it is the
+        -- The hostname is only a suggestion: it is the
         -- value the startup prompt arrives pre-filled with, so accepting it is
         -- one keypress, and it reaches the label through RenameHost below like
         -- any other answer. It is a suggestion, not an identity — the id is

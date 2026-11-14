@@ -1731,7 +1731,7 @@ rule SetReviewCommandViaMcp {
         if command != null:
             settings/SaveSetting(
                 key: settings/config.review_command_key,
-                value: if is_blank(command): "" else: command
+                value: if is_blank(command): "" else: trim(command)
             )
 
     @guidance

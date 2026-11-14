@@ -42,4 +42,3 @@ docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity '
 docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'TmuxWindow' has no obvious governing specification import in this module.
 docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'TmuxPane' has no obvious governing specification import in this module.
 docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'UserIdentity' has no obvious governing specification import in this module.
-
