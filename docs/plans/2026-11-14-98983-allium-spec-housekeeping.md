@@ -60,7 +60,9 @@ each appendix below and folded into this epic's packages:
 - the old cross-cluster C4: the "flip to review" block is still written four times.
 
 Epic #69698 ("allium for skills") is adding specs for the skills that have none. This
-review does not duplicate it. The skill-spec package here (3) runs after that epic.
+review does not duplicate it: its tasks cover decompose-review, allium-loop, retro,
+learnings and wrap-up, not the three skill specs reviewed here. Package 3 adds no new
+skill spec.
 
 ## Decisions (apply them in every package)
 
@@ -89,11 +91,12 @@ New in this review, decided with the user on 2026-11-14:
 Per-spec behaviour questions are NOT decided here. Each package lists its questions; the
 agent asks the user before changing that behaviour.
 
-## Checker facts (additions to the #98956 list; verified on scratch copies)
+## Checker facts (additions to the #98956 list)
 
-The #98956 "Checker facts" all still hold. New:
+The #98956 "Checker facts" all still hold. New ones below were verified on scratch
+copies unless marked "(language reference, not scratch-tested)".
 
-- **Primitive types have no methods.** `name.trim()`, `.length`, `.prefix(n)`,
+- **Primitive types have no methods** (language reference line 354; the checker does not flag them). `name.trim()`, `.length`, `.prefix(n)`,
   `.contains("\n")`, `state.upper` and `.has_control_or_format_characters` are invalid
   and not flagged. Use black-box functions: `trimmed(name)`, `upper(state)`,
   `is_single_line(s)`. The same goes for `flat_map`, `.filter(...)`, `.sum(...)`,
@@ -118,9 +121,11 @@ The #98956 "Checker facts" all still hold. New:
   on host's `HostFile`, passed at creation, clears it (package 2).
 - `when: split/WrapUpRequested(task, host, pr)` *binds* `pr` as a name. It does not match
   a literal, so a rule written this way fires for every action. Bind the parameter and
-  `requires: action = pr`.
+  `requires: action = pr`. (Language reference, not scratch-tested: `when:` parameters
+  are binding names in every example; none shows a literal.)
 - `and` does not join ensures statements (`Emit(...) and x = y`); put one per line. `and
-  not SomeTrigger(...)` in an ensures negates an emission and has no meaning.
+  not SomeTrigger(...)` in an ensures negates an emission and has no meaning. (Language
+  reference, not scratch-tested.)
 
 ## Conventions every package follows
 
@@ -148,6 +153,8 @@ code bugs found in passing, and `record_learning` for new conventions. Also:
   `allium:weed` on the package's specs at the end and fix what it finds (ask when it is a
   behaviour choice); before wrap-up, merge `main` into the branch (`git log
   --oneline HEAD..main`). Wrap up with rebase.
+- **History passages found in passing** in a spec you are already editing: rewrite them
+  in the present tense in the same task, as a separate commit. Do not open a follow-up.
 
 ## Work packages
 
@@ -160,8 +167,8 @@ owned by another package, the package says so. Merge `main` before wrap-up.
 | 0 | T0 | Checker gaps upstream + baseline header | scripts/allium-check.baseline | Checker facts (transitions block; literal-only enums; typed `provides`; missingSourceHint wording) | — | none |
 | 1 | T1 | core: present tense, built-ins, drift | core | A core C1–C8 (C8's pr-workflow read is package 8), B1, D1, D2, the `waiting_on_background` move | — | none |
 | 2 | T2 | storage, settings, host | storage, settings, host, baseline (+ citers dispatch-prompt, preference-review) | A storage S1, settings T1, host H1–H2 | — | none |
-| 3 | T3 | Skill specs: grill, fix, preference-review | the three specs, plugin/skills/preference-review/SKILL.md | A2 all | epic #69698, package 2 | G3: add a follow-up-decisions rule or drop the sentence? |
-| 4 | T4 | agents + agent-health | agents, agent-health | B agents A-n1–A-n8, agent-health H-n1–H-n9 | — | none |
+| 3 | T3 | Skill specs: grill, fix, preference-review | the three specs, plugin/skills/preference-review/SKILL.md | A2 all | package 2 | G3: add a follow-up-decisions rule or drop the sentence? |
+| 4 | T4 | agents + agent-health | agents, agent-health (+ core or store-split for A-n7's shared `chosen_mode`) | B agents A-n1–A-n8, agent-health H-n1–H-n9 | — | none |
 | 5 | T5 | split-pane + one owner for the deferred-Stop flip | split-pane, agent-health (X-1 only) | B split-pane S-n1–S-n12, X-1 | package 4 | none (S-n4 follows Decision 1) |
 | 6 | T6 | agent-tree | agent-tree | B agent-tree T-n1–T-n14 | — | T-n2: keep DiscardAgentTreePaneOnWindowGone or delete it? |
 | 7 | T7 | feeds, feed-scripts, schedules | the three specs | C feeds (all but the PollOwner seam), feed-scripts, schedules | — | none (the v37 sweep follows N2) |
@@ -169,7 +176,7 @@ owned by another package, the package says so. Merge `main` before wrap-up.
 | 9 | T9 | store-split: close-row rules match the module | store-split | D store-split all | — | none |
 | 10 | T10 | sync, spacetime-seed, spacetime-snapshot | the three specs | D sync, seed, snapshot | — | StorePublisher: keep in seed with a comment, or move to core? |
 | 11 | T11 | startup, cli, keep-awake, onboarding, observability + code comments | the five specs, src comment fixes | E startup S1–S3, cli, keep-awake, onboarding, observability, code-comment drift | — | Q-S1: StartupAbortReport contract? C3: how CliInvocation.exit is written |
-| 12 | T12 | dispatch + dispatch-prompt mechanical | dispatch, dispatch-prompt | E dispatch D1, D3–D6; dispatch-prompt P1–P3 | package 2 | none |
+| 12 | T12 | dispatch + dispatch-prompt mechanical | dispatch, dispatch-prompt | E dispatch D1, D3–D6; dispatch-prompt P1–P3; B split-pane S-n5's dispatch side (AgentRelaunch provides `ResumeTask` without `go_to_task`) | package 2 | none |
 | 13 | T13 | Split ProvisionDispatch into a contract | dispatch (+ dispatch-prompt citations) | E dispatch D2 / Q-D1 | package 12 | Q-D1: split, or leave it? |
 | 14 | T14 | tasks | tasks | F tasks old 2, T1–T9 | — | none |
 | 15 | T15 | epics: RecalculateEpicStatus rule | epics, core (`Epic.children` only) | F epics E1–E8, A core B2 | — | none |
@@ -191,6 +198,9 @@ Shared remedies that cross packages, so do not duplicate them:
   package 11. Both follow Decision 1; agent-health's note calling the form invalid stays.
 - mcp-task-tools 2228 `(agents.allium, A5)` -> A6: package 16, not package 4.
 - `PaneResumeAnswer` stays baselined (package 6 only adds its comment).
+- N1 applies in every package: each events-no-rule-listens-to finding (feeds
+  ScriptFileWritten, dispatch-prompt composer outputs, admin render events, keybindings
+  KeyIgnored/KeybindingsListed/KeybindingsShown) gets the one-line comment or is dropped.
 - The old-sweep sentences (N2): core C3 in package 1, tasks T4 in package 14, feeds 3820
   in package 7.
 
@@ -211,7 +221,8 @@ applied unevenly (see B1, D2). 13 of 16 resolved. The custom "Interval literals"
 - C1 mech 579: "(task #98992, B1)" -> drop the task number.
 - C2 mech 703-705: "so after the backfill every task has one" -> "every task has one".
 - C3 mech 1041-1046: "the first connection after the module that added the rule (rules
-  version 43) … are not migrated" is a migration log -> keep only the present rule.
+  version 43) … are not migrated" is a migration log. DECIDED (N2): if the code still
+  runs the sweep, keep one present-tense sentence; otherwise keep only the present rule.
 - C4 mech 324: "(see learnings.allium: Priority Ordering)" -> the section is "Ranking".
 - C5 bp 1011, 1014, 1022, 1023: `flat_map`, `.count(pred)`, `.first(pred)` are not
   built in. `subtree_tasks`/`subtree_epics` -> black box `descends_from(e, this)`;
@@ -316,6 +327,9 @@ preference-review.allium.
 
 ### Appendix B — agent-tree, split-pane, agents, agent-health
 
+Coverage: agents, agent-health, split-pane read in full. agent-tree 1420-1590, 2052-2160
+and the surfaces (2930-3880) were grep-scanned only; read them in package 6.
+
 All config defaults match their code constants; analyse is clean here. The AgentTreePane
 transition graph is complete (shown<->hidden). A second reviewer's "hidden transition
 warnings" come from a checker bug: only the LAST `transitions` block of an entity is
@@ -368,10 +382,10 @@ split-pane.allium. S1-S9 resolved.
   `#{pane_start_path}` (`src/tmux.rs::panes_with_home_in_window_of`) -> fix wording.
 - S-n3 bp 954, 961, 1102, 1133: `tmux_focus = …` assigns an undeclared variable -> emit
   an outcome such as `TmuxFocusMoved(target)`.
-- S-n4 QUESTION 277, 327, 944, 1131 (and keep-awake 80, 111, 120, 176):
+- S-n4 DECIDED (Decision 1; made a convention in this review) 277, 327, 944, 1131 (and keep-awake 80, 111, 120, 176):
   `when: UserAction("s", task)` puts a literal key in a trigger; agent-health 1005-1008
-  calls this form invalid. (a) named key triggers provided by SplitPaneBoard
-  (recommended, Decision 1); (b) keep and correct agent-health 1005-1008.
+  calls this form invalid. -> named key triggers provided by SplitPaneBoard
+  (SplitToggleKeyPressed(task), ActivateKeyPressed(task), JumpBackKeyPressed()).
 - S-n5 bp 1093: listens on dispatch's `ResumeTask` unqualified (reachable by name
   collision only) -> `use dispatch`, `dispatch/ResumeTask(...)`. dispatch's AgentRelaunch
   (dispatch 1538) provides `ResumeTask(task, message?)` without `go_to_task`.
@@ -445,10 +459,11 @@ feeds.allium. 27 of 28 resolved; B7 (history) partly open.
 - bp history: 22-24 "legacy Review Board … remain removed"; 2603-2604 "as when teardown
   was first added"; 3346-3350 "first imposed … NOW MADE"; 3384-3391 "proposal is
   retired"; 3550 "(the reviews_parent parent-flat bug)"; 2169 "AS IMPLEMENTED".
-- QUESTION 3820-3832: "CLAIMS FROM BEFORE THE RULE (a one-time sweep) … rules version
+- DECIDED (N2) 3820-3832: "CLAIMS FROM BEFORE THE RULE (a one-time sweep) … rules version
   37" is a migration log, but the code still runs it
   (`spacetime/module/src/config.rs::release_claims_of_non_setter_hosts`). (a) keep one
-  present-tense sentence (recommended); (b) drop it and open a task to delete the sweep.
+  present-tense sentence: "a store stamped below rules version 37 releases non-setter
+  claims once on connect". Drop the narrative.
 - by-design 956-983: ScriptFileWritten etc. are filesystem effects governed by contract
   ShippedFeedScriptFiles. Leave them.
 
@@ -484,6 +499,9 @@ pr-workflow.allium. 10 of 11 resolved; B16 partly open: bare `pr_closed`, `confl
   Review Board UI has been removed"; 125-126 cite a `docs/plans/…-77825-…` file.
 
 ### Appendix D — store-split, sync, spacetime-seed, spacetime-snapshot, spacetime-memory-store
+
+Coverage: sync, snapshot, memory-store read in full. store-split 811-2084 and
+spacetime-seed 200-800: rule bodies read, remaining prose grep-scanned only.
 
 Checker: 0 diagnostics here. Mirror spot-checks pass (RequestFeedRefresh, both prunes,
 release_unseen_window); config literals match; RULES_VERSION = BOARD_RULES_VERSION = 51.
@@ -647,7 +665,8 @@ tasks.allium. 12 of 13 resolved.
   cleanup, module write rules.
 - T3 mech 2414: `requires: task.exists` -> `exists task`.
 - T4 bp 2529-2531: SubStatusAutoreset bullet "a row stored before these checks existed …
-  reset once" is a migration log -> delete.
+  reset once" is a migration log. DECIDED (N2): if the module still runs the reset
+  (check `spacetime/module/src`), keep one present-tense sentence; otherwise delete.
 - T5 bp history: 533 "no longer transitions"; 828 "Archive edge column … went with the
   archived status"; 1166-1168 "before this field existed"; 1689-1696 `let released =
   removed` "now COINCIDE" -> present tense; use `removed`.
@@ -733,7 +752,8 @@ workspaces.allium. ~14 resolved; one open: orphan `*Allowed` outputs (385, 402, 
 - W10 entry 172-173: "Enter sends SetDisplayName(typed)" prose only -> with A3.
 - W-Q1 QUESTION: the eight `*Allowed` guard rules. (a) inline as `requires` in the owning
   rules (epics, tasks, work-packages); (b) `@invariant`s of a `contract StoreWriteChecks`
-  that the StoreWriteChecks surface demands (recommended); (c) keep, with a comment.
+  that the StoreWriteChecks surface demands (recommended). Keeping them as orphan events
+  is ruled out by N1.
 
 admin-surfaces.allium. 10 of 10 resolved.
 - A1 drift 110: "Esc closes it"; table has `["Esc", "q"]` (`src/keybindings/table.rs`) -> both.
