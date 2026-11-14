@@ -62,7 +62,9 @@ Read the repo's `CLAUDE.md` at `headRefOid` too, if it has one.
 
 The preference folder is `$DISPATCH_REVIEW_CONTEXT` when that variable is set
 and not blank, else `~/.local/share/dispatch/review-context`. Resolve it with
-`realpath` and keep the absolute path: step 7 writes there.
+`realpath` and keep the absolute path: step 7 writes there. The default is
+often a symlink, so list and read the files under that resolved path, never
+the unresolved one (`find` does not follow a symlinked start path).
 
 From that folder, read whichever of these exist:
 

@@ -271,7 +271,11 @@ rule LoadPreferences {
     @guidance
         -- The folder is the environment variable when it is set and not
         -- blank, else the default, resolved to an absolute path and kept:
-        -- WriteApprovedPreferenceEdit writes there.
+        -- WriteApprovedPreferenceEdit writes there. Files are listed and
+        -- read under the resolved path, never the configured one: the
+        -- default is often a symlink, and a hand test listed it with
+        -- `find`, which does not follow a symlinked start path, and
+        -- reviewed a full folder as empty.
         --
         -- Whichever of these exist load: general.md; languages/<language>.md
         -- for each language the changed files use, matched by file

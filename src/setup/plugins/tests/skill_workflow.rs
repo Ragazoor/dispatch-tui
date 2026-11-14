@@ -476,6 +476,10 @@ fn preference_review_skill_text_holds_each_session_guarantee() {
     let content = skill_body("preference-review");
     for (guarantee, needle) in [
         ("LoadPreferences", "DISPATCH_REVIEW_CONTEXT"),
+        (
+            "LoadPreferences",
+            "list and read the files under that resolved path",
+        ),
         ("LoadPreferences", "~/.local/share/dispatch/review-context"),
         ("LoadPreferences", "general.md"),
         ("LoadPreferences", "languages/"),
