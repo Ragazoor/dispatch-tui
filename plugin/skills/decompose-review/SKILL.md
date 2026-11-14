@@ -66,12 +66,11 @@ Save the returned `epic_id` for use in Step 6.
 
 ## Step 6: Write Plan Files and Create Tasks
 
-Create the plan directory:
+Pick the plan directory `docs/plans/review-<YYYY-MM-DD>`. **Check first whether it already exists, before you create it, and if it does, do not write into it** — a second review on the same day would interleave its work packages with the first's and renumber nothing. Add a distinguishing suffix instead (`review-<YYYY-MM-DD>-followup`, `-security`, …) and use it consistently for every path below. Say which directory you used when you report results in Step 7. Then create it:
+
 ```bash
 mkdir -p docs/plans/review-<YYYY-MM-DD>
 ```
-
-**If that directory already exists, do not write into it** — a second review on the same day would interleave its work packages with the first's and renumber nothing. Add a distinguishing suffix instead (`review-<YYYY-MM-DD>-followup`, `-security`, …) and use it consistently for every path below. Say which directory you used when you report results in Step 7.
 
 For each confirmed work package (in severity order):
 

@@ -1,0 +1,576 @@
+-- allium: 3
+-- decompose-review-skill.allium
+--
+-- Scope: The /decompose-review skill (plugin/skills/decompose-review/SKILL.md
+--        and its references/plan-template.md): what an agent running it
+--        guarantees to the user who asked for it. It turns the findings of a
+--        code review in the conversation into one epic of subtasks, each with
+--        a plan attached.
+-- Includes: Decomposition (one per invocation) and its pipeline — extract
+--           the findings, group them into work packages, confirm, resolve the
+--           repo path, create the epic, write each plan and create its
+--           subtask, report; Finding, WorkPackage and the decision item; the
+--           confirmation that gates every write; the plan directory rule;
+--           the fields every subtask is created with.
+-- Excludes: when a review produces findings (preference-review.allium and
+--           whatever code review ran); how the skill's copy reaches an agent
+--           (mcp-task-tools.allium: SkillCopyIsJustInTime); what create_epic
+--           and create_task do (mcp-task-tools.allium); what auto_run_plan
+--           and wrap_up_mode do to the executing agent (tasks.allium,
+--           dispatch-prompt.allium); the tools behind each step (git,
+--           AskUserQuestion) — those are the skill's mechanics, not what it
+--           promises.
+--
+-- Design decisions:
+--   - Findings are grouped by the files they touch, so one agent owns one
+--     area and two agents do not edit the same files.
+--   - Nothing is created until the user confirms the packages. The
+--     confirmation is also what justifies auto_run_plan: the plan was
+--     reviewed when the packages were confirmed, so the executing agent does
+--     not ask to proceed.
+--   - Every finding lands in a package, Low ones included. A finding left
+--     out is named with its reason, so the user can see nothing was dropped
+--     silently.
+--   - auto_run_plan skips the question whether to start, not a decision only
+--     the user can make: a decision item carries into the plan, and the
+--     executing agent asks about it.
+--   - Review packages are small and land on main, so each subtask rebases at
+--     wrap-up and none opens its own PR.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- Least severe last. The report's own labels; a package is ordered by its
+-- worst finding.
+enum FindingSeverity { blocker | high | medium | low }
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+-- One run of the skill against one review report.
+entity Decomposition {
+    -- The date the epic and the plan directory are named for.
+    date: String
+    -- The main repo root, never a worktree path; absent until resolved.
+    repo_path: String?
+    -- Absent until the epic is created.
+    epic_id: Integer?
+    -- The directory every plan of this run is written into; absent until
+    -- the plan step picks it.
+    plan_directory: String?
+    -- The user has said to go ahead after seeing the package list.
+    confirmed: Boolean
+
+    findings: Finding with run = this
+    packages: WorkPackage with run = this
+
+    stage: extracting | grouping | confirming | resolving | creating | reporting | done
+
+    transitions stage {
+        extracting -> grouping
+        extracting -> done
+        grouping -> confirming
+        confirming -> resolving
+        resolving -> creating
+        creating -> reporting
+        reporting -> done
+        terminal: done
+    }
+
+    -- A package is kept by the user's confirmation, not yet turned into a task.
+    pending_packages: packages where status = confirmed
+    -- Every finding is in a package, or is named as left out with a reason.
+    every_finding_accounted_for:
+        findings.all(f => f.package != null or f.left_out_reason != null)
+    creation_complete: stage = creating and pending_packages.count = 0
+    findings_left_out: findings where left_out_reason != null
+}
+
+-- One point from the review report.
+entity Finding {
+    run: Decomposition
+    severity: FindingSeverity
+    -- Every file the finding names. A finding may name several, or none with
+    -- a line.
+    files: Set<String>
+    issue: String
+    suggested_fix: String
+    -- The agent that implements it cannot choose the fix alone: the review
+    -- offers more than one fix, the fix changes behaviour or a spec, or it
+    -- removes something the user may want to keep.
+    decision_item: Boolean
+    package: WorkPackage?
+    -- Set when the finding is in no package; shown in the Not included list.
+    left_out_reason: String?
+}
+
+-- One group of findings that becomes one subtask.
+entity WorkPackage {
+    run: Decomposition
+    -- Named for its primary directory or module; "Cleanups" for the Low-only
+    -- groups.
+    name: String
+    is_cleanups: Boolean
+    -- Position in severity order; blockers first, Cleanups last. Becomes the
+    -- subtask's sort_order.
+    position: Integer
+    findings: Finding with package = this
+    -- Absolute path; absent until the plan is written.
+    plan_path: String?
+    -- Absent until the subtask is created.
+    task_id: Integer?
+
+    status: proposed | confirmed | dropped | created
+
+    transitions status {
+        proposed -> confirmed
+        proposed -> dropped
+        confirmed -> created
+        terminal: dropped, created
+    }
+
+    max_severity: findings.max(f => f.severity)
+    decision_items: findings where decision_item
+    has_decision_items: decision_items.count > 0
+    -- Confirmed, and the run has its epic: the plan and subtask may be made.
+    ready_to_create: status = confirmed and run.stage = creating and run.epic_id != null
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- Path components that name a group: src/mcp, src/tui, src/db.
+    group_prefix_components: Integer = 2
+    cleanups_name: String = "Cleanups"
+    epic_title_pattern: String = "Code Review: <YYYY-MM-DD>"
+    plan_directory_pattern: String = "docs/plans/review-<YYYY-MM-DD>"
+    plan_file_pattern: String = "wp-<N>-<slug>.md"
+    plan_template: String = "references/plan-template.md"
+    task_tag: String = "chore"
+    task_wrap_up_mode: String = "rebase"
+    task_auto_run_plan: Boolean = true
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Step 1: extract ==
+
+rule StartDecomposition {
+    when: DecompositionRequested(report)
+
+    ensures: Decomposition.created(
+        date: today(),
+        confirmed: false,
+        stage: extracting
+    )
+    ensures: DecompositionAnnounced()
+
+    @guidance
+        -- The skill opens with "I'm using the decompose-review skill to
+        -- create work packages from the code review." The report must
+        -- already be in the conversation, with findings carrying file:line
+        -- references (AnnouncesItself).
+}
+
+rule ExtractFindings {
+    when: run: Decomposition.created
+
+    requires: run.stage = extracting
+
+    for item in report_findings(run):
+        ensures: Finding.created(
+            run: run,
+            severity: item.severity,
+            files: item.files,
+            issue: item.issue,
+            suggested_fix: item.suggested_fix,
+            decision_item: false
+        )
+
+    @guidance
+        -- Every finding, Low ones included: Low findings are small issues to
+        -- fix in passing, not only to report, so none is dropped for being
+        -- minor (EveryFindingIsTaken). A finding may name several files or
+        -- omit the line.
+}
+
+rule NothingToDecompose {
+    when: run: Decomposition.created
+
+    requires: run.stage = extracting
+    requires: report_findings(run).count = 0
+
+    ensures: NothingToDecomposeReported()
+    ensures: run.stage = done
+
+    @guidance
+        -- A report with no findings: the user is told there is nothing to
+        -- decompose and the skill stops, creating nothing.
+}
+
+rule FindingsExtracted {
+    when: run: Decomposition.created
+
+    requires: run.stage = extracting
+    requires: report_findings(run).count > 0
+
+    ensures: run.stage = grouping
+}
+
+-- == Step 2: group ==
+
+rule GroupFindings {
+    when: run: Decomposition.stage transitions_to grouping
+
+    for group in groups_by_directory(run.findings, config.group_prefix_components):
+        ensures: WorkPackage.created(
+            run: run,
+            name: group.name,
+            is_cleanups: group.is_low_only,
+            position: group.position,
+            status: proposed
+        )
+    for finding in run.findings:
+        ensures:
+            if left_out_by_review(finding):
+                finding.left_out_reason = left_out_reason(finding)
+            else:
+                finding.package = package_for(finding, run)
+    ensures: run.stage = confirming
+
+    @guidance
+        -- Every finding goes into a package by default; only one the review
+        -- itself marks as needing no change, or that duplicates another
+        -- finding, is left out, with that reason (shown under "Not included").
+        -- Findings are grouped by the files they touch (GroupedByFilesTouched):
+        --   1. take the file paths of every file:line reference;
+        --   2. group by directory prefix, the first two path components
+        --      (src/mcp, src/tui, src/db);
+        --   3. a finding that names files in several groups merges those
+        --      groups;
+        --   4. a Low finding stays in its group when that group also has a
+        --      higher-severity finding; the Low findings of every Low-only
+        --      group move into one "Cleanups" package, so Low findings do not
+        --      each become a tiny package;
+        --   5. packages are ordered by their worst finding, blockers first,
+        --      then high, medium, low, with "Cleanups" last
+        --      (PackagesAreOrderedBySeverity);
+        --   6. each package is named for its primary directory or module.
+}
+
+rule MarkDecisionItems {
+    when: run: Decomposition.stage transitions_to grouping
+
+    for finding in run.findings:
+        ensures: finding.decision_item = needs_user_choice(finding)
+
+    @guidance
+        -- A decision item stays in its package. It is never left out and the
+        -- skill never picks an option for the user (DecisionItemsStayAndAreNotDecided).
+}
+
+-- == Step 3: confirm ==
+
+rule ConfirmPackages {
+    when: UserConfirmedPackages(run)
+
+    requires: run.stage = confirming
+
+    for package in run.packages where status = proposed:
+        ensures: package.status = confirmed
+    ensures: run.confirmed = true
+    ensures: run.stage = resolving
+
+    @guidance
+        -- Nothing is created until now (NothingCreatedBeforeConfirmation).
+        -- The skill shows a numbered list: each package's name, finding count
+        -- by severity, decision item count, files and a one-line summary, and
+        -- asks with AskUserQuestion whether to confirm all, drop or merge
+        -- some. What the user asks for is applied first
+        -- (DropPackage). Under the list is a "Not included" section naming
+        -- each finding in no package with the reason, or "Not included: none"
+        -- (ConfirmationNamesLeftOutFindings).
+}
+
+rule DropPackage {
+    when: UserDroppedPackage(package)
+
+    requires: package.run.stage = confirming
+    requires: package.status = proposed
+
+    ensures: package.status = dropped
+    ensures: package.findings.each(f => f.package = null)
+    ensures: package.findings.each(f => f.left_out_reason = "dropped by the user")
+
+    @guidance
+        -- The user asked for the drop, so it is not silent; the skill applies
+        -- it and creates nothing for that package. A merge moves findings
+        -- between packages and is not modelled here.
+}
+
+-- == Step 4: resolve the repo path ==
+
+rule ResolveRepoPath {
+    when: run: Decomposition.stage transitions_to resolving
+
+    ensures: run.repo_path = main_repo_root()
+    ensures: run.stage = creating
+
+    @guidance
+        -- The main repository root, not a worktree path: git rev-parse
+        -- --path-format=absolute --git-common-dir, with the trailing /.git
+        -- stripped. repo_path on a subtask must be the main root so dispatch
+        -- can create worktrees from it (RepoPathIsTheMainRoot).
+}
+
+-- == Step 5: create the epic ==
+
+rule CreateEpic {
+    when: run: Decomposition.stage transitions_to creating
+
+    requires: run.confirmed
+
+    ensures: run.epic_id = created_epic(
+        title: "Code Review: " + run.date,
+        description: executive_summary(run)
+    )
+
+    @guidance
+        -- Through the dispatch create_epic tool: title "Code Review: <date>",
+        -- description the report's executive summary in 3 to 5 bullets. No
+        -- repo_path: epics carry none and create_epic rejects the field, so
+        -- the path belongs on each subtask (EpicCarriesNoRepoPath).
+}
+
+-- == Step 6: write plans and create subtasks ==
+
+rule ChoosePlanDirectory {
+    when: run: Decomposition.stage transitions_to creating
+
+    ensures: run.plan_directory =
+        if directory_exists(config.plan_directory_pattern):
+            suffixed(config.plan_directory_pattern)
+        else:
+            config.plan_directory_pattern
+
+    @guidance
+        -- docs/plans/review-<date>, created with mkdir -p. If that directory
+        -- already exists it is not written into: a second review on the same
+        -- day would interleave its packages with the first's. A suffix
+        -- (-followup, -security, ...) is added and used for every path
+        -- (PlanDirectoryIsNeverReused). The directory used is said in the
+        -- report.
+}
+
+rule WritePlanAndCreateTask {
+    when: package: WorkPackage.ready_to_create
+
+    requires: package.status = confirmed
+
+    ensures: package.plan_path = written_plan(
+        directory: package.run.plan_directory,
+        file_pattern: config.plan_file_pattern,
+        template: config.plan_template,
+        findings: package.findings,
+        decisions: package.decision_items
+    )
+    ensures: package.task_id = created_task(
+        title: package.name,
+        repo_path: package.run.repo_path,
+        description: one_sentence_summary(package),
+        epic_id: package.run.epic_id,
+        plan_path: package.plan_path,
+        tag: config.task_tag,
+        sort_order: package.position,
+        auto_run_plan: config.task_auto_run_plan,
+        wrap_up_mode: config.task_wrap_up_mode
+    )
+    ensures: package.status = created
+
+    @guidance
+        -- Packages are handled in severity order. The plan follows
+        -- references/plan-template.md and holds every finding of the package
+        -- (severity, file:line, issue, fix), a Decisions section for each
+        -- decision item (the question, the options and what each costs, and
+        -- an instruction to ask the user before implementing that finding),
+        -- a changes table naming every file and what to change, and a
+        -- verification section (PlanHoldsEveryFinding,
+        -- DecisionItemsReachThePlan). Then the subtask is created through
+        -- the dispatch create_task tool, with the plan attached by absolute
+        -- path (EverySubtaskCarriesAPlan). auto_run_plan is true because the
+        -- plan was reviewed when the packages were confirmed; it skips the
+        -- question whether to start, not the Decisions section
+        -- (AutoRunPlanSkipsStartNotDecisions). wrap_up_mode is rebase, the
+        -- tag is chore and sort_order is the package's position
+        -- (SubtasksRebaseAndKeepSeverityOrder).
+}
+
+rule CreationDone {
+    when: run: Decomposition.creation_complete
+
+    ensures: run.stage = reporting
+}
+
+-- == Step 7: report ==
+
+rule ReportResults {
+    when: run: Decomposition.stage transitions_to reporting
+
+    ensures: ResultsReported(
+        epic_id: run.epic_id,
+        tasks: run.packages where status = created,
+        plan_directory: run.plan_directory
+    )
+    ensures: run.stage = done
+
+    @guidance
+        -- The created epic and every task id, each with its severity, and a
+        -- pointer to dispatch the epic from the TUI (ReportNamesEpicAndTasks).
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- No epic, plan or subtask exists before the user confirmed.
+invariant NothingCreatedBeforeConfirmation {
+    for run in Decompositions:
+        run.epic_id != null implies run.confirmed
+}
+
+-- A created package has its plan and its task.
+invariant EveryCreatedPackageHasAPlanAndATask {
+    for package in WorkPackages:
+        package.status = created implies (package.plan_path != null and package.task_id != null)
+}
+
+-- By the time the user is asked, no finding is unaccounted for: it is in a
+-- package or named as left out.
+invariant NoFindingIsDroppedSilently {
+    for run in Decompositions:
+        run.stage in {confirming, resolving, creating, reporting, done}
+            implies run.every_finding_accounted_for
+}
+
+-- A repo path, once resolved, is never a worktree.
+invariant RepoPathIsNeverAWorktree {
+    for run in Decompositions:
+        run.repo_path != null implies not is_worktree_path(run.repo_path)
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface DecomposeReviewInvocation {
+    facing _: core/Operator
+
+    provides:
+        DecompositionRequested(report)
+        UserConfirmedPackages(run)
+        UserDroppedPackage(package)
+
+    @guidance
+        -- The user invokes the skill as /decompose-review after a code review
+        -- ("/preference-review", "/code-review", "/review-pr" or any review
+        -- whose findings carry file:line references). `report` is that
+        -- review in the conversation; with none there is nothing to
+        -- decompose.
+}
+
+surface DecomposeReviewSession {
+    facing _: core/Operator
+
+    context run: Decomposition
+
+    exposes:
+        run.packages
+        run.findings_left_out
+        run.confirmed
+        run.plan_directory
+
+    @guarantee AnnouncesItself
+        -- The skill opens with "I'm using the decompose-review skill to
+        -- create work packages from the code review."
+
+    @guarantee EveryFindingIsTaken
+        -- Every finding is taken from the report, Low ones included. An
+        -- empty report is told so and the skill stops.
+
+    @guarantee GroupedByFilesTouched
+        -- Findings are grouped by the files they touch: by directory prefix
+        -- of the first two path components, merging the groups a single
+        -- finding spans (GroupFindings).
+
+    @guarantee PackagesAreOrderedBySeverity
+        -- Packages are ordered by their worst finding, blockers first, and
+        -- the "Cleanups" package, which holds the Low findings of Low-only
+        -- groups, is last. A Low finding stays in its group when that group
+        -- has a higher-severity finding.
+
+    @guarantee DecisionItemsStayAndAreNotDecided
+        -- A finding the implementing agent cannot decide alone stays in its
+        -- package. It is neither left out nor settled by the skill.
+
+    @guarantee ConfirmationNamesLeftOutFindings
+        -- The confirmation list shows each package's name, finding count by
+        -- severity, decision item count, files and summary, and a "Not
+        -- included" section naming each finding left out with its reason, or
+        -- "Not included: none".
+
+    @guarantee NothingCreatedBeforeConfirmation
+        -- The epic, the plan files and the subtasks are created only after
+        -- the user confirms the packages (ConfirmPackages).
+
+    @guarantee RepoPathIsTheMainRoot
+        -- repo_path on a subtask is the main repository root, never a
+        -- worktree path.
+
+    @guarantee EpicCarriesNoRepoPath
+        -- The epic is created with a title and description only; the repo
+        -- path belongs on the subtasks.
+
+    @guarantee PlanDirectoryIsNeverReused
+        -- A plan directory that already exists is not written into; a
+        -- suffixed directory is used for every plan of the run and named in
+        -- the report.
+
+    @guarantee PlanHoldsEveryFinding
+        -- A package's plan lists all its findings with severity, file:line,
+        -- issue and fix, a changes table of every file, and a verification
+        -- section.
+
+    @guarantee DecisionItemsReachThePlan
+        -- Each decision item is written into its plan's Decisions section:
+        -- the question, the options and what each costs, and an instruction
+        -- to ask the user with AskUserQuestion before implementing it, and
+        -- to leave the finding unimplemented, saying so at wrap-up, if the
+        -- user does not answer. The section is left out of a plan with
+        -- none.
+
+    @guarantee EverySubtaskCarriesAPlan
+        -- Each package becomes one subtask of the epic, with its plan
+        -- attached by absolute path.
+
+    @guarantee AutoRunPlanSkipsStartNotDecisions
+        -- auto_run_plan is set because the package confirmation reviewed the
+        -- plan. It skips the question whether to start, not the questions in
+        -- the plan's Decisions section.
+
+    @guarantee SubtasksRebaseAndKeepSeverityOrder
+        -- Each subtask has wrap_up_mode rebase, so the agent lands on
+        -- base_branch without asking and opens no PR of its own, the tag
+        -- chore, and a sort_order that keeps severity order.
+
+    @guarantee ReportNamesEpicAndTasks
+        -- The skill ends by naming the created epic and every task id with
+        -- its severity, and tells the user to dispatch the epic from the TUI.
+}
