@@ -1,0 +1,400 @@
+-- allium: 3
+-- fix-skill.allium
+--
+-- Scope: The /fix skill (plugin/skills/fix/SKILL.md): what an agent running
+--        it guarantees to the user who asked for a fix. It turns an issue in
+--        the conversation into a task in the repo that owns the defect, and
+--        starts an agent on it.
+-- Includes: FixRequest (one per invocation) and its pipeline — write the
+--           task, find the repo, check for a duplicate, confirm, create and
+--           dispatch, report; the main repo root rule; the confirmation that
+--           bounds an auto-mode chain; the fix tag and the epic choice; the
+--           three things it never does.
+-- Excludes: how the skill's copy reaches an agent (mcp-task-tools.allium:
+--           SkillCopyIsJustInTime); what create_task and dispatch_task do
+--           (mcp-task-tools.allium: CreateTaskViaMcp, DispatchTaskViaMcp);
+--           what the new agent does with the task (dispatch-prompt.allium);
+--           the tools behind each step (git, AskUserQuestion) — those are the
+--           skill's mechanics, not what it promises.
+--
+-- Design decisions:
+--   - Dispatch launches the new agent in auto mode, and that agent may invoke
+--     /fix itself. The user's confirmation before create_task is the only
+--     bound on that chain, so nothing is created without it.
+--   - The skill never edits the owning repo. The task is how work reaches it;
+--     the new agent works in its own worktree.
+--   - repo_path is the main repo root, never a worktree path: a worktree path
+--     makes dispatch branch from the wrong place. It is derived from git, and
+--     when git cannot say, the user is asked rather than the path guessed.
+--   - The duplicate check searches the owning repo, not the caller's epic, so
+--     a task another epic already holds is found.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+-- One run of the skill for one issue.
+entity FixRequest {
+    -- One line naming the defect, not the fix.
+    title: String
+    -- What is wrong, how to see it, what is ruled out, the fix if known.
+    -- Stored in the shared board, so it holds no secrets or tokens.
+    description: String
+    -- The main repo root of the owning repo; absent until resolved.
+    repo_path: String?
+    -- The caller's own epic; absent for a caller with none.
+    caller_epic: Integer?
+    -- An open task in the owning repo that already covers the defect.
+    duplicate_task: Integer?
+    -- Set when the fix belongs to the caller's epic.
+    epic_id: Integer?
+    -- The task the skill created; absent until created.
+    task_id: Integer?
+    -- The user has said dispatch, after seeing title, repo and epic.
+    confirmed: Boolean
+    -- The skill has edited, or switched the branch of, the owning repo.
+    -- Never true.
+    repo_touched: Boolean
+
+    stage: writing | locating | checking | confirming | creating | dispatching | reported | stopped
+
+    transitions stage {
+        writing -> locating
+        locating -> checking
+        checking -> confirming
+        checking -> stopped
+        confirming -> creating
+        confirming -> stopped
+        creating -> dispatching
+        creating -> stopped
+        dispatching -> reported
+        dispatching -> stopped
+        terminal: reported, stopped
+    }
+
+    is_duplicate: duplicate_task != null
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- The board label that says a person asked for this fix.
+    fix_tag: String = "fix"
+    -- The command that gives the main repo root once its trailing /.git is
+    -- stripped.
+    repo_root_command: String = "git rev-parse --path-format=absolute --git-common-dir"
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Step 1: write the task ==
+
+rule StartFix {
+    when: FixRequested(issue, caller_epic)
+
+    ensures: FixRequest.created(
+        title: defect_title(issue),
+        description: self_contained_description(issue),
+        repo_path: null,
+        caller_epic: caller_epic,
+        duplicate_task: null,
+        epic_id: null,
+        task_id: null,
+        confirmed: false,
+        repo_touched: false,
+        stage: writing
+    )
+    ensures: FixAnnounced()
+
+    @guidance
+        -- The issue is the conversation's context; words the user gave after
+        -- /fix are the issue itself. The new agent has none of this conversation, so
+        -- the description says what is wrong, how to see it (command, error
+        -- text, file and symbol, repo and branch), what is ruled out and the
+        -- fix if known (TaskIsSelfContained). If the context does not say
+        -- what is wrong, the skill asks the user one question.
+}
+
+rule TaskWritten {
+    when: request: FixRequest.created
+
+    requires: request.stage = writing
+
+    ensures: request.stage = locating
+}
+
+-- == Step 2: find the repo ==
+
+rule ResolveOwningRepo {
+    when: request: FixRequest.stage transitions_to locating
+
+    let root = strip_git_suffix(run(config.repo_root_command, owning_repo_dir(request)))
+
+    requires: ends_with_dot_git(run(config.repo_root_command, owning_repo_dir(request)))
+
+    ensures: request.repo_path = root
+    ensures: request.stage = checking
+
+    @guidance
+        -- The repo that owns the defect may not be the one the skill runs
+        -- in; with two plausible repos the skill asks the user. The command
+        -- runs in that repo, as `cd <repo>; git ...`, never `git -C`. The
+        -- trailing /.git is stripped (RepoPathIsTheMainRoot). The owning
+        -- repo is not edited and its branch is not switched
+        -- (NeverEditsTheOwningRepo).
+}
+
+rule AskForRepoPath {
+    when: request: FixRequest.stage transitions_to locating
+
+    requires: not ends_with_dot_git(run(config.repo_root_command, owning_repo_dir(request)))
+
+    ensures: request.repo_path = ask_user_for_path()
+    ensures: request.stage = checking
+
+    @guidance
+        -- The command failed, or its output does not end in /.git: the user
+        -- gives the path. The skill does not guess it
+        -- (RepoPathIsTheMainRoot).
+}
+
+-- == Step 3: check for a duplicate ==
+
+rule CheckForDuplicate {
+    when: request: FixRequest.stage transitions_to checking
+
+    let found = list_tasks(
+        query: defect_keywords(request),
+        repo_paths: [request.repo_path]
+    )
+
+    ensures: request.duplicate_task = open_task_covering(found, request)
+    ensures:
+        if request.is_duplicate:
+            DuplicateReported(task_id: request.duplicate_task)
+            and request.stage = stopped
+        else:
+            request.stage = confirming
+
+    @guidance
+        -- list_tasks is called with the defect's key words as `query` and
+        -- repo_paths set to the owning repo, so the search is not limited to
+        -- the caller's own epic (DuplicateCheckSearchesTheOwningRepo). An
+        -- open task that already covers the defect is reported by id and the
+        -- skill stops: nothing is asked and nothing is created.
+}
+
+-- == Step 4: confirm ==
+
+rule ConfirmWithUser {
+    when: request: FixRequest.stage transitions_to confirming
+
+    ensures: request.epic_id = if fix_belongs_to_epic(request): request.caller_epic else: null
+    ensures: ConfirmationAsked(
+        title: request.title,
+        repo_path: request.repo_path,
+        epic_id: request.epic_id,
+        choices: {dispatch, edit, cancel}
+    )
+
+    @guidance
+        -- Asked with AskUserQuestion, showing the title, the repo and the
+        -- epic (ConfirmBeforeCreate). The choices are dispatch, edit the
+        -- title or description, or cancel; an edit is applied and the
+        -- question asked again.
+}
+
+rule UserConfirmed {
+    when: UserChoseDispatch(request)
+
+    requires: request.stage = confirming
+
+    ensures: request.confirmed = true
+    ensures: request.stage = creating
+}
+
+rule UserCancelled {
+    when: UserChoseCancel(request)
+
+    requires: request.stage = confirming
+
+    ensures: request.stage = stopped
+}
+
+-- == Step 5: create and dispatch ==
+
+rule CreateFixTask {
+    when: request: FixRequest.stage transitions_to creating
+
+    requires: request.confirmed
+
+    let created = create_task(
+        title: request.title,
+        description: request.description,
+        repo_path: request.repo_path,
+        tag: config.fix_tag,
+        epic_id: request.epic_id
+    )
+
+    ensures:
+        if created.failed:
+            CreateFailureReported(error: created.error)
+            and request.stage = stopped
+        else:
+            request.task_id = created.id
+            and request.stage = dispatching
+
+    @guidance
+        -- create_task carries tag "fix", the board label that says a person
+        -- asked for this fix (FixTaskIsTagged). epic_id is the caller's own
+        -- epic only if the fix belongs to it, else null for a standalone task
+        -- (EpicIsTheCallersOrNone). An error, for example a closed epic, is
+        -- reported and the skill stops.
+}
+
+rule DispatchFixTask {
+    when: request: FixRequest.stage transitions_to dispatching
+
+    let dispatched = dispatch_task(request.task_id)
+
+    ensures:
+        if dispatched.failed:
+            DispatchFailureReported(task_id: request.task_id, error: dispatched.error)
+            and request.stage = stopped
+        else:
+            request.stage = reported
+
+    @guidance
+        -- dispatch_task is called with the returned id, after create_task
+        -- (DispatchFollowsCreate). If it errors, the skill reports the task
+        -- id and the error and leaves the task in backlog.
+}
+
+-- == Step 6: report ==
+
+rule ReportDispatched {
+    when: request: FixRequest.stage transitions_to reported
+
+    ensures: FixReported(task_id: request.task_id, repo_path: request.repo_path)
+
+    @guidance
+        -- Says the task id, the repo and that it is dispatched; says the new
+        -- agent starts at a design step and waits for the user in its tmux
+        -- window. Then the caller carries on with its own work.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- A task is created only after the user confirmed.
+invariant NothingIsCreatedUnconfirmed {
+    for request in FixRequests:
+        request.task_id != null implies request.confirmed
+}
+
+-- A duplicate stops the skill before it asks or creates anything.
+invariant DuplicatesAreNeverCreated {
+    for request in FixRequests:
+        request.is_duplicate implies request.task_id = null and not request.confirmed
+}
+
+-- The skill never touches the owning repo.
+invariant OwningRepoIsNeverTouched {
+    for request in FixRequests:
+        not request.repo_touched
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface FixInvocation {
+    facing _: core/Operator
+
+    provides:
+        FixRequested(issue, caller_epic)
+
+    @guidance
+        -- The user says /fix (optionally followed by the issue), "dispatch a
+        -- fix for this" or "someone should fix this"; an agent invokes it
+        -- when it hits a bug it should not fix in its own session. The
+        -- plugin skill is /dispatch:fix.
+}
+
+surface FixSession {
+    facing _: core/Operator
+
+    context request: FixRequest
+
+    exposes:
+        request.title
+        request.repo_path
+        request.epic_id
+        request.duplicate_task
+        request.task_id
+
+    provides:
+        UserChoseDispatch(request) when request.stage = confirming
+        UserChoseCancel(request) when request.stage = confirming
+
+    @guarantee TaskIsSelfContained
+        -- The new agent has none of the conversation. The title is one line
+        -- naming the defect, not the fix. The description says what is wrong,
+        -- how to see it, what is ruled out and the fix if known, and holds no
+        -- secrets or tokens, because the board is shared (StartFix).
+
+    @guarantee RepoPathIsTheMainRoot
+        -- repo_path is the main repo root of the owning repo, taken from
+        -- `git rev-parse --path-format=absolute --git-common-dir` with the
+        -- trailing /.git stripped, never a worktree path: a worktree path
+        -- makes dispatch branch from the wrong place. When the command fails
+        -- or its output does not end in /.git, the user is asked for the
+        -- path (ResolveOwningRepo, AskForRepoPath).
+
+    @guarantee DuplicateCheckSearchesTheOwningRepo
+        -- Before anything is confirmed or created, list_tasks is called with
+        -- the defect's key words and repo_paths set to the owning repo. An
+        -- open task that already covers the defect is reported by id and the
+        -- skill stops (CheckForDuplicate, DuplicatesAreNeverCreated).
+
+    @guarantee ConfirmBeforeCreate
+        -- Nothing is created until the user confirms, after being shown the
+        -- title, the repo and the epic, with choices to dispatch, edit or
+        -- cancel. Dispatch launches the new agent in auto mode and that agent
+        -- may invoke /fix itself, so this confirmation is the only bound on a
+        -- chain of fix tasks (ConfirmWithUser, NothingIsCreatedUnconfirmed).
+
+    @guarantee FixTaskIsTagged
+        -- The created task carries tag "fix", the board label that says a
+        -- person asked for this fix (CreateFixTask).
+
+    @guarantee EpicIsTheCallersOrNone
+        -- The task joins the caller's own epic only if the fix belongs to it;
+        -- otherwise it is standalone, epic_id null (ConfirmWithUser,
+        -- CreateFixTask).
+
+    @guarantee DispatchFollowsCreate
+        -- dispatch_task is called with the id create_task returned, after
+        -- the creation succeeded. A create error is reported and the skill
+        -- stops; a dispatch error is reported with the task id and the task
+        -- stays in backlog (CreateFixTask, DispatchFixTask).
+
+    @guarantee NeverEditsTheOwningRepo
+        -- The skill edits no code in any repo (the owning repo is the one the
+        -- model tracks) and does not switch the branch of the
+        -- owning repo, which may not be the repo it runs in. The task is how
+        -- work reaches that repo; the new agent works in its own worktree
+        -- (OwningRepoIsNeverTouched).
+
+    @guarantee ReportsTheOutcome
+        -- The caller is told the task id, the repo, that it is dispatched and
+        -- that the new agent waits for the user at a design step in its tmux
+        -- window (ReportDispatched).
+}

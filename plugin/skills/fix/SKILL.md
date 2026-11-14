@@ -52,7 +52,8 @@ epic. If an open task already covers it, tell the user its id and stop.
 Nothing is created until the user confirms. This is also the guard against
 fix tasks spawning more fix tasks on their own. Ask with `AskUserQuestion`,
 showing the title, the repo and the epic. Offer: dispatch, edit the title or
-description, or cancel. Apply what they ask for.
+description, or cancel. Apply an edit, then ask again: the user confirms
+the version that gets created.
 
 ## Step 5: Create and dispatch
 

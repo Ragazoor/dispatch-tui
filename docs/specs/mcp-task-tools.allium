@@ -2171,10 +2171,8 @@ surface McpTaskTools {
         -- both carry the text in plugin/skills, and a branch that names a references/
         -- file can be followed over MCP too.
         --
-        -- The /fix skill creates and dispatches a task in the repo that owns a defect.
-        -- It checks for a duplicate and asks the user to confirm before create_task,
-        -- because dispatch launches an agent in auto mode and a dispatched agent may
-        -- invoke /fix itself; the confirmation is the only bound on that chain.
+        -- The /fix skill files a defect as a task in the repo that owns it. Its
+        -- behaviour is specified in its own file (fix-skill.allium: FixSession).
         --
         -- The /preference-review skill reviews one PR against the operator's review
         -- preference files. Its behaviour is specified in its own file

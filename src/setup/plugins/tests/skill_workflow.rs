@@ -308,31 +308,85 @@ fn learnings_skill_wrong_verdict_does_not_claim_human_review() {
 /// worktree path as `repo_path` makes dispatch branch from the wrong place),
 /// and must get the user's confirmation before anything is created: dispatch
 /// launches an agent in auto mode, and a dispatched agent can invoke /fix too.
+/// Each guarantee of `FixSession` in `docs/specs/fix-skill.allium` is pinned
+/// by the words in `SKILL.md` that hold it.
 #[test]
 fn fix_skill_confirms_then_creates_and_dispatches_a_fix_task_in_the_owning_repo() {
     let content = skill_body("fix");
-    for needle in [
-        "`create_task`",
-        "`dispatch_task`",
-        "`tag`: `\"fix\"`",
-        "--git-common-dir",
-        "never a\nworktree path",
-        "`epic_id`",
-        "`list_tasks`",
-        "Do not edit",
+    for (guarantee, needle) in [
+        (
+            "TaskIsSelfContained",
+            "`title`: one line naming the defect, not the fix",
+        ),
+        ("TaskIsSelfContained", "Leave out secrets and tokens"),
+        ("RepoPathIsTheMainRoot", "--git-common-dir"),
+        ("RepoPathIsTheMainRoot", "never a\nworktree path"),
+        (
+            "RepoPathIsTheMainRoot",
+            "ask the user for the path instead of guessing",
+        ),
+        ("DuplicateCheckSearchesTheOwningRepo", "`list_tasks`"),
+        (
+            "DuplicateCheckSearchesTheOwningRepo",
+            "`repo_paths` set to `[repo_path]`",
+        ),
+        (
+            "DuplicateCheckSearchesTheOwningRepo",
+            "tell the user its id and stop",
+        ),
+        (
+            "ConfirmBeforeCreate",
+            "Nothing is created until the user confirms",
+        ),
+        ("ConfirmBeforeCreate", "`AskUserQuestion`"),
+        (
+            "ConfirmBeforeCreate",
+            "showing the title, the repo and the epic",
+        ),
+        (
+            "ConfirmBeforeCreate",
+            "Offer: dispatch, edit the title or\ndescription, or cancel",
+        ),
+        ("ConfirmBeforeCreate", "Apply an edit, then ask again"),
+        ("FixTaskIsTagged", "`tag`: `\"fix\"`"),
+        ("EpicIsTheCallersOrNone", "`epic_id`"),
+        (
+            "EpicIsTheCallersOrNone",
+            "pass `null` for a standalone task",
+        ),
+        ("DispatchFollowsCreate", "`create_task`"),
+        ("DispatchFollowsCreate", "`dispatch_task`"),
+        ("DispatchFollowsCreate", "leave the task in backlog"),
+        ("NeverEditsTheOwningRepo", "Do not edit"),
+        (
+            "NeverEditsTheOwningRepo",
+            "Do not edit the repo or switch\nits branch",
+        ),
+        ("ReportsTheOutcome", "waits for the user in its tmux window"),
     ] {
-        assert!(content.contains(needle), "fix skill must mention {needle}");
+        assert!(
+            content.contains(needle),
+            "fix skill must hold {guarantee}: missing {needle:?}"
+        );
     }
     let at = |needle: &str| {
         content
             .find(needle)
             .unwrap_or_else(|| panic!("fix skill must mention {needle}"))
     };
+    // Duplicate check, then confirm, then create, then dispatch
+    // (DuplicateCheckSearchesTheOwningRepo, ConfirmBeforeCreate,
+    // DispatchFollowsCreate).
     assert!(
         at("`list_tasks`") < at("`AskUserQuestion`")
             && at("`AskUserQuestion`") < at("`create_task`")
             && at("`create_task`") < at("`dispatch_task`"),
         "fix skill must check duplicates, then confirm, then create, then dispatch"
+    );
+    // ResolveOwningRepo comes before the duplicate check, which needs repo_path.
+    assert!(
+        at("--git-common-dir") < at("`list_tasks`"),
+        "fix skill must resolve repo_path before searching it"
     );
 }
 
