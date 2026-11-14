@@ -1,0 +1,579 @@
+-- allium: 3
+-- retro-skill.allium
+--
+-- Scope: The /retro skill (plugin/skills/retro/SKILL.md and its
+--        references/filing.md): what an agent running it guarantees to the
+--        next agent dispatched into the repo, and to the operator whose
+--        session it reflects on. It looks for moments where the operator
+--        corrected or steered the agent, then changes the agent-facing
+--        context that would have saved the effort, or files a task for what
+--        it must not change itself.
+-- Includes: Retrospective (one per invocation) and its pipeline — look,
+--           judge, act, report; Moment, one point of user feedback, and what
+--           became of it; what counts as a moment; which surfaces reach the
+--           next agent; the fix-or-file split and the done-path exception; the
+--           two tags it files; the root cause that lies outside the repo; the
+--           report and the return to the calling skill.
+-- Excludes: where the skill sits in a wrap-up and what refuses a dirty tree
+--           (pr-workflow.allium: WrapUpDone, WrapUpPr, WrapUpRebase;
+--           mcp-task-tools.allium: WrapUpRefusesUnfinishedWork, which holds a
+--           retro fix to the commit but cannot tell whether retro ran); that
+--           a retro task sorts after planned subtasks (epics.allium:
+--           AutoDispatchNextSubtask); how the skill's copy reaches an agent
+--           (mcp-task-tools.allium: SkillCopyIsJustInTime); what create_task
+--           and record_learning do (mcp-task-tools.allium: CreateTaskViaMcp;
+--           learnings.allium: RecordLearningViaMcp); the knowledge base itself (learnings.allium);
+--           the tools behind each step (list_tasks, get_task) — those are the
+--           skill's mechanics, not what it promises.
+--
+-- Design decisions:
+--   - The subject is feedback the operator actually gave. A stale spec is the
+--     weed skill's job and a command that failed until the right invocation
+--     was found is a tooling problem, so neither is a moment. Without that
+--     bound the skill turns into an audit of documentation accuracy, and an
+--     inaccurate sentence that cost the session nothing is filed as a chore.
+--   - Nothing notable is a real answer. A skill that must find something
+--     invents it.
+--   - The agent that did the work has the context and a commit as its next
+--     step, so a small, self-evident prose fix is cheap for it and a task is
+--     not. A fix that needs a design judgement, or whose history the agent
+--     does not know, is a task, because the next agent can ask the questions
+--     this one cannot.
+--   - A spec describes behaviour the code has. Retro may bring a spec up to
+--     what this session implemented; a spec for behaviour the code lacks is a
+--     design change and runs spec, tests, code with its own dispatch.
+--   - On a done wrap-up nothing rebases or pushes, so a fix stays in a
+--     worktree that is then removed. A task survives it. Retro therefore
+--     files and never fixes there.
+--   - Retro files bug and chore and nothing else. A speculative refactor or
+--     an enhancement idea is a hypothetical, not a finding, and every retro
+--     task that was archived had that shape.
+--   - A workaround in the repo's docs treats the symptom. When the cause is
+--     the tool or environment running the agent, the defect stays open until
+--     someone files it, and only the repo that owns it may be filed into
+--     silently.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- The surfaces whose content reaches the next agent, and how
+-- (SKILL.md, "What is worth changing").
+enum ContextSurface {
+    claude_md          -- loaded into every dispatch prompt
+    spec               -- docs/specs/*.allium, the source of truth agents consult
+    doc_page           -- docs/*.md, linked from CLAUDE.md, read on demand
+    skill              -- plugin/skills/*/SKILL.md, the skill the next agent invokes
+    knowledge_base     -- injected into the prompt (learnings.allium)
+    verify_command     -- shown by get_task and run by the agent
+}
+
+-- What a moment led to.
+enum Disposition { fixed | filed | flagged | recorded | dropped }
+
+-- The only tags retro files with.
+enum RetroTag { bug | chore }
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+-- One run of the skill, at the end of one task's work.
+entity Retrospective {
+    -- Known from the invocation or from get_task's wrap_up_mode, else asked
+    -- for before the retrospective starts (ActionIsKnownBeforeFixOrFile).
+    action: core/WrapUpMode
+    moments: Moment with retro = this
+    stage: looking | judging | acting | reported
+
+    transitions stage {
+        looking -> judging
+        judging -> acting
+        acting -> reported
+        terminal: reported
+    }
+
+    fixed_moments: moments where disposition = fixed
+    filed_moments: moments where disposition = filed
+    flagged_moments: moments where disposition = flagged
+    is_nothing_notable: moments.count = 0
+    -- Every moment has a disposition. True at once for a retrospective with
+    -- no moments.
+    all_judged: stage = acting and moments.all(m => m.disposition != null)
+}
+
+-- One point where the operator corrected or steered the agent, confirmed a
+-- design choice among options the agent offered, or stated a convention that
+-- is written down nowhere. It may have cost no time.
+entity Moment {
+    retro: Retrospective
+    -- A concrete event in this session, quoted or described. Never a
+    -- hypothetical.
+    event: String
+    surface: ContextSurface?
+    -- Would a change to that surface have saved the operator the effort?
+    next_agent_would_do_better: Boolean
+    -- The cause lies in the tool or environment running the agent (the
+    -- sandbox, dispatch itself, Claude Code) rather than in this repo.
+    root_cause_outside_repo: Boolean
+    -- The surface is one the agent may edit: CLAUDE.md, a docs page, a skill
+    -- or a spec (a spec only for implemented behaviour, below).
+    is_editable_surface: Boolean
+    -- This session's work made the surface wrong, or the session proved it wrong.
+    session_made_it_wrong: Boolean
+    -- The correction is small and self-evident.
+    is_small_and_evident: Boolean
+    -- The fix needs a design judgement, or the inaccuracy predates the
+    -- session and its history is unknown.
+    needs_judgement: Boolean
+    -- The fix would make a spec describe behaviour the code lacks.
+    describes_unimplemented_behaviour: Boolean
+    -- A concrete defect the agent could not fix within the task.
+    is_unfixed_defect: Boolean
+    -- The tool or environment root cause is owned by the repo this task is in.
+    owned_by_this_repo: Boolean
+
+    -- A reusable pitfall, convention or preference: a design or style choice
+    -- the operator corrected or confirmed.
+    is_reusable_convention: Boolean
+
+    disposition: Disposition?
+    tag: RetroTag?
+
+    -- Fixable in place: an editable surface, made wrong or proved wrong this session,
+    -- small and needing no judgement. A spec edit is allowed only for
+    -- behaviour this session already implemented.
+    is_fixable_in_place:
+        next_agent_would_do_better
+        and is_editable_surface
+        and not is_reusable_convention
+        and not is_unfixed_defect
+        and not root_cause_outside_repo
+        and session_made_it_wrong
+        and is_small_and_evident
+        and not needs_judgement
+        and not describes_unimplemented_behaviour
+
+    -- A moment retro may act on at all.
+    is_admitted: next_agent_would_do_better
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- What the skill says first.
+    announcement: String = "I'm using the retro skill to run a session retrospective."
+    -- The heading line the report starts with.
+    report_heading: String = "## Session Retrospective"
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Step 1: look ==
+
+rule StartRetro {
+    when: RetroRequested(action?)
+
+    ensures: Retrospective.created(
+        action: action_or_asked(action),
+        stage: looking
+    )
+    ensures: RetroAnnounced(text: config.announcement)
+
+    @guidance
+        -- Invoked by the /wrap-up skill after the action is settled and
+        -- before its commit step (pr-workflow.allium and mcp-task-tools.allium
+        -- hold the order); the operator may also run /retro or ask for a
+        -- session retrospective. The invocation carries the action; when it
+        -- does not, the action is read from wrap_up_mode in get_task, and
+        -- when that does not say either, the agent asks
+        -- (ActionIsKnownBeforeFixOrFile).
+}
+
+rule LookForMoments {
+    when: MomentNoticed(retro, event)
+
+    requires: retro.stage = looking
+
+    ensures: Moment.created(
+        retro: retro,
+        event: event,
+        surface: surface_of(event),
+        next_agent_would_do_better: would_next_agent_do_better(event),
+        root_cause_outside_repo: is_tool_or_environment_cause(event),
+        is_editable_surface: is_editable(surface_of(event)),
+        session_made_it_wrong: made_wrong_by_session(event),
+        is_small_and_evident: is_small_fix(event),
+        needs_judgement: needs_design_judgement(event),
+        describes_unimplemented_behaviour: spec_would_outrun_code(event),
+        is_unfixed_defect: is_defect_left_open(event),
+        owned_by_this_repo: repo_owns_cause(event),
+        is_reusable_convention: is_convention(event),
+        disposition: null,
+        tag: null
+    )
+
+    @guidance
+        -- One Moment per point of operator feedback the agent notices.
+}
+
+rule LookingDone {
+    when: retro: Retrospective.created
+
+    requires: retro.stage = looking
+
+    ensures: retro.stage = judging
+
+    @guidance
+        -- The subject is feedback the operator actually gave
+        -- (OnlyOperatorFeedbackIsASubject): a code review comment that
+        -- changed something the agent had written, a design choice the
+        -- operator made, a correction to the agent's plan, a convention
+        -- stated that is written down nowhere. A moment counts even if it
+        -- cost no time, because a future agent would meet the same choice
+        -- and might get it wrong (WhatCountsAsAMoment). A stale spec is the
+        -- weed skill's, and a command that failed until the right invocation
+        -- was found is a tooling problem; neither is a moment. Nothing
+        -- notable is a real and common answer (NothingNotableIsAnAnswer).
+}
+
+-- == Step 2: judge ==
+
+rule JudgeMoment {
+    when: retro: Retrospective.stage transitions_to judging
+
+    for moment in retro.moments:
+        requires: moment.disposition = null
+
+        ensures:
+            if not moment.is_admitted:
+                moment.disposition = dropped
+
+    ensures: retro.stage = acting
+
+    @guidance
+        -- For each moment the agent asks whether a change to one of the
+        -- surfaces that reach the next agent would have prevented it. The
+        -- test is whether the next agent would do better, and each moment
+        -- must trace to a concrete event of this session
+        -- (MomentsTraceToTheSession). A true but harmless inaccuracy is not a
+        -- moment. The agent also asks whether the root cause sits in the
+        -- tool or environment running it — the sandbox, dispatch itself or
+        -- Claude Code — and if so reads references/filing.md before it acts
+        -- (RootCauseOutsideTheRepoIsNotClosedByAWorkaround).
+}
+
+-- == Step 3: act ==
+
+rule FixInPlace {
+    when: retro: Retrospective.stage transitions_to acting
+
+    for moment in retro.moments:
+        requires: moment.is_admitted
+        requires: moment.disposition = null
+        requires: moment.is_fixable_in_place
+        requires: retro.action in {rebase, pr}
+
+        ensures: moment.disposition = fixed
+        ensures: ContextEdited(surface: moment.surface, event: moment.event)
+
+    @guidance
+        -- The agent edits the surface now, in its worktree, and the edit
+        -- travels with the session's own commit
+        -- (SmallDriftIsFixedNotFiled). A spec is edited only to describe
+        -- behaviour this session already implemented
+        -- (SpecEditsDescribeImplementedBehaviour).
+}
+
+rule FileInsteadOfFixing {
+    when: retro: Retrospective.stage transitions_to acting
+
+    for moment in retro.moments:
+        requires: moment.is_admitted
+        requires: moment.disposition = null
+        requires: retro.action = done
+            or not moment.is_fixable_in_place
+            or moment.is_unfixed_defect
+        requires: not moment.is_reusable_convention
+        requires: not moment.root_cause_outside_repo
+            or moment.owned_by_this_repo
+
+        ensures: moment.disposition = filed
+        ensures: moment.tag = if moment.is_unfixed_defect: bug else: chore
+        ensures: TaskFiled(
+            tag: moment.tag,
+            repo_path: this_repo(),
+            epic_id: retro_task_epic(),
+            title: names_the_change(moment),
+            description: cold_readable(moment)
+        )
+
+    @guidance
+        -- create_task, with tag bug for a concrete defect with observable
+        -- wrong behaviour and chore for a context improvement that passed
+        -- the worth-changing test but that the agent must not fix itself
+        -- (OnlyBugAndChoreAreFiled, FeaturesAreNeverFiled). A moment is
+        -- filed rather than fixed when the fix needs a design judgement, is
+        -- not small, concerns an inaccuracy whose history the agent does not
+        -- know, or would make a spec describe behaviour the code lacks —
+        -- that is a spec, tests, code loop with its own dispatch
+        -- (SpecEditsDescribeImplementedBehaviour) — and a concrete defect
+        -- that could not be fixed in scope is filed as a bug. On a done
+        -- wrap-up it is always filed (DoneWrapUpAlwaysFiles).
+        --
+        -- The title names the change; the description names this task and
+        -- says what the next agent will hit if it stays unfixed. repo_path
+        -- and epic_id are required and not inherited: the finding goes in
+        -- the epic of the task that found it, or null when it stands alone
+        -- (FilingIsDuplicateCheckedAndWrittenForAColdAgent).
+}
+
+rule FlagForeignRootCause {
+    when: retro: Retrospective.stage transitions_to acting
+
+    for moment in retro.moments:
+        requires: moment.is_admitted
+        requires: moment.disposition = null
+        requires: moment.root_cause_outside_repo
+        requires: not moment.owned_by_this_repo
+
+        ensures: moment.disposition = flagged
+        ensures: RootCauseFlagged(event: moment.event)
+
+    @guidance
+        -- A workaround in this repo's docs may be written first when it helps
+        -- the next agent now, but it is not sufficient closure. When another
+        -- repo owns the defect, nothing is filed on that repo's board: the
+        -- agent names the root cause and the repo it thinks owns it in the
+        -- report, so the operator can file it, and says plainly that it is
+        -- still open (RootCauseOutsideTheRepoIsNotClosedByAWorkaround).
+}
+
+rule RecordLearning {
+    when: retro: Retrospective.stage transitions_to acting
+
+    for moment in retro.moments:
+        requires: moment.is_admitted
+        requires: moment.disposition = null
+        requires: moment.is_reusable_convention
+
+        ensures: moment.disposition = recorded
+        ensures: LearningRecorded(event: moment.event)
+
+    @guidance
+        -- A reusable pitfall, convention or preference — a design or style
+        -- choice the operator corrected or confirmed — is recorded with
+        -- record_learning at once, without waiting to be asked
+        -- (LearningsAreRecordedWithoutBeingAsked). The learnings skill owns
+        -- how.
+}
+
+-- == Step 4: report ==
+
+rule ActingDone {
+    when: retro: Retrospective.all_judged
+
+    requires: retro.stage = acting
+
+    ensures: retro.stage = reported
+    ensures: RetroReported(
+        heading: config.report_heading,
+        went_well: went_well(retro),
+        corrected_or_steered: retro.moments,
+        context_fixed: retro.fixed_moments,
+        tasks_filed: retro.filed_moments,
+        root_causes_flagged: retro.flagged_moments
+    )
+    ensures: CallerResumed()
+
+    @guidance
+        -- A short summary under "## Session Retrospective" with five lines:
+        -- what went well, where the operator corrected or steered, what
+        -- context was fixed and where (or none needed), which follow-up tasks
+        -- were created (or none needed), and the root causes flagged
+        -- elsewhere (or none) (ReportHasFiveLines). It is not the end of the
+        -- session: retro is a sub-step, so the agent goes straight on to the
+        -- calling skill's next instruction in the same turn
+        -- (ResumesTheCallingSkill).
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- A moment becomes a fix only on a path where the fix reaches the base
+-- branch.
+invariant DoneNeverFixes {
+    for moment in Moments:
+        moment.disposition = fixed implies moment.retro.action in {rebase, pr}
+}
+
+-- Retro files only bug and chore.
+invariant OnlyBugAndChoreAreTags {
+    for moment in Moments:
+        moment.disposition = filed implies moment.tag in {bug, chore}
+}
+
+-- A tool or environment root cause owned by another repo is never filed onto
+-- that repo's board by retro.
+invariant ForeignRootCauseIsNeverFiled {
+    for moment in Moments:
+        (moment.root_cause_outside_repo and not moment.owned_by_this_repo)
+            implies moment.disposition != filed
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface RetroInvocation {
+    facing _: core/Operator
+
+    provides:
+        RetroRequested(action?)
+
+    @guidance
+        -- The wrap-up skill invokes retro as a sub-step with the action it is
+        -- wrapping up with; the operator may run /retro directly or ask for a
+        -- session retrospective. To finish a task the agent uses the wrap-up
+        -- skill, never this one. The plugin skill is /dispatch:retro.
+}
+
+surface RetroSession {
+    facing _: core/Operator
+
+    context retro: Retrospective
+
+    exposes:
+        retro.fixed_moments
+        retro.filed_moments
+        retro.flagged_moments
+        retro.is_nothing_notable
+
+    provides:
+        MomentNoticed(retro, event) when retro.stage = looking
+
+    @guarantee AnnouncesItself
+        -- The skill says "I'm using the retro skill to run a session
+        -- retrospective." at the start (StartRetro).
+
+    @guarantee ActionIsKnownBeforeFixOrFile
+        -- Fix-or-file depends on the wrap-up action, so the agent has it
+        -- before it acts: from the invocation, else from wrap_up_mode in
+        -- get_task, else by asking. Retro does not guess it (StartRetro).
+
+    @guarantee OnlyOperatorFeedbackIsASubject
+        -- The subject is feedback the operator actually gave. A stale spec is
+        -- the weed skill's job and a command that failed until the right
+        -- invocation was found is a tooling problem; neither is a moment
+        -- (LookForMoments).
+
+    @guarantee WhatCountsAsAMoment
+        -- A moment is the operator correcting or steering the agent's
+        -- approach, confirming a design choice among options the agent offered,
+        -- or stating a convention written down nowhere: a code review comment
+        -- that changed something the agent had written, a design choice the
+        -- operator made, a correction to the agent's plan. It counts even if
+        -- it cost no time, since a future agent would hit the same choice
+        -- (LookForMoments).
+
+    @guarantee NothingNotableIsAnAnswer
+        -- "Nothing notable" is a real and common answer. The skill does not
+        -- invent a finding, so a smooth session is not turned into busywork
+        -- (LookForMoments, Retrospective.is_nothing_notable).
+
+    @guarantee MomentsTraceToTheSession
+        -- The admission test is whether the next agent would do better, not
+        -- whether a sentence is inaccurate. Every moment traces to a concrete
+        -- event of this session; a true but harmless inaccuracy is not a
+        -- moment (JudgeMoment, Moment.is_admitted).
+
+    @guarantee SmallDriftIsFixedNotFiled
+        -- When the surface is agent-facing prose (CLAUDE.md, a docs page that
+        -- is not a spec, or a skill), the session made it wrong or proved it
+        -- wrong, and the correction is small and self-evident, the agent fixes
+        -- it itself, now: it has the context and the next step is a commit.
+        -- Retro does not forbid editing (FixInPlace, Moment.is_fixable_in_place).
+
+    @guarantee SpecEditsDescribeImplementedBehaviour
+        -- A spec is the agent's to edit only to describe behaviour this
+        -- session already implemented. A fix that would make a spec describe
+        -- behaviour the code lacks is filed: it is a spec, tests, code loop
+        -- with its own dispatch (FixInPlace, FileInsteadOfFixing).
+
+    @guarantee FileWhenTheFixIsNotTheAgentsToMake
+        -- A moment whose fix needs a design judgement, is not small, or
+        -- concerns a pre-existing inaccuracy whose history the agent does not
+        -- know is filed with create_task, not fixed. So is a concrete defect
+        -- the agent could not fix in scope, as a bug (FileInsteadOfFixing).
+
+    @guarantee DoneWrapUpAlwaysFiles
+        -- On a done wrap-up nothing rebases or pushes, so an edit would be
+        -- stranded in the worktree. Retro files a task instead of fixing, for
+        -- every moment it would otherwise fix or file (a root cause another
+        -- repo owns is still flagged, not filed) (FileInsteadOfFixing, DoneNeverFixes).
+
+    @guarantee OnlyBugAndChoreAreFiled
+        -- Retro files bug for a concrete defect with observable wrong
+        -- behaviour and chore for a context improvement that passed the
+        -- worth-changing test and that it must not fix itself
+        -- (FileInsteadOfFixing, OnlyBugAndChoreAreTags).
+
+    @guarantee FeaturesAreNeverFiled
+        -- Retro never files a feature. A speculative refactor or an
+        -- enhancement idea is not a finding; "this invariant is enforced by
+        -- convention, so the same omission could recur" is a hypothetical, not
+        -- a defect (FileInsteadOfFixing, OnlyBugAndChoreAreTags).
+
+    @guarantee FilingIsDuplicateCheckedAndWrittenForAColdAgent
+        -- Before filing, list_tasks is searched for a task that already covers
+        -- the finding. A finding that spans several files is one task, not one
+        -- per file. The title names the change, the description names this task
+        -- and says what the next agent will hit if it stays unfixed, and
+        -- repo_path and epic_id are passed explicitly: the task's own epic, or
+        -- null when it stands alone (FileInsteadOfFixing).
+
+    @guarantee ZeroTasksIsTheNormalOutcome
+        -- Filing several tasks means the agent is recording nits. Zero tasks
+        -- is the normal outcome (FileInsteadOfFixing).
+
+    @guarantee RootCauseOutsideTheRepoIsNotClosedByAWorkaround
+        -- For each moment the agent asks whether the root cause sits in the
+        -- tool or environment running it: the sandbox, dispatch itself or
+        -- Claude Code. A workaround in the repo's docs is written first if it
+        -- helps the next agent, but is not sufficient closure. A defect this
+        -- task's own repo owns is filed with create_task; a defect another repo
+        -- owns is not filed silently but flagged in the report, naming the root
+        -- cause and the repo. Either way the report says the root cause is
+        -- still open (FileInsteadOfFixing, FlagForeignRootCause,
+        -- ForeignRootCauseIsNeverFiled).
+
+    @guarantee LearningsAreRecordedWithoutBeingAsked
+        -- A reusable pitfall, convention or preference the operator corrected
+        -- or confirmed is recorded with record_learning right away, and the
+        -- agent does not wait to be asked (RecordLearning).
+
+    @guarantee ReportHasFiveLines
+        -- The report is a short summary headed "## Session Retrospective" with
+        -- five lines: what went well; what the operator corrected or steered
+        -- the agent on; the context fixed in this session and where, or none
+        -- needed; the follow-up tasks created, or none needed; and the
+        -- root-cause issues flagged elsewhere, or none (ActingDone).
+
+    @guarantee ResumesTheCallingSkill
+        -- The report is not the end of the session. Retro runs as a sub-step of
+        -- wrap-up, so the agent resumes the calling skill's next instruction in
+        -- the same turn and does not stop at the report (ActingDone).
+
+    @guarantee DetailLivesInTheFilingReference
+        -- The tags, the duplicate check, the call details and the
+        -- root-cause routing live in references/filing.md, which SKILL.md names
+        -- at the branch that needs it, so an agent that files nothing never
+        -- loads it (mcp-task-tools.allium: SkillCopyIsJustInTime).
+}

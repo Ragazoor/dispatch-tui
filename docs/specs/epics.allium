@@ -1143,7 +1143,7 @@ rule AutoDispatchNextSubtask {
         -- for nulls and as the tiebreaker. Sub-epics are NEVER auto-dispatched:
         -- if an epic's remaining work is nested inside a sub-epic, the human
         -- operator must dispatch that sub-epic explicitly from the TUI.
-        -- Follow-up tasks created between wrap_up and the close (e.g. by the
+        -- Follow-up tasks created before the commit step (e.g. by the
         -- /retro skill) carry no sort_order, so their fallback key is their own
         -- — always larger — id: they sort after every planned subtask and are
         -- only ever chosen once the planned subtasks are exhausted.

@@ -71,6 +71,7 @@ fn wrap_up_skill_carries_a_preset_mode_through_without_asking_or_stopping() {
     );
 }
 
+/// Pins ResumesTheCallingSkill of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_skill_tells_agent_to_resume_the_caller() {
     // wrap-up invokes retro pre-commit, before its commit step. Without an

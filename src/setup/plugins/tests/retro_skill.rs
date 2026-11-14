@@ -14,6 +14,7 @@ fn retro_section(anchor: &str) -> String {
         .unwrap_or_else(|| panic!("retro skill must contain the section anchored on {anchor:?}"))
 }
 
+/// Pins MomentsTraceToTheSession of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_admission_test_is_next_agent_benefit_not_doc_accuracy() {
     // The old Step 2 asked whether CLAUDE.md or a spec was "stale or
@@ -38,6 +39,7 @@ fn retro_admission_test_is_next_agent_benefit_not_doc_accuracy() {
     );
 }
 
+/// Pins WhatCountsAsAMoment and NothingNotableIsAnAnswer of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_first_step_asks_whether_user_corrected_or_steered_you() {
     // Task #4326: the old Step 1 was entirely "context turned out wrong"
@@ -64,6 +66,7 @@ fn retro_first_step_asks_whether_user_corrected_or_steered_you() {
     );
 }
 
+/// Pins OnlyOperatorFeedbackIsASubject of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_first_step_scopes_out_self_discovered_gaps() {
     // A stale spec is `weed`'s job (spec-code alignment), and a command
@@ -83,6 +86,7 @@ fn retro_first_step_scopes_out_self_discovered_gaps() {
     );
 }
 
+/// Pins WhatCountsAsAMoment of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_first_step_names_code_review_and_design_examples() {
     // Step 1's checklist must give the agent concrete shapes of user
@@ -107,6 +111,7 @@ fn retro_first_step_names_code_review_and_design_examples() {
     );
 }
 
+/// Pins LearningsAreRecordedWithoutBeingAsked of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_relationship_section_says_not_to_wait_to_be_asked_for_feedback() {
     // #4316's design/style feedback only became learnings after the
@@ -120,6 +125,7 @@ fn retro_relationship_section_says_not_to_wait_to_be_asked_for_feedback() {
     );
 }
 
+/// Pins SmallDriftIsFixedNotFiled of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_skill_permits_fixing_small_context_drift_in_session() {
     // The old Step 3 said "Do not edit files yourself", which turned every
@@ -144,6 +150,7 @@ fn retro_skill_permits_fixing_small_context_drift_in_session() {
     );
 }
 
+/// Pins SpecEditsDescribeImplementedBehaviour of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_skill_forbids_speccing_unimplemented_behaviour() {
     // A spec edit describing behaviour the session already implemented is
@@ -163,6 +170,7 @@ fn retro_skill_forbids_speccing_unimplemented_behaviour() {
     );
 }
 
+/// Pins FeaturesAreNeverFiled of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_skill_does_not_file_feature_tasks() {
     // Every archived retro-created task was a speculative refactor dressed
@@ -192,6 +200,7 @@ fn retro_skill_does_not_file_feature_tasks() {
     );
 }
 
+/// Pins FilingIsDuplicateCheckedAndWrittenForAColdAgent of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_skill_requires_a_duplicate_check_before_filing() {
     // Two findings were each filed twice: one stale sentence that appeared
@@ -208,6 +217,7 @@ fn retro_skill_requires_a_duplicate_check_before_filing() {
     );
 }
 
+/// Pins ZeroTasksIsTheNormalOutcome of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_skill_states_zero_findings_is_the_normal_outcome() {
     // The old skill buried this under three steps of checklist-shaped
@@ -220,6 +230,7 @@ fn retro_skill_states_zero_findings_is_the_normal_outcome() {
     );
 }
 
+/// Pins RootCauseOutsideTheRepoIsNotClosedByAWorkaround of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_step_2_asks_whether_root_cause_is_outside_this_repo() {
     // Task #4256: retro found the Bash sandbox blocks Gradle daemon
@@ -242,6 +253,7 @@ fn retro_step_2_asks_whether_root_cause_is_outside_this_repo() {
     );
 }
 
+/// Pins RootCauseOutsideTheRepoIsNotClosedByAWorkaround of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_root_cause_subsection_requires_filing_not_just_a_workaround() {
     // A local doc workaround treats the symptom, not the defect. Retro
@@ -275,6 +287,7 @@ fn retro_root_cause_subsection_requires_filing_not_just_a_workaround() {
     );
 }
 
+/// Pins ReportHasFiveLines of `RetroSession` in `docs/specs/retro-skill.allium`.
 #[test]
 fn retro_output_template_has_a_root_cause_line() {
     // The #4256 gap wasn't just a missing filing rule — retro's own
@@ -291,4 +304,120 @@ fn retro_output_template_has_a_root_cause_line() {
         "retro's output template must include a line surfacing \
          root-cause issues flagged elsewhere"
     );
+}
+
+/// A skill file with every run of whitespace folded to one space, so a
+/// phrase the Markdown wraps across lines still matches.
+fn retro_flat(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Each guarantee of `RetroSession` in `docs/specs/retro-skill.allium` that
+/// the skill text can hold is pinned here by the words that hold it: the
+/// flow in `SKILL.md` and the filing detail in `references/filing.md`. The
+/// skill is followed by an agent, so the text is the behaviour a test can
+/// pin. The guarantees the tests above pin by section are named in their doc
+/// comments: OnlyOperatorFeedbackIsASubject, WhatCountsAsAMoment,
+/// NothingNotableIsAnAnswer, MomentsTraceToTheSession,
+/// SmallDriftIsFixedNotFiled, SpecEditsDescribeImplementedBehaviour,
+/// FeaturesAreNeverFiled, FilingIsDuplicateCheckedAndWrittenForAColdAgent,
+/// ZeroTasksIsTheNormalOutcome, RootCauseOutsideTheRepoIsNotClosedByAWorkaround,
+/// LearningsAreRecordedWithoutBeingAsked and ResumesTheCallingSkill.
+#[test]
+fn retro_text_holds_each_session_guarantee() {
+    let skill = retro_flat(skill_body("retro"));
+    let filing = retro_flat(skill_file("retro", "references/filing.md"));
+    let in_skill = [
+        (
+            "AnnouncesItself",
+            "I'm using the retro skill to run a session retrospective.",
+        ),
+        (
+            "ActionIsKnownBeforeFixOrFile",
+            "it is in the invocation or in `wrap_up_mode` from `get_task`",
+        ),
+        (
+            "ActionIsKnownBeforeFixOrFile",
+            "If you do not know it, ask.",
+        ),
+        (
+            "FileWhenTheFixIsNotTheAgentsToMake",
+            "File a task with `create_task` instead when the fix needs a design judgement",
+        ),
+        (
+            "FileWhenTheFixIsNotTheAgentsToMake",
+            "concerns a pre-existing inaccuracy whose history you do not know",
+        ),
+        (
+            "FileWhenTheFixIsNotTheAgentsToMake",
+            "Also file a `bug` for a concrete defect you could not fix in scope.",
+        ),
+        (
+            "DoneWrapUpAlwaysFiles",
+            "On a `done` wrap-up always file instead of fixing",
+        ),
+        (
+            "DoneWrapUpAlwaysFiles",
+            "an edit is stranded in the worktree and a task is not",
+        ),
+        ("ReportHasFiveLines", "## Session Retrospective"),
+        ("ReportHasFiveLines", "**Went well:**"),
+        (
+            "ReportHasFiveLines",
+            "**User corrected or steered you on:**",
+        ),
+        ("ReportHasFiveLines", "**Context fixed in this session:**"),
+        ("ReportHasFiveLines", "**Follow-up tasks created:**"),
+        (
+            "ReportHasFiveLines",
+            "**Root-cause issues flagged (elsewhere):**",
+        ),
+        (
+            "DetailLivesInTheFilingReference",
+            "`references/filing.md` has the tags, the duplicate check and the call details.",
+        ),
+        (
+            "DetailLivesInTheFilingReference",
+            "read `references/filing.md` before you act",
+        ),
+    ];
+    for (guarantee, needle) in in_skill {
+        assert!(
+            skill.contains(needle),
+            "{guarantee}: retro's SKILL.md must contain {needle:?}"
+        );
+    }
+    let in_filing = [
+        ("OnlyBugAndChoreAreFiled", "Only two tags:"),
+        (
+            "OnlyBugAndChoreAreFiled",
+            "`bug` — a concrete defect with observable wrong behaviour.",
+        ),
+        (
+            "OnlyBugAndChoreAreFiled",
+            "`chore` — a context improvement that passed the \"worth changing\" test but that you must not fix yourself.",
+        ),
+        (
+            "FilingIsDuplicateCheckedAndWrittenForAColdAgent",
+            "`repo_path` and `epic_id` are required and not inherited.",
+        ),
+        (
+            "FilingIsDuplicateCheckedAndWrittenForAColdAgent",
+            "The `title` names the change.",
+        ),
+        (
+            "FilingIsDuplicateCheckedAndWrittenForAColdAgent",
+            "says what the next agent will hit if it stays unfixed",
+        ),
+        (
+            "RootCauseOutsideTheRepoIsNotClosedByAWorkaround",
+            "say plainly that the root cause is still open",
+        ),
+    ];
+    for (guarantee, needle) in in_filing {
+        assert!(
+            filing.contains(needle),
+            "{guarantee}: retro's references/filing.md must contain {needle:?}"
+        );
+    }
 }
