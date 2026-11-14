@@ -592,3 +592,50 @@ fn the_repo_of_a_task_no_host_holds_stays_editable() {
     .expect("no host holds it");
     assert_eq!(store.task(task).repo_path, "/elsewhere");
 }
+
+/// The feed stale delete is not a person's delete: it archives nothing and
+/// still detaches the task's learnings (`core.allium: ArchivedTask`).
+#[test]
+fn a_stale_delete_archives_nothing_and_detaches_learnings() {
+    let (store, epic) = world();
+    ingest(&store, epic, vec![item("a")], HOST_A);
+    let task = store
+        .db()
+        .tasks()
+        .iter()
+        .find(|t| t.external_id == "a")
+        .expect("the feed task")
+        .id;
+    store
+        .call_as_scheduler(|ctx| {
+            seed_learnings(
+                ctx,
+                vec![Learning {
+                    id: 1,
+                    kind: "pitfall".into(),
+                    summary: "A learning".into(),
+                    detail: None,
+                    scope: "repo".into(),
+                    scope_ref: None,
+                    tags: "[]".into(),
+                    status: "approved".into(),
+                    source_task_id: Some(task),
+                    upvote_count: 0,
+                    last_upvoted_at: None,
+                    created_at: "2026-09-19 10:00:00".into(),
+                    updated_at: "2026-09-19 10:00:00".into(),
+                    embedding: None,
+                    workspace_id: 0,
+                    author: String::new(),
+                }],
+            )
+        })
+        .expect("seed_learnings");
+
+    ingest(&store, epic, vec![], HOST_A);
+
+    assert!(store.db().tasks().id().find(task).is_none(), "stale-deleted");
+    assert!(store.db().archived_tasks().id().find(task).is_none());
+    let learning = store.db().learnings().id().find(1).expect("survives");
+    assert_eq!(learning.source_task_id, None);
+}

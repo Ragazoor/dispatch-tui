@@ -308,3 +308,33 @@ async fn a_task_created_after_a_restore_never_takes_an_archived_id() {
         "a new task got id {fresh}, an archived task's id or below"
     );
 }
+
+/// A board whose every task was deleted holds only archived records. Their
+/// ids count as rows for the plausibility check, so such a restore is not
+/// refused as an implausible task ceiling (`RefuseImplausibleCeiling`).
+#[tokio::test]
+async fn a_board_with_only_archived_tasks_restores() {
+    use serde_json::json;
+    let snapshot = crate::spacetime::Snapshot::new(
+        SharedTable::ALL
+            .iter()
+            .copied()
+            .map(|table| {
+                let rows = match table {
+                    SharedTable::ArchivedTasks => vec![vec![("id", json!(42))]],
+                    _ => vec![],
+                };
+                super::module_extract(table, &rows)
+            })
+            .collect(),
+    );
+    assert_eq!(snapshot.rows_claiming_ids(SharedTable::Tasks), 1);
+
+    let store = super::store_for(&snapshot);
+    restore(&store, &snapshot).await.unwrap();
+    let fresh = store
+        .insert_generating_id(SharedTable::Tasks)
+        .await
+        .unwrap();
+    assert!(fresh > 42, "a new task got id {fresh}");
+}

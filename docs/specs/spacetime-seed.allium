@@ -268,6 +268,13 @@ entity Snapshot {
 
     highest_id(t): extracts.filter(e => e.table = t).sum(e => e.row_ids.max ?? 0)
 
+    -- The id t's counter must pass, and the rows that claim it. `tasks` counts
+    -- its archived records too: an archived task keeps its task id
+    -- (core/ArchivedTask), so a board whose every task was deleted still has
+    -- rows behind its ceiling.
+    burn_ceiling(t): if t = tasks: max(highest_id(tasks), highest_id(archived_tasks)) else: highest_id(t)
+    rows_claiming_ids(t): if t = tasks: extracts.filter(e => e.table = tasks or e.table = archived_tasks).sum(e => e.row_count) else: extracts.filter(e => e.table = t).sum(e => e.row_count)
+
     -- Completeness is table-level, not row-level: every shared table appears,
     -- even when it appears empty. An empty extract and a missing extract are
     -- different claims — the first says "this table had no rows", the second
@@ -434,7 +441,7 @@ rule RestoreSnapshot {
     requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count = config.shared_table_count
     requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
-    requires: not snapshot.extracts.any(e => snapshot.highest_id(e.table) < 0 or snapshot.highest_id(e.table) > e.row_count * config.max_ceiling_per_row)
+    requires: not snapshot.extracts.any(e => snapshot.burn_ceiling(e.table) < 0 or snapshot.burn_ceiling(e.table) > snapshot.rows_claiming_ids(e.table) * config.max_ceiling_per_row)
 
     ensures:
         BurnIdSequences(snapshot: snapshot)
@@ -514,11 +521,7 @@ rule BurnIdSequences {
         -- keeps the id its live row had, and that id must never be handed to
         -- a new task (core/ArchivedTask: never reissued). archived_tasks
         -- generates no ids of its own.
-        let restored_ceiling =
-            if sequence.table = tasks:
-                max(snapshot.highest_id(tasks), snapshot.highest_id(archived_tasks))
-            else:
-                snapshot.highest_id(sequence.table)
+        let restored_ceiling = snapshot.burn_ceiling(sequence.table)
 
         ensures:
             sequence.next_value > restored_ceiling
@@ -761,7 +764,7 @@ rule RefuseImplausibleCeiling {
     requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count = config.shared_table_count
     requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
-    requires: snapshot.extracts.any(e => snapshot.highest_id(e.table) < 0 or snapshot.highest_id(e.table) > e.row_count * config.max_ceiling_per_row)
+    requires: snapshot.extracts.any(e => snapshot.burn_ceiling(e.table) < 0 or snapshot.burn_ceiling(e.table) > snapshot.rows_claiming_ids(e.table) * config.max_ceiling_per_row)
 
     ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: incomplete, detail: refusal_detail(snapshot)})
 

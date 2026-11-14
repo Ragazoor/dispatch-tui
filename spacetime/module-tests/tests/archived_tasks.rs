@@ -121,6 +121,19 @@ fn an_archived_task_keeps_its_learnings_retrievals_and_verdicts() {
             )
         })
         .expect("seed_learning_retrievals");
+    store
+        .call_as_scheduler(|ctx| {
+            seed_learning_verdicts(
+                ctx,
+                vec![LearningVerdict {
+                    id: 1,
+                    task_id: id,
+                    learning_id: 1,
+                    verdict: "helped".into(),
+                }],
+            )
+        })
+        .expect("seed_learning_verdicts");
 
     store
         .call("alice", |ctx| delete_task(ctx, id))
@@ -129,6 +142,7 @@ fn an_archived_task_keeps_its_learnings_retrievals_and_verdicts() {
     let learning = store.db().learnings().id().find(1).expect("it survives");
     assert_eq!(learning.source_task_id, Some(id), "still points at the task");
     assert_eq!(store.db().learning_retrievals().iter().count(), 1);
+    assert_eq!(store.db().learning_verdicts().iter().count(), 1);
 }
 
 #[test]
