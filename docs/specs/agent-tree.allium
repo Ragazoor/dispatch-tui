@@ -1989,7 +1989,7 @@ rule AgentTreeDiffPaneFailureIsVisible {
         -- not take the tree with it (FailuresNeverCloseThePane).
         --
         -- A diff needs no file on disk, so opening one is never refused for a
-        -- missing file; the out-of-root case is gone because no path is
+        -- missing file, nor for a path outside the root, because no path is
         -- handed to anything that resolves it — the diff pane is given the
         -- task, and re-derives every path from git itself. The editor (`v`)
         -- does need the file, and its refusal of a deleted one is raised
@@ -2169,8 +2169,8 @@ rule ClearAgentTreeErrorNotice {
 -- decides what the tree and the diff pane show. "unstaged work" is selected
 -- whenever a renderer starts, so by default the pane shows the work in
 -- progress (AgentTreeShowsUnstagedWorkOnly); a commit row shows that one
--- commit against its parent. This is how committed work stays reachable now
--- that committing empties the default view.
+-- commit against its parent. This is how committed work stays reachable,
+-- since committing empties the default view.
 
 rule RefreshAgentTreeCommitList {
     -- A shown pane re-reads the agent's commits on its own timer.
@@ -2712,8 +2712,7 @@ invariant OneCompanionPanePerAgentWindow {
 -- when pane.diff_pane is null, and the pane it creates is marked immediately
 -- after the split with the diff value of the same role marker the toggle reads
 -- (see HideAgentTreePane's "How the companion pane is identified"). One gap
--- follows from that and is accepted, exactly as it was for the editor pane it
--- replaces: if the mark cannot be written, the pane is already open and
+-- follows from that and is accepted: if the mark cannot be written, the pane is already open and
 -- showing the diffs, so the split reports success and a later split, finding
 -- no mark, could make a second. Failing the open instead would report a
 -- failure that did not happen, over a bookkeeping write.
@@ -3024,9 +3023,9 @@ surface AgentTreeCompanionPane {
         -- local database for shared rows: the board is the single reader of
         -- shared rows on a machine, as it is the single writer of hook events
         -- (agent-health.allium: HooksWriteThroughTheBoard). Two panes per
-        -- agent window, each with a store connection of its own, was a
-        -- subscription per pane — and each connection re-delivered every row
-        -- the board already held, to show one task and one list.
+        -- agent window, each with a store connection of its own, would be a
+        -- subscription per pane, each re-delivering every row the board
+        -- already holds, to show one task and one list.
         --
         -- The pane's writes go the same way. A keypress that takes effect is
         -- sent to the board over the same port, and the board records its
@@ -3072,7 +3071,7 @@ surface AgentTreeCompanionPane {
         -- PaneStartupScreenIsOutsideUsage). Every other key is ignored, since there is
         -- no tree, no commits or agents list and no open set for it to act on. The pane
         -- never closes itself — see "Companion Pane Startup" for the race
-        -- that made it do so.
+        -- that would otherwise close it.
 
     @guarantee TwoViewsShareThePane
         -- The pane shows ONE view at a time. The browse view stacks the tree
@@ -3568,7 +3567,7 @@ surface AgentTreeCompanionPane {
         -- nothing about it is remembered between refreshes, which is what
         -- keeps AgentTreeIsGitDerived true of the commit range as well as of
         -- the changes. The alternative — recording at provision time which ref the
-        -- worktree was branched from — was rejected for that reason: it makes
+        -- worktree was branched from — is not taken, for that reason: it makes
         -- the pane depend on dispatch-time bookkeeping that no later git
         -- command can confirm or repair, and it says nothing at all about a
         -- worktree that was reused rather than freshly branched.
@@ -3610,10 +3609,11 @@ surface AgentTreeCompanionPane {
         --
         -- Opening a diff does not breach this and cannot: the diff pane runs
         -- the same read-only git commands this one does, in a pane beside it.
-        -- Nothing this feature added can write to the worktree at all, which is
-        -- a stronger position than the editor pane it replaced — that one
-        -- launched a process that COULD write, at the user's keypress, and
-        -- needed a carve-out stated here. The carve-out is gone with it.
+        --
+        -- The editor (`v`, OpenAgentTreeFileInEditor) is the one carve-out:
+        -- it is the user's own editor, started on the user's keypress, and it
+        -- writes what the user saves. The pane writes nothing through it, and
+        -- nothing the pane does on its own can write to the worktree.
         --
         -- One write does exist and it is outside the worktree: the tree records
         -- its open set, and its selected source, where the diff pane can read
