@@ -224,12 +224,13 @@ rule ForgetWindowOfStoppedAgent {
         -- clear.
 }
 
--- The non-draining subagent clear: every entry of the task's current agent
--- goes, the count reads zero, and a deferred Stop is voided rather than
--- applied. Used where the caller owns the resulting status, or where the turn
--- that deferred the Stop is over: DetectCrashedAgent and
--- ClearSubagentsOnSessionStart. With no current agent there is nothing to
--- clear (A15).
+-- The subagent clear: every entry of the task's current agent goes, the
+-- count reads zero, and a deferred Stop is voided. DetectCrashedAgent and
+-- ClearSubagentsOnSessionStart raise it alone: the caller owns the resulting
+-- status, or the turn that deferred the Stop is over. split-pane.allium's
+-- DetachTmux raises it together with StopApplied when a Stop is pending, so
+-- a detach applies the Stop rather than voiding it. With no current agent
+-- there is nothing to clear (A15).
 rule VoidSubagentsAndPendingStop {
     when: SubagentsVoided(task)
     let agent = current_agent(task)
@@ -247,7 +248,35 @@ rule VoidSubagentsAndPendingStop {
         -- reached from the board through
         -- src/service/tasks/crud.rs::clear_subagents_no_drain. The dispatch
         -- claim makes the same clear inside its own transaction
-        -- (store-split.allium: RequestDispatch).
+        -- (store-split.allium: RequestDispatch). A detach reaches the store
+        -- through spacetime/module/src/agent_state.rs::subagent_clear, which
+        -- clears and applies a pending Stop in one write.
+}
+
+-- A Stop takes effect: the task moves to review and the agent's hook
+-- stamps and pending bit clear. The one owner of that move. Each caller
+-- decides on its own condition and raises StopApplied in the same write:
+-- HookStop's immediate flip, the drain in HookSubagentStop,
+-- ExpireBackgroundWait, and split-pane.allium's DetachTmux. A task with no
+-- current agent moves alone (A15).
+rule FlipTaskToReview {
+    when: StopApplied(task)
+    let agent = current_agent(task)
+
+    requires: task.status = running
+
+    ensures:
+        task.status = review
+        task.sub_status = default_sub_status(review)
+        if exists agent:
+            agent.last_pre_tool_use_at = null
+            agent.last_notification_at = null
+            agent.stop_pending = false
+
+    @guidance
+        -- spacetime/module/src/agent_state.rs::flip_to_review, which also
+        -- recalculates the task's epic. NotifyReview fires on the move as on
+        -- any other move to review.
 }
 
 -- == Notifications ==
@@ -409,12 +438,7 @@ rule HookStop {
             agent.stop_pending_at = now
             agent.background_work = background
         else:
-            task.status = review
-            task.sub_status = default_sub_status(review)
-            if exists agent:
-                agent.last_pre_tool_use_at = null
-                agent.last_notification_at = null
-                agent.stop_pending = false
+            StopApplied(task: task)
 
     @guidance
         -- Stop does not fire inside subagents (Claude Code fires
@@ -520,11 +544,7 @@ rule ExpireBackgroundWait {
                 and agent.stop_pending_at != null
                 and agent.stop_pending_at + config.background_wait_cap <= now
                 and (agent.last_pre_tool_use_at = null or agent.last_pre_tool_use_at + config.background_wait_cap <= now):
-                task.status = review
-                task.sub_status = default_sub_status(review)
-                agent.last_pre_tool_use_at = null
-                agent.last_notification_at = null
-                agent.stop_pending = false
+                StopApplied(task: task)
 
     @guidance
         -- The cap counts from the agent's latest sign of life: the deferred
@@ -608,11 +628,7 @@ rule HookSubagentStop {
         let live = core/SubagentEntries where agent = agent
         agent.live_subagents = live.count
         if live.count = 0 and agent.stop_pending and not agent.waiting_on_background and task.status = running:
-            task.status = review
-            task.sub_status = default_sub_status(review)
-            agent.last_pre_tool_use_at = null
-            agent.last_notification_at = null
-            agent.stop_pending = false
+            StopApplied(task: task)
 
     @guidance
         -- An unrecognised agent_id is a no-op, not a count underflow: the

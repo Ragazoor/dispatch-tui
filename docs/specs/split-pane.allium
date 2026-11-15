@@ -8,6 +8,8 @@
 
 use "./core.allium" as core
 use "./startup.allium" as startup
+use "./agent-health.allium" as agent_health
+use "./dispatch.allium" as dispatch
 
 given {
     split_pane: SplitPane
@@ -205,43 +207,42 @@ rule DetachTmux {
     ensures:
         if task.sub_status in {stale, crashed}:
             task.sub_status = default_sub_status(task.status)
+    ensures: agent_health/SubagentsVoided(task: task)
     ensures:
-        for entry in core/SubagentEntries where agent = agent:
-            not exists entry
-    ensures: agent.live_subagents = 0
-    ensures:
-        -- live_subagents is zero after this rule, so a pending stop drains,
-        -- whatever it was deferred for.
-        if agent.stop_pending and task.status = running:
-            task.status = review
-            task.sub_status = default_sub_status(review)
-            agent.last_pre_tool_use_at = null
-            agent.last_notification_at = null
-            agent.stop_pending = false
+        -- The subagents are gone with the window, so a pending Stop
+        -- applies, whatever it was deferred for.
+        if agent.stop_pending:
+            agent_health/StopApplied(task: task)
 
     @guidance
         -- Kills the tmux window for a task while preserving the
-        -- worktree. The agent is gone but the branch remains for
-        -- PR review or later resume. Clears agent health tracking
+        -- worktree. The agent is paused, not ended (agents.allium: A7):
+        -- the branch remains for PR review, and a later resume brings
+        -- back the same agent. Clears agent health tracking
         -- (captured tmux output, crash detection). Only Stale/Crashed
         -- sub_statuses are reset to the default for the task's
         -- current status; all other sub_statuses are preserved.
-        -- Allowed for any task with a tmux window: Running tasks
-        -- have their live agent terminated; Review tasks lose their
+        -- Allowed for any task with a tmux window: a Running task's
+        -- agent process stops; a Review task loses its
         -- post-completion session. Triggered via the TUI (T key,
         -- uppercase). Always shows a confirmation prompt
         -- ("Detach tmux panel? [y/n]") before detaching, whether the
         -- target is a single task or a batch of multi-selected tasks.
         -- Also clears every core/SubagentEntry for the task's agent and
-        -- resets live_subagents to 0, then runs the drain path
-        -- (see agent-health.allium: HookSubagentStop) — detaching drops the
-        -- agent along with any subagents it spawned, so a stop_pending
-        -- task that had been waiting on them to finish resolves to
-        -- Review right here rather than staying stuck in Running with no
-        -- agent left to drain it. A Stop deferred for background work
-        -- (agent-health.allium: HookStop) applies here too, unlike in
-        -- HookSubagentStop's drain: killing the window ends that work along
-        -- with the agent, so no wake-up is coming.
+        -- resets live_subagents to 0 (agent-health.allium:
+        -- VoidSubagentsAndPendingStop), and applies a pending Stop
+        -- (agent-health.allium: FlipTaskToReview) -- detaching ends the
+        -- subagents the agent spawned, so a stop_pending task that had
+        -- been waiting on them to finish resolves to Review right here
+        -- rather than staying stuck in Running with no agent left to
+        -- drain it. A pending Stop implies Running
+        -- (core/Task's PendingStopOnlyWhileRunning), so the bit alone
+        -- decides. The store makes the clear and the move in one write
+        -- (spacetime/module/src/agent_state.rs::subagent_clear).
+        -- A Stop deferred for background work (agent-health.allium:
+        -- HookStop) applies here too, unlike in HookSubagentStop's drain:
+        -- killing the window ends that work along with the agent's
+        -- process, so no wake-up is coming.
 }
 
 rule BatchDetachTmux {
@@ -846,7 +847,7 @@ rule SplitPaneRespawnOnWindowCleared {
     --   - ConfirmDone (manual move into Done from any non-Done status)
     --   - DeleteTask (a Done task's window is killed as the row goes)
     --   - RetryResume (old window killed, new dispatch starts)
-    --   - DetachTmux (the agent is ended; its pane is respawned too)
+    --   - DetachTmux (the agent is paused; its pane is respawned too)
     --   - a move back a column, and an epic moved to Done (its subtasks'
     --     windows are released)
     -- The board checks the pinned task after every message and key, so a
