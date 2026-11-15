@@ -654,12 +654,14 @@ rule HookSubagentStop {
         -- simultaneously Crashed-and-in-Review or
         -- freshly-dispatched-and-in-Review. The rule that owns the
         -- resulting status wins:
-        --   - DetachTmux (see split-pane.allium) DOES run the drain path.
+        --   - DetachTmux (see split-pane.allium) DOES apply the deferred
+        --     Stop: it raises StopApplied alongside its SubagentsVoided.
         --     It assigns no outcome status of its own — a detach just
         --     removes the agent that was going to drain the count itself —
         --     so applying the deferred Stop is safe there, and is exactly
         --     what unsticks a stop_pending task with no agent left to
-        --     finish the job.
+        --     finish the job. The void that follows clears a bit the move
+        --     to review already cleared.
         --   - DetectCrashedAgent and DispatchTask do NOT run the drain
         --     path. Both already assign the task's resulting status in the
         --     same write (crashed / running respectively), and draining
@@ -671,9 +673,8 @@ rule HookSubagentStop {
         --     session means the previous turn is over, so the Stop that
         --     turn deferred is stale and gets voided rather than applied.
         --     See its own guidance.
-        -- All three non-draining points still clear stop_pending
-        -- unconditionally, so the bit cannot survive into a later session
-        -- and fire a spurious flip.
+        -- All four points leave stop_pending clear, so the bit cannot
+        -- survive into a later session and fire a spurious flip.
         --
         -- Those four points are about the SubagentEntry rows. stop_pending
         -- has one further clear point that touches no rows at all: any

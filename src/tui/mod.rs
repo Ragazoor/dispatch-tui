@@ -967,8 +967,8 @@ impl App {
                     fields,
                 )));
             }
-            // Drain: the agent genuinely finished its turn, so a pending Stop
-            // should land as the Review flip.
+            // Drain: the detach ends the subagents and any background work
+            // with the window, so a pending Stop lands as the Review flip.
             cmds.push(Command::Task(
                 crate::tui::commands::TaskCommand::ClearSubagents {
                     id,
