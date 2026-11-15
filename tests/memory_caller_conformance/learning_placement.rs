@@ -90,8 +90,8 @@ fn memory_caller_places_a_learning_like_the_real_reducer() {
         for row in rows {
             let real_id = real.create_learning(row.clone()).await.unwrap();
             wait_for!(rows_real.learning(real_id).is_some());
+            mem.align_next_learning_id(real_id.0);
             let mem_id = mem.create_learning(row).await.unwrap();
-            assert_eq!(real_id, mem_id, "generated learning id");
             let (real_row, mem_row) = (
                 rows_real.learning(real_id).map(|l| learning_shape(&l)),
                 rows_mem.learning(mem_id).map(|l| learning_shape(&l)),

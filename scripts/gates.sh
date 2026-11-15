@@ -89,6 +89,12 @@ echo "no-test-sleep..."
 echo "no-test-sleep self-test..."
 bash ./scripts/test-check-no-test-sleep.sh
 
+echo "conformance-ids..."
+./scripts/check-conformance-ids.sh
+
+echo "conformance-ids self-test..."
+bash ./scripts/test-check-conformance-ids.sh
+
 echo "single-write-service..."
 ./scripts/check-single-write-service.sh
 

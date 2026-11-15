@@ -318,6 +318,15 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
                 r.won()
             }};
         }
+        // A call naming a feed request: each side gets its own generated id.
+        macro_rules! both_req {
+            ($call:ident($rid:expr, $mid:expr, $($arg:expr),*)) => {{
+                let r = real.$call($rid, $($arg.clone()),*).await.unwrap();
+                let m = mem.$call($mid, $($arg.clone()),*).await.unwrap();
+                assert_eq!(r.won(), m.won(), "{}: real {r:?} vs memory {m:?}", stringify!($call));
+                r.won()
+            }};
+        }
         let host_a = "host-a".to_string();
         let host_b = "host-b".to_string();
         // No poll owner yet: refused on both.
@@ -333,13 +342,16 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         assert_eq!(rows_mem.feed_requests().len(), 1);
         let real_id = rows_real.feed_requests()[0].id;
         let mem_id = rows_mem.feed_requests()[0].id;
-        assert_eq!(real_id, mem_id, "feed request id");
         // Only the row's own host claims it; a report needs a running row.
-        assert!(!both!(claim_feed_request(real_id, host_b)));
-        assert!(!both!(report_feed_request_done(real_id, host_a)));
-        assert!(both!(claim_feed_request(real_id, host_a)));
-        assert!(both!(report_feed_request_done(real_id, host_a)));
-        assert!(!both!(report_feed_request_done(real_id, host_a)));
+        assert!(!both_req!(claim_feed_request(real_id, mem_id, host_b)));
+        assert!(!both_req!(report_feed_request_done(
+            real_id, mem_id, host_a
+        )));
+        assert!(both_req!(claim_feed_request(real_id, mem_id, host_a)));
+        assert!(both_req!(report_feed_request_done(real_id, mem_id, host_a)));
+        assert!(!both_req!(report_feed_request_done(
+            real_id, mem_id, host_a
+        )));
         wait_for!(
             rows_real.feed_requests()[0].state == dispatch_tui::models::FeedRequestState::Done
         );
@@ -358,9 +370,15 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
             .map(|r| r.id)
             .max()
             .unwrap();
+        let second_mem = rows_mem
+            .feed_requests()
+            .into_iter()
+            .map(|r| r.id)
+            .max()
+            .unwrap();
         // -- review Q4: a running row is not claimed again inside the grace ------------
-        assert!(both!(claim_feed_request(second, host_a)));
-        assert!(!both!(claim_feed_request(second, host_a)));
+        assert!(both_req!(claim_feed_request(second, second_mem, host_a)));
+        assert!(!both_req!(claim_feed_request(second, second_mem, host_a)));
         // -- review Q8: an ask while the owner runs the second is a third row ----------
         assert!(both!(request_feed_refresh(root_id, host_b)));
         wait_for!(rows_real.feed_requests().len() == 3);

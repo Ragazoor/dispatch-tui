@@ -393,6 +393,12 @@ jobs:
       - name: Self-test the no-test-sleep checker
         run: bash ./scripts/test-check-no-test-sleep.sh
 
+      - name: Reject cross-store generated-id assertions in conformance tests
+        run: ./scripts/check-conformance-ids.sh
+
+      - name: Self-test the conformance-ids checker
+        run: bash ./scripts/test-check-conformance-ids.sh
+
       - name: Reject multi-write service methods
         run: ./scripts/check-single-write-service.sh
 

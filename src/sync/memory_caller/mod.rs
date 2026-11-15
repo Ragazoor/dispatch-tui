@@ -370,6 +370,11 @@ impl MemoryReducerCaller {
         self.lock().next_task_id = id;
     }
 
+    /// As [`Self::align_next_epic_id`], for learnings.
+    pub fn align_next_learning_id(&self, id: i64) {
+        self.lock().next_learning_id = id;
+    }
+
     /// What the `unseen_items` view would now hold for this sender, pushed to
     /// the rows. Called by the writes that change who is a super-admin, who is
     /// a member, what is private or what exists; the double has no view to

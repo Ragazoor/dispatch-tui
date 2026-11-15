@@ -138,6 +138,7 @@ fn memory_caller_matches_the_real_reducers() {
             .unwrap()
             .0;
         wait_for!(rows_real.epic(EpicId(epic_id_real)).is_some());
+        mem.align_next_epic_id(epic_id_real);
         let epic_id_mem = mem
             .create_epic(bindings::Epic {
                 created_by: accepted.identity.clone(),
@@ -146,7 +147,6 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap()
             .0;
-        assert_eq!(epic_id_real, epic_id_mem, "generated epic id");
         compare_epic(epic_id_real);
 
         let epic2_id_real = real
@@ -158,6 +158,7 @@ fn memory_caller_matches_the_real_reducers() {
             .unwrap()
             .0;
         wait_for!(rows_real.epic(EpicId(epic2_id_real)).is_some());
+        mem.align_next_epic_id(epic2_id_real);
         let epic2_id_mem = mem
             .create_epic(bindings::Epic {
                 created_by: accepted.identity.clone(),
@@ -166,7 +167,6 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap()
             .0;
-        assert_eq!(epic2_id_real, epic2_id_mem, "generated second epic id");
         compare_epic(epic2_id_real);
 
         // -- create_task (in the epic, backlog) ----------------------------------
@@ -175,11 +175,11 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         wait_for!(rows_real.task(task_id_real).is_some());
+        mem.align_next_task_id(task_id_real.0);
         let task_id_mem = mem
             .create_task(own_task_in_epic(epic_id_mem))
             .await
             .unwrap();
-        assert_eq!(task_id_real, task_id_mem, "generated task id");
         compare_task(task_id_real.0);
         compare_epic(epic_id_real);
 
@@ -654,11 +654,11 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         wait_for!(rows_real.unseen_task_ids() == vec![signalled_real]);
+        mem.align_next_task_id(signalled_real.0);
         let signalled_mem = mem
             .create_task_signalled(own_task_in_epic(epic2_id_mem))
             .await
             .unwrap();
-        assert_eq!(signalled_real, signalled_mem, "signalled task id");
         assert_eq!(
             rows_real.unseen_task_ids(),
             rows_mem.unseen_task_ids(),
@@ -670,11 +670,11 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         wait_for!(rows_real.unseen_task_ids().len() == 2);
+        mem.align_next_task_id(sibling_real.0);
         let sibling_mem = mem
             .create_task_signalled(own_task_in_epic(epic2_id_mem))
             .await
             .unwrap();
-        assert_eq!(sibling_real, sibling_mem, "sibling task id");
 
         real.mark_task_seen(subscriber.into(), signalled_real)
             .await
@@ -1000,14 +1000,14 @@ fn memory_caller_matches_the_real_reducers() {
         // -- learnings, retrievals and verdicts (learnings, task #5003) -------------
         let helped_real = real.create_learning(blank_learning()).await.unwrap();
         wait_for!(rows_real.learning(helped_real).is_some());
+        mem.align_next_learning_id(helped_real.0);
         let helped_mem = mem.create_learning(blank_learning()).await.unwrap();
-        assert_eq!(helped_real, helped_mem, "generated learning id");
         compare_learning(helped_real);
 
         let wrong_real = real.create_learning(blank_learning()).await.unwrap();
         wait_for!(rows_real.learning(wrong_real).is_some());
+        mem.align_next_learning_id(wrong_real.0);
         let wrong_mem = mem.create_learning(blank_learning()).await.unwrap();
-        assert_eq!(wrong_real, wrong_mem, "generated second learning id");
 
         // `ApprovedLearningsHaveScopeRef` (`docs/specs/learnings.allium`),
         // enforced server-side by both `create_learning`s.
@@ -1151,7 +1151,8 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         wait_for!(rows_real.learning(epic_scoped_real).is_some());
-        let epic_scoped_mem = mem
+        mem.align_next_learning_id(epic_scoped_real.0);
+        mem
             .create_learning(bindings::Learning {
                 scope: "epic".into(),
                 scope_ref: Some(epic_id_mem.to_string()),
@@ -1159,10 +1160,6 @@ fn memory_caller_matches_the_real_reducers() {
             })
             .await
             .unwrap();
-        assert_eq!(
-            epic_scoped_real, epic_scoped_mem,
-            "generated epic-scoped learning id"
-        );
         real.rescope_epic_learnings(EpicId(epic_id_real), EpicId(epic2_id_real))
             .await
             .unwrap();
@@ -1179,8 +1176,8 @@ fn memory_caller_matches_the_real_reducers() {
         // makes this deterministic rather than waiting on wall-clock time.
         let stale_real = real.create_learning(blank_learning()).await.unwrap();
         wait_for!(rows_real.learning(stale_real).is_some());
-        let stale_mem = mem.create_learning(blank_learning()).await.unwrap();
-        assert_eq!(stale_real, stale_mem, "generated stale learning id");
+        mem.align_next_learning_id(stale_real.0);
+        mem.create_learning(blank_learning()).await.unwrap();
         real.archive_stale_learnings(ts("2025-01-01 00:00:00.000"))
             .await
             .unwrap();
@@ -1917,8 +1914,8 @@ fn memory_caller_matches_the_real_reducers() {
         };
         let feed_epic_id_real = real.create_epic(feed_epic(epic_id_real)).await.unwrap().0;
         wait_for!(rows_real.epic(EpicId(feed_epic_id_real)).is_some());
+        mem.align_next_epic_id(feed_epic_id_real);
         let feed_epic_id_mem = mem.create_epic(feed_epic(epic_id_mem)).await.unwrap().0;
-        assert_eq!(feed_epic_id_real, feed_epic_id_mem, "feed epic id");
 
         let feed_item = |external_id: &str| bindings::FeedIngestItem {
             item: bindings::FeedTaskUpsertItem {
@@ -2098,6 +2095,7 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         wait_for!(rows_real.task(real_predecessor).is_some());
+        mem.align_next_task_id(real_predecessor.0);
         let mem_predecessor = mem
             .create_task(bindings::Task {
                 title: "phoenix predecessor".into(),
@@ -2107,7 +2105,6 @@ fn memory_caller_matches_the_real_reducers() {
             })
             .await
             .unwrap();
-        assert_eq!(real_predecessor, mem_predecessor, "phoenix predecessor id");
 
         let phoenix_successor = |epic_id: i64| bindings::Task {
             title: "phoenix successor".into(),
@@ -2118,11 +2115,11 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         wait_for!(rows_real.task(real_successor).is_some());
+        mem.align_next_task_id(real_successor.0);
         let mem_successor = mem
             .respawn_phoenix_successor(mem_predecessor, phoenix_successor(epic_id_mem))
             .await
             .unwrap();
-        assert_eq!(real_successor, mem_successor, "phoenix successor id");
         wait_for!(rows_real.task(real_predecessor).is_some_and(|t| !t.phoenix));
         compare_task(real_predecessor.0);
         compare_task(real_successor.0);
@@ -2158,6 +2155,7 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         wait_for!(rows_real.learning(sourced_real).is_some());
+        mem.align_next_learning_id(sourced_real.0);
         let sourced_mem = mem
             .create_learning(bindings::Learning {
                 source_task_id: Some(task_id_mem.0),
@@ -2165,7 +2163,6 @@ fn memory_caller_matches_the_real_reducers() {
             })
             .await
             .unwrap();
-        assert_eq!(sourced_real, sourced_mem, "generated sourced learning id");
         real.record_learning_retrieval(task_id_real, sourced_real, RetrievalSource::QueryLearnings)
             .await
             .unwrap();

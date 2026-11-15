@@ -107,14 +107,9 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
                 .unwrap();
         }
         let create = |row: bindings::Task| {
-            let real = &real;
-            let mem = &mem;
-            async move {
-                let r = real.create_task(row.clone()).await.unwrap();
-                let m = mem.create_task(row).await.unwrap();
-                assert_eq!(r, m, "both sides hand out the same task id");
-                r
-            }
+            let (real, mem) = (&real, &mem);
+            let (rows_real, rows_mem) = (&rows_real, &rows_mem);
+            async move { create_task_both(real, mem, rows_real, rows_mem, row).await }
         };
         let in_epic = |epic_id: i64| bindings::Task {
             created_by: identity.clone(),
@@ -187,10 +182,7 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
                 created_by: identity.clone(),
                 ..blank_epic()
             };
-            let r = real.create_epic(row.clone()).await.unwrap();
-            let m = mem.create_epic(row).await.unwrap();
-            assert_eq!(r, m);
-            r
+            create_epic_both(&real, &mem, &rows_real, &rows_mem, row).await
         };
         let with_pr = create(in_epic(edit_epic.0)).await;
         let without_pr = create(in_epic(edit_epic.0)).await;
@@ -272,10 +264,7 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
                 created_by: identity.clone(),
                 ..blank_epic()
             };
-            let r = real.create_epic(row.clone()).await.unwrap();
-            let m = mem.create_epic(row).await.unwrap();
-            assert_eq!(r, m);
-            r
+            create_epic_both(&real, &mem, &rows_real, &rows_mem, row).await
         };
         let task = create(bindings::Task {
             phoenix: true,

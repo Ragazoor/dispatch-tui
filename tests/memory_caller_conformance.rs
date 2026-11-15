@@ -541,6 +541,68 @@ mod schedules;
 #[path = "memory_caller_conformance/session_requests.rs"]
 mod session_requests;
 
+// ---------------------------------------------------------------------------
+// Generated ids are per side.
+//
+// The real store's auto-inc ids are not dense: they jump (a fresh block of 4096
+// after a restart or reallocation) while the twin's count 1, 2, 3. A test never
+// asserts the two sides hand out the same generated id. It creates through one
+// of these helpers, which create on the real store, wait for the row, align the
+// twin's next id to the real one (`align_next_*_id`), then replay the create
+// on the twin. `scripts/check-conformance-ids.sh` rejects an `assert_eq!`
+// between a real and a twin generated id.
+// ---------------------------------------------------------------------------
+
+/// Waits until `cond` holds on the real store's rows.
+async fn real_rows_reach(rows_real: &SharedRows, what: &str, cond: impl Fn() -> bool) {
+    let mut woken = rows_real.changed();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !cond() {
+            woken.changed().await.expect("subscription must deliver");
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("real store never showed {what}"));
+}
+
+/// Creates `row` on both stores under the id the real store handed out.
+async fn create_task_both(
+    real: &dyn ReducerCaller,
+    mem: &MemoryReducerCaller,
+    rows_real: &SharedRows,
+    rows_mem: &SharedRows,
+    row: bindings::Task,
+) -> TaskId {
+    let id = real.create_task(row.clone()).await.unwrap();
+    real_rows_reach(rows_real, "the created task", || {
+        rows_real.task(id).is_some()
+    })
+    .await;
+    mem.align_next_task_id(id.0);
+    mem.create_task(row).await.unwrap();
+    assert!(rows_mem.task(id).is_some(), "the twin stores the task");
+    id
+}
+
+/// Creates `row` on both stores under the id the real store handed out.
+async fn create_epic_both(
+    real: &dyn ReducerCaller,
+    mem: &MemoryReducerCaller,
+    rows_real: &SharedRows,
+    rows_mem: &SharedRows,
+    row: bindings::Epic,
+) -> EpicId {
+    let id = EpicId(real.create_epic(row.clone()).await.unwrap().0);
+    real_rows_reach(rows_real, "the created epic", || {
+        rows_real.epic(id).is_some()
+    })
+    .await;
+    mem.align_next_epic_id(id.0);
+    mem.create_epic(row).await.unwrap();
+    assert!(rows_mem.epic(id).is_some(), "the twin stores the epic");
+    id
+}
+
 /// The board spells `BACKGROUND_WAIT_CAP` itself (a plain build does not link
 /// the module), so this holds the two copies equal.
 #[test]

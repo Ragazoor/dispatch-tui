@@ -101,14 +101,9 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
                 .unwrap();
         }
         let create = |row: bindings::Task| {
-            let real = &real;
-            let mem = &mem;
-            async move {
-                let r = real.create_task(row.clone()).await.unwrap();
-                let m = mem.create_task(row).await.unwrap();
-                assert_eq!(r, m, "both sides hand out the same task id");
-                r
-            }
+            let (real, mem) = (&real, &mem);
+            let (rows_real, rows_mem) = (&rows_real, &rows_mem);
+            async move { create_task_both(real, mem, rows_real, rows_mem, row).await }
         };
         let mine = |epic_id: i64, tag: &str| bindings::Task {
             created_by: identity.clone(),
@@ -210,10 +205,7 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
                 auto_dispatch: true,
                 ..blank_epic()
             };
-            let r = real.create_epic(row.clone()).await.unwrap();
-            let m = mem.create_epic(row).await.unwrap();
-            assert_eq!(r, m);
-            r
+            create_epic_both(&real, &mem, &rows_real, &rows_mem, row).await
         };
         let task = create(mine(epic.0, "")).await;
         let next = create(mine(epic.0, "")).await;

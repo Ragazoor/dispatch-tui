@@ -95,14 +95,9 @@ fn memory_caller_keeps_schedules_like_the_real_module() {
             ..blank_task_in_epic(0)
         };
         let create = |row: bindings::Task| {
-            let real = &real;
-            let mem = &mem;
-            async move {
-                let r = real.create_task(row.clone()).await.unwrap();
-                let m = mem.create_task(row).await.unwrap();
-                assert_eq!(r, m, "both sides hand out the same task id");
-                r
-            }
+            let (real, mem) = (&real, &mem);
+            let (rows_real, rows_mem) = (&rows_real, &rows_mem);
+            async move { create_task_both(real, mem, rows_real, rows_mem, row).await }
         };
         let patch_both = |task: TaskId, patch: bindings::TaskPatch| {
             let real = &real;
@@ -233,9 +228,9 @@ fn memory_caller_keeps_schedules_like_the_real_module() {
             created_by: identity.clone(),
             ..blank_epic()
         };
-        let root = real.create_epic(grouped.clone()).await.unwrap().0;
-        wait_for!(rows_real.epic(EpicId(root)).is_some());
-        assert_eq!(mem.create_epic(grouped).await.unwrap().0, root);
+        let root = create_epic_both(&real, &mem, &rows_real, &rows_mem, grouped)
+            .await
+            .0;
         let epics_before = rows_mem.epics().len();
         let never = bindings::Task {
             repo_path: "/x/alpha".into(),

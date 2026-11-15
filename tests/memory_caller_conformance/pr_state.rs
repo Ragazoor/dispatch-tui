@@ -83,14 +83,9 @@ fn memory_caller_derives_pr_state_like_the_real_module() {
                 tmux_window: "task-1".into(),
                 ..blank_task_in_epic(0)
             };
-            let real = &real;
-            let mem = &mem;
-            async move {
-                let r = real.create_task(row.clone()).await.unwrap();
-                let m = mem.create_task(row).await.unwrap();
-                assert_eq!(r, m, "both sides hand out the same task id");
-                r
-            }
+            let (real, mem) = (&real, &mem);
+            let (rows_real, rows_mem) = (&rows_real, &rows_mem);
+            async move { create_task_both(real, mem, rows_real, rows_mem, row).await }
         };
         // Both sides, one report, one outcome.
         let report = |task: TaskId, state: &'static str, decision: &'static str| {
