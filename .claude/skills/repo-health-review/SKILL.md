@@ -68,7 +68,11 @@ Name a regression's chain ("fix for X → regression Y") so the next run can see
 
 ## 3. Defect hunt over the new commits
 
-Read every non-fix commit in the range. Use these lenses, in this order:
+Read every non-fix commit in the range. When you split the range among
+reviewers, list the commits by path (`git log <start>..<end> -- src
+spacetime/module/src plugin scripts tests`), not by subject: on 2026-11-15 a
+first pass split by theme left 29 `docs(...)`/`fix(specs)` commits unread that
+also changed code. Use these lenses, in this order:
 
 1. **Authority and sight.** Who may call it? Does the module trust a
    client-supplied identity, owner or creator? Can a move or link hide someone
