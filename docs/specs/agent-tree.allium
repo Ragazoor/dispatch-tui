@@ -80,72 +80,6 @@ use "./dispatch.allium" as dispatch
 use "./agent-health.allium" as agent_health
 
 ------------------------------------------------------------
--- Enumerations
-------------------------------------------------------------
-
--- What git says happened to a file, relative to the selected source's
--- baseline — the index for unstaged work, the parent for a commit. Also the badge
--- vocabulary: a rendered node's badge is a FileChange, so there is exactly one
--- enum for both, and a badge cannot say anything git did not.
---
--- Three values, not more. Git's own porcelain distinguishes further (type
--- changes, copies, unmerged), but the user is scanning for "what did this
--- agent do to my repo", and those all answer it as one of these three.
--- CollapsedGitStatusLetters records the mapping.
-enum FileChange { added | modified | deleted }
-
-enum TreeNodeKind { file | directory }
-
--- Why the diff pane is showing a placeholder for a file instead of its
--- contents. Each value is a fact about the file, not a failure of the pane:
--- the pane rendered exactly what it could, and says which of these it hit.
---
---   binary    -- git reports the change without line contents.
---   too_large -- the diff exceeds config.agent_tree_diff_max_bytes.
---
--- There is no "untracked" refusal. Against an index baseline, advice to stage
--- the file would remove it from the pane instead of revealing it. An
--- untracked file's diff is its whole contents as additions
--- (RefreshAgentTreeDiff's "Untracked files"), and both refusals above apply
--- to those contents exactly as they apply to any other diff.
-enum DiffRefusal { binary | too_large }
-
--- Which of the two writers set the pane's current notice. The pane shows one
--- notice at a time in one line of border, so the two have to share a field —
--- and a successful refresh must clear a stale "git failed" without also
--- wiping the answer to a keypress the user made half a second ago. See
--- RefreshAgentTree's clearing expression.
---
--- The second writer is a failed diff-pane split, or a `v` on a file that is
--- not on disk: the direct, immediate answer to a keypress.
---
--- The agents section added two more writers of the same shape. agent_list is
--- the timer's writer, like git_query: a failed read of the task list, cleared
--- by the next successful read. agent_jump is a keypress's writer, like
--- diff_open: a failed jump to another agent's window, or a resume the board
--- refused or could not be asked for (AgentTreeResumeRefusedIsVisible), which
--- survives every refresh until the next key.
---
--- The commits section added one more, of the timer's shape: commit_list, a
--- failed read of the agent's commits, cleared by the next successful read.
--- Selecting a commit has no failure of its own to report — it only names a
--- row already on screen — so it adds no keypress writer.
-enum NoticeSource { git_query | diff_open | agent_list | agent_jump | commit_list }
-
--- Which of the pane's three sections the pane's keys act on. The tree, the
--- commits section and the agents section each keep their own cursor; focus
--- decides which one a motion moves and what Space and Enter do. The pane
--- shows two VIEWS: the browse view holds the tree (above) and the commits
--- section (below), the agents view holds the agents section alone. Focus
--- tree or commits means the browse view is showing; focus agents means the
--- agents view is. See SwitchAgentTreeView and SwitchAgentTreeBrowseFocus.
-enum AgentTreeFocus { tree | commits | agents }
-
--- What the lower pane (pane.diff_pane) is running: the diff renderer, or the
--- user's editor on one file. See OpenAgentTreeFileInEditor.
-enum LowerPaneContent { diff | editor }
-
-------------------------------------------------------------
 -- Value Types
 ------------------------------------------------------------
 
@@ -383,6 +317,72 @@ contract BoardPaneView {
         -- says so in the board's status line, as it does for resume_task.
         -- The pane never launches an agent itself.
 }
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- What git says happened to a file, relative to the selected source's
+-- baseline — the index for unstaged work, the parent for a commit. Also the badge
+-- vocabulary: a rendered node's badge is a FileChange, so there is exactly one
+-- enum for both, and a badge cannot say anything git did not.
+--
+-- Three values, not more. Git's own porcelain distinguishes further (type
+-- changes, copies, unmerged), but the user is scanning for "what did this
+-- agent do to my repo", and those all answer it as one of these three.
+-- CollapsedGitStatusLetters records the mapping.
+enum FileChange { added | modified | deleted }
+
+enum TreeNodeKind { file | directory }
+
+-- Why the diff pane is showing a placeholder for a file instead of its
+-- contents. Each value is a fact about the file, not a failure of the pane:
+-- the pane rendered exactly what it could, and says which of these it hit.
+--
+--   binary    -- git reports the change without line contents.
+--   too_large -- the diff exceeds config.agent_tree_diff_max_bytes.
+--
+-- There is no "untracked" refusal. Against an index baseline, advice to stage
+-- the file would remove it from the pane instead of revealing it. An
+-- untracked file's diff is its whole contents as additions
+-- (RefreshAgentTreeDiff's "Untracked files"), and both refusals above apply
+-- to those contents exactly as they apply to any other diff.
+enum DiffRefusal { binary | too_large }
+
+-- Which of the two writers set the pane's current notice. The pane shows one
+-- notice at a time in one line of border, so the two have to share a field —
+-- and a successful refresh must clear a stale "git failed" without also
+-- wiping the answer to a keypress the user made half a second ago. See
+-- RefreshAgentTree's clearing expression.
+--
+-- The second writer is a failed diff-pane split, or a `v` on a file that is
+-- not on disk: the direct, immediate answer to a keypress.
+--
+-- The agents section added two more writers of the same shape. agent_list is
+-- the timer's writer, like git_query: a failed read of the task list, cleared
+-- by the next successful read. agent_jump is a keypress's writer, like
+-- diff_open: a failed jump to another agent's window, or a resume the board
+-- refused or could not be asked for (AgentTreeResumeRefusedIsVisible), which
+-- survives every refresh until the next key.
+--
+-- The commits section added one more, of the timer's shape: commit_list, a
+-- failed read of the agent's commits, cleared by the next successful read.
+-- Selecting a commit has no failure of its own to report — it only names a
+-- row already on screen — so it adds no keypress writer.
+enum NoticeSource { git_query | diff_open | agent_list | agent_jump | commit_list }
+
+-- Which of the pane's three sections the pane's keys act on. The tree, the
+-- commits section and the agents section each keep their own cursor; focus
+-- decides which one a motion moves and what Space and Enter do. The pane
+-- shows two VIEWS: the browse view holds the tree (above) and the commits
+-- section (below), the agents view holds the agents section alone. Focus
+-- tree or commits means the browse view is showing; focus agents means the
+-- agents view is. See SwitchAgentTreeView and SwitchAgentTreeBrowseFocus.
+enum AgentTreeFocus { tree | commits | agents }
+
+-- What the lower pane (pane.diff_pane) is running: the diff renderer, or the
+-- user's editor on one file. See OpenAgentTreeFileInEditor.
+enum LowerPaneContent { diff | editor }
 
 ------------------------------------------------------------
 -- Entities and Variants
