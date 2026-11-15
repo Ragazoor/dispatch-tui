@@ -205,8 +205,8 @@ fn the_spawned_tree_pane_is_marked_with_its_role() {
 
 /// The marker matters to the *next* toggle, not this one: the pane is already
 /// open and rendering, so a failed write is logged rather than reported as a
-/// failed toggle. Same accepted gap as the editor pane's own marker
-/// (docs/specs/agent-tree.allium: OneEditorPanePerAgentWindow).
+/// failed toggle. Same accepted gap as the diff pane's own marker
+/// (docs/specs/agent-tree.allium: OneDiffPanePerAgentWindow).
 #[test]
 fn a_failing_role_marker_write_does_not_fail_the_toggle() {
     let mock = MockProcessRunner::new(vec![

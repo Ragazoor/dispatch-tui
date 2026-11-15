@@ -195,9 +195,10 @@ fn focus(pane: &PaneId, runner: &dyn ProcessRunner) {
 }
 
 /// The diff renderer's argv. `--data-dir` is named explicitly rather than left
-/// to the default: this process was given a database path and the pane below
-/// it must read the SAME open set and the same task; inheriting a default that
-/// happened to match would be a coincidence, not a guarantee.
+/// to the default so the pane below logs to the same `app.log` as this one;
+/// inheriting a default that happened to match would be a coincidence, not a
+/// guarantee. The open set and the task do not come from it: the open set is
+/// in the worktree's git directory and the task comes from the board.
 fn diff_command(data_dir: &Path, task_id: TaskId, runner: &dyn ProcessRunner) -> Vec<String> {
     vec![
         runner.agent_binaries().dispatch,
@@ -210,9 +211,9 @@ fn diff_command(data_dir: &Path, task_id: TaskId, runner: &dyn ProcessRunner) ->
 
 /// The pane is open and showing something; the marker only matters to the NEXT
 /// reconcile, so a failure here is logged rather than reported as a failed
-/// open. Worst case a later toggle splits a second pane — the same accepted
-/// gap the editor pane's marker had, and the reason OneDiffPanePerAgentWindow
-/// is held by construction rather than enforced.
+/// open. Worst case a later toggle splits a second pane — the accepted gap
+/// that makes OneDiffPanePerAgentWindow held by construction rather than
+/// enforced.
 fn mark_diff_pane(pane: &PaneId, runner: &dyn ProcessRunner) {
     if let Err(e) = tmux::set_pane_option(pane, PANE_ROLE_OPTION, PANE_ROLE_DIFF, runner) {
         tracing::warn!(%pane, error = %e, "failed to mark the diff pane with its role");

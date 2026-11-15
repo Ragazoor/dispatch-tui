@@ -368,21 +368,24 @@ enum DiffRefusal { binary | too_large }
 -- answer to a keypress the user made half a second ago. See RefreshAgentTree's
 -- clearing expression.
 --
--- The writers come in two shapes. A TIMER's writer is a failed read, cleared
+-- The sources come in two shapes. A TIMER's source is a failed read, cleared
 -- by that timer's next successful read:
 --   git_query   -- the tree's git query failed.
 --   agent_list  -- the read of the board's task list failed.
 --   commit_list -- the read of the agent's commits failed.
--- A KEYPRESS's writer is the direct, immediate answer to a key, and survives
--- every refresh until the next key:
---   diff_open   -- the lower pane would not split, or `v` named a file that
---                  is not on disk.
---   agent_jump  -- a jump to another agent's window failed, or the board
+-- The other two answer something the user asked for, and survive every
+-- refresh until the next key:
+--   diff_open   -- the lower pane would not split or respawn, `v` named a
+--                  file that is not on disk, or the pane could not record
+--                  what the lower pane reads (the open set, the selected
+--                  source, or that an editor took the pane over). A
+--                  selection the commits read falls back on is recorded the
+--                  same way, so this one can also be raised on that timer.
+--   agent_jump  -- a jump to another agent's window failed, the board
 --                  refused a resume or could not be asked for one
---                  (AgentTreeResumeRefusedIsVisible).
---
--- Selecting a commit has no failure of its own to report — it only names a
--- row already on screen — so it has no writer.
+--                  (AgentTreeResumeRefusedIsVisible), or a resumed agent
+--                  never came up (ResumeJumpWaitEnds). The jump and the
+--                  wait's end both happen on a list read.
 enum NoticeSource { git_query | diff_open | agent_list | agent_jump | commit_list }
 
 -- Which of the pane's three sections the pane's keys act on. The tree, the
@@ -1039,7 +1042,7 @@ rule HideAgentTreePane {
         -- drains the companion panes left behind when it moves the agent's
         -- own pane out (see split-pane.allium's
         -- PinTaskInSplitPane guidance) — every pane dispatch put in that
-        -- window, the diff pane included. `exec_swap_split_pane` resyncs a
+        -- window, the diff pane and an editor pane included. `exec_swap_split_pane` resyncs a
         -- renamed window's companion pane to the task the new name implies
         -- (see SwapSplitPane's guidance).
         --
@@ -1136,7 +1139,7 @@ rule ShowAgentTreePane {
 
 rule DiscardAgentTreePaneOnWindowCleared {
     -- Covers every lifecycle path that clears a task's window: wrap-up,
-    -- PR merge, manual Review -> Done, delete, the kill half of a
+    -- PR merge, manual Review -> Done, delete, a detach, the kill half of a
     -- retry-resume, and a window that died under the agent — a crash
     -- (agent-health.allium: DetectCrashedAgent) clears the window too.
     when: agent: core/Agent.tmux_window transitions_to null
@@ -1948,7 +1951,11 @@ rule KillAgentTreeDiffPaneWithItsTree {
         -- Keys that would only retire the lower pane — `q`, hiding the tree, a
         -- resync — leave an editor running. Only opening another file
         -- replaces it (OpenAgentTreeFileInEditor,
-        -- ReplaceAgentTreeEditorWithDiff). Opening a file is the user asking
+        -- ReplaceAgentTreeEditorWithDiff), and only pinning the task into the
+        -- board's split pane kills it: the pin moves the agent's own pane out
+        -- and drains every pane dispatch left behind in the window, an editor
+        -- included (split-pane.allium: PinTaskInSplitPane), since nothing
+        -- owns a window once its agent has left it. Opening a file is the user asking
         -- for the pane, so it is replaced. Leaving the tree is not, so the
         -- editor and any unsaved work in it stay. An editor pane with no tree
         -- beside it is harmless, unlike an orphaned diff pane.

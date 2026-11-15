@@ -194,8 +194,8 @@ fn spawn_agent_tree_pane(
     // [`companion_pane_ids`]). Best-effort like the split itself: the pane is open
     // and rendering either way, and only the *next* toggle suffers — it would read
     // the window as having no companion and split a second one. Same accepted gap
-    // as the editor pane's own marker (docs/specs/agent-tree.allium:
-    // `OneEditorPanePerAgentWindow`).
+    // as the diff pane's own marker (docs/specs/agent-tree.allium:
+    // `OneDiffPanePerAgentWindow`).
     if let Err(e) = tmux::set_pane_option(
         &pane,
         tmux::PANE_ROLE_OPTION,

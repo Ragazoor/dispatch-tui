@@ -1313,7 +1313,7 @@ pub fn respawn_pane_running(
 /// makes that third question answerable in a single lookup — and answerable for
 /// a future role without teaching the drain about it. See
 /// docs/specs/agent-tree.allium's `HideAgentTreePane` ("How the companion pane
-/// is identified") and `OneEditorPanePerAgentWindow`.
+/// is identified") and `OneDiffPanePerAgentWindow`.
 pub const PANE_ROLE_OPTION: &str = "@dispatch_pane_role";
 
 /// [`PANE_ROLE_OPTION`] value for the `dispatch agent-tree` companion pane.
