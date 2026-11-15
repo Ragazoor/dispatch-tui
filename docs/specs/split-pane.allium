@@ -275,7 +275,7 @@ rule BatchDetachTmux {
 -- the agent's session survives, only the split-pane UI goes away.
 
 rule ToggleSplitMode {
-    when: UserAction("s", task)
+    when: SplitToggleKeyPressed(task)
 
     -- The settled case, and only that: a press arriving while a rearrangement
     -- of either kind is in flight is held by
@@ -286,7 +286,7 @@ rule ToggleSplitMode {
 
     ensures:
         if split_pane.active = true:
-            ExitSplitMode()
+            SplitExitRequested()
         else if current_agent(task).tmux_window != null:
             -- Auto-pin: the selected task's existing window is joined into
             -- the dispatch window as the right pane.
@@ -325,7 +325,7 @@ rule ToggleSplitMode {
 }
 
 rule HoldToggleWhileRearrangementInFlight {
-    when: UserAction("s", task)
+    when: SplitToggleKeyPressed(task)
 
     requires: split_pane.in_flight != null
 
@@ -394,7 +394,7 @@ rule HoldToggleWhileRearrangementInFlight {
 }
 
 rule ExitSplitMode {
-    when: ExitSplitMode()
+    when: SplitExitRequested()
 
     requires: split_pane.active = true
     requires: split_pane.pane != null
@@ -449,7 +449,7 @@ rule ExitSplitMode {
 }
 
 rule SplitPaneExitStarted {
-    when: ExitSplitMode()
+    when: SplitExitRequested()
 
     -- The same guard ExitSplitMode and RefuseExitSplitModeOntoLiveWindow
     -- share: an exit with no open pane issues no tmux work, so it counts
@@ -478,7 +478,7 @@ rule SplitPaneExitStarted {
 }
 
 rule RefuseExitSplitModeOntoLiveWindow {
-    when: ExitSplitMode()
+    when: SplitExitRequested()
 
     requires: split_pane.active = true
     requires: split_pane.pane != null
@@ -522,7 +522,7 @@ rule RefuseExitSplitModeOntoLiveWindow {
         -- re-attempts the exit, and it succeeds as soon as the conflicting
         -- window is gone.
         --
-        -- That remedy reaches only the toggle paths among ExitSplitMode's
+        -- That remedy reaches only the toggle paths among SplitExitRequested's
         -- emitters. On the [s] toggle the user is still at the board and can
         -- re-press it. On the quit path (QuitExitsSplitMode, or a settle
         -- replaying a held quit — confirming quit exits split mode so the
@@ -636,7 +636,7 @@ rule QuitExitsSplitMode {
 
     ensures:
         if split_pane.active = true:
-            ExitSplitMode()
+            SplitExitRequested()
     ensures: BoardQuitting()
 
     @guidance
@@ -866,7 +866,6 @@ rule SplitPaneRespawnOnWindowCleared {
     requires: split_pane.pinned_task = agent.task
 
     ensures: split_pane.pinned_task = null
-    ensures: split_pane.active = true
     ensures: split_pane.pane = RespawnedPane(split_pane.pane)
 
     @guidance
@@ -940,9 +939,12 @@ rule TrackSplitPaneFocus {
 -- Crashed task that still has a window is jumped to or swapped in (a stale
 -- agent is usually just idle) rather than opening the retry dialog. The
 -- retry dialog is reached only for a windowless Stale/Crashed task (4).
+--
+-- TmuxFocusMoved(target), here and in GoToTaskSpaceResumed and
+-- JumpBackToTuiWindow, is observable output; no rule listens.
 
 rule ActivateTask {
-    when: UserAction(" ", task)
+    when: ActivateKeyPressed(task)
 
     ensures:
         if not task.is_locally_owned:
@@ -952,14 +954,14 @@ rule ActivateTask {
         else if split_pane.active = true and split_pane.pinned_task = task:
             -- Priority 1: the task is pinned; its window was joined into the
             -- dispatch window via join-pane, so focus the pane directly.
-            tmux_focus = split_pane.pane
+            TmuxFocusMoved(target: split_pane.pane)
         else if split_pane.active = true and current_agent(task).tmux_window != null:
             -- Priority 2: split mode replaces the jump with an in-place swap.
             -- Specified by SwapSplitPane below; tmux focus stays on the TUI.
             SplitPaneSwapRequested(task: task)
         else if current_agent(task).tmux_window != null:
             -- Priority 3: jump to the standalone agent window.
-            tmux_focus = current_agent(task).tmux_window
+            TmuxFocusMoved(target: current_agent(task).tmux_window)
         else if task.status = backlog:
             -- Priority 4, Backlog: start the agent. Repo-trust confirmation
             -- (ConfirmTrustRepo) is preserved as a pre-dispatch gate.
@@ -981,7 +983,7 @@ rule ActivateTask {
             else if task.worktree != null:
                 -- Worktree survives, no live window: reattach the agent,
                 -- then go to it (GoToTaskSpaceResumed).
-                ResumeTask(task: task, go_to_task: true)
+                dispatch/ResumeTask(task: task, go_to_task: true)
             else:
                 UserInformed(about: no_worktree_to_resume, task: task)
 
@@ -1032,13 +1034,6 @@ rule ActivateTask {
         --      only while that pane is recorded; a pinned task whose pane is
         --      not (yet) recorded falls through to the branches below.
         --
-        -- Each branch is one row of the keybinding table (keybindings.allium:
-        -- board.normal, Space, the task_* contexts), and the row's action id
-        -- is what the press records: activate_unavailable for priority 0, the
-        -- dispatch-in-progress hint and the no-worktree hint; jump_to_tmux
-        -- for priorities 1 and 3; swap_split_pane, dispatch_task,
-        -- open_retry_dialog and resume_task for the rest.
-        --
         --   2. Split active and the task has a tmux window (and is not the
         --      pinned one): the window is swapped into the split pane in
         --      place, per SwapSplitPane. tmux focus is NOT transferred — the
@@ -1077,6 +1072,13 @@ rule ActivateTask {
         --      * Running/Review/Done without a worktree -> a status hint
         --        ("No worktree to resume, move to Backlog and re-dispatch").
         --
+        -- Each branch is one row of the keybinding table (keybindings.allium:
+        -- board.normal, Space, the task_* contexts), and the row's action id
+        -- is what the press records: activate_unavailable for priority 0, the
+        -- dispatch-in-progress hint and the no-worktree hint; jump_to_tmux
+        -- for priorities 1 and 3; swap_split_pane, dispatch_task,
+        -- open_retry_dialog and resume_task for the rest.
+        --
         -- Space on an epic row (board view) enters the epic view, not this
         -- rule. Inside the epic, Space on each subtask follows the task rules
         -- above.
@@ -1091,7 +1093,7 @@ rule ActivateTask {
 -- pane while split mode is active, otherwise jump tmux focus to it.
 
 rule GoToTaskSpaceResumed {
-    when: ResumeTask(task, message?, go_to_task?)
+    when: dispatch/ResumeTask(task, message?, go_to_task?)
     requires: go_to_task = true
 
     ensures:
@@ -1100,7 +1102,7 @@ rule GoToTaskSpaceResumed {
             SplitPaneSwapRequested(task: task)
         else:
             -- As ActivateTask priority 3.
-            tmux_focus = current_agent(task).tmux_window
+            TmuxFocusMoved(target: current_agent(task).tmux_window)
 
     @guidance
         -- The window exists only once the launch reports back (ResumeTask's
@@ -1129,9 +1131,9 @@ rule GoToTaskSpaceResumed {
 -- dispatch TUI window.
 
 rule JumpBackToTuiWindow {
-    when: UserAction("prefix+space")
+    when: JumpBackKeyPressed()
 
-    ensures: tmux_focus = "TUI"
+    ensures: TmuxFocusMoved(target: "TUI")
 
     @guidance
         -- Registered at TUI startup as a prefixed tmux keybinding (the tmux
@@ -1192,9 +1194,8 @@ rule PinTaskInSplitPane {
     @guidance
         -- When the selected task is already pinned, the action is a no-op: no
         -- rule fires. This one is excluded by pinned_task = null and
-        -- SwapSplitPane by pinned_task != task.
-        -- When a different task is pinned, the pane content is swapped in-place
-        -- via tmux swap-pane. The old content is returned to a standalone window.
+        -- SwapSplitPane by pinned_task != task. When a different task is
+        -- pinned, the request is SwapSplitPane's (see there).
         --
         -- No tmux select-pane is called — the TUI pane retains focus throughout.
         --
@@ -1208,7 +1209,7 @@ rule PinTaskInSplitPane {
         -- (src/dispatch/split_panes.rs::join_task_window_into_pane, reached
         -- from src/runtime/split.rs::exec_enter_split_mode_with_task).
         -- Whatever dispatch itself put in
-        -- that window (docs/specs/agent-tree.allium: the agent-tree companion
+        -- that window (agent-tree.allium: the agent-tree companion
         -- pane, and any editor pane opened from it) is left behind in a window
         -- nothing owns — and a lone companion pane is indistinguishable, from
         -- live tmux state alone, from the companion being toggled hidden.
@@ -1259,12 +1260,14 @@ rule PinTaskInSplitPane {
         --
         -- == Home tag on the pinned pane ==
         -- The pinned pane itself is tagged with the window it was pinned from
-        -- and that window's worktree (the pane options @dispatch_home_window
-        -- and @dispatch_home_dir), written by the pin and again by every swap
-        -- for the pane swapped in. Pane options travel with the pane. The tag
-        -- is what lets a process that is NOT this board return the pane home:
-        -- a pin whose window held only the agent leaves that name in no tmux
-        -- window at all, and nothing but the pane remembers it.
+        -- (the pane option @dispatch_home_window), written by the pin and
+        -- again by every swap for the pane swapped in. Pane options travel
+        -- with the pane. The window's worktree needs no tag: the pane started
+        -- there, and tmux keeps that directory as the pane's
+        -- #{pane_start_path} (src/tmux.rs::panes_with_home_in_window_of).
+        -- The tag is what lets a process that is NOT this board return the
+        -- pane home: a pin whose window held only the agent leaves that name
+        -- in no tmux window at all, and nothing but the pane remembers it.
         --
         -- The one reader is startup.allium's `RetireTheBoardWindow`
         -- (`RetiringReturnsPinnedAgentsFirst`). A board that is SIGNALLED
@@ -1276,7 +1279,7 @@ rule PinTaskInSplitPane {
         -- the later launch's retire is what keeps the agent alive. A confirmed
         -- quit is unchanged: QuitExitsSplitMode restores and awaits it.
         -- Best-effort like the other tags: an untagged pane is simply not
-        -- returned, as before.
+        -- returned.
 }
 
 rule SwapSplitPane {
@@ -1480,10 +1483,10 @@ rule SplitPaneSwapSettles {
             SplitPaneSwapRequested(task: pending)
     ensures:
         if toggling = true and quitting = false:
-            ExitSplitMode()
+            SplitExitRequested()
     ensures:
         if quitting = true:
-            ExitSplitMode()
+            SplitExitRequested()
             BoardQuitting()
 
     @guidance
@@ -1546,8 +1549,8 @@ rule SplitPaneSwapSettles {
         -- It quits whether or not the swap succeeded, exactly as the entry side
         -- does. The user asked to leave; a failed rearrangement changes what
         -- there is to tidy up, never whether the application goes away.
-        -- ExitSplitMode is emitted either way: it is self-guarded on active, and
-        -- after a failed swap the pane still shows the previous occupant, so
+        -- SplitExitRequested is raised either way: ExitSplitMode is
+        -- self-guarded on active, and after a failed swap the pane still shows the previous occupant, so
         -- there is still a pinned agent to restore. Contrast the held TOGGLE in
         -- SplitPaneEntrySettles, which IS dropped on failure — a toggle is
         -- relative to what the press before it achieved, while a quit is not
@@ -1605,7 +1608,7 @@ rule SplitPaneEntrySettles {
             split_pane.focused = true
     ensures:
         if (pending = true or quitting = true) and succeeded = true:
-            ExitSplitMode()
+            SplitExitRequested()
     ensures:
         if quitting = true:
             BoardQuitting()
@@ -1659,14 +1662,14 @@ rule AgentWindowSplitStartsInTaskWorktree {
     when: TmuxWindowSplit(window, new_pane)
 
     -- The window being split is a dispatched task's agent window.
-    let task = core/Task{tmux_window: window}
+    let agent = core/Agent{tmux_window: window}
 
-    requires: exists task
-    requires: task.worktree != null
+    requires: exists agent
+    requires: agent.task.worktree != null
 
     ensures: PaneWorkingDirectorySet(
         pane: new_pane,
-        directory: task.worktree.path
+        directory: agent.task.worktree.path
     )
 
     @guidance
@@ -1749,12 +1752,12 @@ surface SplitPaneBoard {
     provides:
         -- [s]: open or close split mode; task is the selected card, if any
         -- (ToggleSplitMode, HoldToggleWhileRearrangementInFlight).
-        UserAction("s", task)
+        SplitToggleKeyPressed(task)
         -- Space on a task card: the activate action (ActivateTask).
-        UserAction(" ", task)
+        ActivateKeyPressed(task)
         -- The tmux-global prefix+Space binding, from any agent window
         -- (JumpBackToTuiWindow).
-        UserAction("prefix+space")
+        JumpBackKeyPressed()
         -- [T], answered yes, on one task or on a multi-selection.
         ConfirmDetachTmux(task)
         ConfirmBatchDetachTmux(tasks)
