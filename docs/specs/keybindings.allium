@@ -123,7 +123,9 @@ use "./observability.allium" as observability
 -- and h/l do. toggle_focus (s) flips between the browse view (tree and commits)
 -- and the agents view (agent-tree.allium: SwitchAgentTreeView); switch_section
 -- (Tab, BackTab) moves between tree and commits (SwitchAgentTreeBrowseFocus)
--- and has no row in agent_tree.agents. The commits section adds no
+-- and has no row in agent_tree.agents. There the same keys are a separate
+-- row, cycle_agent_filter, which flips the agents filter between all and
+-- running (agent-tree.allium: CycleAgentListFilter). The commits section adds no
 -- new key: Space/Enter take a section-specific meaning there exactly as they
 -- already do in the agents section, so no key collides with another row:
 --   agent_tree.tree
@@ -159,6 +161,9 @@ use "./observability.allium" as observability
 --     exit_pane, toggle_focus, navigate_row,
 --     navigate_row_first, navigate_row_last, navigate_half_page — the same
 --     keys as in agent_tree.tree
+--     cycle_agent_filter         Tab, BackTab   flips the section between
+--                                               every listed agent and the
+--                                               running ones alone
 --     jump_to_agent              Space, Enter   takes effect (and records)
 --                                               only with another task's
 --                                               agent row under the cursor:
