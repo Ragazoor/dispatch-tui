@@ -233,6 +233,17 @@ pub(super) struct ListTasksArgs {
     /// (`ListArchivedTasksViaMcp`).
     #[serde(default)]
     pub(super) archived: bool,
+    /// Keep tasks whose `updated_at` is at or after / strictly before this
+    /// time (`mcp-task-tools.allium`: `TimeFilterInput`).
+    #[serde(default)]
+    pub(super) updated_after: Option<String>,
+    #[serde(default)]
+    pub(super) updated_before: Option<String>,
+    /// The same bounds on `completed_at`.
+    #[serde(default)]
+    pub(super) completed_after: Option<String>,
+    #[serde(default)]
+    pub(super) completed_before: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -565,7 +576,7 @@ fn format_task_line(
     // person's bookmarks".
     let bookmark_indicator = if bookmarked { " bookmarked" } else { "" };
     format!(
-        "- [{}] {}{}{} ({}/{}){}{} | Base: {}{}{}",
+        "- [{}] {}{}{} ({}/{}){}{} | Base: {} | Updated: {} | Completed: {}{}{}",
         t.id,
         t.title,
         bookmark_indicator,
@@ -575,6 +586,8 @@ fn format_task_line(
         tag_indicator,
         epic_indicator,
         t.base_branch,
+        super::time_filter::iso(t.updated_at),
+        super::time_filter::iso_or_dash(t.completed_at),
         pr_part,
         goal_part,
     )

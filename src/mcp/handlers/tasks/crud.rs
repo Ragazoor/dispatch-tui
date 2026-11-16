@@ -9,6 +9,7 @@ use crate::service::{
     CreateTaskParams, ListTasksFilter, ServiceError, UpdateTaskParams, UrlUpdate,
 };
 
+use super::super::time_filter;
 use super::{
     fetch_caller_task, parse_args, service_err_to_response, tool_error, CreateTaskWithEpicArgs,
     GetTaskArgs, JsonRpcResponse, ListTasksArgs, QueryUsageArgs, StatusFilter, UpdateTaskArgs,
@@ -557,6 +558,33 @@ pub(crate) async fn handle_list_tasks(
             "status, recursive and bookmarked do not apply to archived tasks".to_string(),
         );
     }
+    let time_filters_set = parsed.updated_after.is_some()
+        || parsed.updated_before.is_some()
+        || parsed.completed_after.is_some()
+        || parsed.completed_before.is_some();
+    if parsed.archived && time_filters_set {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            "updated_after, updated_before, completed_after and completed_before \
+             do not apply to archived tasks"
+                .to_string(),
+        );
+    }
+    let (updated, completed) = match time_filter::parse_windows(
+        &id,
+        (
+            parsed.updated_after.as_deref(),
+            parsed.updated_before.as_deref(),
+        ),
+        (
+            parsed.completed_after.as_deref(),
+            parsed.completed_before.as_deref(),
+        ),
+    ) {
+        Ok(windows) => windows,
+        Err(resp) => return resp,
+    };
 
     let (derived_epic_id, exclude_task_id) =
         match resolve_list_scope(state, &id, identity, &parsed).await {
@@ -606,6 +634,7 @@ pub(crate) async fn handle_list_tasks(
         Err(e) => return service_err_to_response(id, e),
     };
 
+    filtered.retain(|t| updated.contains(Some(t.updated_at)) && completed.contains(t.completed_at));
     let bookmarks: std::collections::HashSet<TaskId> =
         state.db.bookmarked_task_ids().await.into_iter().collect();
     if let Some(wanted) = parsed.bookmarked {

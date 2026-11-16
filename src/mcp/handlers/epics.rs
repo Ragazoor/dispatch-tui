@@ -6,6 +6,7 @@ use crate::mcp::McpState;
 use crate::models::{Epic, EpicId, TaskStatus, Visibility};
 use crate::service::{CreateEpicParams, UpdateEpicParams};
 
+use super::time_filter;
 use super::types::{
     deserialize_flexible_id, deserialize_nullable_flexible_i64, deserialize_nullable_flexible_id,
     deserialize_nullable_string, deserialize_optional_flexible_i64,
@@ -46,6 +47,16 @@ pub(super) struct ListEpicsArgs {
     pub(super) query: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_limit")]
     pub(super) limit: Option<std::num::NonZeroUsize>,
+    /// Bounds on `updated_at` and `completed_at` (`epics.allium`:
+    /// `ListEpicsViaMcp`, `mcp-task-tools.allium`: `TimeFilterInput`).
+    #[serde(default)]
+    pub(super) updated_after: Option<String>,
+    #[serde(default)]
+    pub(super) updated_before: Option<String>,
+    #[serde(default)]
+    pub(super) completed_after: Option<String>,
+    #[serde(default)]
+    pub(super) completed_before: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -257,12 +268,30 @@ pub(super) async fn handle_list_epics(
                 ("recursive", parsed.recursive.is_some()),
                 ("query", parsed.query.is_some()),
                 ("limit", parsed.limit.is_some()),
+                ("updated_after", parsed.updated_after.is_some()),
+                ("updated_before", parsed.updated_before.is_some()),
+                ("completed_after", parsed.completed_after.is_some()),
+                ("completed_before", parsed.completed_before.is_some()),
             ],
         ) {
             return refusal;
         }
         return get_epic(state, id, epic_id).await;
     }
+    let (updated, completed) = match time_filter::parse_windows(
+        &id,
+        (
+            parsed.updated_after.as_deref(),
+            parsed.updated_before.as_deref(),
+        ),
+        (
+            parsed.completed_after.as_deref(),
+            parsed.completed_before.as_deref(),
+        ),
+    ) {
+        Ok(windows) => windows,
+        Err(resp) => return resp,
+    };
     let recursive = parsed.recursive.unwrap_or(false);
     tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive, "MCP list_epics");
 
@@ -281,6 +310,9 @@ pub(super) async fn handle_list_epics(
             .collect(),
         None => epics,
     };
+    epics.retain(|(e, _, _)| {
+        updated.contains(Some(e.updated_at)) && completed.contains(e.completed_at)
+    });
     if epics.is_empty() {
         return JsonRpcResponse::ok(
             id,
@@ -340,7 +372,7 @@ fn format_epic_list_line(
         None => String::new(),
     };
     format!(
-        "- [{}] {} ({}/{} done) [workspace {}, {}]{}{}{}: {}",
+        "- [{}] {} ({}/{} done) [workspace {}, {}]{}{}{} | Updated: {} | Completed: {}: {}",
         e.id,
         e.title,
         done,
@@ -350,6 +382,8 @@ fn format_epic_list_line(
         plan_indicator,
         status_indicator,
         parent_indicator,
+        time_filter::iso(e.updated_at),
+        time_filter::iso_or_dash(e.completed_at),
         e.description
     )
 }

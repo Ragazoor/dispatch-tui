@@ -1005,15 +1005,21 @@ rule GetArchivedTaskViaMcp {
 rule ListArchivedTasksViaMcp {
     when: McpListTasks(caller_identity,
                        epic_id?, repo_paths?, status?, recursive?, base_branch?,
-                       query?, limit?, bookmarked?, archived?)
+                       query?, limit?, bookmarked?, archived?,
+                       updated_after?, updated_before?,
+                       completed_after?, completed_before?)
 
     requires: archived = true
 
     -- status, recursive and bookmarked mean nothing for an archived record
     -- (it has no status, its sub-epics may be gone, its bookmarks went with
     -- the task): any of them alongside archived = true is rejected as
-    -- invalid params (-32602).
+    -- invalid params (-32602). So are the four time filters (see
+    -- TimeFilterInput): an archived record does not carry the times, and
+    -- its rows show none.
     requires: status = null and not recursive and bookmarked = null
+    requires: updated_after = null and updated_before = null
+              and completed_after = null and completed_before = null
     requires:
         if limit != null: limit >= 1
 
@@ -1077,10 +1083,37 @@ rule ArchivedTaskIsReadOnly {
         -- existed: the refusal must not reveal it.
 }
 
+-- == TimeFilterInput: the shared rule for updated_* and completed_* ==
+-- list_tasks and list_epics take updated_after, updated_before,
+-- completed_after and completed_before; list_work_packages takes
+-- updated_after and updated_before only (a package has no completed_at, and
+-- the completed_* pair is not offered there). Every list that takes them
+-- applies this one rule.
+--   - A bound is a time with an explicit zone: `Z` or a numeric offset such
+--     as +02:00 (ISO 8601). It is converted to UTC. A time with no zone
+--     (2026-11-09T00:00:00) and a bare date (2026-11-09) are invalid.
+--   - after is INCLUSIVE (at or after), before is EXCLUSIVE (strictly
+--     before), so two adjacent windows neither overlap nor leave a gap.
+--     Last week is after 2026-11-09T00:00:00Z, before 2026-11-16T00:00:00Z.
+--     The tool description says "after" includes the bound.
+--   - Either bound may be given alone.
+--   - An invalid time is rejected as invalid params (-32602), and the error
+--     names the parameter. A range whose after is not strictly before its
+--     before (including equal bounds) is rejected the same way, and the
+--     error names both parameters. It is never an empty list.
+--   - Both bounds of a pair apply to the same field; updated_* and
+--     completed_* are ANDed with each other and with every other filter.
+--   - A row with no value in the field (completed_at only) is excluded by
+--     any bound on it.
+--   - Output times are ISO 8601 UTC with a Z suffix (2026-11-11T08:26:37Z).
+--   - Archived lists reject all four filters, as they reject status.
+
 rule ListTasksViaMcp {
     when: McpListTasks(caller_identity,
                        epic_id?, repo_paths?, status?, recursive?, base_branch?,
-                       query?, limit?, bookmarked?, archived?)
+                       query?, limit?, bookmarked?, archived?,
+                       updated_after?, updated_before?,
+                       completed_after?, completed_before?)
 
     -- archived = true is ListArchivedTasksViaMcp's.
     requires: archived != true
@@ -1088,6 +1121,12 @@ rule ListTasksViaMcp {
     -- A limit of zero is meaningless: rejected as invalid params (-32602).
     requires:
         if limit != null: limit >= 1
+
+    -- The four time filters take the shared validation (TimeFilterInput):
+    -- an invalid time, or a range whose after is not strictly before its
+    -- before, is rejected as invalid params (-32602).
+    requires: time_filters_are_valid(updated_after, updated_before)
+    requires: time_filters_are_valid(completed_after, completed_before)
 
     -- caller_identity comes from the HTTP transport (see CreateTaskViaMcp).
 
@@ -1100,10 +1139,29 @@ rule ListTasksViaMcp {
         base_branch: base_branch,
         query: query,
         limit: limit,
-        bookmarked: bookmarked
+        bookmarked: bookmarked,
+        updated_after: updated_after,
+        updated_before: updated_before,
+        completed_after: completed_after,
+        completed_before: completed_before
     )
 
     @guidance
+        -- == time filters narrow by updated_at and completed_at ==
+        -- updated_after / updated_before bound Task.updated_at;
+        -- completed_after / completed_before bound Task.completed_at. Each
+        -- is optional, ANDed with every other filter, and not a scope
+        -- filter: none disables auto-scoping. See TimeFilterInput for the
+        -- input form, the bounds and the validation, which list_epics and
+        -- list_work_packages share.
+        -- completed_at records the LAST completion and survives a move out
+        -- of done; updated_at moves on every later change, so a done task
+        -- edited after completion is later in updated_at than in
+        -- completed_at. A count of tasks finished in a window therefore
+        -- uses completed_*, not updated_*.
+        -- A task with no completed_at (never done, or done before the field
+        -- was stamped) is excluded by any completed_* filter, and its row
+        -- shows "Completed: -".
         -- == bookmarked narrows to the board person's bookmarks ==
         -- bookmarked = true keeps only tasks the board's person (see
         -- UpdateTaskViaMcp's `bookmarked`) has a core/Bookmark on; false
@@ -1178,6 +1236,9 @@ rule ListTasksViaMcp {
         -- caller one over-broad list rather than a mis-parented task.
         -- Output line per task: title, status/sub_status, tag, epic, then
         --   | Base: <base_branch>
+        --   | Updated: <updated_at>
+        --   | Completed: <completed_at>  ("-" when the task has none)
+        --     both as ISO 8601 UTC with a Z suffix (2026-11-11T08:26:37Z)
         --   | <label>: <url.url>  (omitted when url is null), where <label>
         --     is the typed label derived from url.url_type: "PR #N" / "Issue #N"
         --     / "Security Alert" / "Link"
@@ -2210,7 +2271,9 @@ surface McpTaskTools {
                       schedule?, signal?)
         McpGetTask(task_id)
         McpListTasks(client, epic_id?, repo_paths?, status?, recursive?,
-                     base_branch?, query?, limit?, bookmarked?, archived?)
+                     base_branch?, query?, limit?, bookmarked?, archived?,
+                     updated_after?, updated_before?,
+                     completed_after?, completed_before?)
         McpQueryUsage(category?, actor?, since?)
         McpDispatchTask(task)
         McpResumeTask(task, message?)

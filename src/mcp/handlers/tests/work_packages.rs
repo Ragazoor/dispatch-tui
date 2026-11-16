@@ -509,3 +509,85 @@ async fn an_unknown_visibility_is_refused_and_names_the_choices() {
     );
     assert!(state.db.list_work_packages().await.is_empty());
 }
+
+// -- list_work_packages time filters (work-packages.allium: ListWorkPackagesViaMcp)
+
+fn wp_hours_from_now(hours: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::hours(hours))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+#[tokio::test]
+async fn list_work_packages_updated_filters_bound_updated_at() {
+    let state = test_state().await;
+    tool(&state, "create_work_package", json!({"title": "Window 1"})).await;
+
+    let inside = extract_response_text(
+        &tool(
+            &state,
+            "list_work_packages",
+            json!({"updated_after": wp_hours_from_now(-1), "updated_before": wp_hours_from_now(1)}),
+        )
+        .await,
+    );
+    assert!(inside.contains("Window 1"), "{inside}");
+
+    let outside = extract_response_text(
+        &tool(
+            &state,
+            "list_work_packages",
+            json!({"updated_before": wp_hours_from_now(-1)}),
+        )
+        .await,
+    );
+    assert!(!outside.contains("Window 1"), "{outside}");
+}
+
+#[tokio::test]
+async fn list_work_packages_rejects_a_bad_time_and_a_bad_range() {
+    let state = test_state().await;
+    let bad_time = tool(
+        &state,
+        "list_work_packages",
+        json!({"updated_after": "yesterday"}),
+    )
+    .await;
+    assert_error(&bad_time, "updated_after");
+
+    let bad_range = tool(
+        &state,
+        "list_work_packages",
+        json!({"updated_after": "2026-11-16T00:00:00Z", "updated_before": "2026-11-16T00:00:00Z"}),
+    )
+    .await;
+    assert_error(&bad_range, "updated_before");
+}
+
+#[tokio::test]
+async fn list_work_packages_has_no_completed_filters() {
+    let state = test_state().await;
+    let resp = tool(
+        &state,
+        "list_work_packages",
+        json!({"completed_after": "2026-11-09T00:00:00Z"}),
+    )
+    .await;
+    assert!(is_error(&resp), "a package has no completed_at");
+}
+
+#[tokio::test]
+async fn list_work_packages_by_id_rejects_the_time_filters() {
+    let state = test_state().await;
+    tool(&state, "create_work_package", json!({"title": "Window 1"})).await;
+    let id = only_package(&state).await;
+    let resp = tool(
+        &state,
+        "list_work_packages",
+        json!({"work_package_id": id.0, "updated_after": "2026-11-09T00:00:00Z"}),
+    )
+    .await;
+    assert!(
+        is_error(&resp),
+        "id plus a time filter is invalid params: {resp:?}"
+    );
+}

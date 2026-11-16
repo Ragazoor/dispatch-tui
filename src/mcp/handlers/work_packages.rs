@@ -9,6 +9,7 @@ use crate::mcp::McpState;
 use crate::models::{EpicId, TaskId, WorkPackageId, WorkPackageItem};
 use crate::service::{CreateWorkPackageParams, UpdateWorkPackageParams, WorkPackageView};
 
+use super::time_filter;
 use super::types::{
     deserialize_flexible_id, deserialize_optional_flexible_i64, deserialize_optional_flexible_id,
     parse_args, reject_alongside, service_err_to_response, FlexibleId, JsonRpcResponse,
@@ -39,6 +40,13 @@ struct CreateWorkPackageArgs {
 struct ListWorkPackagesArgs {
     #[serde(default, deserialize_with = "deserialize_optional_flexible_id")]
     work_package_id: Option<WorkPackageId>,
+    /// Bounds on `updated_at` (`work-packages.allium`:
+    /// `ListWorkPackagesViaMcp`). A package has no `completed_at`, so there is
+    /// no `completed_*` pair.
+    #[serde(default)]
+    updated_after: Option<String>,
+    #[serde(default)]
+    updated_before: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -146,15 +154,42 @@ pub(super) async fn handle_list_work_packages(
         Err(resp) => return resp,
     };
     tracing::info!(work_package_id = ?parsed.work_package_id, "MCP list_work_packages");
-    match state
+    if parsed.work_package_id.is_some() {
+        if let Some(refusal) = reject_alongside(
+            &id,
+            "work_package_id",
+            &[
+                ("updated_after", parsed.updated_after.is_some()),
+                ("updated_before", parsed.updated_before.is_some()),
+            ],
+        ) {
+            return refusal;
+        }
+    }
+    let updated = match time_filter::parse_window(
+        &id,
+        "updated_after",
+        parsed.updated_after.as_deref(),
+        "updated_before",
+        parsed.updated_before.as_deref(),
+    ) {
+        Ok(w) => w,
+        Err(resp) => return resp,
+    };
+    let listed = state
         .work_package_svc
         .list_work_packages(parsed.work_package_id)
         .await
-    {
-        Ok(views) if views.is_empty() => text(
+        .map(|mut views| {
+            views.retain(|v| updated.contains(Some(v.package.updated_at)));
+            views
+        });
+    match listed {
+        Ok(views) if views.is_empty() && updated.is_unbounded() => text(
             id,
             "No work packages. Create one with create_work_package.".to_string(),
         ),
+        Ok(views) if views.is_empty() => text(id, "No work packages found".to_string()),
         Ok(views) => {
             // Task items show the task's display name (`McpRepliesNameWhatTheyTouch`).
             let mut names = std::collections::HashMap::new();
@@ -208,8 +243,8 @@ fn format_view(
     ));
     out.push_str(&format!(
         "\nCreated: {}\nUpdated: {}",
-        p.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
-        p.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+        time_filter::iso(p.created_at),
+        time_filter::iso(p.updated_at)
     ));
     if view.items.is_empty() {
         out.push_str("\nItems: none");

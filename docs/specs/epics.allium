@@ -553,7 +553,9 @@ rule CreateEpicViaMcp {
 -- replies differ: the list gives one row per epic, the epic_id form the full
 -- record. list_work_packages(work_package_id) is the same shape.
 rule GetEpicViaMcp {
-    when: McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?)
+    when: McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?,
+                 updated_after?, updated_before?,
+                 completed_after?, completed_before?)
 
     requires: epic_id != null
     requires: exists core/Epic{id: epic_id}
@@ -562,6 +564,8 @@ rule GetEpicViaMcp {
     -- (-32602), not a silent ignore.
     requires: parent_epic_id = null and recursive = null and query = null
               and limit = null
+    requires: updated_after = null and updated_before = null
+              and completed_after = null and completed_before = null
 
     -- Returns the Epic record for epic_id along with a subtask summary
     -- (done_count, total_count) rolled up exactly as ListEpicsViaMcp
@@ -600,7 +604,9 @@ rule GetEpicViaMcp {
 }
 
 rule ListEpicsViaMcp {
-    when: McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?)
+    when: McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?,
+                 updated_after?, updated_before?,
+                 completed_after?, completed_before?)
 
     -- With epic_id set the call is GetEpicViaMcp (above).
     requires: epic_id = null
@@ -619,12 +625,33 @@ rule ListEpicsViaMcp {
     requires:
         if limit != null: limit >= 1
 
+    -- The four time filters take the shared validation (mcp-task-tools.allium:
+    -- TimeFilterInput): an invalid time, or a range whose after is not
+    -- strictly before its before, is rejected as invalid params (-32602).
+    requires: time_filters_are_valid(updated_after, updated_before)
+    requires: time_filters_are_valid(completed_after, completed_before)
+
     -- When query is set, only epics matching it are kept, after the scope
     -- above is applied (the two are ANDed).
     ensures: EpicsListed(parent_epic_id: parent_epic_id, recursive: recursive,
-                         query: query, limit: limit)
+                         query: query, limit: limit,
+                         updated_after: updated_after,
+                         updated_before: updated_before,
+                         completed_after: completed_after,
+                         completed_before: completed_before)
 
     @guidance
+        -- == time filters narrow by updated_at and completed_at ==
+        -- updated_* bound Epic.updated_at; completed_* bound
+        -- Epic.completed_at, the time the epic last entered done. Both are
+        -- ANDed with the scope, query and each other. The input form, the
+        -- inclusive after and exclusive before, and the errors are the same
+        -- as list_tasks (mcp-task-tools.allium: TimeFilterInput). An epic
+        -- with no completed_at is excluded by any completed_* filter.
+        -- Every row carries " | Updated: <updated_at> | Completed:
+        -- <completed_at>" as ISO 8601 UTC with a Z suffix, "-" when the epic
+        -- has no completed_at. The epic_id form (GetEpicViaMcp) rejects the
+        -- four filters, like every other filter.
         -- query is split on whitespace into words; an epic matches when
         -- every word is a case-insensitive substring of its title or its
         -- description. A blank query is the same as none. This is the same
@@ -2014,7 +2041,9 @@ surface EpicMcpTools {
                       workspace_id?, visibility?)
         -- list_epics: one epic with epic_id (GetEpicViaMcp), else a list
         -- (ListEpicsViaMcp).
-        McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?)
+        McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?,
+                 updated_after?, updated_before?,
+                 completed_after?, completed_before?)
         -- update_epic (UpdateEpicViaMcp).
         McpUpdateEpic(epic, title?, description?, status?, plan_path?, sort_order?,
                       feed_command?, feed_interval_secs?, group_by_repo?,

@@ -1118,3 +1118,244 @@ async fn update_tasks_refused_bookmark_leaves_the_fields_unwritten() {
     let title = state.db.get_task(task).await.unwrap().title;
     assert_eq!(title, "before", "the refused call must write nothing");
 }
+
+// -- list_tasks time filters (mcp-task-tools.allium: TimeFilterInput) --------
+
+fn hours_from_now(hours: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::hours(hours))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+/// The value after `label` in a row, up to the next ` |` or the end of line.
+fn field_after<'a>(row: &'a str, label: &str) -> &'a str {
+    let rest = row
+        .split(label)
+        .nth(1)
+        .unwrap_or_else(|| panic!("{label} in {row}"));
+    rest.split(" |").next().unwrap_or(rest).trim()
+}
+
+async fn one_done_one_open() -> (Arc<McpState>, crate::models::TaskId, crate::models::TaskId) {
+    let (state, _store, epic) = signal_fixture().await;
+    create_in_epic(&state, epic, json!({ "title": "finished" })).await;
+    create_in_epic(&state, epic, json!({ "title": "open" })).await;
+    let all = state.db.list_all().await;
+    let done = all.iter().find(|t| t.title == "finished").unwrap().id;
+    let open = all.iter().find(|t| t.title == "open").unwrap().id;
+    let resp = tool_call(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [done.0], "status": "done" }),
+    )
+    .await;
+    assert!(!is_error(&resp), "{}", error_message(&resp));
+    (state, done, open)
+}
+
+#[tokio::test]
+async fn list_tasks_rows_show_updated_and_completed_as_iso_utc() {
+    let (state, _done, _open) = one_done_one_open().await;
+    let text = text_of(&tool_call(&state, "list_tasks", json!({})).await);
+    let finished = text.lines().find(|l| l.contains("finished")).unwrap();
+    let open = text.lines().find(|l| l.contains("open")).unwrap();
+
+    for time in [
+        field_after(finished, "| Updated: "),
+        field_after(finished, "| Completed: "),
+        field_after(open, "| Updated: "),
+    ] {
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(time).is_ok() && time.ends_with('Z'),
+            "{time} is not ISO 8601 UTC with a Z: {text}"
+        );
+    }
+    assert_eq!(field_after(open, "| Completed: "), "-", "{open}");
+}
+
+#[tokio::test]
+async fn list_tasks_completed_filters_keep_only_tasks_completed_in_the_window() {
+    let (state, _done, _open) = one_done_one_open().await;
+
+    let in_window = text_of(
+        &tool_call(
+            &state,
+            "list_tasks",
+            json!({ "completed_after": hours_from_now(-1), "completed_before": hours_from_now(1) }),
+        )
+        .await,
+    );
+    assert!(
+        in_window.contains("finished") && !in_window.contains("open"),
+        "a task that never completed is excluded by any completed_* bound: {in_window}"
+    );
+
+    let before_window = text_of(
+        &tool_call(
+            &state,
+            "list_tasks",
+            json!({ "completed_before": hours_from_now(-1) }),
+        )
+        .await,
+    );
+    assert!(before_window.contains("No tasks found"), "{before_window}");
+
+    let after_window = text_of(
+        &tool_call(
+            &state,
+            "list_tasks",
+            json!({ "completed_after": hours_from_now(1) }),
+        )
+        .await,
+    );
+    assert!(after_window.contains("No tasks found"), "{after_window}");
+}
+
+#[tokio::test]
+async fn list_tasks_updated_filters_bound_updated_at_and_combine_with_status() {
+    let (state, _done, _open) = one_done_one_open().await;
+
+    let both = text_of(
+        &tool_call(
+            &state,
+            "list_tasks",
+            json!({ "updated_after": hours_from_now(-1), "updated_before": hours_from_now(1) }),
+        )
+        .await,
+    );
+    assert!(both.contains("finished") && both.contains("open"), "{both}");
+
+    let none = text_of(
+        &tool_call(
+            &state,
+            "list_tasks",
+            json!({ "updated_before": hours_from_now(-1) }),
+        )
+        .await,
+    );
+    assert!(none.contains("No tasks found"), "{none}");
+
+    let done_only = text_of(
+        &tool_call(
+            &state,
+            "list_tasks",
+            json!({ "updated_after": hours_from_now(-1), "status": "done" }),
+        )
+        .await,
+    );
+    assert!(
+        done_only.contains("finished") && !done_only.contains("open"),
+        "{done_only}"
+    );
+}
+
+#[tokio::test]
+async fn list_tasks_after_is_inclusive_and_before_is_exclusive() {
+    let (state, done, _open) = one_done_one_open().await;
+    let completed = state.db.get_task(done).await.unwrap().completed_at.unwrap();
+    let exact = completed.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+
+    let at_after =
+        text_of(&tool_call(&state, "list_tasks", json!({ "completed_after": exact })).await);
+    assert!(
+        at_after.contains("finished"),
+        "after includes the bound: {at_after}"
+    );
+
+    let at_before =
+        text_of(&tool_call(&state, "list_tasks", json!({ "completed_before": exact })).await);
+    assert!(
+        at_before.contains("No tasks found"),
+        "before excludes the bound: {at_before}"
+    );
+}
+
+#[tokio::test]
+async fn list_tasks_accepts_a_numeric_offset_and_compares_in_utc() {
+    let (state, _done, _open) = one_done_one_open().await;
+    // The same instant as one hour ago, written at +02:00.
+    let two_hours_east = (chrono::Utc::now() - chrono::Duration::hours(1))
+        .with_timezone(&chrono::FixedOffset::east_opt(2 * 3600).unwrap())
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+    let resp = tool_call(
+        &state,
+        "list_tasks",
+        json!({ "completed_after": two_hours_east }),
+    )
+    .await;
+    assert!(!is_error(&resp), "{}", error_message(&resp));
+    assert!(text_of(&resp).contains("finished"), "{}", text_of(&resp));
+}
+
+#[tokio::test]
+async fn list_tasks_rejects_a_time_without_a_zone_or_a_bare_date() {
+    let (state, _done, _open) = one_done_one_open().await;
+    for (param, value) in [
+        ("updated_after", "2026-11-09"),
+        ("updated_before", "2026-11-09T00:00:00"),
+        ("completed_after", "last week"),
+        ("completed_before", ""),
+    ] {
+        let resp = tool_call(&state, "list_tasks", json!({ param: value })).await;
+        assert!(is_error(&resp), "{param}={value:?} must be refused");
+        assert!(
+            error_message(&resp).contains(param),
+            "the error names {param}: {}",
+            error_message(&resp)
+        );
+    }
+}
+
+#[tokio::test]
+async fn list_tasks_rejects_a_range_whose_after_is_not_before_before() {
+    let (state, _done, _open) = one_done_one_open().await;
+    let t = "2026-11-09T00:00:00Z";
+    for (after, before) in [
+        ("updated_after", "updated_before"),
+        ("completed_after", "completed_before"),
+    ] {
+        for (a, b) in [("2026-11-16T00:00:00Z", t), (t, t)] {
+            let resp = tool_call(&state, "list_tasks", json!({ after: a, before: b })).await;
+            assert!(is_error(&resp), "{after}={a} {before}={b} must be refused");
+            let msg = error_message(&resp);
+            assert!(
+                msg.contains(after) && msg.contains(before),
+                "names both: {msg}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn list_tasks_archived_rejects_the_time_filters() {
+    let (state, _done, _open) = one_done_one_open().await;
+    for param in [
+        "updated_after",
+        "updated_before",
+        "completed_after",
+        "completed_before",
+    ] {
+        let resp = tool_call(
+            &state,
+            "list_tasks",
+            json!({ "archived": true, param: "2026-11-09T00:00:00Z" }),
+        )
+        .await;
+        assert!(is_error(&resp), "archived + {param} must be refused");
+    }
+}
+
+#[test]
+fn list_tasks_schema_advertises_the_four_time_filters_as_strings() {
+    let def = tool_def("list_tasks");
+    for param in [
+        "updated_after",
+        "updated_before",
+        "completed_after",
+        "completed_before",
+    ] {
+        assert_eq!(
+            def["inputSchema"]["properties"][param]["type"], "string",
+            "{param}"
+        );
+    }
+}

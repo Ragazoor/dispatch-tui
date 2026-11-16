@@ -15,6 +15,7 @@ mod people;
 mod review_command;
 mod task_refs;
 mod tasks;
+mod time_filter;
 mod types;
 mod work_packages;
 

@@ -447,14 +447,35 @@ rule CreateWorkPackageViaMcp {
 }
 
 rule ListWorkPackagesViaMcp {
-    when: McpListWorkPackages(work_package_id?)
+    when: McpListWorkPackages(work_package_id?, updated_after?, updated_before?)
 
     requires:
         if work_package_id != null: exists WorkPackage{id: work_package_id}
 
-    ensures: WorkPackagesListed(work_package_id: work_package_id)
+    -- work_package_id picks one package, so no time filter can narrow it
+    -- further: a call that sets it with either filter is invalid params
+    -- (-32602), like list_epics with epic_id.
+    requires:
+        if work_package_id != null:
+            updated_after = null and updated_before = null
+    -- The shared validation (mcp-task-tools.allium: TimeFilterInput).
+    requires: time_filters_are_valid(updated_after, updated_before)
+
+    ensures: WorkPackagesListed(work_package_id: work_package_id,
+                                updated_after: updated_after,
+                                updated_before: updated_before)
 
     @guidance
+        -- == updated_after and updated_before narrow the list ==
+        -- They bound WorkPackage.updated_at, with the input form, the
+        -- inclusive after, the exclusive before and the errors of
+        -- mcp-task-tools.allium: TimeFilterInput. ANDed with visibility: a
+        -- package the caller cannot see is never listed. There is no
+        -- completed_* pair here: a package has no completed_at, and its
+        -- card is Done only as a result of its linked tasks
+        -- (PackageCardPlacement), so there is no completion time to bound.
+        -- created_at and updated_at are already in every row; they are
+        -- shown as ISO 8601 UTC with a Z suffix.
         -- Every package the board holds (the ones visible to the caller), or
         -- the one named: id, title, description (omitted when empty),
         -- sort_order (omitted when unset), created_at, updated_at, its
@@ -754,7 +775,7 @@ surface WorkPackageMcpTools {
         McpCreateWorkPackage(title, description?, link_task_ids?, link_epic_ids?,
                              workspace_id, visibility?)
         -- list_work_packages (ListWorkPackagesViaMcp). Read-only.
-        McpListWorkPackages(work_package_id?)
+        McpListWorkPackages(work_package_id?, updated_after?, updated_before?)
         -- update_work_package (UpdateWorkPackageViaMcp,
         -- DeleteWorkPackageViaMcp). Destructive.
         McpUpdateWorkPackage(package, title?, description?, sort_order?,

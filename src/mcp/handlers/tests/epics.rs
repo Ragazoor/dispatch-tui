@@ -1368,3 +1368,126 @@ async fn update_epic_sets_visibility() {
         crate::models::Visibility::Private
     );
 }
+
+// =======================================================================
+// list_epics time filters (epics.allium: ListEpicsViaMcp)
+// =======================================================================
+
+fn epic_hours_from_now(hours: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::hours(hours))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+async fn list_epics_with(state: &Arc<McpState>, arguments: Value) -> JsonRpcResponse {
+    call(
+        state,
+        "tools/call",
+        Some(json!({ "name": "list_epics", "arguments": arguments })),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn list_epics_rows_show_updated_and_completed_as_iso_utc() {
+    let state = test_state().await;
+    state
+        .db_write()
+        .create_epic("Window", "", None)
+        .await
+        .unwrap();
+    let text = extract_response_text(&list_epics_with(&state, json!({})).await);
+    let row = text.lines().find(|l| l.contains("Window")).unwrap();
+    assert!(row.contains("| Updated: "), "{row}");
+    let updated = row
+        .split("| Updated: ")
+        .nth(1)
+        .unwrap()
+        .split(" |")
+        .next()
+        .unwrap();
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(updated).is_ok() && updated.ends_with('Z'),
+        "{row}"
+    );
+    assert!(
+        row.contains("| Completed: -"),
+        "an open epic has no completion: {row}"
+    );
+}
+
+#[tokio::test]
+async fn list_epics_updated_filters_bound_updated_at() {
+    let state = test_state().await;
+    state
+        .db_write()
+        .create_epic("Window", "", None)
+        .await
+        .unwrap();
+
+    let inside = extract_response_text(
+        &list_epics_with(
+            &state,
+            json!({ "updated_after": epic_hours_from_now(-1), "updated_before": epic_hours_from_now(1) }),
+        )
+        .await,
+    );
+    assert!(inside.contains("Window"), "{inside}");
+
+    let outside = extract_response_text(
+        &list_epics_with(&state, json!({ "updated_before": epic_hours_from_now(-1) })).await,
+    );
+    assert!(!outside.contains("Window"), "{outside}");
+}
+
+#[tokio::test]
+async fn list_epics_completed_filter_excludes_an_epic_with_no_completion() {
+    let state = test_state().await;
+    state
+        .db_write()
+        .create_epic("Window", "", None)
+        .await
+        .unwrap();
+    let text = extract_response_text(
+        &list_epics_with(
+            &state,
+            json!({ "completed_after": epic_hours_from_now(-1) }),
+        )
+        .await,
+    );
+    assert!(!text.contains("Window"), "{text}");
+}
+
+#[tokio::test]
+async fn list_epics_rejects_a_bad_time_and_a_bad_range() {
+    let state = test_state().await;
+    let bad_time = list_epics_with(&state, json!({ "completed_after": "2026-11-09" })).await;
+    assert_error(&bad_time, "completed_after");
+
+    let bad_range = list_epics_with(
+        &state,
+        json!({ "updated_after": "2026-11-16T00:00:00Z", "updated_before": "2026-11-09T00:00:00Z" }),
+    )
+    .await;
+    assert_error(&bad_range, "updated_after");
+    assert_error(&bad_range, "updated_before");
+}
+
+#[tokio::test]
+async fn get_epic_by_id_rejects_the_time_filters() {
+    let state = test_state().await;
+    let id = state
+        .db_write()
+        .create_epic("Window", "", None)
+        .await
+        .unwrap()
+        .id;
+    let resp = list_epics_with(
+        &state,
+        json!({ "epic_id": id.0, "updated_after": "2026-11-09T00:00:00Z" }),
+    )
+    .await;
+    assert!(
+        is_error(&resp),
+        "epic_id plus a time filter is invalid params: {resp:?}"
+    );
+}

@@ -268,7 +268,7 @@ usually the right answer.",
         };
 
     async read_only "list_tasks" => tasks::handle_list_tasks,
-        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables the epic auto-scoping, but your own task is still excluded. When called from a non-dispatched session, no auto-scoping. Output includes each task's base branch, its url under its own type label — 'PR', 'Issue', 'Security Alert' or 'Link', with the number appended where there is one — and the plan goal, when available.",
+        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables the epic auto-scoping, but your own task is still excluded. When called from a non-dispatched session, no auto-scoping. Output includes each task's base branch, its url under its own type label — 'PR', 'Issue', 'Security Alert' or 'Link', with the number appended where there is one — the plan goal, when available, and its updated and completed times (ISO 8601 UTC, '-' when it has not completed). To count tasks finished in a period, filter with completed_after and completed_before: the last change time also moves on later edits.",
         {
             "type": "object",
             "properties": {
@@ -311,7 +311,23 @@ usually the right answer.",
                 },
                 "archived": {
                     "type": "boolean",
-                    "description": "true lists archived (deleted) tasks instead of live ones, newest first, with their title, epic, agent and a description preview. epic_id, repo_paths, base_branch, query and limit apply; status, recursive and bookmarked are rejected. Defaults to false."
+                    "description": "true lists archived (deleted) tasks instead of live ones, newest first, with their title, epic, agent and a description preview. epic_id, repo_paths, base_branch, query and limit apply; status, recursive, bookmarked and the four time filters are rejected. Defaults to false."
+                },
+                "updated_after": {
+                    "type": "string",
+                    "description": "Keep only tasks whose last change time is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                },
+                "updated_before": {
+                    "type": "string",
+                    "description": "Keep only tasks whose last change time is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                },
+                "completed_after": {
+                    "type": "string",
+                    "description": "Keep only tasks whose completion time (the last time the task entered done; a task that never completed is excluded) is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                },
+                "completed_before": {
+                    "type": "string",
+                    "description": "Keep only tasks whose completion time (the last time the task entered done; a task that never completed is excluded) is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
                 }
             }
         };
@@ -342,11 +358,11 @@ arguments it lists every epic. Pass parent_epic_id for that epic's direct childr
 recursive=true for its whole subtree. Pass query to search titles and descriptions. Use it to find an epic's ID when you only know its title. \
 Pass epic_id instead for one epic in full: its description, status, plan, parent, feed settings \
 and a count of its subtasks by status, but not the subtasks themselves — call list_tasks with \
-epic_id for those.",
+epic_id for those. Each row shows the epic's updated and completed times (ISO 8601 UTC, '-' when it has not completed). Filter them with updated_after, updated_before, completed_after and completed_before.",
         {
             "type": "object",
             "properties": {
-                "epic_id": { "type": "integer", "description": "Return this one epic in full instead of a list. Takes no other argument." },
+                "epic_id": { "type": "integer", "description": "Return this one epic in full instead of a list. Takes no other argument, the time filters included." },
                 "parent_epic_id": { "type": "integer", "description": "List only the sub-epics of this epic." },
                 "recursive": { "type": "boolean", "description": "With parent_epic_id, list every descendant rather than only direct children." },
                 "query": {
@@ -357,6 +373,22 @@ epic_id for those.",
                     "type": "integer",
                     "minimum": 1,
                     "description": "Return at most this many rows. No default: without it every match is returned. When rows are cut, the last line says how many were shown of how many."
+                },
+                "updated_after": {
+                    "type": "string",
+                    "description": "Keep only epics whose last change time is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                },
+                "updated_before": {
+                    "type": "string",
+                    "description": "Keep only epics whose last change time is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                },
+                "completed_after": {
+                    "type": "string",
+                    "description": "Keep only epics whose completion time (the last time the epic entered done; an epic that never completed is excluded) is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                },
+                "completed_before": {
+                    "type": "string",
+                    "description": "Keep only epics whose completion time (the last time the epic entered done; an epic that never completed is excluded) is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
                 }
             }
         };
@@ -417,11 +449,19 @@ instead.",
         "List work packages with their linked items. Read-only. With no arguments it lists every \
 package; pass work_package_id for one. Each package shows its title, description and every linked \
 task or epic with its id, status and title. A package has no status of its own: read progress from \
-the items. A package's sort order is shown when it has been set.",
+the items. A package's sort order is shown when it has been set. Filter by when a package was last changed with updated_after and updated_before. A package has no completion time, so it has no completed filters.",
         {
             "type": "object",
             "properties": {
-                "work_package_id": { "type": "integer", "description": "List only this package." }
+                "work_package_id": { "type": "integer", "description": "List only this package. Takes no time filter." },
+                "updated_after": {
+                    "type": "string",
+                    "description": "Keep only packages whose last change time is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                },
+                "updated_before": {
+                    "type": "string",
+                    "description": "Keep only packages whose last change time is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                }
             }
         };
 
