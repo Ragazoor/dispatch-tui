@@ -1100,6 +1100,9 @@ invariant OneSequencePerTable {
 --
 -- So the operator these commands face is narrower than core.allium's
 -- Operator: the store's publisher.
+--
+-- Seed-specific, so declared here rather than in core.allium: only the seed
+-- and snapshot commands face it (spacetime-snapshot.allium imports it).
 actor StorePublisher {
     identified_by: core/Host where id != "" and owner = store_publisher()
 }
