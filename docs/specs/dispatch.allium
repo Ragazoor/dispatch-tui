@@ -1229,6 +1229,207 @@ rule RetryFresh {
 }
 
 ------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- RunningTaskHasWorktree: Tasks dispatched via DispatchTask or
+-- DispatchResearchTask always have a worktree, ONCE THE DISPATCH HAS COMPLETED.
+-- Two states break it in the meantime: a dispatch in flight, whose claim writes
+-- running ahead of provisioning (store-split.allium: RequestDispatch, and the
+-- worktree arrives with HostReportsDispatched), and manual forward movement
+-- (the move-forward key), which moves a task to running without provisioning at
+-- all. The dispatch flow is the canonical path; manual moves are overrides. This
+-- is why no consumer that must not see a half-provisioned agent trusts status
+-- alone: crash detection and activity classification key off tmux_window, and
+-- the wrap-up gate (mcp-task-tools.allium: WrapUpViaMcp) requires a worktree as
+-- well as running or review.
+--
+-- Neither exception is silent on the board: both satisfy Task.is_unprovisioned,
+-- and UnprovisionedIndicator distinguishes the one still provisioning from the
+-- one whose dispatch died.
+
+-- DispatchClaimExclusive: at most one dispatch ever provisions a given task,
+-- however many entry points fire on it at once. Not expressible as a state
+-- assertion — it constrains the ordering of two writes rather than any single
+-- moment's field values — but it is normative, and it is the reason the
+-- backlog -> running transition is a conditional claim taken before
+-- provisioning rather than a status read followed by a status write. The losing
+-- caller provisions nothing; see DispatchTask for what each entry point reports.
+--
+-- The claim is the module's request reducer
+-- (store-split.allium: RequestDispatch), so it holds across machines as well
+-- as across entry points. Two invariants there carry it into the request row:
+-- OneOpenDispatchRequestPerTask (a second request while one is open is
+-- refused) and DispatchRequest's OnlyTheClaimedRequestProvisions (only the
+-- board whose claim of the row was accepted provisions, and a report on a
+-- finished row is refused, so a timed-out attempt is never recorded).
+
+-- TmuxWindowNamesAreUnique: no two live tmux windows ever carry the same name.
+-- The complement of TmuxWindowTargetedExactly below, and its precondition: that
+-- invariant refuses an ambiguous name rather than guessing, which keeps a
+-- duplicate from doing damage but leaves the task it names unreachable. Once
+-- two windows answer to "task-4749", every name-targeted operation on task
+-- 4749 fails — its @dispatch_dir rewrite, its companion resync, its
+-- notifications, its kill — and stays failing until a human closes one of
+-- them. Nothing in the system recovers from it on its own.
+--
+-- So the duplicate must never be created. Every operation that gives a window
+-- a name is bound by this: creating one (DispatchTask, DispatchResearchTask,
+-- ResumeTask, RetryResume), opening a pop-out editor window (tasks.allium:
+-- EditTask, epics.allium: EditEpic), renaming one (split-pane.allium:
+-- SwapSplitPane), and breaking a pane back out into one (split-pane.allium:
+-- ExitSplitMode). An
+-- operation that would assign a name a live window already holds is refused
+-- and reported, never applied.
+--
+-- One name is scoped to a session instead, and only one: the board's own
+-- window (startup.allium: `config.board_window_name`). Every name above
+-- belongs to a task, an epic or a pane — one thing, in one place, which a
+-- second window answering to the same name makes unreachable. The board's
+-- window name is not an identifier at all; it is a fixed label, one per
+-- session, and two sessions each running their own board is a state the
+-- operator can reach on purpose. Enforcing this name server-wide costs more
+-- than it buys: startup.allium's restart path retires the board in its own
+-- session and would then be refused permission to replace it by a window in a
+-- session it does not own, destroying a board and starting none. So the
+-- board's window is unique within its session, and startup.allium's
+-- `ExactlyOneBoardPerSession` is the invariant that says so.
+--
+-- Refusal is the floor, not the whole answer: a caller that reaches it has
+-- already lost track of which windows exist. ResumeTask's liveness check and
+-- SwapSplitPane's swap serialisation (split-pane.allium:
+-- DeferSwapWhileSwapInFlight) are each there so the refusal is unreachable in
+-- the path they cover. This invariant is what catches the paths nobody has
+-- thought of yet, and what a new one is measured against.
+--
+-- Enforcement is total, and it lives at the four tmux operations that assign
+-- a name rather than at their callers, so it backstops the callers nobody has
+-- written yet: creating a window (`tmux::new_window`), creating one that runs
+-- a command (`tmux::new_window_running`, the pop-out editor windows),
+-- renaming one (`tmux::rename_window`), and breaking a pane back out into one
+-- (`tmux::break_pane_to_window`). Each queries tmux for the name it is about
+-- to assign and bails when a live window already holds it, naming the window
+-- and what a duplicate would cost.
+--
+-- Refuse, never reattach — with ResumeTask the one exception, and the reason
+-- it is one says where the line falls. Reattaching is a decision only a caller
+-- that knows what the window is FOR can make, and a live "task-<id>" window is
+-- by definition the agent ResumeTask was going to resume. Neither of the other two
+-- paths is in that position: a dispatch
+-- would be handing a fresh prompt to a session it knows nothing about, and an
+-- exiting split pane has a live pane that must go somewhere, so there is
+-- nothing to reattach TO. What each then leaves behind: the dispatch rolls its
+-- provisioning back and reports the request failed, which releases its claim
+-- (store-split.allium: ReleaseClaimOfFailedRequest), and the split pane keeps the task
+-- pinned (split-pane.allium: RefuseExitSplitModeOntoLiveWindow).
+--
+-- A failed existence query is an error, and the operation is not applied:
+-- proceeding blind could create the very duplicate this invariant forbids.
+-- "No server running" is not a failure — it reads as an empty window list.
+-- The leftover window a split pane's agent was pinned from is the one live
+-- window under a task's name that is not a duplicate (split-pane.allium:
+-- PinTaskInSplitPane's leftover-window guidance); the pane rejoins it and no
+-- name is assigned.
+
+-- TmuxWindowTargetedExactly: every tmux operation aimed at a named window acts
+-- on that window or fails. It never acts on a different window. This covers all
+-- of them — killing the window, selecting it, renaming it, typing into it (the
+-- agent command, a resume `--continue`, a notification), reading its pane,
+-- joining it into the split pane, splitting a companion pane inside it, and
+-- setting its @dispatch_dir option. It holds for every named window — the
+-- board's own and the editor windows as much as a task's.
+--
+-- Not a cosmetic imprecision: window names are "task-" + task.id (see
+-- DispatchTask, DispatchResearchTask, ResumeTask, RetryResume), so one task's
+-- name is a prefix of another's whenever one id is a prefix of another id —
+-- task 378 and task 3782 both exist in a repo with ids in the thousands. A
+-- mistargeted keystroke goes into another task's live Claude session as user
+-- input; a mistargeted kill destroys another task's agent.
+--
+-- The failure mode this rules out is specifically the one where the intended
+-- window is absent — killed, crashed, or already cleaned up — and a
+-- longer-named sibling is alive. An operation on a window that no longer
+-- exists must report that it does not exist. Silently doing the thing to
+-- whichever window happens to share the name's prefix is the defect.
+--
+-- Ambiguity is also a failure, not a coin flip: when two windows carry the
+-- same name, the operation is refused rather than applied to an arbitrary one.
+--
+-- Mechanism (implementation note, not the obligation): tmux resolves a
+-- `-t <window-name>` target by exact match first and then by *prefix*, so
+-- passing a name through is unsafe by default. tmux's `=name` exact-match
+-- sigil is not a general answer — it is rejected by the pane-target commands
+-- (`send-keys`) and by `set-option -w`, and `display-message` accepts it while
+-- returning nothing and exiting zero. A pane ID is accepted by every command
+-- dispatch issues and cannot be prefix-matched, so window names are resolved
+-- to the pane ID of the window's active pane by exact-name lookup, and every
+-- target is a pane ID. The lookup itself asks tmux to compare names for
+-- equality, and re-checks the name it gets back, so a name carrying format
+-- metacharacters can only produce a miss, never a match on another window.
+-- Verified against tmux 3.5a.
+--
+-- The guarantee rests on a second mechanism as well, upstream of that one: a
+-- window name is a constructed type (core.allium: TmuxWindow), so the two
+-- strings that are NOT names — the empty string and a pane id — can never
+-- become one. Both bypass the exact-name lookup and reach tmux unresolved, and
+-- the empty string is tmux's "current window", so while the name was a bare
+-- string either could arrive at these same helpers and silently retarget a
+-- kill, a send-keys or a set-option at whatever window the user happens to be
+-- focused on. They are deliberate non-names, outside this guarantee's scope
+-- rather than violations of it — which is why the resolution helper
+-- (`tmux::window_target`) still takes a plain string at that boundary: it
+-- accepts those two as well.
+--
+-- Two exceptions to "every target is a pane ID", both standing. First, by
+-- necessity: the prefix+Space keybinding that jumps back to the board (see
+-- JumpBackToTuiWindow in split-pane.allium) is a command string tmux executes
+-- later, so no pane identity resolved at registration time would still be
+-- valid. That one target uses tmux's `=` sigil, which does work for
+-- `select-window`. Second: renaming a window documents the empty string as
+-- meaning the current window, so that target passes through unresolved by
+-- design.
+
+-- DefaultBaseBranchIsDetectedNotAssumed: wherever a base branch is needed and
+-- nobody has named one, it is resolved from the repository it applies to --
+-- detect_default_branch(repo_path), which reads
+-- `git symbolic-ref refs/remotes/origin/HEAD` -- and never taken as the
+-- literal config.default_branch. config.default_branch remains that helper's
+-- OWN last resort, for a repository that names no default at all; it is not a
+-- first answer any caller is entitled to.
+--
+-- Not expressible as a state assertion: it constrains how a field's value is
+-- arrived at, not what any moment's fields hold. It binds every path that
+-- supplies an unnamed base branch:
+--   - tasks.allium: CreateTask (the TUI form and the service beneath it)
+--   - mcp-task-tools.allium: CreateTaskViaMcp
+--   - tasks.allium: CreateQuickTask (which already obeyed it)
+--   - BaseBranchPicker's PrefillFromHistory, for a repo with no history
+--   - feeds.allium: the per-item base branch a feed sync upserts, which
+--     already obeyed it, and caches the answer per repo across one cycle
+--
+-- Why it is stated once rather than left to each path. Most of them arrived at
+-- the same answer independently and one of them got it wrong, for as long as
+-- it took a repo whose default is "master" to meet a task created over MCP. The consequence is not a wrong default that someone corrects
+-- later: the task cannot be dispatched at all, because no such ref exists to
+-- cut a worktree from (UnresolvableBaseIsRefusedByName above).
+--
+-- The invariant governs only the ABSENT case. A base branch a human or a
+-- caller named explicitly is honoured verbatim, including one the repository
+-- does not have -- naming a branch that does not exist yet is legitimate, and
+-- the refusal at provisioning time is where that gets caught.
+
+-- BranchHistoryCapped: no repo path retains more than
+-- config.max_base_branches_per_repo remembered base branches. This is a
+-- property of the write operation (RecordBaseBranch prunes on every write),
+-- not something any caller enforces. A repository with several paths can
+-- offer more in BaseBranchPicker (see RecordBaseBranch).
+invariant BranchHistoryCapped {
+    for b in core/SavedRepoBranches:
+        (core/SavedRepoBranches where repo_path = b.repo_path).count
+            <= config.max_base_branches_per_repo
+}
+
+------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
 
@@ -1745,7 +1946,7 @@ surface BaseBranchPicker {
         -- value, or, when the draft is empty, whatever
         -- detect_default_branch(selected_repo) answers. That last fallback
         -- asks the repository rather than assuming "main"
-        -- (DefaultBaseBranchIsDetectedNotAssumed below): a repo with no
+        -- (DefaultBaseBranchIsDetectedNotAssumed above): a repo with no
         -- history is exactly the repo the user has never answered this
         -- question for, so it is the case where a guess is most likely wrong
         -- and least likely to be caught.
@@ -2158,207 +2359,6 @@ surface SandboxedAgentExecution {
         -- from the sandbox, stays the review layer for an agent's shell
         -- commands. The decision record:
         -- docs/plans/2026-08-25-4373-disable-sandbox-for-dispatch-sessions.md.
-}
-
-------------------------------------------------------------
--- Invariants
-------------------------------------------------------------
-
--- RunningTaskHasWorktree: Tasks dispatched via DispatchTask or
--- DispatchResearchTask always have a worktree, ONCE THE DISPATCH HAS COMPLETED.
--- Two states break it in the meantime: a dispatch in flight, whose claim writes
--- running ahead of provisioning (store-split.allium: RequestDispatch, and the
--- worktree arrives with HostReportsDispatched), and manual forward movement
--- (the move-forward key), which moves a task to running without provisioning at
--- all. The dispatch flow is the canonical path; manual moves are overrides. This
--- is why no consumer that must not see a half-provisioned agent trusts status
--- alone: crash detection and activity classification key off tmux_window, and
--- the wrap-up gate (mcp-task-tools.allium: WrapUpViaMcp) requires a worktree as
--- well as running or review.
---
--- Neither exception is silent on the board: both satisfy Task.is_unprovisioned,
--- and UnprovisionedIndicator distinguishes the one still provisioning from the
--- one whose dispatch died.
-
--- DispatchClaimExclusive: at most one dispatch ever provisions a given task,
--- however many entry points fire on it at once. Not expressible as a state
--- assertion — it constrains the ordering of two writes rather than any single
--- moment's field values — but it is normative, and it is the reason the
--- backlog -> running transition is a conditional claim taken before
--- provisioning rather than a status read followed by a status write. The losing
--- caller provisions nothing; see DispatchTask for what each entry point reports.
---
--- The claim is the module's request reducer
--- (store-split.allium: RequestDispatch), so it holds across machines as well
--- as across entry points. Two invariants there carry it into the request row:
--- OneOpenDispatchRequestPerTask (a second request while one is open is
--- refused) and DispatchRequest's OnlyTheClaimedRequestProvisions (only the
--- board whose claim of the row was accepted provisions, and a report on a
--- finished row is refused, so a timed-out attempt is never recorded).
-
--- TmuxWindowNamesAreUnique: no two live tmux windows ever carry the same name.
--- The complement of TmuxWindowTargetedExactly below, and its precondition: that
--- invariant refuses an ambiguous name rather than guessing, which keeps a
--- duplicate from doing damage but leaves the task it names unreachable. Once
--- two windows answer to "task-4749", every name-targeted operation on task
--- 4749 fails — its @dispatch_dir rewrite, its companion resync, its
--- notifications, its kill — and stays failing until a human closes one of
--- them. Nothing in the system recovers from it on its own.
---
--- So the duplicate must never be created. Every operation that gives a window
--- a name is bound by this: creating one (DispatchTask, DispatchResearchTask,
--- ResumeTask, RetryResume), opening a pop-out editor window (tasks.allium:
--- EditTask, epics.allium: EditEpic), renaming one (split-pane.allium:
--- SwapSplitPane), and breaking a pane back out into one (split-pane.allium:
--- ExitSplitMode). An
--- operation that would assign a name a live window already holds is refused
--- and reported, never applied.
---
--- One name is scoped to a session instead, and only one: the board's own
--- window (startup.allium: `config.board_window_name`). Every name above
--- belongs to a task, an epic or a pane — one thing, in one place, which a
--- second window answering to the same name makes unreachable. The board's
--- window name is not an identifier at all; it is a fixed label, one per
--- session, and two sessions each running their own board is a state the
--- operator can reach on purpose. Enforcing this name server-wide costs more
--- than it buys: startup.allium's restart path retires the board in its own
--- session and would then be refused permission to replace it by a window in a
--- session it does not own, destroying a board and starting none. So the
--- board's window is unique within its session, and startup.allium's
--- `ExactlyOneBoardPerSession` is the invariant that says so.
---
--- Refusal is the floor, not the whole answer: a caller that reaches it has
--- already lost track of which windows exist. ResumeTask's liveness check and
--- SwapSplitPane's swap serialisation (split-pane.allium:
--- DeferSwapWhileSwapInFlight) are each there so the refusal is unreachable in
--- the path they cover. This invariant is what catches the paths nobody has
--- thought of yet, and what a new one is measured against.
---
--- Enforcement is total, and it lives at the four tmux operations that assign
--- a name rather than at their callers, so it backstops the callers nobody has
--- written yet: creating a window (`tmux::new_window`), creating one that runs
--- a command (`tmux::new_window_running`, the pop-out editor windows),
--- renaming one (`tmux::rename_window`), and breaking a pane back out into one
--- (`tmux::break_pane_to_window`). Each queries tmux for the name it is about
--- to assign and bails when a live window already holds it, naming the window
--- and what a duplicate would cost.
---
--- Refuse, never reattach — with ResumeTask the one exception, and the reason
--- it is one says where the line falls. Reattaching is a decision only a caller
--- that knows what the window is FOR can make, and a live "task-<id>" window is
--- by definition the agent ResumeTask was going to resume. Neither of the other two
--- paths is in that position: a dispatch
--- would be handing a fresh prompt to a session it knows nothing about, and an
--- exiting split pane has a live pane that must go somewhere, so there is
--- nothing to reattach TO. What each then leaves behind: the dispatch rolls its
--- provisioning back and reports the request failed, which releases its claim
--- (store-split.allium: ReleaseClaimOfFailedRequest), and the split pane keeps the task
--- pinned (split-pane.allium: RefuseExitSplitModeOntoLiveWindow).
---
--- A failed existence query is an error, and the operation is not applied:
--- proceeding blind could create the very duplicate this invariant forbids.
--- "No server running" is not a failure — it reads as an empty window list.
--- The leftover window a split pane's agent was pinned from is the one live
--- window under a task's name that is not a duplicate (split-pane.allium:
--- PinTaskInSplitPane's leftover-window guidance); the pane rejoins it and no
--- name is assigned.
-
--- TmuxWindowTargetedExactly: every tmux operation aimed at a named window acts
--- on that window or fails. It never acts on a different window. This covers all
--- of them — killing the window, selecting it, renaming it, typing into it (the
--- agent command, a resume `--continue`, a notification), reading its pane,
--- joining it into the split pane, splitting a companion pane inside it, and
--- setting its @dispatch_dir option. It holds for every named window — the
--- board's own and the editor windows as much as a task's.
---
--- Not a cosmetic imprecision: window names are "task-" + task.id (see
--- DispatchTask, DispatchResearchTask, ResumeTask, RetryResume), so one task's
--- name is a prefix of another's whenever one id is a prefix of another id —
--- task 378 and task 3782 both exist in a repo with ids in the thousands. A
--- mistargeted keystroke goes into another task's live Claude session as user
--- input; a mistargeted kill destroys another task's agent.
---
--- The failure mode this rules out is specifically the one where the intended
--- window is absent — killed, crashed, or already cleaned up — and a
--- longer-named sibling is alive. An operation on a window that no longer
--- exists must report that it does not exist. Silently doing the thing to
--- whichever window happens to share the name's prefix is the defect.
---
--- Ambiguity is also a failure, not a coin flip: when two windows carry the
--- same name, the operation is refused rather than applied to an arbitrary one.
---
--- Mechanism (implementation note, not the obligation): tmux resolves a
--- `-t <window-name>` target by exact match first and then by *prefix*, so
--- passing a name through is unsafe by default. tmux's `=name` exact-match
--- sigil is not a general answer — it is rejected by the pane-target commands
--- (`send-keys`) and by `set-option -w`, and `display-message` accepts it while
--- returning nothing and exiting zero. A pane ID is accepted by every command
--- dispatch issues and cannot be prefix-matched, so window names are resolved
--- to the pane ID of the window's active pane by exact-name lookup, and every
--- target is a pane ID. The lookup itself asks tmux to compare names for
--- equality, and re-checks the name it gets back, so a name carrying format
--- metacharacters can only produce a miss, never a match on another window.
--- Verified against tmux 3.5a.
---
--- The guarantee rests on a second mechanism as well, upstream of that one: a
--- window name is a constructed type (core.allium: TmuxWindow), so the two
--- strings that are NOT names — the empty string and a pane id — can never
--- become one. Both bypass the exact-name lookup and reach tmux unresolved, and
--- the empty string is tmux's "current window", so while the name was a bare
--- string either could arrive at these same helpers and silently retarget a
--- kill, a send-keys or a set-option at whatever window the user happens to be
--- focused on. They are deliberate non-names, outside this guarantee's scope
--- rather than violations of it — which is why the resolution helper
--- (`tmux::window_target`) still takes a plain string at that boundary: it
--- accepts those two as well.
---
--- Two exceptions to "every target is a pane ID", both standing. First, by
--- necessity: the prefix+Space keybinding that jumps back to the board (see
--- JumpBackToTuiWindow in split-pane.allium) is a command string tmux executes
--- later, so no pane identity resolved at registration time would still be
--- valid. That one target uses tmux's `=` sigil, which does work for
--- `select-window`. Second: renaming a window documents the empty string as
--- meaning the current window, so that target passes through unresolved by
--- design.
-
--- DefaultBaseBranchIsDetectedNotAssumed: wherever a base branch is needed and
--- nobody has named one, it is resolved from the repository it applies to --
--- detect_default_branch(repo_path), which reads
--- `git symbolic-ref refs/remotes/origin/HEAD` -- and never taken as the
--- literal config.default_branch. config.default_branch remains that helper's
--- OWN last resort, for a repository that names no default at all; it is not a
--- first answer any caller is entitled to.
---
--- Not expressible as a state assertion: it constrains how a field's value is
--- arrived at, not what any moment's fields hold. It binds every path that
--- supplies an unnamed base branch:
---   - tasks.allium: CreateTask (the TUI form and the service beneath it)
---   - mcp-task-tools.allium: CreateTaskViaMcp
---   - tasks.allium: CreateQuickTask (which already obeyed it)
---   - BaseBranchPicker's PrefillFromHistory, for a repo with no history
---   - feeds.allium: the per-item base branch a feed sync upserts, which
---     already obeyed it, and caches the answer per repo across one cycle
---
--- Why it is stated once rather than left to each path. Most of them arrived at
--- the same answer independently and one of them got it wrong, for as long as
--- it took a repo whose default is "master" to meet a task created over MCP. The consequence is not a wrong default that someone corrects
--- later: the task cannot be dispatched at all, because no such ref exists to
--- cut a worktree from (UnresolvableBaseIsRefusedByName above).
---
--- The invariant governs only the ABSENT case. A base branch a human or a
--- caller named explicitly is honoured verbatim, including one the repository
--- does not have -- naming a branch that does not exist yet is legitimate, and
--- the refusal at provisioning time is where that gets caught.
-
--- BranchHistoryCapped: no repo path retains more than
--- config.max_base_branches_per_repo remembered base branches. This is a
--- property of the write operation (RecordBaseBranch prunes on every write),
--- not something any caller enforces. A repository with several paths can
--- offer more in BaseBranchPicker (see RecordBaseBranch).
-invariant BranchHistoryCapped {
-    for b in core/SavedRepoBranches:
-        (core/SavedRepoBranches where repo_path = b.repo_path).count
-            <= config.max_base_branches_per_repo
 }
 
 ------------------------------------------------------------
