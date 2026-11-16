@@ -1200,6 +1200,40 @@ async fn a_hand_move_to_backlog_releases_a_window_the_patch_did_not_name() {
     );
 }
 
+/// `update_task` moving `task` to `status`, as this host's board would.
+async fn update_status(caller: &MemoryReducerCaller, task: TaskId, status: &str) {
+    let patch = bindings::TaskPatch {
+        status: Some(status.into()),
+        ..blank_task_patch()
+    };
+    let outcome = caller
+        .update_task(
+            task,
+            None,
+            String::new(),
+            HOST.into(),
+            patch,
+            String::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(outcome.won());
+}
+
+/// The close row a released window writes: on this host, naming the window,
+/// which the task no longer holds.
+fn assert_released_window_row(rows: &SharedRows, task: TaskId) -> crate::models::SessionRequest {
+    assert!(rows.task(task).unwrap().tmux_window.is_none());
+    let [row] = close_rows(rows, task).try_into().expect("one close row");
+    assert_eq!(row.host, HOST);
+    assert_eq!(
+        row.tmux_window.as_ref().map(|w| w.as_str()),
+        Some(format!("task-{}", task.0).as_str())
+    );
+    row
+}
+
 /// The released window's close row fails an open wrap_up "task closed" first,
 /// as every close row does. Mirrors the module's test of the same name.
 #[tokio::test]
@@ -1208,27 +1242,19 @@ async fn a_released_window_fails_the_open_session_request() {
     let task = dispatched_task(&caller).await;
     let stuck = applied_id(wrap_up(&caller, task, "rebase").await);
 
-    caller
-        .patch_task(
-            task,
-            bindings::TaskPatch {
-                status: Some("backlog".into()),
-                ..blank_task_patch()
-            },
-        )
-        .await
-        .unwrap();
+    update_status(&caller, task, "backlog").await;
 
     let stuck = rows.session_request(stuck).unwrap();
     assert_eq!(stuck.state, SessionRequestState::Failed);
     assert_eq!(stuck.reason.as_deref(), Some("task closed"));
-    let [row] = close_rows(&rows, task).try_into().expect("one close row");
+    let row = assert_released_window_row(&rows, task);
     assert_eq!(row.state, SessionRequestState::Requested);
 }
 
 /// A move into Done with a pr-typed url and a window the board did not see
 /// writes ONE close row, naming the window: it stands in for
-/// `UpdateTaskDoneWritesACloseRow`'s windowless row. Mirrors the module's test.
+/// `UpdateTaskDoneWritesACloseRow`'s windowless row. Mirrors the module's test
+/// of the same name.
 #[tokio::test]
 async fn update_task_into_done_releasing_a_window_writes_one_close_row() {
     let (caller, rows) = caller();
@@ -1245,29 +1271,9 @@ async fn update_task_into_done_releasing_a_window_writes_one_close_row() {
         .await
         .unwrap();
 
-    let done = bindings::TaskPatch {
-        status: Some("done".into()),
-        ..blank_task_patch()
-    };
-    let outcome = caller
-        .update_task(
-            task,
-            None,
-            String::new(),
-            HOST.into(),
-            done,
-            String::new(),
-            None,
-        )
-        .await
-        .unwrap();
-    assert!(outcome.won());
+    update_status(&caller, task, "done").await;
 
-    let [row] = close_rows(&rows, task).try_into().expect("one close row");
-    assert_eq!(
-        row.tmux_window.as_ref().map(|w| w.as_str()),
-        Some(format!("task-{}", task.0).as_str())
-    );
+    assert_released_window_row(&rows, task);
 }
 
 /// No window and no pr-typed url means no host work, so no row.

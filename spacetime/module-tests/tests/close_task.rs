@@ -632,10 +632,9 @@ fn a_released_window_fails_the_open_session_request() {
     let wrap = session_row(&store, id, SESSION_KIND_WRAP_UP);
     assert_eq!(wrap.state, SESSION_FAILED);
     assert_eq!(wrap.reason, "task closed");
-    assert_eq!(
-        session_row(&store, id, SESSION_KIND_CLOSE).state,
-        SESSION_REQUESTED
-    );
+    let close = session_row(&store, id, SESSION_KIND_CLOSE);
+    assert_eq!(close.state, SESSION_REQUESTED);
+    assert_eq!(close.tmux_window, format!("task-{id}"));
 }
 
 /// A move into Done with a pr-typed url and a window the board did not see
@@ -653,4 +652,6 @@ fn update_task_into_done_releasing_a_window_writes_one_close_row() {
         .try_into()
         .expect("one close row");
     assert_eq!(row.tmux_window, format!("task-{id}"));
+    assert_eq!(row.host, HOST_A);
+    assert_eq!(current_agent(&store, id).tmux_window, "", "window released");
 }

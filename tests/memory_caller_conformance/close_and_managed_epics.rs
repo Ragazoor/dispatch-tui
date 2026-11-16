@@ -258,6 +258,76 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
         assert_eq!(close_shapes(with_pr).0.len(), 1, "done -> done adds none");
         assert_eq!(close_shapes(with_pr).1.len(), 1, "nor on the memory side");
 
+        // -- update_task into Done holding a window the board did not see ------------
+        // (store-split.allium: HandMoveReleasesAWindowTheBoardDidNotSee). The
+        // released window's close row fails the open wrap_up "task closed" and
+        // stands in for UpdateTaskDoneWritesACloseRow's windowless row: one row.
+        let unseen = create(in_epic(edit_epic.0)).await;
+        wait_for!(rows_real.task(unseen).is_some());
+        running_with_window(unseen).await;
+        patch(
+            unseen,
+            bindings::TaskPatch {
+                url: Some("https://github.com/acme/repo/pull/43".into()),
+                url_type: Some("pr".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await;
+        let wrap_up_id = |outcome: ReducerOutcome| match outcome {
+            ReducerOutcome::Applied(ids) => SessionRequestId(ids[0]),
+            other => panic!("{other:?}"),
+        };
+        let r_open = wrap_up_id(
+            real.request_wrap_up(unseen, "host-a".into(), "rebase".into())
+                .await
+                .unwrap(),
+        );
+        let m_open = wrap_up_id(
+            mem.request_wrap_up(unseen, "host-a".into(), "rebase".into())
+                .await
+                .unwrap(),
+        );
+        wait_for!(rows_real.session_request(r_open).is_some());
+        both_applied(
+            real.update_task(
+                unseen,
+                None,
+                String::new(),
+                "host-a".into(),
+                to_done(),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap(),
+            mem.update_task(
+                unseen,
+                None,
+                String::new(),
+                "host-a".into(),
+                to_done(),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap(),
+        );
+        wait_for!(!close_shapes(unseen).0.is_empty());
+        let (real_rows, mem_rows) = close_shapes(unseen);
+        assert_eq!(real_rows.len(), 1, "one close row, not two");
+        assert_eq!(real_rows, mem_rows);
+        assert_eq!(
+            rows_real.session_request(r_open).map(|r| session_shape(&r)),
+            rows_mem.session_request(m_open).map(|r| session_shape(&r)),
+            "the open wrap_up is failed the same way"
+        );
+        assert_eq!(
+            rows_real.session_request(r_open).and_then(|r| r.reason),
+            Some("task closed".to_string())
+        );
+        same_task(unseen);
+
         // -- The full close: stuck wrap_up, stop_pending, epic rollup, phoenix ---------
         let epic = {
             let row = bindings::Epic {
