@@ -19,6 +19,19 @@ use "./core.allium" as core
 use "./store-split.allium" as split
 use "./cli.allium" as cli
 use "./mcp-task-tools.allium" as mcp
+use "./feeds.allium" as feeds
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- How the module answered one report_pr_status call (ReportPrStatus).
+-- accepted: the module took the report (it may have changed nothing).
+-- refused: the module rejected it, an unknown state or review decision; the
+--   host counts it as a permanent read failure.
+-- unanswered: the call failed in transport; the host counts it as a
+--   transient read failure.
+enum PrReportReply { accepted | refused | unanswered }
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -47,24 +60,25 @@ entity PrPollState {
     -- there is only one write to make.
     gave_up: consecutive_permanent_failures >= core/config.pr_poll_permanent_failure_threshold
 
-    @guidance
-        -- Conceptually one exists per polled task; the fields' defaults are the
-        -- state of a task that has never failed, so a task with no row yet reads
-        -- as zero failures, no backoff and not given up.
-        --
-        -- gave_up is the in-memory gate that stops polling. Task.sub_status =
-        -- pr_unreachable is its persisted, user-visible shadow: the two change
-        -- together, but only sub_status survives a restart.
-        --
-        -- Because this state is session-scoped, an app restart polls a
-        -- pr_unreachable task once more. That is deliberate, not an oversight.
-        -- The failure it exists for — a repository the gh account cannot read —
-        -- is fixed on GitHub, not on the task, so there is nothing the user
-        -- could edit to earn a retry. A restart is the retry.
-        --
-        -- next_poll_at carries the transient backoff. Null means "eligible on
-        -- the next tick that clears pr_poll_interval", the unthrottled default.
+    -- Conceptually one exists per polled task; the fields' defaults are the
+    -- state of a task that has never failed, so a task with no row yet reads
+    -- as zero failures, no backoff and not given up.
+    --
+    -- gave_up is the in-memory gate that stops polling. Task.sub_status =
+    -- pr_unreachable is its persisted, user-visible shadow, which the module
+    -- writes (ReportPrUnreadable): the two change together, but only
+    -- sub_status survives a restart.
+    --
+    -- Because this state is session-scoped, an app restart polls a
+    -- pr_unreachable task once more. That is deliberate, not an oversight.
+    -- The failure it exists for — a repository the gh account cannot read —
+    -- is fixed on GitHub, not on the task, so there is nothing the user
+    -- could edit to earn a retry. A restart is the retry.
+    --
+    -- next_poll_at carries the transient backoff. Null means "eligible on
+    -- the next tick that clears pr_poll_interval", the unthrottled default.
 }
+
 
 ------------------------------------------------------------
 -- Rules
@@ -136,7 +150,7 @@ rule PollPrStatus {
     -- task with no poll state has never failed, so it is always due.
     --
     -- The host clause admits two shapes of task, deliberately not one: a task
-    -- WITH a worktree (task.host = local_host()) and every host-less task
+    -- WITH a worktree (task.host = core/local_host()) and every host-less task
     -- (task.host = null), whoever runs this tick. The second shape is
     -- ADMITTED, not yet DECIDED — every host's tick sees every host-less due
     -- task, and `owns` below (not this filter) is what narrows that to the
@@ -149,7 +163,7 @@ rule PollPrStatus {
           and url != null
           and url.url_type = pr
           and pr_poll_due(task)
-          and (task.host = null or task.host = local_host()):
+          and (task.host = null or task.host = core/local_host()):
 
         -- A task WITH a worktree is already unambiguously owned by the
         -- machine holding it (core/Task.host, core/HostTracksWorktree) — no
@@ -158,69 +172,81 @@ rule PollPrStatus {
         -- with the first. Only a host-less task (an "open PRs"-style feed
         -- upserted it straight into review with no dispatch, so it never got
         -- a worktree — see feeds.allium: UpsertFeedTasks) needs one.
-        -- Read before the ensures: a guard there sees the resulting state.
-        let was_unreachable = task.sub_status = core/SubStatus.pr_unreachable
         let poll_owner = if task.host = null: core/PollOwner{scope: task, scope_id: task.id} else: null
-        let owns = task.host != null or not exists poll_owner or poll_owner.host = local_host()
+        let owns = task.host != null or not exists poll_owner or poll_owner.host = core/local_host()
+        -- Read BEFORE the report: an accepted merge clears the window in the
+        -- store and the host still has to kill it (PrMerged), and a closed PR
+        -- the task already showed as closed changed nothing, so it gets no
+        -- second notice (PrClosed).
+        let window_before = current_agent(task).tmux_window
+        let sub_status_before = task.sub_status
 
-        -- Branch first on whether GitHub answered at all, then on the state it
-        -- reported:
-        --   succeeded, merged -> fire PrMerged; task moves to done
-        --   succeeded, closed -> fire PrClosed; task stays in review,
-        --                        sub_status becomes pr_closed
-        --   succeeded, open   -> refresh sub_status from review_decision
-        --   failed permanently -> count it; at the threshold, give up and mark
-        --                         the task pr_unreachable
-        --   failed transiently -> widen the backoff and try again later
+        -- Branch first on whether GitHub answered at all, then on how the
+        -- module answered the report of what it said:
+        --   gh answered, report accepted -> clear the failure counters; a
+        --                                   merge fires PrMerged, a close
+        --                                   that changed the task PrClosed
+        --   gh failed permanently, or the report was refused -> count it; at
+        --                                   the threshold, fire PrPollGaveUp
+        --   gh failed transiently, or the report got no answer -> widen the
+        --                                   backoff and try again later
         -- Only pr-typed urls are polled; tasks carrying a security_alert,
         -- issue, or other url are never polled for PR merge/close.
         --
-        -- A host-less task with no PollOwner row is claimed here, by
-        -- whichever host's tick reaches this point first for it — the
-        -- claim is permanent (core/PollOwner): there is no expiry, no
-        -- automatic failover and, since the override_poll_owner MCP tool was
-        -- removed, no way to reassign a task-scope claim to another host. A host that is NOT the owner
-        -- (`owns = false`) does nothing at all this tick: no GitHub call, no
-        -- PrPollState write, no claim attempt — it is simply not this
-        -- host's task to act on.
+        -- A host-less task with no PollOwner row is claimed here, through
+        -- feeds.allium's ClaimPollOwner (the claim_poll_owner reducer, which
+        -- checks the caller's host and sight), by whichever host's tick
+        -- reaches this point first for it. The claim is permanent
+        -- (core/PollOwner): there is no expiry, no automatic failover and no
+        -- way to reassign a task-scope claim to another host. Unlike
+        -- feeds.allium's FeedTick, the poll does not wait for the claim to
+        -- come back: it proceeds in the same tick, and a claim call that fails
+        -- does not stop it (see "Host scoping" below). A host that is NOT
+        -- the owner (`owns = false`) does nothing at all this tick: no GitHub
+        -- call, no PrPollState write, no claim attempt — it is simply not
+        -- this host's task to act on.
         ensures:
             if owns:
                 if task.host = null and not exists poll_owner:
-                    core/PollOwner.created(
-                        scope: task,
-                        scope_id: task.id,
-                        host: local_host(),
-                        claimed_at: now
-                    )
+                    feeds/PollOwnerClaimed(scope: task, scope_id: task.id, host: core/local_host())
 
-                let outcome = check_pr_status(task.url.url)
+                let read = check_pr_status(task.url.url)
+                -- The raw strings gh printed go to the module, which parses
+                -- them and writes the task (ReportPrStatus). Nothing on the
+                -- board reads them.
+                if read.kind = core/PrCheckOutcome.succeeded:
+                    PrStatusReported(
+                        task: task,
+                        host: core/local_host(),
+                        state: read.state,
+                        review_decision: read.review_decision
+                    )
+                -- The module's answer to that report; null when gh failed and
+                -- nothing was posted.
+                let reply = if read.kind = core/PrCheckOutcome.succeeded: pr_report_reply(task) else: null
+                let permanent = read.kind = core/PrCheckOutcome.failed_permanently
+                    or reply = PrReportReply.refused
+                -- gh's failure text, or the module's refusal, for the log line
+                -- and the give-up notice.
+                let reason = pr_read_failure_reason(read, reply)
                 let poll = PrPollState{task}
 
-                if outcome.kind = core/PrCheckOutcome.succeeded:
-                    -- Reaching GitHub retires every earlier failure, including a
-                    -- give-up. This is the only path out of pr_unreachable, which
-                    -- is why the open branch below does not guard against it the
-                    -- way it guards conflict.
+                if reply = PrReportReply.accepted:
+                    -- Reaching GitHub, and the module accepting what it said,
+                    -- retires every earlier failure, including a give-up. This
+                    -- is the only path out of pr_unreachable (the module clears
+                    -- it in the same report).
                     if exists poll:
                         poll.consecutive_permanent_failures = 0
                         poll.consecutive_transient_failures = 0
                         poll.next_poll_at = null
-                    if outcome.state = merged:
-                        PrMerged(task: task)
-                    else if outcome.state = closed:
+                    if upper(read.state) = "MERGED":
+                        PrMerged(task: task, window: window_before)
+                    else if upper(read.state) = "CLOSED"
+                        and sub_status_before != core/SubStatus.pr_closed:
                         PrClosed(task: task)
-                    else if outcome.state = open and task.sub_status != core/SubStatus.conflict:
-                        let new_sub =
-                            if outcome.review_decision = approved:
-                                core/SubStatus.approved
-                            else if outcome.review_decision = changes_requested:
-                                core/SubStatus.changes_requested
-                            else:
-                                core/SubStatus.awaiting_review
-                        if task.sub_status != new_sub:
-                            task.sub_status = new_sub
 
-                else if outcome.kind = core/PrCheckOutcome.failed_permanently:
+                else if permanent:
                     let failures =
                         if exists poll: poll.consecutive_permanent_failures + 1
                         else: 1
@@ -233,24 +259,26 @@ rule PollPrStatus {
                             consecutive_transient_failures: 0,
                             next_poll_at: null
                         )
-                    -- A task already pr_unreachable (a restart re-polled it
-                    -- and it failed again) is left as it is: no second
-                    -- report or notice, only the failure's own log line.
-                    if failures >= core/config.pr_poll_permanent_failure_threshold
-                        and not was_unreachable:
-                        task.sub_status = core/SubStatus.pr_unreachable
-                        task.updated_at = now
-                        PrPollGaveUp(task: task, reason: outcome.reason)
+                    -- The counter rises by one per failure, so it passes the
+                    -- threshold exactly once: a late in-flight failure after
+                    -- the give-up does not give up again.
+                    if failures = core/config.pr_poll_permanent_failure_threshold:
+                        PrPollGaveUp(task: task, reason: reason)
 
                 else:
                     -- Transient: the permanent counter is deliberately left
                     -- untouched — a network blip must never accumulate towards a
-                    -- give-up — and only the deadline moves, widening from
-                    -- pr_poll_interval up to pr_poll_backoff_max.
+                    -- give-up — and only the deadline moves: pr_poll_interval
+                    -- doubled per consecutive transient failure, capped at
+                    -- pr_poll_backoff_max.
                     let transients =
                         if exists poll: poll.consecutive_transient_failures + 1
                         else: 1
-                    let deadline = now + next_pr_poll_backoff(transients)
+                    let deadline = now + doubled_backoff(
+                        core/config.pr_poll_interval,
+                        core/config.pr_poll_backoff_max,
+                        transients
+                    )
                     if exists poll:
                         poll.consecutive_transient_failures = transients
                         poll.next_poll_at = deadline
@@ -268,15 +296,21 @@ rule PollPrStatus {
         -- issue, other) or no url are skipped entirely. Polls
         -- GitHub every core/config.pr_poll_interval via `gh pr view` to check
         -- merge status and review decision.
-        -- Merged PRs: fire PrMerged which transitions the task to done.
-        -- Open PRs: update sub_status to reflect the current review
-        -- decision (approved | changes_requested | awaiting_review).
-        -- Tasks currently in sub_status = conflict are NOT overwritten
-        -- by the review-decision update, so conflict state persists
-        -- across polls until the user resolves it.
-        -- Closed-without-merge PRs: fire PrClosed every tick the PR stays
-        -- closed. Unlike PrMerged, this is NOT a terminal transition — the
-        -- task stays in review; see the PrClosed rule for what changes.
+        --
+        -- == Who writes ==
+        --
+        -- The host runs `gh pr view` and posts the raw state and
+        -- reviewDecision strings through the report_pr_status reducer
+        -- (ReportPrStatus); the MODULE parses them and writes the task: a
+        -- merge moves it to done, a close marks it pr_closed, an open PR's
+        -- review decision sets its sub_status (never over conflict). At the
+        -- give-up threshold the host posts report_pr_unreadable
+        -- (PrPollGaveUp, ReportPrUnreadable). The board writes no status or
+        -- sub_status here. It keeps only the local work: the gh call, the
+        -- failure counters and backoff (session-scoped, store-split P3), and
+        -- the effects in PrMerged, PrClosed and PrPollGaveUp.
+        -- Implementation: src/runtime/pr.rs::PrReporter posts the report;
+        -- src/tui/update/pr.rs holds the counters and the host effects.
         --
         -- == Why failure is branched, not merely logged ==
         --
@@ -300,8 +334,7 @@ rule PollPrStatus {
         -- Recovery needs no user action on the task, because usually there is
         -- none available: the fix for "no account has access" happens on
         -- GitHub. Give-up state is session-scoped (PrPollState), so a
-        -- restart retries; and any poll that reaches GitHub clears
-        -- pr_unreachable through the succeeded branch.
+        -- restart retries; and any accepted report clears pr_unreachable.
         --
         -- == Host scoping ==
         --
@@ -317,32 +350,31 @@ rule PollPrStatus {
         -- core/PollOwner gives it a single, explicit, permanent owner
         -- instead. A single doubled poll at the exact instant two hosts
         -- both see a fresh, unclaimed host-less task for the first time is
-        -- possible (whichever PollOwner insert the store serialises first
-        -- wins) and is not a correctness problem — it costs one extra `gh`
-        -- call, the same order of cost this rule's own transient-failure
-        -- tolerance already accepts.
-        --
-        -- Who writes (ReportPrStatus, ReportPrUnreadable):
-        -- the host runs `gh pr view` and posts the raw state and reviewDecision
-        -- strings through the report_pr_status reducer; the MODULE parses
-        -- them and writes the task. The host keeps only the local work: the
-        -- gh call, the failure counters and backoff (session-scoped, P3),
-        -- and the effects named in PrMerged below. "Reaching GitHub" in the
-        -- succeeded branch means the module ACCEPTED the report: only then
-        -- are the failure counters cleared. A refused report counts as a
-        -- permanent failure, a failed reducer call as a transient one.
+        -- possible (whichever claim the store serialises first wins; the
+        -- loser's next tick sees the winner's row and stands down) and is not
+        -- a correctness problem — it costs one extra `gh` call, the same
+        -- order of cost this rule's own transient-failure tolerance already
+        -- accepts. That is why the poll proceeds without waiting for its
+        -- claim (src/runtime/pr.rs::TuiRuntime::exec_check_status_if_owned).
 }
 
 rule PrPollGaveUp {
     when: PrPollGaveUp(task, reason)
 
-    requires: task.status = review
+    -- Read from the board's own copy of the task. A task that has left
+    -- review, or that already shows pr_unreachable (a restart re-polled it
+    -- and it failed again), gets no second report or notice, only the
+    -- failure's own log line.
+    requires: task.status in { review }
+    requires: task.sub_status != core/SubStatus.pr_unreachable
     -- Nothing to write to PrPollState here: by the time this fires,
     -- PollPrStatus has already raised consecutive_permanent_failures to the
     -- threshold, and gave_up is derived from that counter — so it is already
-    -- true. This rule's only remaining obligation is telling the user.
+    -- true.
     requires: PrPollState{task}.gave_up
 
+    -- The module writes sub_status = pr_unreachable (ReportPrUnreadable).
+    ensures: PrUnreadableReported(task: task, host: core/local_host(), reason: reason)
     ensures: UserInformed(about: pr_unreachable, task: task)
 
     @guidance
@@ -357,106 +389,100 @@ rule PrPollGaveUp {
         --
         -- Unlike PrMerged and PrClosed there is no distinct message carrying
         -- this event in the implementation — the counting rule and this one are
-        -- satisfied together, in the handler that receives the failed read. The
+        -- satisfied together, in the handler that receives the failed read
+        -- (src/tui/update/pr.rs::App::handle_pr_check_failed). The
         -- decomposition is behavioural, so do not go looking for a
         -- `PrPollGaveUp` variant.
         --
-        -- `reason` carries the underlying gh failure so the log line and the
-        -- user-facing message can name it — "Could not resolve to a Repository"
-        -- is far more useful to the user than "PR unreachable".
+        -- `reason` carries the underlying failure so the log line and the
+        -- report can name it — "Could not resolve to a Repository" is far more
+        -- useful than "PR unreachable".
+        --
+        -- UserInformed is the status line ('<PR label> unreadable — <name>
+        -- marked "PR unreachable"') and, when notifications are enabled, a
+        -- desktop notification titled "PR unreachable".
         --
         -- Not terminal: the task stays in review. See PrPollState for why
-        -- an app restart retries, and PollPrStatus's succeeded branch for the
+        -- an app restart retries, and PollPrStatus's accepted branch for the
         -- clearing path.
-        --
-        -- Who writes: the host counts the failures and, at the threshold, posts
-        -- report_pr_unreadable; the module writes sub_status = pr_unreachable
-        -- (ReportPrUnreadable). The UserInformed and the
-        -- log line stay with the host.
 }
 
 rule PrMerged {
-    when: PrMerged(task)
+    when: PrMerged(task, window)
 
-    requires: task.status = review
+    -- The module has already moved the task to done (ReportPrStatus); the
+    -- store's row can reach the board before this does, so a task the board
+    -- already shows as done is still served.
+    requires: task.status in { review, done }
 
-    ensures: task.status = done
-    ensures: task.sub_status = default_sub_status(done)
-    ensures: current_agent(task).tmux_window = null
-    ensures: task.updated_at = now
-    ensures: task.completed_at = now
+    -- The window the task had before the report: the module cleared it from
+    -- the task, and only this host can kill it.
+    ensures:
+        if window != null:
+            TmuxWindowKilled(window: window)
     ensures:
         if notifications_enabled:
             DesktopNotification(task: task, urgency: normal, about: pr_merged)
 
     @guidance
-        -- This is an automatic transition triggered by PR status polling.
-        -- It bypasses the ConfirmDone human confirmation because the PR
+        -- An automatic move to done, triggered by PR status polling. It
+        -- bypasses the ConfirmDone human confirmation because the PR
         -- merge itself is the human confirmation (via GitHub review process).
-        -- The Review Board UI has been removed; no board cleanup side effect fires.
-        -- The write that moves the task to done also runs
-        -- EpicStatusRecalculation on the parent epic when the task belongs
-        -- to one.
-        -- task.completed_at = now is the same completion stamp applied by
-        -- ConfirmDone (tasks.allium): the Done column reads it descending, so
-        -- more-recently-completed tasks sort first.
-        -- A merged PR on a phoenix task respawns it (tasks.allium:
-        -- PhoenixRespawn), on the same terms as any other route into done: the
-        -- trigger is the status transition, and the same reducer write that
-        -- makes it spawns the successor.
         --
-        -- Who writes: the module writes the Done transition, window clear and
-        -- completed_at (ReportPrStatus), including the
-        -- epic rollup and the phoenix successor. The host, after its report
-        -- is accepted, kills the tmux window it read BEFORE posting (the
-        -- module cleared it), sends the DesktopNotification and respawns the
-        -- split pane. The task keeps its worktree.
+        -- Who writes: the module writes the Done transition, the cleared
+        -- window, sub_status and completed_at (ReportPrStatus), with the
+        -- epic rollup and the phoenix successor, as for any route into done.
+        -- completed_at is the same completion stamp ConfirmDone applies
+        -- (tasks.allium): the Done column reads it descending. A merged PR on
+        -- a phoenix task respawns it (tasks.allium: PhoenixRespawn) in that
+        -- same write. A merge never closes the PR (ClosePrOnDone): there is
+        -- nothing to close.
+        --
+        -- This rule is the host's part, after its report was accepted: kill
+        -- the window, set the status line ('<PR label> merged — <name> moved
+        -- to Done'), send the notification ("PR merged", body "<PR label>
+        -- merged: <task title>"), and free the split pane
+        -- (split-pane.allium: SplitPaneRespawnOnWindowCleared). The task
+        -- keeps its worktree.
+        -- Implementation: src/tui/update/pr.rs::App::handle_pr_merged.
 }
 
 rule PrClosed {
     when: PrClosed(task)
 
-    requires: task.status = review
+    -- The module marked the task pr_closed (ReportPrStatus), which it does
+    -- only for a review task; a task the board no longer shows in review is
+    -- left alone.
+    requires: task.status in { review }
 
     ensures:
-        if task.sub_status != core/SubStatus.pr_closed:
-            task.sub_status = core/SubStatus.pr_closed
-            task.updated_at = now
-            if notifications_enabled:
-                DesktopNotification(task: task, urgency: normal, about: pr_closed)
+        if notifications_enabled:
+            DesktopNotification(task: task, urgency: normal, about: pr_closed)
 
     @guidance
-        -- Fires when PR status polling detects a closed (not merged) PR.
-        -- Unlike PrMerged, this is NOT a terminal transition: task.status
-        -- stays review, and current_agent(task).tmux_window / task.worktree / task.completed_at
+        -- Fires when PR status polling reads a closed (not merged) PR and the
+        -- module's report changed the task. Unlike PrMerged, this is NOT a
+        -- terminal transition: task.status stays review, and
+        -- current_agent(task).tmux_window / task.worktree / task.completed_at
         -- are all left untouched — a closed PR doesn't end the task, it just
         -- flags that a human should decide what to do next (reopen the PR,
         -- push a new one, complete and delete the task).
-        -- Idempotent: PollPrStatus re-fires PrClosed on every tick the PR
-        -- stays closed, but the guard on sub_status != pr_closed means the
-        -- notification and the persisted write only happen once, on the
-        -- transition into pr_closed — not on every subsequent tick.
-        -- Overrides sub_status = conflict unconditionally — unlike the
-        -- open-PR poll branch, there is no conflict guard here. A closed PR
+        --
+        -- Once only: PollPrStatus reports the closed PR on every tick it
+        -- stays closed, but fires this rule only when the task did not
+        -- already show pr_closed before the report, so the notification and
+        -- the status line come once, on the move into pr_closed.
+        --
+        -- Who writes: the module writes the sub_status, and it overrides
+        -- conflict unconditionally — unlike the open-PR branch. A closed PR
         -- is a stronger, more definitive GitHub signal than a local rebase
         -- conflict, and the user needs to see it regardless.
-        -- Notification: title "PR closed", body "<PR label> closed: <task
-        -- title>". Status bar shows '<PR label> closed — <name> marked
-        -- "PR closed"'. <name> is the task's display name, else its title.
         --
-        -- Who writes: the module writes the sub_status (store-split.allium:
-        -- ReportPrStatus); the host sends the notification and sets the
-        -- status line when the report changed the task.
-}
-
--- The module's PR-report reducers (report_pr_status, report_pr_unreadable),
--- called by the board of the host that polled gh.
-surface PrReportReducers {
-    facing _: core/StoreClient
-
-    provides:
-        PrStatusReported(task, host, state, review_decision)
-        PrUnreadableReported(task, host, reason)
+        -- This rule is the host's part. Notification: title "PR closed",
+        -- body "<PR label> closed: <task title>". Status bar shows '<PR
+        -- label> closed — <name> marked "PR closed"'. <name> is the task's
+        -- display name, else its title.
+        -- Implementation: src/tui/update/pr.rs::App::handle_pr_closed.
 }
 
 rule ReportPrStatus {
@@ -464,8 +490,8 @@ rule ReportPrStatus {
 
     -- The raw strings gh printed, in any letter case; review_decision is ""
     -- for a repo without branch protection.
-    requires: state.upper in { "OPEN", "MERGED", "CLOSED" }
-    requires: review_decision.upper in { "", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED" }
+    requires: upper(state) in { "OPEN", "MERGED", "CLOSED" }
+    requires: upper(review_decision) in { "", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED" }
     -- store-split D11: only the host's own owner may speak for it.
     requires: host.owner != null and host.owner = caller()
 
@@ -473,7 +499,7 @@ rule ReportPrStatus {
         -- A report for a task that is gone or no longer in review changes
         -- nothing and is accepted: the host's read raced a close.
         if task.status = review and task.url.url_type = pr:
-            if state.upper = "MERGED":
+            if upper(state) = "MERGED":
                 task.status = done
                 task.sub_status = default_sub_status(done)
                 current_agent(task).tmux_window = null
@@ -481,15 +507,15 @@ rule ReportPrStatus {
                 task.updated_at = now
                 -- the epic rollup and the phoenix successor follow, as for
                 -- any route into done
-            else if state.upper = "CLOSED":
-                if task.sub_status != pr_closed:
-                    task.sub_status = pr_closed
+            else if upper(state) = "CLOSED":
+                if task.sub_status != core/SubStatus.pr_closed:
+                    task.sub_status = core/SubStatus.pr_closed
                     task.updated_at = now
-            else if task.sub_status != conflict:
+            else if task.sub_status != core/SubStatus.conflict:
                 let new_sub =
-                    if review_decision.upper = "APPROVED": approved
-                    else if review_decision.upper = "CHANGES_REQUESTED": changes_requested
-                    else: awaiting_review
+                    if upper(review_decision) = "APPROVED": core/SubStatus.approved
+                    else if upper(review_decision) = "CHANGES_REQUESTED": core/SubStatus.changes_requested
+                    else: core/SubStatus.awaiting_review
                 if task.sub_status != new_sub:
                     task.sub_status = new_sub
                     task.updated_at = now
@@ -515,8 +541,8 @@ rule ReportPrUnreadable {
 
     ensures:
         if task.status = review and task.url.url_type = pr
-           and task.sub_status != pr_unreachable:
-            task.sub_status = pr_unreachable
+           and task.sub_status != core/SubStatus.pr_unreachable:
+            task.sub_status = core/SubStatus.pr_unreachable
             task.updated_at = now
 
     @guidance
@@ -529,8 +555,32 @@ rule ReportPrUnreadable {
 }
 
 rule ClosePrOnDone {
-    when: task: core/Task.status transitions_to done
+    -- The routes that close a PR are the ones that write a close row; the
+    -- host serving that row runs the gh call. They are:
+    --   - exit_session with action rebase or done (store-split.allium:
+    --     RequestExitSession, an exit_session row);
+    --   - update_tasks' status="done" path (store-split.allium:
+    --     RequestCloseTask, a close row);
+    --   - a move into Done through update_task, which ConfirmDone and
+    --     EditTask's STATUS section use (store-split.allium:
+    --     UpdateTaskDoneWritesACloseRow, a windowless close row, or
+    --     HandMoveReleasesAWindowTheBoardDidNotSee's close row in its place).
+    -- A merge writes no close row (ReportPrStatus), so it never closes the
+    -- PR: a merged PR has nothing to close, and `gh` itself refuses.
+    when: split/SessionRequestClaimed(request)
 
+    requires: request.kind in {exit_session, close}
+    requires: request.host = core/local_host()
+    -- D11's second line (store-split.allium, W11).
+    requires: request.requested_by = core/local_host().owner
+    -- exit_session with action pr lands the task in review, not done. A
+    -- close row is always action done.
+    requires: request.action != pr
+
+    -- Read from the task when this host serves the row: a task moved out of
+    -- Done in between keeps its PR open.
+    let task = request.task
+    requires: task.status in { done }
     requires: task.url != null and task.url.url_type = pr
     -- A feed task's PR is upstream state the feed mirrors, not something
     -- this task opened: a review card's PR is a colleague's, a Dependabot
@@ -538,79 +588,60 @@ rule ClosePrOnDone {
     -- not that the PR should close — and for a review just approved, closing
     -- it would undo the approval's purpose. Only a task with no external_id
     -- (one the user created, whose PR wrap-up or the user attached) closes
-    -- its PR on entering done.
+    -- its PR.
     requires: task.external_id = null
 
     ensures: PrCloseRequested(task: task, url: task.url.url)
 
     @guidance
-        -- The feed exemption holds on every route below: the module writes
-        -- no windowless close row for a feed task (UpdateTaskDoneWritesACloseRow
-        -- asks spacetime/module/src/session_request.rs::close_has_host_work,
-        -- which ignores a feed task's url), and a host serving any close or
-        -- exit_session row skips gh pr close for one
-        -- (src/service/tasks/session.rs::close_pr_of_exit). The second check is
-        -- what covers a close row that kills a window: a hand move, wrap-up's
-        -- done path, and feeds.allium: KeepWorkedOnFeedTask.
+        -- PrCloseRequested is `gh pr close <url>`: observable output; no rule
+        -- listens. Implementation:
+        -- src/service/tasks/session.rs::close_pr_of_exit, called while the
+        -- host serves the teardown (ExitSessionTeardown), alongside the kill.
         --
-        -- Every route into Done but one carries this: the trigger is the
-        -- status transition itself, not any one operator action.
-        -- transitions_to reaches all five routes — see PhoenixRespawn's
-        -- guidance for the full list (ConfirmDone, EditTask's STATUS
-        -- section, update_tasks' status="done" path, ExitSession's rebase
-        -- and done branches, and PrMerged). PrMerged is the exception: see
-        -- below.
-        -- The gh call needs a host. ConfirmDone and EditTask write through
-        -- the board's TaskService::update_task (src/service/tasks/crud.rs),
-        -- whose module reducer writes a windowless close row when the call
-        -- enters Done with a pr-typed url (store-split.allium:
-        -- UpdateTaskDoneWritesACloseRow); the host serving it runs the gh
-        -- call, so the decision is the store's, not the board cache's.
-        -- ExitSession's
-        -- branches and update_tasks' done path
-        -- (store-split.allium: RequestCloseTask) write in the
-        -- module instead, and the host serving the close's exit_session or
-        -- close row runs it (ExitSessionTeardown). That owner is a recorded
-        -- decision (store-split.allium, "ClosePrOnDone's owner"):
-        -- a row that fails before its host serves it leaves the PR open,
-        -- accepted as built and flagged for user review.
+        -- The feed exemption holds twice: the module writes no windowless
+        -- close row for a feed task (UpdateTaskDoneWritesACloseRow and
+        -- RequestCloseTask ask
+        -- spacetime/module/src/session_request.rs::close_has_host_work, which
+        -- ignores a feed task's url), and the host skips gh pr close for one
+        -- (the requires above). The second check is what covers a close row
+        -- that also kills a window: a hand move, wrap-up's done path, and
+        -- feeds.allium: KeepWorkedOnFeedTask.
         --
-        -- NOT run for PrMerged. The merge reaches Done through its own
-        -- report (ReportPrStatus), which writes no close
-        -- row, and the host's merge handling kills the window without a gh
-        -- call. A merged PR has nothing to close: `gh` itself refuses.
+        -- The decision whether a move into Done asks for a close is the
+        -- store's, made in the writing transaction on its own prior row, not
+        -- the board cache's. A row that fails before its host serves it (the
+        -- backstop, the restart sweep, the task's deletion, a later close
+        -- that fails it) leaves the PR open: KillWindowOfFailedExitSession
+        -- kills the window only. Accepted as built (store-split.allium, W5).
         --
-        -- NOT fired for PrClosed (above): that rule leaves task.status at
-        -- review, so it never crosses this trigger — a closed-without-merge
-        -- PR stays open on GitHub until a human decides what to do with the
-        -- task, exactly as PrClosed's own guidance describes. NOT fired for
-        -- a task already Done being re-saved (done -> done), matching
-        -- transitions_to's own creation/no-op exemptions — with one
-        -- exception on the close-row route: update_tasks' status="done" on a
-        -- task already Done that carries a pr-typed url still writes a close
-        -- row (store-split.allium: RequestCloseTask), and the host serving it
-        -- runs gh pr close again, which meets a PR already merged or closed
-        -- and logs quietly. The no-op exemption also
-        -- means a task inserted directly with status = done (a feed item
-        -- that already arrived done, feeds.allium: UpsertFeedTasks) never
-        -- reaches this rule, since transitions_to never fires on creation.
+        -- NOT run for PrClosed (above): that leaves task.status at review, so
+        -- no route writes a close row and a closed-without-merge PR stays
+        -- closed on GitHub until a human decides what to do with the task.
         --
-        -- Runs `gh pr close <url>` best-effort, after the Done write has
-        -- already persisted. Never blocks, delays or fails the Done
-        -- transition on the outcome — the task is already done by the time
-        -- this fires. Unlike PollPrStatus there is no retry, backoff or
-        -- give-up state: this is a one-shot attempt, because there is
-        -- nothing to poll for — either the close took or it didn't, and the
-        -- operator already has what they asked for (the task is Done). The
-        -- outcome is logged, never surfaced to the user: an expected
-        -- failure (the PR was already merged or already closed) logs at a
-        -- quieter level than an unexpected one (bad credentials, an
+        -- A RE-CLOSE. update_tasks' status="done" on a task already Done that
+        -- carries a pr-typed url still writes a close row (RequestCloseTask),
+        -- and the host serving it runs gh pr close again, which meets a PR
+        -- already merged or closed and logs quietly. A plain update_task
+        -- re-save of a Done task writes none: it is not a move into Done.
+        -- A task inserted directly with status = done (a feed item that
+        -- already arrived done, feeds.allium: UpsertFeedTasks) gets no close
+        -- row either.
+        --
+        -- Best-effort and one-shot, after the Done write has already
+        -- persisted. It never blocks, delays or fails the Done transition or
+        -- the row's report. Unlike PollPrStatus there is no retry, backoff or
+        -- give-up state: there is nothing to poll for — either the close took
+        -- or it didn't, and the operator already has what they asked for (the
+        -- task is Done). The outcome is logged, never surfaced to the user:
+        -- an expected failure (the PR was already merged or already closed)
+        -- logs at a quieter level than an unexpected one (bad credentials, an
         -- unresolvable repository).
         --
-        -- Scope is deliberately narrow: only a literal transition into Done.
         -- There is no route off the board that skips it: a task is deleted
         -- only from Done (tasks.allium: DeleteTask), so it has already
-        -- crossed this trigger by the time it can be removed.
+        -- been through whatever route took it there by the time it can be
+        -- removed.
 }
 
 -- == Wrap Up ==
@@ -751,8 +782,9 @@ rule WrapUpRebase {
 }
 
 rule WrapUpPr {
-    when: split/WrapUpRequested(task, host, pr)
+    when: split/WrapUpRequested(task, host, action)
 
+    requires: action = pr
     -- Applies only to a request the module accepts: store-split.allium's
     -- RequestWrapUp owns acceptance and every refusal (a review-tagged task,
     -- another owner, an open session request). The three requires below are
@@ -820,8 +852,9 @@ rule WrapUpPr {
 }
 
 rule WrapUpDone {
-    when: split/WrapUpRequested(task, host, done)
+    when: split/WrapUpRequested(task, host, action)
 
+    requires: action = done
     -- As WrapUpPr: only an accepted request; store-split.allium's
     -- RequestWrapUp owns acceptance and every refusal.
     requires: task.status = review or task.status = running
@@ -1122,19 +1155,12 @@ rule ExitSessionTeardown {
         -- (store-split.allium: SessionRequestTimesOut) fails a row this host
         -- never reports; the close stands either way.
         --
-        -- ClosePrOnDone's gh call (above) is also this host's, on this route:
-        -- when the close took the task into Done (action rebase or done; a
-        -- close row is always done) and the task carries a pr-typed url, the
-        -- host serving this row runs `gh pr close <url>` best-effort,
-        -- alongside the kill, reading the url from the task. The host reads
-        -- the task when it
-        -- serves the row, and runs the close only if the task is still Done
-        -- then: a task moved out of Done in between keeps its PR open. A row
-        -- with action pr never runs it. Its outcome is logged and does
-        -- not affect the row's report. This owner is a recorded decision
-        -- (store-split.allium, "ClosePrOnDone's owner"); a row that
-        -- fails before it is served leaves the PR open, accepted as built
-        -- and flagged for user review.
+        -- ClosePrOnDone (above) fires on the same claim: when the close took
+        -- the task into Done and the task carries a pr-typed url, the host
+        -- serving this row runs `gh pr close <url>` best-effort, alongside
+        -- the kill. Its outcome is logged and does not affect the row's
+        -- report. A row that fails before it is served leaves the PR open,
+        -- accepted as built (store-split.allium, W5).
         --
         -- On an exit_session row the kill targets this agent's own window,
         -- so it ends the session that called exit_session. The MCP response
@@ -1167,7 +1193,7 @@ rule KillWindowOfFailedExitSession {
         -- (one more attempt). The close already cleared the window from the
         -- task, so nothing else would ever kill it. It kills the window only:
         -- ClosePrOnDone's gh call is not retried here, so such a row leaves
-        -- the PR open (store-split.allium, "ClosePrOnDone's owner").
+        -- the PR open (store-split.allium, W5).
         --
         -- NOT the task's deletion. A delete fails the row
         -- and deletes it in one transaction (store-split.allium:
@@ -1227,4 +1253,18 @@ rule FinishTaskConflict {
         -- there is nothing to mark "conflicted": the task's own work
         -- never entered a rebase, so it is safe to simply retry once the
         -- primary worktree is clean.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- The module's PR-report reducers (report_pr_status, report_pr_unreadable),
+-- called by the board of the host that polled gh.
+surface PrReportReducers {
+    facing _: core/StoreClient
+
+    provides:
+        PrStatusReported(task, host, state, review_decision)
+        PrUnreadableReported(task, host, reason)
 }

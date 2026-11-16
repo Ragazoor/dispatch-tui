@@ -1245,14 +1245,16 @@ rule FeedTick {
                     let poll_owner = core/PollOwner{scope: epic, scope_id: epic.id}
                     if core/local_host().owner = (epic.feed_command_set_by ?? epic.created_by):
                         if not exists poll_owner:
-                            -- CLAIM, THEN RUN. The cycle runs only
-                            -- once the claim is answered and the owner read back
-                            -- is this host; see "Claim then run" below.
-                            core/PollOwner.created(
+                            -- CLAIM, THEN RUN. The claim goes through
+                            -- ClaimPollOwner (the claim_poll_owner reducer),
+                            -- which holds the setter and sight checks. The
+                            -- cycle runs only once the claim is answered and
+                            -- the owner read back is this host; see "Claim
+                            -- then run" below.
+                            PollOwnerClaimed(
                                 scope: epic,
                                 scope_id: epic.id,
-                                host: core/local_host(),
-                                claimed_at: now
+                                host: core/local_host()
                             )
                             if core/PollOwner{scope: epic, scope_id: epic.id}.host = core/local_host():
                                 FeedCycleRequested(epic: epic)
@@ -1417,7 +1419,7 @@ rule ClaimPollOwner {
 
     @guidance
         -- claim_poll_owner. Its callers are pr-workflow.allium's
-        -- PollPrStatus and FeedTick.
+        -- PollPrStatus, FeedTick and ManualFeedTrigger.
 }
 
 rule OverridePollOwner {
@@ -3759,12 +3761,12 @@ rule ManualFeedTrigger {
 
     ensures:
         if core/local_host().owner = setter:
+            -- The claim goes through ClaimPollOwner, as FeedTick's does.
             if not exists core/PollOwner{scope: epic, scope_id: epic.id}:
-                core/PollOwner.created(
+                PollOwnerClaimed(
                     scope: epic,
                     scope_id: epic.id,
-                    host: core/local_host(),
-                    claimed_at: now
+                    host: core/local_host()
                 )
             if core/PollOwner{scope: epic, scope_id: epic.id}.host = core/local_host():
                 FeedCycleRequested(epic: epic)
