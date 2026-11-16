@@ -78,17 +78,8 @@ fn selected_node<'a>(root: &'a TreeNode, selected: &[String]) -> Option<&'a Tree
 /// exceptions would be one more list to keep in step with the match below.
 pub fn handle_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyAction {
     let opened_before = state.tree_state.opened().clone();
-    let agent_before = state.agents.selected().map(|row| row.id);
-    let filter_before = state.agents.filter();
     let action = dispatch_key(state, root, key);
     state.absorb_manual_expansion(&opened_before);
-    // ForgetPendingResumeJump listens for cursor motions only. A filter flip
-    // moves the cursor without being one (CycleAgentListFilter).
-    if state.agents.filter() == filter_before
-        && state.agents.selected().map(|row| row.id) != agent_before
-    {
-        state.forget_pending_jump_if_moved();
-    }
     action
 }
 
@@ -280,6 +271,14 @@ fn run_tree_action(
         }
         _ => return None,
     };
+    // ForgetPendingResumeJump listens for the agents cursor motions alone
+    // (AgentTreeAgentCursorMoved). A filter flip moves the cursor without
+    // being one (CycleAgentListFilter).
+    if matches!(ns, crate::keybindings::KeyNamespace::AgentTreeAgents)
+        && action.starts_with("navigate_")
+    {
+        state.forget_pending_jump_if_moved();
+    }
     Some(result)
 }
 

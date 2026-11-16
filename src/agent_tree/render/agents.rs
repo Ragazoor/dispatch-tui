@@ -145,11 +145,10 @@ impl AgentsSection {
     /// cursor on its task or, failing that, at its index clamped.
     fn reshow(&mut self) {
         let selected = self.selected().map(|row| row.id);
-        let filter = self.filter;
         self.rows = self
             .listed
             .iter()
-            .filter(|row| filter.admits(row))
+            .filter(|row| self.filter.admits(row))
             .cloned()
             .collect();
         self.cursor = selected
@@ -504,7 +503,11 @@ mod tests {
     }
 
     fn rendered(section: &mut AgentsSection, focused: bool, height: u16) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(30, height)).expect("terminal");
+        rendered_at(section, focused, 30, height)
+    }
+
+    fn rendered_at(section: &mut AgentsSection, focused: bool, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
         terminal
             .draw(|frame| render_agents(frame, frame.area(), section, focused, false, None))
             .expect("draw");
@@ -921,21 +924,13 @@ mod tests {
         assert_ne!(buffer[(3, 2)].fg, MUTED);
     }
 
-    fn rendered_wide(section: &mut AgentsSection, focused: bool) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(50, 6)).expect("terminal");
-        terminal
-            .draw(|frame| render_agents(frame, frame.area(), section, focused, false, None))
-            .expect("draw");
-        crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
-    }
-
     #[test]
     fn the_title_names_tab_and_s_whichever_section_has_focus() {
         // TwoViewsShareThePane: the hints name the filter Tab moves to and
         // the key that leaves the view.
         let mut section = AgentsSection::new();
         for focused in [true, false] {
-            let out = rendered_wide(&mut section, focused);
+            let out = rendered_at(&mut section, focused, 50, 6);
             assert!(
                 out.contains("Agents (Tab: running, s: browse)"),
                 "focused={focused}: {out}"
@@ -947,7 +942,7 @@ mod tests {
     fn under_running_the_title_carries_the_badge_and_names_all() {
         let mut section = AgentsSection::new();
         section.cycle_filter();
-        let out = rendered_wide(&mut section, true);
+        let out = rendered_at(&mut section, true, 50, 6);
         assert!(
             out.contains("Agents [running] (Tab: all, s: browse)"),
             "{out}"
