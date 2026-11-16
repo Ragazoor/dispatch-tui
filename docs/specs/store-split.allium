@@ -949,7 +949,7 @@ rule HostReportsDispatched {
         -- state is failed and this rule does not apply: the task's fields are
         -- not written, and the claim has already been released. The host
         -- then tears down what it made, by the provisioning-failure rollback
-        -- (dispatch.allium: ProvisionDispatch), so no agent keeps running
+        -- (dispatch.allium: DispatchRequestServing), so no agent keeps running
         -- against a task that is back in backlog.
         --
         -- A REPEATED REPORT IS ACCEPTED AND CHANGES NOTHING (see
@@ -1105,7 +1105,7 @@ rule HostRepeatsDispatchedReport {
         -- row, the task, the epic rollup or the timer — whatever the clock
         -- says now. It is what lets the host settle a dispatched report that
         -- ended in a transport error by simply sending it once more
-        -- (dispatch.allium: ProvisionDispatch, "A report that ends in a
+        -- (dispatch.allium: DispatchRequestServing, "A report that ends in a
         -- transport error"). A report naming a different worktree or window,
         -- or on a row that failed, is still refused.
 }
@@ -1218,7 +1218,7 @@ rule DeletingATaskFailsItsOpenRequest {
         -- failed "task deleted": the host's subscription sees the row
         -- removed. The host learns of it from its
         -- dispatched report being refused when its provisioning ends, and
-        -- tears down whatever it made (dispatch.allium: ProvisionDispatch, "A
+        -- tears down whatever it made (dispatch.allium: DispatchRequestServing, "A
         -- row that fails under this host"). The failure still matters inside
         -- the transaction: it cancels the timer and runs the release.
 }
@@ -2089,7 +2089,7 @@ rule CloseFailsOpenRequests {
         -- failed row refuses that report, and so does HostReportsDispatched's
         -- own check of the task's status, which also covers a plain status
         -- write into done (GivingUpTheLaunchCancelsTheDispatch). The host
-        -- tears down what it made (dispatch.allium: ProvisionDispatch, "A
+        -- tears down what it made (dispatch.allium: DispatchRequestServing, "A
         -- row that fails under this host").
         --
         -- Not D11-checked, as for the session row: the row may name a

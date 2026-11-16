@@ -27,6 +27,618 @@ use "./core.allium" as core
 use "./store-split.allium" as split
 
 ------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- How this host's board serves a dispatch request row it has claimed
+-- (ProvisionDispatch): the claim behind it, the answers it waits on, the
+-- reports it sends, the deadline it works against and what a failure undoes.
+-- The row, its states and its release are the module's (store-split.allium:
+-- DispatchRequest); these are the host's side of them. Demanded by
+-- DispatchProvisioning.
+contract DispatchRequestServing {
+    @invariant SubagentStateIsReset
+        -- == Subagent state reset ==
+        -- A fresh dispatch clears every core/SubagentEntry left over from a
+        -- prior run of this task (a backlog task should never carry live
+        -- subagents from before) and resets live_subagents to 0. The
+        -- module does this in the claim's own transaction
+        -- (store-split.allium: RequestDispatch), not ProvisionDispatch. stop_pending
+        -- is cleared too, but the HookSubagentStop drain path does NOT run
+        -- there even if it was set: the claim moves the task into Running,
+        -- and draining to Review in the same write would leave a task
+        -- freshly-dispatched-and-in-Review. The dispatch is the more
+        -- informative outcome and wins. Clearing stop_pending unconditionally
+        -- still matters — otherwise the bit would survive into the new
+        -- session and fire a spurious flip the next time a subagent hook
+        -- landed on the drain path (see agent-health.allium).
+
+    @invariant ClaimIsTheRequest
+        -- == The claim, and precondition timing ==
+        -- The backlog precondition is not a read: it is an atomic claim, and it
+        -- is the same claim on every entry point (the TUI dispatch key and its
+        -- trust-confirmed, retry-fresh and quick-dispatch siblings,
+        -- DispatchTaskViaMcp, and AutoDispatchNextSubtask in epics.allium).
+        -- The claim IS the request: one module
+        -- transaction applies backlog -> running, the default running
+        -- sub_status and the seeded last_pre_tool_use_at, conditionally on the
+        -- task still being backlog with no open request, and writes the
+        -- request row (store-split.allium: RequestDispatch). That happens
+        -- BEFORE provisioning starts. The worktree, tmux_window and host are
+        -- written by the module when ProvisionDispatch's report lands
+        -- (store-split.allium: HostReportsDispatched).
+        --
+        -- Two consequences, both normative. First, the precondition is evaluated
+        -- against the pre-claim state and enforced by the claim itself, so
+        -- exactly one caller can provision a given task no matter how many fire
+        -- at once (DispatchClaimExclusive below). A request that is refused
+        -- provisions nothing and launches no agent: DispatchTaskViaMcp reports
+        -- that the task is no longer in backlog, the TUI clears its
+        -- DispatchingFeedback entry with a failure message, and the chain moves
+        -- to its next candidate. Second, a task being dispatched is running
+        -- with worktree = null until the report lands (see
+        -- RunningTaskHasWorktree below).
+        --
+        -- If provisioning fails, this host rolls back what it created (below)
+        -- and reports the failure; the module then releases the claim: the
+        -- task returns to backlog with the default backlog sub_status and the
+        -- last_pre_tool_use_at the claim seeded cleared again, leaving it
+        -- dispatchable exactly as before (store-split.allium:
+        -- ReleaseClaimOfFailedRequest). That release is conditional, mirroring
+        -- the claim — it applies only while the task is still running with no
+        -- worktree, so a task provisioned or moved on meanwhile is left alone
+        -- rather than stomped back to backlog. The same release follows every
+        -- other failure: this host's deadline stop
+        -- (ProvisioningStopsAtTheDeadline below), the module's backstop timer
+        -- (DispatchRequestTimesOut) and a restart of this host
+        -- (HostRestartFailsInterrupted). A task deleted under its request has
+        -- nothing to release (DeletingATaskFailsItsOpenRequest), a task
+        -- closed under it is Done, which the release leaves alone
+        -- (store-split.allium: CloseFailsOpenRequests), and a task the
+        -- operator moved to backlog or done has already left running, so the
+        -- release leaves it alone too (store-split.allium:
+        -- GivingUpTheLaunchCancelsTheDispatch).
+        --
+        -- Only a FAILED REQUEST releases a claim, and no client calls a release
+        -- of its own. A refused request wrote nothing and holds nothing, so
+        -- losing the claim and failing after winning it, which look the same
+        -- to the user, cannot be confused by the code: there is no release for
+        -- a loser to call (LostClaimReported on the DispatchingFeedback
+        -- surface).
+
+    @invariant AnUnansweredClaimIsServedAgain
+        -- == A claim that gets no answer ==
+        -- Only a claim the module ANSWERED — accepted or refused — settles
+        -- whether this host serves the row. A claim that could not be sent
+        -- (a transport error), or a row held back because this board has no
+        -- settled identity yet to compare requested_by against, is not
+        -- served: the row is still requested, and the next delivery of this
+        -- host's rows hands it out again (store-split.allium:
+        -- HostClaimsDispatch). The retry ends when the row stops being
+        -- requested — claimed, or failed by the backstop at its deadline.
+
+    @invariant AnUnansweredReportIsSentOnceMore
+        -- == A report that ends in a transport error ==
+        -- A dispatched report that gets no answer may or may not have been
+        -- recorded. The host sends it once more: the module accepts a repeat
+        -- of a report that already landed and changes nothing
+        -- (store-split.allium: HostRepeatsDispatchedReport), so an accepted
+        -- retry means the agent is kept, whichever send landed. A refused
+        -- retry is a refused report (below): the host tears down and reports
+        -- the failure. A retry that also gets no answer leaves the outcome
+        -- unknown; the host tears down and reports the failure, which the
+        -- module accepts while the row is still provisioning.
+
+    @invariant ARefusedReportTearsDown
+        -- == A refused dispatched report ==
+        -- Whatever refused it — the row failed under this host (below), the
+        -- row's deadline passed before the report landed, or the operator
+        -- moved the task to backlog or done meanwhile (store-split.allium:
+        -- HostReportsDispatched, GivingUpTheLaunchCancelsTheDispatch) —
+        -- nothing was recorded on the task, so the host tears down what this
+        -- attempt made and reports the failure: "deadline passed" once the
+        -- deadline has gone by, else "task moved back to backlog" or "task
+        -- moved to done" when its view of the task shows the move. On a row
+        -- that already failed that report is refused in turn, and the row
+        -- keeps the module's reason.
+        --
+        -- The move back is why a task can sit in backlog with a dispatch
+        -- still open: the row stays provisioning until this host's teardown
+        -- has reported, so no second dispatch meets the first one's worker.
+
+    @invariant TheRowsDeadlineBoundsProvisioning
+        -- == The row's deadline bounds provisioning ==
+        -- Provisioning runs against the request's deadline (requested_at plus
+        -- store-split.allium's config.dispatch_request_timeout, exposed on the
+        -- row), not against a budget of its own. At the deadline this host
+        -- stops: see ProvisioningStopsAtTheDeadline below. Every
+        -- SUBPROCESS_TIMEOUT bound in ProvisionDispatch still applies, but the
+        -- deadline is the tighter one, and a single bounded call can be cut
+        -- off by it. A test holds the host to this: a provisioning whose
+        -- subprocess stalls fails at the row's deadline.
+
+    @invariant ARowThatFailsUnderThisHostRollsBack
+        -- == A row that fails under this host ==
+        -- The row can fail while this host is still working: the module's
+        -- backstop timer (store-split.allium: DispatchRequestTimesOut), the
+        -- task's close (CloseFailsOpenRequests), or the task's deletion
+        -- (DeletingATaskFailsItsOpenRequest, after which the row is deleted
+        -- too: DeletingATaskDeletesItsRequestRows). Either way the module has
+        -- finished the row, and this host's dispatched report, if it sends
+        -- one, is refused. The host learns that the row failed
+        -- under it from that refused report, when its provisioning ends — it
+        -- does not watch the row mid-attempt — and treats it as a provisioning
+        -- failure after the fact: it applies the provisioning-failure rollback
+        -- below to what this attempt created (the window it opened, a FRESH
+        -- worktree and its branch; never a reused one), so no agent keeps
+        -- running against a task that is back in backlog, or gone, and may
+        -- already be requested again. The attempt itself is bounded by the
+        -- row's deadline either way (ProvisioningStopsAtTheDeadline), and the
+        -- backstop cannot fail the row before that deadline has passed, so in
+        -- practice only a task's deletion or close fails a row mid-attempt.
+
+    @invariant ProvisioningFailureRollsBack
+        -- == Provisioning-failure rollback ==
+        -- "Dispatchable exactly as before" is a claim about disk state (and
+        -- tmux state), not just the task row, and it only holds if a failed
+        -- dispatch leaves no trace of what it created. So: once `git worktree
+        -- add` has created a FRESH worktree for this attempt, any later
+        -- failure in the same dispatch — opening the tmux window, setting its
+        -- dispatch dir, installing the split hook, writing `.claude-prompt`,
+        -- or sending the launch keystroke — rolls back everything this
+        -- attempt created before the error propagates, via the same
+        -- kill-window-then-remove-worktree teardown used elsewhere (see
+        -- TaskTeardown in tasks.allium): the tmux window this attempt opened
+        -- (killed if present), then
+        -- `git worktree remove --force` on the path, then a best-effort
+        -- `git branch -D` on the branch it created. All of it is best-effort —
+        -- a rollback failure is logged, never surfacing over the original
+        -- provisioning error, since the operator needs to know why the
+        -- dispatch failed, not that cleanup afterward also failed.
+        -- Without this, a re-dispatch of the same task would silently take
+        -- the REUSED path (the orphaned directory still exists), which is a
+        -- different, weaker code path than the one "exactly as before" implies
+        -- — the fetch downgrades from Required to BestEffort, and an edited
+        -- title changes the slug and orphans the directory permanently.
+        --
+        -- The window half is symmetrical, and for the same reason: the
+        -- rollback kills the window ONLY when this attempt is the one that
+        -- opened it. A dispatch that never got a window of its own — because
+        -- the name was already taken by a live one, which
+        -- TmuxWindowNamesAreUnique refuses to duplicate — must leave that
+        -- window alone. It is somebody else's running agent, and killing it
+        -- would turn a refusal that changed nothing into the worst outcome
+        -- available: the conflicting session destroyed, by the flow whose
+        -- whole purpose was to not disturb it.
+        --
+        -- The worktree-and-branch half of this rollback applies ONLY to a
+        -- worktree created fresh during THIS attempt. A REUSED worktree (its
+        -- directory already existed before `git worktree add` was even
+        -- considered) is never removed on failure, no matter which later step
+        -- fails: it predates this dispatch, may hold another attempt's state,
+        -- and this flow did not create it. The reuse path's failure surface
+        -- is covered separately — an unreachable origin on reuse downgrades to
+        -- a "Note: ..." warning (see WorktreeProvisioner below), never a
+        -- removal. The tmux-window half of the rollback is independent of
+        -- reuse — the window is never reused, so whether the worktree was
+        -- decides nothing about it. What decides it is the separate condition
+        -- stated above: this attempt opened that window.
+        --
+        -- Each of the three tmux calls this rollback guards against —
+        -- opening the window, setting its dispatch dir, installing the split
+        -- hook — is bounded by SUBPROCESS_TIMEOUT (120s), so a hung tmux
+        -- server now surfaces as an ordinary failure here (triggering this
+        -- same rollback) within 120s rather than parking the calling thread
+        -- indefinitely.
+}
+
+-- How ProvisionDispatch makes the worktree a claimed request launches into:
+-- the trust gate before it, whether the path is fresh or reused, the fetch,
+-- the start point, the branch and the rebase preamble the prompt carries.
+-- Demanded by DispatchProvisioning.
+contract WorktreeProvisioner {
+    @invariant RepoTrustPreGate
+        -- == Repo-trust pre-gate ==
+        -- Every launch of a worktree agent from the TUI is gated on Claude
+        -- Code trusting the repo: an untrusted repo makes the freshly created
+        -- worktree stall on Claude Code's own interactive trust prompt, so
+        -- the agent never starts. The gate runs before ProvisionDispatch fires, not
+        -- inside it: the TUI checks trust on task.repo_path and, when
+        -- untrusted, shows a confirmation prompt (ConfirmTrustRepo, "trust
+        -- it? [y/N]") whose accept branch grants trust and then emits
+        -- DispatchTask; declining dispatches nothing. Trust is keyed on the
+        -- REPO path, which is what makes the worktree beneath
+        -- <repo_path>/.worktrees/... launchable.
+        -- The trust check and the trust grant read and write Claude Code's
+        -- ~/.claude.json, several MB and possibly on a stalled mount, so they
+        -- run on a blocking thread OFF the command drain and report back as a
+        -- message (TrustChecked, TrustGranted), never by holding the drain: a
+        -- slow file freezes only the one dispatch waiting on it, not the
+        -- board. The result message names the flow that asked (dispatch or
+        -- quick dispatch) and the board then takes the same branch it always
+        -- did: dispatch, ask, report the failure, or abandon the claim.
+        -- Quick dispatch shares this gate — see QuickDispatchTrustGate and
+        -- TrustRepoForQuickDispatch in tasks.allium, which apply the same
+        -- check to the still-pending creation parameters (no task exists yet
+        -- at that point) and write to the same trust record. Trust is the
+        -- only gate the two entry points share; the rest of quick dispatch
+        -- is its own path (see CreateQuickTask).
+        --
+        -- Before creating the worktree, `git fetch origin <base_branch>` is
+        -- run in the repo root to update the remote-tracking ref. This fetch
+        -- runs unconditionally — even when the worktree directory already
+        -- exists on disk (pre-created) — so `origin/<base_branch>` stays as
+        -- fresh as possible for the selection below. If the worktree directory
+        -- already exists, only the `git worktree add` step is skipped; the
+        -- fetch still runs.
+
+    @invariant WorktreeExistenceIsOneQuestion
+        -- == "Does the worktree path exist" has one answer ==
+        -- WorktreeExistenceIsOneQuestion. Two flows ask whether anything
+        -- exists at the worktree path, and they must not be able to disagree:
+        -- ProvisionDispatch asks it to decide fresh vs reused, and teardown's step 2b
+        -- asks it to decide whether there is anything to delete (see
+        -- WorktreeDirectoryMustNotSurviveTeardown in tasks.allium). Both ask
+        -- through one shared primitive, and it is the stat teardown already
+        -- specifies — AbsentMeansNotFound and
+        -- SymlinksAreUnlinkedNeverFollowed apply here unchanged. What is
+        -- shared is the stat, not the spelling of the path handed to it:
+        -- teardown lexically normalises its path first, because its own
+        -- deletion bound is a lexical prefix test. Both spellings derive from
+        -- one recorded repo_path, so they name the same file today:
+        --
+        --   * NOT FOUND is the only absence. The path is FRESH.
+        --   * Anything that exists is presence, including a path that is
+        --     itself a symlink, dangling or not. The link is what is asked
+        --     about, never its target.
+        --   * Any other stat answer — a parent without execute permission, an
+        --     I/O error, an unmounted mount point — is neither, and the dispatch
+        --     ABORTS rather than guessing. No worktree is
+        --     created, no window opens, no agent launches, and nothing on
+        --     disk is touched. The abort message names the path and the
+        --     underlying error.
+        --
+        -- PresenceIsNotYetReuse. Presence settles what may be DELETED; it does
+        -- not settle what may be WORKED IN. Those are two questions and the
+        -- dispatch asks both, in that order:
+        --
+        --   * present, and resolving to a DIRECTORY — REUSED. `git worktree
+        --     add` is skipped and the agent is launched there. A symlink to a
+        --     real directory qualifies; it is followed for this question only.
+        --   * present, resolving to a directory that holds no `.git` — a husk,
+        --     not a worktree — ABORTS the same way. Reusing it would point
+        --     every `git -C` at the PARENT repository, so the reuse fast-forward
+        --     would run in the primary checkout.
+        --   * present, and anything else — a dangling symlink, a regular file,
+        --     a link to a file, a socket, a device, or a target that cannot be
+        --     stat'd at all — ABORTS, on the same terms as the unreadable case
+        --     above: nothing on disk is touched, and the message names the
+        --     path. Where there is an underlying error it is named too, which
+        --     is what tells "something else is in the way" apart from "the
+        --     target could not be reached". The list is illustrative; the rule
+        --     is that only a directory is reusable.
+        --
+        -- Creating the `.worktrees` root also adds `.worktrees/` to the repo's
+        -- `info/exclude` (idempotently), so the worktrees never make the
+        -- primary checkout read as dirty. A fresh add uses `-b`: an existing
+        -- branch is reset (`-B`) only when the start point already contains it,
+        -- and otherwise the dispatch aborts rather than lose unpushed commits.
+        --
+        -- The abort is what the second question is FOR. Skipping
+        -- `git worktree add` is the whole of the reuse path, so a path that
+        -- cannot be worked in produces no error of its own downstream: tmux
+        -- accepts an unresolvable start directory and silently starts the pane
+        -- in the operator's HOME (probed against tmux 3.7c: the
+        -- `-c` argument is not validated and `new-window` exits 0). Reuse
+        -- without this check therefore does not fail; it launches an agent
+        -- outside any worktree, with the task recording the unusable path as
+        -- its worktree, and nothing looks wrong.
+        --
+        -- Taking the FRESH path instead is not the alternative it appears to
+        -- be. `git worktree add` would then fail on the occupied path, which
+        -- does abort — but it aborts having already declared the path fresh,
+        -- and a fresh path is one the provisioning-failure rollback may
+        -- delete. That is the hazard above, re-armed. Answering presence and
+        -- usability separately is what lets the rule refuse without ever
+        -- claiming the path is its own to remove.
+        --
+        -- The abort is not caution for its own sake. Every onward choice
+        -- turns on this answer: which start-point path runs, whether
+        -- `git worktree add` is issued, and — the dangerous one — whether the
+        -- provisioning-failure rollback above is allowed to delete the path.
+        -- Guessing ABSENT for an unreadable path is what makes that rollback
+        -- eligible to delete a directory this attempt did not create, which
+        -- is precisely what the "never removes a REUSED worktree" clause
+        -- exists to prevent. Guessing PRESENT instead would launch an agent
+        -- into a directory nobody could read. Refusing is the only answer
+        -- that is wrong in neither direction.
+        --
+        -- A dangling symlink at the worktree path is therefore present but not
+        -- usable: the dispatch aborts, and the link survives. It is still
+        -- there for the operator to see, rather than silently unlinked by a
+        -- rollback that did not create it, as deciding presence by a
+        -- link-following `exists()` would.
+
+    @invariant ReusedBranchWithNoOwnWorkIsFastForwarded
+        -- == A reused branch with no work of its own is fast-forwarded ==
+        -- ReusedBranchWithNoOwnWorkIsFastForwarded. Skipping `git worktree
+        -- add` also skips the one step that places the branch, so a worktree
+        -- left by an earlier failed dispatch keeps the branch where that
+        -- attempt made it — possibly many commits behind the base, which the
+        -- agent notices only by chance. On the reuse path,
+        -- when a base branch is known and is not a PR head, the branch is
+        -- therefore reconciled with the start point StartPointSelection chooses
+        -- (the same ref a fresh worktree would have been created from):
+        --
+        --   * no commits of its own — `git rev-list --count --left-right
+        --     <start>...HEAD` reports 0 on the HEAD side — and behind the start
+        --     point: `git merge --ff-only <start>` runs in the worktree, and
+        --     the move is logged with the branch and the ref.
+        --   * no commits of its own and not behind: nothing to do.
+        --   * commits of its own: left alone. The agent merges the base as the
+        --     reuse preamble instructs.
+        --
+        -- Best-effort, like the reuse fetch. If the count cannot be read or
+        -- the fast-forward is refused (for example uncommitted changes that
+        -- the move would overwrite), a warning is logged and the dispatch goes
+        -- on with the branch as it was: the preamble's merge instruction still
+        -- covers it. Never a reason to abort, and never a reset — a branch
+        -- with work on it is not moved.
+
+    @invariant StaleAdminRecordIsPrunedBeforeWorktreeAdd
+        -- == A stale admin record is pruned before every fresh add ==
+        -- StaleAdminRecordIsPrunedBeforeWorktreeAdd. `git worktree prune` is
+        -- run best-effort in the repo root immediately before
+        -- `git worktree add`, on the FRESH path only.
+        --
+        -- The record is the hazard PruneTheRecordGitKeptWhenItRemovedNothing
+        -- describes (tasks.allium): a `.git/worktrees/<name>` entry whose
+        -- directory is gone still claims the branch, and the next
+        -- `git worktree add` for the same task fails with "'<branch>' is
+        -- already used by worktree at ..." (probed against git 2.55).
+        -- Teardown prunes the records it personally witnessed, and must
+        -- continue to — it prunes before its own step-3 branch delete, which
+        -- fails while the record still claims the branch. But teardown only
+        -- runs for the husks teardown made. A record left by an operator's
+        -- `rm -rf`, by a crashed dispatch, or by a husk deleted by hand
+        -- has no teardown behind it, and blocks
+        -- re-dispatch forever. Pruning here covers every cause, including
+        -- that existing backlog, and makes teardown's prune belt-and-braces
+        -- rather than the only guard.
+        --
+        -- Repo-wide is safe: prune drops only records whose directory is
+        -- missing, so it cannot reach a live worktree — including a sibling
+        -- task's in the same repo. Best-effort: a prune failure is ignored,
+        -- because the add that follows is the step whose success actually
+        -- decides the dispatch, and its error is the one worth reporting.
+        --
+        -- The REUSED path does not prune. It skips `git worktree add`
+        -- entirely, so there is no record conflict to clear and nothing to
+        -- gain — and that path exists partly to stay cheap when the network
+        -- is down, which spending another bounded subprocess would undo.
+        --
+        -- This is a sequential, SUBPROCESS_TIMEOUT-bounded call on the fresh
+        -- path, so it spends time from the request's deadline like every other
+        -- provisioning step (store-split.allium: config.dispatch_request_timeout).
+        -- Teardown's prune is NOT bounded that way, and neither are the remove
+        -- and branch-delete beside it.
+        --
+        -- That costs nothing at teardown's two ordinary entry points, which run
+        -- detached on a blocking thread with no timeout budget to fit inside.
+        -- It is a known gap at the third: the provisioning-failure rollback
+        -- above reaches the same teardown SYNCHRONOUSLY, inside the dispatch
+        -- worker the row's deadline is timing — so a git that hangs while
+        -- rolling back parks that worker, past the point where the deadline
+        -- stop (ProvisioningStopsAtTheDeadline) can report for it. The
+        -- module's backstop timer then fails the request and releases the
+        -- claim, but cannot cancel the parked worker. Bounding those three
+        -- calls is tracked separately.
+
+    @invariant FreshVsReusedDecidesTheFetch
+        -- == Fresh vs reused decides how hard the fetch tries ==
+        -- The existence question above is asked BEFORE the fetch, because it
+        -- decides how much the fetch is allowed to cost and whether its
+        -- failure is fatal. The two paths differ because the
+        -- resolved ref is used for different things:
+        --
+        -- - FRESH — the ref is about to become the worktree's branch, via
+        --   `git worktree add`. Getting it wrong bakes stale history into the
+        --   branch, so origin MUST be reachable. The classification and retry
+        --   rules below apply in full.
+        -- - REUSED — `git worktree add` is skipped entirely, so no ref is
+        --   consumed to create anything; the resolved ref feeds only the
+        --   rebase preamble. A single best-effort fetch attempt still runs (to
+        --   keep `origin/<base_branch>` fresh for later rebases), but it is NOT classified and NOT
+        --   retried, and any failure is a warning rather than an abort. Both
+        --   the classification probe and the retry budget exist solely to
+        --   serve the abort decision this path does not make, and each costs a
+        --   further bounded-subprocess timeout against an unresponsive
+        --   network — so an offline re-dispatch of a task whose worktree is
+        --   still on disk waits for one fetch, not for a probe plus three
+        --   fetches. See the reuse rows in the start-point table below for
+        --   which ref is chosen when that fetch fails.
+
+    @invariant FetchFailureIsClassified
+        -- == Fetch failure is classified, not blanket-tolerated ==
+        -- On the FRESH path a failed fetch is never treated as one uniform
+        -- case, and it is never classified by matching git's stderr text —
+        -- only by exit code. Once `git fetch origin <base_branch>` fails,
+        -- `git ls-remote --exit-code origin refs/heads/<base_branch>` is run
+        -- to tell apart:
+        --
+        -- - 404-class — no origin remote is configured at all, or origin has
+        --   no branch by that name (ls-remote exits 2). This is NOT an error
+        --   BY ITSELF: local <base_branch> is then the only candidate that
+        --   could exist, so it is used, and a warning is surfaced to the agent
+        --   as a "Note: ..." line in its prompt (same threading as before —
+        --   the agent is told directly in its prompt, not just via a
+        --   server-side log entry). This class is never retried: retrying a
+        --   fetch of a branch that does not exist on origin cannot succeed.
+        --   "Could exist" rather than "exists" is the load-bearing word — see
+        --   UnresolvableBaseIsRefusedByName below for the case where it does
+        --   not.
+        -- - infra-class — origin is reachable-or-unknown but the fetch itself
+        --   failed (ls-remote exits 128, or even 0, or the probe itself fails
+        --   to spawn). This is retried — `git fetch origin <base_branch>` is
+        --   attempted up to a small maximum number of times (currently 3) with
+        --   a short delay between attempts — and if every attempt still
+        --   fails, the dispatch ABORTS: no worktree is created, no tmux
+        --   window opens, no agent launches. Nothing is left on disk either —
+        --   the `.worktrees/` directory is created immediately before the
+        --   worktree it holds, not before the fetch, so an aborted dispatch
+        --   leaves no empty directory behind. The abort message names both the
+        --   cause and a next step (check connectivity, then dispatch again),
+        --   because the condition is usually the operator's to fix.
+
+    @invariant StartPointSelection
+        -- == Start-point selection ==
+        -- On a successful fetch, the worktree's start point is chosen by
+        -- comparing local <base_branch> against `origin/<base_branch>`:
+        -- local wins only when it holds commits origin lacks (ahead > 0);
+        -- otherwise `origin/<base_branch>` is used, which is today's
+        -- behaviour for the ahead = 0 case. Local is *never* chosen when the
+        -- comparison is unmeasurable (local <base_branch> does not resolve on
+        -- disk) — that case looks identical to "local <base_branch> does not
+        -- exist" and must fall back to origin, not local.
+        -- When local is both ahead and behind (diverged), local is still
+        -- taken, and silently — no additional warning is added to the
+        -- agent's prompt beyond what is described above.
+        -- The worktree branch is cut from `<selected ref>`, whichever of
+        -- local <base_branch> or `origin/<base_branch>` was selected above,
+        -- with `-b`, or `-B` only as the fresh-add paragraph above allows.
+
+    @invariant UnresolvableBaseIsRefusedByName
+        -- == UnresolvableBaseIsRefusedByName ==
+        -- On the FRESH path only, the selected ref must be known to resolve in
+        -- the repository before `git worktree add` is asked to consume it.
+        -- When it is not, provisioning is REFUSED, and the refusal names
+        -- the task's base_branch and both refs that were tried —
+        -- `origin/<base_branch>` and local <base_branch> — and says that the
+        -- repository has neither, so the task's base branch is the thing to
+        -- correct. Nothing is created: no worktree, no tmux window, no agent,
+        -- and no empty `.worktrees/` directory, exactly as for the
+        -- infra-class abort above.
+        --
+        -- Only ONE of the three ways a start point is chosen leaves it
+        -- unproven, and only that one is probed:
+        --
+        -- - after a successful fetch, `origin/<base_branch>` is proven by the
+        --   fetch itself — it is the ref the fetch just updated;
+        -- - local <base_branch> chosen by the ahead/behind comparison is
+        --   proven by that comparison, which yields no counts at all when
+        --   local does not resolve, and local is taken only on ahead > 0;
+        -- - local <base_branch> chosen by the 404-class branch above is
+        --   proven by NOTHING. Origin not having the branch says nothing
+        --   about whether the local repo does. This is the case that is
+        --   probed, and the only one.
+        --
+        -- Stated as a proof structure rather than "probe whichever ref was
+        -- chosen" because the difference is observable: a probe on every path
+        -- would spend a subprocess re-establishing what the step before it
+        -- already established, on the hot path of every dispatch.
+        -- A task whose base_branch names a branch the repository has never
+        -- had — the common shape being "main" recorded against a repo whose
+        -- default is "master" — lands here. Left unchecked it surfaced as
+        -- git's own `fatal: invalid reference: <base_branch>`, wrapped in a
+        -- dispatch failure that named neither the ref it wanted nor the field
+        -- holding it. When the failing dispatch was the epic auto-dispatch
+        -- chain (epics.allium: AutoDispatchNextSubtask), which cannot fail its
+        -- caller, that message was the whole of the evidence.
+        --
+        -- Scoped to the FRESH path deliberately. On the REUSED path no ref is
+        -- consumed to create anything — the selected ref feeds only the
+        -- rebase preamble — so an unresolvable one is the same class of
+        -- problem as an unreachable origin there, and that path already
+        -- degrades to a warning rather than an abort. Refusing there would
+        -- turn re-dispatches that work today into failures.
+        --
+        -- When the best-effort fetch on the REUSED path fails, there is no
+        -- trustworthy comparison to make — `origin/<base_branch>` is exactly
+        -- the ref that could not be refreshed — so the ahead/behind
+        -- measurement is skipped and the start point is fixed by the kind of
+        -- base instead:
+        --
+        -- - a base branch resolves to local <base_branch>. It is the ref whose
+        --   freshness is not in doubt, and the one wrap-up rebases onto, so
+        --   the preamble and wrap-up agree. Pointing the preamble at an
+        --   unrefreshed `origin/<base_branch>` would risk replaying local
+        --   <base_branch>'s unpushed commits under new SHAs — the same
+        --   history-duplication hazard the selection rule above exists to
+        --   avoid.
+        -- - a PR head branch stays pinned to `origin/<headRefName>`, never
+        --   local. The carve-out below is absolute: a review must never be
+        --   handed a local branch of the same name. Nothing is poisoned by
+        --   staying pinned, because the reused worktree already holds the PR's
+        --   code from the previous attempt; if the preamble's rebase then
+        --   cannot reach the origin ref, the agent sees that directly and the
+        --   "Note: ..." line explains why.
+        --
+        -- Either way a "Note: ..." line tells the agent that origin could not
+        -- be reached and that its worktree was reused, so nothing needed the
+        -- network.
+        --
+        -- Review tasks (tag pr-review, dependabot or release-please — the
+        -- review set, core.allium: "THE REVIEW SET") that carry a PR URL are
+        -- an explicit carve-out from all of the above: their worktree is
+        -- always based on the PR's head branch instead of <base_branch>, so
+        -- the agent sees the PR's code, and the ahead/behind comparison is
+        -- never run for them. The PR's head branch is resolved with
+        -- `gh pr view <url> --json headRefName,isCrossRepository`; the
+        -- worktree is then created from `origin/<headRefName>` (same
+        -- fetch-then-base flow as above, but always the origin ref — never
+        -- compared against a local branch of the same name). This soft-falls
+        -- back to <base_branch> on any gh failure, empty output, or a
+        -- cross-repository (fork) PR whose head branch is not on origin.
+        -- This `gh pr view` call is bounded by SUBPROCESS_TIMEOUT (120s), so
+        -- a hung `gh` falls into this same soft fallback rather than
+        -- blocking the dispatch indefinitely.
+        -- That fallback happens before the head branch is resolved to a
+        -- fetch target; it does not apply once a PR head branch has been
+        -- chosen. If the subsequent `git fetch origin <headRefName>` then
+        -- classifies as 404-class — origin no longer has that branch, e.g.
+        -- it was merged and deleted after `gh pr view` resolved it — the
+        -- 404-class local-branch fallback described above does NOT apply to
+        -- a PR head branch. A stale local branch of the same name would let
+        -- a review silently examine the wrong code, so this instead ABORTS
+        -- the dispatch with an error naming the missing branch: no worktree
+        -- is created, no tmux window opens, no agent launches. It does not
+        -- fall back to <base_branch> either, because the worktree
+        -- provisioning step does not know the task's base branch at that
+        -- point. This abort, like the infra-class one, is a FRESH-path rule:
+        -- a reused review worktree already holds the PR's code, classifies
+        -- nothing, and stays pinned to `origin/<headRefName>` with a warning
+        -- (see the reuse rows above). What never varies is the carve-out
+        -- itself — no path ever bases a review on a local branch.
+        -- For these PR-based worktrees the reused-worktree preamble (see
+        -- below) also targets the PR branch (`git fetch origin <headRefName>`
+        -- + `git rebase origin/<headRefName>`) rather than the base branch,
+        -- framed as an on-demand refresh so the agent can pull later pushes
+        -- to the PR.
+        -- The launched Claude command includes a plugin-dir flag so
+        -- the agent discovers dispatch plugin skills (e.g. dispatch:wrap-up).
+
+    @invariant ConditionalRebasePreamble
+        -- == Conditional rebase preamble ==
+        -- The fetch-then-rebase preamble is not unconditional. It targets
+        -- the resolved start point — whichever ref, local <base_branch> or
+        -- `origin/<base_branch>`, was actually selected above — and is
+        -- emitted only when the worktree is being REUSED (the worktree
+        -- directory already existed on disk) or for a PR-based worktree. On a
+        -- fresh dispatch the preamble is absent, because the branch already
+        -- *is* the resolved start point: a rebase onto it would be a
+        -- guaranteed no-op at best, and if it instead targeted
+        -- `origin/<base_branch>` unconditionally while the branch was created
+        -- from a local <base_branch> that is ahead, it would replay those
+        -- already-present commits with new SHAs — duplicating history rather
+        -- than refreshing it.
+        -- Invariant: the preamble's target is always the resolved base
+        -- branch (task.base_branch, or else the detected default), never a
+        -- literal "main".
+        -- The launch carries no --permission-mode flag, for any mode —
+        -- see AgentLaunchCommand: EveryTaskAgentLaunchesInAutoMode.
+}
+
+------------------------------------------------------------
 -- Config
 ------------------------------------------------------------
 
@@ -222,7 +834,7 @@ rule ProvisionDispatch {
         -- (store-split.allium: HostReportsDispatchFailed).
         -- reused_worktree is whether the worktree directory already existed,
         -- measured before acting, and was reused rather than created (see
-        -- "Fresh vs reused" below).
+        -- WorktreeProvisioner: "Fresh vs reused").
         split/DispatchProvisioned(
             request: request,
             reporter: core/local_host(),
@@ -267,586 +879,16 @@ rule ProvisionDispatch {
     -- runbook checks against are all in dispatch-prompt.allium. Its rules fire
     -- on the AgentLaunched event this rule emits, so every guarantee there is
     -- owed by this dispatch. The launch command that carries the text is
-    -- AgentLaunchCommand; what stays below is the provisioning.
+    -- AgentLaunchCommand.
+
+    -- HOW THE ROW IS SERVED AND HOW THE WORKTREE IS MADE are the two contracts
+    -- the DispatchProvisioning surface demands: DispatchRequestServing (the
+    -- claim, the answers and reports, the deadline, the failure rollback) and
+    -- WorktreeProvisioner (trust, fresh vs reused, fetch, start point, branch,
+    -- rebase preamble). Each invariant there opens with its `== heading ==`
+    -- line, the name other specs and the code cite.
 
     @guidance
-        -- == Subagent state reset ==
-        -- A fresh dispatch clears every core/SubagentEntry left over from a
-        -- prior run of this task (a backlog task should never carry live
-        -- subagents from before) and resets live_subagents to 0. The
-        -- module does this in the claim's own transaction
-        -- (store-split.allium: RequestDispatch), not this rule. stop_pending
-        -- is cleared too, but the HookSubagentStop drain path does NOT run
-        -- there even if it was set: the claim moves the task into Running,
-        -- and draining to Review in the same write would leave a task
-        -- freshly-dispatched-and-in-Review. The dispatch is the more
-        -- informative outcome and wins. Clearing stop_pending unconditionally
-        -- still matters — otherwise the bit would survive into the new
-        -- session and fire a spurious flip the next time a subagent hook
-        -- landed on the drain path (see agent-health.allium).
-        --
-        -- == The claim, and precondition timing ==
-        -- The backlog precondition is not a read: it is an atomic claim, and it
-        -- is the same claim on every entry point (the TUI dispatch key and its
-        -- trust-confirmed, retry-fresh and quick-dispatch siblings,
-        -- DispatchTaskViaMcp, and AutoDispatchNextSubtask in epics.allium).
-        -- The claim IS the request: one module
-        -- transaction applies backlog -> running, the default running
-        -- sub_status and the seeded last_pre_tool_use_at, conditionally on the
-        -- task still being backlog with no open request, and writes the
-        -- request row (store-split.allium: RequestDispatch). That happens
-        -- BEFORE provisioning starts. The worktree, tmux_window and host are
-        -- written by the module when this rule's report lands
-        -- (store-split.allium: HostReportsDispatched).
-        --
-        -- Two consequences, both normative. First, the precondition is evaluated
-        -- against the pre-claim state and enforced by the claim itself, so
-        -- exactly one caller can provision a given task no matter how many fire
-        -- at once (DispatchClaimExclusive below). A request that is refused
-        -- provisions nothing and launches no agent: DispatchTaskViaMcp reports
-        -- that the task is no longer in backlog, the TUI clears its
-        -- DispatchingFeedback entry with a failure message, and the chain moves
-        -- to its next candidate. Second, a task being dispatched is running
-        -- with worktree = null until the report lands (see
-        -- RunningTaskHasWorktree below).
-        --
-        -- If provisioning fails, this host rolls back what it created (below)
-        -- and reports the failure; the module then releases the claim: the
-        -- task returns to backlog with the default backlog sub_status and the
-        -- last_pre_tool_use_at the claim seeded cleared again, leaving it
-        -- dispatchable exactly as before (store-split.allium:
-        -- ReleaseClaimOfFailedRequest). That release is conditional, mirroring
-        -- the claim — it applies only while the task is still running with no
-        -- worktree, so a task provisioned or moved on meanwhile is left alone
-        -- rather than stomped back to backlog. The same release follows every
-        -- other failure: this host's deadline stop
-        -- (ProvisioningStopsAtTheDeadline below), the module's backstop timer
-        -- (DispatchRequestTimesOut) and a restart of this host
-        -- (HostRestartFailsInterrupted). A task deleted under its request has
-        -- nothing to release (DeletingATaskFailsItsOpenRequest), a task
-        -- closed under it is Done, which the release leaves alone
-        -- (store-split.allium: CloseFailsOpenRequests), and a task the
-        -- operator moved to backlog or done has already left running, so the
-        -- release leaves it alone too (store-split.allium:
-        -- GivingUpTheLaunchCancelsTheDispatch).
-        --
-        -- Only a FAILED REQUEST releases a claim, and no client calls a release
-        -- of its own. A refused request wrote nothing and holds nothing, so
-        -- losing the claim and failing after winning it, which look the same
-        -- to the user, cannot be confused by the code: there is no release for
-        -- a loser to call (LostClaimReported on the DispatchingFeedback
-        -- surface).
-        --
-        -- == A claim that gets no answer ==
-        -- Only a claim the module ANSWERED — accepted or refused — settles
-        -- whether this host serves the row. A claim that could not be sent
-        -- (a transport error), or a row held back because this board has no
-        -- settled identity yet to compare requested_by against, is not
-        -- served: the row is still requested, and the next delivery of this
-        -- host's rows hands it out again (store-split.allium:
-        -- HostClaimsDispatch). The retry ends when the row stops being
-        -- requested — claimed, or failed by the backstop at its deadline.
-        --
-        -- == A report that ends in a transport error ==
-        -- A dispatched report that gets no answer may or may not have been
-        -- recorded. The host sends it once more: the module accepts a repeat
-        -- of a report that already landed and changes nothing
-        -- (store-split.allium: HostRepeatsDispatchedReport), so an accepted
-        -- retry means the agent is kept, whichever send landed. A refused
-        -- retry is a refused report (below): the host tears down and reports
-        -- the failure. A retry that also gets no answer leaves the outcome
-        -- unknown; the host tears down and reports the failure, which the
-        -- module accepts while the row is still provisioning.
-        --
-        -- == A refused dispatched report ==
-        -- Whatever refused it — the row failed under this host (below), the
-        -- row's deadline passed before the report landed, or the operator
-        -- moved the task to backlog or done meanwhile (store-split.allium:
-        -- HostReportsDispatched, GivingUpTheLaunchCancelsTheDispatch) —
-        -- nothing was recorded on the task, so the host tears down what this
-        -- attempt made and reports the failure: "deadline passed" once the
-        -- deadline has gone by, else "task moved back to backlog" or "task
-        -- moved to done" when its view of the task shows the move. On a row
-        -- that already failed that report is refused in turn, and the row
-        -- keeps the module's reason.
-        --
-        -- The move back is why a task can sit in backlog with a dispatch
-        -- still open: the row stays provisioning until this host's teardown
-        -- has reported, so no second dispatch meets the first one's worker.
-        --
-        -- == The row's deadline bounds provisioning ==
-        -- Provisioning runs against the request's deadline (requested_at plus
-        -- store-split.allium's config.dispatch_request_timeout, exposed on the
-        -- row), not against a budget of its own. At the deadline this host
-        -- stops: see ProvisioningStopsAtTheDeadline below. Every
-        -- SUBPROCESS_TIMEOUT bound in this rule still applies, but the
-        -- deadline is the tighter one, and a single bounded call can be cut
-        -- off by it. A test holds the host to this: a provisioning whose
-        -- subprocess stalls fails at the row's deadline.
-        --
-        -- == A row that fails under this host ==
-        -- The row can fail while this host is still working: the module's
-        -- backstop timer (store-split.allium: DispatchRequestTimesOut), the
-        -- task's close (CloseFailsOpenRequests), or the task's deletion
-        -- (DeletingATaskFailsItsOpenRequest, after which the row is deleted
-        -- too: DeletingATaskDeletesItsRequestRows). Either way the module has
-        -- finished the row, and this host's dispatched report, if it sends
-        -- one, is refused. The host learns that the row failed
-        -- under it from that refused report, when its provisioning ends — it
-        -- does not watch the row mid-attempt — and treats it as a provisioning
-        -- failure after the fact: it applies the provisioning-failure rollback
-        -- below to what this attempt created (the window it opened, a FRESH
-        -- worktree and its branch; never a reused one), so no agent keeps
-        -- running against a task that is back in backlog, or gone, and may
-        -- already be requested again. The attempt itself is bounded by the
-        -- row's deadline either way (ProvisioningStopsAtTheDeadline), and the
-        -- backstop cannot fail the row before that deadline has passed, so in
-        -- practice only a task's deletion or close fails a row mid-attempt.
-        --
-        -- == Provisioning-failure rollback ==
-        -- "Dispatchable exactly as before" is a claim about disk state (and
-        -- tmux state), not just the task row, and it only holds if a failed
-        -- dispatch leaves no trace of what it created. So: once `git worktree
-        -- add` has created a FRESH worktree for this attempt, any later
-        -- failure in the same dispatch — opening the tmux window, setting its
-        -- dispatch dir, installing the split hook, writing `.claude-prompt`,
-        -- or sending the launch keystroke — rolls back everything this
-        -- attempt created before the error propagates, via the same
-        -- kill-window-then-remove-worktree teardown used elsewhere (see
-        -- TaskTeardown in tasks.allium): the tmux window this attempt opened
-        -- (killed if present), then
-        -- `git worktree remove --force` on the path, then a best-effort
-        -- `git branch -D` on the branch it created. All of it is best-effort —
-        -- a rollback failure is logged, never surfacing over the original
-        -- provisioning error, since the operator needs to know why the
-        -- dispatch failed, not that cleanup afterward also failed.
-        -- Without this, a re-dispatch of the same task would silently take
-        -- the REUSED path (the orphaned directory still exists), which is a
-        -- different, weaker code path than the one "exactly as before" implies
-        -- — the fetch downgrades from Required to BestEffort, and an edited
-        -- title changes the slug and orphans the directory permanently.
-        --
-        -- The window half is symmetrical, and for the same reason: the
-        -- rollback kills the window ONLY when this attempt is the one that
-        -- opened it. A dispatch that never got a window of its own — because
-        -- the name was already taken by a live one, which
-        -- TmuxWindowNamesAreUnique refuses to duplicate — must leave that
-        -- window alone. It is somebody else's running agent, and killing it
-        -- would turn a refusal that changed nothing into the worst outcome
-        -- available: the conflicting session destroyed, by the flow whose
-        -- whole purpose was to not disturb it.
-        --
-        -- The worktree-and-branch half of this rollback applies ONLY to a
-        -- worktree created fresh during THIS attempt. A REUSED worktree (its
-        -- directory already existed before `git worktree add` was even
-        -- considered) is never removed on failure, no matter which later step
-        -- fails: it predates this dispatch, may hold another attempt's state,
-        -- and this flow did not create it. The reuse path's failure surface
-        -- is covered separately — an unreachable origin on reuse downgrades to
-        -- a "Note: ..." warning (see the fetch-policy rules above), never a
-        -- removal. The tmux-window half of the rollback is independent of
-        -- reuse — the window is never reused, so whether the worktree was
-        -- decides nothing about it. What decides it is the separate condition
-        -- stated above: this attempt opened that window.
-        --
-        -- Each of the three tmux calls this rollback guards against —
-        -- opening the window, setting its dispatch dir, installing the split
-        -- hook — is bounded by SUBPROCESS_TIMEOUT (120s), so a hung tmux
-        -- server now surfaces as an ordinary failure here (triggering this
-        -- same rollback) within 120s rather than parking the calling thread
-        -- indefinitely.
-        --
-        -- == Repo-trust pre-gate ==
-        -- Every launch of a worktree agent from the TUI is gated on Claude
-        -- Code trusting the repo: an untrusted repo makes the freshly created
-        -- worktree stall on Claude Code's own interactive trust prompt, so
-        -- the agent never starts. The gate runs before this rule fires, not
-        -- inside it: the TUI checks trust on task.repo_path and, when
-        -- untrusted, shows a confirmation prompt (ConfirmTrustRepo, "trust
-        -- it? [y/N]") whose accept branch grants trust and then emits
-        -- DispatchTask; declining dispatches nothing. Trust is keyed on the
-        -- REPO path, which is what makes the worktree beneath
-        -- <repo_path>/.worktrees/... launchable.
-        -- The trust check and the trust grant read and write Claude Code's
-        -- ~/.claude.json, several MB and possibly on a stalled mount, so they
-        -- run on a blocking thread OFF the command drain and report back as a
-        -- message (TrustChecked, TrustGranted), never by holding the drain: a
-        -- slow file freezes only the one dispatch waiting on it, not the
-        -- board. The result message names the flow that asked (dispatch or
-        -- quick dispatch) and the board then takes the same branch it always
-        -- did: dispatch, ask, report the failure, or abandon the claim.
-        -- Quick dispatch shares this gate — see QuickDispatchTrustGate and
-        -- TrustRepoForQuickDispatch in tasks.allium, which apply the same
-        -- check to the still-pending creation parameters (no task exists yet
-        -- at that point) and write to the same trust record. Trust is the
-        -- only gate the two entry points share; the rest of quick dispatch
-        -- is its own path (see CreateQuickTask).
-        --
-        -- Before creating the worktree, `git fetch origin <base_branch>` is
-        -- run in the repo root to update the remote-tracking ref. This fetch
-        -- runs unconditionally — even when the worktree directory already
-        -- exists on disk (pre-created) — so `origin/<base_branch>` stays as
-        -- fresh as possible for the selection below. If the worktree directory
-        -- already exists, only the `git worktree add` step is skipped; the
-        -- fetch still runs.
-        --
-        -- == "Does the worktree path exist" has one answer ==
-        -- WorktreeExistenceIsOneQuestion. Two flows ask whether anything
-        -- exists at the worktree path, and they must not be able to disagree:
-        -- this rule asks it to decide fresh vs reused, and teardown's step 2b
-        -- asks it to decide whether there is anything to delete (see
-        -- WorktreeDirectoryMustNotSurviveTeardown in tasks.allium). Both ask
-        -- through one shared primitive, and it is the stat teardown already
-        -- specifies — AbsentMeansNotFound and
-        -- SymlinksAreUnlinkedNeverFollowed apply here unchanged. What is
-        -- shared is the stat, not the spelling of the path handed to it:
-        -- teardown lexically normalises its path first, because its own
-        -- deletion bound is a lexical prefix test. Both spellings derive from
-        -- one recorded repo_path, so they name the same file today:
-        --
-        --   * NOT FOUND is the only absence. The path is FRESH.
-        --   * Anything that exists is presence, including a path that is
-        --     itself a symlink, dangling or not. The link is what is asked
-        --     about, never its target.
-        --   * Any other stat answer — a parent without execute permission, an
-        --     I/O error, an unmounted mount point — is neither, and this rule
-        --     ABORTS the dispatch rather than guessing. No worktree is
-        --     created, no window opens, no agent launches, and nothing on
-        --     disk is touched. The abort message names the path and the
-        --     underlying error.
-        --
-        -- PresenceIsNotYetReuse. Presence settles what may be DELETED; it does
-        -- not settle what may be WORKED IN. Those are two questions and this
-        -- rule asks both, in that order:
-        --
-        --   * present, and resolving to a DIRECTORY — REUSED. `git worktree
-        --     add` is skipped and the agent is launched there. A symlink to a
-        --     real directory qualifies; it is followed for this question only.
-        --   * present, resolving to a directory that holds no `.git` — a husk,
-        --     not a worktree — ABORTS the same way. Reusing it would point
-        --     every `git -C` at the PARENT repository, so the reuse fast-forward
-        --     would run in the primary checkout.
-        --   * present, and anything else — a dangling symlink, a regular file,
-        --     a link to a file, a socket, a device, or a target that cannot be
-        --     stat'd at all — ABORTS, on the same terms as the unreadable case
-        --     above: nothing on disk is touched, and the message names the
-        --     path. Where there is an underlying error it is named too, which
-        --     is what tells "something else is in the way" apart from "the
-        --     target could not be reached". The list is illustrative; the rule
-        --     is that only a directory is reusable.
-        --
-        -- Creating the `.worktrees` root also adds `.worktrees/` to the repo's
-        -- `info/exclude` (idempotently), so the worktrees never make the
-        -- primary checkout read as dirty. A fresh add uses `-b`: an existing
-        -- branch is reset (`-B`) only when the start point already contains it,
-        -- and otherwise the dispatch aborts rather than lose unpushed commits.
-        --
-        -- The abort is what the second question is FOR. Skipping
-        -- `git worktree add` is the whole of the reuse path, so a path that
-        -- cannot be worked in produces no error of its own downstream: tmux
-        -- accepts an unresolvable start directory and silently starts the pane
-        -- in the operator's HOME (probed against tmux 3.7c: the
-        -- `-c` argument is not validated and `new-window` exits 0). Reuse
-        -- without this check therefore does not fail; it launches an agent
-        -- outside any worktree, with the task recording the unusable path as
-        -- its worktree, and nothing looks wrong.
-        --
-        -- Taking the FRESH path instead is not the alternative it appears to
-        -- be. `git worktree add` would then fail on the occupied path, which
-        -- does abort — but it aborts having already declared the path fresh,
-        -- and a fresh path is one the provisioning-failure rollback may
-        -- delete. That is the hazard above, re-armed. Answering presence and
-        -- usability separately is what lets the rule refuse without ever
-        -- claiming the path is its own to remove.
-        --
-        -- The abort is not caution for its own sake. Every onward choice
-        -- turns on this answer: which start-point path runs, whether
-        -- `git worktree add` is issued, and — the dangerous one — whether the
-        -- provisioning-failure rollback above is allowed to delete the path.
-        -- Guessing ABSENT for an unreadable path is what makes that rollback
-        -- eligible to delete a directory this attempt did not create, which
-        -- is precisely what the "never removes a REUSED worktree" clause
-        -- exists to prevent. Guessing PRESENT instead would launch an agent
-        -- into a directory nobody could read. Refusing is the only answer
-        -- that is wrong in neither direction.
-        --
-        -- A dangling symlink at the worktree path is therefore present but not
-        -- usable: the dispatch aborts, and the link survives. It is still
-        -- there for the operator to see, rather than silently unlinked by a
-        -- rollback that did not create it, as deciding presence by a
-        -- link-following `exists()` would.
-        --
-        -- == A reused branch with no work of its own is fast-forwarded ==
-        -- ReusedBranchWithNoOwnWorkIsFastForwarded. Skipping `git worktree
-        -- add` also skips the one step that places the branch, so a worktree
-        -- left by an earlier failed dispatch keeps the branch where that
-        -- attempt made it — possibly many commits behind the base, which the
-        -- agent notices only by chance. On the reuse path,
-        -- when a base branch is known and is not a PR head, the branch is
-        -- therefore reconciled with the start point the selection above chose
-        -- (the same ref a fresh worktree would have been created from):
-        --
-        --   * no commits of its own — `git rev-list --count --left-right
-        --     <start>...HEAD` reports 0 on the HEAD side — and behind the start
-        --     point: `git merge --ff-only <start>` runs in the worktree, and
-        --     the move is logged with the branch and the ref.
-        --   * no commits of its own and not behind: nothing to do.
-        --   * commits of its own: left alone. The agent merges the base as the
-        --     reuse preamble instructs.
-        --
-        -- Best-effort, like the reuse fetch. If the count cannot be read or
-        -- the fast-forward is refused (for example uncommitted changes that
-        -- the move would overwrite), a warning is logged and the dispatch goes
-        -- on with the branch as it was: the preamble's merge instruction still
-        -- covers it. Never a reason to abort, and never a reset — a branch
-        -- with work on it is not moved.
-        --
-        -- == A stale admin record is pruned before every fresh add ==
-        -- StaleAdminRecordIsPrunedBeforeWorktreeAdd. `git worktree prune` is
-        -- run best-effort in the repo root immediately before
-        -- `git worktree add`, on the FRESH path only.
-        --
-        -- The record is the hazard PruneTheRecordGitKeptWhenItRemovedNothing
-        -- describes (tasks.allium): a `.git/worktrees/<name>` entry whose
-        -- directory is gone still claims the branch, and the next
-        -- `git worktree add` for the same task fails with "'<branch>' is
-        -- already used by worktree at ..." (probed against git 2.55).
-        -- Teardown prunes the records it personally witnessed, and must
-        -- continue to — it prunes before its own step-3 branch delete, which
-        -- fails while the record still claims the branch. But teardown only
-        -- runs for the husks teardown made. A record left by an operator's
-        -- `rm -rf`, by a crashed dispatch, or by a husk deleted by hand
-        -- has no teardown behind it, and blocks
-        -- re-dispatch forever. Pruning here covers every cause, including
-        -- that existing backlog, and makes teardown's prune belt-and-braces
-        -- rather than the only guard.
-        --
-        -- Repo-wide is safe: prune drops only records whose directory is
-        -- missing, so it cannot reach a live worktree — including a sibling
-        -- task's in the same repo. Best-effort: a prune failure is ignored,
-        -- because the add that follows is the step whose success actually
-        -- decides the dispatch, and its error is the one worth reporting.
-        --
-        -- The REUSED path does not prune. It skips `git worktree add`
-        -- entirely, so there is no record conflict to clear and nothing to
-        -- gain — and that path exists partly to stay cheap when the network
-        -- is down, which spending another bounded subprocess would undo.
-        --
-        -- This is a sequential, SUBPROCESS_TIMEOUT-bounded call on the fresh
-        -- path, so it spends time from the request's deadline like every other
-        -- provisioning step (store-split.allium: config.dispatch_request_timeout).
-        -- Teardown's prune is NOT bounded that way, and neither are the remove
-        -- and branch-delete beside it.
-        --
-        -- That costs nothing at teardown's two ordinary entry points, which run
-        -- detached on a blocking thread with no timeout budget to fit inside.
-        -- It is a known gap at the third: the provisioning-failure rollback
-        -- above reaches the same teardown SYNCHRONOUSLY, inside the dispatch
-        -- worker the row's deadline is timing — so a git that hangs while
-        -- rolling back parks that worker, past the point where the deadline
-        -- stop (ProvisioningStopsAtTheDeadline) can report for it. The
-        -- module's backstop timer then fails the request and releases the
-        -- claim, but cannot cancel the parked worker. Bounding those three
-        -- calls is tracked separately.
-        --
-        -- == Fresh vs reused decides how hard the fetch tries ==
-        -- The existence question above is asked BEFORE the fetch, because it
-        -- decides how much the fetch is allowed to cost and whether its
-        -- failure is fatal. The two paths differ because the
-        -- resolved ref is used for different things:
-        --
-        -- - FRESH — the ref is about to become the worktree's branch, via
-        --   `git worktree add`. Getting it wrong bakes stale history into the
-        --   branch, so origin MUST be reachable. The classification and retry
-        --   rules below apply in full.
-        -- - REUSED — `git worktree add` is skipped entirely, so no ref is
-        --   consumed to create anything; the resolved ref feeds only the
-        --   rebase preamble. A single best-effort fetch attempt still runs (to
-        --   keep `origin/<base_branch>` fresh for later rebases), but it is NOT classified and NOT
-        --   retried, and any failure is a warning rather than an abort. Both
-        --   the classification probe and the retry budget exist solely to
-        --   serve the abort decision this path does not make, and each costs a
-        --   further bounded-subprocess timeout against an unresponsive
-        --   network — so an offline re-dispatch of a task whose worktree is
-        --   still on disk waits for one fetch, not for a probe plus three
-        --   fetches. See the reuse rows in the start-point table below for
-        --   which ref is chosen when that fetch fails.
-        --
-        -- == Fetch failure is classified, not blanket-tolerated ==
-        -- On the FRESH path a failed fetch is never treated as one uniform
-        -- case, and it is never classified by matching git's stderr text —
-        -- only by exit code. Once `git fetch origin <base_branch>` fails,
-        -- `git ls-remote --exit-code origin refs/heads/<base_branch>` is run
-        -- to tell apart:
-        --
-        -- - 404-class — no origin remote is configured at all, or origin has
-        --   no branch by that name (ls-remote exits 2). This is NOT an error
-        --   BY ITSELF: local <base_branch> is then the only candidate that
-        --   could exist, so it is used, and a warning is surfaced to the agent
-        --   as a "Note: ..." line in its prompt (same threading as before —
-        --   the agent is told directly in its prompt, not just via a
-        --   server-side log entry). This class is never retried: retrying a
-        --   fetch of a branch that does not exist on origin cannot succeed.
-        --   "Could exist" rather than "exists" is the load-bearing word — see
-        --   UnresolvableBaseIsRefusedByName below for the case where it does
-        --   not.
-        -- - infra-class — origin is reachable-or-unknown but the fetch itself
-        --   failed (ls-remote exits 128, or even 0, or the probe itself fails
-        --   to spawn). This is retried — `git fetch origin <base_branch>` is
-        --   attempted up to a small maximum number of times (currently 3) with
-        --   a short delay between attempts — and if every attempt still
-        --   fails, the dispatch ABORTS: no worktree is created, no tmux
-        --   window opens, no agent launches. Nothing is left on disk either —
-        --   the `.worktrees/` directory is created immediately before the
-        --   worktree it holds, not before the fetch, so an aborted dispatch
-        --   leaves no empty directory behind. The abort message names both the
-        --   cause and a next step (check connectivity, then dispatch again),
-        --   because the condition is usually the operator's to fix.
-        --
-        -- == Start-point selection ==
-        -- On a successful fetch, the worktree's start point is chosen by
-        -- comparing local <base_branch> against `origin/<base_branch>`:
-        -- local wins only when it holds commits origin lacks (ahead > 0);
-        -- otherwise `origin/<base_branch>` is used, which is today's
-        -- behaviour for the ahead = 0 case. Local is *never* chosen when the
-        -- comparison is unmeasurable (local <base_branch> does not resolve on
-        -- disk) — that case looks identical to "local <base_branch> does not
-        -- exist" and must fall back to origin, not local.
-        -- When local is both ahead and behind (diverged), local is still
-        -- taken, and silently — no additional warning is added to the
-        -- agent's prompt beyond what is described above.
-        -- The worktree branch is cut from `<selected ref>`, whichever of
-        -- local <base_branch> or `origin/<base_branch>` was selected above,
-        -- with `-b`, or `-B` only as the fresh-add paragraph above allows.
-        --
-        -- == UnresolvableBaseIsRefusedByName ==
-        -- On the FRESH path only, the selected ref must be known to resolve in
-        -- the repository before `git worktree add` is asked to consume it.
-        -- When it is not, provisioning is REFUSED, and the refusal names
-        -- the task's base_branch and both refs that were tried —
-        -- `origin/<base_branch>` and local <base_branch> — and says that the
-        -- repository has neither, so the task's base branch is the thing to
-        -- correct. Nothing is created: no worktree, no tmux window, no agent,
-        -- and no empty `.worktrees/` directory, exactly as for the
-        -- infra-class abort above.
-        --
-        -- Only ONE of the three ways a start point is chosen leaves it
-        -- unproven, and only that one is probed:
-        --
-        -- - after a successful fetch, `origin/<base_branch>` is proven by the
-        --   fetch itself — it is the ref the fetch just updated;
-        -- - local <base_branch> chosen by the ahead/behind comparison is
-        --   proven by that comparison, which yields no counts at all when
-        --   local does not resolve, and local is taken only on ahead > 0;
-        -- - local <base_branch> chosen by the 404-class branch above is
-        --   proven by NOTHING. Origin not having the branch says nothing
-        --   about whether the local repo does. This is the case that is
-        --   probed, and the only one.
-        --
-        -- Stated as a proof structure rather than "probe whichever ref was
-        -- chosen" because the difference is observable: a probe on every path
-        -- would spend a subprocess re-establishing what the step before it
-        -- already established, on the hot path of every dispatch.
-        -- A task whose base_branch names a branch the repository has never
-        -- had — the common shape being "main" recorded against a repo whose
-        -- default is "master" — lands here. Left unchecked it surfaced as
-        -- git's own `fatal: invalid reference: <base_branch>`, wrapped in a
-        -- dispatch failure that named neither the ref it wanted nor the field
-        -- holding it. When the failing dispatch was the epic auto-dispatch
-        -- chain (epics.allium: AutoDispatchNextSubtask), which cannot fail its
-        -- caller, that message was the whole of the evidence.
-        --
-        -- Scoped to the FRESH path deliberately. On the REUSED path no ref is
-        -- consumed to create anything — the selected ref feeds only the
-        -- rebase preamble — so an unresolvable one is the same class of
-        -- problem as an unreachable origin there, and that path already
-        -- degrades to a warning rather than an abort. Refusing there would
-        -- turn re-dispatches that work today into failures.
-        --
-        -- When the best-effort fetch on the REUSED path fails, there is no
-        -- trustworthy comparison to make — `origin/<base_branch>` is exactly
-        -- the ref that could not be refreshed — so the ahead/behind
-        -- measurement is skipped and the start point is fixed by the kind of
-        -- base instead:
-        --
-        -- - a base branch resolves to local <base_branch>. It is the ref whose
-        --   freshness is not in doubt, and the one wrap-up rebases onto, so
-        --   the preamble and wrap-up agree. Pointing the preamble at an
-        --   unrefreshed `origin/<base_branch>` would risk replaying local
-        --   <base_branch>'s unpushed commits under new SHAs — the same
-        --   history-duplication hazard the selection rule above exists to
-        --   avoid.
-        -- - a PR head branch stays pinned to `origin/<headRefName>`, never
-        --   local. The carve-out below is absolute: a review must never be
-        --   handed a local branch of the same name. Nothing is poisoned by
-        --   staying pinned, because the reused worktree already holds the PR's
-        --   code from the previous attempt; if the preamble's rebase then
-        --   cannot reach the origin ref, the agent sees that directly and the
-        --   "Note: ..." line explains why.
-        --
-        -- Either way a "Note: ..." line tells the agent that origin could not
-        -- be reached and that its worktree was reused, so nothing needed the
-        -- network.
-        --
-        -- Review tasks (tag pr-review, dependabot or release-please — the
-        -- review set, core.allium: "THE REVIEW SET") that carry a PR URL are
-        -- an explicit carve-out from all of the above: their worktree is
-        -- always based on the PR's head branch instead of <base_branch>, so
-        -- the agent sees the PR's code, and the ahead/behind comparison is
-        -- never run for them. The PR's head branch is resolved with
-        -- `gh pr view <url> --json headRefName,isCrossRepository`; the
-        -- worktree is then created from `origin/<headRefName>` (same
-        -- fetch-then-base flow as above, but always the origin ref — never
-        -- compared against a local branch of the same name). This soft-falls
-        -- back to <base_branch> on any gh failure, empty output, or a
-        -- cross-repository (fork) PR whose head branch is not on origin.
-        -- This `gh pr view` call is bounded by SUBPROCESS_TIMEOUT (120s), so
-        -- a hung `gh` falls into this same soft fallback rather than
-        -- blocking the dispatch indefinitely.
-        -- That fallback happens before the head branch is resolved to a
-        -- fetch target; it does not apply once a PR head branch has been
-        -- chosen. If the subsequent `git fetch origin <headRefName>` then
-        -- classifies as 404-class — origin no longer has that branch, e.g.
-        -- it was merged and deleted after `gh pr view` resolved it — the
-        -- 404-class local-branch fallback described above does NOT apply to
-        -- a PR head branch. A stale local branch of the same name would let
-        -- a review silently examine the wrong code, so this instead ABORTS
-        -- the dispatch with an error naming the missing branch: no worktree
-        -- is created, no tmux window opens, no agent launches. It does not
-        -- fall back to <base_branch> either, because the worktree
-        -- provisioning step does not know the task's base branch at that
-        -- point. This abort, like the infra-class one, is a FRESH-path rule:
-        -- a reused review worktree already holds the PR's code, classifies
-        -- nothing, and stays pinned to `origin/<headRefName>` with a warning
-        -- (see the reuse rows above). What never varies is the carve-out
-        -- itself — no path ever bases a review on a local branch.
-        -- For these PR-based worktrees the reused-worktree preamble (see
-        -- below) also targets the PR branch (`git fetch origin <headRefName>`
-        -- + `git rebase origin/<headRefName>`) rather than the base branch,
-        -- framed as an on-demand refresh so the agent can pull later pushes
-        -- to the PR.
-        -- The launched Claude command includes a plugin-dir flag so
-        -- the agent discovers dispatch plugin skills (e.g. dispatch:wrap-up).
-        --
-        -- == Conditional rebase preamble ==
-        -- The fetch-then-rebase preamble is not unconditional. It targets
-        -- the resolved start point — whichever ref, local <base_branch> or
-        -- `origin/<base_branch>`, was actually selected above — and is
-        -- emitted only when the worktree is being REUSED (the worktree
-        -- directory already existed on disk) or for a PR-based worktree. On a
-        -- fresh dispatch the preamble is absent, because the branch already
-        -- *is* the resolved start point: a rebase onto it would be a
-        -- guaranteed no-op at best, and if it instead targeted
-        -- `origin/<base_branch>` unconditionally while the branch was created
-        -- from a local <base_branch> that is ahead, it would replay those
-        -- already-present commits with new SHAs — duplicating history rather
-        -- than refreshing it.
-        -- Invariant: the preamble's target is always the resolved base
-        -- branch (task.base_branch, or else the detected default), never a
-        -- literal "main".
-        -- The launch carries no --permission-mode flag, for any mode —
-        -- see AgentLaunchCommand: EveryTaskAgentLaunchesInAutoMode.
-
         -- == The prompt itself ==
         -- What text the launched agent reads — the skeleton every variant
         -- fills in, the design step, the deliberately absent verify command,
@@ -906,7 +948,7 @@ rule ProvisioningStopsAtTheDeadline {
         -- (store-split.allium, decision D4). At the deadline this host's
         -- provisioning of the request stops: any subprocess it still has
         -- running is killed, the provisioning-failure rollback in
-        -- ProvisionDispatch is applied to what the attempt created, and the
+        -- DispatchRequestServing is applied to what the attempt created, and the
         -- failure is reported with reason "deadline passed", which releases
         -- the claim (store-split.allium: HostReportsDispatchFailed,
         -- ReleaseClaimOfFailedRequest). The module's own timer fires
@@ -1717,6 +1759,16 @@ surface AgentLaunchCommand {
         -- passes no positional text, so it needs none.
 }
 
+-- This host's board serving a dispatch request row it claimed
+-- (ProvisionDispatch): how it answers the row and how it makes the worktree.
+surface DispatchProvisioning {
+    facing _: core/BoardProcess
+
+    contracts:
+        demands DispatchRequestServing
+        demands WorktreeProvisioner
+}
+
 -- The label the board shows for starting a task.
 surface DispatchActionLabel {
     facing _: core/Operator
@@ -2084,7 +2136,7 @@ surface DispatchingFeedback {
         -- branch. The module's timer releases (store-split.allium:
         -- ReleaseClaimOfFailedRequest) because that hazard is now closed
         -- elsewhere: the slow worker's late report is refused and it tears
-        -- down what it made (ProvisionDispatch, "A row that fails under this
+        -- down what it made (DispatchRequestServing, "A row that fails under this
         -- host"), so the task is never recorded against the old attempt.
         -- A stuck dispatch therefore returns its task to backlog instead of
         -- stranding it running with no worktree.

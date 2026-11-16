@@ -639,7 +639,7 @@ fn script_with_spare_teardown() -> MockProcessRunner {
     MockProcessRunner::new_with_delays(responses)
 }
 
-/// `dispatch.allium: ProvisionDispatch`, "A row that fails under this host":
+/// `dispatch.allium: DispatchRequestServing`, "A row that fails under this host":
 /// the module's backstop fails the row while the window is being created. The
 /// dispatched report is refused, and the host tears down what THIS attempt
 /// made — the window — but never the reused worktree. The task is left as
@@ -951,7 +951,7 @@ async fn serve_with_report_faults(
     (outcome, id, runner)
 }
 
-/// `dispatch.allium: ProvisionDispatch`, "A report that ends in a transport
+/// `dispatch.allium: DispatchRequestServing`, "A report that ends in a transport
 /// error": the module recorded the report but the reply was lost. The host
 /// sends it again, the module accepts the repeat and changes nothing
 /// (`store-split.allium: HostRepeatsDispatchedReport`), and the host keeps

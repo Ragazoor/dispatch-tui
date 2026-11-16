@@ -1073,7 +1073,7 @@ rule ActivateTask {
         --        repo-trust confirmation (ConfirmTrustRepo) is preserved: an
         --        untrusted repo first shows the trust prompt, which on accept
         --        proceeds to dispatch. The gate itself is specified in
-        --        dispatch.allium (DispatchTask, "Repo-trust pre-gate"), and
+        --        dispatch.allium (WorktreeProvisioner, "Repo-trust pre-gate"), and
         --        quick dispatch goes through the same gate via
         --        QuickDispatchTrustGate in tasks.allium.
         --        Tag-based routing (research ->

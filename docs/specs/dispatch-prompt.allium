@@ -12,7 +12,7 @@
 --           dispatch.allium: AgentLaunchCommand); the rebase and worktree
 --           preambles, whose wording is decided by fresh-vs-reused and
 --           start-point selection rather than here (see dispatch.allium:
---           "Fresh vs reused decides how hard the fetch tries" and
+--           WorktreeProvisioner, "Fresh vs reused decides how hard the fetch tries" and
 --           "Start-point selection"); the validated-knowledge block and how it
 --           is ranked (see learnings.allium:
 --           AugmentDispatchPromptWithLearnings); the verify command this
