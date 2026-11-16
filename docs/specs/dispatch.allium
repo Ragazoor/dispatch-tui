@@ -201,6 +201,13 @@ contract DispatchRequestServing {
         -- — the fetch downgrades from Required to BestEffort, and an edited
         -- title changes the slug and orphans the directory permanently.
         --
+        -- One step is not best-effort in that sense: a window kill that FAILS
+        -- stops the rollback before the worktree removal, as it stops any
+        -- TaskTeardown (TeardownIsOwedWheneverThereIsSomethingToRelease),
+        -- because an agent may still be live in that window. The fresh
+        -- worktree and its branch are then left on disk, and the next
+        -- dispatch of the task takes the REUSED path.
+        --
         -- The window half is symmetrical, and for the same reason: the
         -- rollback kills the window ONLY when this attempt is the one that
         -- opened it. A dispatch that never got a window of its own — because
