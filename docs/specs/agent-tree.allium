@@ -1345,10 +1345,10 @@ rule RefreshAgentTree {
     ensures: pane.rendered_changes = changes
 
     -- A working git clears its own stale failure notice, and nothing else. A
-    -- diff-open or agent-jump notice is the answer to a keypress the user made
-    -- moments ago and survives every refresh until they press the next key; an
-    -- agent-list notice belongs to the agents section's own timer, which
-    -- clears it when its own read recovers.
+    -- diff-open or agent-jump notice answers something the user asked for and
+    -- survives every refresh until they press the next key (NoticeSource); an
+    -- agent-list or commit-list notice belongs to its own section's timer,
+    -- which clears it when its own read recovers.
     ensures:
         if notice_was = git_query:
             pane.error_notice = null
