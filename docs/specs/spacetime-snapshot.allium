@@ -45,6 +45,33 @@ use "./spacetime-seed.allium" as seed
 use "./startup.allium" as startup
 
 ------------------------------------------------------------
+-- Given
+------------------------------------------------------------
+
+-- A process holds the managed store at most once, so there is one hold.
+given {
+    hold: ManagedStoreHold
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The sentinel translation at the store boundary. Both directions take the
+-- column they translate, because the sentinel depends on it.
+contract SentinelTranslation {
+    -- Absence becomes the column's sentinel on the way in.
+    to_store: (column: SentinelColumn, value: Any?) -> Any
+    -- The column's sentinel becomes absence on the way out.
+    from_store: (column: SentinelColumn, value: Any) -> Any?
+
+    @invariant RoundTrip
+        -- from_store(c, to_store(c, v)) = v for every value v of column c,
+        -- absence included. This is what SentinelsNeverReachTheSnapshot
+        -- needs from the two ends of one conversion.
+}
+
+------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
@@ -117,29 +144,6 @@ entity ManagedStoreLocation {
 entity ManagedStoreHold {
     held: Boolean              -- startup.allium: managed_store_held_by_this_board()
     stop_requested: Boolean    -- a stop has already been asked for by this process
-}
-
--- A process holds the managed store at most once, so there is one hold.
-given {
-    hold: ManagedStoreHold
-}
-
-------------------------------------------------------------
--- Contracts
-------------------------------------------------------------
-
--- The sentinel translation at the store boundary. Both directions take the
--- column they translate, because the sentinel depends on it.
-contract SentinelTranslation {
-    -- Absence becomes the column's sentinel on the way in.
-    to_store: (column: SentinelColumn, value: Any?) -> Any
-    -- The column's sentinel becomes absence on the way out.
-    from_store: (column: SentinelColumn, value: Any) -> Any?
-
-    @invariant RoundTrip
-        -- from_store(c, to_store(c, v)) = v for every value v of column c,
-        -- absence included. This is what SentinelsNeverReachTheSnapshot
-        -- needs from the two ends of one conversion.
 }
 
 ------------------------------------------------------------
