@@ -631,6 +631,37 @@ impl SharedRows {
         })
     }
 
+    /// The tasks `subscriber` has bookmarked, ascending. For a store whose rows
+    /// hold more than one person's marks (the in-memory twin); a subscription
+    /// delivers only the caller's own, so [`Self::bookmarked_task_ids`] is the
+    /// same list there.
+    pub fn bookmarked_task_ids_of(&self, subscriber: &str) -> Vec<TaskId> {
+        self.read(|rows| {
+            let mut ids: Vec<TaskId> = rows
+                .bookmarks
+                .values()
+                .filter(|b| b.subscriber == subscriber)
+                .map(|b| TaskId(b.task_id))
+                .collect();
+            ids.sort_unstable();
+            ids
+        })
+    }
+
+    /// [`Self::bookmarked_task_ids_of`] for the unseen marks.
+    pub fn unseen_task_ids_of(&self, subscriber: &str) -> Vec<TaskId> {
+        self.read(|rows| {
+            let mut ids: Vec<TaskId> = rows
+                .unseen_tasks
+                .values()
+                .filter(|u| u.subscriber == subscriber)
+                .map(|u| TaskId(u.task_id))
+                .collect();
+            ids.sort_unstable();
+            ids
+        })
+    }
+
     /// The tasks this person has not yet seen, ascending
     /// (`core.allium: UnseenTask`). The rows are already this person's own.
     pub fn unseen_task_ids(&self) -> Vec<TaskId> {

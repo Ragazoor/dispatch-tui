@@ -513,6 +513,40 @@ rule ClaimsFollowSight {
             not exists b
 }
 
+-- A sight change never strands a running agent (task #99226, L1, decided with
+-- the user: refuse on every path). Taking a task out of the sight of a person
+-- whose host holds a current agent, or an open dispatch or session request, on
+-- it leaves that host unable to read the task: wrap-up fails as "task deleted"
+-- and PR polling stops. So the store refuses the change, whoever asks, the
+-- store itself included, until the agent has ended. The detach refusal
+-- (EpicStaysInItsWorkspace, task_detach_strands_a_host) is the first case of
+-- this rule; the others are below. The refusal of an epic-level change names
+-- the epic and never a task in it, so it leaks nothing the caller cannot see.
+rule SightChangeNeverStrandsAHost {
+    when: TaskMoved(moved, destination, owner)    -- not a detach: see above
+       or SetEpicVisibility(epic, visibility)
+       or EpicMoved(epic, destination)            -- a re-parent
+       or MoveEpicToWorkspace(epic, workspace)
+       or RemoveMember(workspace, user)
+
+    requires:
+        for task in affected_tasks:
+            not exists person where task.visible_to(person) now
+                and not task.visible_to(person) after the change
+                and task.runs_on_a_host_owned_by(person)
+    -- affected_tasks: the moved task; the tasks of the epic's subtree; or
+    -- every task of the workspace, for RemoveMember, whose "person" is the
+    -- removed user. A task "runs on a host" while a current agent, or an open
+    -- dispatch or session request, sits on it.
+    -- Refusals: "task N: another person's host is running it; move it once
+    -- that agent has ended"; "epic N: a host is running a task in it for
+    -- someone who would lose sight of it; change it once that agent has
+    -- ended"; "a host is running a task in this workspace for the member;
+    -- remove them once that agent has ended".
+    -- Module: task_move_strands_a_host, epic_change_strands_a_host,
+    -- member_removal_strands_a_host (shared with MemoryReducerCaller).
+}
+
 rule ClaimsFollowTaskSight {
     when: TaskMoved(moved, destination, owner)    -- a move into a private epic, or a detach
 
@@ -885,7 +919,9 @@ rule SuperAdminDeletesUnseenItem {
         -- DeleteWorkPackage. The hatch never tears down running work. It
         -- widens who may delete, not what: the super-admin is exempt from
         -- the sight checks (UnseenIsAsMissing), since nobody can see the
-        -- item, but never takes a private sub-epic someone still sees.
+        -- item, but never takes a private sub-epic someone still sees. That
+        -- check runs before the every-task-done one (as in DeleteEpic), so the
+        -- done-guard's refusal never names a task inside such a sub-epic.
 }
 
 -- Writes ------------------------------------------------------

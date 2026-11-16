@@ -71,6 +71,8 @@ pub(super) struct Pair<'a> {
     /// A second user, a member of the same workspace: owner of the private
     /// epic the first user must not be able to move a task into.
     pub(super) other_real: &'a SdkReducerCaller,
+    /// The second user's own subscription: where their marks arrive.
+    pub(super) rows_other: &'a Arc<SharedRows>,
     pub(super) other_mem: &'a MemoryReducerCaller,
     pub(super) other_identity: String,
     /// The highest id given to an epic the first caller cannot see.
@@ -88,6 +90,7 @@ pub(super) struct World {
     rows_mem: Arc<SharedRows>,
     identity: String,
     other_real: SdkReducerCaller,
+    rows_other: Arc<SharedRows>,
     other_mem: MemoryReducerCaller,
     other_identity: String,
 }
@@ -175,6 +178,7 @@ impl World {
             rows_mem,
             identity: accepted.identity,
             other_real,
+            rows_other,
             other_mem,
             other_identity: accepted2.identity,
         }
@@ -183,6 +187,7 @@ impl World {
     pub(super) fn pair(&self) -> Pair<'_> {
         Pair {
             other_real: &self.other_real,
+            rows_other: &self.rows_other,
             other_mem: &self.other_mem,
             other_identity: self.other_identity.clone(),
             hidden_max: std::cell::Cell::new(0),

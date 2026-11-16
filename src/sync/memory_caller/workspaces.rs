@@ -274,6 +274,16 @@ impl MemoryReducerCaller {
         if !self.caller_administers(&tables, workspace_id) {
             return refused("only a super-admin or an admin of this workspace may do this");
         }
+        // `SightChangeNeverStrandsAHost`: before any write.
+        if let Some(user) = tables
+            .memberships
+            .get(&membership_id)
+            .map(|m| m.user.clone())
+        {
+            if module::member_removal_strands_a_host(&*tables, workspace_id, &user) {
+                return refused(module::member_removal_strands_refusal());
+            }
+        }
         let Some(membership) = tables.memberships.remove(&membership_id) else {
             return applied();
         };

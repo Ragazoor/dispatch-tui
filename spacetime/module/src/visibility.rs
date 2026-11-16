@@ -416,9 +416,154 @@ pub fn task_detach_strands_refusal(task_id: i64) -> String {
     format!("task {task_id}: another person's host is running it; detach it once that agent has ended")
 }
 
+/// L1 (task #99226, resolved with the user): whether a current agent, or an
+/// open dispatch or session request, of `task_id` sits on a host `owner` owns.
+fn runs_on_a_host_of(r: &impl StoreReads, task_id: i64, owner: &str) -> bool {
+    let mine: std::collections::HashSet<String> = r
+        .hosts_owned_by(owner)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    if mine.is_empty() {
+        return false;
+    }
+    r.agents_of(task_id)
+        .iter()
+        .any(|a| a.state == AGENT_CURRENT && mine.contains(&a.host))
+        || r.dispatch_requests_of(task_id)
+            .iter()
+            .any(|d| dispatch_request_is_open(&d.state) && mine.contains(&d.host))
+        || r.session_requests_of(task_id)
+            .iter()
+            .any(|s| session_request_is_open(&s.state) && mine.contains(&s.host))
+}
+
+/// The people who see `task` now, among the members of its epic's workspace
+/// (an epic-less task: its owner).
+fn people_seeing(r: &impl StoreReads, task: &Task) -> Vec<String> {
+    if task.epic_id == 0 {
+        return vec![task.owner.clone()];
+    }
+    let Some(epic) = r.epic(task.epic_id) else {
+        return Vec::new();
+    };
+    r.members_of(epic.workspace_id)
+        .into_iter()
+        .map(|m| m.user)
+        .filter(|user| epic_visible_to(r, &epic, user))
+        .collect()
+}
+
+/// `SightChangeNeverStrandsAHost`: whether `task` is run from a host whose
+/// owner sees it now and would not afterwards (`sees_after`).
+fn task_loses_a_running_host(
+    r: &impl StoreReads,
+    task: &Task,
+    sees_after: &dyn Fn(&str) -> bool,
+) -> bool {
+    people_seeing(r, task)
+        .iter()
+        .any(|who| !sees_after(who) && runs_on_a_host_of(r, task.id, who))
+}
+
+/// `SightChangeNeverStrandsAHost`, for a task move into `epic_id` (not a
+/// detach, which `task_detach_strands_a_host` judges). Shared with
+/// `MemoryReducerCaller`.
+pub fn task_move_strands_a_host(r: &impl StoreReads, task: &Task, epic_id: i64) -> bool {
+    let destination = r.epic(epic_id);
+    task_loses_a_running_host(r, task, &|who| {
+        destination
+            .as_ref()
+            .is_some_and(|e| epic_visible_to(r, e, who))
+    })
+}
+
+/// `private_holder` as it would be after `rewrite` is applied to every epic
+/// on the walk up.
+fn private_holder_after(
+    r: &impl StoreReads,
+    epic: &Epic,
+    rewrite: &dyn Fn(Epic) -> Epic,
+) -> Option<String> {
+    let mut current = rewrite(epic.clone());
+    for _ in 0..PRIVATE_WALK_LIMIT {
+        if current.visibility == VISIBILITY_PRIVATE {
+            return Some(current.created_by);
+        }
+        if current.parent_epic_id == 0 {
+            return None;
+        }
+        current = rewrite(r.epic(current.parent_epic_id)?);
+    }
+    None
+}
+
+/// `SightChangeNeverStrandsAHost`, for a change to the epics of `subtree`
+/// (a visibility flip, a re-parent, a workspace move) written as `rewrite`,
+/// which maps an epic row to its row after the change. True when a task of the
+/// subtree is run from a host whose owner would stop seeing it. Shared with
+/// `MemoryReducerCaller`.
+pub fn epic_change_strands_a_host(
+    r: &impl StoreReads,
+    subtree: &std::collections::HashSet<i64>,
+    rewrite: &dyn Fn(Epic) -> Epic,
+) -> bool {
+    subtree.iter().any(|epic_id| {
+        let Some(epic) = r.epic(*epic_id) else {
+            return false;
+        };
+        let after = rewrite(epic.clone());
+        let holder = private_holder_after(r, &epic, rewrite);
+        r.tasks_in_epic(*epic_id).iter().any(|task| {
+            task_loses_a_running_host(r, task, &|who| {
+                workspace_has_member(r, after.workspace_id, who)
+                    && match &holder {
+                        None => true,
+                        Some(h) => !h.is_empty() && h == who,
+                    }
+            })
+        })
+    })
+}
+
+/// `SightChangeNeverStrandsAHost`, for `RemoveMember`: a task of the workspace
+/// is run from a host `user` owns. Shared with `MemoryReducerCaller`.
+pub fn member_removal_strands_a_host(r: &impl StoreReads, workspace_id: i64, user: &str) -> bool {
+    r.epics_in_workspace(workspace_id).iter().any(|epic| {
+        r.tasks_in_epic(epic.id)
+            .iter()
+            .any(|task| runs_on_a_host_of(r, task.id, user))
+    })
+}
+
+/// The refusal for a task move that would strand a host.
+pub fn task_move_strands_refusal(task_id: i64) -> String {
+    format!("task {task_id}: another person's host is running it; move it once that agent has ended")
+}
+
+/// The refusal for an epic change that would strand a host. Names the epic,
+/// never a task in it, so it leaks nothing the caller cannot see.
+pub fn epic_change_strands_refusal(epic_id: i64) -> String {
+    format!(
+        "epic {epic_id}: a host is running a task in it for someone who would lose sight of it; change it once that agent has ended"
+    )
+}
+
+/// The refusal for a member removal that would strand their host.
+pub fn member_removal_strands_refusal() -> String {
+    "a host is running a task in this workspace for the member; remove them once that agent has ended"
+        .into()
+}
+
 pub fn check_task_move(ctx: &ReducerContext, task: &Task, epic_id: i64) -> Result<(), String> {
+    // L1: no one, the store itself included, may strand a running host.
+    let strands = !task_move_is_detach(task, epic_id) && task_move_strands_a_host(ctx, task, epic_id);
     if is_operator(ctx) {
-        return Ok(());
+        return if strands {
+            Err(task_move_strands_refusal(task.id))
+        } else {
+            Ok(())
+        };
     }
     // A detach is judged by its own authority, not the holder arithmetic below.
     if task_move_is_detach(task, epic_id) {
@@ -439,7 +584,11 @@ pub fn check_task_move(ctx: &ReducerContext, task: &Task, epic_id: i64) -> Resul
         ));
     }
     if task_move_permitted(ctx, task, epic_id, &caller_identity(ctx)) {
-        return Ok(());
+        return if strands {
+            Err(task_move_strands_refusal(task.id))
+        } else {
+            Ok(())
+        };
     }
     Err(format!(
         "task {}: only the person it is private to, or an admin, may move it into or out of a private epic",
@@ -539,12 +688,22 @@ pub(crate) fn set_epic_visibility_row(
     }
     check_private_has_creator(&visibility, &epic.created_by)?;
     check_repo_group_stays_public(&epic.origin, &visibility)?;
+    let subtree = collect_epic_subtree_ids(ctx, epic_id);
+    let flipped = visibility.clone();
+    if epic_change_strands_a_host(ctx, &subtree, &|mut node| {
+        if node.id == epic_id {
+            node.visibility = flipped.clone();
+        }
+        node
+    }) {
+        return Err(epic_change_strands_refusal(epic_id));
+    }
     epic.visibility = visibility;
     epic.updated_at = now(ctx);
     ctx.db.epics().id().update(epic);
     // `ClaimsFollowSight`: a flip to private takes the tree from every other
     // member, and their hosts' claims with it.
-    crate::config::on_sight_lost(ctx, &collect_epic_subtree_ids(ctx, epic_id));
+    crate::config::on_sight_lost(ctx, &subtree);
     Ok(())
 }
 
@@ -627,6 +786,13 @@ pub(crate) fn move_epic_row(
     });
     if someone_elses && !is_operator(ctx) {
         return Err(missing());
+    }
+    let tree_ids: std::collections::HashSet<i64> = tree.iter().copied().collect();
+    if epic_change_strands_a_host(ctx, &tree_ids, &|mut node| {
+        node.workspace_id = workspace_id;
+        node
+    }) {
+        return Err(epic_change_strands_refusal(epic_id));
     }
     let mut task_ids = std::collections::HashSet::new();
     for id in &tree {
@@ -783,11 +949,17 @@ pub fn super_admin_delete_unseen_item(
             let parent = epic.parent_epic_id;
             // The escape hatch widens who may delete, not what may be torn
             // down: the every-task-done guard of `delete_epic` still holds.
-            let doomed = crate::tasks_epics::validate_epic_deletable(ctx, item_id)?;
-            let nodes = doomed.iter().filter_map(|id| ctx.db.epics().id().find(*id));
+            // V5: the seen-private check runs first, as in `delete_epic`:
+            // `validate_epic_deletable` names the lowest-id undone task, which
+            // may sit inside a private sub-epic someone still holds.
+            let subtree = collect_epic_subtree_ids(ctx, item_id);
+            let nodes = subtree
+                .iter()
+                .filter_map(|id| ctx.db.epics().id().find(*id));
             if subtree_holds_a_seen_private_epic(ctx, nodes) {
                 return Err(SUBTREE_HOLDS_A_SEEN_PRIVATE_EPIC.into());
             }
+            let doomed = crate::tasks_epics::validate_epic_deletable(ctx, item_id)?;
             delete_epic_subtree_with_feed_cleanup(ctx, item_id, &doomed);
             recalculate_epic_chain(ctx, parent);
             Ok(())

@@ -198,6 +198,19 @@ fn every_loss_of_sight_path_releases_the_claims_it_strands_on_both_stores() {
             );
             both_apply!(p, |c| c.claim_poll_owner(epic_scope, "h-first".into()));
             both_apply!(p, |c| c.claim_poll_owner(mine_scope, "h-first".into()));
+            // Both people bookmark both tasks, so every path must end the
+            // second person's marks and keep the first's, on both sides.
+            for task in [mine, theirs] {
+                both_apply!(p, |c| c.set_bookmark(p.identity.clone(), task, true));
+                for caller in [p.other_real as &dyn ReducerCaller, p.other_mem] {
+                    caller
+                        .set_bookmark(p.other_identity.clone(), task, true)
+                        .await
+                        .unwrap()
+                        .applied()
+                        .unwrap();
+                }
+            }
             for caller in [p.other_real as &dyn ReducerCaller, p.other_mem] {
                 caller
                     .claim_poll_owner(theirs_scope, "h-second".into())
@@ -214,6 +227,7 @@ fn every_loss_of_sight_path_releases_the_claims_it_strands_on_both_stores() {
             // The real store's rows arrive by subscription; the claim on the
             // second user's task is the one that must go.
             p.wait(|r| holder(r, theirs_scope).is_none()).await;
+            assert_marks_agree(path, &p).await;
             for (side, rows) in [("module", p.rows_real), ("twin", p.rows_mem)] {
                 assert_eq!(
                     holder(rows, theirs_scope),
@@ -233,6 +247,40 @@ fn every_loss_of_sight_path_releases_the_claims_it_strands_on_both_stores() {
             }
         }
     });
+}
+
+/// Marks parity (task #99226, L2): after a loss-of-sight path, the bookmarks
+/// and unseen marks each person can read are the same on the module and the
+/// twin. The twin's rows hold everyone's marks, so they are read per person;
+/// the module delivers each person only their own.
+async fn assert_marks_agree(path: &str, p: &Pair<'_>) {
+    for (who, real_rows) in [
+        (&p.identity, p.rows_real),
+        (&p.other_identity, p.rows_other),
+    ] {
+        // The second person's subscription is not the one the test waits on,
+        // so give its rows until they settle before judging them.
+        let settled = || {
+            real_rows.bookmarked_task_ids() == p.rows_mem.bookmarked_task_ids_of(who)
+                && real_rows.unseen_task_ids() == p.rows_mem.unseen_task_ids_of(who)
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while !settled() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert_eq!(
+            real_rows.bookmarked_task_ids(),
+            p.rows_mem.bookmarked_task_ids_of(who),
+            "{path}: the bookmarks of {who} differ between the module and the twin"
+        );
+        assert_eq!(
+            real_rows.unseen_task_ids(),
+            p.rows_mem.unseen_task_ids_of(who),
+            "{path}: the unseen marks of {who} differ between the module and the twin"
+        );
+    }
 }
 
 /// The path list names every arm of `carol_loses_sight_by`, and the module's
@@ -257,4 +305,134 @@ fn the_conformance_paths_are_the_modules_paths_minus_the_managed_root_flip() {
     let mut here = PATHS.to_vec();
     here.sort_unstable();
     assert_eq!(here, module_paths);
+}
+
+/// `workspaces.allium: SightChangeNeverStrandsAHost` (task #99226, L1): every
+/// path that would hide a task from the person whose host holds an open
+/// request on it is refused, with the same words, on both sides.
+#[test]
+fn every_sight_change_that_would_strand_a_host_is_refused_on_both_stores() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = Instance::start("memory-caller-strand-refusal");
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(async move {
+        let world = World::start(instance).await;
+        let p = world.pair();
+        for caller in [p.other_real as &dyn ReducerCaller, p.other_mem] {
+            caller
+                .register_host("h-second".into(), String::new(), p.other_identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        both_apply!(p, |c| c.create_workspace("Elsewhere".into()));
+        p.wait(|r| r.workspaces().iter().any(|w| w.name == "Elsewhere"))
+            .await;
+        let elsewhere = p
+            .rows_real
+            .workspaces()
+            .iter()
+            .find(|w| w.name == "Elsewhere")
+            .expect("the workspace exists")
+            .id;
+
+        for path in [
+            "set_epic_visibility",
+            "move_task_into_a_private_epic",
+            "reparent_under_a_private_epic",
+            "move_epic_to_workspace",
+            "remove_member",
+        ] {
+            let epic = make_epic(&p, blank_epic()).await;
+            let task = make_task(&p, epic).await;
+            // The second person's host holds an open request on the task.
+            let opened = p
+                .other_real
+                .request_dispatch(task, "h-second".into(), "user".into(), String::new())
+                .await
+                .unwrap();
+            assert!(
+                matches!(opened, ReducerOutcome::Applied(_)),
+                "{path}: {opened:?}"
+            );
+            p.other_mem
+                .request_dispatch(task, "h-second".into(), "user".into(), String::new())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+
+            let mut answers = Vec::new();
+            for caller in [p.real as &dyn ReducerCaller, p.mem] {
+                let outcome = match path {
+                    "set_epic_visibility" => {
+                        caller
+                            .set_epic_visibility(EpicId(epic), "private".into())
+                            .await
+                    }
+                    "move_task_into_a_private_epic" => {
+                        let private = make_epic(
+                            &p,
+                            bindings::Epic {
+                                visibility: "private".into(),
+                                ..blank_epic()
+                            },
+                        )
+                        .await;
+                        caller
+                            .set_task_epic(task, Some(EpicId(private)), String::new())
+                            .await
+                    }
+                    "reparent_under_a_private_epic" => {
+                        let private = make_epic(
+                            &p,
+                            bindings::Epic {
+                                visibility: "private".into(),
+                                ..blank_epic()
+                            },
+                        )
+                        .await;
+                        let patch = bindings::EpicPatch {
+                            parent_epic_id: Some(private),
+                            ..blank_epic_patch()
+                        };
+                        caller.patch_epic(EpicId(epic), patch).await
+                    }
+                    "move_epic_to_workspace" => {
+                        caller.move_epic_to_workspace(EpicId(epic), elsewhere).await
+                    }
+                    "remove_member" => {
+                        let rows = if std::ptr::addr_eq(caller, p.real) {
+                            p.rows_real
+                        } else {
+                            p.rows_mem
+                        };
+                        let membership = rows
+                            .memberships()
+                            .iter()
+                            .find(|m| {
+                                m.workspace_id == DEFAULT_WORKSPACE && m.user == p.other_identity
+                            })
+                            .expect("the second user is a member")
+                            .id;
+                        caller.remove_member(membership).await
+                    }
+                    other => panic!("unknown path {other}"),
+                };
+                answers.push(outcome.unwrap());
+            }
+            for (side, answer) in ["module", "twin"].iter().zip(&answers) {
+                assert!(
+                    matches!(answer, ReducerOutcome::Refused(why) if why.contains("is running")),
+                    "{path}: the {side} did not refuse for a running host: {answer:?}"
+                );
+            }
+        }
+    });
 }

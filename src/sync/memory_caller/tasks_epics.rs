@@ -800,9 +800,10 @@ impl MemoryReducerCaller {
         if let Some(refusal) = refusal {
             return Ok(refusal);
         }
-        // The dry run said yes to every part, so a refusal here means the dry
-        // run and the module's order have drifted apart. Name the part rather
-        // than leave a half-applied update.
+        // The dry run judged each part against the store as it was, so a later
+        // part can still be refused once an earlier one has been written (the
+        // module rolls the whole call back; this double cannot). Name the part
+        // rather than hide a half-applied update.
         let applied = |part: &str, outcome: ReducerOutcome| -> Result<()> {
             match outcome {
                 ReducerOutcome::Refused(reason) => Err(anyhow::anyhow!(
@@ -874,6 +875,20 @@ impl MemoryReducerCaller {
             .as_ref()
             .is_some_and(|c| *c != row.feed_command);
         let reparented = patch.parent_epic_id.is_some_and(|p| p != was_child_of);
+        if let Some(parent) = patch.parent_epic_id.filter(|p| *p != was_child_of) {
+            // `SightChangeNeverStrandsAHost`: before any write.
+            let subtree = Self::collect_epic_subtree_ids(&tables, id);
+            if module::epic_change_strands_a_host(&*tables, &subtree, &|mut node| {
+                if node.id == id {
+                    node.parent_epic_id = parent;
+                }
+                node
+            }) {
+                return Ok(ReducerOutcome::Refused(
+                    module::epic_change_strands_refusal(id),
+                ));
+            }
+        }
         let before = row.clone();
         module::apply_epic_patch(&mut row, patch);
         if module::epic_uniqueness_inputs_changed(&before, &row) {

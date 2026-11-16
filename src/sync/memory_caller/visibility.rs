@@ -402,8 +402,15 @@ impl Tables {
         task: &module::Task,
         epic_id: i64,
     ) -> Result<(), String> {
+        // L1: no one, the store itself included, may strand a running host.
+        let strands = !module::task_move_is_detach(task, epic_id)
+            && module::task_move_strands_a_host(self, task, epic_id);
         if !scope.on {
-            return Ok(());
+            return if strands {
+                Err(module::task_move_strands_refusal(task.id))
+            } else {
+                Ok(())
+            };
         }
         // A detach is judged by its own authority, as the module does.
         if module::task_move_is_detach(task, epic_id) {
@@ -423,7 +430,11 @@ impl Tables {
             ));
         }
         if module::task_move_permitted(self, task, epic_id, &scope.who) {
-            return Ok(());
+            return if strands {
+                Err(module::task_move_strands_refusal(task.id))
+            } else {
+                Ok(())
+            };
         }
         Err(format!(
             "task {}: only the person it is private to, or an admin, may move it into or out of a private epic",
@@ -553,15 +564,24 @@ impl MemoryReducerCaller {
         if let Err(why) = module::check_repo_group_stays_public(&epic.origin, &visibility) {
             return refused(why);
         }
+        let subtree = Self::collect_epic_subtree_ids(&tables, id.0);
+        let flipped = visibility.clone();
+        let epic_id = id.0;
+        if module::epic_change_strands_a_host(&*tables, &subtree, &|mut node| {
+            if node.id == epic_id {
+                node.visibility = flipped.clone();
+            }
+            node
+        }) {
+            return refused(module::epic_change_strands_refusal(epic_id));
+        }
         if check_only {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
         epic.visibility = visibility;
         epic.updated_at = self.now();
-        let epic_id = epic.id;
         self.write_epic(&mut tables, epic);
         // `ClaimsFollowSight`.
-        let subtree = Self::collect_epic_subtree_ids(&tables, epic_id);
         self.on_sight_lost(&mut tables, &subtree);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -645,6 +665,12 @@ impl MemoryReducerCaller {
         });
         if someone_elses && scope.on() {
             return refused(missing());
+        }
+        if module::epic_change_strands_a_host(&*tables, &tree, &|mut node| {
+            node.workspace_id = workspace_id;
+            node
+        }) {
+            return refused(module::epic_change_strands_refusal(id.0));
         }
         if check_only {
             return Ok(ReducerOutcome::Applied(vec![]));
@@ -793,6 +819,13 @@ impl MemoryReducerCaller {
                     return refused("only a private item is deleted this way");
                 }
                 let doomed = Self::collect_epic_subtree_ids(&tables, item_id);
+                // V5: the seen-private check first, as the module does, so the
+                // undone-task refusal below never names a task inside a
+                // private sub-epic someone still holds.
+                let nodes = doomed.iter().filter_map(|id| tables.epics.get(id));
+                if scope_on && module::subtree_holds_a_seen_private_epic(&*tables, nodes) {
+                    return refused(module::SUBTREE_HOLDS_A_SEEN_PRIVATE_EPIC);
+                }
                 if let Some(why) = Self::subtree_too_deep(&tables, item_id) {
                     return refused(why);
                 }
@@ -800,10 +833,6 @@ impl MemoryReducerCaller {
                     return refused(format!(
                         "epic {item_id}: cannot delete while task {undone} in its subtree is not done"
                     ));
-                }
-                let nodes = doomed.iter().filter_map(|id| tables.epics.get(id));
-                if scope_on && module::subtree_holds_a_seen_private_epic(&*tables, nodes) {
-                    return refused(module::SUBTREE_HOLDS_A_SEEN_PRIVATE_EPIC);
                 }
                 self.delete_epic_subtree_with_feed_cleanup(&mut tables, item_id, &doomed);
                 self.recalculate_epic_chain(&mut tables, epic.parent_epic_id);

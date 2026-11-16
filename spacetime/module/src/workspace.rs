@@ -294,6 +294,14 @@ pub fn remove_member(ctx: &ReducerContext, membership_id: i64) -> Result<(), Str
         return Err(format!("membership {membership_id} does not exist"));
     };
     require_admin_of(ctx, membership.workspace_id)?;
+    // `SightChangeNeverStrandsAHost`: before any write.
+    if crate::visibility::member_removal_strands_a_host(
+        ctx,
+        membership.workspace_id,
+        &membership.user,
+    ) {
+        return Err(crate::visibility::member_removal_strands_refusal());
+    }
     ctx.db.memberships().id().delete(membership_id);
     drop_follows_in_workspace(ctx, &membership.user, membership.workspace_id);
     Ok(())

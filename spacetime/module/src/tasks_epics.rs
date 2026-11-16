@@ -972,6 +972,22 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
         .as_ref()
         .is_some_and(|c| *c != row.feed_command);
     let reparented = patch.parent_epic_id.is_some_and(|p| p != was_child_of);
+    if let Some(parent) = patch.parent_epic_id.filter(|p| *p != was_child_of) {
+        // `SightChangeNeverStrandsAHost`: before any write.
+        let moved = id;
+        if crate::visibility::epic_change_strands_a_host(
+            ctx,
+            &collect_epic_subtree_ids(ctx, id),
+            &|mut node| {
+                if node.id == moved {
+                    node.parent_epic_id = parent;
+                }
+                node
+            },
+        ) {
+            return Err(crate::visibility::epic_change_strands_refusal(id));
+        }
+    }
 
     let before = row.clone();
     apply_epic_patch(&mut row, patch);
