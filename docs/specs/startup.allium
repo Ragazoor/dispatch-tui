@@ -166,40 +166,40 @@ contract ConfigDriftEngine {
         -- that wrote it, and the runs that reach this check are not all the
         -- operator's installed one. A build from a worktree reaches it on the
         -- ordinary board-launch path, because there is no separate setup
-        -- command left to keep it away. Recording the RUNNING BINARY let such a
-        -- run write a path inside that worktree, which stops existing the
-        -- moment the worktree is removed. The entry was then live and broken,
-        -- nothing re-derived it until the operator next ran their installed
-        -- binary, and nothing had reported a failure — the run that wrote it
-        -- succeeded. Pointing the run at a throwaway database does not avoid
-        -- this: that redirects dispatch's own data directory, while the
-        -- operator's Claude Code configuration is resolved separately and is
-        -- reached all the same.
+        -- command to keep it away. Recording the RUNNING BINARY would let such
+        -- a run write a path inside that worktree, which stops existing the
+        -- moment the worktree is removed. The entry would then be live and
+        -- broken, nothing would re-derive it until the operator next ran their
+        -- installed binary, and nothing would report a failure — the run that
+        -- wrote it succeeded. Pointing the run at a throwaway data directory
+        -- does not avoid this: that redirects dispatch's own data directory,
+        -- while the operator's Claude Code configuration is resolved
+        -- separately and is reached all the same.
         --
-        -- Looking the command up on the operator's PATH at startup closed that
-        -- build axis but left a second one. The answer was then the first
-        -- installed binary the LAUNCHING SHELL's PATH named, so two boards
-        -- started from shells that order PATH differently recorded different
-        -- values and each found the other's entry stale — a rewrite prompt for
-        -- a difference that is not drift in either direction, which is what
-        -- OneDefinitionOfOutOfDate and ApplyIsIdempotent need to be free of. A
-        -- fixed string has neither axis, by construction rather than by
-        -- argument.
+        -- Looking the command up on the operator's PATH at startup closes that
+        -- build axis but leaves a second one. The answer would be the first
+        -- installed binary the LAUNCHING SHELL's PATH names, so two boards
+        -- started from shells that order PATH differently would record
+        -- different values and each find the other's entry stale — a rewrite
+        -- prompt for a difference that is not drift in either direction, which
+        -- is what OneDefinitionOfOutOfDate and ApplyIsIdempotent need to be
+        -- free of. A fixed string has neither axis, by construction rather
+        -- than by argument.
         --
         -- THE STATUS LINE IS THE PRECEDENT, not a counter-example. The
-        -- status_line artefact records a bare `dispatch` invocation too, and
-        -- always has. Both artefacts are command strings the SAME Claude Code
-        -- process runs, under the same PATH, so a rule that held for one and
-        -- not the other would have to name a difference between them. There is
-        -- none. The two now agree, and this invariant is the statement that
-        -- their agreeing is deliberate.
+        -- status_line artefact records a bare `dispatch` invocation too. Both
+        -- artefacts are command strings the SAME Claude Code process runs,
+        -- under the same PATH, so a rule that held for one and not the other
+        -- would have to name a difference between them. There is none. The
+        -- two agree, and this invariant is the statement that their agreeing
+        -- is deliberate.
         --
         -- What is given up, stated rather than glossed: where Claude Code's own
         -- PATH holds no dispatch, the helper cannot be invoked and no caller
         -- identity reaches the board. That is accepted on two counts. Claude
         -- Code's PATH is the one the command actually runs under, so it is the
         -- right one to decide — which is the same reason the launching shell's
-        -- was the wrong one. And the cost is small: the helper emits one
+        -- is the wrong one. And the cost is small: the helper emits one
         -- constant payload naming a NON-DISPATCHED session, and a dispatched
         -- agent never reaches it, because its launch overrides this entry with
         -- one carrying a fixed caller-task header (dispatch.allium:
@@ -392,7 +392,7 @@ contract SessionLauncher {
 
     @invariant ArgvIsCarriedThrough
         -- argv is the invocation being relocated, not a fresh default one.
-        -- Whatever database path and port the operator named reach the board
+        -- Whatever data directory and port the operator named reach the board
         -- that comes up inside the session. This holds on both entry paths: a
         -- session created for the launch runs argv in its first window, and a
         -- session that already existed gets a new window running the same
@@ -976,7 +976,7 @@ rule LaunchBoardBySupplyingASession {
     @guidance
         -- The cold path: no session of dispatch's own yet. The command puts
         -- itself inside one rather than reporting that it is not in one. It
-        -- hands its own arguments — the database path and the agent port — to
+        -- hands its own arguments — the data directory and the agent port — to
         -- the session it enters, so the board that comes up inside tmux is the
         -- board the operator asked for and not a default one.
         --
