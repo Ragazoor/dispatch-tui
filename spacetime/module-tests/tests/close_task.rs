@@ -614,3 +614,43 @@ fn a_move_to_review_keeps_the_window() {
     assert_eq!(current_agent(&store, id).tmux_window, format!("task-{id}"));
     assert!(session_rows(&store, id, SESSION_KIND_CLOSE).is_empty());
 }
+
+/// The released window's close row fails an open wrap_up "task closed" first,
+/// as every close row does, so at most one session request is open.
+#[test]
+fn a_released_window_fails_the_open_session_request() {
+    let (store, _, ids) = wrappable(false, &["running"]);
+    let id = ids[0];
+    store
+        .call("alice", |ctx| {
+            request_wrap_up(ctx, id, HOST_A.into(), "rebase".into())
+        })
+        .expect("request_wrap_up");
+
+    update_to(&store, id, status_patch("backlog")).expect("update_task");
+
+    let wrap = session_row(&store, id, SESSION_KIND_WRAP_UP);
+    assert_eq!(wrap.state, SESSION_FAILED);
+    assert_eq!(wrap.reason, "task closed");
+    assert_eq!(
+        session_row(&store, id, SESSION_KIND_CLOSE).state,
+        SESSION_REQUESTED
+    );
+}
+
+/// A move into Done with a pr-typed url and a window the board did not see
+/// writes ONE close row, naming the window: its host also runs `gh pr close`,
+/// so it stands in for `UpdateTaskDoneWritesACloseRow`'s windowless row.
+#[test]
+fn update_task_into_done_releasing_a_window_writes_one_close_row() {
+    let (store, _, ids) = wrappable(false, &["review"]);
+    let id = ids[0];
+    patch(&store, id, pr_patch()).expect("attach the pr");
+
+    update_to(&store, id, status_patch("done")).expect("update_task");
+
+    let [row] = session_rows(&store, id, SESSION_KIND_CLOSE)
+        .try_into()
+        .expect("one close row");
+    assert_eq!(row.tmux_window, format!("task-{id}"));
+}

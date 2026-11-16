@@ -1200,6 +1200,76 @@ async fn a_hand_move_to_backlog_releases_a_window_the_patch_did_not_name() {
     );
 }
 
+/// The released window's close row fails an open wrap_up "task closed" first,
+/// as every close row does. Mirrors the module's test of the same name.
+#[tokio::test]
+async fn a_released_window_fails_the_open_session_request() {
+    let (caller, rows) = caller();
+    let task = dispatched_task(&caller).await;
+    let stuck = applied_id(wrap_up(&caller, task, "rebase").await);
+
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                status: Some("backlog".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+
+    let stuck = rows.session_request(stuck).unwrap();
+    assert_eq!(stuck.state, SessionRequestState::Failed);
+    assert_eq!(stuck.reason.as_deref(), Some("task closed"));
+    let [row] = close_rows(&rows, task).try_into().expect("one close row");
+    assert_eq!(row.state, SessionRequestState::Requested);
+}
+
+/// A move into Done with a pr-typed url and a window the board did not see
+/// writes ONE close row, naming the window: it stands in for
+/// `UpdateTaskDoneWritesACloseRow`'s windowless row. Mirrors the module's test.
+#[tokio::test]
+async fn update_task_into_done_releasing_a_window_writes_one_close_row() {
+    let (caller, rows) = caller();
+    let task = dispatched_task(&caller).await;
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                url: Some("https://github.com/o/r/pull/9".into()),
+                url_type: Some("pr".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+
+    let done = bindings::TaskPatch {
+        status: Some("done".into()),
+        ..blank_task_patch()
+    };
+    let outcome = caller
+        .update_task(
+            task,
+            None,
+            String::new(),
+            HOST.into(),
+            done,
+            String::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(outcome.won());
+
+    let [row] = close_rows(&rows, task).try_into().expect("one close row");
+    assert_eq!(
+        row.tmux_window.as_ref().map(|w| w.as_str()),
+        Some(format!("task-{}", task.0).as_str())
+    );
+}
+
 /// No window and no pr-typed url means no host work, so no row.
 #[tokio::test]
 async fn close_task_without_host_work_writes_no_row() {
