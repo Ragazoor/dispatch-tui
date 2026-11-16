@@ -774,41 +774,6 @@ config {
 }
 
 ------------------------------------------------------------
--- Surfaces
-------------------------------------------------------------
-
--- The module's request-row reducers. Any store client may call them; each
--- rule below decides from caller() whether the call stands (D11, W11). The
--- writers are the board's launch paths, the MCP tools and the epic chain
--- (request_dispatch, request_wrap_up, request_exit_session, close_task,
--- request_feed_refresh); the reporters are the host whose board the row
--- names (claim_*, report_*). Rules in other specs that raise one of these
--- emit it qualified (split/DispatchRequested(...)).
-surface ModuleRequestReducers {
-    facing _: core/StoreClient
-
-    provides:
-        DispatchRequested(task, requester, origin, mode?)
-        WrapUpRequested(task, host, action)
-        ExitSessionRequested(task, token, action, pr_url?)
-        CloseTaskRequested(task, host)
-        FeedRefreshRequested(epic, host)
-        -- The claims: a host's board claiming a row its subscription
-        -- delivered (claim_dispatch_request, claim_session_request,
-        -- claim_feed_request).
-        DispatchRequestDelivered(request)
-        SessionRequestDelivered(request)
-        FeedRequestDelivered(request, host)
-        -- The reports of the claiming host.
-        DispatchProvisioned(request, reporter, worktree, tmux_window, reused_worktree)
-        DispatchProvisioningFailed(request, reporter, reason)
-        SessionRequestDone(request, reporter)
-        SessionRequestFailed(request, reporter, reason, conflict)
-        FeedRequestDone(request, reporter)
-        FeedRequestFailed(request, reporter, reason)
-}
-
-------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
@@ -2344,6 +2309,41 @@ invariant CloseRowsCarryNoTokenAndNoChain {
             and r.wrap_up_request = null
             and r.chained_task = null
             and r.pr_url = null)
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- The module's request-row reducers. Any store client may call them; each
+-- rule above decides from caller() whether the call stands (D11, W11). The
+-- writers are the board's launch paths, the MCP tools and the epic chain
+-- (request_dispatch, request_wrap_up, request_exit_session, close_task,
+-- request_feed_refresh); the reporters are the host whose board the row
+-- names (claim_*, report_*). Rules in other specs that raise one of these
+-- emit it qualified (split/DispatchRequested(...)).
+surface ModuleRequestReducers {
+    facing _: core/StoreClient
+
+    provides:
+        DispatchRequested(task, requester, origin, mode?)
+        WrapUpRequested(task, host, action)
+        ExitSessionRequested(task, token, action, pr_url?)
+        CloseTaskRequested(task, host)
+        FeedRefreshRequested(epic, host)
+        -- The claims: a host's board claiming a row its subscription
+        -- delivered (claim_dispatch_request, claim_session_request,
+        -- claim_feed_request).
+        DispatchRequestDelivered(request)
+        SessionRequestDelivered(request)
+        FeedRequestDelivered(request, host)
+        -- The reports of the claiming host.
+        DispatchProvisioned(request, reporter, worktree, tmux_window, reused_worktree)
+        DispatchProvisioningFailed(request, reporter, reason)
+        SessionRequestDone(request, reporter)
+        SessionRequestFailed(request, reporter, reason, conflict)
+        FeedRequestDone(request, reporter)
+        FeedRequestFailed(request, reporter, reason)
 }
 
 ------------------------------------------------------------
