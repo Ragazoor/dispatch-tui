@@ -1078,8 +1078,9 @@ rule CreatesRequireASettledIdentity {
         -- THE THIRD THING SOME WRITES NEED, BESIDES A CONNECTION. A
         -- mutation that supplies a person has to send a name the board
         -- itself chose, and there is no placeholder for "whoever this turns
-        -- out to be". The writes that supply one
-        -- (src/store/queries/mod.rs::require_identity and its callers):
+        -- out to be". The writes that supply one (the board's store queries
+        -- read its settled identity for each; most go through
+        -- src/store/queries/mod.rs::require_identity):
         --   - a create of a task, an epic or a work package, which stamps
         --     core/Task.owner or created_by, or core/Epic.created_by;
         --   - a task moved out of its epic onto a user board, which needs an
@@ -1095,16 +1096,20 @@ rule CreatesRequireASettledIdentity {
         -- THE SEEN MARK IS DROPPED, NOT REFUSED. A seen mark on an
         -- unidentified board is neither sent nor refused: the board drops it
         -- and reports success (src/store/queries/tasks.rs::mark_task_seen).
-        -- Opening a card is not an action the operator asked to save, and a
-        -- refusal for it would be noise; the card stays marked unseen until
-        -- the next open on an identified board.
+        -- The mark comes from the cursor landing on a card (tasks.allium:
+        -- SeeTaskByLandingOnIt), not from an action the operator asked to
+        -- save, so a refusal for it would be noise. The UnseenTask row stays,
+        -- and the next landing on an identified board removes it.
         --
-        -- WRITES THE STORE STAMPS ITSELF DO NOT WAIT. A feed ingest stamps an
-        -- empty created_by when no identity is settled (feeds.allium:
-        -- IngestFeedEmission). A learning, a workspace, a usage event and the
-        -- request rows (dispatch, wrap-up, feed refresh) carry no person the
-        -- board chose; whatever names their author the store takes from the
-        -- caller it sees. None of them supplies a person and none waits.
+        -- FEED INGEST DOES NOT WAIT. A feed's tasks are the feed's, not a
+        -- person's: ingest sends an empty created_by when no identity is
+        -- settled (feeds.allium: IngestFeedEmission), so there is no name it
+        -- could get wrong, and it does not supply a person.
+        --
+        -- NOR DO WRITES THE STORE STAMPS ITSELF. A learning, a workspace, a
+        -- usage event and the request rows (dispatch, wrap-up, feed refresh)
+        -- carry no person the board chose; whatever names their author the
+        -- store takes from the caller it sees. None of them waits.
         --
         -- NOT GUARDED ON connection.status = connected, DELIBERATELY. An
         -- unidentified board and a disconnected board overlap: identity settles
@@ -1783,7 +1788,9 @@ surface BoardWrites {
         -- A mutation of a shared row reaches the store only as a
         -- SharedRowMutationRequested, so BoardWritesThroughTheStore,
         -- CreatesRequireASettledIdentity and AWriteWithNoConnectionIsRefused
-        -- see every one. No caller writes a shared row any other way.
+        -- see every one. No caller writes a shared row any other way. Each
+        -- is sent or refused, except a seen mark on an unidentified board,
+        -- which is dropped (CreatesRequireASettledIdentity).
 }
 
 surface ConnectionIndicator {

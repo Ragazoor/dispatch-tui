@@ -285,10 +285,8 @@ entity Snapshot {
     extracts: List<TableExtract>
 
     -- Black boxes over the one extract whose table is t, 0 when there is none
-    -- (src/spacetime/snapshot.rs::Snapshot::extract): the largest value its
-    -- rows hold in their `id` column (0 when they hold none), and its
-    -- row_count. The `id` column, not row_ids: an archived_tasks row carries
-    -- the task id it kept, though that table generates none.
+    -- (src/spacetime/snapshot.rs::Snapshot::extract): its largest row id (0
+    -- when its row_ids is empty), and its row_count.
     highest_id(t): highest_extract_id(extracts, t)
     rows_in(t): extract_row_count(extracts, t)
 
@@ -296,7 +294,11 @@ entity Snapshot {
     -- its archived records too: an archived task keeps its task id
     -- (core/ArchivedTask), so a board whose every task was deleted still has
     -- rows behind its ceiling.
-    burn_ceiling(t): if t = tasks: max(highest_id(tasks), highest_id(archived_tasks)) else: highest_id(t)
+    -- archived_tasks generates no ids, so its row_ids is empty and its
+    -- highest_id is 0. Its rows still carry the task id each kept, in their
+    -- `id` column; highest_kept_task_id (a black box) is the largest of them,
+    -- 0 when there are none.
+    burn_ceiling(t): if t = tasks: max(highest_id(tasks), highest_kept_task_id(extracts)) else: highest_id(t)
     rows_claiming_ids(t): if t = tasks: rows_in(tasks) + rows_in(archived_tasks) else: rows_in(t)
 
     -- Completeness is table-level, not row-level: every shared table appears,

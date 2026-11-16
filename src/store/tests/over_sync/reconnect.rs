@@ -467,7 +467,7 @@ async fn an_error_after_accept_is_an_outage_that_is_retried() {
     assert_eq!(connector.subscriptions().len(), 1);
 }
 
-/// `ASubscriptionTheStoreRefusesIsAnOutage`: a stored-identity read that fails
+/// `ConnectionAttemptFailed`: a stored-identity read that fails
 /// after the store has accepted the connection is an ordinary failed attempt.
 /// The connection is closed and the retry waits for the backoff, rather than
 /// the session staying `Connecting` over a live socket.
