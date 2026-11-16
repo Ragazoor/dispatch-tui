@@ -1,1 +1,5 @@
-This is a grouped update, so it cannot be routed automatically: it covers several packages and there is no one changelog to clear it with. Go to ASK THE USER and carry the Bump line above into your question.
+This is a grouped update: it covers several packages, so there is no one changelog. Start from Kognic's GitHub App verdict: gh pr view <PR> --json reviews,comments. The app is `kognic-github-app`; its verdict is its latest review (a new push dismisses its earlier review).
+   - Latest review APPROVED -> go to AUTO-APPROVE + MERGE.
+   - Anything else (dismissed, no review, or a comment saying the review was inconclusive or did not auto-approve) -> the app is uncertain. Read the reason in its latest comment, then investigate yourself: for each bumped package, the release notes or changelog between its two versions, and the diff.
+   - Nothing in any package suggests a breaking change (a removal, a deprecation, a changed default, a migration step), and the app's concern is cleared -> go to AUTO-APPROVE + MERGE, and say in the approval body that the app was uncertain and what you read.
+   - A package with no notes you can find, a breaking change, or a concern you cannot clear -> go to ASK THE USER. Name the package and the app's reason.

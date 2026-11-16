@@ -201,7 +201,9 @@ enum BumpKind {
     non_major   -- a Renovate grouped update declared non-major, covering more
                 -- than one package. Not routable as a minor bump: the
                 -- changelog branch is written for a single package and a group
-                -- has no one changelog to read.
+                -- has no one changelog to read. It has its own branch: the
+                -- app's verdict first, then the agent's own per-package
+                -- investigation (AReviewRunbookCarriesOnlyTheBranchThatApplies).
     digest      -- the image a tag resolves to moved without the tag moving —
                 -- Renovate's `digest` and `pinDigest` updates. No version pair,
                 -- no semver kind, and no changelog anywhere that would describe
@@ -1171,18 +1173,18 @@ surface AgentPrompt {
         -- prompt states the bump on one line ("Bump: major — pandas → v3")
         -- and carries exactly one decision body: merge it, check its
         -- changelog first, summarise its breaking changes, say no changelog
-        -- exists because only an image digest moved, say a group has no one
-        -- changelog to clear it with, or say the kind could not be read. The
-        -- other five are absent, and with them the transitions that existed
-        -- only to skip past them.
+        -- exists because only an image digest moved, read a group by the app's
+        -- verdict and then package by package, or say the kind could not be
+        -- read. The other five are absent, and with them the transitions that
+        -- existed only to skip past them.
         --
         -- THREE of the six route straight to the user, and they are separate
         -- bodies rather than one shared body because each states a reason and
         -- no reason is true of the others. A digest is unroutable because
-        -- there is no changelog for an image move; a group because it covers
-        -- several packages; an unclassified bump because nothing said what
-        -- kind it is, and it is usually a single package. Sharing one body
-        -- meant telling every unclassified PR it was a group.
+        -- there is no changelog for an image move; a major bump because it is
+        -- never merged by the agent; an unclassified bump because nothing said
+        -- what kind it is, and it is usually a single package. Sharing one
+        -- body meant telling every unclassified PR it was a group.
         --
         -- The merge terminal is omitted too on a route that cannot reach it.
         -- That is not tidiness: the major branch says "never merge one
@@ -1202,7 +1204,20 @@ surface AgentPrompt {
         -- minor branch reads THE changelog and merges when it comes back
         -- clean, and a multi-package PR has no single changelog — so routing a
         -- group there would clear a check that was never performed. Only
-        -- `(major)` keeps its own kind; every other group goes to the user.
+        -- `(major)` keeps its own kind; every other group has its own branch.
+        --
+        -- That branch may merge. It reads the app's verdict first: a latest
+        -- APPROVED review goes to the merge terminal. Anything else — no
+        -- review, a dismissed one, or a comment saying the review was
+        -- inconclusive or did not auto-approve — means the app is uncertain,
+        -- and the agent investigates: the release notes or changelog of each
+        -- bumped package between its two versions, and the diff. Nothing in
+        -- any of them suggests a breaking change and the app's own concern is
+        -- cleared: approve and merge, saying the app was uncertain and what
+        -- was read. A package with no notes, a breaking change, or a concern
+        -- the agent cannot clear: ASK THE USER, naming the package and the
+        -- app's reason. The investigation stands in for the app's approval
+        -- on this route only; patch and minor still need the approval.
 
     @guarantee TheRunbookStatesThePrItWasHandedRatherThanAskingForIt
         -- The PR itself is rendered too, when the task carries a pr-typed url.
@@ -1289,7 +1304,8 @@ surface AgentPrompt {
         -- The dependency-bump runbook states its goal and its policy in plain
         -- sentences and leaves their application to the agent's judgement:
         -- approve only when the PR changes just dependency manifests,
-        -- lockfiles and pinned GitHub Action versions in workflow files, and
+        -- lockfiles, pinned GitHub Action versions in workflow files and
+        -- version pins in build files, and
         -- nothing in the changelog suggests a breaking change; otherwise ask
         -- the human one direct question. Naming the action-pin case keeps
         -- Action bumps from all escalating to the human (an operator
@@ -1307,6 +1323,14 @@ surface AgentPrompt {
         --     there says nothing about what else the diff did. The agent applies
         --     that reason to the files in front of it, including ecosystems the
         --     list never named.
+        --
+        -- A version pin in a build file is a change to a version string only,
+        -- inside a dependency declaration, with no change to logic, tasks or
+        -- plugin configuration — for example the version in a
+        -- `classpath "group:artifact:2.23.0"` line in settings.gradle. It
+        -- counts as a dependency change. Any other edit to a build file still
+        -- goes to the user.
+        --
         --   - a token list for "breaking change" in a changelog. The question
         --     is whether the changelog suggests one, which a deprecation,
         --     a removed option or a changed default can do without any listed
@@ -1327,8 +1351,8 @@ surface AgentPrompt {
     @guarantee TheAppsVerdictGatesTheMerge
         -- Kognic's GitHub App (login `kognic-github-app`) reviews the PR
         -- before the agent does. It posts a comment — "✅ **Agent review
-        -- approved**" or "🚫 **Autoreview did not auto-approve**", with a
-        -- reason — and an APPROVED review. A new push DISMISSES its earlier
+        -- approved**", "❓ **Agent review was inconclusive**" or "🚫 **Autoreview
+        -- did not auto-approve**", with a reason — and an APPROVED review. A new push DISMISSES its earlier
         -- review, so an approval of a commit the PR has since moved past does
         -- not survive.
         --
@@ -1341,12 +1365,18 @@ surface AgentPrompt {
         -- as live would merge a commit the app never looked at.
         --
         -- The check sits at the HEAD of the auto-approve + merge terminal,
-        -- and only there. It therefore renders only on the routes that can
-        -- reach that terminal — patch and minor. Major, digest, grouped and
-        -- unclassified never merge, so they carry no merge terminal and no
-        -- gate on one; rendering the gate there would be the same mistake
-        -- AReviewRunbookCarriesOnlyTheBranchThatApplies already refuses for
-        -- the merge commands themselves.
+        -- and only there. It therefore renders on patch and minor. Major,
+        -- digest and unclassified never merge, so they carry no merge
+        -- terminal and no gate on one; rendering the gate there would be the
+        -- same mistake AReviewRunbookCarriesOnlyTheBranchThatApplies already
+        -- refuses for the merge commands themselves.
+        --
+        -- Grouped is the one exception. It renders the merge commands without
+        -- the gate, because a grouped update with no app approval is not a
+        -- stop: its branch reads the same verdict itself, and an uncertain
+        -- app sends the agent to investigate each package rather than to the
+        -- user. The merge commands still render only there and on patch and
+        -- minor.
         --
         -- Not safe, or no verdict yet: the agent does NOT approve and does
         -- NOT merge. It goes to ASK THE USER and names the app's reason — or

@@ -3,7 +3,7 @@ This is a Dependabot PR review, not a code-edit task: do not edit files or write
 {{BUMP}}
 {{PR}}
 
-1. Verify the PR touches only dependency files (gh pr view <PR> --json files, gh pr diff <PR>). Approve only a PR that changes just dependency manifests, lockfiles and pinned GitHub Action versions in workflow files; anything else, such as build scripts or source, goes to ASK THE USER.{{AUTHOR}}
+1. Verify the PR touches only dependency files (gh pr view <PR> --json files, gh pr diff <PR>). Approve only a PR that changes just dependency manifests, lockfiles, pinned GitHub Action versions in workflow files and version pins in build files. A version pin is a change to a version string only, inside a dependency declaration, with no change to logic, tasks or plugin configuration (for example the version in a `classpath "group:artifact:2.23.0"` line in settings.gradle). Anything else, such as other build script changes or source, goes to ASK THE USER.{{AUTHOR}}
 2. Check CI: gh pr checks <PR>. Passing checks continue to step 3; pending checks go to ASK THE USER, asking whether to wait; failing checks go to ASK THE USER with the failure summary.
 3. {{DECISION}}
 

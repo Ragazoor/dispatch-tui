@@ -304,12 +304,18 @@ fn a_dependabot_prompt_carries_only_the_branch_its_bump_takes() {
             label: "grouped non-major",
             title: "#79 fix(deps): update python (non-major)",
             body: "",
+            // A group may merge: the app's verdict first, then the agent's own
+            // per-package reading when the app is uncertain.
             present: &[
                 "Bump: non-major group — python",
-                "cannot be routed",
                 "several packages",
+                "kognic-github-app",
+                "inconclusive",
+                "each bumped package",
+                "gh pr merge",
+                "ASK THE USER",
             ],
-            absent: &["gh pr merge", "gh pr comment", "CHANGELOG"],
+            absent: &["gh pr comment", "CHANGELOG", "cannot be routed"],
         },
         Route {
             label: "digest",
@@ -546,27 +552,41 @@ fn every_dependabot_route_keeps_the_shared_steps_and_the_ask_terminal() {
 #[test]
 fn the_apps_verdict_gates_the_merge() {
     const APP: &str = "kognic-github-app";
-    for (title, merges) in [
-        ("Bump foo from 1.0.0 to 1.0.1", true),
-        ("Bump foo from 1.0.0 to 1.1.0", true),
-        ("fix(deps): update dependency foo to v9", false),
-        ("fix(deps): update python (non-major)", false),
-        ("chore: something else", false),
+    // (title, renders the merge terminal, the terminal opens with the gate)
+    for (title, merges, gate_opens) in [
+        ("Bump foo from 1.0.0 to 1.0.1", true, true),
+        ("Bump foo from 1.0.0 to 1.1.0", true, true),
+        ("fix(deps): update dependency foo to v9", false, false),
+        // A group reads the verdict in its own branch, so the terminal
+        // carries the commands without the gate.
+        ("fix(deps): update python (non-major)", true, false),
+        ("chore: something else", false, false),
     ] {
         let text = dependabot_prompt(title);
         let Some((merge, _ask)) = text.split_once("ASK THE USER:") else {
             panic!("{title:?}: no ask terminal, got: {text}");
         };
-        let gated = merge
-            .split_once("AUTO-APPROVE + MERGE:")
-            .is_some_and(|(_, terminal)| {
-                let first_step = terminal.split("gh pr review").next().unwrap_or("");
-                first_step.contains(APP) && first_step.contains("APPROVED")
-            });
+        let terminal = merge.split_once("AUTO-APPROVE + MERGE:").map(|(_, t)| t);
         assert_eq!(
-                gated, merges,
-                "{title:?}: the verdict gate must open the merge terminal exactly when it renders, got: {text}"
+            terminal.is_some(),
+            merges,
+            "{title:?}: the merge terminal must render exactly on the routes that can merge, got: {text}"
+        );
+        let gated = terminal.is_some_and(|t| {
+            let first_step = t.split("gh pr review").next().unwrap_or("");
+            first_step.contains(APP) && first_step.contains("APPROVED")
+        });
+        assert_eq!(
+            gated, gate_opens,
+            "{title:?}: the verdict gate must open the merge terminal exactly on patch and minor, got: {text}"
+        );
+        if title.contains("non-major") {
+            // The group branch itself reads the verdict.
+            assert!(
+                merge.contains(APP) && merge.contains("APPROVED"),
+                "{title:?}: the group branch must read the app's verdict, got: {text}"
             );
+        }
     }
 }
 
@@ -601,6 +621,23 @@ fn the_dependabot_runbook_states_the_dep_only_policy_in_plain_words() {
             assert!(
                 lower.contains(needle),
                 "{title:?}: the dep-only policy must name {needle:?}, got: {text}"
+            );
+        }
+    }
+}
+
+/// A version pin in a build file is a dependency change: step 1 says what
+/// counts (a version string only, no logic change) and gives the
+/// settings.gradle classpath example, so it is not read as a build script
+/// change that forces an ask.
+#[test]
+fn the_dependabot_runbook_counts_a_build_file_version_pin_as_a_dependency_change() {
+    for title in DEPENDABOT_ROUTES {
+        let text = dependabot_prompt(title);
+        for needle in ["version pin", "settings.gradle", "version string only"] {
+            assert!(
+                text.contains(needle),
+                "{title:?}: step 1 must define a build-file pin, missing {needle:?}, got: {text}"
             );
         }
     }

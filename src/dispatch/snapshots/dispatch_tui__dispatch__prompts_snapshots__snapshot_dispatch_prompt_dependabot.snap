@@ -1,5 +1,6 @@
 ---
 source: src/dispatch/prompts_snapshots.rs
+assertion_line: 124
 expression: prompt
 ---
 Your task is:
@@ -14,7 +15,7 @@ Bump: patch — serde 1.0.195 → 1.0.197
 PR: https://github.com/example/repo/pull/42
    Pass this URL to every `gh` command below — it identifies the repo too, so none of them need `--repo`.
 
-1. Verify the PR touches only dependency files (gh pr view <PR> --json files, gh pr diff <PR>). Approve only a PR that changes just dependency manifests, lockfiles and pinned GitHub Action versions in workflow files; anything else, such as build scripts or source, goes to ASK THE USER.
+1. Verify the PR touches only dependency files (gh pr view <PR> --json files, gh pr diff <PR>). Approve only a PR that changes just dependency manifests, lockfiles, pinned GitHub Action versions in workflow files and version pins in build files. A version pin is a change to a version string only, inside a dependency declaration, with no change to logic, tasks or plugin configuration (for example the version in a `classpath "group:artifact:2.23.0"` line in settings.gradle). Anything else, such as other build script changes or source, goes to ASK THE USER.
    - Do not re-check the PR author. The feed that created this task lists PRs by bot author, so a task only exists for a PR that already passed that filter; re-deriving it costs a call and can only ever agree.
 2. Check CI: gh pr checks <PR>. Passing checks continue to step 3; pending checks go to ASK THE USER, asking whether to wait; failing checks go to ASK THE USER with the failure summary.
 3. This is a patch bump. Nothing further to check — go to AUTO-APPROVE + MERGE.

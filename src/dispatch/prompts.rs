@@ -775,22 +775,46 @@ fn render_template(template: &str, pairs: &[(&str, &str)]) -> String {
 /// commands beside "never merge a major bump yourself" would put the exact call
 /// the branch forbids two lines under the prohibition. See
 /// `AReviewRunbookCarriesOnlyTheBranchThatApplies` in `docs/specs/dispatch-prompt.allium`.
-fn dependabot_decision(kind: BumpKind) -> (&'static str, &'static str) {
-    // MERGE is a const because two arms share it. Every decision body is
-    // inlined, so the fragment a route renders is readable off its own arm.
-    const MERGE: &str = include_str!("prompts/dependabot/merge.md");
-    match kind {
-        BumpKind::Patch => (include_str!("prompts/dependabot/patch.md"), MERGE),
-        BumpKind::Minor => (include_str!("prompts/dependabot/minor.md"), MERGE),
-        BumpKind::Major => (include_str!("prompts/dependabot/major.md"), ""),
+fn dependabot_decision(kind: BumpKind) -> (&'static str, String) {
+    // Every decision body is inlined, so the fragment a route renders is
+    // readable off its own arm.
+    let gated = merge_terminal(true);
+    let (decision, merge) = match kind {
+        BumpKind::Patch => (include_str!("prompts/dependabot/patch.md"), gated),
+        BumpKind::Minor => (include_str!("prompts/dependabot/minor.md"), gated),
+        BumpKind::Major => (include_str!("prompts/dependabot/major.md"), String::new()),
         // Reaches the same ask terminal as an unclassified bump, but says WHY
         // there is nothing to read rather than that nothing was read.
-        BumpKind::Digest => (include_str!("prompts/dependabot/digest.md"), ""),
-        // Two ask bodies, not one shared body: each states WHY the bump is
-        // unroutable, and neither reason is true of the other. Sharing one
-        // told every unclassified PR it was a group.
-        BumpKind::NonMajor => (include_str!("prompts/dependabot/grouped.md"), ""),
-        BumpKind::Unknown => (include_str!("prompts/dependabot/unclassified.md"), ""),
+        BumpKind::Digest => (include_str!("prompts/dependabot/digest.md"), String::new()),
+        // A group merges without the verdict gate: its own body reads the
+        // app's verdict and, when the app is uncertain, sends the agent to
+        // investigate each package instead of to the user
+        // (`TheAppsVerdictGatesTheMerge`).
+        BumpKind::NonMajor => (
+            include_str!("prompts/dependabot/grouped.md"),
+            merge_terminal(false),
+        ),
+        // Not the group body: that one states a group reason, and an
+        // unclassified bump is usually a single package.
+        BumpKind::Unknown => (
+            include_str!("prompts/dependabot/unclassified.md"),
+            String::new(),
+        ),
+    };
+    (decision, merge)
+}
+
+/// The auto-approve + merge terminal: its heading, then the verdict gate when
+/// `gated`, then the approve and merge commands.
+fn merge_terminal(gated: bool) -> String {
+    let (heading, commands) = include_str!("prompts/dependabot/merge.md")
+        .split_once('\n')
+        .unwrap_or_default();
+    if gated {
+        let gate = include_str!("prompts/dependabot/merge-gate.md");
+        format!("{heading}\n{}\n{commands}", gate.trim_end())
+    } else {
+        format!("{heading}\n{commands}")
     }
 }
 
