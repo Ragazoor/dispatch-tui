@@ -45,6 +45,7 @@
 
 use "./core.allium" as core
 use "./tasks.allium" as tasks
+use "./sync.allium" as sync
 
 ------------------------------------------------------------
 -- Enumerations
@@ -266,14 +267,18 @@ entity Snapshot {
     taken_at: Timestamp
     extracts: List<TableExtract>
 
-    highest_id(t): extracts.filter(e => e.table = t).sum(e => e.row_ids.max ?? 0)
+    -- Black boxes over the one extract whose table is t, 0 when there is none
+    -- (src/spacetime/snapshot.rs::Snapshot::extract): its largest row id (0
+    -- when its row_ids is empty), and its row_count.
+    highest_id(t): highest_extract_id(extracts, t)
+    rows_in(t): extract_row_count(extracts, t)
 
     -- The id t's counter must pass, and the rows that claim it. `tasks` counts
     -- its archived records too: an archived task keeps its task id
     -- (core/ArchivedTask), so a board whose every task was deleted still has
     -- rows behind its ceiling.
     burn_ceiling(t): if t = tasks: max(highest_id(tasks), highest_id(archived_tasks)) else: highest_id(t)
-    rows_claiming_ids(t): if t = tasks: extracts.filter(e => e.table = tasks or e.table = archived_tasks).sum(e => e.row_count) else: extracts.filter(e => e.table = t).sum(e => e.row_count)
+    rows_claiming_ids(t): if t = tasks: rows_in(tasks) + rows_in(archived_tasks) else: rows_in(t)
 
     -- Completeness is table-level, not row-level: every shared table appears,
     -- even when it appears empty. An empty extract and a missing extract are
@@ -351,7 +356,7 @@ config {
     -- than written into the invariant so that the number and the SharedTable
     -- enumeration are visibly two statements of the same fact, and disagreeing
     -- is a spec-level error rather than a silent gap in a backup.
-    shared_table_count: Integer = 25
+    shared_table_count: Integer = 26
 
     -- Bumped when the snapshot layout changes in a way an older reader cannot
     -- interpret. A reader refuses a version it does not know rather than
@@ -440,7 +445,7 @@ rule RestoreSnapshot {
     requires: snapshot.format_version = config.snapshot_format_version
     requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count = config.shared_table_count
-    requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
+    requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) in sync/config.removed_statuses))
     requires: not snapshot.extracts.any(e => snapshot.burn_ceiling(e.table) < 0 or snapshot.burn_ceiling(e.table) > snapshot.rows_claiming_ids(e.table) * config.max_ceiling_per_row)
 
     ensures:
@@ -658,7 +663,7 @@ rule RefuseArchivedRows {
     requires: snapshot.format_version = config.snapshot_format_version
     requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count = config.shared_table_count
-    requires: snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
+    requires: snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) in sync/config.removed_statuses))
 
     ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: archived_rows_present, detail: refusal_detail(snapshot)})
 
@@ -706,7 +711,8 @@ rule StoreRefusesUnknownStatus {
     -- leave.
     when: tasks/TaskWriteRequested(task, written)
 
-    requires: written.status not in {"backlog", "running", "review", "done"}
+    -- Black box: true when the raw status text names a core/TaskStatus value.
+    requires: not names_a_task_status(written.status)
 
     ensures: StoreWriteRefused(caller: caller(), table: tasks, detail: unknown_status_detail(written))
 
@@ -763,7 +769,7 @@ rule RefuseImplausibleCeiling {
     requires: snapshot.format_version = config.snapshot_format_version
     requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count = config.shared_table_count
-    requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
+    requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) in sync/config.removed_statuses))
     requires: snapshot.extracts.any(e => snapshot.burn_ceiling(e.table) < 0 or snapshot.burn_ceiling(e.table) > snapshot.rows_claiming_ids(e.table) * config.max_ceiling_per_row)
 
     ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: incomplete, detail: refusal_detail(snapshot)})
@@ -818,8 +824,9 @@ invariant NoSequenceCanCollide {
 -- count, and one MISSING over a table that does generate ids is the original
 -- collision with no invariant watching for it.
 invariant SequenceForEveryGeneratingTable {
-    for extract in Snapshots.flat_map(s => s.extracts):
-        extract.row_ids.count > 0 implies IdSequences.any(q => q.table = extract.table)
+    for snapshot in Snapshots:
+        for extract in snapshot.extracts:
+            extract.row_ids.count > 0 implies IdSequences.any(q => q.table = extract.table)
 }
 
 -- One counter per table, not several. Two rows for the same table would let
@@ -926,25 +933,32 @@ rule ImportOldStore {
     requires: no_id_conflict(snapshot, target)
 
     ensures:
-        -- Every task and epic row read from the source passes through
-        -- sync.allium: RowsWithARemovedStatusAreDropped, the one removed-status
-        -- predicate the board's subscription decode also asks.
-        for row in snapshot.rows:
-            RowReadForImport(row)
-        ImportDroppedRemovedStatusRows(snapshot)
-        DependentsOfDroppedRowsAreDropped(snapshot)
-        OrphansLeaveTheirDroppedEpic(operator: operator, snapshot: snapshot)
+        -- Every row read from the source passes through sync.allium:
+        -- RowsWithARemovedStatusAreDropped, the one removed-status predicate
+        -- the board's subscription decode also asks. That rule judges task
+        -- and epic rows only.
+        for extract in snapshot.extracts:
+            for row in extract.rows:
+                RowReadForImport(row)
+        -- DependentsOfDroppedRowsAreDropped and OrphansLeaveTheirDroppedEpic
+        -- listen for this.
+        ImportDroppedRemovedStatusRows(operator: operator, snapshot: snapshot)
         BurnIdSequences(snapshot: snapshot)
+        -- Black boxes: rows_missing_from is the extract's rows, less the
+        -- dropped ones, whose key and natural key are both free in target
+        -- (see "ALREADY PRESENT" below). The four report arguments are the
+        -- per-table counts of rows written, of rows kept as the target has
+        -- them and of rows dropped, and the ids of the orphaned tasks.
         for extract in snapshot.extracts:
             TableRowsWriteRequested(
                 table: extract.table,
-                rows: extract.rows where not target.has_key(row) and not target.has_natural_key(row)
+                rows: rows_missing_from(target, extract)
             )
         ImportReported(
-            imported: per_table_counts_written,
-            kept: per_table_counts_already_present,
-            dropped: per_table_counts_dropped,
-            orphaned: tasks_whose_epic_was_dropped
+            imported: written_counts(snapshot, target),
+            kept: kept_counts(snapshot, target),
+            dropped: dropped_counts(snapshot),
+            orphaned: orphaned_task_ids(snapshot)
         )
 
     @guidance
@@ -1041,13 +1055,15 @@ rule ImportOldStore {
 }
 
 rule DependentsOfDroppedRowsAreDropped {
-    when: ImportDroppedRemovedStatusRows(snapshot)
+    when: ImportDroppedRemovedStatusRows(operator, snapshot)
 
+    -- Black boxes: whether a row names a task or an epic the import dropped.
     ensures:
-        for row in snapshot.rows where names_a_dropped_task(row):
-            RowDropped(row)
-        for row in snapshot.rows where names_a_dropped_epic(row):
-            RowDropped(row)
+        for extract in snapshot.extracts:
+            for row in extract.rows where names_a_dropped_task(snapshot, row):
+                RowDropped(row)
+            for row in extract.rows where names_a_dropped_epic(snapshot, row):
+                RowDropped(row)
 
     @guidance
         -- A row that exists only to describe a dropped row is dropped with it:
@@ -1069,11 +1085,12 @@ rule DependentsOfDroppedRowsAreDropped {
 }
 
 rule OrphansLeaveTheirDroppedEpic {
-    when: ImportOldStore(operator, source)
-    let snapshot = dump_of(source)
+    when: ImportDroppedRemovedStatusRows(operator, snapshot)
 
+    -- Black boxes: the task rows the import keeps, and whether a task's epic
+    -- was dropped.
     ensures:
-        for task in snapshot.kept_tasks where epic_was_dropped(task):
+        for task in kept_task_rows(snapshot) where epic_was_dropped(snapshot, task):
             ImportedWithoutEpic(task: task, owner: operator)
 
     @guidance
