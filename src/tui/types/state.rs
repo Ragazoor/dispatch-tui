@@ -528,6 +528,14 @@ pub struct InFlight {
     /// leaving two windows sharing a name. See
     /// `HoldQuitWhileRearrangementInFlight` in `docs/specs/split-pane.allium`.
     pub(in crate::tui) pending_quit: bool,
+    /// The task whose window this rearrangement is moving: an entry's task,
+    /// or a swap's incoming task. `None` for a bare-shell entry.
+    ///
+    /// Nothing else names it until the settle pins it, and its window is
+    /// already gone from the standalone list by then, so the window liveness
+    /// check skips it. See `PinnedWindowIsNotGone` in
+    /// `docs/specs/agent-health.allium`.
+    pub(in crate::tui) task: Option<TaskId>,
 }
 
 impl InFlight {
@@ -537,7 +545,14 @@ impl InFlight {
             kind,
             pending_toggle: false,
             pending_quit: false,
+            task: None,
         }
+    }
+
+    /// Name the task this rearrangement is moving.
+    pub(in crate::tui) fn moving(mut self, task: Option<TaskId>) -> Self {
+        self.task = task;
+        self
     }
 
     /// A split-mode entry, holding nothing yet.

@@ -1683,3 +1683,172 @@ fn toggle_split_exit_carries_the_pinned_task_worktree() {
             if d == "/work/task-3"
     ));
 }
+
+// ---------------------------------------------------------------------------
+// Window liveness checks against a rearrangement in flight
+// (agent-health.allium: WindowLiveness / PinnedWindowIsNotGone)
+// ---------------------------------------------------------------------------
+
+fn tick_checks_window_of(app: &mut App, id: i64) -> bool {
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick))
+        .iter()
+        .any(|c| {
+            matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::BatchCheckWindows { windows })
+                    if windows.iter().any(|(t, _)| *t == TaskId(id))
+            )
+        })
+}
+
+fn window_gone(app: &mut App, id: i64) -> Vec<Command> {
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::WindowGone(TaskId(id)),
+    ))
+}
+
+#[test]
+fn a_window_gone_during_entry_with_a_task_does_not_crash_it() {
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
+    app.selection_mut().set_column(2); // Running column
+    assert!(enter_command(&press_s(&mut app)));
+    assert!(entry_in_flight(&app.board.split));
+    assert!(!app.split_active());
+
+    let cmds = window_gone(&mut app, 3);
+
+    assert!(cmds.is_empty(), "the entry's task is exempt: {cmds:?}");
+    assert!(!app.is_crashed(TaskId(3)));
+    assert!(app.board.tasks[0].tmux_window.is_some());
+}
+
+#[test]
+fn the_tick_does_not_check_the_window_of_the_entry_task() {
+    let mut app = App::new(vec![
+        make_task(3, TaskStatus::Running),
+        make_task(4, TaskStatus::Running),
+    ]);
+    app.selection_mut().set_column(2); // Running column, task 3 first
+    assert!(enter_command(&press_s(&mut app)));
+
+    assert!(!tick_checks_window_of(&mut app, 3));
+    assert!(tick_checks_window_of(&mut app, 4));
+}
+
+#[test]
+fn a_bare_entry_exempts_no_task() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = None;
+    let mut app = App::new(vec![task, make_task(4, TaskStatus::Running)]);
+    app.handle_key(make_key(KeyCode::Char('s')));
+    assert!(entry_in_flight(&app.board.split));
+
+    window_gone(&mut app, 4);
+    // Selection moved nowhere: task 4 was not the entry's task.
+    assert!(app.is_crashed(TaskId(4)));
+}
+
+#[test]
+fn a_window_gone_during_a_swap_does_not_crash_the_incoming_task() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    assert!(swap_in_flight(&app.board.split));
+
+    let cmds = window_gone(&mut app, 4);
+
+    assert!(cmds.is_empty(), "the incoming task is exempt: {cmds:?}");
+    assert!(!app.is_crashed(TaskId(4)));
+    assert!(!tick_checks_window_of(&mut app, 4));
+}
+
+#[test]
+fn a_window_gone_for_an_unrelated_task_during_a_swap_still_crashes_it() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+
+    window_gone(&mut app, 5);
+
+    assert!(app.is_crashed(TaskId(5)));
+}
+
+#[test]
+fn the_exemption_ends_with_the_swap_settle_but_the_pin_takes_over() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    swap_settles(&mut app, 4);
+    assert!(app.board.split.in_flight.is_none());
+
+    // Pinned now, so still exempt; the outgoing task is a normal task again.
+    assert!(window_gone(&mut app, 4).is_empty());
+    assert!(!tick_checks_window_of(&mut app, 4));
+    assert!(tick_checks_window_of(&mut app, 3));
+}
+
+// ---------------------------------------------------------------------------
+// Exit with the pinned task's row missing from the board
+// (split-pane.allium: ExitSplitMode)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn exit_with_the_pinned_row_missing_does_not_kill_the_pane() {
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
+    app.board.split.pinned_task_id = Some(TaskId(99));
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
+
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(
+            &cmds[0],
+            Command::Split(crate::tui::commands::SplitCommand::ExitPinnedRowMissing { pane_id })
+                if pane_id == "%42"
+        ),
+        "got {cmds:?}"
+    );
+    // The pane id and pin survive: a later [s] can still act on them.
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(99)));
+    assert_eq!(app.board.split.right_pane_id, Some(test_pane_id("%42")));
+}
+
+// ---------------------------------------------------------------------------
+// Detach writes only the window and the stale/crashed reset
+// (split-pane.allium: DetachTmux)
+// ---------------------------------------------------------------------------
+
+fn persist_of(cmds: &[Command], id: i64) -> crate::tui::commands::PersistFields {
+    cmds.iter()
+        .find_map(|c| match c {
+            Command::Task(crate::tui::commands::TaskCommand::Persist(f)) if f.id == TaskId(id) => {
+                Some(f.clone())
+            }
+            _ => None,
+        })
+        .expect("a persist for the task")
+}
+
+#[test]
+fn detach_does_not_write_back_the_boards_status() {
+    use crate::tui::commands::StatusWrite;
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
+    let cmds = app.detach_tmux_panels(vec![TaskId(3)]);
+    let fields = persist_of(&cmds, 3);
+    assert!(fields.release_tmux_window);
+    assert_eq!(fields.status_write, StatusWrite::Neither);
+}
+
+#[test]
+fn detach_writes_only_the_sub_status_when_it_resets_stale_or_crashed() {
+    use crate::tui::commands::StatusWrite;
+    let mut task = make_task(3, TaskStatus::Running);
+    task.sub_status = SubStatus::Crashed;
+    let mut app = App::new(vec![task]);
+    let cmds = app.detach_tmux_panels(vec![TaskId(3)]);
+    let fields = persist_of(&cmds, 3);
+    assert_eq!(fields.status_write, StatusWrite::SubStatusOnly);
+    assert_eq!(
+        fields.sub_status,
+        SubStatus::default_for(TaskStatus::Running)
+    );
+}

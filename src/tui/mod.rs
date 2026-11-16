@@ -956,16 +956,20 @@ impl App {
                     ));
                 }
                 // Reset sub_status when detaching (e.g. Stale/Crashed -> default)
-                if task.sub_status == SubStatus::Stale || task.sub_status == SubStatus::Crashed {
+                let reset =
+                    task.sub_status == SubStatus::Stale || task.sub_status == SubStatus::Crashed;
+                if reset {
                     task.sub_status = SubStatus::default_for(task.status);
                 }
-                let mut fields = crate::tui::commands::PersistFields::from_task(task);
-                if released_window {
-                    fields = fields.releasing_tmux_window();
+                // Only the window release and that reset are written: the
+                // board's status can be older than the store's.
+                if released_window || reset {
+                    let fields =
+                        crate::tui::commands::PersistFields::from_task(task).detaching(reset);
+                    cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                        fields,
+                    )));
                 }
-                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                    fields,
-                )));
             }
             // Drain: the detach ends the subagents and any background work
             // with the window, so a pending Stop lands as the Review flip.

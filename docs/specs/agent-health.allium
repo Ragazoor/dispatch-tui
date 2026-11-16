@@ -1401,6 +1401,17 @@ surface WindowLiveness {
         -- longer a standalone window. Both the tick that collects windows to
         -- check and the board's WindowGone handler skip that task, so pinning
         -- never produces a spurious crash (see split-pane.allium).
+        --
+        -- So is the task a rearrangement in flight is moving
+        -- (split_pane.in_flight.task: an entry's task, a swap's incoming
+        -- task). Its window leaves the standalone list before the settle
+        -- pins it, while active is still false (entry) or the task is not yet
+        -- the pinned one (swap). A check that lands in that gap would
+        -- otherwise crash a running task and have the settle pin a windowless
+        -- one, whose respawn kills the live agent. The WindowGone handler
+        -- applies the exemption when the message is handled, not when the
+        -- check was issued, so a check started before the rearrangement is
+        -- covered too.
 
     @guidance
         -- src/runtime/tasks.rs sends TaskMessage::WindowGone; the board

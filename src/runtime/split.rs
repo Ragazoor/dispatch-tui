@@ -75,6 +75,26 @@ impl TuiRuntime {
         })
     }
 
+    /// The exit of a pinned task whose row the board cannot find: nothing is
+    /// restored and nothing is killed. The error settles the exit, as every
+    /// refused one does, and the pane stays for a later attempt.
+    pub(super) fn exec_refuse_exit_pinned_row_missing(
+        &self,
+        pane_id: &PaneId,
+    ) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        let pane_id = pane_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let error = "Exit split failed: the pinned task is not on the board, \
+                          so its pane was left in place"
+                .to_string();
+            tracing::warn!(pane_id = %pane_id, "{error}");
+            let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                error,
+            )));
+        })
+    }
+
     pub(super) fn exec_exit_split_mode(
         &self,
         pane_id: &PaneId,

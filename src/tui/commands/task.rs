@@ -21,6 +21,8 @@ use super::super::types::TaskDraft;
 /// [`releasing_tmux_window`](Self::releasing_tmux_window).
 #[derive(Debug, Clone)]
 pub struct PersistFields {
+    /// Which of `status` / `sub_status` the write sends. See [`StatusWrite`].
+    pub status_write: StatusWrite,
     pub id: TaskId,
     pub status: TaskStatus,
     pub sub_status: SubStatus,
@@ -45,9 +47,27 @@ pub struct PersistFields {
     pub release_tmux_window: bool,
 }
 
+/// Which of the board copy's `status` and `sub_status` a [`PersistFields`]
+/// write sends to the store.
+///
+/// The board's copy can be older than the store's: a HookStop flip or a
+/// `needs_input` set lands store-side between refreshes. A write that only
+/// means to release the window must not undo it
+/// (`DetachTmux` in `docs/specs/split-pane.allium`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusWrite {
+    /// The generic board mutation: both fields.
+    Both,
+    /// Only `sub_status` — a detach that reset Stale/Crashed.
+    SubStatusOnly,
+    /// Neither — a detach that only releases the window.
+    Neither,
+}
+
 impl PersistFields {
     pub fn from_task(task: &Task) -> Self {
         Self {
+            status_write: StatusWrite::Both,
             id: task.id,
             status: task.status,
             sub_status: task.sub_status,
@@ -66,6 +86,19 @@ impl PersistFields {
     pub fn releasing_worktree(mut self) -> Self {
         self.release_worktree = true;
         self.release_tmux_window = true;
+        self
+    }
+
+    /// Send only what a detach changes: the window release and, when
+    /// `reset_sub_status` is set, the sub_status reset. The board's `status`
+    /// is never sent.
+    pub fn detaching(mut self, reset_sub_status: bool) -> Self {
+        self.release_tmux_window = true;
+        self.status_write = if reset_sub_status {
+            StatusWrite::SubStatusOnly
+        } else {
+            StatusWrite::Neither
+        };
         self
     }
 

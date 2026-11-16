@@ -126,6 +126,9 @@ fn dispatch_split(
             restore_window.as_ref(),
             restore_dir.as_deref(),
         )),
+        ExitPinnedRowMissing { pane_id } => {
+            rt.track_split_restore(rt.exec_refuse_exit_pinned_row_missing(&pane_id))
+        }
         Swap {
             task_id,
             new_window,

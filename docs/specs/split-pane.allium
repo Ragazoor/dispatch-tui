@@ -56,6 +56,13 @@ config {
 entity Rearrangement {
     kind: EntryInFlight | SwapInFlight
 
+    -- The task whose window this rearrangement is moving: the entry's task
+    -- (null for a bare-shell entry) or the swap's incoming task. Until the
+    -- settle pins it, nothing else names it, and the window it was running in
+    -- is already gone or about to be, so it is what the window liveness check
+    -- must not report (agent-health/WindowLiveness: PinnedWindowIsNotGone).
+    task: core/Task?
+
     -- Whether a toggle press arrived while this rearrangement was in flight,
     -- held until it settles. A flag rather than a count: a further press
     -- replaces the held one instead of accumulating, so any burst of presses
@@ -222,6 +229,13 @@ rule DetachTmux {
         -- (captured tmux output, crash detection). Only Stale/Crashed
         -- sub_statuses are reset to the default for the task's
         -- current status; all other sub_statuses are preserved.
+        --
+        -- Those are the only two writes the store receives: the window
+        -- release and, when the board's copy was stale or crashed, the
+        -- sub_status reset. The board's copy of status and every other
+        -- sub_status is not written back, because it can be older than the
+        -- store's: a HookStop flip to Review or a needs_input set after the
+        -- board last refreshed would be undone by a whole-snapshot persist.
         -- Allowed for any task with a tmux window: a Running task's
         -- agent process stops; a Review task loses its
         -- post-completion session. Triggered via the TUI (T key,
@@ -290,11 +304,11 @@ rule ToggleSplitMode {
         else if current_agent(task).tmux_window != null:
             -- Auto-pin: the selected task's existing window is joined into
             -- the dispatch window as the right pane.
-            split_pane.in_flight = EntryInFlight.created()
+            split_pane.in_flight = EntryInFlight.created(task: task)
             SplitPaneEntryStarted(task: task)
         else:
             -- No agent window to show: open a bare, unpinned shell pane.
-            split_pane.in_flight = EntryInFlight.created()
+            split_pane.in_flight = EntryInFlight.created(task: null)
             SplitPaneEntryStarted(task: null)
 
     @guidance
@@ -421,6 +435,14 @@ rule ExitSplitMode {
             SplitPaneKilled(pane: split_pane.pane)
 
     @guidance
+        -- A pinned task whose row the board cannot find (the list was
+        -- refreshed without it) is still a pinned task: the board has no
+        -- window name to restore it under, but it must not take the unpinned
+        -- branch and kill the agent's pane. The exit issues no tmux work
+        -- against the pane, reports an error through the error channel (which
+        -- settles it like any refused exit, SplitPaneExitSettles) and leaves
+        -- the pane open for a later attempt once the row is back.
+        --
         -- Exit destroys the split-pane UI, not the agent. With a task pinned,
         -- tmux break-pane returns the pane to a standalone window keyed by the
         -- task's tmux_window name, so the agent remains reachable via [Space].
@@ -1293,7 +1315,7 @@ rule SwapSplitPane {
     -- starts any given swap.
     requires: split_pane.pinned_task != null
 
-    ensures: split_pane.in_flight = SwapInFlight.created()
+    ensures: split_pane.in_flight = SwapInFlight.created(task: task)
     -- The currently pinned task's pane is returned to a standalone window,
     -- and the new task's window is joined into the split pane.
     ensures: SplitPaneSwapStarted(

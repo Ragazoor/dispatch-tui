@@ -191,11 +191,19 @@ impl App {
             Some(id) => id,
             None => return vec![],
         };
-        let pinned = self
-            .board
-            .split
-            .pinned_task_id
-            .and_then(|id| self.board.find_task(id));
+        // A pinned task the board cannot find is still pinned: restoring needs
+        // its window name, but the unpinned branch would kill its pane.
+        let pinned = match self.board.split.pinned_task_id {
+            Some(id) => match self.board.find_task(id) {
+                Some(task) => Some(task),
+                None => {
+                    return vec![Command::Split(
+                        crate::tui::commands::SplitCommand::ExitPinnedRowMissing { pane_id },
+                    )]
+                }
+            },
+            None => None,
+        };
         let restore_window = pinned.and_then(|t| t.tmux_window.clone());
         let restore_dir = pinned.and_then(|t| t.worktree.clone());
         vec![Command::Split(crate::tui::commands::SplitCommand::Exit {

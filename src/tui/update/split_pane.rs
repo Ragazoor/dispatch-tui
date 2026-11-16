@@ -26,11 +26,12 @@ impl App {
         }
         // Both branches below start an entry; they differ only in whether there
         // is a task window to join or a bare shell to open.
-        self.board.split.in_flight = Some(InFlight::entry());
-        match self
+        let target = self
             .selected_task()
-            .and_then(|t| t.tmux_window.clone().map(|w| (t.id, w)))
-        {
+            .and_then(|t| t.tmux_window.clone().map(|w| (t.id, w)));
+        self.board.split.in_flight =
+            Some(InFlight::entry().moving(target.as_ref().map(|(id, _)| *id)));
+        match target {
             Some((task_id, window)) => vec![Command::Split(
                 crate::tui::commands::SplitCommand::EnterWithTask { task_id, window },
             )],
@@ -94,7 +95,7 @@ impl App {
             .pinned_task_id
             .and_then(|id| self.board.find_task(id))
             .and_then(|t| t.tmux_window.clone().zip(t.worktree.clone()));
-        self.board.split.in_flight = Some(InFlight::swap());
+        self.board.split.in_flight = Some(InFlight::swap().moving(Some(task_id)));
         vec![Command::Split(crate::tui::commands::SplitCommand::Swap {
             task_id,
             new_window,

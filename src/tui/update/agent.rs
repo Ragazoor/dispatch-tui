@@ -11,10 +11,23 @@ use super::super::{
 };
 
 impl App {
+    /// Whether the split pane accounts for `id`'s window being off the
+    /// standalone list: it is pinned while the pane is active, or it is the
+    /// task a rearrangement in flight is moving (`PinnedWindowIsNotGone` in
+    /// `docs/specs/agent-health.allium`).
+    fn is_exempt_from_window_checks(&self, id: TaskId) -> bool {
+        let split = &self.board.split;
+        (split.active && split.pinned_task_id == Some(id))
+            || split.in_flight.as_ref().and_then(|f| f.task) == Some(id)
+    }
+
     pub(in crate::tui) fn handle_window_gone(&mut self, id: TaskId) -> Vec<Command> {
         // Ignore WindowGone for the split-pinned task — its window is joined as
-        // a pane and isn't missing, just not a standalone window right now.
-        if self.board.split.active && self.board.split.pinned_task_id == Some(id) {
+        // a pane and isn't missing, just not a standalone window right now —
+        // and for the task a rearrangement in flight is moving. Checked here,
+        // when the message is handled, so a check issued before the entry or
+        // swap began is covered too.
+        if self.is_exempt_from_window_checks(id) {
             return vec![];
         }
         // A foreign-hosted task's window lives on its own machine, never in
@@ -322,12 +335,6 @@ impl App {
     /// split-pinned task: its window has been joined as a pane and is no longer
     /// visible to `has_window`, which would falsely trigger WindowGone → Crashed.
     fn tick_window_checks(&self) -> Vec<Command> {
-        let split_pinned = self
-            .board
-            .split
-            .pinned_task_id
-            .filter(|_| self.board.split.active);
-
         let local_host_id = self.local_host_id().map(str::to_owned);
         let windows_to_check: Vec<(crate::models::TaskId, TmuxWindow)> = self
             .board
@@ -335,7 +342,7 @@ impl App {
             .iter()
             .filter(|t| t.tmux_window.is_some())
             .filter(|t| t.is_locally_owned(local_host_id.as_deref()))
-            .filter(|t| Some(t.id) != split_pinned)
+            .filter(|t| !self.is_exempt_from_window_checks(t.id))
             .filter_map(|t| t.tmux_window.clone().map(|w| (t.id, w)))
             .collect();
 

@@ -250,9 +250,13 @@ impl TuiRuntime {
         // (e.g. from a tick reclassification or sort_order swap) overwrite
         // a fresher hook write, flipping the task to Stale on the next tick.
         // Backlog→Running seeds go through `SeedActivity` instead.
-        let mut p = UpdateTaskParams::for_task(fields.id)
-            .status(fields.status)
-            .sub_status(fields.sub_status);
+        let mut p = UpdateTaskParams::for_task(fields.id);
+        if fields.status_write == crate::tui::commands::StatusWrite::Both {
+            p = p.status(fields.status);
+        }
+        if fields.status_write != crate::tui::commands::StatusWrite::Neither {
+            p = p.sub_status(fields.sub_status);
+        }
         // worktree, host and window: an absent value on the board's copy is
         // "do not touch" unless the caller said it releases them. A stale copy
         // that lacks a worktree must not clear the store's, which also ends the

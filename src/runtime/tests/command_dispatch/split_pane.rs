@@ -135,6 +135,27 @@ async fn dispatch_split_exit_without_a_window_kills_the_pane() {
 }
 
 #[tokio::test]
+async fn dispatch_split_exit_with_the_pinned_row_missing_touches_no_pane_and_reports() {
+    let mut h = harness(MockProcessRunner::new(vec![])).await;
+
+    h.dispatch(Command::Split(SplitCommand::ExitPinnedRowMissing {
+        pane_id: test_pane_id("%2"),
+    }))
+    .await;
+
+    // The error is what settles the exit; nothing may touch the pane.
+    assert!(matches!(
+        h.next_msg().await,
+        Message::System(crate::tui::messages::SystemMessage::Error(_))
+    ));
+    assert!(
+        h.mock.flattened_calls().is_empty(),
+        "no tmux call: {:?}",
+        h.mock.flattened_calls()
+    );
+}
+
+#[tokio::test]
 async fn dispatch_split_swap_hands_the_pane_to_the_incoming_task() {
     let mut h = harness(
         MockProcessRunner::new(vec![

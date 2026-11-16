@@ -20,6 +20,13 @@ pub enum SplitCommand {
         /// do not travel with the pane.
         restore_dir: Option<String>,
     },
+    /// An exit whose pinned task has no row on the board, so there is no window
+    /// name to restore it under. Touches no pane; the runtime reports an error,
+    /// which settles the exit (`ExitSplitMode` in
+    /// `docs/specs/split-pane.allium`).
+    ExitPinnedRowMissing {
+        pane_id: PaneId,
+    },
     Swap {
         task_id: TaskId,
         new_window: TmuxWindow,

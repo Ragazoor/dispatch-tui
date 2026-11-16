@@ -34,6 +34,8 @@ pub use repo_filter::RepoFilterCommand;
 pub use settings::SettingsCommand;
 pub use split::SplitCommand;
 pub use system::SystemCommand;
-pub use task::{CleanupFollowUp, DeleteGuard, PersistFields, TaskCommand, TeardownTarget};
+pub use task::{
+    CleanupFollowUp, DeleteGuard, PersistFields, StatusWrite, TaskCommand, TeardownTarget,
+};
 pub use usage::UsageCommand;
 pub use work_package::WorkPackageCommand;
