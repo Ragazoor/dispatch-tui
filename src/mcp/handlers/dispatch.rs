@@ -43,7 +43,7 @@ const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2024-11-05"];
 /// tool cannot be registered without choosing one. Drives the MCP `annotations`
 /// behaviour hints that `tools/list` advertises.
 #[derive(Clone, Copy)]
-enum Access {
+pub(super) enum Access {
     /// Changes nothing.
     ReadOnly,
     /// Changes state; repeating the call may change it again.
@@ -54,11 +54,25 @@ enum Access {
     Destructive,
 }
 
+/// Old tool name → the call that replaces it, as `(old, hint)`. The hint reads
+/// after "<old> was renamed: ", e.g. `("get_task", "call task_search with task_id")`.
+/// An old name is never registered, so it never appears in `tools/list`.
+pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[];
+
+/// The error text for a `tools/call` to an unregistered name. A name in
+/// `table` gets a second line naming the tool that replaced it.
+pub(super) fn unknown_tool_message(name: &str, table: &[(&str, &str)]) -> String {
+    match table.iter().find(|(old, _)| *old == name) {
+        Some((old, hint)) => format!("Unknown tool: {name}\n{old} was renamed: {hint}"),
+        None => format!("Unknown tool: {name}"),
+    }
+}
+
 /// The MCP `annotations` object for a tool: a title and the four behaviour
 /// hints. `openWorldHint` is false everywhere — no tool reaches outside dispatch.
-fn annotations(name: &str, access: Access) -> Value {
+pub(super) fn annotations(name: &str, access: Access) -> Value {
     let title = name
-        .split('_')
+        .split(['_', '-'])
         .map(|w| {
             let mut c = w.chars();
             c.next()
@@ -114,7 +128,7 @@ macro_rules! mcp_tools {
                 $(
                     $name => mcp_tools!(@call $kind, $handler, state, id, identity, args),
                 )+
-                other => JsonRpcResponse::err(id, INVALID_PARAMS, format!("Unknown tool: {other}")),
+                other => JsonRpcResponse::err(id, INVALID_PARAMS, unknown_tool_message(other, OLD_TOOL_NAMES)),
             }
         }
 

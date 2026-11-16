@@ -1710,3 +1710,131 @@ fn wrap_up_description_names_release_please_among_the_refused_tags() {
         );
     }
 }
+
+/// Tool names that predate the `<noun>_<verb>` rule (ADR 0002). Each surface
+/// task removes its names; the last one deletes the list and the exemption.
+const LEGACY_TOOL_NAMES: &[&str] = &[
+    "update_tasks",
+    "get_task",
+    "create_task",
+    "list_tasks",
+    "create_epic",
+    "list_epics",
+    "update_epic",
+    "create_work_package",
+    "list_work_packages",
+    "update_work_package",
+    "wrap_up",
+    "dispatch_task",
+    "resume_task",
+    "record_learning",
+    "query_learnings",
+    "rate_learning",
+    "delete_learning",
+    "set_review_command",
+    "managed_feed_config",
+    "set_display_name",
+    "list_workspaces",
+    "create_workspace",
+    "update_workspace",
+    "set_workspace_member",
+    "set_super_admin",
+    "claim_super_admin",
+    "list_unseen_items",
+    "delete_unseen_item",
+    "set_verify_command",
+    "exit_session",
+    "query_usage",
+    "read_context",
+    "list_keybindings",
+];
+
+fn is_noun_verb(name: &str) -> bool {
+    let word = |w: &str| {
+        !w.is_empty()
+            && w.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    };
+    let mut parts = name.split('_');
+    matches!((parts.next(), parts.next(), parts.next()), (Some(a), Some(b), None) if word(a) && word(b))
+        && !name.starts_with("dispatch_")
+}
+
+/// mcp-task-tools.allium: ToolNamesAreNounVerb.
+#[test]
+fn tool_names_are_noun_verb_or_legacy() {
+    for name in super::dispatch::TOOL_NAMES {
+        if LEGACY_TOOL_NAMES.contains(name) {
+            continue;
+        }
+        assert!(is_noun_verb(name), "{name} is not <noun>_<verb>");
+    }
+}
+
+/// The allow-list only holds registered names, so it shrinks with each rename.
+#[test]
+fn legacy_tool_names_are_all_registered() {
+    for name in LEGACY_TOOL_NAMES {
+        assert!(
+            super::dispatch::TOOL_NAMES.contains(name),
+            "{name} is on the legacy list but not registered; remove it"
+        );
+    }
+}
+
+#[test]
+fn noun_verb_rule_rejects_bad_names() {
+    for good in ["task_search", "work-package_search", "session_wrap-up"] {
+        assert!(is_noun_verb(good), "{good}");
+    }
+    for bad in [
+        "task",
+        "Task_search",
+        "task_search_all",
+        "dispatch_task",
+        "task__x",
+        "_x",
+    ] {
+        assert!(!is_noun_verb(bad), "{bad}");
+    }
+}
+
+/// mcp-task-tools.allium: ToolNamesAreNounVerb. Hyphens split words too.
+#[test]
+fn annotations_title_splits_hyphenated_words() {
+    let a = super::dispatch::annotations("work-package_search", super::dispatch::Access::ReadOnly);
+    assert_eq!(a["title"], json!("Work Package Search"));
+    let a = super::dispatch::annotations("session_wrap-up", super::dispatch::Access::Write);
+    assert_eq!(a["title"], json!("Session Wrap Up"));
+}
+
+/// mcp-task-tools.allium: OldToolNameRedirects.
+#[test]
+fn old_tool_name_call_names_the_new_tool() {
+    let table = [("get_task", "call task_search with task_id")];
+    let msg = super::dispatch::unknown_tool_message("get_task", &table);
+    assert!(msg.starts_with("Unknown tool: get_task"), "got: {msg}");
+    assert!(
+        msg.contains("get_task was renamed: call task_search with task_id"),
+        "got: {msg}"
+    );
+}
+
+#[test]
+fn unregistered_name_gets_no_rename_hint() {
+    let table = [("get_task", "call task_search with task_id")];
+    let msg = super::dispatch::unknown_tool_message("bogus_tool", &table);
+    assert_eq!(msg, "Unknown tool: bogus_tool");
+}
+
+/// mcp-task-tools.allium: OldToolNameRedirects. An old name is never also a
+/// registered tool, so it cannot show up in `tools/list`.
+#[test]
+fn redirect_table_names_are_not_registered() {
+    for (old, _) in super::dispatch::OLD_TOOL_NAMES {
+        assert!(
+            !super::dispatch::TOOL_NAMES.contains(old),
+            "{old} is both registered and in the redirect table"
+        );
+    }
+}

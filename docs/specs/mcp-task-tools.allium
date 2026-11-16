@@ -105,6 +105,38 @@ rule ToolsAdvertiseAnnotations {
         -- every_argument_carries_a_description.
 }
 
+rule ToolNamesAreNounVerb {
+    when: McpToolsList(client)
+
+    -- Every registered tool name is `<noun>_<verb>` and matches
+    -- ^[a-z0-9-]+_[a-z0-9-]+$: the noun first and singular, one verb, a `-`
+    -- only inside a word, and no `dispatch_` prefix (the server name already
+    -- gives the target). Names that predate the rule sit on a legacy
+    -- allow-list in the test, which shrinks as each tool is renamed.
+    -- The title in a tool's annotations splits the name on `_` and on `-`,
+    -- so `work-package_search` is titled "Work Package Search".
+    ensures: ToolNamesMatchPattern()
+
+    @guidance
+        -- Asserted by tool_names_are_noun_verb_or_legacy and
+        -- annotations_title_splits_hyphenated_words.
+}
+
+rule OldToolNameRedirects {
+    when: McpToolsCall(client, name)
+    -- Applies when `name` is an old name in the redirect table. An old name is never in tools/list. A call to it is refused as an
+    -- unknown tool (a tool error, isError true), and the message adds one line
+    -- that names the new tool, e.g. "get_task was renamed: call task_search
+    -- with task_id". There is no alias: the old name does nothing.
+    -- No name in the redirect table is also a registered tool.
+    ensures: UnknownToolErrorNamesNewTool()
+
+    @guidance
+        -- Asserted by old_tool_name_call_names_the_new_tool,
+        -- redirect_table_names_are_not_registered and
+        -- unregistered_name_gets_no_rename_hint.
+}
+
 -- == MCP Task Tools ==
 
 -- UpdateTaskViaMcp is the per-task rule behind the one update tool,
@@ -2261,6 +2293,7 @@ surface McpTaskTools {
 
     provides:
         McpToolsList(client)
+        McpToolsCall(client, name)
         McpUpdateTasks(client, task_ids, status?, sub_status?, plan_path?,
                        title?, description?, repo_path?, sort_order?, url?,
                        url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
