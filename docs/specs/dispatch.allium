@@ -163,7 +163,7 @@ contract DispatchRequestServing {
         -- backstop timer (store-split.allium: DispatchRequestTimesOut), the
         -- task's close (CloseFailsOpenRequests), or the task's deletion
         -- (DeletingATaskFailsItsOpenRequest, after which the row is deleted
-        -- too: DeletingATaskDeletesItsRequestRows). Either way the module has
+        -- too: DeletingATaskDeletesItsRequestRows). Each way the module has
         -- finished the row, and this host's dispatched report, if it sends
         -- one, is refused. The host learns that the row failed
         -- under it from that refused report, when its provisioning ends — it
@@ -338,9 +338,9 @@ contract WorktreeProvisioner {
         -- be. `git worktree add` would then fail on the occupied path, which
         -- does abort — but it aborts having already declared the path fresh,
         -- and a fresh path is one the provisioning-failure rollback may
-        -- delete. That is the hazard above, re-armed. Answering presence and
-        -- usability separately is what lets the rule refuse without ever
-        -- claiming the path is its own to remove.
+        -- delete. That is ProvisioningFailureRollsBack's hazard, re-armed.
+        -- Answering presence and usability separately is what lets the rule
+        -- refuse without ever claiming the path is its own to remove.
         --
         -- The abort is not caution for its own sake. Every onward choice
         -- turns on this answer: which start-point path runs, whether
@@ -420,8 +420,8 @@ contract WorktreeProvisioner {
         -- This is a sequential, SUBPROCESS_TIMEOUT-bounded call on the fresh
         -- path, so it spends time from the request's deadline like every other
         -- provisioning step (store-split.allium: config.dispatch_request_timeout).
-        -- Teardown's prune is NOT bounded that way, and neither are the remove
-        -- and branch-delete beside it.
+        -- Teardown's prune and branch delete are bounded the same way; its
+        -- `git worktree remove --force` is NOT.
         --
         -- That costs nothing at teardown's two ordinary entry points, which run
         -- detached on a blocking thread with no timeout budget to fit inside.
@@ -431,8 +431,8 @@ contract WorktreeProvisioner {
         -- rolling back parks that worker, past the point where the deadline
         -- stop (ProvisioningStopsAtTheDeadline) can report for it. The
         -- module's backstop timer then fails the request and releases the
-        -- claim, but cannot cancel the parked worker. Bounding those three
-        -- calls is tracked separately.
+        -- claim, but cannot cancel the parked worker. Bounding that remove
+        -- is tracked separately.
 
     @invariant FreshVsReusedDecidesTheFetch
         -- == Fresh vs reused decides how hard the fetch tries ==
@@ -455,7 +455,7 @@ contract WorktreeProvisioner {
         --   further bounded-subprocess timeout against an unresponsive
         --   network — so an offline re-dispatch of a task whose worktree is
         --   still on disk waits for one fetch, not for a probe plus three
-        --   fetches. See the reuse rows in the start-point table below for
+        --   fetches. See the reuse rows under UnresolvableBaseIsRefusedByName for
         --   which ref is chosen when that fetch fails.
 
     @invariant FetchFailureIsClassified
@@ -631,9 +631,9 @@ contract WorktreeProvisioner {
         -- from a local <base_branch> that is ahead, it would replay those
         -- already-present commits with new SHAs — duplicating history rather
         -- than refreshing it.
-        -- Invariant: the preamble's target is always the resolved base
-        -- branch (task.base_branch, or else the detected default), never a
-        -- literal "main".
+        -- Invariant: the preamble's target is always the resolved start
+        -- point above (from task.base_branch, or the PR's head branch), never
+        -- a literal "main".
         -- The launch carries no --permission-mode flag, for any mode —
         -- see AgentLaunchCommand: EveryTaskAgentLaunchesInAutoMode.
 }
@@ -834,7 +834,7 @@ rule ProvisionDispatch {
         -- (store-split.allium: HostReportsDispatchFailed).
         -- reused_worktree is whether the worktree directory already existed,
         -- measured before acting, and was reused rather than created (see
-        -- WorktreeProvisioner: "Fresh vs reused").
+        -- WorktreeProvisioner: WorktreeExistenceIsOneQuestion).
         split/DispatchProvisioned(
             request: request,
             reporter: core/local_host(),
