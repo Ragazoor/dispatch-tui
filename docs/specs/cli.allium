@@ -144,6 +144,90 @@ config {
 }
 
 ------------------------------------------------------------
+-- Rules: how a process ends
+------------------------------------------------------------
+
+rule CliInvocationStarts {
+    when: CliStarted(subcommand)
+
+    ensures: CliInvocation.created(
+        subcommand: subcommand,
+        process_class: process_class_of(subcommand),
+        named_store: named_store_argument(),
+        board_store: board_store_variable(),
+        recorded_store: recorded_store_address(),
+        exit: null
+    )
+
+    @guidance
+        -- The process class is chosen from the subcommand alone, before
+        -- anything else runs (ProcessClass); `pr-gate` is a hook
+        -- (PrGateRunsAsAHook). An argument list that names no subcommand
+        -- still starts an invocation, under the word that was typed, so that
+        -- its usage error has somewhere to land.
+        --
+        -- == Black boxes ==
+        -- process_class_of(subcommand) is the class ProcessClass lists it
+        -- under; named_store_argument(), board_store_variable() and
+        -- recorded_store_address() read the flag or DISPATCH_SPACETIME_SERVER,
+        -- DISPATCH_BOARD_STORE, and the data directory's StoreAddressRecord,
+        -- each null when absent or blank.
+}
+
+rule UnparseableArgumentsAreAUsageError {
+    when: CliArgumentsRejected(invocation)
+    requires: invocation.exit = null
+
+    ensures: invocation.exit = usage_error
+
+    @guidance
+        -- The arguments did not parse, so no command body runs. The usage
+        -- text goes to stderr. See the open question on what this means for
+        -- `pr-gate`.
+}
+
+rule AFailedCommandExitsWithFailure {
+    when: CliFailed(invocation, reason)
+    requires: invocation.exit = null
+
+    ensures: CliReported(on: stderr, line: reason)
+    ensures: invocation.exit = failure
+
+    @guidance
+        -- Every error a subcommand's body returns ends here: one line on
+        -- stderr naming the cause (EveryFailureNamesItsCause), then exit 1.
+}
+
+rule ACompletedCommandExitsWithSuccess {
+    when: CliCompleted(invocation)
+    requires: invocation.exit = null
+
+    ensures: invocation.exit = success
+
+    @guidance
+        -- The body returned without an error. The commands that never fail
+        -- (statusline, caller-headers, toggle-agent-tree-pane) always end
+        -- here.
+}
+
+rule ABlockedPrGateExitsWithTheBlockCode {
+    when: PrGateBlocked(invocation, reminder)
+    requires: invocation.subcommand = "pr-gate" and invocation.exit = null
+
+    ensures: CliReported(on: stderr, line: reminder)
+    ensures: invocation.exit = block_tool_call
+
+    @guidance
+        -- The board's verdict comes back to the `pr-gate` process
+        -- (pr-workflow.allium: PrLearningsGate), and the process, not the
+        -- board, picks the exit code: only where the process ends does the
+        -- block code mean anything. The reminder goes to stderr, where
+        -- Claude Code shows a blocking hook's reason to the agent. An allow
+        -- verdict, or no verdict at all, ends through
+        -- ACompletedCommandExitsWithSuccess.
+}
+
+------------------------------------------------------------
 -- Rules: reaching the store
 ------------------------------------------------------------
 
@@ -387,18 +471,18 @@ rule ListReposViaCli {
 rule PruneRepoPathsViaCli {
     when: CliPruneRepoPaths(operator)
 
-    let mine = core/SavedRepoPaths where host = this_host
+    let mine = core/SavedRepoPaths where host = core/local_host()
     let missing = mine where not path_exists_on_disk(path)
     let unowned = core/SavedRepoPaths where host = null
     let unowned_here = unowned where path_exists_on_disk(path)
-    let left = core/SavedRepoPaths where not (host = this_host and not path_exists_on_disk(path))
+    let left = core/SavedRepoPaths where not (host = core/local_host() and not path_exists_on_disk(path))
 
     ensures:
         for repo in missing:
-            SavedRepoPathForgotten(repo: repo, host: this_host)
+            SavedRepoPathForgotten(repo: repo, host: core/local_host())
             CliPrinted(line: "removed: " + repo.path)
         for repo in unowned_here:
-            SavedRepoPathAdopted(repo: repo, host: this_host)
+            SavedRepoPathAdopted(repo: repo, host: core/local_host())
             CliPrinted(line: "adopted: " + repo.path)
     ensures: CliPrinted(line: prune_summary(missing.count, distinct_path_count(left)))
 
@@ -408,8 +492,8 @@ rule PruneRepoPathsViaCli {
         -- never judged and never removed: its path says nothing about this
         -- disk. Rows are one per (path, host), so a path both hosts have is
         -- two rows and this host's prune touches only its own; the verify
-        -- command is the repository's and survives on the other rows. A row saved before
-        -- rows carried a host (host = null) belongs to no one, so every
+        -- command is the repository's and survives on the other rows. A row
+        -- with no host (host = null) belongs to no one, so every
         -- host's prune may adopt it: where the path exists on this disk the
         -- host adopts it (stamps itself, keeping the verify command). Where
         -- it is missing here the row is left alone, never removed: a path
@@ -429,7 +513,6 @@ rule PruneRepoPathsViaCli {
         -- A path is judged missing only when the filesystem says it is not
         -- there (NotFound): a permission error or a detached disk leaves the
         -- row alone.
-        -- this_host is the host file's identity (CliCommandsNeedAHostFile).
         --
         -- == Black boxes ==
         -- path_exists_on_disk(path) asks the local filesystem;
@@ -659,6 +742,13 @@ surface DispatchCommandLine {
             invocation.exit
 
     provides:
+        -- A process's start and end: `dispatch <subcommand>` run, its
+        -- arguments refused, its body returning, or `pr-gate`'s verdict
+        -- blocking the tool call.
+        CliStarted(subcommand)
+        CliArgumentsRejected(invocation)
+        CliCompleted(invocation)
+        PrGateBlocked(invocation, reminder)
         CliSetVerify(path, command)
         CliClearVerify(path)
         CliListRepos(operator)
