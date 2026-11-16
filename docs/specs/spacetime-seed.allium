@@ -48,6 +48,97 @@ use "./tasks.allium" as tasks
 use "./sync.allium" as sync
 
 ------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- What an operator is told when a restore refuses.
+--
+-- The reason is a closed set so that a caller can branch on it; the detail is
+-- free text so that a human can act on it. Both are carried, because the
+-- RefusalIsSilentAboutNothing guarantee is unmeetable with only one: a reason
+-- code alone does not say WHICH table was missing or WHICH version was found,
+-- and free text alone cannot be tested against.
+value Refusal {
+    reason: RefusalReason
+    detail: String
+}
+
+-- One table's contribution to a snapshot.
+--
+-- `rows` is deliberately opaque. This spec does not describe the shape of a
+-- task row — core.allium does — and a second description here would be a
+-- second thing to keep in step, which is exactly the duplication the whole
+-- migration exists to remove. What this spec constrains is that the rows are
+-- carried WHOLE and UNALTERED, which is a property of the extract, not of any
+-- field in it.
+--
+-- `row_ids` is separated out because the ids are the one part of a row this
+-- spec reasons about directly: they are what must survive the round trip, and
+-- they are what the sequence burn is measured against.
+--
+-- `columns` is what makes the rows interpretable on the far side. It sits on
+-- the extract rather than as one schema block on the Snapshot because each
+-- extract already names its table, and the columns are a property of that
+-- table's rows — putting them anywhere else would mean carrying the table name
+-- twice and keeping the two lists in step by hand. It is also what a restore
+-- actually compares against: the question at restore time is asked per table
+-- ("can these rows go into this table?"), never about the schema as a whole.
+--
+-- NOT EVERY SHARED TABLE HAS ONE. Half the shared domain is identified by
+-- something the store never generates: a task's live shells are keyed by the
+-- task and the shell's own id, a saved repo by its path, a branch by the pair
+-- it names. Those rows have nothing to preserve and nothing to burn, so their
+-- extract carries no ids at all, and they have no IdSequence. This is a real
+-- distinction rather than a gap in the data: an extract with no ids says "this
+-- table does not generate them", which is why the invariant below admits the
+-- empty case rather than demanding a placeholder per row.
+value TableExtract {
+    table: SharedTable
+    rows: List<String>          -- each row encoded whole; opaque to this spec
+    row_ids: List<Integer>      -- the generated id of each row, in the same order; empty for a table whose identity is not generated
+    columns: List<String>       -- the names of the columns those rows carry
+
+    row_count: rows.count
+
+    -- An extract that lost track of which row is which is not an extract. This
+    -- is the structural half of id preservation: the ids travel alongside the
+    -- rows rather than being re-derived on the far side, so a restore never has
+    -- to guess. Either every row is accounted for or the table has no generated
+    -- ids to account for; a partial list is the one state that means nothing.
+    invariant EveryRowCarriesItsId {
+        row_ids.count = 0 or row_ids.count = rows.count
+    }
+
+    -- An extract that names no columns makes no claim about its schema, and
+    -- "no claim" must never be allowed to read as "matches". A set-comparison
+    -- against an empty list is the shape that quietly passes some checks and
+    -- fails others, so the empty case is ruled out here rather than guarded at
+    -- every site that compares. A table with no rows still has columns; see
+    -- TakeSnapshot's guidance for why they are recorded rather than derived.
+    invariant EveryExtractNamesItsColumns {
+        columns.count > 0
+    }
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- What a restore or import needs from the target store to move a counter.
+-- The sequence names its table (SnapshotTarget::advance_id_sequence_past in
+-- src/spacetime/snapshot_target.rs takes the table).
+contract IdSequenceCounter {
+    -- Generate and discard ids until the sequence's next value passes
+    -- `ceiling`. A no-op for a table that does not generate ids, and for a
+    -- counter already past the ceiling.
+    advance_past: (sequence: IdSequence, ceiling: Integer) -> Boolean
+
+    @invariant AdvancesPastTheCeiling
+        -- After advance_past(s, c) succeeds, s.next_value > c. This is what
+        -- BurnIdSequences relies on.
+}
+
+------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
@@ -176,79 +267,6 @@ enum RefusalReason {
 }
 
 ------------------------------------------------------------
--- Value Types
-------------------------------------------------------------
-
--- What an operator is told when a restore refuses.
---
--- The reason is a closed set so that a caller can branch on it; the detail is
--- free text so that a human can act on it. Both are carried, because the
--- RefusalIsSilentAboutNothing guarantee is unmeetable with only one: a reason
--- code alone does not say WHICH table was missing or WHICH version was found,
--- and free text alone cannot be tested against.
-value Refusal {
-    reason: RefusalReason
-    detail: String
-}
-
--- One table's contribution to a snapshot.
---
--- `rows` is deliberately opaque. This spec does not describe the shape of a
--- task row — core.allium does — and a second description here would be a
--- second thing to keep in step, which is exactly the duplication the whole
--- migration exists to remove. What this spec constrains is that the rows are
--- carried WHOLE and UNALTERED, which is a property of the extract, not of any
--- field in it.
---
--- `row_ids` is separated out because the ids are the one part of a row this
--- spec reasons about directly: they are what must survive the round trip, and
--- they are what the sequence burn is measured against.
---
--- `columns` is what makes the rows interpretable on the far side. It sits on
--- the extract rather than as one schema block on the Snapshot because each
--- extract already names its table, and the columns are a property of that
--- table's rows — putting them anywhere else would mean carrying the table name
--- twice and keeping the two lists in step by hand. It is also what a restore
--- actually compares against: the question at restore time is asked per table
--- ("can these rows go into this table?"), never about the schema as a whole.
---
--- NOT EVERY SHARED TABLE HAS ONE. Half the shared domain is identified by
--- something the store never generates: a task's live shells are keyed by the
--- task and the shell's own id, a saved repo by its path, a branch by the pair
--- it names. Those rows have nothing to preserve and nothing to burn, so their
--- extract carries no ids at all, and they have no IdSequence. This is a real
--- distinction rather than a gap in the data: an extract with no ids says "this
--- table does not generate them", which is why the invariant below admits the
--- empty case rather than demanding a placeholder per row.
-value TableExtract {
-    table: SharedTable
-    rows: List<String>          -- each row encoded whole; opaque to this spec
-    row_ids: List<Integer>      -- the generated id of each row, in the same order; empty for a table whose identity is not generated
-    columns: List<String>       -- the names of the columns those rows carry
-
-    row_count: rows.count
-
-    -- An extract that lost track of which row is which is not an extract. This
-    -- is the structural half of id preservation: the ids travel alongside the
-    -- rows rather than being re-derived on the far side, so a restore never has
-    -- to guess. Either every row is accounted for or the table has no generated
-    -- ids to account for; a partial list is the one state that means nothing.
-    invariant EveryRowCarriesItsId {
-        row_ids.count = 0 or row_ids.count = rows.count
-    }
-
-    -- An extract that names no columns makes no claim about its schema, and
-    -- "no claim" must never be allowed to read as "matches". A set-comparison
-    -- against an empty list is the shape that quietly passes some checks and
-    -- fails others, so the empty case is ruled out here rather than guarded at
-    -- every site that compares. A table with no rows still has columns; see
-    -- TakeSnapshot's guidance for why they are recorded rather than derived.
-    invariant EveryExtractNamesItsColumns {
-        columns.count > 0
-    }
-}
-
-------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
 
@@ -326,24 +344,6 @@ entity IdSequence {
     invariant SequenceClearsEveryRow {
         next_value > highest_row_id
     }
-}
-
-------------------------------------------------------------
--- Contracts
-------------------------------------------------------------
-
--- What a restore or import needs from the target store to move a counter.
--- The sequence names its table (SnapshotTarget::advance_id_sequence_past in
--- src/spacetime/snapshot_target.rs takes the table).
-contract IdSequenceCounter {
-    -- Generate and discard ids until the sequence's next value passes
-    -- `ceiling`. A no-op for a table that does not generate ids, and for a
-    -- counter already past the ceiling.
-    advance_past: (sequence: IdSequence, ceiling: Integer) -> Boolean
-
-    @invariant AdvancesPastTheCeiling
-        -- After advance_past(s, c) succeeds, s.next_value > c. This is what
-        -- BurnIdSequences relies on.
 }
 
 ------------------------------------------------------------
@@ -804,92 +804,6 @@ rule RefuseImplausibleCeiling {
         -- before the first row, so the store stays untouched.
 }
 
-------------------------------------------------------------
--- Invariants
-------------------------------------------------------------
-
--- Restated at the top level because it is the property the whole file is for,
--- and because it must hold of the store as a whole rather than of one
--- sequence at a time. A single table left unburned is enough to produce the
--- collision.
-invariant NoSequenceCanCollide {
-    for sequence in IdSequences:
-        sequence.next_value > sequence.highest_row_id
-}
-
--- A counter exists for exactly the tables that generate ids, and for no
--- others. A counter over a table keyed by a path or a pair has nothing to
--- count, and one MISSING over a table that does generate ids is the original
--- collision with no invariant watching for it.
-invariant SequenceForEveryGeneratingTable {
-    for snapshot in Snapshots:
-        for extract in snapshot.extracts:
-            extract.row_ids.count > 0 implies IdSequences.any(q => q.table = extract.table)
-}
-
--- One counter per table, not several. Two rows for the same table would let
--- the burn advance one while a writer read the other, which is the same bug
--- wearing a different hat.
-invariant OneSequencePerTable {
-    for a in IdSequences:
-        for b in IdSequences:
-            a != b implies a.table != b.table
-}
-
-------------------------------------------------------------
--- Actor Declarations
-------------------------------------------------------------
-
--- Dump and restore are operator actions, not agent actions. There is
--- deliberately no MCP tool for either: a dispatched agent has no business
--- rebuilding the shared store, and an operation whose failure mode is "the
--- team's board is now half a board" should require a human to have typed it.
---
--- WHO MAY CALL THE seed_* REDUCERS. The seed reducers write rows
--- with the ids, owners and visibilities they already have, so they skip every
--- permission rule on purpose. The module therefore lets only two callers use
--- them: the store itself (the database identity, as a scheduled call), and the
--- store's PUBLISHER, the identity that published the database. The module
--- learns the publisher once, as the sender of `init`, and keeps it in a private
--- `store_owner` row that no board can read and no restore can rewrite. Any
--- other identity, a board included, is refused by every seed_* reducer before
--- it writes anything. A store published before that row existed has no
--- recorded publisher and refuses every board: failing closed is the point, as
--- a board could otherwise claim the role by being first to ask.
---
--- A STORE PUBLISHED BEFORE THAT ROW EXISTED. Its
--- publisher is recorded by `claim_store_owner`, a reducer with no arguments:
--- the caller becomes the publisher, but ONLY while no row exists, and the call
--- is refused once one does. The managed bring-up runs it as the CLI login
--- straight after every `spacetime publish` it makes, and on every start that
--- publishes nothing, and treats "already has a recorded publisher" as
--- success, so a store that predates the row, or whose claim failed after the
--- publish, is fixed on the board's next start. A store the board did not publish (a named
--- `--spacetime-server`) is claimed by hand, as the login that owns the
--- database: `spacetime call <db> claim_store_owner`. The import's refusal
--- names this fix.
---
--- KNOWN WINDOW. The module cannot learn who owns the database: a reducer's
--- context carries the caller and the module's own identity, not the publisher's
--- (`ctx.identity()` is the module's). So `claim_store_owner` cannot check that
--- its caller is the owner, and on a store with no row the FIRST caller wins.
--- The window is the time between a publish over an old store and the claim that
--- follows it; the bring-up closes it by claiming in the same step. A store
--- published by this version of the module records its publisher in `init` and
--- has no window.
---
--- RESTORE-ONLY REDUCERS. Besides every seed_* reducer, three reducers exist
--- only for restore and publish and are gated the same way, by the store itself
--- or its publisher: `burn_id_sequence` (a large ceiling stalls the
--- transaction), `probe_generated_task_id` and `set_schema_version`. Any other
--- caller is refused before anything is written.
---
--- So the operator these commands face is narrower than core.allium's
--- Operator: the store's publisher.
-actor StorePublisher {
-    identified_by: core/Host where id != "" and owner = store_publisher()
-}
-
 -- == Importing the old store ==
 
 -- Why this is not a restore. With the managed local store
@@ -1102,6 +1016,92 @@ rule OrphansLeaveTheirDroppedEpic {
         -- ONLY THE EPIC LINK AND THE OWNER CHANGE. Everything else about the
         -- task, its id included, is as read. The same applies to an epic whose
         -- parent epic is dropped: it becomes a top-level epic.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- Restated at the top level because it is the property the whole file is for,
+-- and because it must hold of the store as a whole rather than of one
+-- sequence at a time. A single table left unburned is enough to produce the
+-- collision.
+invariant NoSequenceCanCollide {
+    for sequence in IdSequences:
+        sequence.next_value > sequence.highest_row_id
+}
+
+-- A counter exists for exactly the tables that generate ids, and for no
+-- others. A counter over a table keyed by a path or a pair has nothing to
+-- count, and one MISSING over a table that does generate ids is the original
+-- collision with no invariant watching for it.
+invariant SequenceForEveryGeneratingTable {
+    for snapshot in Snapshots:
+        for extract in snapshot.extracts:
+            extract.row_ids.count > 0 implies IdSequences.any(q => q.table = extract.table)
+}
+
+-- One counter per table, not several. Two rows for the same table would let
+-- the burn advance one while a writer read the other, which is the same bug
+-- wearing a different hat.
+invariant OneSequencePerTable {
+    for a in IdSequences:
+        for b in IdSequences:
+            a != b implies a.table != b.table
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+-- Dump and restore are operator actions, not agent actions. There is
+-- deliberately no MCP tool for either: a dispatched agent has no business
+-- rebuilding the shared store, and an operation whose failure mode is "the
+-- team's board is now half a board" should require a human to have typed it.
+--
+-- WHO MAY CALL THE seed_* REDUCERS. The seed reducers write rows
+-- with the ids, owners and visibilities they already have, so they skip every
+-- permission rule on purpose. The module therefore lets only two callers use
+-- them: the store itself (the database identity, as a scheduled call), and the
+-- store's PUBLISHER, the identity that published the database. The module
+-- learns the publisher once, as the sender of `init`, and keeps it in a private
+-- `store_owner` row that no board can read and no restore can rewrite. Any
+-- other identity, a board included, is refused by every seed_* reducer before
+-- it writes anything. A store published before that row existed has no
+-- recorded publisher and refuses every board: failing closed is the point, as
+-- a board could otherwise claim the role by being first to ask.
+--
+-- A STORE PUBLISHED BEFORE THAT ROW EXISTED. Its
+-- publisher is recorded by `claim_store_owner`, a reducer with no arguments:
+-- the caller becomes the publisher, but ONLY while no row exists, and the call
+-- is refused once one does. The managed bring-up runs it as the CLI login
+-- straight after every `spacetime publish` it makes, and on every start that
+-- publishes nothing, and treats "already has a recorded publisher" as
+-- success, so a store that predates the row, or whose claim failed after the
+-- publish, is fixed on the board's next start. A store the board did not publish (a named
+-- `--spacetime-server`) is claimed by hand, as the login that owns the
+-- database: `spacetime call <db> claim_store_owner`. The import's refusal
+-- names this fix.
+--
+-- KNOWN WINDOW. The module cannot learn who owns the database: a reducer's
+-- context carries the caller and the module's own identity, not the publisher's
+-- (`ctx.identity()` is the module's). So `claim_store_owner` cannot check that
+-- its caller is the owner, and on a store with no row the FIRST caller wins.
+-- The window is the time between a publish over an old store and the claim that
+-- follows it; the bring-up closes it by claiming in the same step. A store
+-- published by this version of the module records its publisher in `init` and
+-- has no window.
+--
+-- RESTORE-ONLY REDUCERS. Besides every seed_* reducer, three reducers exist
+-- only for restore and publish and are gated the same way, by the store itself
+-- or its publisher: `burn_id_sequence` (a large ceiling stalls the
+-- transaction), `probe_generated_task_id` and `set_schema_version`. Any other
+-- caller is refused before anything is written.
+--
+-- So the operator these commands face is narrower than core.allium's
+-- Operator: the store's publisher.
+actor StorePublisher {
+    identified_by: core/Host where id != "" and owner = store_publisher()
 }
 
 ------------------------------------------------------------
