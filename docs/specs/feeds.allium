@@ -941,6 +941,10 @@ rule InstallShippedFeedScripts {
     -- hold back the four that could be written, and the user would be left
     -- with neither the update nor a way to make progress without fixing an
     -- unrelated permission first.
+    --
+    -- ScriptFileWritten, ScriptFileBackedUp, ScriptDigestRecorded,
+    -- ScriptOverwriteDeclined and ScriptOverwriteStillDeclined are observable
+    -- output; no rule listens.
 
     ensures:
         for name in config.shipped_scripts:
