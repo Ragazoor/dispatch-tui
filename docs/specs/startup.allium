@@ -650,6 +650,27 @@ contract StoreIdentityPin {
         -- is exactly what the next launch must compare against.
 }
 
+-- What the operator reads when a launch aborts: one message on stderr, and the
+-- command exits non-zero (`src/startup/launch.rs::StartupAbort::message`).
+-- Stated as a contract because the wording is the implementation's; what the
+-- spec holds it to is what each message must say.
+contract StartupAbortReport {
+    -- The message for an abort that is not a session failure.
+    abort_message: (reason: StartupAbortReason) -> String
+
+    -- The message for a failure to enter a tmux session. The two session
+    -- reasons of StartupAbortReason are reported in this wording unchanged
+    -- (ReportASessionFailureAbort).
+    session_failure_message: (failure: SessionLaunchFailure) -> String
+
+    @invariant EachAbortNamesTheNextAction
+        -- Every message says what the operator does next — install tmux, look
+        -- at the tmux server, move to another window, close a board, name the
+        -- machine, free the port, start or migrate the store — because that is
+        -- what differs between the reasons. A message that only says the
+        -- launch failed leaves the operator to guess which of them it was.
+}
+
 ------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
@@ -686,8 +707,6 @@ enum StartupConfigOutcome {
 
 -- Why the command could not put itself inside a tmux session. Both are fatal —
 -- unlike configuration drift, the board genuinely cannot run without one.
--- The checker reports it unused: its only use is as a contract return type,
--- which it does not credit.
 enum SessionLaunchFailure {
     tmux_unavailable  -- no tmux on PATH
     | launch_rejected -- tmux was reached and refused to start or attach
@@ -727,8 +746,6 @@ enum ModulePublishOutcome {
 -- failures above are carried through unchanged; the rest are the ways a
 -- launch can find the substrate it needs already taken, unusable, or — in the
 -- host's case — unnamed with nobody there to name it, or not readable at all.
--- The checker reports it unused: its only uses are literals of
--- StartupAborted's reason parameter, which it does not credit.
 enum StartupAbortReason {
     tmux_unavailable              -- no tmux on PATH
     | launch_rejected             -- tmux was reached and refused
@@ -2016,6 +2033,36 @@ rule AStartupAbortIsAnExit {
         -- tmux bindings, keep-awake) exists yet.
 }
 
+rule ReportTheStartupAbort {
+    when: StartupAborted(reason)
+    requires: reason != tmux_unavailable and reason != launch_rejected
+
+    -- observable output; no rule listens
+    ensures: StartupAbortReported(message: abort_message(reason))
+
+    @guidance
+        -- The abort's one message, on the shell the operator launched from.
+        -- The board never drew, so stderr is still theirs to read.
+}
+
+rule ReportASessionFailureAbort {
+    when: StartupAborted(reason)
+    requires: reason = tmux_unavailable or reason = launch_rejected
+
+    -- observable output; no rule listens
+    ensures:
+        if reason = tmux_unavailable:
+            StartupAbortReported(message: session_failure_message(tmux_unavailable))
+        else:
+            StartupAbortReported(message: session_failure_message(launch_rejected))
+
+    @guidance
+        -- The two session failures keep the wording they have as a
+        -- SessionLaunchFailure, so a missing tmux reads the same whichever
+        -- launch path met it (DistinguishesAbsentFromBroken). Exactly one of
+        -- this rule and ReportTheStartupAbort fires for an abort.
+}
+
 rule StopTheManagedStoreWhenStartupAborts {
     when: StartupAborted(reason)
     requires: managed_store_held_by_this_board()
@@ -2471,6 +2518,7 @@ surface BoardLaunchCommand {
     contracts:
         demands ConfigDriftEngine
         demands SessionLauncher
+        demands StartupAbortReport
         demands ManagedStoreHost
         demands StoreAddressRecord
         demands StoreIdentityPin

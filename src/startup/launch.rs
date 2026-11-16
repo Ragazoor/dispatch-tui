@@ -240,7 +240,7 @@ pub fn cli_store_server(
 impl StartupAbort {
     /// The operator-facing message. Each names the next action, because that is
     /// what differs between them — install tmux, look at the server, move
-    /// window, close a board.
+    /// window, close a board (`startup.allium`'s `StartupAbortReport`).
     pub fn message(&self) -> String {
         match self {
             Self::TmuxUnavailable => SessionLaunchFailure::TmuxUnavailable.message(),

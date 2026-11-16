@@ -36,11 +36,9 @@ docs/specs/dispatch-prompt.allium	allium.definition.unused	Value 'Bump' is decla
 docs/specs/dispatch-prompt.allium	allium.definition.unused	Value 'Preceding' is declared but not referenced elsewhere.
 docs/specs/feeds.allium	allium.definition.unused	Value 'FeedCommandRun' is declared but not referenced elsewhere.
 docs/specs/startup.allium	allium.definition.unused	Value 'StartupConfigOutcome' is declared but not referenced elsewhere.
-docs/specs/startup.allium	allium.definition.unused	Value 'SessionLaunchFailure' is declared but not referenced elsewhere.
 docs/specs/startup.allium	allium.definition.unused	Value 'RetireOutcome' is declared but not referenced elsewhere.
 docs/specs/startup.allium	allium.definition.unused	Value 'ManagedAddressState' is declared but not referenced elsewhere.
 docs/specs/startup.allium	allium.definition.unused	Value 'ModulePublishOutcome' is declared but not referenced elsewhere.
-docs/specs/startup.allium	allium.definition.unused	Value 'StartupAbortReason' is declared but not referenced elsewhere.
 docs/specs/startup.allium	allium.definition.unused	Value 'BoardExitCause' is declared but not referenced elsewhere.
 
 docs/specs/core.allium	allium.externalEntity.missingSourceHint	External entity 'Worktree' has no obvious governing specification import in this module.
