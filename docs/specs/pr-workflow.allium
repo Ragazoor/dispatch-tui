@@ -239,10 +239,10 @@ rule PollPrStatus {
                         poll.consecutive_transient_failures = 0
                         poll.next_poll_at = null
                     if upper(read.state) = "MERGED":
-                        PrMerged(task: task, window: window_before)
+                        PrMergeAccepted(task: task, window: window_before)
                     else if upper(read.state) = "CLOSED"
                         and sub_status_before != core/SubStatus.pr_closed:
-                        PrClosed(task: task)
+                        PrCloseAccepted(task: task)
 
                 else if permanent:
                     let failures =
@@ -261,7 +261,7 @@ rule PollPrStatus {
                     -- threshold exactly once: a late in-flight failure after
                     -- the give-up does not give up again.
                     if failures = core/config.pr_poll_permanent_failure_threshold:
-                        PrPollGaveUp(task: task, reason: reason)
+                        PrPollThresholdReached(task: task, reason: reason)
 
                 else:
                     -- Transient: the permanent counter is deliberately left
@@ -357,7 +357,7 @@ rule PollPrStatus {
 }
 
 rule PrPollGaveUp {
-    when: PrPollGaveUp(task, reason)
+    when: PrPollThresholdReached(task, reason)
 
     -- Read from the board's own copy of the task. A task that has left
     -- review, or that already shows pr_unreachable (a restart re-polled it
@@ -406,7 +406,7 @@ rule PrPollGaveUp {
 }
 
 rule PrMerged {
-    when: PrMerged(task, window)
+    when: PrMergeAccepted(task, window)
 
     -- The module has already moved the task to done (ReportPrStatus); the
     -- store's row can reach the board before this does, so a task the board
@@ -446,7 +446,7 @@ rule PrMerged {
 }
 
 rule PrClosed {
-    when: PrClosed(task)
+    when: PrCloseAccepted(task)
 
     -- The module marked the task pr_closed (ReportPrStatus), which it does
     -- only for a review task; a task the board no longer shows in review is
