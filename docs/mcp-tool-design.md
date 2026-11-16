@@ -14,8 +14,10 @@ and the checklist.
    to get done. If the operation is an update over existing state, extend the
    update tool; do not add a delete or reset twin. Avoid overlapping tools —
    they cost the agent a choice and no benefit. Watch for pairs that are one
-   capability: a single and a batch form, an on and an off, a get and a set of
-   the same config. Keep create and update apart: their required fields differ.
+   capability: a single and a batch form, an on and an off, a get by id and a
+   filtered list. Keep apart what needs different annotations: a read and a
+   write of the same config are two tools, and so are an update and a delete
+   (ADR 0002). Keep create and update apart: their required fields differ.
 2. **Agents are first-class users.** A capability the TUI offers needs an MCP
    tool too.
 3. **Describe it like a briefing for a new colleague.** At least three
@@ -28,20 +30,24 @@ and the checklist.
    shared wording. Enforced by `every_argument_carries_a_description`.
 5. **Let the schema carry constraints.** Use `enum` for closed sets, `required`
    for mandatory fields, and prefer required arguments over silent fallbacks.
-6. **Declare an access class.** `read_only`, `write`, `idempotent` or
+6. **Name it `<noun>_<verb>`.** The noun is singular and comes first; noun
+   and verb are one word each, with `-` inside a word if needed. `search`
+   reads a collection, `read` reads one fixed thing. The rule and the
+   rename table are in [ADR 0002](adr/0002-mcp-tool-names-are-noun-verb.md).
+7. **Declare an access class.** `read_only`, `write`, `idempotent` or
    `destructive` goes next to the name in `mcp_tools!`. It becomes the MCP
    `annotations` hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
    `openWorldHint`, `title`). Pick `destructive` only when no other call undoes
    it.
-7. **Return high-signal text.** Names and titles beside ids. No internal
+8. **Return high-signal text.** Names and titles beside ids. No internal
    handles. Put the *next step* in the response, where it arrives just in time,
    not in the description.
-8. **Bound the response.** Give list tools filters and a `limit` with a default.
+9. **Bound the response.** Give list tools filters and a `limit` with a default.
    When truncating, say how to narrow the request.
-9. **Write errors that fix the call.** Say what was wrong and what a valid call
+10. **Write errors that fix the call.** Say what was wrong and what a valid call
    looks like. Use the named codes in `src/mcp/handlers/types.rs`. No raw
    internals.
-10. **Test with real agent behaviour.** The per-task trajectory log records every
+11. **Test with real agent behaviour.** The per-task trajectory log records every
     call with arguments and result. Read it to find confusion, repeated errors
     and redundant calls, then edit the description and measure again. Small
     wording changes move behaviour.
@@ -55,9 +61,9 @@ Checked every tool in `mcp_tools!` against the guidance above.
 | Detailed descriptions (3+ sentences) | Met. Enforced by test. `get_task` and `record_learning` are one sentence on purpose (spec). | None |
 | Every argument described | Met for all 25 tools at the audit; the four work-package tools added since meet it too. | Added a test so it stays met |
 | Closed sets as `enum` | Met (`status`, `tag`, `wrap_up_mode`, `model`, `url_type`). | None |
-| Consolidation | **Met.** Three pairs overlapped, and all are merged. (The first, a watch subscribe/unsubscribe pair merged as `watch_task`, was later removed along with `override_poll_owner` in task 53250.) `get_managed_feed_config`/`set_managed_feed_config` became `managed_feed_config` (task 45073): no arguments reads, any argument writes, and it is annotated as a write because annotations cannot say both. `update_task`/`update_tasks` became `update_tasks` (task 45071): a call with one id is the single update. `create_task` and `update_tasks` stay apart: their required fields differ, and an upsert turns a wrong id into a new task.  Two more merged later (task 53252): `get_epic` became the `epic_id` form of `list_epics`, as `list_work_packages` already took `work_package_id`; `delete_work_package` became `delete: true` on `update_work_package`, which is now declared destructive. Neither merge uses a generic `action` argument: a per-action schema cannot say which fields each action needs, and annotations describe a whole tool. | Tasks 45072, 53252 |
+| Consolidation | **Met.** Three pairs overlapped, and all are merged. (The first, a watch subscribe/unsubscribe pair merged as `watch_task`, was later removed along with `override_poll_owner` in task 53250.) `get_managed_feed_config`/`set_managed_feed_config` became `managed_feed_config` (task 45073): no arguments reads, any argument writes, and it is annotated as a write because annotations cannot say both. `update_task`/`update_tasks` became `update_tasks` (task 45071): a call with one id is the single update. `create_task` and `update_tasks` stay apart: their required fields differ, and an upsert turns a wrong id into a new task.  Two more merged later (task 53252): `get_epic` became the `epic_id` form of `list_epics`, as `list_work_packages` already took `work_package_id`; `delete_work_package` became `delete: true` on `update_work_package`, which is now declared destructive. Neither merge uses a generic `action` argument: a per-action schema cannot say which fields each action needs, and annotations describe a whole tool. ADR 0002 reverses the two merges that mix a read or a delete into a write tool (`managed_feed_config`, `delete: true`): each tool gets one honest access class. | Tasks 45072, 53252, 99256 |
 | Search over list-everything | **Gap.** `list_tasks` and `list_epics` have filters but no text query. One search tool across tasks and epics was rejected: they return different shapes. | Task 45074 |
-| Namespacing | Met by the server. Agents see `mcp__dispatch__<tool>`; names inside it are verb plus noun. | None |
+| Namespacing | **Changing.** Agents see `mcp__dispatch__<tool>`. Names inside it move from verb plus noun to `<noun>_<verb>` ([ADR 0002](adr/0002-mcp-tool-names-are-noun-verb.md)). | Task 99256's follow-up epic |
 | Next step in the response, not the description | Met (`wrap_up` → `exit_session`). | None |
 | Tool annotations | **Missing on every tool.** | Added. `mcp_tools!` now takes an access class per tool |
 | Authoring guidance in the repo | **Missing.** `how-to.md` had the mechanics but no design guidance. | This page; linked from `how-to.md` and `CLAUDE.md` |
