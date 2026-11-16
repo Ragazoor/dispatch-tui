@@ -134,10 +134,8 @@ rule PrLearningsGate {
         --
         -- The reminder names the one argument query_learnings requires,
         -- `task_id`, with this task's own id written out, alongside `query`.
-        -- Naming only `query` is read as the whole call: most query_learnings
-        -- calls refused for a missing `task_id` come within minutes of the
-        -- gate firing (docs/plans/2026-10-16-77825-learnings-iteration-2.md
-        -- has the measurement). The id is
+        -- Naming only `query` is read as the whole call: an agent told only
+        -- `query` omits `task_id`, and the call is refused. The id is
         -- the task the gate was asked about, which is always the caller's.
 }
 
