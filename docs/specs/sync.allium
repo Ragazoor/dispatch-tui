@@ -1328,7 +1328,8 @@ rule ASubscriptionTheStoreRefusesIsAnOutage {
         -- run between acceptance and the ask. A failure at either leaves a
         -- connection that is `connected` with nothing asked for, so it is this
         -- same outage, with that step's error as last_error
-        -- (src/sync/session.rs::SyncSession::attempt).
+        -- (src/sync/session.rs::SyncSession::attempt). A failed adopt stores
+        -- no identity, so the next attempt settles it afresh.
         --
         -- CLOSED, NOT MERELY MARKED DOWN. The connection the store accepted is
         -- closed and whatever it had already delivered is discarded, exactly
@@ -1337,8 +1338,8 @@ rule ASubscriptionTheStoreRefusesIsAnOutage {
         -- says `disconnected`, and on accepting writes the board has just
         -- told the operator it will refuse.
         --
-        -- The identity stays settled: the store did say who this is, and
-        -- nothing about a refused ask changes that.
+        -- After a refused ask the identity stays settled: the store did say
+        -- who this is, and nothing about a refused ask changes that.
         --
         -- ONLY THE ASK MADE ON CONNECTING: the board makes no other.
 }
