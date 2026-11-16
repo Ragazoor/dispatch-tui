@@ -1421,8 +1421,8 @@ rule UpdateEpicIsOneTransaction {
 }
 
 -- Repo grouping runs in the store (store-split.allium S1).
--- route_target is the store's. create_task and respawn_phoenix_successor
--- place a new task, and set_task_epic places a moved one, into the per-repo
+-- route_target is the store's. create_task and the in-transaction phoenix
+-- respawn place a new task, and set_task_epic places a moved one, into the per-repo
 -- sub-epic when the epic named is a grouped non-feed root (creating the
 -- sub-epic if needed); any other epic is used as named. patch_task, when the
 -- patch carries a repo_path, re-routes a task already inside a grouped

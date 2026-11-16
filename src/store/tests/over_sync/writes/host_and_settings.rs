@@ -170,40 +170,6 @@ async fn batch_patch_sub_status_sends_the_whole_batch_in_one_call() {
     assert_eq!(caller.sent(), vec![Sent::BatchPatchSubStatus(2)]);
 }
 
-/// The successor is stamped with this connection's identity and the labels
-/// the caller passed — not `encode::create_task_row`'s empty default.
-#[tokio::test]
-async fn respawn_phoenix_successor_stamps_the_identity_and_the_labels() {
-    let (writer, caller) = writer_with(RecordingCaller::default());
-
-    let id = writer
-        .respawn_phoenix_successor(TaskId(1), a_request(), &["a".to_string(), "b".to_string()])
-        .await
-        .unwrap();
-
-    assert_eq!(id, TaskId(43));
-    let sent = caller.sent();
-    match sent.as_slice() {
-        [Sent::RespawnPhoenixSuccessor(predecessor, row)] => {
-            assert_eq!(*predecessor, 1);
-            assert_eq!(row.owner, "user-me");
-            assert_eq!(row.labels, "[\"a\",\"b\"]");
-        }
-        other => panic!("expected one RespawnPhoenixSuccessor call, got {other:?}"),
-    }
-}
-
-#[tokio::test]
-async fn a_board_with_no_identity_cannot_respawn_a_phoenix_successor() {
-    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
-
-    assert!(writer
-        .respawn_phoenix_successor(TaskId(1), a_request(), &[])
-        .await
-        .is_err());
-    assert!(caller.sent().is_empty());
-}
-
 // -- Host registry (Phase 6c) -------------------------------------------------
 //
 // `push_host_registration` is NOT a store method — see its doc comment — so it
@@ -518,9 +484,6 @@ async fn every_store_mutation_reaches_the_transport() {
     db.batch_patch_sub_status(&[(TaskId(1), SubStatus::Active)])
         .await
         .unwrap();
-    db.respawn_phoenix_successor(TaskId(1), a_request(), &[])
-        .await
-        .unwrap();
 
     db.claim_poll_owner(crate::models::PollScopeId::Epic(EpicId(1)))
         .await
@@ -655,7 +618,6 @@ async fn every_store_mutation_reaches_the_transport() {
             "IngestFeed",
             "EnsureManagedEpics",
             "BatchPatchSubStatus",
-            "RespawnPhoenixSuccessor",
             "ClaimPollOwner",
             "OverridePollOwner",
             "CreateLearning",

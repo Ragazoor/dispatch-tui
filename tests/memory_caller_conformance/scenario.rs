@@ -2078,67 +2078,6 @@ fn memory_caller_matches_the_real_reducers() {
             "a retired feed item is not ingested again"
         );
 
-        // -- respawn_phoenix_successor (agent_state) -----------------------------
-        // Each of these three tasks needs its own distinct `title`: both
-        // `create_task` and `respawn_phoenix_successor`'s id read-back match
-        // on `(title, repo_path, owner, epic_id, created_at, created_by)`
-        // (`matches_create`), and `blank_task_in_epic(epic_id_real)`'s
-        // defaults would otherwise collide with `task_id_real` and each
-        // other, all three sharing `epic_id_real`.
-        let real_predecessor = real
-            .create_task(bindings::Task {
-                title: "phoenix predecessor".into(),
-                status: "done".into(),
-                phoenix: true,
-                ..own_task_in_epic(epic_id_real)
-            })
-            .await
-            .unwrap();
-        wait_for!(rows_real.task(real_predecessor).is_some());
-        mem.align_next_task_id(real_predecessor.0);
-        let mem_predecessor = mem
-            .create_task(bindings::Task {
-                title: "phoenix predecessor".into(),
-                status: "done".into(),
-                phoenix: true,
-                ..own_task_in_epic(epic_id_mem)
-            })
-            .await
-            .unwrap();
-
-        let phoenix_successor = |epic_id: i64| bindings::Task {
-            title: "phoenix successor".into(),
-            ..own_task_in_epic(epic_id)
-        };
-        let real_successor = real
-            .respawn_phoenix_successor(real_predecessor, phoenix_successor(epic_id_real))
-            .await
-            .unwrap();
-        wait_for!(rows_real.task(real_successor).is_some());
-        mem.align_next_task_id(real_successor.0);
-        let mem_successor = mem
-            .respawn_phoenix_successor(mem_predecessor, phoenix_successor(epic_id_mem))
-            .await
-            .unwrap();
-        wait_for!(rows_real.task(real_predecessor).is_some_and(|t| !t.phoenix));
-        compare_task(real_predecessor.0);
-        compare_task(real_successor.0);
-
-        // Clean up the extra fixtures this section created, so the delete
-        // section below only has the original task/epics' worth to close out.
-        for (real_id, mem_id) in [
-            (real_predecessor, mem_predecessor),
-            (real_successor, mem_successor),
-        ] {
-            real.patch_task(real_id, mark_done()).await.unwrap();
-            wait_for!(rows_real
-                .task(real_id)
-                .is_some_and(|t| t.status == TaskStatus::Done));
-            mem.patch_task(mem_id, mark_done()).await.unwrap();
-            real.delete_task(real_id).await.unwrap();
-            wait_for!(rows_real.task(real_id).is_none());
-            mem.delete_task(mem_id).await.unwrap();
-        }
         real.delete_epic(EpicId(feed_epic_id_real)).await.unwrap();
         wait_for!(rows_real.epic(EpicId(feed_epic_id_real)).is_none());
         mem.delete_epic(EpicId(feed_epic_id_mem)).await.unwrap();

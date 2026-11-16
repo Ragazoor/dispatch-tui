@@ -278,8 +278,12 @@ use super::*;
 /// Each of those rules already lived in the module; the commit closed write
 /// paths that skipped them and moved nothing out of the board.
 ///
+/// Bumped: the public `respawn_phoenix_successor` reducer is gone (it inserted
+/// a client-built task with no aim check and no identity stamp). A board that
+/// still called it would fail at the call, so the two must match.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 53;
+pub const RULES_VERSION: i64 = 54;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

@@ -62,3 +62,8 @@ mod unseen_items;
 /// (`views.rs`), over a plain in-test store.
 #[cfg(test)]
 mod views;
+
+/// No public reducer inserts a client-built task without the aim check and the
+/// identity stamp (`tasks.allium: PhoenixRespawn`). A source scan.
+#[cfg(test)]
+mod task_authority;

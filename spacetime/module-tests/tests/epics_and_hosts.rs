@@ -39,44 +39,6 @@ fn batch_patch_sub_status_applies_the_whole_batch_in_one_call() {
     assert_eq!(store.task(b).sub_status, "stale");
 }
 
-/// The successor is created and the predecessor's `phoenix` flag clears in
-/// one call: `TheFlagIsTheReceipt`.
-#[test]
-fn respawn_phoenix_successor_creates_and_clears_the_flag_atomically() {
-    let store = Store::new();
-    let predecessor = Task {
-        status: "done".into(),
-        phoenix: true,
-        ..user_task("recurring", "alice")
-    };
-    let id = store.create("alice", predecessor);
-
-    let successor = Task {
-        phoenix: true,
-        ..user_task("recurring", "alice")
-    };
-    store
-        .call("alice", |ctx| {
-            respawn_phoenix_successor(ctx, id, successor.clone())
-        })
-        .expect("respawn_phoenix_successor");
-
-    assert!(!store.task(id).phoenix, "the predecessor's flag must clear");
-    let carrying = store
-        .db()
-        .tasks()
-        .iter()
-        .filter(|t| t.title == "recurring" && t.phoenix)
-        .count();
-    assert_eq!(carrying, 1, "exactly one successor carries the flag onward");
-
-    let missing = store.call("alice", |ctx| {
-        respawn_phoenix_successor(ctx, 999, successor)
-    });
-    assert!(missing.is_err(), "a missing predecessor must refuse");
-    assert_eq!(store.db().tasks().iter().count(), 2, "no orphan successor");
-}
-
 /// Plain upsert by id: a second call with a changed label overwrites rather
 /// than duplicating.
 #[test]

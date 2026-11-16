@@ -576,9 +576,13 @@ rule ConfirmDone {
 --     core/Task.respawn_failed, rendered as a red ⚠ card indicator (see
 --     board-visuals.allium: "Phoenix marker"), and re-entering done retries.
 --
--- The store enforces the receipt on its standalone respawn too: a respawn
--- whose predecessor does not carry the flag is refused, writing nothing
--- (RespawnPhoenixSuccessorNeedsTheFlag).
+-- There is no standalone respawn reducer. The successor is built by the
+-- store, inside the transaction that closes the predecessor, from the
+-- predecessor's own row and under the closing caller's identity; no client
+-- supplies a successor row. A reducer that took one would insert a task with
+-- no aim check and no identity stamp (TaskCreateRequested's checks), so the
+-- module refuses to have one: a source test lists every reducer that inserts
+-- a client-built task and requires both checks of each.
 --
 -- Two properties fall out of this and neither should be re-derived some other
 -- way. A done -> review -> done round-trip cannot spawn a duplicate, because
@@ -2314,7 +2318,6 @@ surface TaskWriteReducers {
         TaskCreateRequested(row)
         TaskInsertRequested(written)
         TaskUpdateRequested(task, epic?, patch, host)
-        PhoenixSuccessorRequested(predecessor, successor)
 }
 
 rule SubStatusMovesMustBeLegal {
@@ -2543,24 +2546,6 @@ rule HandStatusWriteReachesTheSchedule {
         -- schedules.allium consumes both: LeavingBacklogCancelsThePendingRun,
         -- EnteringBacklogRearmsAPhoenixTask, LeavingRunningCancelsThePendingRun
         -- and ClosingCancelsThePendingRun.
-}
-
-rule RespawnPhoenixSuccessorNeedsTheFlag {
-    when: PhoenixSuccessorRequested(predecessor, successor)
-
-    -- TheFlagIsTheReceipt, enforced: a predecessor without the
-    -- flag is not a phoenix task, or has already respawned.
-    requires: predecessor.phoenix
-
-    ensures: PhoenixSuccessorAccepted(predecessor: predecessor, successor: successor)
-
-    @guidance
-        -- The standalone respawn_phoenix_successor reducer. A refusal reads
-        -- "predecessor task <id> is not a phoenix task, or already respawned"
-        -- and writes nothing, so a repeated call cannot insert a second
-        -- successor. The in-transaction respawns (patch_task, close_task,
-        -- exit_session's close, a merged PR; PhoenixRespawn) are gated on the
-        -- flag too.
 }
 
 ------------------------------------------------------------

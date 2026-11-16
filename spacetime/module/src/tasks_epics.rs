@@ -797,57 +797,6 @@ pub fn update_task(
     }
 }
 
-/// `PhoenixRespawn`, atomic: inserts the successor and clears the
-/// predecessor's `phoenix` flag in one transaction. Either both happen or
-/// neither does — `TheFlagIsTheReceipt` holds literally, so a retry after a
-/// failure cannot create a second successor. Mirrors
-/// `src/db/queries/tasks.rs::respawn_phoenix_successor` exactly.
-///
-/// The successor is routed into a grouped epic's per-repo sub-epic like any
-/// other created task (`epics.allium`'s routing note), and the epic it lands in
-/// is recalculated here: the caller cannot know which sub-epic that was.
-#[spacetimedb::reducer]
-pub fn respawn_phoenix_successor(
-    ctx: &ReducerContext,
-    predecessor: i64,
-    successor: Task,
-) -> Result<(), String> {
-    let Some(predecessor_row) = visible_task(ctx, predecessor) else {
-        return Err(format!("predecessor task {predecessor} not found"));
-    };
-    check_task_may_enter_epic(ctx, "successor task", successor.epic_id)?;
-    if !predecessor_row.phoenix {
-        return Err(format!(
-            "predecessor task {predecessor} is not a phoenix task, or already respawned"
-        ));
-    }
-    let epic_id = route_to_repo_group(ctx, successor.epic_id, &successor.repo_path);
-    // tasks.allium: PhoenixRespawn carries the predecessor's schedule,
-    // whatever the client's row said; `store_task` arms it from now.
-    let successor = Task {
-        schedule: predecessor_row.schedule.clone(),
-        ..successor
-    };
-    write_task(
-        ctx,
-        Task {
-            id: 0,
-            epic_id,
-            ..successor
-        },
-    )?;
-    // Nothing between the check above and here can touch `predecessor_row` —
-    // reducers run one at a time, and the write above only inserts a NEW
-    // successor row — so the row already in hand is still current; no need
-    // to re-fetch it.
-    ctx.db.tasks().id().update(Task {
-        phoenix: false,
-        ..predecessor_row
-    });
-    recalculate_epic_chain(ctx, epic_id);
-    Ok(())
-}
-
 /// Atomically set `sub_status` for many tasks. One reducer taking the whole
 /// batch, so it applies whole or not at all — `TaskCrud::batch_patch_sub_status`'s
 /// own doc comment already promises this shape.

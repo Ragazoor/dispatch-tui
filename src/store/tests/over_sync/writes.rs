@@ -98,7 +98,6 @@ enum Sent {
     ClaimPollOwner(String, i64, String),
     OverridePollOwner(String, i64, String),
     BatchPatchSubStatus(usize),
-    RespawnPhoenixSuccessor(i64, Box<bindings::Task>),
     RegisterHost(String, String, String),
     RequestDispatch(TaskId, String, String, String),
     ClaimDispatchRequest(i64, String),
@@ -962,19 +961,6 @@ impl ReducerCaller for RecordingCaller {
         updates: Vec<(TaskId, SubStatus)>,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::BatchPatchSubStatus(updates.len()))
-    }
-
-    async fn respawn_phoenix_successor(
-        &self,
-        predecessor: TaskId,
-        successor: bindings::Task,
-    ) -> anyhow::Result<TaskId> {
-        let predecessor = predecessor.0;
-        self.record(Sent::RespawnPhoenixSuccessor(
-            predecessor,
-            Box::new(successor),
-        ))?;
-        Ok(TaskId(43))
     }
 
     async fn register_host(

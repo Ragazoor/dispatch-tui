@@ -425,13 +425,6 @@ mod unconnected {
                 .unwrap_err(),
         );
         refused(
-            "respawn_phoenix_successor",
-            caller
-                .respawn_phoenix_successor(TaskId(1), task("t"))
-                .await
-                .unwrap_err(),
-        );
-        refused(
             "register_host",
             caller
                 .register_host(host(), "label".into(), "alice".into())

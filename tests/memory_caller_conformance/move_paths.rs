@@ -757,8 +757,31 @@ fn epic_id_write_sites(body: &str) -> Vec<(usize, String)> {
             sites.push((at, owner(at)));
         }
     }
+    // A whole-row replacement (`*task = other;`) rewrites `epic_id` too, with
+    // no field named (G10). Only a deref of a task-named binding counts: `*n =
+    // 3` is not a task.
+    for (at, _) in body.match_indices('*') {
+        let rest = &body[at + 1..];
+        let name: String = rest.chars().take_while(|c| is_ident_char(*c)).collect();
+        if name.is_empty() || !is_task_binding(&name) {
+            continue;
+        }
+        if body[..at].chars().next_back().is_some_and(is_ident_char) {
+            continue;
+        }
+        let after = rest[name.len()..].trim_start();
+        if after.starts_with('=') && !after.starts_with("==") && !after.starts_with("=>") {
+            sites.push((at, owner(at)));
+        }
+    }
     sites.sort();
     sites
+}
+
+/// A binding whose name says it holds a task row: `task`, `row`, `t`, or a
+/// name ending in `_task`.
+fn is_task_binding(name: &str) -> bool {
+    matches!(name, "task" | "row" | "t") || name.ends_with("_task")
 }
 
 /// Each function in `file` that writes a task's `epic_id`, with how many
@@ -1002,6 +1025,25 @@ fn module_sources_recurses_into_subdirectories() {
     );
 }
 
+/// G10: a whole-row replacement writes `epic_id` without naming it, and a
+/// second write in one function counts twice.
+#[test]
+fn the_epic_id_scan_finds_a_whole_row_replacement() {
+    let body = "fn swap(task: &mut Task, other: Task) {\n    *task = other;\n}";
+    assert_eq!(
+        epic_id_writers("g.rs", body),
+        vec!["g.rs::swap".to_string()]
+    );
+    let not_a_task = "fn bump(n: &mut i64) {\n    *n = 3;\n    let _ = 2 * n == 4;\n}";
+    assert_eq!(epic_id_writers("g.rs", not_a_task), Vec::<String>::new());
+    let twice =
+        "fn mv(t: &mut Task, e: i64, other: Task) {\n    t.epic_id = Some(e);\n    *t = other;\n}";
+    assert_eq!(
+        epic_id_write_count("g.rs", twice),
+        vec![("g.rs::mv".to_string(), 2)]
+    );
+}
+
 /// Every writer under `dir` (recursively), minus fixtures and tests (they
 /// build tasks, they do not move them), with its write count.
 fn sites_under(dir: &std::path::Path) -> Vec<(String, usize)> {
@@ -1047,29 +1089,34 @@ const MORE_THAN_ONE_WRITE: &[(&str, usize)] = &[];
 /// Every twin function that writes a task's `epic_id`, with the module site it
 /// mirrors (or why none). A twin write absent from this list is a move only
 /// the twin makes, so no module path pins it.
-const TWIN_SITES: &[(&str, &str)] = &[
-    (
-        "agent_state.rs::apply_respawn_phoenix_successor",
-        "mirrors tasks_epics.rs::respawn_phoenix_successor: inserts the successor, no prior mark",
-    ),
+///
+/// The number is how many `epic_id` writes the function makes (G10): a second
+/// write inside a listed function is a new path the name does not cover, so a
+/// changed count fails `every_twin_move_function_is_listed` until reviewed.
+const TWIN_SITES: &[(&str, usize, &str)] = &[
     (
         "convert.rs::from",
+        1,
         "a row type conversion between the module and binding Task, not a move",
     ),
     (
         "feed.rs::upsert_feed_item",
+        1,
         "mirrors feed.rs::upsert_feed_item: stays in its epic",
     ),
     (
         "grouping.rs::relink_task",
+        1,
         "mirrors grouping.rs::relink_task (MOVE_PATHS)",
     ),
     (
         "tasks_epics.rs::apply_create_task",
+        1,
         "mirrors tasks_epics.rs::create_task: an insert, no prior mark",
     ),
     (
         "tasks_epics.rs::apply_set_task_epic",
+        1,
         "mirrors tasks_epics.rs::move_task_row (MOVE_PATHS)",
     ),
 ];
@@ -1096,14 +1143,20 @@ fn every_twin_move_function_is_listed() {
         !twin.is_empty(),
         "the twin scan found no site: update this test"
     );
-    for (site, _) in &twin {
-        assert!(
-            TWIN_SITES.iter().any(|(s, _)| s == site),
-            "{site} writes a task's epic_id on the twin but is not in TWIN_SITES: a move \
-             only the twin makes is untested; list it with the module site it mirrors"
+    for (site, n) in &twin {
+        let Some((_, want, _)) = TWIN_SITES.iter().find(|(s, _, _)| s == site) else {
+            panic!(
+                "{site} writes a task's epic_id on the twin but is not in TWIN_SITES: a move \
+                 only the twin makes is untested; list it with the module site it mirrors"
+            );
+        };
+        assert_eq!(
+            n, want,
+            "{site} writes a task's epic_id {n} time(s) on the twin, TWIN_SITES expects \
+             {want}: a new write is a new path; review it and update the count"
         );
     }
-    for (site, _) in TWIN_SITES {
+    for (site, _, _) in TWIN_SITES {
         assert!(
             twin.iter().any(|(s, _)| s == site),
             "TWIN_SITES lists {site}, which no longer writes a task's epic_id"

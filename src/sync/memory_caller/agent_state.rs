@@ -7,10 +7,9 @@ use chrono::{DateTime, Utc};
 use dispatch_spacetime_module as module;
 
 use crate::models::{NotificationWrite, PollScopeId, SubStatus, TaskId};
-use crate::spacetime::bindings;
 
 use super::super::encode;
-use super::super::writes::{DrainReadBack, ReducerOutcome, StoreRefusal};
+use super::super::writes::{DrainReadBack, ReducerOutcome};
 use super::{
     MemoryReducerCaller, Tables, ACTIVE, AWAITING_REVIEW, NEEDS_INPUT, POLL_SCOPE_TASK, REVIEW,
     RUNNING,
@@ -575,58 +574,6 @@ impl MemoryReducerCaller {
             );
         }
         Ok(ReducerOutcome::Applied(vec![]))
-    }
-
-    /// Atomic: inserts the successor and clears the predecessor's `phoenix`
-    /// flag in one lock hold. No internal recalculation — mirrors the
-    /// module's own `respawn_phoenix_successor` exactly.
-    pub(super) fn apply_respawn_phoenix_successor(
-        &self,
-        predecessor: TaskId,
-        successor: bindings::Task,
-    ) -> Result<TaskId> {
-        let predecessor = predecessor.0;
-        let scope = self.scope();
-        let mut tables = self.lock();
-        if tables.visible_task(&scope, predecessor).is_none() {
-            return Err(anyhow::anyhow!("predecessor task {predecessor} not found"));
-        }
-        tables
-            .check_task_may_enter_epic(&scope, "successor task", successor.epic_id)
-            .map_err(anyhow::Error::msg)?;
-        if tables.tasks.get(&predecessor).is_some_and(|t| !t.phoenix) {
-            return Err(anyhow::anyhow!(
-                "predecessor task {predecessor} is not a phoenix task, or already respawned"
-            ));
-        }
-        let epic_id =
-            self.route_to_repo_group(&mut tables, successor.epic_id, &successor.repo_path);
-        // Mirrors the module: the successor carries the predecessor's
-        // schedule, which `write_task` arms (tasks.allium: PhoenixRespawn).
-        let schedule = tables
-            .tasks
-            .get(&predecessor)
-            .map(|t| t.schedule.clone())
-            .unwrap_or_default();
-        let successor_row = module::Task {
-            id: 0,
-            epic_id,
-            schedule,
-            ..module::Task::from(successor)
-        };
-        self.write_task(&mut tables, successor_row)
-            .map_err(StoreRefusal)?;
-        let new_id = tables.next_task_id - 1;
-        if let Some(predecessor_row) = tables.tasks.get(&predecessor).cloned() {
-            let updated = module::Task {
-                phoenix: false,
-                ..predecessor_row
-            };
-            tables.tasks.insert(predecessor, updated.clone());
-            self.rows.upsert_task(&updated.into());
-        }
-        self.recalculate_epic_chain(&mut tables, epic_id);
-        Ok(TaskId(new_id))
     }
 
     pub(super) fn apply_register_host(

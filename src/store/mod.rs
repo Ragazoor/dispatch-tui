@@ -168,17 +168,6 @@ pub trait TaskCrud: TaskRead {
     /// its epic in the same transaction
     /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`).
     async fn create_task_signalled(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
-    /// `PhoenixRespawn`, made atomic: inserts the successor (with `labels` set
-    /// directly, not a follow-up patch) and clears `predecessor`'s `phoenix`
-    /// flag in one transaction. Either both happen or neither does — a failure
-    /// rolls back the insert too, so `TheFlagIsTheReceipt` holds literally and
-    /// a retry after a failure cannot create a second successor.
-    async fn respawn_phoenix_successor(
-        &self,
-        predecessor: TaskId,
-        req: CreateTaskRequest<'_>,
-        labels: &[String],
-    ) -> Result<TaskId>;
     async fn delete_task(&self, id: TaskId) -> Result<()>;
     /// `tasks.allium: SeeTaskByLandingOnIt`: a key left this board's cursor on
     /// `id`'s card, so this board's person's unseen mark on it ends. A board

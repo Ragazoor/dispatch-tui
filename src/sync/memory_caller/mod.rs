@@ -991,14 +991,6 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_batch_patch_sub_status(updates)
     }
 
-    async fn respawn_phoenix_successor(
-        &self,
-        predecessor: TaskId,
-        successor: bindings::Task,
-    ) -> Result<TaskId> {
-        self.apply_respawn_phoenix_successor(predecessor, successor)
-    }
-
     async fn register_host(
         &self,
         id: String,

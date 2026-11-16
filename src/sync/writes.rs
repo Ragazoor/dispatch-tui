@@ -555,14 +555,6 @@ pub trait ReducerCaller: Send + Sync {
         &self,
         updates: Vec<(TaskId, SubStatus)>,
     ) -> Result<ReducerOutcome>;
-    /// Insert the successor and read its generated id back — the same
-    /// content-matched read-back [`Self::create_task`] uses.
-    async fn respawn_phoenix_successor(
-        &self,
-        predecessor: TaskId,
-        successor: bindings::Task,
-    ) -> Result<TaskId>;
-
     // -- Host registry (Phase 6c) -----------------------------------------------
     //
     // NOT a store method — see [`push_host_registration`] and

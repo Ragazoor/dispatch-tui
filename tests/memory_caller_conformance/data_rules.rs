@@ -617,28 +617,6 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             );
         }
 
-        // -- respawn_phoenix_successor on a task that is not a phoenix -----------
-        let successor = bindings::Task {
-            title: "never respawned".into(),
-            ..blank_task_in_epic(root)
-        };
-        let real_why = real
-            .respawn_phoenix_successor(task, successor.clone())
-            .await
-            .unwrap_err()
-            .to_string();
-        let why = mem
-            .respawn_phoenix_successor(task, successor)
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(
-            real_why.contains(&why) || why.contains(&real_why),
-            "real {real_why:?} vs memory {why:?}"
-        );
-        assert!(why.contains("is not a phoenix task"), "{why}");
-        same_task(task.0);
-
         // -- a subtree nested past the depth cap is refused, not half-deleted ----
         let owned_epic = |parent_epic_id: i64| bindings::Epic {
             parent_epic_id,

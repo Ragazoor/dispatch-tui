@@ -132,29 +132,6 @@ impl TaskCrud for Store {
         self.caller.create_task_signalled(row).await
     }
 
-    async fn respawn_phoenix_successor(
-        &self,
-        predecessor: TaskId,
-        req: CreateTaskRequest<'_>,
-        labels: &[String],
-    ) -> Result<TaskId> {
-        let identity = self
-            .require_identity(
-                "there is no name to stamp on a phoenix successor; it was not created",
-            )
-            .await?;
-        let owner = if req.epic_id.is_none() {
-            identity.as_str()
-        } else {
-            ""
-        };
-        let mut row = encode::create_task_row(&req, owner, &identity, &self.now());
-        row.labels = serde_json::to_string(labels).unwrap_or_else(|_| "[]".to_string());
-        self.caller
-            .respawn_phoenix_successor(predecessor, row)
-            .await
-    }
-
     /// tasks.allium: `DeleteTask`. A feed task's delete retires its
     /// `external_id` under its `nearest_feed_epic` (core/Epic) in the same
     /// reducer transaction as the row delete — a cycle landing between the two

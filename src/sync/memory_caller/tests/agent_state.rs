@@ -516,53 +516,6 @@ async fn batch_patch_sub_status_updates_many_and_ignores_missing_ids() {
     );
 }
 
-#[tokio::test]
-async fn respawn_phoenix_successor_inserts_and_clears_the_predecessor_flag() {
-    let (caller, rows) = caller();
-    let predecessor = bindings::Task {
-        status: DONE.into(),
-        phoenix: true,
-        ..blank_task()
-    };
-    let predecessor = caller.create_task(predecessor).await.unwrap();
-    let successor_id = caller
-        .respawn_phoenix_successor(predecessor, blank_task())
-        .await
-        .unwrap();
-    assert_ne!(successor_id, predecessor);
-    assert!(!rows.task(predecessor).unwrap().phoenix);
-    assert!(rows.has_task(successor_id));
-}
-
-#[tokio::test]
-async fn respawn_phoenix_successor_refuses_a_predecessor_without_the_flag() {
-    let (caller, rows) = caller();
-    let predecessor = bindings::Task {
-        status: DONE.into(),
-        phoenix: false,
-        ..blank_task()
-    };
-    let predecessor = caller.create_task(predecessor).await.unwrap();
-    let before = rows.tasks().len();
-    let outcome = caller
-        .respawn_phoenix_successor(predecessor, blank_task())
-        .await;
-    assert!(
-        outcome.is_err(),
-        "the flag is the receipt: no flag, no successor"
-    );
-    assert_eq!(rows.tasks().len(), before);
-}
-
-#[tokio::test]
-async fn respawn_phoenix_successor_refuses_an_unknown_predecessor() {
-    let (caller, _rows) = caller();
-    let outcome = caller
-        .respawn_phoenix_successor(TaskId(999), blank_task())
-        .await;
-    assert!(outcome.is_err());
-}
-
 // -- Host registry --------------------------------------------------------
 
 #[tokio::test]

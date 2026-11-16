@@ -117,7 +117,6 @@ pub mod request_exit_session_reducer;
 pub mod request_feed_refresh_reducer;
 pub mod request_wrap_up_reducer;
 pub mod rescope_epic_learnings_reducer;
-pub mod respawn_phoenix_successor_reducer;
 pub mod retired_feed_item_type;
 pub mod revoke_super_admin_reducer;
 pub mod rules_version_table;
@@ -327,7 +326,6 @@ pub use request_exit_session_reducer::request_exit_session;
 pub use request_feed_refresh_reducer::request_feed_refresh;
 pub use request_wrap_up_reducer::request_wrap_up;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
-pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
 pub use retired_feed_item_type::RetiredFeedItem;
 pub use revoke_super_admin_reducer::revoke_super_admin;
 pub use rules_version_table::*;
@@ -709,10 +707,6 @@ pub enum Reducer {
         from: i64,
         to: i64,
     },
-    RespawnPhoenixSuccessor {
-        predecessor: i64,
-        successor: Task,
-    },
     RevokeSuperAdmin {
         user: String,
     },
@@ -985,7 +979,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::RequestFeedRefresh { .. } => "request_feed_refresh",
             Reducer::RequestWrapUp { .. } => "request_wrap_up",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
-            Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
             Reducer::RevokeSuperAdmin { .. } => "revoke_super_admin",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SaveSetting { .. } => "save_setting",
@@ -1529,13 +1522,6 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&rescope_epic_learnings_reducer::RescopeEpicLearningsArgs {
                 from: from.clone(),
                 to: to.clone(),
-}),
-            Reducer::RespawnPhoenixSuccessor{
-                predecessor,
-                successor,
-}             => __sats::bsatn::to_vec(&respawn_phoenix_successor_reducer::RespawnPhoenixSuccessorArgs {
-                predecessor: predecessor.clone(),
-                successor: successor.clone(),
 }),
             Reducer::RevokeSuperAdmin{
                 user,

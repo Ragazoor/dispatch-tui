@@ -143,17 +143,6 @@ fn moving_a_task_that_does_not_exist_is_refused() {
     assert!(why.contains("not found"), "{why}");
 }
 
-#[test]
-fn respawning_from_a_task_that_is_not_a_phoenix_is_refused() {
-    let store = Store::new();
-    let id = store.create("alice", user_task("plain", "alice"));
-    let successor = user_task("successor", "alice");
-    let refused = store.call("alice", |ctx| respawn_phoenix_successor(ctx, id, successor));
-    let why = refused.expect_err("only a phoenix task respawns");
-    assert!(why.contains("is not a phoenix task"), "{why}");
-    assert_eq!(store.db().tasks().iter().count(), 1, "no successor written");
-}
-
 fn blank_learning(id: i64, summary: &str, source_task_id: Option<i64>) -> Learning {
     Learning {
         id,
