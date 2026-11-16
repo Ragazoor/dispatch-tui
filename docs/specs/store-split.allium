@@ -591,12 +591,13 @@ entity SessionRequest {
     -- newer done wrap_up row beside it (newer by requested_at, ties broken by
     -- row id) and with no exit_session row that consumed it. A later dispatch
     -- does not end it; RequestRowsArePruned keeps a live token's row and the
-    -- dispatched row that voids it together.
+    -- dispatched row that voids it together. is_newer(r, this) is a black
+    -- box: r's requested_at is later, or equal with a higher row id.
     is_live_token:
         kind = wrap_up and state = done
         and not SessionRequests.any(r =>
             r.task = task and r.kind = wrap_up and r.state = done
-            and r.requested_at > requested_at)
+            and is_newer(r, this))
         and not SessionRequests.any(r =>
             r.kind = exit_session and r.wrap_up_request = this)
 
@@ -1028,8 +1029,9 @@ rule HandMoveReleasesAWindowTheBoardDidNotSee {
     -- delivery).
     let window = task.current_window
     -- caller_host() is a black box: the host the write's call names
-    -- (update_task's host argument), or null for a patch_task call, which
-    -- names none.
+    -- (update_task's host argument, or the ingest host when a feed ingest
+    -- keeps a worked-on task, feeds.allium: KeepWorkedOnFeedTask), or null
+    -- for a patch_task call, which names none.
     let teardown_host = if task.host != null: task.host else: caller_host()
     let may_tear_down = teardown_host != null
         and teardown_host.owner != null and teardown_host.owner = caller()
@@ -1482,7 +1484,8 @@ rule RequestExitSession {
     requires: token.is_valid_token
     requires: action = token.action
     requires: current_agent(task).tmux_window != null
-    requires: action = pr implies (pr_url != null and pr_url != "")
+    -- is_blank(s) is a black box: s holds only whitespace, or nothing.
+    requires: action = pr implies (pr_url != null and not is_blank(pr_url))
     -- D11 (W11): the row names the task's host, whose board tears the window
     -- down, so only that host's owner may ask.
     requires: task.host != null and task.host.owner != null and task.host.owner = caller()
