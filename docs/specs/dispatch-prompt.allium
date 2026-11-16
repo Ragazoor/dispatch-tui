@@ -85,8 +85,8 @@ contract PromptComposer {
     --
     -- Total, with no error arm, for the same reason holds_allium_specs has
     -- none: a failed or missing read mid-walk answers false. The consequence is
-    -- a CVE task that gets the ordinary design step, which is the answer it got
-    -- before this branch existed; failing the dispatch over it would be worse.
+    -- a CVE task that gets the ordinary design step, which still gives the agent
+    -- a workable prompt; failing the dispatch over it would be worse.
     -- An epic already visited on the walk answers false too — the service layer
     -- forbids a parent cycle, but a dispatch must terminate on one that got in
     -- anyway. There is deliberately no depth limit: the chain is as long as the
@@ -243,6 +243,7 @@ rule ComposeAgentPrompt {
     -- owed to it.
     requires: mode in {standard, research, quick}
 
+    -- observable output; no rule listens.
     ensures: AgentPromptComposed(task: task, mode: mode)
 
     @guidance
@@ -330,6 +331,8 @@ rule NameTheDesignStep {
     -- cannot disagree with the trailing block about which branch was taken.
     -- has_plan is false here by precondition, so only two of its four answers
     -- are reachable from this rule: spec_first and brainstorm.
+    --
+    -- observable output; no rule listens.
     ensures: DesignStepNamed(
         task: task,
         step: preceding(has_plan: false, holds_specs: repo_keeps_specs, is_cve: false)
@@ -376,10 +379,10 @@ rule NameTheDesignStep {
         --     are overridden with their own review addenda regardless of
         --     plan state (see RenderDependencyBumpRunbook,
         --     RenderPrReviewRunbook and RenderReleasePrRunbook below).
-        --     This closes a gap where a bug/feature/chore-tagged agent read
-        --     "write and attach a plan" plus the (then-universal) wrap-up
-        --     wording as license to stop at a plan-only state instead of
-        --     implementing it.
+        --     It is there so that a bug/feature/chore-tagged agent does not
+        --     read "write and attach a plan" plus the wrap-up wording as
+        --     license to stop at a plan-only state instead of implementing
+        --     it.
 }
 
 -- == The CVE runbook ==
@@ -415,6 +418,7 @@ rule RenderCveRunbook {
     -- path, which it is not — see HOW IT COMPOSES below.
     requires: task.has_plan = false
 
+    -- observable output; no rule listens.
     ensures: CveRunbookRendered(task: task)
 }
 
@@ -463,6 +467,7 @@ rule RenderDependencyBumpRunbook {
 
     when: BumpClassified(task, bump)
 
+    -- observable output; no rule listens.
     ensures: DependencyBumpRunbookRendered(task: task, kind: bump.kind)
 
     @guidance
@@ -499,6 +504,7 @@ rule RenderPrReviewRunbook {
     requires: mode = standard
     requires: task.tag = pr_review
 
+    -- observable output; no rule listens.
     ensures: PrReviewRunbookRendered(
         task: task,
         review_command: settings/review_command()
@@ -534,6 +540,7 @@ rule RenderReleasePrRunbook {
     requires: mode = standard
     requires: task.tag = release_please
 
+    -- observable output; no rule listens.
     ensures: ReleasePrRunbookRendered(task: task)
 
     @guidance
@@ -1398,20 +1405,19 @@ surface AgentPrompt {
     -- == RenderPrReviewRunbook ==
 
     @guarantee TheReviewCommandMakesTheSizeChoiceItself
-        -- PR review. There is no diff-size branch. The runbook named one
-        -- review command for a small diff and another for a large one, which
-        -- made the agent shell out to `gh pr diff | wc -l` to pick between
-        -- them. The command it routes to takes a PR target and sizes its own
-        -- review (/preference-review runs one reviewer for a tiny diff), so
-        -- the size was a proxy for a choice that command already makes. Deleting the branch is the harness absorbing it — the
-        -- routing does not move, it stops existing.
+        -- PR review. The runbook has no diff-size branch; sizing is the
+        -- review command's. It names the one configured review command
+        -- (settings/review_command()) and hands it the PR, and never asks
+        -- the agent to measure the diff (`gh pr diff | wc -l`) and pick
+        -- between commands by size. How large a review a diff gets is the
+        -- command's own choice, so the runbook has no size to route on.
 
     @guarantee APrReviewRunbookStatesThePrItWasHanded
         -- PR review. When the task carries a pr-typed url, step 1 reads
         -- "The PR is <url>." instead of "Find the PR number or URL in the
         -- task description." The review feed sets that url at insert time
-        -- and fills the description with the PR body, so the old step
-        -- pointed the agent at text that does not hold the PR. This follows
+        -- and fills the description with the PR body, so a find-it step
+        -- would point the agent at text that does not hold the PR. This follows
         -- TheRunbookStatesThePrItWasHandedRatherThanAskingForIt, without its
         -- author check: nothing in a PR review merges, so there is nothing
         -- to gate. A task with no pr-typed url (a hand-made review task)
