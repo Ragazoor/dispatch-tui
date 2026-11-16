@@ -1239,35 +1239,35 @@ rule FeedTick {
                     -- whichever host's tick reaches it first; a claimed epic
                     -- is polled only by its owner. See "Host scoping" below.
                     -- FeedCommandRunsOnSettersHost comes first: a host whose
-                    -- owner did not set the command neither claims nor runs.
+                    -- owner did not set the command neither claims nor runs
+                    -- (skipped, last_run bumped as below).
                     let poll_owner = core/PollOwner{scope: epic, scope_id: epic.id}
-                    if core/local_host().owner != (epic.feed_command_set_by ?? epic.created_by):
-                        -- skipped, last_run bumped as below
-                    else if not exists poll_owner:
-                        -- CLAIM, THEN RUN. The cycle runs only
-                        -- once the claim is answered and the owner read back
-                        -- is this host; see "Claim then run" below.
-                        core/PollOwner.created(
-                            scope: epic,
-                            scope_id: epic.id,
-                            host: core/local_host(),
-                            claimed_at: now
-                        )
-                        if core/PollOwner{scope: epic, scope_id: epic.id}.host = core/local_host():
+                    if core/local_host().owner = (epic.feed_command_set_by ?? epic.created_by):
+                        if not exists poll_owner:
+                            -- CLAIM, THEN RUN. The cycle runs only
+                            -- once the claim is answered and the owner read back
+                            -- is this host; see "Claim then run" below.
+                            core/PollOwner.created(
+                                scope: epic,
+                                scope_id: epic.id,
+                                host: core/local_host(),
+                                claimed_at: now
+                            )
+                            if core/PollOwner{scope: epic, scope_id: epic.id}.host = core/local_host():
+                                FeedCycleRequested(epic: epic)
+                        else if poll_owner.host = core/local_host():
                             FeedCycleRequested(epic: epic)
-                    else if poll_owner.host = core/local_host():
-                        FeedCycleRequested(epic: epic)
-                    -- else: another host owns this epic's feed. This tick
-                    -- does no exec and emits no FeedCycleRequested for it —
-                    -- until a human reassigns ownership
-                    -- (OverrideFeedOwner below) — but last_run IS bumped
-                    -- regardless of which arm above ran, same as it already
-                    -- is for a dropped SerialisedFeedCycle request. Without
-                    -- that, a non-owning host would re-read core/PollOwner
-                    -- on every feed poll tick instead of only at this
-                    -- epic's own feed interval; the ownership answer changes
-                    -- rarely enough that the extra latency to notice a
-                    -- reassignment costs nothing real.
+                        -- else: another host owns this epic's feed. This tick
+                        -- does no exec and emits no FeedCycleRequested for it —
+                        -- until a human reassigns ownership
+                        -- (OverrideFeedOwner below) — but last_run IS bumped
+                        -- regardless of which arm above ran, same as it already
+                        -- is for a dropped SerialisedFeedCycle request. Without
+                        -- that, a non-owning host would re-read core/PollOwner
+                        -- on every feed poll tick instead of only at this
+                        -- epic's own feed interval; the ownership answer changes
+                        -- rarely enough that the extra latency to notice a
+                        -- reassignment costs nothing real.
 
     -- FEED REQUESTS ARE SERVED ON EVERY TICK. Beside the
     -- interval walk above, each tick picks up the open feed requests on this
@@ -1389,17 +1389,6 @@ rule OverrideFeedOwner {
         -- its status, so there is no status in which ownership is moot.
 }
 
--- The module's poll-owner reducers (claim_poll_owner, override_poll_owner),
--- which any store client may call; each checks the host argument against
--- caller() (store-split.allium D11).
-surface PollOwnerReducers {
-    facing _: core/StoreClient
-
-    provides:
-        PollOwnerClaimed(scope, scope_id, host)
-        PollOwnerOverridden(scope, scope_id, host)
-}
-
 rule ClaimPollOwner {
     when: PollOwnerClaimed(scope, scope_id, host)
 
@@ -1410,12 +1399,20 @@ rule ClaimPollOwner {
     -- the poll of something its caller cannot read. A feed epic is also
     -- refused to a host whose owner did not set its command
     -- (FeedCommandRunsOnSettersHost).
-    requires: caller().sees(scope, scope_id)
+    requires: sees(caller(), scope, scope_id)
     let target = core/Epic{id: scope_id}    -- only read when scope = epic
     requires: scope != epic or target.feed_command = null
         or host.owner = (target.feed_command_set_by ?? target.created_by)
 
-    ensures: core/PollOwner.claimed_if_absent(scope, scope_id, host)
+    -- A scope that already has an owner keeps it: the claim is a no-op.
+    ensures:
+        if not exists core/PollOwner{scope: scope, scope_id: scope_id}:
+            core/PollOwner.created(
+                scope: scope,
+                scope_id: scope_id,
+                host: host,
+                claimed_at: now
+            )
 
     @guidance
         -- claim_poll_owner. Its callers are pr-workflow.allium's
@@ -1429,12 +1426,25 @@ rule OverridePollOwner {
     -- someone else's machine, so a poll cannot be stolen for another host.
     requires: host.owner != null and host.owner = caller()
     -- The same sight and setter checks as ClaimPollOwner.
-    requires: caller().sees(scope, scope_id)
+    requires: sees(caller(), scope, scope_id)
     let target = core/Epic{id: scope_id}    -- only read when scope = epic
     requires: scope != epic or target.feed_command = null
         or host.owner = (target.feed_command_set_by ?? target.created_by)
 
-    ensures: core/PollOwner.reassigned(scope, scope_id, host)
+    -- Unconditional: an existing row moves to the host, and a scope with no
+    -- row gets one.
+    let owner = core/PollOwner{scope: scope, scope_id: scope_id}
+    ensures:
+        if exists owner:
+            owner.host = host
+            owner.claimed_at = now
+        else:
+            core/PollOwner.created(
+                scope: scope,
+                scope_id: scope_id,
+                host: host,
+                claimed_at: now
+            )
 
     @guidance
         -- override_poll_owner. Its caller is OverrideFeedOwner.
@@ -1465,12 +1475,14 @@ rule FeedCommandAuthority {
         or is_super_admin(caller())
         or caller_is_store_operator()
 
+    let changed = command != epic.feed_command
+
     ensures:
         epic.feed_command = command
         -- A real change records who made it, and drops every claim held by a
         -- host whose owner is not that person (FeedCommandRunsOnSettersHost),
         -- so the setter's own host can claim the feed at its next tick.
-        if command != old(epic.feed_command):
+        if changed:
             epic.feed_command_set_by = caller()
             for claim in core/PollOwners where scope = epic and scope_id = epic.id
                     and host.owner != caller():
@@ -1689,8 +1701,6 @@ rule RunFeedCommand {
         -- src/feed/parse.rs::parse_feed_items).
 }
 
--- == Upsert semantics ==
-
 -- == Where ingestion runs ==
 
 rule IngestFeedEmission {
@@ -1780,6 +1790,8 @@ rule IngestFeedEmission {
         -- its before-and-after read); src/feed/cycle.rs::FeedCycle::run (the
         -- host work and the additive decision).
 }
+
+-- == Upsert semantics ==
 
 rule UpsertFeedTasks {
     when: UpsertFeedItems(epic, items, additive, host)
@@ -2030,7 +2042,7 @@ rule UpsertFeedTasks {
                         not exists task
                         tasks/TaskRowDeleted(task: task)
                         FeedTaskRemovedAsStale(task: task, ingest_host: host)
-                        TaskTeardown(task)
+                        -- and performs tasks.allium's TaskTeardown on it
                     else:
                         FeedTaskLeftFeed(task: task, ingest_host: host)
 
@@ -2676,7 +2688,7 @@ rule RoleRoutedFeedSync {
                         not exists task
                         tasks/TaskRowDeleted(task: task)
                         FeedTaskRemovedAsStale(task: task, ingest_host: host)
-                        TaskTeardown(task)
+                        -- and performs tasks.allium's TaskTeardown on it
                     else:
                         FeedTaskLeftFeed(task: task, ingest_host: host)
 
@@ -2698,7 +2710,7 @@ rule RoleRoutedFeedSync {
                 not exists task
                 tasks/TaskRowDeleted(task: task)
                 FeedTaskRemovedAsStale(task: task, ingest_host: host)
-                TaskTeardown(task)
+                -- and performs tasks.allium's TaskTeardown on it
 
         -- Recalculate bottom-up through all three levels: repo-group sub-epics
         -- first (they roll up into their role sub-epic), then each role
@@ -2764,7 +2776,8 @@ rule RoleRoutedFeedSync {
         --
         -- Sequencing note — the ensures clauses of this rule and of
         -- UpsertFeedTasks / GroupedFeedUpsert write `not exists task` BEFORE
-        -- TaskTeardown(task), which is the order the implementation runs in:
+        -- the TaskTeardown they perform, which is the order the implementation
+        -- runs in:
         -- the module's ingest transaction commits first and the teardown runs
         -- afterwards in the caller, off FeedIngestOutcome.removed. The report
         -- is the board's prediction narrowed to rows CONFIRMED gone after the
@@ -2873,9 +2886,11 @@ rule NewReviewRequestIsSignalled {
     -- with left_feed whose item is back — a review requested again) is
     -- signalled the same way: it is new review work, not a refresh.
     ensures:
-        for task in inserted_or_reopened_tasks(epic, items) where route(signals) in {my_reviews, team_reviews}:
-            for m in task.epic.workspace.memberships where task.epic.visible_to(user):
-                core/UnseenTask.created(subscriber: m.user, task: task)
+        for item in items where route(item.signals) in {my_reviews, team_reviews}:
+            for task in inserted_or_reopened_tasks(epic, items)
+                    where task.external_id = item.external_id:
+                for m in task.epic.workspace.memberships where task.epic.visible_to(m.user):
+                    core/UnseenTask.created(subscriber: m.user, task: task)
 
     @guidance
         -- The signal is the create-time flag create_task already has; the feed
@@ -2901,8 +2916,8 @@ rule NewReviewRequestIsSignalled {
         -- The additive path (DegradedNonEmptyEmission, AppendOnlyFeed) inserts
         -- the same way and signals the same way.
         --
-        -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_into
-        -- (role-routed branch), through IngestStore's
+        -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_role_routed,
+        -- through IngestStore's
         -- mark_task_unseen_for_viewers, which the module and the board's
         -- in-memory double both implement.
         -- Tests: src/feed/ingest/tests/role_routing.rs::new_my_reviews_pr_is_signalled_and_a_refresh_is_not,
@@ -2926,17 +2941,17 @@ rule ReviewTaskModelIsSetByRole {
     -- the same store transaction as the insert, so the agent never launches on
     -- a stale default.
     ensures:
-        for task in inserted_tasks(epic, items):
-            task.model = if route(signals) = bots: sonnet else: opus
+        for item in items:
+            for task in inserted_tasks(epic, items) where task.external_id = item.external_id:
+                task.model = if route(item.signals) = bots: sonnet else: opus
 
     @guidance
         -- INSERT ONLY. A refresh of a PR already on the board writes no model,
         -- so a model the operator picked by hand survives a re-poll. A MOVE
         -- between role sub-epics (Team Reviews into My Reviews, Bots into Team
         -- Reviews) keeps the model it had: the task is not new, and a move is
-        -- not a change the operator asked for. A PR already on the board when
-        -- this rule shipped keeps its model; a PR retired and later re-inserted
-        -- is a new insert and takes the role's model.
+        -- not a change the operator asked for. A PR removed as stale and later
+        -- emitted again is a new insert and takes the role's model.
         --
         -- FIXED, NOT CONFIGURED. The mapping is written in the rule. No role
         -- sub-epic carries a model setting.
@@ -2951,7 +2966,7 @@ rule ReviewTaskModelIsSetByRole {
         --
         -- Implementation: spacetime/module/src/feed_ingest.rs::route_and_move
         -- (records each insert's model) and
-        -- spacetime/module/src/feed_ingest.rs::ingest_into (writes it).
+        -- spacetime/module/src/feed_ingest.rs::ingest_role_routed (writes it).
         -- Tests: src/feed/ingest/tests/role_routing.rs::new_review_pr_gets_the_model_of_its_role,
         -- src/feed/ingest/tests/role_routing.rs::refresh_keeps_a_model_chosen_by_hand,
         -- src/feed/ingest/tests/role_routing.rs::role_move_keeps_the_model,
@@ -3990,6 +4005,17 @@ invariant FeedCommandRunsOnSettersHost {
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
+
+-- The module's poll-owner reducers (claim_poll_owner, override_poll_owner),
+-- which any store client may call; each checks the host argument against
+-- caller() (store-split.allium D11).
+surface PollOwnerReducers {
+    facing _: core/StoreClient
+
+    provides:
+        PollOwnerClaimed(scope, scope_id, host)
+        PollOwnerOverridden(scope, scope_id, host)
+}
 
 -- The board keys this spec owns. The "r" key reaches ManualFeedTrigger and
 -- the yes answer to epics.allium's feed-ownership take-over prompt reaches

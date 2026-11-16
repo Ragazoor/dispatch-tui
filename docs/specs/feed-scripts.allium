@@ -182,7 +182,8 @@ contract FetchDependabot {
     @invariant EveryItemIsTaggedDependabot
         -- Every emitted item carries tag dependabot, whoever its author is:
         -- external_id "dep:<repo>#<n>", title "#<n> <title>", the body cut to
-        -- 500 characters as description, the repo name as its one label.
+        -- config.pr_description_chars as description, the repo name as its
+        -- one label.
 
     @invariant BoundedAndLoudPerBot
         -- Each (repo x bot) call passes `--limit config.dependabot_prs_per_bot`
@@ -490,8 +491,9 @@ contract FetchReviews {
 
     @invariant ReviewItemShape
         -- external_id "review:<owner>/<repo>#<n>"; title "#<n> <title>";
-        -- description the body cut to 500 characters; labels "@<author>",
-        -- the repo name, then "draft" and the ci label when they apply.
+        -- description the body cut to config.pr_description_chars; labels
+        -- "@<author>", the repo name, then "draft" and the ci label when they
+        -- apply.
 
     @invariant DraftsAreLabelled
         -- Draft PRs are included and carry a "draft" entry in labels, which
@@ -576,7 +578,7 @@ contract FetchLogWarnings {
 enum CiLabel { ci_pass | ci_fail | ci_pending }
 
 ------------------------------------------------------------
--- Configuration
+-- Config
 ------------------------------------------------------------
 
 config {
@@ -596,4 +598,7 @@ config {
     fix_pr_list_limit: Integer = 200
     -- fetch-cve.sh: a linked PR's title is cut to this many characters.
     fix_pr_title_chars: Integer = 200
+    -- fetch-dependabot.sh and fetch-reviews.sh: a PR's body is cut to this
+    -- many characters for an item's description.
+    pr_description_chars: Integer = 500
 }

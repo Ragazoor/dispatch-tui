@@ -105,7 +105,7 @@ contract CronSchedule {
 }
 
 ------------------------------------------------------------
--- Configuration
+-- Config
 ------------------------------------------------------------
 
 config {
@@ -115,8 +115,10 @@ config {
 }
 
 ------------------------------------------------------------
--- Setting and clearing
+-- Rules
 ------------------------------------------------------------
+
+-- == Setting and clearing ==
 
 rule SetSchedule {
     when: ScheduleSet(task, cron)
@@ -157,9 +159,7 @@ rule ClearSchedule {
         -- task with no schedule is a no-op, not a refusal.
 }
 
-------------------------------------------------------------
--- Firing
-------------------------------------------------------------
+-- == Firing ==
 
 rule FireDueTask {
     when: task: core/Task.next_due <= now
