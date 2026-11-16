@@ -27,8 +27,9 @@ use "./feeds.allium" as feeds
 
 -- How the module answered one report_pr_status call (ReportPrStatus).
 -- accepted: the module took the report (it may have changed nothing).
--- refused: the module rejected it, an unknown state or review decision; the
---   host counts it as a permanent read failure.
+-- refused: the module rejected it (an unknown state or review decision, or
+--   a caller that does not own the host it names); the host counts any
+--   refusal as a permanent read failure.
 -- unanswered: the call failed in transport; the host counts it as a
 --   transient read failure.
 enum PrReportReply { accepted | refused | unanswered }
@@ -70,7 +71,9 @@ entity PrPollState {
     -- sub_status survives a restart.
     --
     -- Because this state is session-scoped, an app restart polls a
-    -- pr_unreachable task once more. That is deliberate, not an oversight.
+    -- pr_unreachable task again, until the threshold is reached again (that
+    -- second give-up sends no report or notice: PrPollGaveUp). That is
+    -- deliberate, not an oversight.
     -- The failure it exists for — a repository the gh account cannot read —
     -- is fixed on GitHub, not on the task, so there is nothing the user
     -- could edit to earn a retry. A restart is the retry.
@@ -142,10 +145,12 @@ rule PrLearningsGate {
 rule PollPrStatus {
     when: core/Tick()
 
-    -- `pr_poll_due` reads this task's PrPollState and answers false in
-    -- exactly two cases: polling gave up on the task (gave_up), or its
+    -- `pr_poll_due` answers false in exactly three cases: this host sent a
+    -- check for the task less than core/config.pr_poll_interval ago (failed
+    -- or not), polling gave up on the task (PrPollState.gave_up), or its
     -- transient backoff deadline has not passed yet (next_poll_at > now). A
-    -- task with no poll state has never failed, so it is always due.
+    -- task with no poll state has never failed, so only the interval gates
+    -- it.
     --
     -- The host clause admits two shapes of task, deliberately not one: a task
     -- WITH a worktree (task.host = core/local_host()) and every host-less task
@@ -1223,6 +1228,9 @@ rule FinishTaskConflict {
     -- HostReportsSessionRequestFailed). The board writes no sub_status.
 
     ensures: task.sub_status = core/SubStatus.conflict
+    -- No host sends a status line or notification for it. The user learns
+    -- of it from the card's conflict section (core.allium, "Column Section
+    -- Layout") and from the reason the wrap_up call returns to the agent.
     ensures: UserInformed(about: rebase_conflict, task: task)
 
     @guidance
