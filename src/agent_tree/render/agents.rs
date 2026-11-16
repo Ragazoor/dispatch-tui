@@ -980,6 +980,19 @@ mod tests {
     }
 
     #[test]
+    fn a_filter_that_shrinks_the_list_scrolls_the_shown_rows_back_into_view() {
+        let mut section = AgentsSection::new();
+        let mut rows: Vec<AgentRow> = (1..=10).map(test_detached_row).collect();
+        rows.insert(0, row(100, false));
+        section.set_rows(rows);
+        section.bottom();
+        rendered(&mut section, true, 5);
+        section.cycle_filter();
+        let out = rendered(&mut section, true, 5);
+        assert!(out.contains("task 100"), "{out}");
+    }
+
+    #[test]
     fn the_filter_shows_attached_agents_and_keeps_every_listed_one() {
         let mut section = AgentsSection::new();
         section.set_rows(vec![row(1, true), test_detached_row(2), row(3, false)]);

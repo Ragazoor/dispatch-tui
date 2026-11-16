@@ -2632,10 +2632,15 @@ rule JumpToAgentWindow {
     requires: target != pane.task
 
     ensures: AgentWindowSelected(window: current_agent(target).tmux_window)
+    -- Jumping to another agent ends any resume wait: the user moved on, and
+    -- the resumed agent coming up later must not pull them away. Without the
+    -- agents filter the cursor would already have left the resumed row
+    -- (ForgetPendingResumeJump); with the row hidden it has not.
+    ensures: pane.pending_jump = null
 
     @guidance
         -- The jump selects the window only. It does not move focus into the
-        -- target's own agent-tree pane, and it changes nothing in this pane:
+        -- target's own agent-tree pane, and beyond the wait it changes nothing in this pane:
         -- when the user comes back, the cursor is where they left it.
         --
         -- The window is named by the task, not by the text on the row, so a
@@ -3106,7 +3111,9 @@ surface AgentTreeCompanionPane {
         -- Not keys of their own. AgentTreeKeyPressed is raised for every key
         -- event in the pane, bound or not (ClearAgentTreeErrorNotice), and
         -- AgentTreeAgentCursorMoved for every one of them that moves the
-        -- agents section's cursor (ForgetPendingResumeJump).
+        -- agents section's cursor (ForgetPendingResumeJump), except the
+        -- agents filter's flip, which moves it without being a motion
+        -- (CycleAgentListFilter).
         AgentTreeKeyPressed(pane)
         AgentTreeAgentCursorMoved(pane)
 

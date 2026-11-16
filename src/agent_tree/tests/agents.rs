@@ -238,6 +238,26 @@ fn an_accepted_resume_for_a_task_no_longer_listed_does_not_wait() {
     assert_eq!(rig.state.pending_jump, None);
 }
 
+/// JumpToAgentWindow: jumping to another agent while the resumed row is
+/// hidden ends the wait, so its start later does not pull the user away.
+#[test]
+fn jumping_to_another_agent_ends_a_hidden_resume_wait() {
+    let mut rig = agents_rig(vec![detached(7), agent(8, false)]);
+    rig.press(KeyCode::Char(' '));
+    accept(&mut rig.state, 7);
+    rig.press(KeyCode::Tab);
+    assert_eq!(
+        rig.press(KeyCode::Char(' ')),
+        KeyAction::JumpTo(test_tmux_window("task-8"))
+    );
+    assert_eq!(rig.state.pending_jump, None);
+    assert_eq!(
+        rig.state
+            .adopt_agent_list(Ok(vec![agent(7, false), agent(8, false)])),
+        None
+    );
+}
+
 /// Flipping back to `all` shows the resumed row with the cursor elsewhere.
 /// The flip itself keeps the wait; the next cursor motion ends it.
 #[test]

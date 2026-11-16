@@ -259,7 +259,14 @@ fn run_tree_action(
             state.tree_state.toggle_selected();
             KeyAction::Continue
         }
-        "jump_to_agent" => return state.agents.space_action(),
+        "jump_to_agent" => {
+            let action = state.agents.space_action()?;
+            // JumpToAgentWindow: jumping elsewhere ends any resume wait.
+            if matches!(action, KeyAction::JumpTo(_)) {
+                state.pending_jump = None;
+            }
+            action
+        }
         // Space or Enter in the commits section: the row under the cursor
         // becomes the source. The row already selected is a no-op, so it
         // records nothing (SelectAgentTreeSource).
