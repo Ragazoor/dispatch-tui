@@ -38,9 +38,11 @@ the main read tool works badly:
   90th percentile reply is 5.5 KB.
 - Each row carries a 200-character goal excerpt with its line breaks, so one
   row spreads over several lines.
-- For a dispatched agent it silently keeps only the agent's own epic. About
-  100 calls got a bare "No tasks found", which does not say which filter
-  emptied the list.
+- 98 calls got a bare "No tasks found", which does not say which filter
+  emptied the list. 33 of them passed no `epic_id` or `repo_paths`, so for a
+  dispatched agent the hidden scope to its own epic did the filtering.
+- `list_epics` has the same gap: a call with no arguments returned over
+  20 KB, 26 times.
 - `get_task` (1805 calls) and `list_tasks` (797) are two tools for one
   capability, reading tasks.
 
@@ -59,7 +61,8 @@ the main read tool works badly:
    reverses the merges recorded in `docs/mcp-tool-design.md` for tasks 45073
    and 53252.
 5. **`task_search` fixes the list problems.** It has a default `limit` of
-   50. It has no silent epic scope: the caller passes `epic_id` (an agent
+   50, and its sort order is stated, since the order decides which 50 an
+   agent sees. It has no silent epic scope: the caller passes `epic_id` (an agent
    finds its own epic in its prompt). Each row is one line, with the goal cut
    to one short line. An empty result names the filters it applied. The
    `task_id` form returns the full view `get_task` returns today, archived
@@ -83,10 +86,13 @@ the main read tool works badly:
 | `set_review_command` | `review-command_read`, `review-command_set` |
 | `managed_feed_config` | `feed-config_read`, `feed-config_set` |
 | `set_display_name` | `display-name_set` |
-| `list_workspaces`, `create_workspace`, `update_workspace`, `set_workspace_member` | `workspace_search`, `workspace_create`, `workspace_update`, `workspace-member_set` |
+| `list_workspaces`, `create_workspace`, `update_workspace`, `set_workspace_member` | `workspace_search`, `workspace_create`, `workspace_update`, `workspace-member_set`, plus `workspace_delete` split out |
 | `set_super_admin`, `claim_super_admin` | `super-admin_set`, `super-admin_claim` |
 | `list_unseen_items`, `delete_unseen_item` | `unseen-item_search`, `unseen-item_delete` |
 | `query_usage`, `read_context`, `list_keybindings` | `usage_read`, `context_read`, `keybinding_search` |
+
+The same default limit and empty-result wording apply to every `_search`
+tool that can return a long list (`epic_search` above all).
 
 A follow-up task may change a name in its own surface when the work shows a
 better one, as long as it keeps the rules above and updates this table.
