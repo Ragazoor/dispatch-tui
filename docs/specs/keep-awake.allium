@@ -185,18 +185,19 @@ rule ReleaseKeepAwake {
 }
 
 rule ReleaseKeepAwakeOnExit {
-    when: startup/BoardExited(_)
+    when: startup/BoardExited(cause)
 
+    requires: cause = quit
     requires: keep_awake.status in {requesting, on}
 
     ensures: KeepAwakeReleased()
 
     @guidance
-        -- Covers every exit the board runs: a confirmed quit, a signalled
-        -- exit and a startup abort (startup.allium: BoardExitCause). An end
-        -- the process cannot run its exit for (SIGKILL, a crash) raises no
-        -- BoardExited; the hold goes then because it belongs to the board
-        -- process (HoldDiesWithTheBoard). Either way nothing is left holding
+        -- The board leaving its run loop lets go of the hold itself. Every
+        -- other end relies on HoldDiesWithTheBoard: a signalled exit ends the
+        -- process without letting go first, a startup abort comes before the
+        -- board draws and so before keep-awake exists, and SIGKILL or a crash
+        -- raises no BoardExited at all. Either way nothing is left holding
         -- the machine awake after the board is gone.
 }
 
@@ -262,8 +263,8 @@ surface KeepAwakeHold {
         -- The hold belongs to the board process. When the process ends for
         -- any reason, SIGKILL and crashes included, the system drops the hold
         -- without the board doing anything, so no cleanup step stands
-        -- between a dead board and a released machine. An exit the board
-        -- runs releases it first (ReleaseKeepAwakeOnExit).
+        -- between a dead board and a released machine. A quit releases it
+        -- first (ReleaseKeepAwakeOnExit).
 }
 
 ------------------------------------------------------------

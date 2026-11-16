@@ -198,8 +198,9 @@ rule AFailedCommandExitsWithFailure {
     ensures: invocation.exit = failure
 
     @guidance
-        -- Every error a subcommand's body returns ends here: one line on
-        -- stderr naming the cause (EveryFailureNamesItsCause), then exit 1.
+        -- Every error a subcommand's body returns ends here: stderr says
+        -- what went wrong, prefixed `Error: ` and followed by any underlying
+        -- causes (EveryFailureNamesItsCause), then exit 1.
 }
 
 rule ACompletedCommandExitsWithSuccess {
@@ -211,7 +212,8 @@ rule ACompletedCommandExitsWithSuccess {
     @guidance
         -- The body returned without an error. The commands that never fail
         -- (statusline, caller-headers, toggle-agent-tree-pane) always end
-        -- here.
+        -- here. So do `--help` and `--version`, which print to stdout and
+        -- run no body.
 }
 
 rule ABlockedPrGateExitsWithTheBlockCode {

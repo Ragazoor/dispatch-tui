@@ -667,8 +667,11 @@ contract StartupAbortReport {
         -- Every message says what the operator does next — install tmux, look
         -- at the tmux server, move to another window, close a board, name the
         -- machine, free the port, start or migrate the store — because that is
-        -- what differs between the reasons. A message that only says the
-        -- launch failed leaves the operator to guess which of them it was.
+        -- what differs between the reasons. Where the cause is an error passed
+        -- through (the managed store not starting, a publish failing), the
+        -- message carries that error and says to run `dispatch tui` again once
+        -- it is fixed. A message that only says the launch failed leaves the
+        -- operator to guess which of them it was.
 }
 
 ------------------------------------------------------------
