@@ -1481,12 +1481,14 @@ rule FeedCommandAuthority {
     ensures:
         epic.feed_command = command
         -- A real change records who made it, and drops every claim held by a
-        -- host whose owner is not that person (FeedCommandRunsOnSettersHost),
-        -- so the setter's own host can claim the feed at its next tick.
+        -- registered host whose owner is not that person
+        -- (FeedCommandRunsOnSettersHost), so the setter's own host can claim
+        -- the feed at its next tick. A claim needs a registered host and no
+        -- reducer deletes a host, so every claim is held by one.
         if changed:
             epic.feed_command_set_by = caller()
             for claim in core/PollOwners where scope = epic and scope_id = epic.id
-                    and host.owner != caller():
+                    and host.owner != null and host.owner != caller():
                 not exists claim
 
     @guidance
