@@ -323,7 +323,24 @@ impl SyncSession {
         // subscribed on connect and identified afterwards would, in the
         // conflict case, already have asked for a stranger's rows before
         // discovering it was a stranger.
-        let stored = store.user_identity().await?;
+        //
+        // `connect` has already installed the live connection, so a failed
+        // read cannot just return: it would leave a socket open under a
+        // session still `Connecting`, retried on the next tick with no
+        // backoff. It is a failed attempt like any other, and is closed.
+        let stored = match store.user_identity().await {
+            Ok(stored) => stored,
+            Err(error) => {
+                self.connection.apply(
+                    ConnectionEvent::AttemptFailed {
+                        reason: error.to_string(),
+                    },
+                    now,
+                );
+                self.connector.disconnect().await;
+                return Ok(StepOutcome::Failed);
+            }
+        };
         let verdict = settle_identity(stored.as_deref(), &accepted.identity);
 
         // `Accepted` before the verdict is acted on, in BOTH arms.

@@ -376,6 +376,8 @@ async fn a_connection_that_cannot_subscribe_is_closed() {
 struct FlakyAdopt {
     inner: Store,
     fail: std::sync::atomic::AtomicBool,
+    /// Fail the stored-identity read the session makes after `connect`.
+    fail_read: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -390,6 +392,9 @@ impl HostStore for FlakyAdopt {
         self.inner.rename_host(label).await
     }
     async fn user_identity(&self) -> anyhow::Result<Option<String>> {
+        if self.fail_read.load(std::sync::atomic::Ordering::SeqCst) {
+            anyhow::bail!("host file unreadable");
+        }
         self.inner.user_identity().await
     }
 }
@@ -438,6 +443,7 @@ async fn an_error_after_accept_is_an_outage_that_is_retried() {
     let db = FlakyAdopt {
         inner: store().await,
         fail: std::sync::atomic::AtomicBool::new(true),
+        fail_read: std::sync::atomic::AtomicBool::new(false),
     };
     let connector = ScriptedConnector::new(vec![
         accepted("user-a", "token-a"),
@@ -459,4 +465,37 @@ async fn an_error_after_accept_is_an_outage_that_is_retried() {
         StepOutcome::Connected
     );
     assert_eq!(connector.subscriptions().len(), 1);
+}
+
+/// `ASubscriptionTheStoreRefusesIsAnOutage`: a stored-identity read that fails
+/// after the store has accepted the connection is an ordinary failed attempt.
+/// The connection is closed and the retry waits for the backoff, rather than
+/// the session staying `Connecting` over a live socket.
+#[tokio::test]
+async fn a_failed_identity_read_after_connect_closes_the_connection() {
+    let db = FlakyAdopt {
+        inner: store().await,
+        fail: std::sync::atomic::AtomicBool::new(false),
+        fail_read: std::sync::atomic::AtomicBool::new(true),
+    };
+    let connector = ScriptedConnector::new(vec![
+        accepted("user-a", "token-a"),
+        accepted("user-a", "token-a"),
+    ]);
+    let mut session = SyncSession::open("store.example", connector.clone());
+    let start = Instant::now();
+
+    assert_eq!(session.step(&db, start).await.unwrap(), StepOutcome::Failed);
+    assert_eq!(session.status(), ConnectionStatus::Disconnected);
+    assert_eq!(connector.disconnects(), 1);
+    assert!(connector.subscriptions().is_empty());
+
+    db.fail_read
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let due = start + RECONNECT_BACKOFF_BASE;
+    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
+    assert_eq!(
+        session.step(&db, due).await.unwrap(),
+        StepOutcome::Connected
+    );
 }

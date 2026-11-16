@@ -1272,8 +1272,11 @@ rule ConnectionAttemptFailed {
         connection.last_failure_at = now
 
     @guidance
-        -- Covers refusal, an unresolvable host, a rejected credential and the
-        -- attempt that simply never answered within config.connect_timeout.
+        -- Covers refusal, an unresolvable host, a rejected credential, the
+        -- attempt that simply never answered within config.connect_timeout,
+        -- and a failed read of this install's stored identity after the store
+        -- answered but before the board accepts. That last one closes the
+        -- connection the store opened (src/sync/session.rs::SyncSession::attempt).
         -- They are one state because an operator's next action is the same for
         -- all of them — look at the reason — and the reason is carried, so
         -- nothing is lost by not branching.
@@ -1426,7 +1429,10 @@ rule StopOnAUserIdentityConflict {
         --
         -- The message is recorded as last_error before the board goes, so a
         -- write refused in the moment before it exits quotes the conflict
-        -- (AWriteWithNoConnectionIsRefused), not a bare "not connected".
+        -- (AWriteWithNoConnectionIsRefused), not a bare "not connected". The
+        -- write path learns it one step after the connection closes, as it
+        -- learns every outage's reason, so a write in that brief gap says
+        -- only that the store is not connected.
         --
         -- ONE STATE FOR BOTH ARRIVAL PATHS is what keeps that answer honest. The
         -- tempting design has a fatal cold start and a warning mid-session,
