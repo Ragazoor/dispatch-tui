@@ -17,8 +17,8 @@
 -- Design decisions:
 --   - It blocks all three idle effects: screen lock, screen blanking and
 --     suspend. Blocking one alone does not replace the video.
---   - It always starts off. It ends on toggle-off or when the board exits,
---     including a crash. It is never remembered across restarts.
+--   - It always starts off. It ends on toggle-off or when the board process
+--     ends, a crash included. It is never remembered across restarts.
 --   - One board key toggles it. A steady badge shows while it holds.
 --   - A refusal, or a hold that ends on its own, turns it off with an error
 --     message. There is no automatic retry.
@@ -26,6 +26,10 @@
 
 use "./core.allium" as core
 use "./startup.allium" as startup
+
+given {
+    keep_awake: KeepAwake
+}
 
 ------------------------------------------------------------
 -- Enumerations
@@ -57,10 +61,6 @@ entity KeepAwake {
     shows_badge: status = on
 }
 
-given {
-    keep_awake: KeepAwake
-}
-
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
@@ -77,7 +77,7 @@ rule KeepAwakeStartsOff {
 }
 
 rule RequestKeepAwake {
-    when: UserAction("W")
+    when: ToggleKeepAwakeKeyPressed()
 
     requires: keep_awake.status = off
     requires: platform_is_linux()
@@ -108,7 +108,7 @@ rule RequestKeepAwake {
 }
 
 rule RefuseKeepAwakeOffLinux {
-    when: UserAction("W")
+    when: ToggleKeepAwakeKeyPressed()
 
     requires: keep_awake.status = off
     requires: not platform_is_linux()
@@ -117,7 +117,7 @@ rule RefuseKeepAwakeOffLinux {
 }
 
 rule CancelKeepAwakeWhileRequesting {
-    when: UserAction("W")
+    when: ToggleKeepAwakeKeyPressed()
 
     requires: keep_awake.status = requesting
 
@@ -173,7 +173,7 @@ rule KeepAwakeLost {
 }
 
 rule ReleaseKeepAwake {
-    when: UserAction("W")
+    when: ToggleKeepAwakeKeyPressed()
 
     requires: keep_awake.status = on
 
@@ -189,11 +189,12 @@ rule ReleaseKeepAwakeOnExit {
     ensures: KeepAwakeReleased()
 
     @guidance
-        -- Covers every way the board process ends, a crash or kill
-        -- included: the hold must be tied to the board process so that the
-        -- operating system drops it when the process goes, with no cleanup
-        -- step that a crash could skip. Nothing is left holding the machine
-        -- awake after the board is gone.
+        -- Covers every exit the board runs: a confirmed quit, a signalled
+        -- exit and a startup abort (startup.allium: BoardExitCause). An end
+        -- the process cannot run its exit for (SIGKILL, a crash) raises no
+        -- BoardExited; the hold goes then because it belongs to the board
+        -- process (HoldDiesWithTheBoard). Either way nothing is left holding
+        -- the machine awake after the board is gone.
 }
 
 ------------------------------------------------------------
@@ -207,7 +208,9 @@ surface KeepAwakeToggle {
         keep_awake.shows_badge
 
     provides:
-        UserAction("W")
+        -- [W] in the board's normal mode: the keybinding table's
+        -- toggle_keep_awake action (KeyIsInTheTable).
+        ToggleKeepAwakeKeyPressed()
 
     @guarantee BadgeMeansHeld
         -- The board shows a steady "awake [W]" badge in the top indicator
@@ -254,8 +257,10 @@ surface KeepAwakeHold {
 
     @guarantee HoldDiesWithTheBoard
         -- The hold belongs to the board process. When the process ends for
-        -- any reason, the system drops the hold without the board doing
-        -- anything (ReleaseKeepAwakeOnExit).
+        -- any reason, SIGKILL and crashes included, the system drops the hold
+        -- without the board doing anything, so no cleanup step stands
+        -- between a dead board and a released machine. An exit the board
+        -- runs releases it first (ReleaseKeepAwakeOnExit).
 }
 
 ------------------------------------------------------------
