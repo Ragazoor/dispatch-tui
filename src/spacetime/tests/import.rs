@@ -1,4 +1,4 @@
-//! Importing the old store into the managed one — task #16385.
+//! Importing the old store into the managed one.
 //!
 //! Spec: `spacetime-seed.allium`'s `ImportOldStore`,
 //! `DependentsOfDroppedRowsAreDropped`, `OrphansLeaveTheirDroppedEpic` and the
@@ -203,7 +203,7 @@ async fn todos_shells_and_claims_of_a_dropped_task_are_dropped_with_it() {
 
 /// `DependentsOfDroppedRowsAreDropped`, for agents: an agent of a dropped
 /// task goes with it, and its name stays in the ledger
-/// (`agents.allium: AgentNameIsNeverReused`).
+/// (`agents.allium: A4`).
 #[tokio::test]
 async fn an_agent_of_a_dropped_task_is_dropped_and_its_name_kept() {
     let mut source = snapshot_of_a_populated_board().await;
@@ -315,6 +315,24 @@ async fn a_task_created_after_an_import_gets_an_id_past_every_imported_one() {
 
     import_old_store(&target, &source, OPERATOR).await.unwrap();
 
+    let next = target
+        .insert_generating_id(SharedTable::Tasks)
+        .await
+        .unwrap();
+    assert!(next > 4096, "got {next}");
+}
+
+/// `ImportOldStore`: the burn passes the source's ids, dropped rows included,
+/// so a dropped task's id is never handed to a new task.
+#[tokio::test]
+async fn a_dropped_tasks_id_is_never_handed_out_after_an_import() {
+    let mut source = snapshot_of_a_populated_board().await;
+    archive(&mut source, SharedTable::Tasks, 4096);
+    let target = store_for(&source);
+
+    import_old_store(&target, &source, OPERATOR).await.unwrap();
+
+    assert!(!ids(&rows(&target, SharedTable::Tasks).await).contains(&4096));
     let next = target
         .insert_generating_id(SharedTable::Tasks)
         .await

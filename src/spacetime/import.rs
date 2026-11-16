@@ -140,7 +140,10 @@ pub async fn import_old_store(
     let mut report = ImportReport::default();
     let prepared = prepare(source, operator, &mut report);
 
-    if let Some(refusal) = implausible_ceiling(&prepared) {
+    // The ceiling is the source's, dropped rows included: the burn below
+    // passes every id the old store handed out, so a dropped task's id is
+    // never given to a new one (`spacetime-seed.allium: ImportOldStore`).
+    if let Some(refusal) = implausible_ceiling(source) {
         return Err(RestoreError::Refused(refusal));
     }
 
@@ -167,7 +170,7 @@ pub async fn import_old_store(
         )));
     }
 
-    burn_id_sequences(target, &prepared).await?;
+    burn_id_sequences(target, source).await?;
     for (table, rows) in &to_write {
         target
             .upsert_rows(*table, rows)
@@ -266,7 +269,7 @@ impl DroppedIds {
         match table {
             SharedTable::Tasks | SharedTable::Epics => is_dropped_status(row),
             // An agent of a dropped task goes with it; its ledger row stays
-            // (`agents.allium: AgentNameIsNeverReused`).
+            // (`agents.allium: A4`).
             SharedTable::TaskSubagents | SharedTable::Agents | SharedTable::TaskShells => {
                 self.task_in(row, "task_id")
             }

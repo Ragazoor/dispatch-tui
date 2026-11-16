@@ -285,8 +285,10 @@ entity Snapshot {
     extracts: List<TableExtract>
 
     -- Black boxes over the one extract whose table is t, 0 when there is none
-    -- (src/spacetime/snapshot.rs::Snapshot::extract): its largest row id (0
-    -- when its row_ids is empty), and its row_count.
+    -- (src/spacetime/snapshot.rs::Snapshot::extract): the largest value its
+    -- rows hold in their `id` column (0 when they hold none), and its
+    -- row_count. The `id` column, not row_ids: an archived_tasks row carries
+    -- the task id it kept, though that table generates none.
     highest_id(t): highest_extract_id(extracts, t)
     rows_in(t): extract_row_count(extracts, t)
 
@@ -929,10 +931,10 @@ rule ImportOldStore {
         -- before the burn, and the burn before the first row, for the same
         -- reasons (NothingIsWrittenBeforeTheChecksPass), and the
         -- implausible-ceiling check (RefuseImplausibleCeiling) runs here too,
-        -- before the id-conflict scan. The burn goes past the highest id the
-        -- import writes (the source's, less the rows it drops) so that the
-        -- next task created on the managed store cannot collide with an
-        -- imported one.
+        -- before the id-conflict scan. Both read the source as dumped,
+        -- dropped rows included: the burn goes past every id the old store
+        -- handed out, so the next task created on the managed store collides
+        -- with no imported row and reuses no dropped task's id.
         --
         -- AGENTS (agents.allium: A1). An agent row is keyed by its id,
         -- with its name as the natural key; a ledger row is keyed by its name.
