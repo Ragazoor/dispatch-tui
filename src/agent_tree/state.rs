@@ -265,7 +265,9 @@ impl RenderState {
                     self.notice = None;
                 }
                 let waiting = self.pending_jump?;
-                match self.agents.rows().iter().find(|row| row.id == waiting) {
+                // Judged against every listed agent, not the shown rows: the
+                // agents filter hiding a detached row is not the task leaving.
+                match self.agents.listed().iter().find(|row| row.id == waiting) {
                     // Still detached: keep waiting, for a bounded time. A launch
                     // can fail on the board after it accepted the request.
                     Some(row) if row.window.is_none() => {
@@ -318,12 +320,16 @@ impl RenderState {
         }
     }
 
-    /// `ForgetPendingResumeJump`: the agents cursor left the row a resume is
-    /// waiting on, so the user stopped waiting.
+    /// `ForgetPendingResumeJump`: the agents cursor is off the row a resume is
+    /// waiting on, so the user stopped waiting. Only off a row the section
+    /// shows: while the agents filter hides it, the cursor cannot be on it and
+    /// the wait stands.
     pub fn forget_pending_jump_if_moved(&mut self) {
-        if self.pending_jump.is_some()
-            && self.agents.selected().map(|row| row.id) != self.pending_jump
-        {
+        let Some(waiting) = self.pending_jump else {
+            return;
+        };
+        let shown = self.agents.rows().iter().any(|row| row.id == waiting);
+        if shown && self.agents.selected().map(|row| row.id) != Some(waiting) {
             self.pending_jump = None;
         }
     }

@@ -843,9 +843,10 @@ fn no_agent_tree_namespace_binds_an_all_files_key() {
     }
 }
 
-/// SwitchAgentTreeView and SwitchAgentTreeBrowseFocus: `s` flips the view in
-/// all three companion-pane namespaces; Tab and BackTab move between tree and
-/// commits, so they have no row in the agents namespace.
+/// SwitchAgentTreeView, SwitchAgentTreeBrowseFocus and CycleAgentListFilter:
+/// `s` flips the view in all three companion-pane namespaces; Tab and BackTab
+/// move between tree and commits, and in the agents namespace they are the
+/// separate cycle_agent_filter row.
 #[test]
 fn s_flips_the_agent_tree_view_and_tab_switches_the_browse_section() {
     for ns in [
@@ -862,10 +863,9 @@ fn s_flips_the_agent_tree_view_and_tab_switches_the_browse_section() {
             "{ns:?}"
         );
     }
-    for key in ["Tab", "BackTab"] {
-        assert!(
-            !bindings_in(KeyNamespace::AgentTreeAgents).any(|b| b.keys.contains(&key)),
-            "{key}"
-        );
-    }
+    assert!(keys_of(KeyNamespace::AgentTreeAgents, "switch_section").is_empty());
+    assert_eq!(
+        keys_of(KeyNamespace::AgentTreeAgents, "cycle_agent_filter"),
+        vec!["Tab", "BackTab"]
+    );
 }

@@ -61,11 +61,36 @@ pub struct AgentList {
     pub hidden: usize,
 }
 
+/// Which listed agents the section shows — the spec's `AgentListFilter`
+/// (`CycleAgentListFilter`). `Running` is the attached agents alone: a live
+/// window, the board's `is_live_agent`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentFilter {
+    #[default]
+    All,
+    Running,
+}
+
+impl AgentFilter {
+    fn admits(self, row: &AgentRow) -> bool {
+        match self {
+            Self::All => true,
+            Self::Running => row.window.is_some(),
+        }
+    }
+}
+
 /// The section's rows and its own cursor. Kept apart from the tree's cursor so
 /// Switching back and forth returns the user to where they were in each.
 #[derive(Debug, Default)]
 pub struct AgentsSection {
+    /// Every agent the last good read listed — the spec's `listed_agents`.
+    /// The resume wait is judged against these, never against `rows`.
+    listed: Vec<AgentRow>,
+    /// The rows drawn and under the cursor: `listed` narrowed by `filter`
+    /// (the spec's `shown_agents`).
     rows: Vec<AgentRow>,
+    filter: AgentFilter,
     cursor: usize,
     /// First drawn line shown, headers counted, so the cursor stays in view
     /// in a short pane.
@@ -82,16 +107,51 @@ impl AgentsSection {
         Self::default()
     }
 
+    /// The rows the section shows: the listed agents the filter admits.
     pub fn rows(&self) -> &[AgentRow] {
         &self.rows
     }
 
+    /// Every agent the last good read listed, whatever the filter.
+    pub fn listed(&self) -> &[AgentRow] {
+        &self.listed
+    }
+
+    pub fn filter(&self) -> AgentFilter {
+        self.filter
+    }
+
     /// Adopt a fresh read. The cursor follows the task it was on, not the
     /// index: an agent starting above it must not move the selection to a
-    /// different agent. A task that left the list clamps the cursor instead.
+    /// different agent. A task that left the shown rows clamps the cursor
+    /// instead.
     pub fn set_rows(&mut self, rows: Vec<AgentRow>) {
+        self.listed = rows;
+        self.reshow();
+    }
+
+    /// `CycleAgentListFilter`: flip between every listed agent and the
+    /// running ones alone. The cursor stays on its task when it is still
+    /// shown and otherwise keeps its row index, clamped.
+    pub fn cycle_filter(&mut self) {
+        self.filter = match self.filter {
+            AgentFilter::All => AgentFilter::Running,
+            AgentFilter::Running => AgentFilter::All,
+        };
+        self.reshow();
+    }
+
+    /// Re-derive the shown rows from `listed` and `filter`, keeping the
+    /// cursor on its task or, failing that, at its index clamped.
+    fn reshow(&mut self) {
         let selected = self.selected().map(|row| row.id);
-        self.rows = rows;
+        let filter = self.filter;
+        self.rows = self
+            .listed
+            .iter()
+            .filter(|row| filter.admits(row))
+            .cloned()
+            .collect();
         self.cursor = selected
             .and_then(|id| self.rows.iter().position(|row| row.id == id))
             .unwrap_or(self.cursor)
@@ -364,7 +424,10 @@ pub fn render_agents(
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(border)
-        .title(" Agents (s: browse) ");
+        .title(match section.filter {
+            AgentFilter::All => " Agents (Tab: running, s: browse) ",
+            AgentFilter::Running => " Agents [running] (Tab: all, s: browse) ",
+        });
     // The agents view is the whole pane, so a notice has no tree border to sit
     // on: it goes on this one (TwoViewsShareThePane).
     if let Some(text) = notice {
@@ -858,17 +921,76 @@ mod tests {
         assert_ne!(buffer[(3, 2)].fg, MUTED);
     }
 
+    fn rendered_wide(section: &mut AgentsSection, focused: bool) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(50, 6)).expect("terminal");
+        terminal
+            .draw(|frame| render_agents(frame, frame.area(), section, focused, false, None))
+            .expect("draw");
+        crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
+    }
+
     #[test]
-    fn the_title_names_s_whichever_section_has_focus() {
-        // TwoViewsShareThePane: the hint names the key that leaves the view.
+    fn the_title_names_tab_and_s_whichever_section_has_focus() {
+        // TwoViewsShareThePane: the hints name the filter Tab moves to and
+        // the key that leaves the view.
         let mut section = AgentsSection::new();
         for focused in [true, false] {
-            let out = rendered(&mut section, focused, 3);
+            let out = rendered_wide(&mut section, focused);
             assert!(
-                out.contains("Agents (s: browse)"),
+                out.contains("Agents (Tab: running, s: browse)"),
                 "focused={focused}: {out}"
             );
         }
+    }
+
+    #[test]
+    fn under_running_the_title_carries_the_badge_and_names_all() {
+        let mut section = AgentsSection::new();
+        section.cycle_filter();
+        let out = rendered_wide(&mut section, true);
+        assert!(
+            out.contains("Agents [running] (Tab: all, s: browse)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_narrow_border_clips_the_hints_and_keeps_the_badge() {
+        let mut section = AgentsSection::new();
+        section.cycle_filter();
+        let out = rendered(&mut section, true, 3);
+        assert!(out.contains("Agents [running]"), "{out}");
+    }
+
+    // ---- CycleAgentListFilter --------------------------------------------
+
+    #[test]
+    fn under_running_an_epic_of_only_detached_agents_draws_no_header() {
+        let mut section = AgentsSection::new();
+        let detached_in_epic = AgentRow {
+            window: None,
+            ..in_epic(2, 5, &["Five"])
+        };
+        section.set_rows(vec![in_epic(1, 3, &["Three"]), detached_in_epic]);
+        section.cycle_filter();
+        let out = rendered(&mut section, true, 8);
+        assert!(out.contains("Three"), "{out}");
+        assert!(!out.contains("Five"), "{out}");
+        assert!(!out.contains("task 2"), "{out}");
+    }
+
+    #[test]
+    fn the_filter_shows_attached_agents_and_keeps_every_listed_one() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![row(1, true), test_detached_row(2), row(3, false)]);
+        section.cycle_filter();
+        assert_eq!(section.filter(), AgentFilter::Running);
+        let shown: Vec<i64> = section.rows().iter().map(|r| r.id.0).collect();
+        assert_eq!(shown, vec![1, 3]);
+        assert_eq!(section.listed().len(), 3);
+        section.cycle_filter();
+        assert_eq!(section.filter(), AgentFilter::All);
+        assert_eq!(section.rows().len(), 3);
     }
 
     #[test]

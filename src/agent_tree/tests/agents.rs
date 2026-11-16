@@ -63,18 +63,181 @@ fn flipping_back_returns_to_the_commits_section_when_that_is_where_you_were() {
     assert_eq!(rig.state.focus, Focus::Commits);
 }
 
-/// In the agents view there is only one section, so Tab and Shift+Tab have
-/// nowhere to go, and record nothing.
+// ---- CycleAgentListFilter ---------------------------------------------
+
+/// A rig on the agents view with `rows` listed.
+fn agents_rig(rows: Vec<AgentRow>) -> KeyRig {
+    let mut rig = KeyRig::with_agents(&[modified("a.rs")], rows);
+    rig.state.focus = Focus::Agents;
+    rig
+}
+
+fn shown_ids(state: &RenderState) -> Vec<i64> {
+    state.agents.rows().iter().map(|row| row.id.0).collect()
+}
+
+/// A fresh pane shows every listed agent, attached and detached.
 #[test]
-fn tab_does_nothing_in_the_agents_view() {
-    let mut rig = KeyRig::new(&[modified("a.rs")]);
-    rig.press(KeyCode::Char('s'));
+fn the_agents_filter_starts_on_all() {
+    let rig = agents_rig(vec![agent(1, false), detached(2)]);
+    assert_eq!(rig.state.agents.filter(), AgentFilter::All);
+    assert_eq!(shown_ids(&rig.state), vec![1, 2]);
+}
+
+/// CycleAgentListFilter: in the agents view Tab flips to the running agents
+/// alone and back, leaves focus where it is, and records its own action.
+#[test]
+fn tab_in_the_agents_view_flips_between_all_and_running() {
+    let mut rig = agents_rig(vec![agent(1, false), detached(2), agent(3, false)]);
     rig.state.usage.clear();
-    rig.press(KeyCode::Tab);
-    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(rig.press(KeyCode::Tab), KeyAction::Continue);
+    assert_eq!(rig.state.agents.filter(), AgentFilter::Running);
+    assert_eq!(shown_ids(&rig.state), vec![1, 3]);
     assert_eq!(rig.state.focus, Focus::Agents);
     assert_eq!(rig.state.browse_focus, Focus::Tree);
-    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
+    assert_eq!(rig.state.usage.len(), 1, "{:?}", rig.state.usage);
+    assert_eq!(rig.state.usage[0].action, "cycle_agent_filter");
+
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.agents.filter(), AgentFilter::All);
+    assert_eq!(shown_ids(&rig.state), vec![1, 2, 3]);
+}
+
+/// With two filters there is no direction: Shift+Tab is the same flip.
+#[test]
+fn back_tab_in_the_agents_view_flips_the_filter_like_tab() {
+    let mut rig = agents_rig(vec![agent(1, false), detached(2)]);
+    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(rig.state.agents.filter(), AgentFilter::Running);
+    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(rig.state.agents.filter(), AgentFilter::All);
+}
+
+/// Tab in the browse view still moves between tree and commits and leaves
+/// the agents filter alone.
+#[test]
+fn tab_in_the_browse_view_leaves_the_agents_filter_alone() {
+    let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![detached(2)]);
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.focus, Focus::Commits);
+    assert_eq!(rig.state.agents.filter(), AgentFilter::All);
+}
+
+/// The cursor stays on its task when the filter still shows it.
+#[test]
+fn the_filter_keeps_the_cursor_on_a_task_it_still_shows() {
+    let mut rig = agents_rig(vec![detached(1), agent(2, false), agent(3, false)]);
+    rig.press(KeyCode::Char('G'));
+    assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(3));
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(3));
+}
+
+/// A hidden task's cursor keeps its row index among the rows left, clamped
+/// to the last; flipping back does not return to it.
+#[test]
+fn the_filter_clamps_the_cursor_off_a_task_it_hides() {
+    let mut rig = agents_rig(vec![agent(1, false), agent(2, false), detached(3)]);
+    rig.press(KeyCode::Char('G'));
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(2));
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(2));
+}
+
+/// With only detached agents listed, `running` shows nothing and Space does
+/// nothing.
+#[test]
+fn running_with_only_detached_agents_shows_no_rows() {
+    let mut rig = agents_rig(vec![detached(1)]);
+    rig.press(KeyCode::Tab);
+    assert!(rig.state.agents.selected().is_none());
+    assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::Continue);
+}
+
+/// A list read under `running` keeps every listed agent: a detached one
+/// shows the moment it attaches, and one that detaches leaves the shown rows.
+#[test]
+fn a_read_under_running_shows_what_attaches_and_hides_what_detaches() {
+    let mut rig = agents_rig(vec![agent(1, false), detached(2)]);
+    rig.press(KeyCode::Tab);
+    rig.state
+        .adopt_agent_list(Ok(vec![agent(1, false), agent(2, false)]));
+    assert_eq!(shown_ids(&rig.state), vec![1, 2]);
+    rig.state
+        .adopt_agent_list(Ok(vec![detached(1), agent(2, false)]));
+    assert_eq!(shown_ids(&rig.state), vec![2]);
+    assert_eq!(rig.state.agents.listed().len(), 2);
+}
+
+/// The agents filter is not the board's: the hidden count stays the board's.
+#[test]
+fn the_agents_filter_never_changes_the_board_hidden_count() {
+    let mut rig = agents_rig(vec![]);
+    rig.state
+        .adopt_agent_read(Ok(crate::agent_tree::render::agents::AgentList {
+            rows: vec![agent(1, false), detached(2)],
+            hidden: 3,
+        }));
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.agents.hidden(), 3);
+}
+
+fn accept(state: &mut RenderState, id: i64) {
+    state.adopt_resume_answer(
+        TaskId(id),
+        Ok(crate::hooks::wire::PaneResumeAnswer::Accepted),
+    );
+}
+
+/// ForgetPendingResumeJump: hiding the resumed row with Tab does not end the
+/// wait, nor do motions among the running rows; the read that shows it
+/// attached jumps there.
+#[test]
+fn hiding_the_resumed_row_keeps_the_wait_and_jumps_when_it_attaches() {
+    let mut rig = agents_rig(vec![detached(7), agent(8, false), agent(9, false)]);
+    assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::Resume(TaskId(7)));
+    accept(&mut rig.state, 7);
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.pending_jump, Some(TaskId(7)));
+    rig.press(KeyCode::Char('j'));
+    assert_eq!(rig.state.pending_jump, Some(TaskId(7)));
+    assert_eq!(
+        rig.state
+            .adopt_agent_list(Ok(vec![detached(7), agent(8, false), agent(9, false)])),
+        None
+    );
+    assert_eq!(rig.state.pending_jump, Some(TaskId(7)));
+    assert_eq!(
+        rig.state
+            .adopt_agent_list(Ok(vec![agent(7, false), agent(8, false), agent(9, false)])),
+        Some(test_tmux_window("task-7"))
+    );
+}
+
+/// AgentTreeResumeAccepted: an answer that arrives after Tab hid the row
+/// still starts the wait.
+#[test]
+fn an_accepted_resume_for_a_row_the_filter_hid_still_waits() {
+    let mut rig = agents_rig(vec![detached(7), agent(8, false)]);
+    rig.press(KeyCode::Char(' '));
+    rig.press(KeyCode::Tab);
+    accept(&mut rig.state, 7);
+    assert_eq!(rig.state.pending_jump, Some(TaskId(7)));
+}
+
+/// Flipping back to `all` shows the resumed row with the cursor elsewhere.
+/// The flip itself keeps the wait; the next cursor motion ends it.
+#[test]
+fn after_flipping_back_the_next_motion_ends_the_wait() {
+    let mut rig = agents_rig(vec![detached(7), agent(8, false), agent(9, false)]);
+    rig.press(KeyCode::Char(' '));
+    accept(&mut rig.state, 7);
+    rig.press(KeyCode::Tab);
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.pending_jump, Some(TaskId(7)));
+    rig.press(KeyCode::Char('j'));
+    assert_eq!(rig.state.pending_jump, None);
 }
 
 #[test]
@@ -448,7 +611,7 @@ fn the_agents_view_fills_the_pane_with_agents_and_hides_the_tree() {
     state.adopt_agent_list(Ok(vec![agent(4941, false), agent(4942, true)]));
     state.focus = Focus::Agents;
     let out = render_pane_to_string(&mut state, &tree, 12);
-    assert!(out.contains("Agents (s: browse)"), "{out}");
+    assert!(out.contains("Agents (Tab: running, s: browse)"), "{out}");
     assert!(
         out.contains("task 4941") && out.contains("task 4942"),
         "{out}"

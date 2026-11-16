@@ -37,8 +37,11 @@ pane show, and the selected row carries a `●` marker. A selected commit is sho
 against its first parent, and the tree's title names it. If the branch drops the
 selected commit, the pane falls back to unstaged work.
 
-The **Agents** section lists every task with a live agent window, as `#<id> <title>`.
-Your own task is dimmed and marked `●`.
+The **Agents** section lists every task with an agent, grouped by epic, as
+`<dot> <agent name> <title>`: `●` for an agent with a live window, `○` for a detached
+one. Space jumps to an attached agent and resumes a detached one. Your own task is
+dimmed. Tab or Shift+Tab flips the list between every agent and the running
+(attached) ones alone; the border reads `Agents [running]` while it is narrowed.
 
 Each row also carries `+N -M` line counts. A directory shows the sum over the changed
 files beneath it, so a collapsed directory says how much is inside. A file git could

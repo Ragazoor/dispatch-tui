@@ -1465,6 +1465,14 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeAgents,
+        &["Tab", "BackTab"],
+        None,
+        "cycle_agent_filter",
+        "Show only running agents, or every agent again",
+        None,
+    ),
+    row(
+        N::AgentTreeAgents,
         &["j", "Down", "k", "Up"],
         None,
         "navigate_row",

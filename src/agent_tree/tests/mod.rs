@@ -7,7 +7,7 @@ use super::list_cursor::ListCursor;
 use super::model::tests::nul_stream;
 use super::model::*;
 use super::pane::buffer_to_string;
-use super::render::agents::AgentRow;
+use super::render::agents::{AgentFilter, AgentRow};
 use super::render::commits::MAX_ROWS as COMMITS_MAX_ROWS;
 use super::render::commits::*;
 use super::render::*;
