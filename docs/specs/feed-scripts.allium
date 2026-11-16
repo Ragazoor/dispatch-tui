@@ -176,14 +176,14 @@ contract FetchDependabot {
 
     @invariant EmptyListFallsBack
         -- An absent or empty BOT_AUTHORS falls back to
-        -- config.fallback_dependency_bot, so an existing copy keeps emitting
-        -- what it emitted before bots.conf existed.
+        -- config.fallback_dependency_bot, so a deployment with no bot list
+        -- still emits that bot's PRs.
 
     @invariant EveryItemIsTaggedDependabot
         -- Every emitted item carries tag dependabot, whoever its author is:
         -- external_id "dep:<repo>#<n>", title "#<n> <title>", the body cut to
-        -- config.pr_description_chars as description, the repo name as its
-        -- one label.
+        -- config.pr_description_chars characters as description, the repo
+        -- name as its one label.
 
     @invariant BoundedAndLoudPerBot
         -- Each (repo x bot) call passes `--limit config.dependabot_prs_per_bot`
@@ -491,9 +491,9 @@ contract FetchReviews {
 
     @invariant ReviewItemShape
         -- external_id "review:<owner>/<repo>#<n>"; title "#<n> <title>";
-        -- description the body cut to config.pr_description_chars; labels
-        -- "@<author>", the repo name, then "draft" and the ci label when they
-        -- apply.
+        -- description the body cut to config.pr_description_chars characters;
+        -- labels "@<author>", the repo name, then "draft" and the ci label
+        -- when they apply.
 
     @invariant DraftsAreLabelled
         -- Draft PRs are included and carry a "draft" entry in labels, which

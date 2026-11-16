@@ -69,10 +69,10 @@ value FeedItem {
                               -- reach — e.g. the security feed declaring
                               -- security_alert for Dependabot alert URLs that
                               -- would otherwise classify as other. Defaults to
-                              -- absent when the script omits the field,
-                              -- preserving wire compatibility with scripts
-                              -- written before this field existed. Ignored
-                              -- when url is empty (there is no URL to type).
+                              -- absent when the script omits the field, so a
+                              -- script that does not emit it stays valid.
+                              -- Ignored when url is empty (there is no URL to
+                              -- type).
     status: core/TaskStatus   -- desired column for newly-inserted tasks
     tag: core/TaskTag         -- required: drives DispatchMode for the inserted
                               -- Task. Feed scripts must set this so dispatch
@@ -95,8 +95,7 @@ value FeedItem {
                               -- to badge rendering order on the card
                               -- (feed-controlled, not user-editable). Defaults
                               -- to the empty list when the script omits the field,
-                              -- preserving wire compatibility with scripts
-                              -- written before this field existed.
+                              -- so a script that does not emit it stays valid.
     sort_order: Integer?      -- optional ordering hint copied to Task.sort_order;
                               -- a column sorts lower values first, and a task
                               -- without one by its id. Used by the CVE feed to surface CRITICAL
@@ -131,9 +130,8 @@ value FeedItem {
     signals: Set<Signal> = {} -- optional routing signals a feed script attaches
                               -- to this item; routed into the right feed bucket
                               -- by the RouteSignals contract. Defaults to the
-                              -- empty set when the script omits the field,
-                              -- preserving wire compatibility with scripts
-                              -- written before this field existed.
+                              -- empty set when the script omits the field, so a
+                              -- script that does not emit it stays valid.
                               --
                               -- UNRECOGNISED signal values are DROPPED with a
                               -- warning rather than failing the whole item. This
