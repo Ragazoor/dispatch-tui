@@ -117,6 +117,44 @@ impl super::super::RepoConfigRead for Store {
     }
 }
 
+/// The repository's GitHub path, read from this host's clone; `None` when it
+/// has no GitHub origin (or the path is not a clone).
+async fn github_path_of(path: &str) -> Option<String> {
+    let owned = path.to_string();
+    tokio::task::spawn_blocking(move || {
+        crate::git::origin_github_repo(&owned, &crate::process::RealProcessRunner::default())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+impl Store {
+    /// `core.allium: SavedRepoPath` (re-save at startup): re-save this host's
+    /// rows that have no GitHub path, so legacy rows learn theirs from the
+    /// clone's `origin` and join their repository instead of falling back to
+    /// path equality. A row whose clone has no GitHub origin is left alone.
+    /// Returns how many rows it re-saved.
+    pub async fn stamp_github_paths_of_this_host(&self) -> usize {
+        let mut stamped = 0;
+        for path in self.rows.repo_paths_saved_by_without_github(&self.host) {
+            let Some(github_path) = github_path_of(&path).await else {
+                continue;
+            };
+            let saved = self
+                .caller
+                .save_repo_path(path, self.clock.now(), self.host.clone(), github_path)
+                .await
+                .and_then(|outcome| outcome.applied());
+            match saved {
+                Ok(()) => stamped += 1,
+                Err(e) => tracing::warn!("Re-saving a repo path failed: {e:#}"),
+            }
+        }
+        stamped
+    }
+}
+
 /// The module's `""` means "no command", so a blank one is that.
 fn normalised_verify_command(command: Option<&str>) -> String {
     match command {
@@ -128,16 +166,7 @@ fn normalised_verify_command(command: Option<&str>) -> String {
 #[async_trait::async_trait]
 impl super::super::RepoConfigStore for Store {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
-        // The repository's GitHub path comes from this host's clone; `""` when
-        // it has no GitHub origin (or the path is not a clone).
-        let owned = path.to_string();
-        let github_path = tokio::task::spawn_blocking(move || {
-            crate::git::origin_github_repo(&owned, &crate::process::RealProcessRunner::default())
-        })
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+        let github_path = github_path_of(path).await.unwrap_or_default();
         self.caller
             .save_repo_path(
                 path.to_string(),

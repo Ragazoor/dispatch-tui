@@ -344,6 +344,23 @@ impl MemoryReducerCaller {
         );
     }
 
+    /// Put `user` in workspace `workspace_id` as a plain member, bypassing the
+    /// admin check and the workspace's existence — a fixture's way to give two
+    /// people a workspace in common.
+    pub fn seed_membership(&self, workspace_id: i64, user: impl Into<String>) {
+        let mut tables = self.lock();
+        let id = Self::assign_id(0, &mut tables.next_membership_id);
+        let row = module::Membership {
+            id,
+            workspace_id,
+            user: user.into(),
+            role: "member".into(),
+            created_at: self.now(),
+        };
+        tables.memberships.insert(id, row.clone());
+        self.rows.upsert_membership(&row.into());
+    }
+
     fn now(&self) -> String {
         stamp(self.clock.now())
     }

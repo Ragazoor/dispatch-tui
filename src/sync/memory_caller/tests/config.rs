@@ -101,6 +101,49 @@ async fn repo_path_writes_refuse_a_host_the_sender_does_not_own() {
     assert!(rows.repo_paths_unowned().contains(&"/legacy".to_string()));
 }
 
+/// `core.allium: SavedRepoPath`: a verify command reaches only the rows of
+/// people who share a workspace with the caller (twin of the module's V2 tests).
+#[tokio::test]
+async fn a_strangers_rows_are_out_of_reach_of_set_and_save() {
+    let (caller, rows) = repo_path_caller();
+    caller.seed_repo_path("/bobs/api", "bobs", "org/api", "");
+    save_path(&caller, "/home/a/api", "a", "org/api").await;
+    caller
+        .set_verify_command("/home/a/api".into(), "a".into(), "make ci".into())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+    assert_eq!(rows.verify_command("/bobs/api", "bobs").as_deref(), None);
+    // A save of Alice's own does not fill the stranger's empty row either.
+    save_path(&caller, "/home/a/api", "a", "org/api").await;
+    assert_eq!(rows.verify_command("/bobs/api", "bobs").as_deref(), None);
+    // And a new row of hers does not take a stranger's command.
+    caller.seed_repo_path("/bobs/other", "bobs", "org/other", "curl evil");
+    save_path(&caller, "/home/a/other", "a", "org/other").await;
+    assert_eq!(rows.verify_command("/home/a/other", "a").as_deref(), None);
+}
+
+#[tokio::test]
+async fn a_workspace_members_rows_are_in_reach_of_set() {
+    let (caller, rows) = repo_path_caller();
+    for who in ["alice", "bob"] {
+        caller.seed_membership(1, who);
+    }
+    caller.seed_repo_path("/bobs/api", "bobs", "org/api", "");
+    save_path(&caller, "/home/a/api", "a", "org/api").await;
+    caller
+        .set_verify_command("/home/a/api".into(), "a".into(), "make ci".into())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+    assert_eq!(
+        rows.verify_command("/bobs/api", "bobs").as_deref(),
+        Some("make ci")
+    );
+}
+
 #[tokio::test]
 async fn set_verify_command_refuses_a_multi_line_command() {
     let (caller, _rows) = repo_path_caller();

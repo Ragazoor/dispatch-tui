@@ -196,6 +196,14 @@ impl MemoryReducerCaller {
         id
     }
 
+    /// The hosts whose rows a verify-command write by the sender may reach
+    /// (`module::hosts_sharing_a_workspace`).
+    fn verify_reach(&self, tables: &Tables) -> std::collections::HashSet<String> {
+        let hosts: Vec<module::Host> = tables.hosts.values().cloned().collect();
+        let memberships: Vec<module::Membership> = tables.memberships.values().cloned().collect();
+        module::hosts_sharing_a_workspace(&hosts, &memberships, &self.sender)
+    }
+
     pub(super) fn apply_save_repo_path(
         &self,
         path: String,
@@ -212,12 +220,15 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused(why));
         }
         // The module's single read of the table.
-        let rows: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
-        let own = rows
+        let all: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
+        let own = all
             .iter()
             .find(|r| r.path == path && r.host == host)
-            .or_else(|| rows.iter().find(|r| r.path == path && r.host.is_empty()))
+            .or_else(|| all.iter().find(|r| r.path == path && r.host.is_empty()))
             .cloned();
+        // Only the rows of people who share a workspace with the sender.
+        let reach = self.verify_reach(&tables);
+        let rows = module::rows_within_reach(&all, &reach, own.as_ref().map(|r| r.id));
         let row = match own {
             Some(row) => {
                 let github_path = if github_path.is_empty() {
@@ -349,16 +360,18 @@ impl MemoryReducerCaller {
         if let Err(why) = self.acting_for(&tables, &host) {
             return Ok(ReducerOutcome::Refused(why));
         }
-        let rows: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
-        let Some(named) = rows
+        let all: Vec<module::RepoPath> = tables.repo_paths.values().cloned().collect();
+        let Some(named) = all
             .iter()
             .find(|r| r.path == path && r.host == host)
-            .or_else(|| rows.iter().find(|r| r.path == path && r.host.is_empty()))
+            .or_else(|| all.iter().find(|r| r.path == path && r.host.is_empty()))
         else {
             return Ok(ReducerOutcome::Refused(format!(
                 "no repo path {path} for host {host}"
             )));
         };
+        let reach = self.verify_reach(&tables);
+        let rows = module::rows_within_reach(&all, &reach, Some(named.id));
         let repository = module::rows_of_the_repository_of(&rows, named);
         for row in repository {
             self.write_repo_path(

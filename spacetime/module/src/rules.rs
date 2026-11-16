@@ -282,8 +282,13 @@ use super::*;
 /// a client-built task with no aim check and no identity stamp). A board that
 /// still called it would fail at the call, so the two must match.
 ///
+/// Bumped: a verify command now reaches only rows whose host owner is the
+/// caller or shares a workspace with them (`config.rs: hosts_sharing_a_workspace`,
+/// `core.allium: VerifyCommandIsPerRepository`). A board that fans it out to a
+/// stranger's rows would disagree with the store.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 54;
+pub const RULES_VERSION: i64 = 55;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

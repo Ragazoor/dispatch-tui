@@ -362,3 +362,32 @@ async fn rename_host_can_rename_an_already_named_host() {
     let (_id, label) = db.ensure_host_identity().await.unwrap();
     assert_eq!(label, Some("second-name".to_string()));
 }
+
+/// `core.allium: SavedRepoPath` (re-save at startup): a row saved before the
+/// clone had a GitHub origin is stamped once the origin is there, and a second
+/// pass finds nothing left to stamp.
+#[tokio::test]
+async fn startup_resave_stamps_a_legacy_rows_github_path_once() {
+    let db = in_memory_db().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_str().unwrap().to_string();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    db.save_repo_path(&path).await.unwrap();
+    assert_eq!(
+        db.stamp_github_paths_of_this_host().await,
+        0,
+        "no origin yet"
+    );
+
+    git(&["remote", "add", "origin", "git@github.com:org/api.git"]);
+    assert_eq!(db.stamp_github_paths_of_this_host().await, 1);
+    assert_eq!(db.stamp_github_paths_of_this_host().await, 0, "once");
+}

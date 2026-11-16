@@ -346,6 +346,13 @@ async fn start_services_after_connect(
     // store's.
     spawn_embedding_backfill(database.clone(), emb_svc);
 
+    // Re-save this host's repo paths that never learned their GitHub path, once
+    // per start and off the command drain (`core.allium: SavedRepoPath`).
+    let resave = database.clone();
+    tokio::spawn(async move {
+        resave.stamp_github_paths_of_this_host().await;
+    });
+
     // Serve agents now that their reads have something to answer from.
     // The port was claimed above, before the board could take the screen;
     // a connection that arrived in between waited in the listen backlog.

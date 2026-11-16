@@ -1070,7 +1070,16 @@ entity SavedRepoPath {
                              -- command acts through the CALLING host's row of the path (its own, else an
                              -- unowned one), never another host's row of the same path; it then reaches that
                              -- row's repository (same github_path). Whoever owns a row of a repository may
-                             -- set the command every row of it shares.
+                             -- set the command every row of it shares WITH PEOPLE WHO SHARE A WORKSPACE
+                             -- (VerifyCommandIsPerRepository): the module cannot check a client-supplied
+                             -- github_path, so workspace membership is the trust line. A set, a save's sibling
+                             -- fill and a save's join reach only rows whose host owner is the caller or shares a
+                             -- workspace with the caller; a stranger's rows of the "same" repository are
+                             -- neither written nor read.
+                             -- At startup the board re-saves this host's rows that have no github_path, so a
+                             -- legacy row learns its repository from the clone's origin
+                             -- (src/store/queries/settings.rs::stamp_github_paths_of_this_host); it runs off the
+                             -- command drain and skips a clone with no GitHub origin.
 
     invariant VerifyCommandSingleLine {
         verify_command = null or is_single_line(verify_command)  -- black box: no "\n" or "\r"; short-circuits, so it is only evaluated when verify_command != null
@@ -1740,8 +1749,12 @@ invariant UniqueRepoGroupPerParent {
                 implies b.origin != repo_group
 }
 
--- Rows of one repository share its verify command: rows with the same
--- non-null github_path are one repository on several machines. The store
+-- Rows of one repository share its verify command AMONG PEOPLE WHO SHARE A
+-- WORKSPACE: rows with the same non-null github_path whose host owners are the
+-- same person or share a workspace are one repository on several machines.
+-- Rows of strangers are not bridged by a shared github_path, so a stranger
+-- cannot choose what another person's agents run
+-- (spacetime/module/src/config.rs::hosts_sharing_a_workspace). The store
 -- holds it: setting a command through a path sets it on every row of that
 -- path and every sibling of them
 -- (spacetime/module/src/config.rs::rows_of_the_repository_at), and a row
@@ -1751,7 +1764,8 @@ invariant UniqueRepoGroupPerParent {
 invariant VerifyCommandIsPerRepository {
     for a in SavedRepoPaths:
         for b in SavedRepoPaths:
-            (a.github_path != null and a.github_path = b.github_path)
+            (a.github_path != null and a.github_path = b.github_path
+                and shares_a_workspace(a.host.owner, b.host.owner))  -- black box: same person, or a common Membership
                 implies a.verify_command = b.verify_command
 }
 

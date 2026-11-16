@@ -1395,6 +1395,20 @@ impl SharedRows {
         })
     }
 
+    /// The paths `host` saved whose row has no GitHub path yet: rows saved
+    /// before the board stamped one. Unordered.
+    pub fn repo_paths_saved_by_without_github(&self, host: &str) -> Vec<String> {
+        self.read(|rows| {
+            rows.repo_paths
+                .values()
+                .filter(|row| {
+                    !row.host.is_empty() && row.host == host && row.github_path.is_empty()
+                })
+                .map(|row| row.path.clone())
+                .collect()
+        })
+    }
+
     /// The distinct paths that have a row `host` does not own: another
     /// host's, or one saved before rows carried a host. Unordered.
     pub fn repo_paths_saved_by_others(&self, host: &str) -> Vec<String> {

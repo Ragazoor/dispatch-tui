@@ -118,6 +118,52 @@ pub fn is_sibling(path_a: &str, gh_a: &str, path_b: &str, gh_b: &str) -> bool {
     }
 }
 
+/// `core.allium: SavedRepoPath`, verify-command scope: the hosts whose rows a
+/// write by `caller` may reach. A host qualifies when its owner is `caller` or
+/// shares a workspace with `caller`. A host with no owner and a row with no host
+/// never qualify, so no stranger's choice of command runs on someone else's
+/// agents.
+pub fn hosts_sharing_a_workspace(
+    hosts: &[Host],
+    memberships: &[Membership],
+    caller: &str,
+) -> std::collections::HashSet<String> {
+    let mine: std::collections::HashSet<i64> = memberships
+        .iter()
+        .filter(|m| m.user == caller)
+        .map(|m| m.workspace_id)
+        .collect();
+    let sharing: std::collections::HashSet<&str> = memberships
+        .iter()
+        .filter(|m| mine.contains(&m.workspace_id))
+        .map(|m| m.user.as_str())
+        .collect();
+    hosts
+        .iter()
+        .filter(|h| !h.owner.is_empty() && (h.owner == caller || sharing.contains(h.owner.as_str())))
+        .map(|h| h.id.clone())
+        .collect()
+}
+
+/// The rows of `rows` a write by `caller` may reach, plus the row `keep`
+/// (the one the caller named, which `require_acting_for` already vouched for).
+pub fn rows_within_reach(
+    rows: &[RepoPath],
+    reach: &std::collections::HashSet<String>,
+    keep: Option<i64>,
+) -> Vec<RepoPath> {
+    rows.iter()
+        .filter(|r| reach.contains(&r.host) || Some(r.id) == keep)
+        .cloned()
+        .collect()
+}
+
+fn reach_of(ctx: &ReducerContext, caller: &str) -> std::collections::HashSet<String> {
+    let hosts: Vec<Host> = ctx.db.hosts().iter().collect();
+    let memberships: Vec<Membership> = ctx.db.memberships().iter().collect();
+    hosts_sharing_a_workspace(&hosts, &memberships, caller)
+}
+
 /// Record a repo path for `host`, or touch the row it already has.
 ///
 /// A path is one row per `(path, host)`: two machines that both have
@@ -142,12 +188,16 @@ pub fn save_repo_path(
     }
     require_acting_for(ctx, &host)?;
     // One read of the table serves the lookup, the join and the share.
-    let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
-    let own = rows
+    let all: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
+    let own = all
         .iter()
         .find(|r| r.path == path && r.host == host)
-        .or_else(|| rows.iter().find(|r| r.path == path && r.host.is_empty()))
+        .or_else(|| all.iter().find(|r| r.path == path && r.host.is_empty()))
         .cloned();
+    // The join and the share see only the rows of people who share a workspace
+    // with the caller (`core.allium: SavedRepoPath`).
+    let reach = reach_of(ctx, &caller_identity(ctx));
+    let rows = rows_within_reach(&all, &reach, own.as_ref().map(|r| r.id));
     let row = match own {
         Some(existing) => {
             let github_path = if github_path.is_empty() {
@@ -263,6 +313,15 @@ pub fn delete_repo_path(ctx: &ReducerContext, path: String, host: String) -> Res
 /// with no `github_path` is its own repository by path, as `is_sibling` says.
 pub fn unify_repo_verify_commands(ctx: &ReducerContext) {
     let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
+    let hosts: Vec<Host> = ctx.db.hosts().iter().collect();
+    let memberships: Vec<Membership> = ctx.db.memberships().iter().collect();
+    let owner_of = |r: &RepoPath| {
+        hosts
+            .iter()
+            .find(|h| h.id == r.host)
+            .map(|h| h.owner.clone())
+            .unwrap_or_default()
+    };
     let key = |r: &RepoPath| {
         if r.github_path.is_empty() {
             format!("path:{}", r.path)
@@ -275,21 +334,25 @@ pub fn unify_repo_verify_commands(ctx: &ReducerContext) {
         groups.entry(key(row)).or_default().push(row);
     }
     for group in groups.values() {
-        let Some(winner) = group
-            .iter()
-            .filter(|r| !r.verify_command.is_empty())
-            .max_by(|a, b| (&a.last_used, a.id).cmp(&(&b.last_used, b.id)))
-        else {
-            continue;
-        };
-        for row in group
-            .iter()
-            .filter(|r| r.verify_command != winner.verify_command)
-        {
-            ctx.db.repo_paths().id().update(RepoPath {
-                verify_command: winner.verify_command.clone(),
-                ..(*row).clone()
-            });
+        // Each row takes the command of the most recently used row among those
+        // its owner shares a workspace with (`core.allium: SavedRepoPath`).
+        for row in group {
+            let owner = owner_of(row);
+            let reach = hosts_sharing_a_workspace(&hosts, &memberships, &owner);
+            let Some(winner) = group
+                .iter()
+                .filter(|r| !r.verify_command.is_empty())
+                .filter(|r| r.id == row.id || reach.contains(&r.host))
+                .max_by(|a, b| (&a.last_used, a.id).cmp(&(&b.last_used, b.id)))
+            else {
+                continue;
+            };
+            if row.verify_command != winner.verify_command {
+                ctx.db.repo_paths().id().update(RepoPath {
+                    verify_command: winner.verify_command.clone(),
+                    ..(*row).clone()
+                });
+            }
         }
     }
 }
@@ -314,15 +377,18 @@ pub fn set_verify_command(
         return Err("verify command must be a single line; chain steps with && or ;".into());
     }
     require_acting_for(ctx, &host)?;
-    let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
-    let Some(named) = rows
+    let all: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
+    let Some(named) = all
         .iter()
         .find(|r| r.path == path && r.host == host)
-        .or_else(|| rows.iter().find(|r| r.path == path && r.host.is_empty()))
+        .or_else(|| all.iter().find(|r| r.path == path && r.host.is_empty()))
     else {
         return Err(format!("no repo path {path} for host {host}"));
     };
-    // The command belongs to the repository: every row that is the same one.
+    // The command belongs to the repository, among people who share a
+    // workspace with the caller: every such row that is the same one.
+    let reach = reach_of(ctx, &caller_identity(ctx));
+    let rows = rows_within_reach(&all, &reach, Some(named.id));
     let repository = rows_of_the_repository_of(&rows, named);
     for row in repository {
         ctx.db.repo_paths().id().update(RepoPath {
