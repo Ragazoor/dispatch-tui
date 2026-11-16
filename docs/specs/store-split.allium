@@ -587,21 +587,27 @@ entity SessionRequest {
         if kind = wrap_up: requested_at + config.wrap_up_rebase_timeout
         else: requested_at + config.exit_session_teardown_timeout
 
-    -- The exit token this row is, while it is one (W3): a done wrap_up row
-    -- for its task with no newer done wrap_up row beside it (newer by
-    -- requested_at, ties broken by row id), finished after the task's latest
-    -- dispatched request (a later dispatch voids it), and with no
-    -- exit_session row that consumed it.
-    is_valid_token:
+    -- Whether this row is its task's live token: a done wrap_up row with no
+    -- newer done wrap_up row beside it (newer by requested_at, ties broken by
+    -- row id) and with no exit_session row that consumed it. A later dispatch
+    -- does not end it; RequestRowsArePruned keeps a live token's row and the
+    -- dispatched row that voids it together.
+    is_live_token:
         kind = wrap_up and state = done
-        and not DispatchRequests.any(d =>
-            d.task = task and d.state = dispatched
-            and d.finished_at >= finished_at)
         and not SessionRequests.any(r =>
             r.task = task and r.kind = wrap_up and r.state = done
             and r.requested_at > requested_at)
         and not SessionRequests.any(r =>
             r.kind = exit_session and r.wrap_up_request = this)
+
+    -- The exit token this row is, while it is one (W3): the live token,
+    -- finished after the task's latest dispatched request (a dispatch that
+    -- finished at or after it voids it, decided with the user).
+    is_valid_token:
+        is_live_token
+        and not DispatchRequests.any(d =>
+            d.task = task and d.state = dispatched
+            and d.finished_at >= finished_at)
 
     @invariant OnlyTheClaimedSessionRequestIsServed
         -- As OnlyTheClaimedRequestProvisions above. Only the board whose
@@ -1056,12 +1062,22 @@ rule HandMoveReleasesAWindowTheBoardDidNotSee {
     -- host's dispatched report landed after the board's last subscription
     -- delivery).
     let window = task.current_window
-    let teardown_host = if task.host != null: task.host else: caller_host
+    -- caller_host() is a black box: the host the write's call names
+    -- (update_task's host argument), or null for a patch_task call, which
+    -- names none.
+    let teardown_host = if task.host != null: task.host else: caller_host()
     let may_tear_down = teardown_host != null
         and teardown_host.owner != null and teardown_host.owner = caller()
+    let open = SessionRequests where task = task and is_open
 
     ensures:
         if window != null and may_tear_down:
+            -- Failed before the close row is written, so
+            -- OneOpenSessionRequestPerTask holds throughout.
+            for request in open:
+                request.state = failed
+                request.finished_at = now
+                request.reason = "task closed"
             current_agent(task).tmux_window = null
             SessionRequest.created(
                 task: task,
@@ -1089,15 +1105,21 @@ rule HandMoveReleasesAWindowTheBoardDidNotSee {
         -- holds. A backlog move leaves the task not done, so the row's gh pr
         -- close step finds nothing to close; nor does a feed task's
         -- (pr-workflow.allium: ClosePrOnDone). An open session request on the
-        -- task is failed first, as for any close row.
+        -- task is failed "task closed" first, as for any close row, and only
+        -- when the row is written.
+        --
+        -- ON AN update_task MOVE INTO DONE this row stands in for the
+        -- windowless one UpdateTaskDoneWritesACloseRow would write: its host
+        -- also runs ClosePrOnDone, so the task gets one close row, not two.
         --
         -- WHEN NO HOST IS KNOWN OR OWNED BY THE CALLER (patch_task from a
         -- caller that names no host, on a task with none; a teammate's
         -- machine) there is no row and the window is left, on the task, to
         -- its own machine: clearing it with no kill would orphan it.
         --
-        -- Ends in the same transaction as the status write, after
-        -- GivingUpTheLaunchCancelsTheDispatch.
+        -- In the same transaction as the status write, after it and before
+        -- GivingUpTheLaunchCancelsTheDispatch fails the waiting dispatch
+        -- requests (spacetime/module/src/tasks_epics.rs::patch_task_row).
 }
 
 rule HostRepeatsDispatchedReport {
@@ -1301,7 +1323,7 @@ rule RequestWrapUp {
     requires: task.host = host
     -- D11 (W11): only the host's own owner may name it.
     requires: host.owner != null and host.owner = caller()
-    -- W1: at most one open session request per task, of either kind.
+    -- W1: at most one open session request per task, of any kind.
     requires: not SessionRequests.any(r => r.task = task and r.is_open)
 
     -- Retention, before the new row is written.
@@ -1493,11 +1515,6 @@ rule RequestExitSession {
     -- token is the wrap_up row the agent was handed (W3).
     requires: token.task = task
     requires: token.is_valid_token
-    -- Part of is_valid_token, stated on its own because it is the newest
-    -- condition (W3, decided with the user): a dispatch of the task that
-    -- finished at or after the token's row voids the token.
-    requires: not DispatchRequests.any(d =>
-        d.task = task and d.state = dispatched and d.finished_at >= token.finished_at)
     requires: action = token.action
     requires: current_agent(task).tmux_window != null
     requires: action = pr implies (pr_url != null and pr_url != "")
@@ -1676,13 +1693,8 @@ rule RequestRowsArePruned {
 
     -- What check_exit_token still reads, and must outlive the prune (the
     -- proviso the retention question set):
-    --   * a task's newest done wrap_up row (by requested_at, ties broken by
-    --     row id), when no exit_session consumed it, is a live token;
-    let live_tokens = SessionRequests where kind = wrap_up and state = done
-        and not SessionRequests.any(r =>
-            r.task = task and r.kind = wrap_up and r.state = done
-            and r.requested_at > requested_at)
-        and not SessionRequests.any(r => r.kind = exit_session and r.wrap_up_request = this)
+    --   * a task's live token (SessionRequest.is_live_token);
+    let live_tokens = SessionRequests where is_live_token
     -- A finished row's age runs from finished_at, or from requested_at for a
     -- row that never recorded one.
     let cutoff = at - config.request_retention
@@ -2115,6 +2127,7 @@ rule CloseFailsOpenRequests {
         -- Not D11-checked, as for the session row: the row may name a
         -- teammate's machine, and it is the close that fails it.
 }
+
 rule UpdateTaskDoneWritesACloseRow {
     -- The same update_task call as tasks.allium: UpdateTaskIsOneTransaction.
     when: tasks/TaskUpdateRequested(task, epic?, patch, host)
@@ -2127,16 +2140,25 @@ rule UpdateTaskDoneWritesACloseRow {
     -- a window, and still does not. (A window the store itself finds held
     -- on a move into Done is HandMoveReleasesAWindowTheBoardDidNotSee's.)
     let was_already_done = task.status = done
+    -- patched(task, patch) is a black box: the task row as this call's patch
+    -- leaves it (url, external_id, host and the current agent's window
+    -- included), before any rule here clears a window.
+    let after = patched(task, patch)
     -- A feed task's url never asks for a close (pr-workflow.allium:
     -- ClosePrOnDone): the PR is upstream state, not this task's.
-    let has_pr_url = task.url != null and task.url.url_type = pr and task.external_id = null
-    let teardown_host = if task.host != null: task.host else: host
+    let has_pr_url = after.url != null and after.url.url_type = pr and after.external_id = null
+    let teardown_host = if after.host != null: after.host else: host
     let may_tear_down = teardown_host.owner != null and teardown_host.owner = caller()
+    -- A window still held after the patch is released by
+    -- HandMoveReleasesAWindowTheBoardDidNotSee, whose close row stands in
+    -- for this one (same host, same owner check), so the task gets one row.
+    let window_released_elsewhere = after.current_window != null
 
     let open = SessionRequests where task = task and is_open
 
     ensures:
-        if not was_already_done and patch.status = done and has_pr_url and may_tear_down:
+        if not was_already_done and patch.status = done and has_pr_url and may_tear_down
+            and not window_released_elsewhere:
             -- Failed before the close row is written, so
             -- OneOpenSessionRequestPerTask holds throughout.
             for request in open:
@@ -2165,6 +2187,12 @@ rule UpdateTaskDoneWritesACloseRow {
         -- THE FINAL URL. The url is the task's after the patch, so a call
         -- that attaches a pr-typed url and moves to Done together is caught.
         --
+        -- ONE CLOSE ROW. When the store finds a window the board's patch did
+        -- not clear, HandMoveReleasesAWindowTheBoardDidNotSee writes the
+        -- close row naming it, and its host runs ClosePrOnDone too; this rule
+        -- writes nothing then. A window the patch itself clears (the board
+        -- killed it) leaves this rule's windowless row.
+        --
         -- SERVED LIKE ANY CLOSE ROW. The host runs gh pr close best effort
         -- (pr-workflow.allium: ExitSessionTeardown), reading the task when it
         -- serves the row and closing only if it is still done. D11 applies as
@@ -2192,7 +2220,14 @@ rule SaveSettingForHost {
     -- can name a script path the host's board runs (the feed commands).
     requires: host.owner != null and host.owner = caller()
 
-    ensures: core/Setting.created_or_updated(host: host, key: key, value: value)
+    -- Bound before the ensures, which reads the resulting state.
+    let had_row = exists core/Setting{host: host, key: key}
+
+    ensures:
+        if had_row:
+            core/Setting{host: host, key: key}.value = value
+        else:
+            core/Setting.created(host: host, key: key, value: value)
 
     @guidance
         -- save_setting. An upsert on (host, key) (settings.allium:
@@ -2253,9 +2288,9 @@ invariant OneOpenDispatchRequestPerTask {
             a != b and a.task = b.task implies not (a.is_open and b.is_open)
 }
 
--- W1: a task holds at most one open session request, of either kind.
--- RequestWrapUp and RequestExitSession refuse a second one while the first is
--- open.
+-- W1: a task holds at most one open session request, of any kind (wrap_up,
+-- exit_session or close). RequestWrapUp and RequestExitSession refuse a second
+-- one while the first is open; a close row's writer fails the open one first.
 invariant OneOpenSessionRequestPerTask {
     for a in SessionRequests:
         for b in SessionRequests:
@@ -2291,8 +2326,7 @@ invariant EveryExitSessionHadAWrapUp {
 -- running row does not count: its owner read the feed before this ask, so the
 -- ask needs a cycle of its own. Scoped to the host because the coalescing check
 -- reads the current poll owner's rows: a row left requested on a host the poll
--- has since moved away from does not block a new one for the new owner (see
--- the open question below).
+-- has since moved away from does not block a new one for the new owner.
 invariant OneRequestedRefreshRequestPerEpic {
     for a in FeedRequests:
         for b in FeedRequests:
