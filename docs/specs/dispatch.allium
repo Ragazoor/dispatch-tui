@@ -1372,10 +1372,10 @@ rule RetryFresh {
 -- window name is a constructed type (core.allium: TmuxWindow), so the two
 -- strings that are NOT names — the empty string and a pane id — can never
 -- become one. Both bypass the exact-name lookup and reach tmux unresolved, and
--- the empty string is tmux's "current window", so while the name was a bare
--- string either could arrive at these same helpers and silently retarget a
+-- the empty string is tmux's "current window", so a bare string in a name's
+-- place could carry either to these same helpers and silently retarget a
 -- kill, a send-keys or a set-option at whatever window the user happens to be
--- focused on. They are deliberate non-names, outside this guarantee's scope
+-- focused on. The constructed type keeps them out. They are deliberate non-names, outside this guarantee's scope
 -- rather than violations of it — which is why the resolution helper
 -- (`tmux::window_target`) still takes a plain string at that boundary: it
 -- accepts those two as well.
@@ -1402,16 +1402,17 @@ rule RetryFresh {
 -- supplies an unnamed base branch:
 --   - tasks.allium: CreateTask (the TUI form and the service beneath it)
 --   - mcp-task-tools.allium: CreateTaskViaMcp
---   - tasks.allium: CreateQuickTask (which already obeyed it)
+--   - tasks.allium: CreateQuickTask
 --   - BaseBranchPicker's PrefillFromHistory, for a repo with no history
 --   - feeds.allium: the per-item base branch a feed sync upserts, which
---     already obeyed it, and caches the answer per repo across one cycle
+--     caches the answer per repo across one cycle
 --
--- Why it is stated once rather than left to each path. Most of them arrived at
--- the same answer independently and one of them got it wrong, for as long as
--- it took a repo whose default is "master" to meet a task created over MCP. The consequence is not a wrong default that someone corrects
--- later: the task cannot be dispatched at all, because no such ref exists to
--- cut a worktree from (UnresolvableBaseIsRefusedByName above).
+-- Why it is stated once rather than left to each path: each path calls the
+-- detection on its own, so one that falls back to the literal instead goes
+-- unnoticed until a repo whose default is "master" meets it. The consequence
+-- is not a wrong default that someone corrects later: the task cannot be
+-- dispatched at all, because no such ref exists to cut a worktree from
+-- (UnresolvableBaseIsRefusedByName above).
 --
 -- The invariant governs only the ABSENT case. A base branch a human or a
 -- caller named explicitly is honoured verbatim, including one the repository
