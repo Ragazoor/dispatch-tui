@@ -1214,7 +1214,7 @@ rule DeletingATaskFailsItsOpenRequest {
         -- THE FAILED ROW IS NOT KEPT. The same transaction then deletes the
         -- row (DeletingATaskDeletesItsRequestRows), so no reader ever sees it
         -- failed "task deleted": the host's subscription sees the row
-        -- removed. The host learns of it as it always did, from its
+        -- removed. The host learns of it from its
         -- dispatched report being refused when its provisioning ends, and
         -- tears down whatever it made (dispatch.allium: ProvisionDispatch, "A
         -- row that fails under this host"). The failure still matters inside
@@ -1656,8 +1656,7 @@ rule DeletingATaskDeletesItsRequestRows {
 rule RequestRowsArePruned {
     when: PruneRequestRows(at)
 
-    -- What check_exit_token still reads, and must outlive the prune (the
-    -- proviso the retention question set):
+    -- What check_exit_token still reads, and must outlive the prune:
     --   * a task's live token (SessionRequest.is_live_token);
     let live_tokens = SessionRequests where is_live_token
     -- A finished row's age runs from finished_at, or from requested_at for a
@@ -2056,7 +2055,8 @@ rule RequestCloseTask {
         -- request for host work, that fails it. An open DISPATCH request is
         -- failed too (CloseFailsOpenRequests below).
         --
-        -- The tool waits for nothing; its response text is unchanged.
+        -- The tool waits for nothing: its reply does not depend on the close
+        -- row.
 }
 
 rule CloseFailsOpenRequests {
@@ -2101,8 +2101,8 @@ rule UpdateTaskDoneWritesACloseRow {
     -- (pr-workflow.allium). update_task takes the caller's host and, when the
     -- call moves the task into Done (status was not done, is done after the
     -- patch) and the task then carries a pr-typed url, writes a close row for
-    -- the host to serve. The close is windowless: an edit to Done never killed
-    -- a window, and still does not. (A window the store itself finds held
+    -- the host to serve. The close is windowless: an edit to Done kills no
+    -- window. (A window the store itself finds held
     -- on a move into Done is HandMoveReleasesAWindowTheBoardDidNotSee's.)
     let was_already_done = task.status = done
     -- patched(task, patch) is a black box: the task row as this call's patch
