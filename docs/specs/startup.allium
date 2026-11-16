@@ -880,6 +880,11 @@ config {
 -- Rules
 ------------------------------------------------------------
 
+-- SessionAttached, ConfigUpdatePrompted, HostLabelPrompted, BoardWarned,
+-- StartupAbortReported, StoreAddressRecorded, StoreAddressForgotten,
+-- StoreIdentityPinned and BoardStorePublished are observable output; no rule
+-- listens.
+
 rule DrawInTheWindowThisBoardWasStartedIn {
     when: LaunchBoard(operator)
     requires: inside_tmux_session and launching_as_the_started_board
@@ -2037,7 +2042,6 @@ rule ReportTheStartupAbort {
     when: StartupAborted(reason)
     requires: reason != tmux_unavailable and reason != launch_rejected
 
-    -- observable output; no rule listens
     ensures: StartupAbortReported(message: abort_message(reason))
 
     @guidance
@@ -2049,7 +2053,6 @@ rule ReportASessionFailureAbort {
     when: StartupAborted(reason)
     requires: reason = tmux_unavailable or reason = launch_rejected
 
-    -- observable output; no rule listens
     ensures:
         if reason = tmux_unavailable:
             StartupAbortReported(message: session_failure_message(tmux_unavailable))

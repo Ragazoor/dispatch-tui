@@ -147,6 +147,10 @@ config {
 -- Rules: how a process ends
 ------------------------------------------------------------
 
+-- CliPrinted, CliReported, CliConnectedTo, CliReadsThroughTheBoard,
+-- VerifyCommandStored, SavedRepoPathAdopted and SavedRepoPathForgotten are
+-- observable output; no rule listens.
+
 rule CliInvocationStarts {
     when: CliStarted(subcommand)
 

@@ -8,8 +8,8 @@
 --        of the same tour.
 -- Includes: The page and where it lives (docs/guide/index.html, served by
 --           GitHub Pages); its two steps and the Next/Back buttons and step
---           tabs between--           them; what the example board holds; which keys the page answers
---           to and the rule that every one of them is a real binding
+--           tabs between them; what the example board holds; which keys the
+--           page answers to and the rule that every one of them is a real binding
 --           (key parity), with the test that holds the page to it; the
 --           status-bar banner; the graph step; the walkthrough; the README
 --           link to the page.
@@ -161,6 +161,9 @@ entity GuideVisit {
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
+
+-- GuideActionImitated and GuideKeyIgnored are observable output; no rule
+-- listens.
 
 -- == The two steps ==
 

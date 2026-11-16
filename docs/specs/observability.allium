@@ -51,8 +51,8 @@ use "./keybindings.allium" as keybindings
 -- Each MCP tool call from a dispatched-agent caller becomes one
 -- TrajectoryEntry, serialised as a single JSON object on its own line.
 -- Entries for a given task accumulate in a single per-task file named
--- by the task's integer ID. The centralized data dir (storage.allium:
--- DataDirectory — the data directory) holds all trajectory files so they outlive worktree
+-- by the task's integer ID. The data directory (storage.allium:
+-- DataDirectory) holds all trajectory files, so they outlive worktree
 -- cleanup and remain queryable in a single location.
 --
 -- args and result are stored as opaque JSON strings to keep this spec free
@@ -149,6 +149,11 @@ config {
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
+
+-- TrajectoryWriteWarning, TeardownSkipNoted, TeardownWarning,
+-- UsageWriteWarning, OldestFeatureUsageEventsEvicted, DecodeFallbackLogged,
+-- RowOmittedFromBulkResult and ReadFailed are observable output; no rule
+-- listens.
 
 -- == Append on MCP tool call ==
 
@@ -276,18 +281,14 @@ rule UsageWriteFailureIsSilent {
     ensures: UsageWriteWarning(event: event, error: error)
 
     @guidance
-        -- Both fire-and-forget call sites — the TUI's UsageCommand::Record
-        -- command and the MCP handler's post-dispatch recording — route
-        -- through one helper, src/service/usage.rs::record_usage_event_logged,
-        -- rather than each writing its own error branch. The helper awaits
-        -- the write and, on error, emits a warn-level line (target "usage")
-        -- carrying the event's category, its action, and the error message;
-        -- the action is what makes the warning attributable to a specific
-        -- counter. The helper does not spawn: callers keep ownership of the
-        -- fire-and-forget shape, so the write stays off the critical path
-        -- and no caller newly awaits telemetry.
-        -- UsageWriteWarning is observable via the standard tracing
-        -- subscriber; it has no entity representation in this spec.
+        -- Every usage write — a keypress's, a companion pane's, an MCP tool
+        -- call's — reports a failure the same way, through one helper
+        -- (src/service/usage.rs::record_usage_event_logged): a warn-level
+        -- line (target "usage") carrying the event's category, its action
+        -- and the error. The action is what makes the warning attributable
+        -- to a specific counter. The write stays off the critical path: no
+        -- key handler or MCP handler waits on it.
+        -- UsageWriteWarning is observable in the log; no rule listens.
 }
 
 -- == Feature usage recording ==
@@ -349,10 +350,8 @@ rule KeypressRecordsFeatureUsage {
         -- ran, by whether the handler produced any command or state change,
         -- not by whether the user could see it: a key that
         -- opens a dialog, moves a cursor, or dispatches an agent all count
-        -- equally. In the implementation this is the dispatch_keyed /
-        -- dispatch_handler_keyed pair in src/tui/input.rs — the latter only
-        -- records when the sub-handler returned a non-empty command list,
-        -- which is what keeps inert presses silent.
+        -- equally. A handler that returns no command records nothing, which
+        -- is what keeps inert presses silent.
         -- is_text_entry covers the printable characters, backspace and caret
         -- motions of a text field, in every mode that has one — the task and
         -- epic title/description fields, the repo-path and base-branch
@@ -371,9 +370,9 @@ rule KeypressRecordsFeatureUsage {
         -- that closes it.
         -- The agent-tree companion and diff panes open no store connection;
         -- each press that takes effect is sent to the running board over its
-        -- port (the hook endpoint, ObservedEvent::PaneKey { task_id, action,
-        -- key }), and the board records it through record_usage_event_logged
-        -- without treating it as a task change, so no refresh is pushed. The
+        -- hook endpoint with its task id, action and key, and the board
+        -- records it like its own presses, without treating it as a task
+        -- change, so no refresh is pushed. The
         -- send runs beside the pane's render loop, the pane waits for
         -- outstanding sends before it exits, and an unreachable board drops
         -- the press with a warning from the pane (keybindings.allium:
@@ -543,8 +542,11 @@ surface ObservedFailures {
 }
 
 surface StatusLineDecorator {
-    facing operator: core/Operator
-    -- prose: `dispatch statusline --snapshot <path> [--chain <command>]`, the
+    -- Claude Code runs it, in the agent's session, as it runs that session's
+    -- hooks; the operator never invokes it.
+    facing _: core/HookRunner
+
+    -- `dispatch statusline --snapshot <path> [--chain <command>]`, the
     -- process that produces the data dispatch.allium's TokenBudgetIndicator reads. It is wired as
     -- the statusLine command of every dispatch-spawned Claude session, so it
     -- runs several times a second in every session, for the whole life of every
@@ -663,10 +665,9 @@ surface StatusLineDecorator {
         -- recursion is not.
 
     @guidance
-        -- Implemented by src/cli/statusline.rs. The command string, including
-        -- the discovered chain and the quoted snapshot location, is written by
-        -- src/setup/statusline.rs into a dispatch-owned settings file that
-        -- every spawn site passes to `claude`, never the operator's own
+        -- The command string, including the discovered chain and the quoted
+        -- snapshot location, is written into a dispatch-owned settings file
+        -- that every spawn site passes to `claude`, never the operator's own
         -- settings file. Startup rewrites that file whenever its content
         -- differs from what the current build would write; `claude` refuses
         -- to start without it. Where that file lives is startup's

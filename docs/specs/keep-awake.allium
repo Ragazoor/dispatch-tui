@@ -65,6 +65,9 @@ entity KeepAwake {
 -- Rules
 ------------------------------------------------------------
 
+-- KeepAwakeRequested, KeepAwakeReleased and ErrorShown are observable
+-- output; no rule listens.
+
 rule KeepAwakeStartsOff {
     when: startup/BoardDrawn()
 
