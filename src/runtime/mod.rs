@@ -907,7 +907,8 @@ impl TuiRuntime {
         name_the_host(host_label, &database).await?;
 
         // THE FIRST CONNECTION, before anything reads a shared row and before
-        // the board draws. startup.allium: ConnectToTheStoreOnceTheHostIsNamed
+        // the board draws. startup.allium: ConnectToTheNamedStoreOnceTheHostIsNamed,
+        // BringUpTheManagedStoreOnceTheHostIsNamed
         // and AbortWhenTheStoreCannotBeReached; sync.allium:
         // OpenBoardConnection. Everything below — the tasks the board opens
         // with, the example feed epic, the managed feeds, the repo paths and
@@ -1151,7 +1152,8 @@ impl Drop for TuiRuntime {
 /// `HostIdentityUnavailable` already carries.
 ///
 /// No registry push here: the startup prompt runs before the first
-/// connection (`startup.allium: ConnectToTheStoreOnceTheHostIsNamed`), and
+/// connection (`startup.allium: ConnectToTheNamedStoreOnceTheHostIsNamed`,
+/// `BringUpTheManagedStoreOnceTheHostIsNamed`), and
 /// `sync.allium: RegisterHostOnConnect` pushes the new label as that
 /// connection settles. A rename surface reachable while connected would push
 /// itself, via [`crate::sync::push_host_registration`]

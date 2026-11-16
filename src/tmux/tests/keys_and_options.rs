@@ -113,7 +113,7 @@ fn bind_key_issues_correct_tmux_args() {
 
 /// The store address is published on the board's own session, by exact
 /// name, so every pane and window the board starts afterwards inherits it
-/// (startup.allium: ConnectToTheStoreOnceTheHostIsNamed).
+/// (startup.allium: PublishTheBoardsStoreOnItsSession).
 #[test]
 fn set_session_environment_targets_the_session_exactly() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);

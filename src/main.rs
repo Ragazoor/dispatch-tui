@@ -802,16 +802,15 @@ fn cmd_toggle_agent_tree_pane(data_dir: Option<&std::path::Path>, window: String
 /// the reactor, built and torn down per process. `statusline` runs on Claude
 /// Code's ~300 ms statusLine debounce in every session concurrently, and
 /// `caller-headers` on every MCP session start/reconnect, so that setup is pure
-/// waste at exactly the frequency that matters. See `docs/specs/dispatch.allium`:
+/// waste at exactly the frequency that matters. See `docs/specs/observability.allium`:
 /// StatusLineDecorator (`@guarantee StartsNoAsyncRuntime`).
 ///
 /// The second group is the hooks, which fire more often still — one process per
 /// tool call of every live session. They need a runtime, because their whole
 /// body is one loopback round trip, but they need only the I/O driver and a
 /// single thread to run it on: no worker pool, no timer-driven fan-out, nothing
-/// concurrent to schedule. This became true when hooks stopped opening the
-/// database (`HookDelivery` in `docs/specs/agent-health.allium`); before that
-/// they genuinely needed the full runtime.
+/// concurrent to schedule. That holds because hooks open no database
+/// (`HookDelivery` in `docs/specs/agent-health.allium`).
 ///
 /// Everything else falls through to the multi-thread runtime and [`run_async`].
 /// A subcommand added later therefore lands on the general path by default —
