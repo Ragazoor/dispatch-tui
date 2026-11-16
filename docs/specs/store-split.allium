@@ -2120,13 +2120,13 @@ rule UpdateTaskDoneWritesACloseRow {
     -- A window still held after the patch is released by
     -- HandMoveReleasesAWindowTheBoardDidNotSee, whose close row stands in
     -- for this one (same host, same owner check), so the task gets one row.
-    let window_released_elsewhere = after.current_window != null
+    let holds_window_after_patch = after.current_window != null
 
     let open = SessionRequests where task = task and is_open
 
     ensures:
         if not was_already_done and patch.status = done and has_pr_url and may_tear_down
-            and not window_released_elsewhere:
+            and not holds_window_after_patch:
             -- Failed before the close row is written, so
             -- OneOpenSessionRequestPerTask holds throughout.
             for request in open:
