@@ -19,9 +19,8 @@
 --           which Signals it emits, are specified in feed-scripts.allium.
 --           The GENERIC feed runtime (flat upsert + group_by_repo) never
 --           embeds upstream-specific knowledge — those scripts are
---           user-owned executables. The legacy Review Board and Security
---           Board UIs remain removed; their behaviour is subsumed by feed
---           epics.
+--           user-owned executables. PR reviews and security alerts are
+--           feed epics; no separate board UI shows them.
 --
 -- DELIBERATE EXCEPTION — the role-routed path. The reviews_parent reconcile
 -- (RoleRoutedFeedSync below, driven by the RouteSignals contract) is the ONE
@@ -2312,8 +2311,7 @@ rule GroupedFeedUpsert {
             UpsertFeedItems(epic, {}, additive, host)
 
     @guidance
-        -- `admitted`'s retired-without-task filter, AS IMPLEMENTED, only
-        -- narrows the group whose repo has NO EXISTING sub-epic yet — the
+        -- `admitted`'s retired-without-task filter only narrows the group whose repo has NO EXISTING sub-epic yet — the
         -- exact case this rule's own `ensures` comment is about ("no sub-epic
         -- is found-or-created just to hold nothing"). A group whose repo
         -- already has a sub-epic passes every item through unfiltered,
@@ -2759,9 +2757,7 @@ rule RoleRoutedFeedSync {
         -- src/store/mod.rs::FeedIngestOutcome, which
         -- src/feed/cycle.rs::FeedCycle::run hands to
         -- src/feed/mod.rs::cleanup_removed_feed_tasks -- once, in the shared
-        -- cycle, rather than once per feed path as when teardown was first
-        -- added. It groups
-        -- by repo_path and tears down sequentially within a repo (git worktree
+        -- cycle, not once per feed path. It groups by repo_path and tears down sequentially within a repo (git worktree
         -- remove / branch -D contend on the shared checkout's index lock) and
         -- in parallel across repos. Teardown is best-effort and warn-logged;
         -- it never fails the sync. It is also unconditional on task state —
@@ -3334,7 +3330,7 @@ rule DegradedNonEmptyEmission {
     -- non-terminal status), leaving the agent and its branch alive for the
     -- human to reclaim. Rejected because it pays its cost on the LEGITIMATE
     -- case: a PR merged while its review agent is still running is ordinary,
-    -- and it is the exact case feed-driven teardown was added for. Under a
+    -- and it is the exact case feed-driven teardown exists for. Under a
     -- state gate every such merge leaves a worktree, a branch and a tmux
     -- window on disk with no card left to find them from, forever. The
     -- failure this rule addresses is better fixed by not performing the
@@ -3508,11 +3504,8 @@ rule AppendOnlyFeed {
 
     -- NOT COMBINABLE WITH GROUPING OR A FEED ROLE. An epic may be append-only
     -- OR grouped/role-routed, never both, and the write path REFUSES the pair
-    -- (epics.allium: UpdateEpicViaMcp). This was first imposed as a
-    -- conservative guard against a migration deadlock, pending a decision on
-    -- whether the combination was wanted at all. THAT DECISION IS NOW MADE and
-    -- the answer is no: the restriction is permanent, and the reason is the
-    -- grouping KEY, not the sync machinery.
+    -- (epics.allium: UpdateEpicViaMcp). The restriction is permanent, and the
+    -- reason is the grouping KEY, not the sync machinery.
     --
     -- REPO IS A MIRRORING FEED'S KEY. Every mirroring feed's item IS a
     -- repo-scoped thing — a PR, a CVE, a Dependabot alert each belongs to
@@ -3551,9 +3544,9 @@ rule AppendOnlyFeed {
     -- move and GroupedFeedUpsert's migration by move — and a move removes
     -- nothing, so it runs on an additive cycle too. An additive epic would
     -- not be stuck un-migrated; the refusal rests on the argument above alone.
-    -- Consequently there is no reason to split SyncMode's single permission in
-    -- two ("may I delete because absent" versus "do I trust this emission
-    -- enough to migrate"); that proposal is retired.
+    -- Consequently SyncMode keeps a single permission; it is not split into
+    -- "may I delete because absent" and "do I trust this emission enough to
+    -- migrate".
 
     -- A degraded emission on an append-only epic is DegradedEmptyEmission's
     -- or DegradedNonEmptyEmission's, never this rule's, so exactly one rule
@@ -3711,8 +3704,8 @@ rule DropClosedRetiredFeedItems {
 -- caller, the two paths are structurally identical — not merely behaviourally
 -- equivalent by convention — for every feed_role. A manual refresh therefore
 -- cannot fall back to a flat upsert for an epic whose feed_role selects a
--- different path; doing so would strand feed tasks in the wrong epic (the
--- reviews_parent parent-flat bug).
+-- different path; doing so would strand a reviews_parent's feed tasks flat on
+-- the parent instead of in its role sub-epics.
 --
 -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_feed is the
 -- shared role->path dispatcher; it reads feed_role and group_by_repo from the
@@ -3984,14 +3977,9 @@ invariant DefaultFeedIntervalClearsTheFloor {
 --      longer holds (the command was re-set by someone else after the
 --      request).
 --
--- CLAIMS FROM BEFORE THE RULE (a one-time sweep). Only a NEW claim is gated,
--- so a claim a non-setter's host took before the rule would stall the feed
--- for good: that host may no longer run the command and skips, and the
--- setter's host sees the claim and skips too. When a store moves onto rules
--- version 37, its first connection releases every epic-scoped claim on a
--- feed epic held by a host whose owner is not the setter (or by a host no
--- longer registered), once. It is not a standing rule: from then on
--- enforcement point 1 refuses such a claim.
+-- A store stamped below rules version 37 releases non-setter claims once on
+-- connect: each epic-scoped claim on a feed epic held by a host whose owner
+-- is not the setter, or by a host that is not registered.
 -- Module: spacetime/module/src/config.rs::release_claims_of_non_setter_hosts,
 -- called by stamp_rules_version_on_connect. The in-memory store starts empty
 -- on every connection and has no stored claims to sweep.
