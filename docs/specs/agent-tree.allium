@@ -2440,7 +2440,7 @@ rule RefreshAgentTreeAgentList {
         -- stands, so the two cannot disagree about what is hidden. The
         -- pane's own task gets no exception: when the board hides it, it is
         -- not in the list, while the tree and commits sections still show
-        -- its work. A pending resume jump whose task the filter now hides
+        -- its work. A pending resume jump whose task the board's filter now hides
         -- has left the list, so it is forgotten like any other.
         -- board_hidden_agents() is the same answer's hidden_agents.
         --
@@ -2695,7 +2695,7 @@ rule AgentTreeResumeAccepted {
     -- between (CycleAgentListFilter) is not a row the user moved off: the
     -- wait starts all the same.
     ensures: pane.pending_jump =
-        if pane.selected_agent = target or target not in pane.shown_agents: target
+        if pane.selected_agent = target or (target in pane.listed_agents and target not in pane.shown_agents): target
         else: null
     -- A new wait starts its count of list reads from zero.
     ensures: pane.pending_jump_reads = 0

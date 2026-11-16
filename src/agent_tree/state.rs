@@ -308,8 +308,13 @@ impl RenderState {
         use crate::hooks::wire::PaneResumeAnswer;
         match answer {
             // Only while the cursor is still on the row: the answer can
-            // arrive after the user moved on.
+            // arrive after the user moved on. A row the agents filter hid
+            // still waits; a task no longer listed does not.
             Ok(PaneResumeAnswer::Accepted) => {
+                if !self.agents.listed().iter().any(|row| row.id == task) {
+                    self.pending_jump = None;
+                    return;
+                }
                 self.pending_jump = Some(task);
                 self.pending_jump_reads = 0;
                 self.forget_pending_jump_if_moved();

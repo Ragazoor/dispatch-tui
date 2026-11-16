@@ -226,6 +226,18 @@ fn an_accepted_resume_for_a_row_the_filter_hid_still_waits() {
     assert_eq!(rig.state.pending_jump, Some(TaskId(7)));
 }
 
+/// AgentTreeResumeAccepted: an answer for a task that has left the list
+/// starts no wait.
+#[test]
+fn an_accepted_resume_for_a_task_no_longer_listed_does_not_wait() {
+    let mut rig = agents_rig(vec![detached(7), agent(8, false)]);
+    rig.press(KeyCode::Char(' '));
+    rig.press(KeyCode::Tab);
+    rig.state.adopt_agent_list(Ok(vec![agent(8, false)]));
+    accept(&mut rig.state, 7);
+    assert_eq!(rig.state.pending_jump, None);
+}
+
 /// Flipping back to `all` shows the resumed row with the cursor elsewhere.
 /// The flip itself keeps the wait; the next cursor motion ends it.
 #[test]
