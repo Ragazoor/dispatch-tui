@@ -910,7 +910,7 @@ rule ProvisioningStopsAtTheDeadline {
         -- failure is reported with reason "deadline passed", which releases
         -- the claim (store-split.allium: HostReportsDispatchFailed,
         -- ReleaseClaimOfFailedRequest). The module's own timer fires
-        -- config.dispatch_request_backstop_grace later, as a backstop
+        -- split/config.dispatch_request_backstop_grace later, as a backstop
         -- for a host that is gone or hung (DispatchRequestTimesOut, reason
         -- "timed out"); a live host's stop and rollback land within that grace,
         -- so its reason is the one the row records.
@@ -1094,11 +1094,11 @@ rule ResumeTask {
         -- is for a task with a window: Space's go-to for a Space resume
         -- (split-pane.allium: GoToTaskSpaceResumed), else the "has a window"
         -- branch of Space (ActivateTask, priority 3) on the next keypress.
-        -- Before this check existed, the stale-field case above
-        -- caused AgentLaunched to unconditionally spawn a second window
-        -- sharing the live one's name, and the next targeted tmux operation
-        -- on that name (select-window, send-keys, kill-window — all resolved
-        -- by exact name, see TmuxWindowTargetedExactly) refused as ambiguous.
+        -- Without this check, the stale-field case above would make
+        -- AgentLaunched spawn a second window sharing the live one's name,
+        -- and the next targeted tmux operation on that name (select-window,
+        -- send-keys, kill-window — all resolved by exact name, see
+        -- TmuxWindowTargetedExactly) would refuse as ambiguous.
         --
         -- A failed tmux query fails the resume, as TmuxWindowNamesAreUnique
         -- requires: creating blind could duplicate a live window, and the
@@ -1274,7 +1274,7 @@ rule RetryFresh {
 -- them. Nothing in the system recovers from it on its own.
 --
 -- So the duplicate must never be created. Every operation that gives a window
--- a name is bound by this: creating one (DispatchTask, DispatchResearchTask,
+-- a name is bound by this: creating one (ProvisionDispatch,
 -- ResumeTask, RetryResume), opening a pop-out editor window (tasks.allium:
 -- EditTask, epics.allium: EditEpic), renaming one (split-pane.allium:
 -- SwapSplitPane), and breaking a pane back out into one (split-pane.allium:
@@ -1326,6 +1326,11 @@ rule RetryFresh {
 -- A failed existence query is an error, and the operation is not applied:
 -- proceeding blind could create the very duplicate this invariant forbids.
 -- "No server running" is not a failure — it reads as an empty window list.
+-- The board's session-scoped check above is the one exception: a failed
+-- query there reads as "no duplicate" and the operation proceeds
+-- (`tmux::refuse_duplicate_window_name_in_session`), so a tmux hiccup cannot
+-- block the board's own launch; the operation itself fails if the server is
+-- really unreachable.
 -- The leftover window a split pane's agent was pinned from is the one live
 -- window under a task's name that is not a duplicate (split-pane.allium:
 -- PinTaskInSplitPane's leftover-window guidance); the pane rejoins it and no
@@ -1340,7 +1345,7 @@ rule RetryFresh {
 -- board's own and the editor windows as much as a task's.
 --
 -- Not a cosmetic imprecision: window names are "task-" + task.id (see
--- DispatchTask, DispatchResearchTask, ResumeTask, RetryResume), so one task's
+-- ProvisionDispatch, ResumeTask, RetryResume), so one task's
 -- name is a prefix of another's whenever one id is a prefix of another id —
 -- task 378 and task 3782 both exist in a repo with ids in the thousands. A
 -- mistargeted keystroke goes into another task's live Claude session as user
@@ -1393,8 +1398,8 @@ rule RetryFresh {
 -- nobody has named one, it is resolved from the repository it applies to --
 -- detect_default_branch(repo_path), which reads
 -- `git symbolic-ref refs/remotes/origin/HEAD` -- and never taken as the
--- literal config.default_branch. config.default_branch remains that helper's
--- OWN last resort, for a repository that names no default at all; it is not a
+-- literal core/config.default_branch. core/config.default_branch remains
+-- that helper's OWN last resort, for a repository that names no default at all; it is not a
 -- first answer any caller is entitled to.
 --
 -- Not expressible as a state assertion: it constrains how a field's value is
@@ -1422,8 +1427,10 @@ rule RetryFresh {
 -- BranchHistoryCapped: no repo path retains more than
 -- config.max_base_branches_per_repo remembered base branches. This is a
 -- property of the write operation (RecordBaseBranch prunes on every write),
--- not something any caller enforces. A repository with several paths can
--- offer more in BaseBranchPicker (see RecordBaseBranch).
+-- not something any caller enforces. A restore (spacetime-seed.allium) inserts
+-- the dumped rows without pruning; the dump was capped when it was written.
+-- A repository with several paths can offer more in BaseBranchPicker (see
+-- RecordBaseBranch).
 invariant BranchHistoryCapped {
     for b in core/SavedRepoBranches:
         (core/SavedRepoBranches where repo_path = b.repo_path).count
@@ -1881,7 +1888,7 @@ surface BaseBranchPicker {
 
     -- query starts prefilled with the most-recently-used branch for
     -- selected_repo (history.first.branch), falling back to the form's prior
-    -- default base branch ("main" / config.default_branch) when the repo has
+    -- default base branch ("main" / core/config.default_branch) when the repo has
     -- no history yet. See the PrefillFromHistory guarantee.
     let query = ""
     let cursor = 0
@@ -1942,11 +1949,11 @@ surface BaseBranchPicker {
         -- When the field is opened, query is prefilled with the
         -- most-recently-used branch for selected_repo (history.first.branch)
         -- and the text caret lands at the end (per TextInputField's
-        -- PrefillLandsAtEnd). When selected_repo has no history, query falls
-        -- back to the form's prior default base branch — the current draft
-        -- value, or, when the draft is empty, whatever
-        -- detect_default_branch(selected_repo) answers. That last fallback
-        -- asks the repository rather than assuming "main"
+        -- PrefillLandsAtEnd). When selected_repo has no history, query opens
+        -- on the current draft value and the board asks
+        -- detect_default_branch(selected_repo); its answer replaces the
+        -- prefill as long as nobody has edited it. That detection asks the
+        -- repository rather than assuming "main"
         -- (DefaultBaseBranchIsDetectedNotAssumed above): a repo with no
         -- history is exactly the repo the user has never answered this
         -- question for, so it is the case where a guess is most likely wrong

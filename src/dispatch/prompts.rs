@@ -90,8 +90,8 @@ impl EpicContext {
     /// True when `epic` or any ancestor of it carries `FeedRole::Cve`.
     ///
     /// A read failure mid-walk answers `false` rather than propagating: the
-    /// consequence is a CVE task that gets the ordinary design step, which is
-    /// the same answer it got before this branch existed. Failing the dispatch
+    /// consequence is a CVE task that gets the ordinary design step, which still
+    /// gives the agent a workable prompt. Failing the dispatch
     /// over it would be worse.
     ///
     /// The visited set is the cycle guard, mirroring

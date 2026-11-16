@@ -117,7 +117,7 @@ contract PromptComposer {
     classify_bump: (title: String, description: String) -> Bump
 
     @invariant NoReadFailureIsItsOwnAnswer
-        -- holds_allium_specs has no error arm. A missing docs/specs directory,
+        -- holds_allium_specs has no error arm. A missing docs directory,
         -- an empty one, one holding no .allium file and an unreadable one all
         -- answer false, so the prompt an agent receives never depends on which
         -- way a read failed.
