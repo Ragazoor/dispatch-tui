@@ -530,6 +530,13 @@ rule ReportPrStatus {
         -- permanent read failure toward the give-up threshold (store-split P3), and a
         -- reducer call that fails in transport as a transient one.
         -- Repeating the same report is a no-op.
+        -- A merge fails no open session request. A wrap_up rebase still
+        -- running for the task (RequestWrapUp accepts a review task) runs on
+        -- to its own report or its deadline (store-split.allium, W7), as it
+        -- does after a hand move into Done; a conflict report then finds the
+        -- task Done and writes nothing (FinishTaskConflict applies only while
+        -- the task is running or review). Only RequestCloseTask fails open
+        -- rows, because it writes a close row of its own.
         -- The host that polls a host-less task is chosen by core/PollOwner;
         -- the module does not check ownership of the poll, only
         -- that the caller owns the host it names.
