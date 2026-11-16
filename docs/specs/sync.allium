@@ -970,10 +970,9 @@ rule RowsWithARemovedStatusAreDropped {
         --
         -- DROPPED MEANS GONE, NOTHING ELSE. The row is not imported, not
         -- drawn, not mapped to `done` or any other current status, and not
-        -- kept as a retired item. No history of it is kept anywhere. The old
-        -- store holds roughly 1,790 archived tasks and 165 archived epics;
-        -- each is work somebody already put away, and none is worth a status
-        -- it never had.
+        -- kept as a retired item. No history of it is kept anywhere. Each
+        -- such row is work somebody already put away, and none is worth a
+        -- status it never had.
         --
         -- THE ACCEPTED COST: A FEED MAY BRING ONE BACK. An archived feed task
         -- is not recorded as a core/RetiredFeedItem, so nothing tells its feed
@@ -987,12 +986,12 @@ rule RowsWithARemovedStatusAreDropped {
         -- report, and nothing is ever logged at warn.
         -- It does NOT emit observability.allium's DecodeFallbackWarning and
         -- does not bump its counter, which exists to show rows that really
-        -- could not be decoded — two thousand expected drops would bury the one
+        -- could not be decoded — thousands of expected drops would bury the one
         -- that matters.
         --
         -- AN UNKNOWN STATUS IS STILL REFUSED. A status that is neither a
         -- current one nor on config.removed_statuses is not this rule's: it
-        -- stays an undecodable row, warned and counted as before
+        -- stays an undecodable row, warned and counted
         -- (observability.allium: BulkRowDecodeFailed), and dropped from the
         -- board as AConnectedBoardDrawsOnlyDeliveredRows says.
         --
@@ -1010,6 +1009,9 @@ rule BoardWritesThroughTheStore {
     requires:
         connection != null
         and connection.status = connected
+        and (connection.is_identified
+             or not mutation.is_a_create
+             or mutation.is_feed_ingest)
 
     ensures:
         MutationSentToStore(connection, mutation)
@@ -1050,6 +1052,11 @@ rule BoardWritesThroughTheStore {
         -- of a write — a last-updated stamp, a completion time — is the
         -- store's, so that rows written by different boards are ordered by one
         -- clock rather than by whose laptop runs fast.
+        --
+        -- SENT OR REFUSED, NEVER BOTH. The guard is the converse of
+        -- AWriteWithNoConnectionIsRefused (not connected) and of
+        -- CreatesRequireASettledIdentity (a non-ingest create on an
+        -- unidentified board), so a mutation those two refuse is never sent.
 }
 
 rule CreatesRequireASettledIdentity {
@@ -1065,7 +1072,6 @@ rule CreatesRequireASettledIdentity {
 
     ensures:
         MutationRefused(connection, mutation, reason: "this board has no settled identity yet, so there is no name to stamp on a new row")
-        and not MutationSentToStore(connection, mutation)
 
     @guidance
         -- THE THIRD THING A CREATE NEEDS, BESIDES A CONNECTION. A create is a
@@ -1123,7 +1129,6 @@ rule AWriteWithNoConnectionIsRefused {
 
     ensures:
         MutationRefused(connection, mutation, reason: connection.last_error)
-        and not MutationSentToStore(connection, mutation)
 
     @guidance
         -- IT FAILS, LOUDLY, AND NOTHING ANYWHERE CHANGES. Not queued, not
@@ -1318,6 +1323,13 @@ rule ASubscriptionTheStoreRefusesIsAnOutage {
         -- with the store's reason as last_error, and RetryAfterBackoff brings
         -- it back.
         --
+        -- THE STEPS BEFORE THE ASK COUNT TOO. Adopting the offered identity
+        -- (host.allium: AdoptUserIdentity) and reading this host's own id both
+        -- run between acceptance and the ask. A failure at either leaves a
+        -- connection that is `connected` with nothing asked for, so it is this
+        -- same outage, with that step's error as last_error
+        -- (src/sync/session.rs::SyncSession::attempt).
+        --
         -- CLOSED, NOT MERELY MARKED DOWN. The connection the store accepted is
         -- closed and whatever it had already delivered is discarded, exactly
         -- as ADisconnectedBoardDrawsNoSharedRows does for a drop. A connection
@@ -1410,6 +1422,17 @@ rule StopOnAUserIdentityConflict {
         -- connection that is not up has offered no identity for anyone to
         -- disagree with. Written out rather than left implicit because it is
         -- what makes the `failed` edge one the transition graph above admits.
+        --
+        -- NO RACE WITH THE OTHER EXITS FROM `connected`. Analysis pairs this
+        -- rule with ASubscriptionTheStoreRefusesIsAnOutage and with
+        -- ConnectionDropped, since all three leave `connected`. Neither pair
+        -- can meet. InitialSubscriptionRefused answers only an ask sent after
+        -- host/UserIdentitySettled, and host gives Settled and Conflict
+        -- opposite guards, so a conflicted connection never asked for
+        -- anything to refuse. A drop cannot overtake the conflict either: the
+        -- board applies the acceptance and the conflict in one step with no
+        -- wait between them, and a `failed` connection ignores every later
+        -- event (src/sync/session.rs::SyncSession::attempt).
 }
 
 -- == Choosing what to follow ==
@@ -1503,8 +1526,7 @@ rule UnsubscribeFromEpic {
         -- touched. An epic that is still covered (a followed ancestor, or a
         -- second followed route) keeps its claim. An epic this identity
         -- created stays visible through the `own_epics` view, so its next tick
-        -- re-claims it: that is the narrower thin-subtree case (a) in the
-        -- assumption note on `covered_epics`, not a stopped feed.
+        -- re-claims it and its feed does not stop.
         --
         -- The epic's tasks stop reaching this board. Reversible at any time by
         -- subscribing again, and carrying nothing with it: a subscription is an
@@ -1530,6 +1552,7 @@ rule UnsubscribeFromEpic {
 -- Invariants
 ------------------------------------------------------------
 
+-- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics:
 -- The containment claim of the whole design, stated where it can be read.
 --
 -- A board asks for its own user board, its subscribed epics, and everything
@@ -1550,10 +1573,12 @@ rule UnsubscribeFromEpic {
 -- an under-subscribed client is the store's to get right; what this board asks
 -- for is this file's, and asking for too much is the failure that would be
 -- ours.
-invariant SubscriptionsCoverOnlyTheOwnBoardAndItsEpics {
-    for s in core/Subscriptions:
-        s.subscriber = core/local_host().owner implies s.epic != null
-}
+--
+-- Prose rather than an expression. A Subscription row always names an epic,
+-- so an expression over core/Subscriptions would hold trivially and check
+-- nothing. The claim is about the ask the Subscribe* rules send, and the
+-- tests check it against the queries the board builds
+-- (src/sync/sdk_connector/queries.rs::subscription_queries).
 
 -- NoWriteIsEverQueued:
 -- No write waits anywhere for a store to come back.
@@ -1765,9 +1790,8 @@ surface ConnectionIndicator {
         -- in the same plain style as the rest of the status bar. A board
         -- connected to the wrong store looks exactly like a healthy one — full
         -- of tasks, updating, quiet — and the address is the one thing that
-        -- tells them apart at a glance (a board has run on an old store for
-        -- two days with nothing on screen to say so). The operator
-        -- chose this over showing it only for a named store.
+        -- tells them apart at a glance. It shows for every store, not only a
+        -- named one.
 
     @guarantee EveryFailureNamesItself
         -- `disconnected` and `failed` both carry a reason an operator can act
