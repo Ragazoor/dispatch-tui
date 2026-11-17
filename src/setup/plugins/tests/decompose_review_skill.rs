@@ -79,7 +79,7 @@ fn decompose_review_skill_text_holds_each_session_guarantee() {
         ),
         (
             "EpicCarriesNoRepoPath",
-            "`create_epic` rejects the field outright",
+            "`epic_create` rejects the field outright",
         ),
         (
             "PlanDirectoryIsNeverReused",

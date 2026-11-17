@@ -13,7 +13,7 @@
 # "closed" and would delete the task — and tear down its worktree — on the very
 # next poll. Set the flag once, when you wire the epic up:
 #
-#   update_epic(epic_id: <id>, feed_append_only: true)
+#   epic_update(epic_id: <id>, feed_append_only: true)
 #
 # See docs/specs/feeds.allium: AppendOnlyFeed.
 #

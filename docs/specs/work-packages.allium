@@ -53,7 +53,7 @@ use "./board-layout.allium" as board_layout
 entity WorkPackage {
     title: String               -- non-empty after trimming
     description: String         -- free text, may be empty; holds the plan for the window
-    sort_order: Integer?        -- manual ordering of the package's card, and nothing else; lower sorts first via sort_order ?? id (null falls back to the package id). Written by ReorderPackage and by the update_work_package tool
+    sort_order: Integer?        -- manual ordering of the package's card, and nothing else; lower sorts first via sort_order ?? id (null falls back to the package id). Written by ReorderPackage and by the work-package_update tool
     created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused). The board receives every package visible_to it (workspaces.allium: SetWorkPackageVisibility)
     workspace: core/Workspace         -- the workspace this package lives in; chosen at creation and never moved (CreateWorkPackage)
     visibility: core/Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetWorkPackageVisibility)
@@ -141,7 +141,7 @@ rule CreateWorkPackage {
 
     @guidance
         -- Reachable from the link picker (CreatePackageFromPicker) and from
-        -- the create_work_package MCP tool (CreateWorkPackageViaMcp). A blank
+        -- the work-package_create MCP tool (CreateWorkPackageViaMcp). A blank
         -- title is refused with a validation error and nothing is created.
         -- A repeated item is one link.
 }
@@ -160,7 +160,7 @@ rule UpdateWorkPackage {
     @guidance
         -- Renaming from the board is `e` on a package card
         -- (RenamePackageFromBoard). The description is edited through the
-        -- update_work_package MCP tool only. sort_order is written by
+        -- work-package_update MCP tool only. sort_order is written by
         -- ReorderPackage (J/K) and by that tool; there is no way to clear it.
 }
 
@@ -232,7 +232,7 @@ rule ReorderPackage {
         -- card and K on the first do nothing, and the cursor does not move
         -- onto an epic or task card. Both written keys are persisted.
         -- The card order (PackageCardPlacement), this rule and the
-        -- update_work_package tool all read the same key.
+        -- work-package_update tool all read the same key.
 }
 
 rule LinkItem {
@@ -283,7 +283,7 @@ rule CreateTaskInPackageView {
         -- plain main-board task and shows the error; the user links it with
         -- `w`. The board re-reads its packages after the link.
         -- MCP has no twin parameter on task_create: an agent has no view,
-        -- and task_create followed by update_work_package(link_task_ids)
+        -- and task_create followed by work-package_update(link_task_ids)
         -- already does the same.
 }
 
@@ -410,8 +410,9 @@ rule DeletePackageFromBoard {
 -- == MCP tools ==
 
 -- Agents are first-class users of packages: everything the board can do has
--- a tool. Three tools, in the merged style of task_update: create_work_package,
--- list_work_packages and update_work_package (WorkPackageMcpTools).
+-- a tool. Four tools, named <noun>_<verb> (docs/adr/0002): work-package_create,
+-- work-package_search, work-package_update and work-package_delete
+-- (WorkPackageMcpTools).
 --
 -- Replies name what they touch (mcp-task-tools.allium:
 -- RepliesNameWhatTheyTouch). Every reply that names a package says
@@ -421,7 +422,7 @@ rule DeletePackageFromBoard {
 -- `not linked: <epic ref>`; an item the store does not hold stays `task 4` or
 -- `epic 7`.
 --
--- A missing package id is not-found on list and delete, and a refusal
+-- A missing package id is not-found on search and delete, and a refusal
 -- ("no work package N", invalid params) on a create or update, which the
 -- store decides; so is the id of a package the caller cannot see. A link to
 -- a task or epic id that does not exist is refused the same way, and nothing
@@ -432,8 +433,8 @@ rule DeletePackageFromBoard {
 -- name.
 
 rule CreateWorkPackageViaMcp {
-    when: McpCreateWorkPackage(title, description?, link_task_ids?, link_epic_ids?,
-                               workspace_id, visibility?)
+    when: McpWorkPackageCreate(title, description?, link_task_ids?, link_epic_ids?,
+                                workspace_id, visibility?)
 
     ensures:
         CreateWorkPackage(title, description ?? "", caller(),
@@ -447,14 +448,14 @@ rule CreateWorkPackageViaMcp {
 }
 
 rule ListWorkPackagesViaMcp {
-    when: McpListWorkPackages(work_package_id?, updated_after?, updated_before?)
+    when: McpWorkPackageSearch(work_package_id?, updated_after?, updated_before?)
 
     requires:
         if work_package_id != null: exists WorkPackage{id: work_package_id}
 
     -- work_package_id picks one package, so no time filter can narrow it
     -- further: a call that sets it with either filter is invalid params
-    -- (-32602), like list_epics with epic_id.
+    -- (-32602), like epic_search with epic_id.
     requires:
         if work_package_id != null:
             updated_after = null and updated_before = null
@@ -489,14 +490,11 @@ rule ListWorkPackagesViaMcp {
 }
 
 rule UpdateWorkPackageViaMcp {
-    when: McpUpdateWorkPackage(package, title?, description?, sort_order?,
+    when: McpWorkPackageUpdate(package, title?, description?, sort_order?,
                                link_task_ids?, unlink_task_ids?,
-                               link_epic_ids?, unlink_epic_ids?, delete?,
+                               link_epic_ids?, unlink_epic_ids?,
                                visibility?)
 
-    -- delete: false is the same as leaving it out; delete: true is
-    -- DeleteWorkPackageViaMcp.
-    requires: delete != true
     -- A call that names no field is refused before anything is written.
     requires: title != null or description != null or sort_order != null
               or link_task_ids != null or unlink_task_ids != null
@@ -523,38 +521,29 @@ rule UpdateWorkPackageViaMcp {
         -- store leaves a link to an item the caller cannot see in place, as
         -- if it were not linked (UnlinkItem).
         -- An empty list is the same as leaving the list out: a call whose
-        -- only field is `link_task_ids: []` names no field, and
-        -- `delete: true` with an empty list is still a delete.
-        -- The tool is declared destructive, because one of its forms deletes
-        -- (DeleteWorkPackageViaMcp): annotations describe a whole tool.
+        -- only field is `link_task_ids: []` names no field.
+        -- The tool is declared idempotent: it no longer has a delete form
+        -- (DeleteWorkPackageViaMcp is work-package_delete), so repeating the
+        -- identical call leaves the same state (docs/adr/0002, decision 4).
+        -- A delete flag in the arguments is an unknown field, refused like
+        -- any other.
 }
 
 rule DeleteWorkPackageViaMcp {
-    when: McpUpdateWorkPackage(package, title?, description?, sort_order?,
-                               link_task_ids?, unlink_task_ids?,
-                               link_epic_ids?, unlink_epic_ids?, delete?,
-                               visibility?)
+    when: McpWorkPackageDelete(package)
 
-    requires: delete = true
-    -- A delete is a call of its own: the same call must not also rename or
-    -- relink, since those writes would be thrown away with the package. A
-    -- call that sets delete with any other field is invalid params (-32602)
-    -- and nothing is written. The same rule as task_update with
-    -- status="done" (mcp-task-tools.allium).
-    requires: title = null and description = null and sort_order = null
-              and link_task_ids = null and unlink_task_ids = null
-              and link_epic_ids = null and unlink_epic_ids = null
-              and visibility = null
+    requires: exists WorkPackage{id: package}
 
     ensures: DeleteWorkPackage(package)
 
     @guidance
         -- The reply names the deleted package and says its tasks and epics
         -- are kept.
-        -- There is no delete_work_package tool. A delete is the last update
-        -- of a package, so it is a field of update_work_package
-        -- (docs/mcp-tool-design.md, rule 1: extend the update tool; do not
-        -- add a delete twin).
+        -- work-package_delete takes the package id and nothing else. It is a
+        -- tool of its own, declared destructive, because a tool that deletes
+        -- in one call and updates in another has no honest access class
+        -- (docs/adr/0002, decision 4). It replaces the `delete: true` form of
+        -- update_work_package, which is gone.
 }
 
 ------------------------------------------------------------
@@ -771,17 +760,18 @@ surface WorkPackageMcpTools {
     facing _: core/McpClient
 
     provides:
-        -- create_work_package (CreateWorkPackageViaMcp). Write.
-        McpCreateWorkPackage(title, description?, link_task_ids?, link_epic_ids?,
+        -- work-package_create (CreateWorkPackageViaMcp). Write.
+        McpWorkPackageCreate(title, description?, link_task_ids?, link_epic_ids?,
                              workspace_id, visibility?)
-        -- list_work_packages (ListWorkPackagesViaMcp). Read-only.
-        McpListWorkPackages(work_package_id?, updated_after?, updated_before?)
-        -- update_work_package (UpdateWorkPackageViaMcp,
-        -- DeleteWorkPackageViaMcp). Destructive.
-        McpUpdateWorkPackage(package, title?, description?, sort_order?,
+        -- work-package_search (ListWorkPackagesViaMcp). Read-only.
+        McpWorkPackageSearch(work_package_id?, updated_after?, updated_before?)
+        -- work-package_update (UpdateWorkPackageViaMcp). Idempotent.
+        McpWorkPackageUpdate(package, title?, description?, sort_order?,
                              link_task_ids?, unlink_task_ids?,
-                             link_epic_ids?, unlink_epic_ids?, delete?,
+                             link_epic_ids?, unlink_epic_ids?,
                              visibility?)
+        -- work-package_delete (DeleteWorkPackageViaMcp). Destructive.
+        McpWorkPackageDelete(package)
 
     @guidance
         -- The package argument is `work_package_id`, not a bare `id`: every

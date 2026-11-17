@@ -71,6 +71,18 @@ pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[
     ("resume_task", "call task_resume"),
     ("wrap_up", "call session_wrap-up"),
     ("exit_session", "call session_exit"),
+    ("create_epic", "call epic_create"),
+    (
+        "list_epics",
+        "call epic_search. It returns 50 rows unless limit says otherwise",
+    ),
+    ("update_epic", "call epic_update"),
+    ("create_work_package", "call work-package_create"),
+    ("list_work_packages", "call work-package_search"),
+    (
+        "update_work_package",
+        "call work-package_update. To delete a package, call work-package_delete",
+    ),
 ];
 
 /// The error text for a `tools/call` to an unregistered name. A name in
@@ -362,11 +374,12 @@ also moves on later edits.",
             }
         };
 
-    async write "create_epic" => epics::handle_create_epic,
-        "Create a new epic on the kanban board. An epic groups related tasks and derives its \
-status from theirs, so you do not set an epic's status directly. Pass parent_epic_id to create it \
-as a sub-epic of an existing one. A root epic needs a workspace_id (a refusal lists yours); a \
-sub-epic takes its parent's workspace and refuses one. visibility is public (every member of the \
+    async write "epic_create" => epics::handle_epic_create,
+        "Create a new epic on the kanban board. Pass either workspace_id (a root epic) or \
+parent_epic_id (a sub-epic), never both and never neither: a root epic needs a workspace_id (a \
+refusal lists yours), and a sub-epic takes its parent's workspace and refuses one. An epic groups \
+related tasks and derives its status from theirs, so you do not set an epic's status directly. \
+visibility is public (every member of the \
 workspace sees it, the default) or private (only you do). Epics carry no repo_path — that lives \
 on each subtask, and passing it here is rejected.",
         {
@@ -375,16 +388,17 @@ on each subtask, and passing it here is rejected.",
                 "title": { "type": "string", "description": "Epic title" },
                 "description": { "type": "string", "description": "Epic description" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
-                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent." },
-                "workspace_id": { "type": "integer", "description": "The workspace a root epic lives in. Required without parent_epic_id; refused with it. A refusal lists the workspaces you belong to." },
+                "parent_epic_id": { "type": "integer", "description": "Makes this a sub-epic of the epic with this id, in that epic's workspace, so pass no workspace_id with it. Leave it out for a root epic." },
+                "workspace_id": { "type": "integer", "description": "The workspace a root epic lives in: required for a root epic (no parent_epic_id), refused for a sub-epic. A refusal lists the workspaces you belong to." },
                 "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only you do. Default public." }
             },
             "required": ["title"]
         };
 
-    async read_only "list_epics" => epics::handle_list_epics,
+    async read_only "epic_search" => epics::handle_epic_search,
         "List epics on the kanban board, one row each, with each sub-epic's parent id. With no \
-arguments it lists every epic. Pass parent_epic_id for that epic's direct children, plus \
+arguments it lists the 50 most recently updated epics, newest first; a last line says when rows \
+were cut and how to get the rest, and an empty result names the filters it applied. Pass parent_epic_id for that epic's direct children, plus \
 recursive=true for its whole subtree. Pass query to search titles and descriptions. Use it to find an epic's ID when you only know its title. \
 Pass epic_id instead for one epic in full: its description, status, plan, parent, feed settings \
 and a count of its subtasks by status, but not the subtasks themselves — call task_search with \
@@ -402,7 +416,7 @@ epic_id for those. Each row shows the epic's updated and completed times (ISO 86
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Return at most this many rows. No default: without it every match is returned. When rows are cut, the last line says how many were shown of how many."
+                    "description": "Return at most this many rows. Default 50. Rows are sorted by last update, newest first. When rows are cut, the last line says how many were shown of how many."
                 },
                 "updated_after": {
                     "type": "string",
@@ -423,7 +437,7 @@ epic_id for those. Each row shows the epic's updated and completed times (ISO 86
             }
         };
 
-    async idempotent "update_epic" => epics::handle_update_epic,
+    async idempotent "epic_update" => epics::handle_epic_update,
         "Update an epic in place. Accepts title, description, status, plan_path, sort_order, \
 parent_epic_id, and the feed settings feed_command, feed_interval_secs, group_by_repo and \
 feed_append_only, and visibility (public or private), and workspace_id, which moves a root epic and its whole tree \
@@ -453,14 +467,14 @@ loop.",
             "required": ["epic_id"]
         };
 
-    async write "create_work_package" => work_packages::handle_create_work_package,
+    async write "work-package_create" => work_packages::handle_work_package_create,
         "Create a work package: a named group that links to tasks and epics which already exist, \
 wherever they sit in the epic tree, so work spread across several epics can be followed as one \
 board. A package only links; it never owns its items, and one item can belong to many packages. Pass \
 link_task_ids and link_epic_ids to link items at once; every id is checked first, and an unknown \
 one creates nothing. Needs a workspace_id (a refusal lists yours) and links only items in that \
 workspace, or tasks on your main board. visibility is public (the default) or private (only you \
-see it). Returns the new package's id. To group new work under a parent, use create_epic \
+see it). Returns the new package's id. To group new work under a parent, use epic_create \
 instead.",
         {
             "type": "object",
@@ -475,7 +489,7 @@ instead.",
             "required": ["title", "workspace_id"]
         };
 
-    async read_only "list_work_packages" => work_packages::handle_list_work_packages,
+    async read_only "work-package_search" => work_packages::handle_work_package_search,
         "List work packages with their linked items. Read-only. With no arguments it lists every \
 package; pass work_package_id for one. Each package shows its title, description and every linked \
 task or epic with its id, status and title. A package has no status of its own: read progress from \
@@ -495,14 +509,13 @@ the items. A package's sort order is shown when it has been set. Filter by when 
             }
         };
 
-    async destructive "update_work_package" => work_packages::handle_update_work_package,
+    async idempotent "work-package_update" => work_packages::handle_work_package_update,
         "Update a work package in place: rename it with title, rewrite description, set sort_order (lower values show first among the package cards), set visibility (public or private), and change \
 its links with link_task_ids, unlink_task_ids, link_epic_ids and unlink_epic_ids. Unlinks apply \
 before links, linking an item already linked and unlinking one not linked are both silent, and \
 the tasks and epics themselves are never changed. Every id is checked before anything is written, \
 and an id named in both a link and an unlink list is refused. Every field left out is untouched, \
-and at least one must be given. Pass delete=true, and nothing else, to delete the package once it \
-has served its purpose: its linked tasks and epics stay where they are, with their status unchanged.",
+and at least one must be given. To delete a package, call work-package_delete.",
         {
             "type": "object",
             "properties": {
@@ -514,8 +527,19 @@ has served its purpose: its linked tasks and epics stay where they are, with the
                 "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
                 "unlink_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of tasks to unlink." },
                 "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link." },
-                "unlink_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of epics to unlink." },
-                "delete": { "type": "boolean", "description": "When true, delete the package and its links. Must be the only field besides work_package_id. False is the same as leaving it out." }
+                "unlink_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of epics to unlink." }
+            },
+            "required": ["work_package_id"]
+        };
+
+    async destructive "work-package_delete" => work_packages::handle_work_package_delete,
+        "Delete a work package and its links once it has served its purpose. Its linked tasks and \
+epics stay where they are, with their status unchanged. Takes only the package id; to rename or \
+relink a package, call work-package_update.",
+        {
+            "type": "object",
+            "properties": {
+                "work_package_id": { "type": "integer", "description": "The work package ID" }
             },
             "required": ["work_package_id"]
         };
@@ -756,7 +780,7 @@ Returns the saved name.",
     async read_only "list_workspaces" => admin::handle_list_workspaces,
         "List the workspaces you can see, who is in each and in which role, who the super-admins are, \
 and the directory of every person by display name and short identity. Use it to find the \
-workspace_id and the person to name in create_epic, set_workspace_member and set_super_admin: \
+workspace_id and the person to name in epic_create, set_workspace_member and set_super_admin: \
 people are named by display name, and the directory tells two people with one name apart by \
 identity. A person sees the workspaces they belong to; a super-admin sees all of them. It \
 also says when claim_super_admin would work. It returns no epics, tasks or other content.",

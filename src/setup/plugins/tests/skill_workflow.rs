@@ -19,7 +19,7 @@ fn decompose_review_skill_defaults_wrap_up_mode_to_rebase() {
 
 #[test]
 fn decompose_review_skill_does_not_pass_repo_path_to_create_epic() {
-    // Epics carry no repo_path — create_epic rejects the field outright
+    // Epics carry no repo_path — epic_create rejects the field outright
     // ("unknown field `repo_path`"). Step 6's subtasks are where the repo
     // path belongs, so this assertion is scoped to the Step 5 section:
     // a whole-document check would trip over Step 6's legitimate uses.
@@ -34,7 +34,7 @@ fn decompose_review_skill_does_not_pass_repo_path_to_create_epic() {
     assert!(
         !step5.contains("`repo_path`:"),
         "decompose-review must not tell the agent to pass repo_path to \
-         create_epic — the tool rejects it (found in Step 5: {step5:?})"
+         epic_create — the tool rejects it (found in Step 5: {step5:?})"
     );
 }
 

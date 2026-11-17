@@ -94,7 +94,7 @@ pub(super) struct UpdateEpicArgs {
 // Epic tool handlers (thin wrappers over EpicService)
 // ---------------------------------------------------------------------------
 
-pub(super) async fn handle_create_epic(
+pub(super) async fn handle_epic_create(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
@@ -104,7 +104,7 @@ pub(super) async fn handle_create_epic(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(title = %parsed.title, "MCP create_epic");
+    tracing::info!(title = %parsed.title, "MCP epic_create");
 
     // `epics.allium: CreateEpicViaMcp`. A sub-epic takes
     // its parent's workspace, so naming one is refused rather than ignored.
@@ -112,7 +112,8 @@ pub(super) async fn handle_create_epic(
         (Some(_), Some(_)) => {
             return tool_error(
                 id,
-                "workspace_id is for a root epic; a sub-epic takes its parent's workspace",
+                "workspace_id is for a root epic; a sub-epic takes its parent's workspace, so \
+                 drop workspace_id and keep parent_epic_id",
             )
         }
         (Some(_), None) => 0,
@@ -121,7 +122,7 @@ pub(super) async fn handle_create_epic(
             return tool_error(
                 id,
                 format!(
-                    "a root epic needs a workspace_id. {}",
+                    "a root epic needs a workspace_id: add workspace_id, or pass parent_epic_id for a sub-epic. {}",
                     workspace_choices(state).await
                 ),
             )
@@ -200,9 +201,9 @@ fn format_workspace_choices(mine: &[crate::models::WorkspaceRef]) -> String {
     format!("Your workspaces: {}.", list.join(", "))
 }
 
-/// epics.allium: GetEpicViaMcp, the `epic_id` form of list_epics.
+/// epics.allium: GetEpicViaMcp, the `epic_id` form of epic_search.
 async fn get_epic(state: &McpState, id: Option<Value>, epic_id: EpicId) -> JsonRpcResponse {
-    tracing::info!(epic_id = epic_id.0, "MCP list_epics one epic");
+    tracing::info!(epic_id = epic_id.0, "MCP epic_search one epic");
 
     let (epic, done_count, total) = match state.epic_svc.get_epic_with_progress(epic_id).await {
         Ok(found) => found,
@@ -249,7 +250,7 @@ async fn get_epic(state: &McpState, id: Option<Value>, epic_id: EpicId) -> JsonR
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-pub(super) async fn handle_list_epics(
+pub(super) async fn handle_epic_search(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
@@ -293,7 +294,7 @@ pub(super) async fn handle_list_epics(
         Err(resp) => return resp,
     };
     let recursive = parsed.recursive.unwrap_or(false);
-    tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive, "MCP list_epics");
+    tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive, "MCP epic_search");
 
     let epics = match state
         .epic_svc
@@ -316,10 +317,16 @@ pub(super) async fn handle_list_epics(
     if epics.is_empty() {
         return JsonRpcResponse::ok(
             id,
-            json!({"content": [{"type": "text", "text": "No epics found"}]}),
+            json!({"content": [{"type": "text", "text": super::types::empty_reply("epics", applied_filters(&parsed))}]}),
         );
     }
-    let cut_hint = super::types::apply_limit(&mut epics, parsed.limit);
+    // ListEpicsViaMcp: most recently updated first, ties by id descending.
+    epics.sort_by(|(a, _, _), (b, _, _)| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| b.id.0.cmp(&a.id.0))
+    });
+    let cut_hint = cut_rows(&mut epics, parsed.limit);
     // A parent's title comes from the listing when the parent is in it, else
     // from the store (`McpRepliesNameWhatTheyTouch`).
     let mut parent_titles: std::collections::HashMap<crate::models::EpicId, String> = epics
@@ -350,6 +357,51 @@ pub(super) async fn handle_list_epics(
         id,
         json!({"content": [{"type": "text", "text": lines.join("\n")}]}),
     )
+}
+
+/// The default `limit` of `epic_search` (`ListEpicsViaMcp`).
+const DEFAULT_EPIC_LIMIT: usize = 50;
+
+/// Keep the first `limit` rows (50 when `limit` is `None`). Returns the line to
+/// append when rows were cut: it says how many, in what order, and how to get
+/// the rest.
+fn cut_rows<T>(rows: &mut Vec<T>, limit: Option<std::num::NonZeroUsize>) -> Option<String> {
+    let total = rows.len();
+    let n = limit.map_or(DEFAULT_EPIC_LIMIT, std::num::NonZeroUsize::get);
+    if total <= n {
+        return None;
+    }
+    rows.truncate(n);
+    Some(format!(
+        "Showing {n} of {total}, newest update first. Narrow with parent_epic_id, query or the \
+         time filters, or raise limit."
+    ))
+}
+
+/// The filters a search applied, as `name=value` in the order `ListEpicsViaMcp`
+/// fixes, for the empty reply. `None` when it applied none.
+fn applied_filters(p: &ListEpicsArgs) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(e) = p.parent_epic_id {
+        parts.push(format!("parent_epic_id={}", e.0));
+    }
+    if p.recursive == Some(true) {
+        parts.push("recursive=true".to_string());
+    }
+    if let Some(q) = &p.query {
+        parts.push(format!("query={q:?}"));
+    }
+    for (name, value) in [
+        ("updated_after", &p.updated_after),
+        ("updated_before", &p.updated_before),
+        ("completed_after", &p.completed_after),
+        ("completed_before", &p.completed_before),
+    ] {
+        if let Some(v) = value {
+            parts.push(format!("{name}={v}"));
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(", "))
 }
 
 fn format_epic_list_line(
@@ -388,7 +440,7 @@ fn format_epic_list_line(
     )
 }
 
-pub(super) async fn handle_update_epic(
+pub(super) async fn handle_epic_update(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
@@ -398,7 +450,7 @@ pub(super) async fn handle_update_epic(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(epic_id = parsed.epic_id.0, "MCP update_epic");
+    tracing::info!(epic_id = parsed.epic_id.0, "MCP epic_update");
 
     let params = UpdateEpicParams {
         epic_id: parsed.epic_id,

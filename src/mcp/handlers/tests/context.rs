@@ -1558,7 +1558,7 @@ async fn tools_list_omits_removed_watch_and_poll_owner_tools() {
     for removed in ["watch_task", "override_poll_owner"] {
         assert!(!names.contains(&removed), "{removed} must not be listed");
     }
-    for kept in ["read_context", "create_work_package"] {
+    for kept in ["read_context", "work-package_create"] {
         assert!(names.contains(&kept), "{kept} must still be listed");
     }
 }

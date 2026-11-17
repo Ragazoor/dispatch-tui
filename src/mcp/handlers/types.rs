@@ -392,22 +392,12 @@ where
 // boundary and parses each into a TaskStatus.
 // ---------------------------------------------------------------------------
 
-/// Keep the first `limit` rows. Returns the hint line to append when rows were
-/// cut. See `limit` in `ListTasksViaMcp` (`docs/specs/mcp-task-tools.allium`).
-pub(super) fn apply_limit<T>(
-    rows: &mut Vec<T>,
-    limit: Option<std::num::NonZeroUsize>,
-) -> Option<String> {
-    let total = rows.len();
-    match limit.map(std::num::NonZeroUsize::get) {
-        Some(n) if total > n => {
-            rows.truncate(n);
-            Some(format!(
-                "Showing {n} of {total}. Narrow your query or filters."
-            ))
-        }
-        _ => None,
-    }
+/// The reply for a list that matched nothing: it names the filters applied.
+pub(in crate::mcp::handlers) fn empty_reply(noun: &str, filters: Option<String>) -> String {
+    format!(
+        "No {noun} match {}",
+        filters.unwrap_or_else(|| "(no filters)".to_string())
+    )
 }
 
 /// Filter for `task_search.status`. Deserialises from either a JSON string

@@ -138,7 +138,7 @@ async fn session_identity_writes_no_trajectory_file() {
         json!({
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
-            "params": { "name": "list_epics", "arguments": {} }
+            "params": { "name": "epic_search", "arguments": {} }
         }),
     )
     .await;

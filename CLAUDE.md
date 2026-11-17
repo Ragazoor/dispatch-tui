@@ -84,7 +84,7 @@ Each spec filename names its domain (`tasks.allium`, `dispatch.allium`, …); `c
 
 ## MCP Tools for Agents
 
-The `dispatch` MCP server's tool descriptions say what each tool does; call `tools/list`, or see `docs/specs/mcp-task-tools.allium`. Writing or changing a tool: read [docs/mcp-tool-design.md](docs/mcp-tool-design.md) first. `task_create`/`create_epic` matter mainly to orchestrating agents, not to one executing a single task.
+The `dispatch` MCP server's tool descriptions say what each tool does; call `tools/list`, or see `docs/specs/mcp-task-tools.allium`. Writing or changing a tool: read [docs/mcp-tool-design.md](docs/mcp-tool-design.md) first. `task_create`/`epic_create` matter mainly to orchestrating agents, not to one executing a single task.
 
 ## Agent-Facing Skill Copy
 

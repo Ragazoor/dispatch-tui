@@ -21,7 +21,7 @@ async fn create_epic_minimal() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_epic",
+            "name": "epic_create",
             "arguments": { "workspace_id": 1, "title": "My Epic" }
         })),
     )
@@ -42,7 +42,7 @@ async fn create_epic_with_all_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_epic",
+            "name": "epic_create",
             "arguments": { "workspace_id": 1,
                 "title": "Full Epic",
                 "description": "Epic desc"
@@ -63,7 +63,7 @@ async fn create_epic_missing_title() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_epic",
+            "name": "epic_create",
             "arguments": { "workspace_id": 1,}
         })),
     )
@@ -84,7 +84,7 @@ async fn get_epic_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -101,7 +101,7 @@ async fn get_epic_not_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": 9999 }
         })),
     )
@@ -145,7 +145,7 @@ async fn get_epic_shows_subtask_summary() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -170,7 +170,7 @@ async fn get_epic_accepts_string_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0.to_string() }
         })),
     )
@@ -190,11 +190,11 @@ async fn list_epics_empty() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": {} })),
+        Some(json!({ "name": "epic_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
-    assert!(text.contains("No epics found"));
+    assert!(text.contains("No epics match (no filters)"));
 }
 
 #[tokio::test]
@@ -214,7 +214,7 @@ async fn list_epics_with_items() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": {} })),
+        Some(json!({ "name": "epic_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -257,7 +257,7 @@ async fn list_epics_shows_subtask_counts() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": {} })),
+        Some(json!({ "name": "epic_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -280,7 +280,7 @@ async fn update_epic_title() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "title": "New Title" }
         })),
     )
@@ -306,7 +306,7 @@ async fn update_epic_mark_done() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "status": "done" }
         })),
     )
@@ -334,7 +334,7 @@ async fn update_epic_multiple_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": {
                 "epic_id": epic.id.0,
                 "title": "New",
@@ -363,7 +363,7 @@ async fn update_epic_accepts_string_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0.to_string(), "title": "Updated" }
         })),
     )
@@ -388,7 +388,7 @@ async fn update_epic_plan() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "plan_path": "docs/plans/epic-plan.md" }
         })),
     )
@@ -418,7 +418,7 @@ async fn update_epic_no_fields_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -439,7 +439,7 @@ async fn update_epic_feed_command_set() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_command": "echo []" }
         })),
     )
@@ -471,7 +471,7 @@ async fn update_epic_feed_command_clear() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_command": null }
         })),
     )
@@ -506,7 +506,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "title": "Updated Title" }
         })),
     )
@@ -530,7 +530,7 @@ async fn update_epic_feed_interval_secs_set() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_interval_secs": 60 }
         })),
     )
@@ -562,7 +562,7 @@ async fn update_epic_feed_interval_secs_clear() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_interval_secs": null }
         })),
     )
@@ -599,7 +599,7 @@ async fn get_epic_shows_feed_command() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -635,7 +635,7 @@ async fn mcp_create_sub_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_epic",
+            "name": "epic_create",
             "arguments": {
                 "title": "Sub Epic",
                 "description": "child",
@@ -669,14 +669,14 @@ async fn create_epic_tool_schema_includes_parent_epic_id() {
     let state = test_state().await;
     let resp = call(&state, "tools/list", None).await;
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
-    let create_epic = tools
+    let epic_create = tools
         .iter()
-        .find(|t| t["name"] == "create_epic")
-        .expect("create_epic not in tool list");
-    let props = &create_epic["inputSchema"]["properties"];
+        .find(|t| t["name"] == "epic_create")
+        .expect("epic_create not in tool list");
+    let props = &epic_create["inputSchema"]["properties"];
     assert!(
         props.get("parent_epic_id").is_some(),
-        "create_epic schema is missing parent_epic_id property"
+        "epic_create schema is missing parent_epic_id property"
     );
 }
 

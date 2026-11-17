@@ -286,7 +286,7 @@ async fn an_unseen_private_epic_is_listed_without_a_title_and_deleted() {
     ok_text(&state, "claim_super_admin", json!({})).await;
     ok_text(
         &state,
-        "create_epic",
+        "epic_create",
         json!({"title": "Secret plans", "workspace_id": 1, "visibility": "private"}),
     )
     .await;
@@ -343,7 +343,7 @@ async fn a_public_item_cannot_be_deleted_through_the_hatch() {
     ok_text(&state, "claim_super_admin", json!({})).await;
     ok_text(
         &state,
-        "create_epic",
+        "epic_create",
         json!({"title": "Open", "workspace_id": 1}),
     )
     .await;
@@ -404,7 +404,7 @@ async fn a_create_in_a_workspace_the_store_accepts_is_not_stopped_by_the_local_l
     let (state, _) = state_with_people().await;
     let made = ok_text(
         &state,
-        "create_work_package",
+        "work-package_create",
         json!({"title": "P", "workspace_id": 1}),
     )
     .await;
@@ -427,13 +427,13 @@ async fn unseen_items_are_listed_by_workspace_then_kind_then_id() {
     // higher one: kind order alone would list the epic first.
     ok_text(
         &state,
-        "create_work_package",
+        "work-package_create",
         json!({"title": "Hidden package", "workspace_id": 1, "visibility": "private"}),
     )
     .await;
     ok_text(
         &state,
-        "create_epic",
+        "epic_create",
         json!({"title": "Hidden epic", "workspace_id": ops, "visibility": "private"}),
     )
     .await;

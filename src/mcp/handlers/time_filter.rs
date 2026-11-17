@@ -1,5 +1,5 @@
 //! The `updated_*` and `completed_*` list filters, shared by `task_search`,
-//! `list_epics` and `list_work_packages` (`mcp-task-tools.allium`:
+//! `epic_search` and `work-package_search` (`mcp-task-tools.allium`:
 //! `TimeFilterInput`).
 //!
 //! A bound is an ISO 8601 time with an explicit zone. `after` is inclusive,

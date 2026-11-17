@@ -69,9 +69,14 @@ struct UpdateWorkPackageArgs {
     #[serde(default)]
     unlink_epic_ids: Vec<FlexibleId<EpicId>>,
     #[serde(default)]
-    delete: bool,
-    #[serde(default)]
     visibility: Option<crate::models::Visibility>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteWorkPackageArgs {
+    #[serde(deserialize_with = "deserialize_flexible_id")]
+    work_package_id: WorkPackageId,
 }
 
 fn items(tasks: Vec<FlexibleId<TaskId>>, epics: Vec<FlexibleId<EpicId>>) -> Vec<WorkPackageItem> {
@@ -94,7 +99,7 @@ fn text(id: Option<Value>, text: String) -> JsonRpcResponse {
 // Handlers
 // ---------------------------------------------------------------------------
 
-pub(super) async fn handle_create_work_package(
+pub(super) async fn handle_work_package_create(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
@@ -104,7 +109,7 @@ pub(super) async fn handle_create_work_package(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(title = %parsed.title, "MCP create_work_package");
+    tracing::info!(title = %parsed.title, "MCP work-package_create");
     let Some(workspace_id) = parsed.workspace_id else {
         return super::types::tool_error(
             id,
@@ -143,7 +148,7 @@ pub(super) async fn handle_create_work_package(
     }
 }
 
-pub(super) async fn handle_list_work_packages(
+pub(super) async fn handle_work_package_search(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
@@ -153,7 +158,7 @@ pub(super) async fn handle_list_work_packages(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(work_package_id = ?parsed.work_package_id, "MCP list_work_packages");
+    tracing::info!(work_package_id = ?parsed.work_package_id, "MCP work-package_search");
     if parsed.work_package_id.is_some() {
         if let Some(refusal) = reject_alongside(
             &id,
@@ -187,7 +192,7 @@ pub(super) async fn handle_list_work_packages(
     match listed {
         Ok(views) if views.is_empty() && updated.is_unbounded() => text(
             id,
-            "No work packages. Create one with create_work_package.".to_string(),
+            "No work packages. Create one with work-package_create.".to_string(),
         ),
         Ok(views) if views.is_empty() => text(id, "No work packages found".to_string()),
         Ok(views) => {
@@ -269,7 +274,7 @@ fn format_view(
     out
 }
 
-pub(super) async fn handle_update_work_package(
+pub(super) async fn handle_work_package_update(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
@@ -280,7 +285,7 @@ pub(super) async fn handle_update_work_package(
         Err(resp) => return resp,
     };
     let package_id = parsed.work_package_id;
-    tracing::info!(work_package_id = package_id.0, "MCP update_work_package");
+    tracing::info!(work_package_id = package_id.0, "MCP work-package_update");
 
     let named = [
         ("title", parsed.title.is_some()),
@@ -292,12 +297,6 @@ pub(super) async fn handle_update_work_package(
         ("link_epic_ids", !parsed.link_epic_ids.is_empty()),
         ("unlink_epic_ids", !parsed.unlink_epic_ids.is_empty()),
     ];
-    if parsed.delete {
-        if let Some(refusal) = reject_alongside(&id, "delete", &named) {
-            return refusal;
-        }
-        return delete_work_package(state, id, package_id).await;
-    }
     let fields: Vec<&str> = named
         .iter()
         .filter_map(|&(name, set)| set.then_some(name))
@@ -366,17 +365,19 @@ fn update_reply(package: &str, fields: &[&str], not_linked: &[String]) -> String
     reply
 }
 
-/// work-packages.allium: DeleteWorkPackageViaMcp, the `delete: true` form of
-/// update_work_package.
-async fn delete_work_package(
+/// work-packages.allium: DeleteWorkPackageViaMcp, the work-package_delete tool.
+pub(super) async fn handle_work_package_delete(
     state: &McpState,
     id: Option<Value>,
-    package_id: WorkPackageId,
+    _identity: &CallerIdentity,
+    args: Value,
 ) -> JsonRpcResponse {
-    tracing::info!(
-        work_package_id = package_id.0,
-        "MCP update_work_package delete"
-    );
+    let parsed = match parse_args::<DeleteWorkPackageArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let package_id = parsed.work_package_id;
+    tracing::info!(work_package_id = package_id.0, "MCP work-package_delete");
     // Named before the delete: afterwards there is no title left to read.
     let package = package_ref(state, package_id).await;
     match state.work_package_svc.delete_work_package(package_id).await {

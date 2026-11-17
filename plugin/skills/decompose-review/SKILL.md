@@ -50,11 +50,11 @@ Strip the trailing `/.git` to get the main repo path. `repo_path` on tasks must 
 
 ## Step 5: Create Epic
 
-Call the `dispatch` MCP tool `create_epic` with:
+Call the `dispatch` MCP tool `epic_create` with:
 - `title`: "Code Review: <YYYY-MM-DD>" (today's date)
 - `description`: the executive summary from the code review report (3-5 bullet points)
 
-Do **not** pass `repo_path` here — epics do not carry one, and `create_epic`
+Do **not** pass `repo_path` here — epics do not carry one, and `epic_create`
 rejects the field outright (`unknown field 'repo_path'`). The repo path from
 Step 4 belongs on each subtask in Step 6, which is what dispatch reads when
 creating worktrees.

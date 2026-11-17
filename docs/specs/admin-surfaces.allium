@@ -27,7 +27,8 @@
 --       twin, and the tools follow docs/mcp-tool-design.md: capability, not
 --       endpoint. A grant and a revoke are one tool (set_super_admin); a role
 --       change and a removal are one tool (set_workspace_member); a rename and
---       a delete are one tool (update_workspace), as update_work_package does.
+--       a delete are one tool (update_workspace; docs/adr/0002 splits the
+--       delete out in a later task).
 --       Claiming is its own tool: it takes no person and has its own
 --       precondition.
 --   A2. People are found by display name. Names need not be unique
@@ -323,7 +324,7 @@ rule UpdateWorkspaceTool {
         if delete = true: workspaces/DeleteWorkspace(workspace)
 
     @guidance
-        -- destructive, as update_work_package is, because delete is an
+        -- destructive, because delete is an
         -- argument of it. Exactly one of name and delete is given; both or
         -- neither is refused with the shape of a valid call. Rename needs a
         -- super-admin or the workspace's admin; delete needs a super-admin and

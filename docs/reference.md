@@ -315,7 +315,7 @@ creating it. Set `feed_append_only` on such an epic and the removal pass never
 runs for it:
 
 ```
-update_epic(epic_id: <id>, feed_append_only: true)
+epic_update(epic_id: <id>, feed_append_only: true)
 ```
 
 Close such a card by completing it and then **deleting** it (there is no

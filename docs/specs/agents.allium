@@ -545,9 +545,9 @@ surface NamesForPeople {
         -- the task's display name and title beside it; one that names an
         -- epic adds the epic's title. That covers the replies that would
         -- otherwise give a bare id — task_create, task_update (one, several, done),
-        -- update_epic, task_dispatch, task_resume, session_wrap-up, session_exit,
+        -- epic_update, task_dispatch, task_resume, session_wrap-up, session_exit,
         -- and the work-package replies and their item lists — and the rows
-        -- that name a parent by id alone (list_epics' `(parent:<id>)`).
+        -- that name a parent by id alone (epic_search' `(parent:<id>)`).
         -- Work-package task items show their display name. The exact reply
         -- strings are in mcp-task-tools.allium, epics.allium and
         -- work-packages.allium. Epic titles are not unique, and a tool never

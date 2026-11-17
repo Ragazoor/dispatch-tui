@@ -14,7 +14,7 @@
 --           the fields every subtask is created with.
 -- Excludes: when a review produces findings (preference-review.allium and
 --           whatever code review ran); how the skill's copy reaches an agent
---           (mcp-task-tools.allium: SkillCopyIsJustInTime); what create_epic
+--           (mcp-task-tools.allium: SkillCopyIsJustInTime); what epic_create
 --           and task_create do (mcp-task-tools.allium); what auto_run_plan
 --           and wrap_up_mode do to the executing agent (tasks.allium,
 --           dispatch-prompt.allium); the tools behind each step (git,
@@ -344,9 +344,9 @@ rule CreateEpic {
     )
 
     @guidance
-        -- Through the dispatch create_epic tool: title "Code Review: <date>",
+        -- Through the dispatch epic_create tool: title "Code Review: <date>",
         -- description the report's executive summary in 3 to 5 bullets. No
-        -- repo_path: epics carry none and create_epic rejects the field, so
+        -- repo_path: epics carry none and epic_create rejects the field, so
         -- the path belongs on each subtask (EpicCarriesNoRepoPath).
 }
 

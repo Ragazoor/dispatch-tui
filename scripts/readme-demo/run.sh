@@ -105,7 +105,7 @@ wait_for 300 mcp_post '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 # ---- seed ------------------------------------------------------------------
 SF=$D/repos/storefront
 PA=$D/repos/payments-api
-epic() { mcp create_epic "$1" >/dev/null; }
+epic() { mcp epic_create "$1" >/dev/null; }
 task() {
     mcp task_create "$(jq -nc --arg t "$1" --arg r "$2" --argjson e "$3" --arg g "$4" --arg d "$5" \
         '{title:$t,repo_path:$r,epic_id:$e,tag:$g,description:$d}')" >/dev/null
@@ -138,7 +138,7 @@ task "Add refund reason codes" "$PA" null feature "For the finance report." # 19
 task "Fix currency rounding in refunds" "$PA" null bug "JPY rounds to cents." # 20
 task "Single-page checkout layout" "$SF" 1 feature "One page, three steps." # 21
 
-mcp create_work_package '{"title":"Black Friday launch","description":"Must ship before 28 November.","link_epic_ids":[1,4],"link_task_ids":[11]}' >/dev/null
+mcp work-package_create '{"title":"Black Friday launch","description":"Must ship before 28 November.","link_epic_ids":[1,4],"link_task_ids":[11]}' >/dev/null
 mcp task_update '{"task_ids":[5,13,18,19,20,21],"status":"done"}' >/dev/null
 mcp task_update '{"task_ids":[1,7,10,15],"status":"running"}' >/dev/null
 mcp task_update '{"task_ids":[2,8,12],"status":"review"}' >/dev/null

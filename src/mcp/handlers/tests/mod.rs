@@ -831,21 +831,25 @@ fn set_verify_command_description_names_the_surfaces_that_carry_the_command() {
 #[test]
 fn every_update_tool_description_names_every_field_it_accepts() {
     let defs = tool_definitions();
-    let updaters = defs["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|t| t["name"].as_str().unwrap().starts_with("update_"));
+    let updaters = defs["tools"].as_array().unwrap().iter().filter(|t| {
+        let n = t["name"].as_str().unwrap();
+        n.starts_with("update_") || n.ends_with("_update")
+    });
     let mut checked = 0;
     for tool in updaters {
         let name = tool["name"].as_str().unwrap();
         let desc = tool["description"].as_str().unwrap();
         let props = tool["inputSchema"]["properties"].as_object().unwrap();
-        // `task_update` selects with task_ids, `update_epic` with epic_id: the
+        // `task_update` selects with task_ids, `epic_update` with epic_id: the
         // selector is not a mutable field.
         let selector = match name {
             "task_update" => "task_ids".to_string(),
-            _ => format!("{}_id", name.trim_start_matches("update_")),
+            _ => format!(
+                "{}_id",
+                name.trim_start_matches("update_")
+                    .trim_end_matches("_update")
+                    .replace('-', "_")
+            ),
         };
         for field in props.keys() {
             if *field == selector {
@@ -860,7 +864,7 @@ fn every_update_tool_description_names_every_field_it_accepts() {
     }
     assert!(
         checked >= 2,
-        "expected task_update and update_epic, saw {checked}"
+        "expected task_update and epic_update, saw {checked}"
     );
 }
 
@@ -982,7 +986,7 @@ fn no_tool_description_cites_internal_symbol_names() {
 /// the common failure is under-description, not bloat: a one-line description
 /// leaves the caller guessing at what the tool returns, when not to reach for
 /// it, and how it differs from its neighbours. Six tools sat at one or two
-/// sentences — `list_epics` was 35 characters.
+/// sentences — `epic_search` was 35 characters.
 ///
 /// Deliberately a floor and not a ceiling: no test caps a description's
 /// length. A long description that states contract is doing its job.
@@ -1011,15 +1015,15 @@ fn every_tool_description_meets_the_detail_floor() {
     }
 }
 
-/// `create_epic` accepts `parent_epic_id`, so sub-epics are reachable from the
-/// create call and not only from `update_epic`. The description is where a
+/// `epic_create` accepts `parent_epic_id`, so sub-epics are reachable from the
+/// create call and not only from `epic_update`. The description is where a
 /// caller finds that out.
 #[test]
 fn create_epic_description_mentions_sub_epics() {
-    let desc = tool_description("create_epic").to_lowercase();
+    let desc = tool_description("epic_create").to_lowercase();
     assert!(
         desc.contains("sub-epic") || desc.contains("parent"),
-        "create_epic description must mention creating a sub-epic, got: {desc}"
+        "epic_create description must mention creating a sub-epic, got: {desc}"
     );
 }
 
@@ -1335,7 +1339,7 @@ fn subset_enum_consts_have_every_intended_variant() {
 }
 
 /// Every MCP arg struct carries `#[serde(deny_unknown_fields)]`, so a stray or
-/// stale argument (like the discarded `repo_path` on `create_epic`) surfaces
+/// stale argument (like the discarded `repo_path` on `epic_create`) surfaces
 /// as a JSON-RPC error instead of being silently dropped. This exercises every
 /// registered tool with a minimal valid payload plus one bogus field — the
 /// per-field/per-value behaviour of each struct is covered by that handler's
@@ -1351,9 +1355,9 @@ async fn every_tool_with_args_rejects_unknown_field() {
             "task_create",
             json!({"title": "t", "repo_path": "/r", "epic_id": null}),
         ),
-        ("list_epics", json!({})),
-        ("create_epic", json!({"title": "t"})),
-        ("update_epic", json!({"epic_id": 1})),
+        ("epic_search", json!({})),
+        ("epic_create", json!({"title": "t"})),
+        ("epic_update", json!({"epic_id": 1})),
         ("session_wrap-up", json!({"task_id": 1, "action": "rebase"})),
         ("task_dispatch", json!({"task_id": 1})),
         ("task_resume", json!({"task_id": 1})),
@@ -1378,9 +1382,10 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("query_usage", json!({})),
         ("list_keybindings", json!({})),
         ("read_context", json!({"uri": "dispatch://task/self"})),
-        ("create_work_package", json!({"title": "t"})),
-        ("list_work_packages", json!({})),
-        ("update_work_package", json!({"work_package_id": 1})),
+        ("work-package_create", json!({"title": "t"})),
+        ("work-package_search", json!({})),
+        ("work-package_update", json!({"work_package_id": 1})),
+        ("work-package_delete", json!({"work_package_id": 1})),
         ("list_workspaces", json!({})),
         ("create_workspace", json!({"name": "n"})),
         ("update_workspace", json!({"workspace_id": 1})),
@@ -1567,19 +1572,19 @@ fn no_task_or_epic_status_schema_advertises_archived() {
 fn tool_definitions_carry_annotations() {
     const READ_ONLY: &[&str] = &[
         "task_search",
-        "list_epics",
+        "epic_search",
         "query_learnings",
         "query_usage",
         "read_context",
         "list_keybindings",
-        "list_work_packages",
+        "work-package_search",
         "list_workspaces",
         "list_unseen_items",
     ];
     const DESTRUCTIVE: &[&str] = &[
         "delete_learning",
         "session_exit",
-        "update_work_package",
+        "work-package_delete",
         "update_workspace",
         "set_workspace_member",
         "delete_unseen_item",
@@ -1718,12 +1723,6 @@ fn wrap_up_description_names_release_please_among_the_refused_tags() {
 /// Tool names that predate the `<noun>_<verb>` rule (ADR 0002). Each surface
 /// task removes its names; the last one deletes the list and the exemption.
 const LEGACY_TOOL_NAMES: &[&str] = &[
-    "create_epic",
-    "list_epics",
-    "update_epic",
-    "create_work_package",
-    "list_work_packages",
-    "update_work_package",
     "record_learning",
     "query_learnings",
     "rate_learning",
@@ -1821,6 +1820,33 @@ fn unregistered_name_gets_no_rename_hint() {
     let table = [("get_task", "call task_search with task_id")];
     let msg = super::dispatch::unknown_tool_message("bogus_tool", &table);
     assert_eq!(msg, "Unknown tool: bogus_tool");
+}
+
+/// mcp-task-tools.allium: OldToolNameRedirects. Each old epic and work-package
+/// name is in the table and its hint names the tool that replaced it; the
+/// delete form of update_work_package points at work-package_delete.
+#[test]
+fn epic_and_work_package_old_names_redirect_to_their_replacements() {
+    for (old, new) in [
+        ("create_epic", "epic_create"),
+        ("list_epics", "epic_search"),
+        ("update_epic", "epic_update"),
+        ("create_work_package", "work-package_create"),
+        ("list_work_packages", "work-package_search"),
+        ("update_work_package", "work-package_update"),
+    ] {
+        let msg = super::dispatch::unknown_tool_message(old, super::dispatch::OLD_TOOL_NAMES);
+        assert!(
+            msg.contains(&format!("{old} was renamed: call {new}")),
+            "{old}: {msg}"
+        );
+        assert!(super::dispatch::TOOL_NAMES.contains(&new), "{new}");
+    }
+    let msg = super::dispatch::unknown_tool_message(
+        "update_work_package",
+        super::dispatch::OLD_TOOL_NAMES,
+    );
+    assert!(msg.contains("work-package_delete"), "{msg}");
 }
 
 /// mcp-task-tools.allium: OldToolNameRedirects. An old name is never also a

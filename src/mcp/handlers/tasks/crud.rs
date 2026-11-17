@@ -587,13 +587,7 @@ fn applied_filters(p: &TaskSearchArgs) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(", "))
 }
 
-/// The reply for a list that matched nothing: it names the filters applied.
-pub(super) fn empty_reply(noun: &str, filters: Option<String>) -> String {
-    format!(
-        "No {noun} match {}",
-        filters.unwrap_or_else(|| "(no filters)".to_string())
-    )
-}
+pub(super) use crate::mcp::handlers::types::empty_reply;
 
 /// Keep the first `limit` rows (50 when `limit` is `None`). Returns the line
 /// to append when rows were cut: it says how many, in what order, and how to

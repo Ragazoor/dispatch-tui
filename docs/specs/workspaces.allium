@@ -440,7 +440,7 @@ rule CreateEpicInWorkspace {
         -- creates one in workspace 0, the column default. MoveEpicToWorkspace
         -- is the rescue for a row that has it.
         -- The create_epic reducer runs this check for every client. Every
-        -- epic-creating path (board, create_epic MCP tool, feed
+        -- epic-creating path (board, epic_create MCP tool, feed
         -- grouping) names a workspace for a root epic. For a sub-epic the
         -- workspace argument is ignored and the parent's is used (D5). A
         -- feed's grouped and role-routed sub-epics are created by the
@@ -707,8 +707,8 @@ rule MoveEpicToWorkspace {
         -- it, and the move is the rescue. Admin of both is checked against
         -- real memberships, so a source that does not exist fails it and
         -- falls to the super-admin branch with no special case for 0.
-        -- The board and agents reach the move through update_epic with
-        -- workspace_id (epics.allium: UpdateEpicViaMcp). update_epic answers
+        -- The board and agents reach the move through epic_update with
+        -- workspace_id (epics.allium: UpdateEpicViaMcp). The epic_update tool answers
         -- an epic the caller cannot see as missing, except a super-admin's
         -- bare move (a workspace and no other field), which reaches this
         -- rule so the rescue works.
@@ -810,7 +810,7 @@ rule LinkOnlyInsideTheWorkspace {
 
     @guidance
         -- The store's check on every link, whichever path asks for it
-        -- (CreateWorkPackage, the link picker, update_work_package). A refused
+        -- (CreateWorkPackage, the link picker, work-package_update). A refused
         -- link writes nothing. item_workspace is the epic's workspace for an
         -- epic, the epic's workspace for an epic task, and null for a
         -- main-board task, which may be linked anywhere and stays private to
@@ -822,14 +822,14 @@ rule LinkOnlyInsideTheWorkspace {
 -- Agents are first-class users: the MCP twins take workspace_id and
 -- visibility as parameters (epics.allium: CreateEpicViaMcp, UpdateEpicViaMcp;
 -- work-packages.allium: CreateWorkPackageViaMcp, UpdateWorkPackageViaMcp).
--- create_epic requires workspace_id for a root epic and refuses one for a
+-- epic_create requires workspace_id for a root epic and refuses one for a
 -- sub-epic, which takes its parent's, so a caller never thinks it chose a
--- workspace it did not. create_work_package always requires it. There is no
+-- workspace it did not. work-package_create always requires it. There is no
 -- default workspace and no inheritance from the agent's task: the person's
 -- workspaces and their ids are named in the tool descriptions and in the
 -- refusal for a missing or unknown one. visibility is "public" or "private",
 -- default public. Results name the workspace and the visibility, and so do
--- list_epics and list_work_packages; list_work_packages also names the
+-- epic_search and work-package_search; work-package_search also names the
 -- creator (CreatorIsShownByName). The tool handler refuses a missing
 -- workspace_id, and one given with a parent, before it calls the store; every
 -- other refusal is the store's.
@@ -1195,7 +1195,7 @@ surface StoreReads {
     @guarantee CreatorIsShownByName
         -- D4. Wherever a card or a tool result names who created an item,
         -- it shows UserProfile.shown_name: the creator's display name, or the
-        -- identity prefix when they have set none. list_work_packages and
+        -- identity prefix when they have set none. work-package_search and
         -- the package card name a creator. The shown name has two twins,
         -- because the board cannot link the module crate in a release build:
         -- `shown_name` in the module's user_profile.rs (used by the module and
@@ -1223,7 +1223,7 @@ surface WorkspaceAdministration {
         SetMemberRole(membership, role) when workspace.is_admin(admin.identity)
         RemoveMember(membership) when workspace.is_admin(admin.identity)
         RenameWorkspace(workspace, name) when workspace.is_admin(admin.identity)
-        -- update_epic with workspace_id (epics.allium: UpdateEpicViaMcp), by
+        -- epic_update with workspace_id (epics.allium: UpdateEpicViaMcp), by
         -- an admin of the source and of the destination.
         MoveEpicToWorkspace(epic, destination)
             when workspace.is_admin(admin.identity)

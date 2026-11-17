@@ -1540,7 +1540,7 @@ rule UnsubscribeFromEpic {
         -- permanent.
         --
         -- RELEASING THE CLAIM. A feed epic this person no longer
-        -- follows is invisible to their boards (`list_epics` answers from
+        -- follows is invisible to their boards (`epic_search` answers from
         -- `covered_epics` UNION the `own_epics`/`own_tasks` views), so a claim they hold on it
         -- would stop the feed for EVERY board with no error: the owner never
         -- polls it and no other host may. Releasing the row lets the next host

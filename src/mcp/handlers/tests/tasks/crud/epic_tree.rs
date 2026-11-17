@@ -2,7 +2,7 @@ use super::*;
 use crate::models::{EpicId, TaskId};
 
 // ---------------------------------------------------------------------------
-// Walking an epic tree and changing many tasks at once: list_epics
+// Walking an epic tree and changing many tasks at once: epic_search
 // (parent_epic_id, recursive), task_search (recursive, base_branch) and
 // task_update. See ListEpicsViaMcp in docs/specs/epics.allium and
 // ListTasksViaMcp / UpdateTasksViaMcp in docs/specs/mcp-task-tools.allium.
@@ -72,14 +72,14 @@ fn row(text: &str, id: impl std::fmt::Display) -> Option<&str> {
     text.lines().find(|l| l.starts_with(&prefix))
 }
 
-// -- list_epics ---------------------------------------------------------------
+// -- epic_search ---------------------------------------------------------------
 
 #[tokio::test]
 async fn list_epics_with_parent_returns_direct_children_only() {
     let state = test_state().await;
     let t = make_tree(&state).await;
 
-    let resp = tool(&state, "list_epics", json!({ "parent_epic_id": t.root.0 })).await;
+    let resp = tool(&state, "epic_search", json!({ "parent_epic_id": t.root.0 })).await;
     let text = extract_response_text(&resp);
 
     assert!(row(&text, t.child).is_some(), "{text}");
@@ -96,7 +96,7 @@ async fn list_epics_recursive_returns_every_descendant_but_not_the_parent() {
 
     let resp = tool(
         &state,
-        "list_epics",
+        "epic_search",
         json!({ "parent_epic_id": t.root.0, "recursive": true }),
     )
     .await;
@@ -114,7 +114,7 @@ async fn list_epics_rows_name_their_parent() {
     let state = test_state().await;
     let t = make_tree(&state).await;
 
-    let text = extract_response_text(&tool(&state, "list_epics", json!({})).await);
+    let text = extract_response_text(&tool(&state, "epic_search", json!({})).await);
 
     let grandchild = row(&text, t.grandchild).unwrap();
     assert!(
@@ -130,7 +130,7 @@ async fn list_epics_recursive_without_parent_is_invalid_params() {
     let state = test_state().await;
     make_tree(&state).await;
 
-    let resp = tool(&state, "list_epics", json!({ "recursive": true })).await;
+    let resp = tool(&state, "epic_search", json!({ "recursive": true })).await;
     assert_error(&resp, "parent_epic_id");
 }
 
@@ -138,7 +138,7 @@ async fn list_epics_recursive_without_parent_is_invalid_params() {
 async fn list_epics_with_unknown_parent_is_not_found() {
     let state = test_state().await;
 
-    let resp = tool(&state, "list_epics", json!({ "parent_epic_id": 9999 })).await;
+    let resp = tool(&state, "epic_search", json!({ "parent_epic_id": 9999 })).await;
     assert!(is_error(&resp), "{:?}", resp.result);
 }
 
@@ -147,8 +147,14 @@ async fn list_epics_with_childless_parent_reports_none_found() {
     let state = test_state().await;
     let t = make_tree(&state).await;
 
-    let resp = tool(&state, "list_epics", json!({ "parent_epic_id": t.other.0 })).await;
-    assert!(extract_response_text(&resp).contains("No epics found"));
+    let resp = tool(
+        &state,
+        "epic_search",
+        json!({ "parent_epic_id": t.other.0 }),
+    )
+    .await;
+    assert!(extract_response_text(&resp)
+        .contains(&format!("No epics match parent_epic_id={}", t.other.0)));
 }
 
 // -- task_search ---------------------------------------------------------------

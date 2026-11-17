@@ -571,7 +571,7 @@ rule DeleteEpicRefused {
 -- == MCP Epic Tools ==
 
 rule CreateEpicViaMcp {
-    when: McpCreateEpic(title, description?, sort_order?, parent_epic_id?,
+    when: McpEpicCreate(title, description?, sort_order?, parent_epic_id?,
                         workspace_id?, visibility?)
 
     -- parent_epic_id, when given, must refer to an existing epic.
@@ -596,20 +596,27 @@ rule CreateEpicViaMcp {
         -- parent_epic_id (the sub-epic takes its parent's). The handler
         -- refuses both before it calls the store; the store then checks the
         -- caller may create there (workspaces.allium: CreateEpicInWorkspace).
+        -- The trajectory logs showed 6 of 65 create_epic calls refused on
+        -- this: 5 left workspace_id out of a root epic, 1 passed it with a
+        -- parent. So the tool description opens with the either/or (a root
+        -- epic takes workspace_id and no parent_epic_id, a sub-epic takes
+        -- parent_epic_id and no workspace_id), each of the two arguments
+        -- says which case it belongs to, and each refusal names the one
+        -- argument to add or drop.
         -- feed_command and feed_interval_secs are NOT exposed by the
-        -- MCP create_epic tool — even though the underlying service
+        -- MCP epic_create tool — even though the underlying service
         -- accepts them, the handler hardcodes them to null. Feeds are
         -- configured after creation either from the TUI (via the epic
         -- editor, EditEpic) or via UpdateEpicViaMcp.
 }
 
--- One epic is read through list_epics with epic_id: there is no separate
+-- One epic is read through epic_search with epic_id: there is no separate
 -- get_epic tool (docs/mcp-tool-design.md, rule 1: a get and a list of the same
 -- entity are one capability). The two forms are separate rules because their
 -- replies differ: the list gives one row per epic, the epic_id form the full
--- record. list_work_packages(work_package_id) is the same shape.
+-- record. work-package_search(work_package_id) is the same shape.
 rule GetEpicViaMcp {
-    when: McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?,
+    when: McpEpicSearch(epic_id?, parent_epic_id?, recursive?, query?, limit?,
                  updated_after?, updated_before?,
                  completed_after?, completed_before?)
 
@@ -641,7 +648,7 @@ rule GetEpicViaMcp {
         -- sub-epics are aggregated recursively; for any other epic only
         -- the direct subtasks are counted. Without the shared rollup a
         -- group_by_repo epic whose tasks all live in per-repo sub-epics
-        -- reports 0/0 here while list_epics shows the real totals.
+        -- reports 0/0 here while epic_search shows the real totals.
         -- An unknown epic_id returns ServiceError::NotFound, surfaced as
         -- the -32001 not-found code (distinct from -32602, which means
         -- invalid params).
@@ -660,7 +667,7 @@ rule GetEpicViaMcp {
 }
 
 rule ListEpicsViaMcp {
-    when: McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?,
+    when: McpEpicSearch(epic_id?, parent_epic_id?, recursive?, query?, limit?,
                  updated_after?, updated_before?,
                  completed_after?, completed_before?)
 
@@ -690,7 +697,7 @@ rule ListEpicsViaMcp {
     -- When query is set, only epics matching it are kept, after the scope
     -- above is applied (the two are ANDed).
     ensures: EpicsListed(parent_epic_id: parent_epic_id, recursive: recursive,
-                         query: query, limit: limit,
+                         query: query, limit: limit ?? 50,
                          updated_after: updated_after,
                          updated_before: updated_before,
                          completed_after: completed_after,
@@ -712,16 +719,31 @@ rule ListEpicsViaMcp {
         -- every word is a case-insensitive substring of its title or its
         -- description. A blank query is the same as none. This is the same
         -- rule as task_search (ListTasksViaMcp in mcp-task-tools.allium). The
-        -- progress counts of a matching epic are unchanged. Nothing matching
-        -- gives the usual "No epics found".
-        -- limit (optional, no default) keeps the first `limit` rows after the
-        -- scope and query are applied; when rows were cut the reply ends with
-        -- "Showing <limit> of <total>. Narrow your query or filters." The
-        -- same rule as task_search.
+        -- progress counts of a matching epic are unchanged.
+        -- == limit defaults to 50 ==
+        -- limit is optional; without it the first 50 rows are returned after
+        -- the scope, query and time filters are applied (the trajectory logs
+        -- show a no-argument reply of over 20 KB, 26 times, p90 39 KB). The
+        -- same rule as task_search (docs/adr/0002, decision 5).
+        -- == the order decides which rows an agent sees ==
+        -- Rows are sorted by updated_at, newest first, ties by id
+        -- descending, as in task_search. When rows were cut, a final line
+        -- says how to get the rest:
+        --   "Showing <limit> of <total>, newest update first. Narrow with
+        --    parent_epic_id, query or the time filters, or raise limit."
+        -- When nothing is cut there is no such line. A caller that must see
+        -- every epic checks for the line and raises limit.
+        -- == an empty result names the filters ==
+        -- Nothing found replies "No epics match <filters>", where <filters>
+        -- lists every argument the call applied as name=value, in the order
+        -- parent_epic_id, recursive, query, updated_after, updated_before,
+        -- completed_after, completed_before, e.g. "No epics match
+        -- parent_epic_id=12, query=\"feed\"". A call with no filter reads
+        -- "No epics match (no filters)", the same wording as task_search.
         --
-        -- All arguments are optional. With neither it returns every epic in
-        -- the database along with done/total subtask counts for each. An
-        -- unknown parent_epic_id is not found (-32001); recursive without
+        -- All arguments are optional. With none it returns the first 50
+        -- epics in the database along with done/total subtask counts for
+        -- each. An unknown parent_epic_id is not found (-32001); recursive without
         -- parent_epic_id is invalid params (-32602).
         -- The response is one line per epic carrying the
         -- epic id, the title, the progress fraction, then
@@ -730,19 +752,19 @@ rule ListEpicsViaMcp {
         -- the status is not backlog), then " (parent:<id> <parent title>)" when the epic
         -- has a parent, and finally the description. The parent is on every row so
         -- a caller can rebuild the tree from one call instead of one
-        -- list_epics(epic_id) per epic. The id
+        -- epic_search(epic_id) per epic. The id
         -- is included because it is how the caller addresses the epic in
-        -- follow-up calls (list_epics with epic_id, update_epic, task_create).
-        -- An empty result returns an informational "No epics found"
+        -- follow-up calls (epic_search with epic_id, epic_update, task_create).
+        -- An empty result returns an informational "No epics match ..."
         -- message rather than an error.
 }
 
--- The update_epic reply is "<epic ref> updated (fields)", e.g.
+-- The epic_update reply is "<epic ref> updated (fields)", e.g.
 -- `Epic 314 ("Dispatch") updated (title)` (mcp-task-tools.allium:
 -- RepliesNameWhatTheyTouch). When the call changes the title, the reply shows
 -- the new one.
 rule UpdateEpicViaMcp {
-    when: McpUpdateEpic(epic, title?, description?, status?, plan_path?, sort_order?,
+    when: McpEpicUpdate(epic, title?, description?, status?, plan_path?, sort_order?,
                         feed_command?, feed_interval_secs?, group_by_repo?,
                         feed_append_only?, parent_epic_id?, visibility?,
                         workspace_id?)
@@ -2107,16 +2129,16 @@ surface EpicMcpTools {
     facing _: core/McpClient
 
     provides:
-        -- create_epic (CreateEpicViaMcp).
-        McpCreateEpic(title, description?, sort_order?, parent_epic_id?,
+        -- epic_create (CreateEpicViaMcp).
+        McpEpicCreate(title, description?, sort_order?, parent_epic_id?,
                       workspace_id?, visibility?)
-        -- list_epics: one epic with epic_id (GetEpicViaMcp), else a list
+        -- epic_search: one epic with epic_id (GetEpicViaMcp), else a list
         -- (ListEpicsViaMcp).
-        McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?,
+        McpEpicSearch(epic_id?, parent_epic_id?, recursive?, query?, limit?,
                  updated_after?, updated_before?,
                  completed_after?, completed_before?)
-        -- update_epic (UpdateEpicViaMcp).
-        McpUpdateEpic(epic, title?, description?, status?, plan_path?, sort_order?,
+        -- epic_update (UpdateEpicViaMcp).
+        McpEpicUpdate(epic, title?, description?, status?, plan_path?, sort_order?,
                       feed_command?, feed_interval_secs?, group_by_repo?,
                       feed_append_only?, parent_epic_id?, visibility?,
                       workspace_id?)

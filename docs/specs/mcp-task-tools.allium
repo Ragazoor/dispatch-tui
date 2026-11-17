@@ -81,15 +81,15 @@ rule ToolsAdvertiseAnnotations {
 
     -- Every tool in the list carries `annotations` with a `title` and the four
     -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
-    -- nothing (task_search, list_epics, query_learnings,
-    -- query_usage, read_context, list_keybindings, list_work_packages,
+    -- nothing (task_search, epic_search, query_learnings,
+    -- query_usage, read_context, list_keybindings, work-package_search,
     -- list_workspaces, list_unseen_items).
     -- managed_feed_config is NOT in that list: its no-argument call reads but
     -- its other calls write, so it is declared idempotent (see
     -- epics.allium: ManagedFeedConfigViaMcp, @guidance).
     -- destructiveHint is true only where a call removes or closes something
     -- that cannot be restored by another call (delete_learning, session_exit,
-    -- update_work_package, whose delete form removes the package;
+    -- work-package_delete;
     -- update_workspace and set_workspace_member, whose delete and remove forms
     -- remove the workspace or the membership; delete_unseen_item);
     -- it is false on a read-only tool. idempotentHint is true where repeating
@@ -135,7 +135,12 @@ rule OldToolNameRedirects {
     -- limit says otherwise"), create_task ("call task_create"), update_tasks
     -- and the older update_task ("call task_update"), dispatch_task ("call
     -- task_dispatch"), resume_task ("call task_resume"), wrap_up ("call
-    -- session_wrap-up") and exit_session ("call session_exit").
+    -- session_wrap-up"), exit_session ("call session_exit"), create_epic ("call
+    -- epic_create"), list_epics ("call epic_search; it returns 50 rows unless
+    -- limit says otherwise"), update_epic ("call epic_update"),
+    -- create_work_package ("call work-package_create"), list_work_packages
+    -- ("call work-package_search"), update_work_package ("call
+    -- work-package_update; to delete a package call work-package_delete").
     ensures: UnknownToolErrorNamesNewTool()
 
     @guidance
@@ -953,7 +958,7 @@ rule GetTaskViaMcp {
     @guidance
         -- task_search with task_id takes no other argument and is the tool a
         -- dispatched agent uses to read its own task (title, description,
-        -- plan, tag, wrap_up_mode). It copies list_epics' epic_id form
+        -- plan, tag, wrap_up_mode). It copies epic_search' epic_id form
         -- (GetEpicViaMcp): task_id alongside any other argument is rejected as
         -- invalid params (-32602), and the error names the arguments that were
         -- set. A recursive or archived of false counts as not set.
@@ -1137,8 +1142,8 @@ rule ArchivedTaskIsReadOnly {
 }
 
 -- == TimeFilterInput: the shared rule for updated_* and completed_* ==
--- task_search (list form) and list_epics take updated_after, updated_before,
--- completed_after and completed_before; list_work_packages takes
+-- task_search (list form) and epic_search take updated_after, updated_before,
+-- completed_after and completed_before; work-package_search takes
 -- updated_after and updated_before only (a package has no completed_at, and
 -- the completed_* pair is not offered there). Every list that takes them
 -- applies this one rule.
@@ -1244,8 +1249,8 @@ rule ListTasksViaMcp {
         -- updated_after / updated_before bound Task.updated_at;
         -- completed_after / completed_before bound Task.completed_at. Each
         -- is optional and ANDed with every other filter. See TimeFilterInput
-        -- for the input form, the bounds and the validation, which list_epics
-        -- and list_work_packages share.
+        -- for the input form, the bounds and the validation, which epic_search
+        -- and work-package_search share.
         -- completed_at records the LAST completion and survives a move out
         -- of done; updated_at moves on every later change, so a done task
         -- edited after completion is later in updated_at than in
@@ -1272,7 +1277,7 @@ rule ListTasksViaMcp {
         -- may match in either field, different words in different fields).
         -- Word order does not matter. A blank query (empty or only
         -- whitespace) has no words and is the same as omitting it. The same
-        -- matching rule serves list_epics (ListEpicsViaMcp in epics.allium).
+        -- matching rule serves epic_search (ListEpicsViaMcp in epics.allium).
         -- Substring, not whole-word: "dispatch" matches "redispatch". No
         -- ranking: matches come back in the order above.
         -- == recursive widens the epic scope to the whole subtree ==

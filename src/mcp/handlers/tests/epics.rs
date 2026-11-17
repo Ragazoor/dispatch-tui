@@ -11,7 +11,7 @@ async fn create_epic_minimal() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_epic",
+            "name": "epic_create",
             "arguments": { "workspace_id": 1, "title": "My Epic" }
         })),
     )
@@ -32,7 +32,7 @@ async fn create_epic_with_all_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_epic",
+            "name": "epic_create",
             "arguments": { "workspace_id": 1,
                 "title": "Full Epic",
                 "description": "Epic desc"
@@ -53,7 +53,7 @@ async fn create_epic_missing_title() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_epic",
+            "name": "epic_create",
             "arguments": { "workspace_id": 1,}
         })),
     )
@@ -74,7 +74,7 @@ async fn get_epic_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -91,7 +91,7 @@ async fn get_epic_not_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": 9999 }
         })),
     )
@@ -99,7 +99,7 @@ async fn get_epic_not_found() {
     assert_error(&resp, "not found");
 }
 
-// `list_epics` with `epic_id` must agree with its list rows on a `group_by_repo` epic's progress —
+// `epic_search` with `epic_id` must agree with its list rows on a `group_by_repo` epic's progress —
 // both roll up descendant sub-epics rather than counting only direct subtasks.
 #[tokio::test]
 async fn get_epic_matches_list_epics_progress_for_grouped_epic() {
@@ -129,24 +129,24 @@ async fn get_epic_matches_list_epics_progress_for_grouped_epic() {
     let list_resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": {} })),
+        Some(json!({ "name": "epic_search", "arguments": {} })),
     )
     .await;
     let list_text = extract_response_text(&list_resp);
     let list_line = list_text
         .lines()
         .find(|l| l.contains("Grouped Root"))
-        .expect("list_epics should show Grouped Root");
+        .expect("epic_search should show Grouped Root");
     assert!(
         list_line.contains("0/1 done"),
-        "list_epics should aggregate the sub-epic's task: {list_line}"
+        "epic_search should aggregate the sub-epic's task: {list_line}"
     );
 
     let get_resp = call(
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": root.id.0 }
         })),
     )
@@ -154,7 +154,7 @@ async fn get_epic_matches_list_epics_progress_for_grouped_epic() {
     let get_text = extract_response_text(&get_resp);
     assert!(
         get_text.contains("0/1 done"),
-        "get_epic should match list_epics' rollup (0/1 done), got: {get_text}"
+        "get_epic should match epic_search' rollup (0/1 done), got: {get_text}"
     );
 }
 
@@ -194,7 +194,7 @@ async fn get_epic_shows_subtask_summary() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -219,7 +219,7 @@ async fn get_epic_accepts_string_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0.to_string() }
         })),
     )
@@ -239,11 +239,11 @@ async fn list_epics_empty() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": {} })),
+        Some(json!({ "name": "epic_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
-    assert!(text.contains("No epics found"));
+    assert!(text.contains("No epics match (no filters)"));
 }
 
 #[tokio::test]
@@ -263,7 +263,7 @@ async fn list_epics_with_items() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": {} })),
+        Some(json!({ "name": "epic_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -326,7 +326,7 @@ async fn list_epics_shows_subtask_counts() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": {} })),
+        Some(json!({ "name": "epic_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -349,7 +349,7 @@ async fn update_epic_workspace_id_reaches_the_move_and_the_store_refuses_an_unkn
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "workspace_id": 4242 }
         })),
     )
@@ -374,7 +374,7 @@ async fn update_epic_title() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "title": "New Title" }
         })),
     )
@@ -405,7 +405,7 @@ async fn update_epic_mark_done() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "status": "done" }
         })),
     )
@@ -433,7 +433,7 @@ async fn update_epic_multiple_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": {
                 "epic_id": epic.id.0,
                 "title": "New",
@@ -462,7 +462,7 @@ async fn update_epic_accepts_string_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0.to_string(), "title": "Updated" }
         })),
     )
@@ -487,7 +487,7 @@ async fn update_epic_plan() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "plan_path": "docs/plans/epic-plan.md" }
         })),
     )
@@ -518,7 +518,7 @@ async fn update_epic_no_fields_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -539,7 +539,7 @@ async fn update_epic_feed_command_set() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_command": "echo []" }
         })),
     )
@@ -571,7 +571,7 @@ async fn update_epic_feed_command_clear() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_command": null }
         })),
     )
@@ -606,7 +606,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "title": "Updated Title" }
         })),
     )
@@ -630,7 +630,7 @@ async fn update_epic_feed_interval_secs_set() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_interval_secs": 60 }
         })),
     )
@@ -658,7 +658,7 @@ async fn update_epic_sub_floor_feed_interval_secs_rejected() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "update_epic",
+                "name": "epic_update",
                 "arguments": { "epic_id": epic.id.0, "feed_interval_secs": bad }
             })),
         )
@@ -707,7 +707,7 @@ async fn update_epic_feed_interval_secs_clear() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_interval_secs": null }
         })),
     )
@@ -744,7 +744,7 @@ async fn get_epic_shows_feed_command() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -778,7 +778,7 @@ async fn get_epic_shows_parent_when_set() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": child.id.0 }
         })),
     )
@@ -803,7 +803,7 @@ async fn get_epic_shows_bare_parent_id_when_parent_is_missing() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": child.id.0 }
         })),
     )
@@ -828,7 +828,7 @@ async fn get_epic_omits_parent_line_when_unset() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_epics",
+            "name": "epic_search",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -860,7 +860,7 @@ async fn mcp_create_sub_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_epic",
+            "name": "epic_create",
             "arguments": {
                 "title": "Sub Epic",
                 "description": "child",
@@ -902,7 +902,7 @@ async fn update_epic_feed_append_only() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "feed_append_only": true }
         })),
     )
@@ -926,7 +926,7 @@ async fn update_epic_group_by_repo() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": epic.id.0, "group_by_repo": true }
         })),
     )
@@ -938,7 +938,7 @@ async fn update_epic_group_by_repo() {
 }
 
 // ---------------------------------------------------------------------------
-// update_epic parent_epic_id tests
+// epic_update parent_epic_id tests
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -959,7 +959,7 @@ async fn update_epic_parent_id_set() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": child.id.0, "parent_epic_id": parent.id.0 }
         })),
     )
@@ -989,7 +989,7 @@ async fn update_epic_parent_id_clear() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": child.id.0, "parent_epic_id": null }
         })),
     )
@@ -1022,7 +1022,7 @@ async fn update_epic_parent_id_absent_preserves_existing() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": child.id.0, "title": "New Title" }
         })),
     )
@@ -1052,7 +1052,7 @@ async fn update_epic_parent_id_cycle_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_epic",
+            "name": "epic_update",
             "arguments": { "epic_id": a.id.0, "parent_epic_id": b.id.0 }
         })),
     )
@@ -1065,11 +1065,11 @@ async fn update_epic_tool_schema_includes_parent_epic_id() {
     let state = test_state().await;
     let resp = call(&state, "tools/list", None).await;
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
-    let update_epic = tools
+    let epic_update = tools
         .iter()
-        .find(|t| t["name"] == "update_epic")
-        .expect("update_epic not in tool list");
-    let props = &update_epic["inputSchema"]["properties"];
+        .find(|t| t["name"] == "epic_update")
+        .expect("epic_update not in tool list");
+    let props = &epic_update["inputSchema"]["properties"];
     assert!(
         props.get("parent_epic_id").is_some(),
         "update_epic schema is missing parent_epic_id property"
@@ -1083,7 +1083,7 @@ async fn create_epic_tool_schema_includes_parent_epic_id() {
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
     let create_epic = tools
         .iter()
-        .find(|t| t["name"] == "create_epic")
+        .find(|t| t["name"] == "epic_create")
         .expect("create_epic not in tool list");
     let props = &create_epic["inputSchema"]["properties"];
     assert!(
@@ -1102,7 +1102,7 @@ async fn create_epic_schema_excludes_repo_path() {
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
     let create_epic = tools
         .iter()
-        .find(|t| t["name"] == "create_epic")
+        .find(|t| t["name"] == "epic_create")
         .expect("create_epic not in tool list");
     let schema = &create_epic["inputSchema"];
     assert!(
@@ -1123,7 +1123,7 @@ async fn update_epic_schema_excludes_repo_path() {
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
     let update_epic = tools
         .iter()
-        .find(|t| t["name"] == "update_epic")
+        .find(|t| t["name"] == "epic_update")
         .expect("update_epic not in tool list");
     assert!(
         update_epic["inputSchema"]["properties"]
@@ -1141,7 +1141,7 @@ async fn list_epics_text(state: &Arc<McpState>, args: Value) -> String {
     let resp = call(
         state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": args })),
+        Some(json!({ "name": "epic_search", "arguments": args })),
     )
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
@@ -1178,7 +1178,7 @@ async fn list_epics_query_matches_title_and_description_words() {
 
     assert_eq!(
         list_epics_text(&state, json!({ "query": "zzzz" })).await,
-        "No epics found"
+        "No epics match query=\"zzzz\""
     );
 }
 
@@ -1218,7 +1218,7 @@ async fn list_epics_limit_caps_rows_and_hints() {
     assert_eq!(text.lines().count(), 3, "{text}");
     assert_eq!(
         text.lines().last().unwrap(),
-        "Showing 2 of 3. Narrow your query or filters."
+        "Showing 2 of 3, newest update first. Narrow with parent_epic_id, query or the time filters, or raise limit."
     );
     let text = list_epics_text(&state, json!({ "limit": 3 })).await;
     assert!(!text.contains("Showing"), "{text}");
@@ -1226,7 +1226,7 @@ async fn list_epics_limit_caps_rows_and_hints() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": { "limit": 0 } })),
+        Some(json!({ "name": "epic_search", "arguments": { "limit": 0 } })),
     )
     .await;
     let rejected = resp.error.is_some()
@@ -1235,6 +1235,98 @@ async fn list_epics_limit_caps_rows_and_hints() {
             .as_ref()
             .is_some_and(|r| r["isError"] == json!(true));
     assert!(rejected, "limit 0 must be rejected: {resp:?}");
+}
+
+/// epics.allium: ListEpicsViaMcp, "limit defaults to 50". A call with no
+/// arguments returns at most 50 rows and a final line says how to get the rest.
+#[tokio::test]
+async fn epic_search_without_a_limit_returns_the_first_fifty() {
+    let state = test_state().await;
+    let w = state.db_write();
+    for i in 0..52 {
+        w.create_epic(&format!("E{i}"), "", None).await.unwrap();
+    }
+    let text = list_epics_text(&state, json!({})).await;
+    assert_eq!(text.lines().count(), 51, "{text}");
+    assert_eq!(
+        text.lines().last().unwrap(),
+        "Showing 50 of 52, newest update first. Narrow with parent_epic_id, query or the time filters, or raise limit."
+    );
+    let text = list_epics_text(&state, json!({"limit": 52})).await;
+    assert_eq!(text.lines().count(), 52, "{text}");
+    assert!(!text.contains("Showing"), "{text}");
+}
+
+/// epics.allium: ListEpicsViaMcp, "the order decides which rows an agent
+/// sees": newest update first, ties by id descending.
+#[tokio::test]
+async fn epic_search_lists_the_most_recently_updated_first() {
+    let state = test_state().await;
+    let w = state.db_write();
+    for t in ["First", "Second", "Third"] {
+        w.create_epic(t, "", None).await.unwrap();
+    }
+    let text = list_epics_text(&state, json!({"limit": 1})).await;
+    assert!(text.lines().next().unwrap().contains("Third"), "{text}");
+}
+
+/// epics.allium: ListEpicsViaMcp, "an empty result names the filters". The
+/// wording is task_search's, with the epic filters in the stated order.
+#[tokio::test]
+async fn epic_search_empty_result_names_the_filters() {
+    let state = test_state().await;
+    let parent = state.db_write().create_epic("P", "", None).await.unwrap();
+    assert_eq!(
+        list_epics_text(
+            &state,
+            json!({"parent_epic_id": parent.id.0, "recursive": true, "query": "none"})
+        )
+        .await,
+        format!(
+            "No epics match parent_epic_id={}, recursive=true, query=\"none\"",
+            parent.id.0
+        )
+    );
+    assert_eq!(
+        list_epics_text(&state, json!({"updated_after": "2999-01-01T00:00:00Z"})).await,
+        "No epics match updated_after=2999-01-01T00:00:00Z"
+    );
+}
+
+/// epics.allium: CreateEpicViaMcp. The description opens with the root or
+/// sub-epic either/or, and each argument says which case it belongs to, so a
+/// caller does not forget workspace_id for a root epic or pass it for a sub-epic.
+#[test]
+fn epic_create_description_states_the_root_or_sub_epic_rule() {
+    let desc = tool_description("epic_create");
+    let before_visibility = &desc[..desc.find("visibility").unwrap()];
+    assert!(
+        before_visibility.contains("workspace_id") && before_visibility.contains("parent_epic_id"),
+        "the workspace rule comes before the other arguments, got: {desc}"
+    );
+    let props = &tool_def("epic_create")["inputSchema"]["properties"];
+    let workspace = props["workspace_id"]["description"].as_str().unwrap();
+    assert!(workspace.contains("root epic"), "{props}");
+    let parent = props["parent_epic_id"]["description"].as_str().unwrap();
+    assert!(parent.contains("no workspace_id"), "{props}");
+}
+
+/// Each refusal names the one argument to add or drop.
+#[tokio::test]
+async fn epic_create_refusals_name_the_argument_to_add_or_drop() {
+    let state = test_state().await;
+    let root = extract_response_text(&create_epic_call(&state, json!({"title": "E"})).await);
+    assert!(root.contains("add workspace_id"), "{root}");
+    create_epic_call(&state, json!({"title": "P", "workspace_id": 1})).await;
+    let parent = state.db.list_epics().await.remove(0).id;
+    let sub = extract_response_text(
+        &create_epic_call(
+            &state,
+            json!({"title": "S", "parent_epic_id": parent.0, "workspace_id": 1}),
+        )
+        .await,
+    );
+    assert!(sub.contains("drop workspace_id"), "{sub}");
 }
 
 /// epics.allium: GetEpicViaMcp. epic_id picks one epic, so no filter can
@@ -1257,7 +1349,7 @@ async fn list_epics_with_epic_id_and_a_filter_is_refused() {
         let resp = call(
             &state,
             "tools/call",
-            Some(json!({"name": "list_epics", "arguments": args})),
+            Some(json!({"name": "epic_search", "arguments": args})),
         )
         .await;
         assert_error(&resp, "epic_id");
@@ -1292,7 +1384,7 @@ async fn create_epic_call(state: &Arc<McpState>, arguments: Value) -> JsonRpcRes
     call(
         state,
         "tools/call",
-        Some(json!({"name": "create_epic", "arguments": arguments})),
+        Some(json!({"name": "epic_create", "arguments": arguments})),
     )
     .await
 }
@@ -1358,7 +1450,7 @@ async fn update_epic_sets_visibility() {
         &state,
         "tools/call",
         Some(
-            json!({"name": "update_epic", "arguments": {"epic_id": id.0, "visibility": "private"}}),
+            json!({"name": "epic_update", "arguments": {"epic_id": id.0, "visibility": "private"}}),
         ),
     )
     .await;
@@ -1382,7 +1474,7 @@ async fn list_epics_with(state: &Arc<McpState>, arguments: Value) -> JsonRpcResp
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": arguments })),
+        Some(json!({ "name": "epic_search", "arguments": arguments })),
     )
     .await
 }
