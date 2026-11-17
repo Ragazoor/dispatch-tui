@@ -1,8 +1,11 @@
 -- allium: 3
 -- tasks.allium
 --
--- Scope: Task lifecycle — creation, status movement, reorder, delete, copy, editor,
---        and the board-wide multi-selection the batch rules consume.
+-- Scope: Task lifecycle — creation, status movement, phoenix respawn,
+--        build-output cleanup of Done tasks, reorder, move to epic, the
+--        new-task signal, bookmarks, delete and archive, copy, editor, the
+--        board-wide multi-selection the batch rules consume, section collapse
+--        and epic fold, and the module write rules every task write obeys.
 -- Excludes: Agent health and hooks (see agent-health.allium);
 --           dispatch and retry (see dispatch.allium);
 --           PR/wrap-up (see pr-workflow.allium);
@@ -28,6 +31,202 @@ given {
     -- The one set of folded epic groups, consumed by ToggleEpicFold. See
     -- board-layout.allium: "Epic Folding".
     folded_epics: board_layout/FoldedEpics
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- TaskTeardown releases a task's live resources on the host that holds them.
+-- DeleteTask and BatchDelete (Rules: "Delete") perform it, and so do DeleteEpic
+-- (epics.allium) and the feed removal clauses in feeds.allium
+-- (RoleRoutedFeedSync, GroupedFeedUpsert, FlatFeedReconcile,
+-- UpsertFeedTasks), where removing a stale feed task performs this same
+-- teardown rather than dropping the row and orphaning the worktree of an
+-- in-flight agent. Those rules state their own postconditions; this contract
+-- states what the teardown itself promises.
+--
+-- Done is not teardown. A Done task keeps its worktree and branch; only the
+-- worktree's build output is cleared (ClearBuildOutputOfDoneTask).
+contract TaskTeardown {
+    -- In order: 1. kill the task's tmux window if it has one; 2. remove the
+    -- task's worktree if it has one; 3. delete the task's branch, best
+    -- effort. Answers the worktree path still on disk when step 2 failed or
+    -- did not run because step 1 failed, and null when there was none to
+    -- release or it was released.
+    teardown: (worktree: String?, tmux_window: String?) -> String?
+
+    @invariant TeardownIsOwedWheneverThereIsSomethingToRelease
+        -- The teardown runs when the task owns a worktree OR a tmux window;
+        -- a task owning NEITHER runs no commands at all. The two are
+        -- independent, so all four combinations are reachable, and each step
+        -- is owed on its own condition (a failed step 1 stops the rest; see
+        -- below):
+        --   * worktree and window -> steps 1, 2, 3.
+        --   * window, no worktree -> step 1 only.
+        --   * worktree, no window -> steps 2 and 3.
+        --   * neither -> nothing.
+        -- Step 1 is NOT contingent on step 2 having something to remove.
+        -- A FAILED step 1 on a task that owns a worktree stops the teardown
+        -- before step 2: an agent may still be live in that window, so its
+        -- worktree is not removed from under it. The worktree is reported
+        -- left, so WorktreeReleaseIsGated applies and the operator can retry.
+        -- A failed step 1 on a window-only task is warn-logged (see
+        -- WorktreeReleaseIsGated).
+        -- Step 3 is: a task that never had a worktree never had a branch.
+        -- Branch deletion lives inside the worktree arm, which is the only
+        -- thing that deletes a branch. One primitive performs all three
+        -- steps for every caller; the callers differ only in what they do
+        -- with a failure, and none of them branches on the worktree itself.
+
+    @invariant CallerIdentityConfigGoesWithTheWorktree
+        -- Step 2 also releases the per-task MCP configuration each launch
+        -- writes (dispatch.allium: AgentCarriesItsOwnCallerIdentity). It lives
+        -- inside the worktree's own git administrative directory, which
+        -- `git worktree remove` deletes with the worktree, so the teardown has
+        -- no fourth step and no separate failure mode. A teardown that leaves
+        -- the worktree in place leaves the configuration with it, which is
+        -- correct: the same worktree re-dispatched is the same task, and the
+        -- file still names it.
+
+    @invariant WorktreeReleaseIsGated
+        -- Step 2 either releases the worktree or it does not, and the
+        -- difference is observable. A FAILED removal:
+        --   a. is reported to the operator, and
+        --   b. is recorded in the application log at ERROR, naming the task
+        --      and the worktree path, and
+        --   c. does NOT let the requesting operation forget the path.
+        --      DeleteTask does not remove the row at all.
+        -- (c) is what makes the failure recoverable: the task still names the
+        -- directory and the branch still on disk, so the operator retries by
+        -- deleting the done task again. Without it a transient git failure
+        -- strands a worktree nothing in the system references.
+        --
+        -- Three paths are exempt from (c), and all still owe (a) and (b):
+        -- RetryFresh (its own postcondition clears the pointer, and the
+        -- immediate re-dispatch derives the same worktree path), DeleteEpic
+        -- (epics.allium; it removes the subtask rows in one operation, leaving
+        -- nothing to hold a pointer), and BatchDelete, for the same reason over
+        -- every item it deletes. The feed path owes none of (a), (b) or (c):
+        -- the stale delete has already removed the row, and its failures are
+        -- warn-logged only (FeedTeardownsAreSerialPerRepo).
+        --
+        -- The gate is keyed on step 2 ONLY. A task with no worktree has
+        -- nothing to release, so the requesting operation's follow-up (the
+        -- row delete) applies even if step 1 failed. Such a failure is
+        -- warn-logged and not surfaced: withholding the follow-up would gate a
+        -- row delete on a tmux call and strand the row instead of a resource.
+        --
+        -- The outcome of step 2 is reported by the teardown (the path still on
+        -- disk), never inferred by the caller from the arguments it passed.
+        -- The teardown runs off the board's thread because it shells out to
+        -- git, so the follow-up travels with it and is applied on its
+        -- completion, not beside it.
+
+    @invariant WorktreeDirectoryMustNotSurviveTeardown
+        -- Step 2 releases a DIRECTORY, not a git registration, and the two
+        -- come apart. A task whose worktree or window was removed out of band
+        -- tears down cleanly, and for the worktree "removed" means the
+        -- directory is gone. Step 2 succeeds
+        -- only once nothing remains at the worktree path. `git worktree remove
+        -- --force <path>` has three outcomes:
+        --   * registration and directory both valid -> git deletes the whole
+        --     directory, gitignored content included.
+        --   * the worktree's `.git` pointer file is gone -> git fails and
+        --     removes NOTHING.
+        --   * the repo's admin record under `.git/worktrees/<name>` is gone ->
+        --     git fails with "is not a working tree" and removes NOTHING,
+        --     while `git worktree list` reports the entry prunable.
+        -- So step 2 is, in order:
+        --   2a. `git worktree remove --force <path>`.
+        --   2b. If anything still exists at the worktree path, delete it.
+        --       Absent is the success condition, so a path that was never
+        --       there is already satisfied.
+
+    @invariant GitsExitCodeDoesNotDecideStepTwo
+        -- 2b runs after EVERY outcome of 2a, including 2a producing no exit
+        -- code at all (git missing from PATH, a spawn failure). Whether step 2
+        -- succeeded is decided by what is left on disk: the outcomes where
+        -- git fails are exactly the ones where it removes nothing. A 2a
+        -- failure whose directory 2b then removes is a released worktree; that
+        -- recovery is info-logged, and step 3 still runs.
+
+    @invariant PruneTheRecordGitKeptWhenItRemovedNothing
+        -- A 2a that removed nothing also kept its admin record, and with that
+        -- record in place the next `git worktree add` for the same task fails
+        -- ("'<branch>' is already used by worktree at ...") and the step-3
+        -- branch delete fails too. So a 2a failure whose 2b succeeded prunes,
+        -- best effort, BEFORE step 3. `git worktree prune` drops only records
+        -- whose directory is missing, which 2b has just made true, so it
+        -- cannot reach a live worktree. A successful 2a does not prune.
+        -- Provisioning also prunes before every fresh `git worktree add`
+        -- (dispatch.allium: StaleAdminRecordIsPrunedBeforeWorktreeAdd); this
+        -- prune stays because step 3 depends on it.
+
+    @invariant OneRefusalIsObeyed
+        -- A LOCKED worktree (`git worktree lock`) is the single exception.
+        -- Git refuses it even under `--force`; dispatch does not take the
+        -- `remove -f -f` override and does not delete the directory either.
+        -- A lock is the operator protecting the directory on purpose. A
+        -- failed 2b and a lock both fail step 2 with the path still on disk,
+        -- so WorktreeReleaseIsGated applies and the operator can retry.
+
+    @invariant DeletionIsBoundedToTheWorktreesDirectory
+        -- 2b deletes recursively, so the path must lie inside
+        -- `<repo>/.worktrees/` and be neither that directory itself nor the
+        -- repo. A path failing that test is NOT deleted; it fails step 2 and
+        -- is reported like a failed deletion. The test is LEXICAL: `~`
+        -- expanded, `.`/`..` resolved as text, both sides made absolute the
+        -- same way, with no filesystem resolution. Resolving symlinks would
+        -- judge a worktree's target rather than the worktree.
+
+    @invariant AbsentMeansNotFound
+        -- 2b's "does anything still exist here" is a stat with three answers.
+        -- Only NOT FOUND is absence. A path that cannot be inspected (a parent
+        -- without execute permission, an I/O error, an unmounted mount point)
+        -- may well be there, so it fails step 2. Anything present is removed
+        -- by type: a link is unlinked, a directory removed recursively, and
+        -- anything else (a regular file, a socket, a device) fails step 2.
+        -- Dispatch asks the same question about the same path through the
+        -- same primitive when it decides fresh vs reused (dispatch.allium:
+        -- WorktreeExistenceIsOneQuestion).
+
+    @invariant SymlinksAreUnlinkedNeverFollowed
+        -- 2b removes links, never what they point at. A symlink inside the
+        -- worktree is unlinked; a worktree path that is itself a symlink is
+        -- unlinked, and the recursive delete never descends through it.
+
+    @invariant WorktreeIsNeverShared
+        -- No two tasks name the same worktree, so step 2 is unconditional and
+        -- no path asks whether another task also holds the worktree. A
+        -- worktree path embeds the task id (`<repo>/.worktrees/<task-id>-<slug>`),
+        -- and a reused directory is only ever that same id-scoped path. The id
+        -- prefix, not the slug, guarantees it: a rename never recomputes the
+        -- stored path. Every value that sets task.worktree comes from
+        -- provisioning, and the board writes back only the value it read.
+        -- CopyTask, the MCP update_tasks schema, the feed upsert and the CLI
+        -- never set it. A store client that patches task.worktree by hand
+        -- (patch_task accepts it, PatchTaskNeverAimsAnotherHostsTeardown)
+        -- could fabricate two rows on one path; that is not a supported
+        -- input. Do NOT add a shared-worktree check on any path.
+
+    @invariant BatchTeardownsAreSerialPerRepo
+        -- BatchDelete's teardowns follow the same rule as the feed path's
+        -- (FeedTeardownsAreSerialPerRepo): a repo's removals run one after
+        -- another, because they shell git against one shared checkout and
+        -- would contend on its index lock; distinct repos run in parallel.
+        -- One failure does not stop the rest of its repo's queue. Failures are
+        -- reported and logged as TaskTeardown says; a batch's items are
+        -- exempt from the retry pointer (WorktreeReleaseIsGated). DeleteEpic's
+        -- subtree teardowns follow the same rule: it pre-checks once, then
+        -- runs them through the same per-repo queues.
+
+    @invariant FeedTeardownsAreSerialPerRepo
+        -- The feed path tears down the tasks a stale delete removed. A repo's
+        -- removals run one after another, because they shell git against one
+        -- shared checkout and would contend on its index lock; distinct repos
+        -- run in parallel. Failures are warn-logged, never surfaced: feed
+        -- reconciliation is background work.
 }
 
 ------------------------------------------------------------
@@ -1500,198 +1699,6 @@ rule BookmarkEndsWithTheTaskFinishing {
 -- DeletingATaskDeletesItsRequestRows). The module runs that list from one
 -- function every such reducer calls.
 
--- TaskTeardown releases a task's live resources on the host that holds them.
--- DeleteTask and BatchDelete below perform it, and so do DeleteEpic
--- (epics.allium) and the feed removal clauses in feeds.allium
--- (RoleRoutedFeedSync, GroupedFeedUpsert, FlatFeedReconcile,
--- UpsertFeedTasks), where removing a stale feed task performs this same
--- teardown rather than dropping the row and orphaning the worktree of an
--- in-flight agent. Those rules state their own postconditions; this contract
--- states what the teardown itself promises.
---
--- Done is not teardown. A Done task keeps its worktree and branch; only the
--- worktree's build output is cleared (ClearBuildOutputOfDoneTask, above).
-contract TaskTeardown {
-    -- In order: 1. kill the task's tmux window if it has one; 2. remove the
-    -- task's worktree if it has one; 3. delete the task's branch, best
-    -- effort. Answers the worktree path still on disk when step 2 failed or
-    -- did not run because step 1 failed, and null when there was none to
-    -- release or it was released.
-    teardown: (worktree: String?, tmux_window: String?) -> String?
-
-    @invariant TeardownIsOwedWheneverThereIsSomethingToRelease
-        -- The teardown runs when the task owns a worktree OR a tmux window;
-        -- a task owning NEITHER runs no commands at all. The two are
-        -- independent, so all four combinations are reachable, and each step
-        -- is owed on its own condition (a failed step 1 stops the rest; see
-        -- below):
-        --   * worktree and window -> steps 1, 2, 3.
-        --   * window, no worktree -> step 1 only.
-        --   * worktree, no window -> steps 2 and 3.
-        --   * neither -> nothing.
-        -- Step 1 is NOT contingent on step 2 having something to remove.
-        -- A FAILED step 1 on a task that owns a worktree stops the teardown
-        -- before step 2: an agent may still be live in that window, so its
-        -- worktree is not removed from under it. The worktree is reported
-        -- left, so WorktreeReleaseIsGated applies and the operator can retry.
-        -- A failed step 1 on a window-only task is warn-logged (see
-        -- WorktreeReleaseIsGated).
-        -- Step 3 is: a task that never had a worktree never had a branch.
-        -- Branch deletion lives inside the worktree arm, which is the only
-        -- thing that deletes a branch. One primitive performs all three
-        -- steps for every caller; the callers differ only in what they do
-        -- with a failure, and none of them branches on the worktree itself.
-
-    @invariant CallerIdentityConfigGoesWithTheWorktree
-        -- Step 2 also releases the per-task MCP configuration each launch
-        -- writes (dispatch.allium: AgentCarriesItsOwnCallerIdentity). It lives
-        -- inside the worktree's own git administrative directory, which
-        -- `git worktree remove` deletes with the worktree, so the teardown has
-        -- no fourth step and no separate failure mode. A teardown that leaves
-        -- the worktree in place leaves the configuration with it, which is
-        -- correct: the same worktree re-dispatched is the same task, and the
-        -- file still names it.
-
-    @invariant WorktreeReleaseIsGated
-        -- Step 2 either releases the worktree or it does not, and the
-        -- difference is observable. A FAILED removal:
-        --   a. is reported to the operator, and
-        --   b. is recorded in the application log at ERROR, naming the task
-        --      and the worktree path, and
-        --   c. does NOT let the requesting operation forget the path.
-        --      DeleteTask does not remove the row at all.
-        -- (c) is what makes the failure recoverable: the task still names the
-        -- directory and the branch still on disk, so the operator retries by
-        -- deleting the done task again. Without it a transient git failure
-        -- strands a worktree nothing in the system references.
-        --
-        -- Three paths are exempt from (c), and all still owe (a) and (b):
-        -- RetryFresh (its own postcondition clears the pointer, and the
-        -- immediate re-dispatch derives the same worktree path), DeleteEpic
-        -- (epics.allium; it removes the subtask rows in one operation, leaving
-        -- nothing to hold a pointer), and BatchDelete, for the same reason over
-        -- every item it deletes. The feed path owes none of (a), (b) or (c):
-        -- the stale delete has already removed the row, and its failures are
-        -- warn-logged only (FeedTeardownsAreSerialPerRepo).
-        --
-        -- The gate is keyed on step 2 ONLY. A task with no worktree has
-        -- nothing to release, so the requesting operation's follow-up (the
-        -- row delete) applies even if step 1 failed. Such a failure is
-        -- warn-logged and not surfaced: withholding the follow-up would gate a
-        -- row delete on a tmux call and strand the row instead of a resource.
-        --
-        -- The outcome of step 2 is reported by the teardown (the path still on
-        -- disk), never inferred by the caller from the arguments it passed.
-        -- The teardown runs off the board's thread because it shells out to
-        -- git, so the follow-up travels with it and is applied on its
-        -- completion, not beside it.
-
-    @invariant WorktreeDirectoryMustNotSurviveTeardown
-        -- Step 2 releases a DIRECTORY, not a git registration, and the two
-        -- come apart. A task whose worktree or window was removed out of band
-        -- tears down cleanly, and for the worktree "removed" means the
-        -- directory is gone. Step 2 succeeds
-        -- only once nothing remains at the worktree path. `git worktree remove
-        -- --force <path>` has three outcomes:
-        --   * registration and directory both valid -> git deletes the whole
-        --     directory, gitignored content included.
-        --   * the worktree's `.git` pointer file is gone -> git fails and
-        --     removes NOTHING.
-        --   * the repo's admin record under `.git/worktrees/<name>` is gone ->
-        --     git fails with "is not a working tree" and removes NOTHING,
-        --     while `git worktree list` reports the entry prunable.
-        -- So step 2 is, in order:
-        --   2a. `git worktree remove --force <path>`.
-        --   2b. If anything still exists at the worktree path, delete it.
-        --       Absent is the success condition, so a path that was never
-        --       there is already satisfied.
-
-    @invariant GitsExitCodeDoesNotDecideStepTwo
-        -- 2b runs after EVERY outcome of 2a, including 2a producing no exit
-        -- code at all (git missing from PATH, a spawn failure). Whether step 2
-        -- succeeded is decided by what is left on disk: the outcomes where
-        -- git fails are exactly the ones where it removes nothing. A 2a
-        -- failure whose directory 2b then removes is a released worktree; that
-        -- recovery is info-logged, and step 3 still runs.
-
-    @invariant PruneTheRecordGitKeptWhenItRemovedNothing
-        -- A 2a that removed nothing also kept its admin record, and with that
-        -- record in place the next `git worktree add` for the same task fails
-        -- ("'<branch>' is already used by worktree at ...") and the step-3
-        -- branch delete fails too. So a 2a failure whose 2b succeeded prunes,
-        -- best effort, BEFORE step 3. `git worktree prune` drops only records
-        -- whose directory is missing, which 2b has just made true, so it
-        -- cannot reach a live worktree. A successful 2a does not prune.
-        -- Provisioning also prunes before every fresh `git worktree add`
-        -- (dispatch.allium: StaleAdminRecordIsPrunedBeforeWorktreeAdd); this
-        -- prune stays because step 3 depends on it.
-
-    @invariant OneRefusalIsObeyed
-        -- A LOCKED worktree (`git worktree lock`) is the single exception.
-        -- Git refuses it even under `--force`; dispatch does not take the
-        -- `remove -f -f` override and does not delete the directory either.
-        -- A lock is the operator protecting the directory on purpose. A
-        -- failed 2b and a lock both fail step 2 with the path still on disk,
-        -- so WorktreeReleaseIsGated applies and the operator can retry.
-
-    @invariant DeletionIsBoundedToTheWorktreesDirectory
-        -- 2b deletes recursively, so the path must lie inside
-        -- `<repo>/.worktrees/` and be neither that directory itself nor the
-        -- repo. A path failing that test is NOT deleted; it fails step 2 and
-        -- is reported like a failed deletion. The test is LEXICAL: `~`
-        -- expanded, `.`/`..` resolved as text, both sides made absolute the
-        -- same way, with no filesystem resolution. Resolving symlinks would
-        -- judge a worktree's target rather than the worktree.
-
-    @invariant AbsentMeansNotFound
-        -- 2b's "does anything still exist here" is a stat with three answers.
-        -- Only NOT FOUND is absence. A path that cannot be inspected (a parent
-        -- without execute permission, an I/O error, an unmounted mount point)
-        -- may well be there, so it fails step 2. Anything present is removed
-        -- by type: a link is unlinked, a directory removed recursively, and
-        -- anything else (a regular file, a socket, a device) fails step 2.
-        -- Dispatch asks the same question about the same path through the
-        -- same primitive when it decides fresh vs reused (dispatch.allium:
-        -- WorktreeExistenceIsOneQuestion).
-
-    @invariant SymlinksAreUnlinkedNeverFollowed
-        -- 2b removes links, never what they point at. A symlink inside the
-        -- worktree is unlinked; a worktree path that is itself a symlink is
-        -- unlinked, and the recursive delete never descends through it.
-
-    @invariant WorktreeIsNeverShared
-        -- No two tasks name the same worktree, so step 2 is unconditional and
-        -- no path asks whether another task also holds the worktree. A
-        -- worktree path embeds the task id (`<repo>/.worktrees/<task-id>-<slug>`),
-        -- and a reused directory is only ever that same id-scoped path. The id
-        -- prefix, not the slug, guarantees it: a rename never recomputes the
-        -- stored path. Every value that sets task.worktree comes from
-        -- provisioning, and the board writes back only the value it read.
-        -- CopyTask, the MCP update_tasks schema, the feed upsert and the CLI
-        -- never set it. A store client that patches task.worktree by hand
-        -- (patch_task accepts it, PatchTaskNeverAimsAnotherHostsTeardown)
-        -- could fabricate two rows on one path; that is not a supported
-        -- input. Do NOT add a shared-worktree check on any path.
-
-    @invariant BatchTeardownsAreSerialPerRepo
-        -- BatchDelete's teardowns follow the same rule as the feed path's
-        -- (FeedTeardownsAreSerialPerRepo): a repo's removals run one after
-        -- another, because they shell git against one shared checkout and
-        -- would contend on its index lock; distinct repos run in parallel.
-        -- One failure does not stop the rest of its repo's queue. Failures are
-        -- reported and logged as TaskTeardown says; a batch's items are
-        -- exempt from the retry pointer (WorktreeReleaseIsGated). DeleteEpic's
-        -- subtree teardowns follow the same rule: it pre-checks once, then
-        -- runs them through the same per-repo queues.
-
-    @invariant FeedTeardownsAreSerialPerRepo
-        -- The feed path tears down the tasks a stale delete removed. A repo's
-        -- removals run one after another, because they shell git against one
-        -- shared checkout and would contend on its index lock; distinct repos
-        -- run in parallel. Failures are warn-logged, never surfaced: feed
-        -- reconciliation is background work.
-}
-
 -- Removing the task row removes every agent the task has had, assigned,
 -- current and ended, which frees their names (agents.allium:
 -- AgentsGoWithTheirTask, A4). BatchDelete removes them the same way.
@@ -2221,105 +2228,7 @@ rule EditTask {
         -- through, so the editor gets it without asking.
 }
 
-------------------------------------------------------------
--- Board surfaces
-------------------------------------------------------------
-
--- What the operator does to tasks at the board. Each key's binding is in
--- keybindings.allium; the rule each action reaches says what it does.
-surface Board {
-    facing _: core/Operator
-
-    contracts:
-        fulfils TaskTeardown
-
-    exposes:
-        selection.selected_tasks
-        selection.selected_epics
-
-    provides:
-        -- The new-task form, finished (CreateTask).
-        CreateTask(title, description, repo_path, plan?, epic?, tag?, sort_order?, base_branch?, wrap_up_mode?, model?, auto_run_plan?, phoenix?)
-        -- [c] on a task card, the copy form finished (CopyTask).
-        CopyTask(source)
-        -- [e] on a task card, confirmed (EditTask).
-        EditTask(task)
-        -- [D] (QuickDispatchTrustGate), and its trust prompt answered y
-        -- (TrustRepoForQuickDispatch).
-        QuickDispatch(repo_path, epic_id?)
-        TrustAndQuickDispatch(repo_path, epic_id?)
-        -- Move keys on one card (MoveTaskForward, MoveTaskBackward), or on a
-        -- multi-selection (BatchMoveForward, BatchMoveBackward).
-        MoveTask(task, direction)
-        BatchMoveTasks(tasks, direction) when not selection.is_empty
-        -- Reorder keys on a task or epic card (ReorderItem).
-        ReorderItem(item, direction)
-        -- [m] on a task card, the target confirmed (MoveTaskToEpic), or on a
-        -- multi-selection (BatchMoveToEpic).
-        MoveTaskToEpic(task, new_epic?)
-        BatchMoveToEpic(tasks, new_epic?) when not selection.is_empty
-        -- [a], or Enter on a column header (SelectAllColumn); Esc
-        -- (ClearSelection).
-        SelectAllColumn(tasks, epics)
-        ClearSelection()
-        -- [z] and [Z] (ToggleSectionCollapse, ToggleEpicFold), raised only
-        -- with the cursor on a card or a folded header that names a section
-        -- or an epic group.
-        ToggleSectionCollapse(ref)
-        ToggleEpicFold(ref)
-        -- [b] on a task card (ToggleBookmarkFromBoard).
-        ToggleBookmarkKeyPressed(viewer, task)
-        -- Any key handled on the plain board, with the task card left under
-        -- the cursor (SeeTaskByLandingOnIt).
-        OperatorKeyHandled(viewer, task)
-
-        -- DeleteKeyRouting. [x] completes or deletes, by what is selected,
-        -- so a live task is never deleted in one step. The guards read the
-        -- board's view; DeleteTask, DeleteTaskRefused and BatchDelete
-        -- re-read the store's true rows before anything is torn down.
-        --   * one task not in Done -> ConfirmDone (also a forward move out
-        --     of review);
-        --   * one task in Done -> ConfirmDeleteTask, answered y -> DeleteTask;
-        --   * a tasks-only selection with a task not in Done -> ConfirmDone
-        --     over the tasks not in Done, the Done ones left untouched;
-        --   * a tasks-only selection all in Done, or any selection holding an
-        --     epic -> BatchDelete, after a count prompt;
-        --   * one epic -> ConfirmDeleteEpic (epics.allium);
-        --   * one work package -> DeletePackageFromBoard's prompt
-        --     (work-packages.allium).
-        ConfirmDone(task) when task.status != done
-        DeleteTask(task) when task.status = done
-        BatchDelete(tasks, epics)
-            when epics.count > 0 or tasks.all(t => t.status = done)
-
-    @guarantee ABoardWriteLeavesThePointersAlone
-        -- A board write (a reorder, a detach, an epic move, a lifecycle move,
-        -- a window that went away) writes task.worktree, task.host and
-        -- current_agent(task).tmux_window only when the operation means to.
-        -- The board's copy of a task can be stale: a reorder pressed before
-        -- the provisioned report reached this board sees no worktree, and
-        -- sending that copy as a clear would wipe the store's pointer and
-        -- end the task's agent (agents.allium: EndAgentWhenWorktreeGoes). So
-        -- an absent value on the board's copy means "do not touch", never
-        -- "clear". The operations that do mean to clear say so: RetryFresh
-        -- releases the worktree (its host and window with it), and a
-        -- detach, a window-gone or a crash clears the window only.
-}
-
--- The board lays its columns out again whenever its tasks or epics change,
--- judged on each column unfiltered (FoldMovesToDrawnDescendant).
-surface BoardLayoutPass {
-    facing _: core/BoardProcess
-
-    provides:
-        -- skipped: a recorded fold whose epic is drawn in no section of its
-        -- column; takers: the drawn epics now heading what it hid.
-        UnfilteredColumnLaidOut(skipped, takers)
-}
-
-------------------------------------------------------------
--- Module write rules for tasks
-------------------------------------------------------------
+-- == Module Write Rules ==
 
 -- The module enforces these at its task writes, so every client gets them
 -- (store-split.allium S1).
@@ -2327,21 +2236,6 @@ surface BoardLayoutPass {
 -- sub_status_valid_for(sub_status, status) is the black box mcp-task-tools.allium
 -- (UpdateTaskViaMcp) names: the store's legality table, core.allium's
 -- Task.SubStatusFitsStatus.
-
--- The module's task-write reducers, which any store client may call. Each is
--- named in its rule's guidance; TaskWriteRequested is the write every one of
--- them reaches.
-surface TaskWriteReducers {
-    facing _: core/StoreClient
-
-    provides:
-        TaskWriteRequested(task, written)
-        SubStatusBatchPatched(updates)
-        TaskPatchRequested(task, patch)
-        TaskCreateRequested(row)
-        TaskInsertRequested(written)
-        TaskUpdateRequested(task, epic?, patch, host)
-}
 
 rule SubStatusMovesMustBeLegal {
     when: TaskWriteRequested(task, written)
@@ -2613,4 +2507,115 @@ rule HandStatusWriteReachesTheSchedule {
 invariant SubStatusAutoreset {
     for t in core/Tasks:
         sub_status_valid_for(t.sub_status, t.status)
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- What the operator does to tasks at the board. Each key's binding is in
+-- keybindings.allium; the rule each action reaches says what it does.
+surface Board {
+    facing _: core/Operator
+
+    contracts:
+        fulfils TaskTeardown
+
+    exposes:
+        selection.selected_tasks
+        selection.selected_epics
+
+    provides:
+        -- The new-task form, finished (CreateTask).
+        CreateTask(title, description, repo_path, plan?, epic?, tag?, sort_order?, base_branch?, wrap_up_mode?, model?, auto_run_plan?, phoenix?)
+        -- [c] on a task card, the copy form finished (CopyTask).
+        CopyTask(source)
+        -- [e] on a task card, confirmed (EditTask).
+        EditTask(task)
+        -- [D] (QuickDispatchTrustGate), and its trust prompt answered y
+        -- (TrustRepoForQuickDispatch).
+        QuickDispatch(repo_path, epic_id?)
+        TrustAndQuickDispatch(repo_path, epic_id?)
+        -- Move keys on one card (MoveTaskForward, MoveTaskBackward), or on a
+        -- multi-selection (BatchMoveForward, BatchMoveBackward).
+        MoveTask(task, direction)
+        BatchMoveTasks(tasks, direction) when not selection.is_empty
+        -- Reorder keys on a task or epic card (ReorderItem).
+        ReorderItem(item, direction)
+        -- [m] on a task card, the target confirmed (MoveTaskToEpic), or on a
+        -- multi-selection (BatchMoveToEpic).
+        MoveTaskToEpic(task, new_epic?)
+        BatchMoveToEpic(tasks, new_epic?) when not selection.is_empty
+        -- [a], or Enter on a column header (SelectAllColumn); Esc
+        -- (ClearSelection).
+        SelectAllColumn(tasks, epics)
+        ClearSelection()
+        -- [z] and [Z] (ToggleSectionCollapse, ToggleEpicFold), raised only
+        -- with the cursor on a card or a folded header that names a section
+        -- or an epic group.
+        ToggleSectionCollapse(ref)
+        ToggleEpicFold(ref)
+        -- [b] on a task card (ToggleBookmarkFromBoard).
+        ToggleBookmarkKeyPressed(viewer, task)
+        -- Any key handled on the plain board, with the task card left under
+        -- the cursor (SeeTaskByLandingOnIt).
+        OperatorKeyHandled(viewer, task)
+
+        -- DeleteKeyRouting. [x] completes or deletes, by what is selected,
+        -- so a live task is never deleted in one step. The guards read the
+        -- board's view; DeleteTask, DeleteTaskRefused and BatchDelete
+        -- re-read the store's true rows before anything is torn down.
+        --   * one task not in Done -> ConfirmDone (also a forward move out
+        --     of review);
+        --   * one task in Done -> ConfirmDeleteTask, answered y -> DeleteTask;
+        --   * a tasks-only selection with a task not in Done -> ConfirmDone
+        --     over the tasks not in Done, the Done ones left untouched;
+        --   * a tasks-only selection all in Done, or any selection holding an
+        --     epic -> BatchDelete, after a count prompt;
+        --   * one epic -> ConfirmDeleteEpic (epics.allium);
+        --   * one work package -> DeletePackageFromBoard's prompt
+        --     (work-packages.allium).
+        ConfirmDone(task) when task.status != done
+        DeleteTask(task) when task.status = done
+        BatchDelete(tasks, epics)
+            when epics.count > 0 or tasks.all(t => t.status = done)
+
+    @guarantee ABoardWriteLeavesThePointersAlone
+        -- A board write (a reorder, a detach, an epic move, a lifecycle move,
+        -- a window that went away) writes task.worktree, task.host and
+        -- current_agent(task).tmux_window only when the operation means to.
+        -- The board's copy of a task can be stale: a reorder pressed before
+        -- the provisioned report reached this board sees no worktree, and
+        -- sending that copy as a clear would wipe the store's pointer and
+        -- end the task's agent (agents.allium: EndAgentWhenWorktreeGoes). So
+        -- an absent value on the board's copy means "do not touch", never
+        -- "clear". The operations that do mean to clear say so: RetryFresh
+        -- releases the worktree (its host and window with it), and a
+        -- detach, a window-gone or a crash clears the window only.
+}
+
+-- The board lays its columns out again whenever its tasks or epics change,
+-- judged on each column unfiltered (FoldMovesToDrawnDescendant).
+surface BoardLayoutPass {
+    facing _: core/BoardProcess
+
+    provides:
+        -- skipped: a recorded fold whose epic is drawn in no section of its
+        -- column; takers: the drawn epics now heading what it hid.
+        UnfilteredColumnLaidOut(skipped, takers)
+}
+
+-- The module's task-write reducers, which any store client may call. Each is
+-- named in its rule's guidance; TaskWriteRequested is the write every one of
+-- them reaches.
+surface TaskWriteReducers {
+    facing _: core/StoreClient
+
+    provides:
+        TaskWriteRequested(task, written)
+        SubStatusBatchPatched(updates)
+        TaskPatchRequested(task, patch)
+        TaskCreateRequested(row)
+        TaskInsertRequested(written)
+        TaskUpdateRequested(task, epic?, patch, host)
 }
