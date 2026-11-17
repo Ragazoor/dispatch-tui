@@ -11,8 +11,9 @@ fn repo_cursor_resets_on_entering_repo_path_mode() {
         description: String::new(),
         ..Default::default()
     });
-    app.input.set_buffer("some desc".to_string());
-    app.handle_key(make_key(KeyCode::Enter));
+    app.update(Message::Editor(
+        crate::tui::messages::EditorMessage::DescriptionResult("some desc".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::InputRepoPath);
     assert_eq!(app.input.repo_cursor, 0, "cursor should reset to top");
 }

@@ -344,7 +344,9 @@ rule CreateTask {
         --
         -- There is NO separate phoenix step. The form's steps are, in order:
         -- InputTitle -> InputTag -> InputDescription -> InputRepoPath ->
-        -- InputBaseBranch -> InputWrapUpMode -> InputModel -> created. phoenix is decided at
+        -- InputBaseBranch -> InputWrapUpMode -> InputModel -> created. InputDescription
+        -- is the $EDITOR window; while it is open the board takes only Esc
+        -- (keybindings.allium: DescriptionEditorTakesOnlyEsc). phoenix is decided at
         -- InputTag, before the fields that follow it, and the ordinary
         -- non-phoenix task costs no keypress at all for the flag: not pressing
         -- p IS declining it.

@@ -235,24 +235,60 @@ fn enter_with_whitespace_only_title_cancels() {
     assert!(app.input.task_draft.is_none());
 }
 
+/// keybindings.allium DescriptionEditorTakesOnlyEsc: while the description
+/// is open in $EDITOR, typing, caret keys and Enter on the board do nothing.
 #[test]
-fn enter_in_description_advances_to_repo_path() {
+fn description_editor_takes_only_esc() {
+    for mode in [InputMode::InputDescription, InputMode::InputEpicDescription] {
+        let mut app = App::new(vec![]);
+        app.input.mode = mode.clone();
+        app.input.task_draft = Some(TaskDraft {
+            title: "T".to_string(),
+            ..Default::default()
+        });
+        app.input.epic_draft = Some(crate::tui::types::EpicDraft {
+            title: "E".to_string(),
+            ..Default::default()
+        });
+        for code in [
+            KeyCode::Char('x'),
+            KeyCode::Left,
+            KeyCode::Backspace,
+            KeyCode::Enter,
+        ] {
+            let cmds = without_usage(app.handle_key(make_key(code)));
+            assert!(cmds.is_empty(), "{mode:?}: {code:?} must do nothing");
+            assert_eq!(
+                app.input.mode, mode,
+                "{mode:?}: {code:?} must not leave the step"
+            );
+        }
+        assert!(app.input.buffer.is_empty(), "{mode:?}: nothing is typed");
+        assert_eq!(app.input.task_draft.as_ref().unwrap().description, "");
+        assert_eq!(app.input.epic_draft.as_ref().unwrap().description, "");
+
+        app.handle_key(make_key(KeyCode::Esc));
+        assert_eq!(app.input.mode, InputMode::Normal, "{mode:?}: Esc cancels");
+    }
+}
+
+/// keybindings.allium DescriptionEditorTakesOnlyEsc: an editor result that
+/// arrives after the form was cancelled finds no form and creates nothing.
+#[test]
+fn description_result_after_cancel_creates_nothing() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
-        description: String::new(),
         ..Default::default()
     });
-    app.input.set_buffer("some desc".to_string());
-    app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(app.input.mode, InputMode::InputRepoPath);
-    assert!(app.input.buffer.is_empty());
-    assert_eq!(
-        app.input.task_draft.as_ref().unwrap().description,
-        "some desc"
-    );
-    assert_eq!(app.status.message.as_deref(), Some("Enter repo path: "));
+    app.handle_key(make_key(KeyCode::Esc));
+    let cmds = app.update(Message::Editor(
+        crate::tui::messages::EditorMessage::DescriptionResult("late".to_string()),
+    ));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.input.task_draft.is_none());
 }
 
 #[test]

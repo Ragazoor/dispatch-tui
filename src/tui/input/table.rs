@@ -35,10 +35,11 @@ impl App {
                 }
             }
             InputMode::SearchTasks => N::BoardSearch,
+            InputMode::InputDescription | InputMode::InputEpicDescription => {
+                N::BoardDescriptionEditor
+            }
             InputMode::InputTitle
-            | InputMode::InputDescription
             | InputMode::InputEpicTitle
-            | InputMode::InputEpicDescription
             | InputMode::InputWorkPackageTitle(_)
             | InputMode::RenameWorkPackage(_)
             | InputMode::InputDisplayName
@@ -350,9 +351,10 @@ impl App {
             N::BoardError => {
                 self.dispatch_keyed(Message::System(SystemMessage::DismissError), action, label)
             }
-            N::BoardText | N::BoardPickerRepoPath | N::BoardPickerBaseBranch => {
-                self.run_text_mode(action, key, label)
-            }
+            N::BoardText
+            | N::BoardDescriptionEditor
+            | N::BoardPickerRepoPath
+            | N::BoardPickerBaseBranch => self.run_text_mode(action, key, label),
             N::BoardFilter => self.handle_key_board_filter(key, action, label),
             N::BoardFilterSearch => self.handle_key_board_filter_search(action, label),
             N::BoardPickerTag => self.run_tag_picker(action, key, label),

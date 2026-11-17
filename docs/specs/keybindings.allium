@@ -58,10 +58,14 @@ use "./observability.allium" as observability
 --   board_help                   board.help                   the `?` help overlay
 --   board_error                  board.error                  the error popup
 --   board_text                   board.text                   a free-text field: task title,
---                                                             task description, epic title,
---                                                             epic description, a new
---                                                             work package's title, a
---                                                             work package rename
+--                                                             epic title, a new work
+--                                                             package's title, a work
+--                                                             package rename, display
+--                                                             name, the admin name input
+--   board_description_editor     board.description_editor     a new task's or epic's
+--                                                             description is open in
+--                                                             $EDITOR; one row,
+--                                                             cancel_input [Esc]
 --   board_filter                 board.filter                 the board-filter overlay (`f`)
 --   board_filter_search          board.filter_search          typing the overlay's Epics-tab
 --                                                             title search (`/` there)
@@ -201,7 +205,7 @@ use "./observability.allium" as observability
 -- the omission shows up the first time anyone presses a key, not later.
 enum KeyNamespace {
     board_normal | board_detail | board_search | board_help | board_error |
-    board_text | board_filter | board_filter_search |
+    board_text | board_description_editor | board_filter | board_filter_search |
     board_picker_repo_path | board_picker_base_branch | board_picker_tag |
     board_picker_wrap_up_mode | board_picker_model | board_picker_quick_dispatch |
     board_picker_move_to_epic | board_picker_reparent_epic |
@@ -765,6 +769,15 @@ surface KeyInput {
         -- (agent_tree.tree, agent_tree.commits, agent_tree.agents, agent_diff)
         -- have rows like the
         -- board's — see the pane inventory under KeyNamespace.
+
+    @guarantee DescriptionEditorTakesOnlyEsc
+        -- The new-task and new-epic forms open the description in $EDITOR, in
+        -- a tmux window of its own, and the board stays live meanwhile
+        -- (board.description_editor). While it is open the board takes only
+        -- Esc, which cancels the whole form. A typed character, Enter or a
+        -- caret key does nothing: the description comes from the editor
+        -- alone, and a board press never submits one. An editor result that
+        -- arrives after the cancel finds no form and creates nothing.
 
     @guarantee PaneStartupScreenIsOutsideUsage
         -- While a companion or diff pane waits for its task, or shows its

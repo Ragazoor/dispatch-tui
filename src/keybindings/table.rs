@@ -551,6 +551,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "text_cursor_word_right",
         "Move the caret one word right",
     ),
+    // ---- board.description_editor ----
+    // The description is open in $EDITOR; the board takes only Esc
+    // (keybindings.allium: DescriptionEditorTakesOnlyEsc).
+    r(
+        N::BoardDescriptionEditor,
+        &["Esc"],
+        "cancel_input",
+        "Cancel the form; the description editor's result is then dropped",
+    ),
     // ---- board.filter ----
     r(
         N::BoardFilter,

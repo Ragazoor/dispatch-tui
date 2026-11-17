@@ -1636,7 +1636,8 @@ surface TextInputField {
     -- title, epic title, work-package title and rename, display name, the
     -- admin screen's name input, base branch, repo-path query and
     -- quick-dispatch query. Task and epic DESCRIPTION are not this surface:
-    -- they open an external $EDITOR. The board search (`/`) and the board
+    -- they open an external $EDITOR, and the board takes only Esc meanwhile
+    -- (keybindings.allium: DescriptionEditorTakesOnlyEsc). The board search (`/`) and the board
     -- filter's epic search keep their own query, with no caret.
     --
     -- The caret is a CHARACTER index into the buffer: the text insertion

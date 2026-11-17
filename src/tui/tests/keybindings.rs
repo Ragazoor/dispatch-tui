@@ -397,11 +397,13 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
             app.status.error_popup = Some("boom".to_string());
             one(app)
         }
+        N::BoardDescriptionEditor => [InputMode::InputDescription, InputMode::InputEpicDescription]
+            .into_iter()
+            .map(draft_app)
+            .collect(),
         N::BoardText => [
             InputMode::InputTitle,
-            InputMode::InputDescription,
             InputMode::InputEpicTitle,
-            InputMode::InputEpicDescription,
             InputMode::InputWorkPackageTitle(crate::models::WorkPackageItem::Task(TaskId(1))),
             InputMode::RenameWorkPackage(crate::models::WorkPackageId(1)),
             InputMode::InputDisplayName,
