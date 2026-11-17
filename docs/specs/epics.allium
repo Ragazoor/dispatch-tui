@@ -319,7 +319,7 @@ rule DeleteEpic {
 
     -- The epics this delete removes: the epic itself and every descendant.
     -- A feed epic among them is being reset, not pruned.
-    let doomed_epics = epic.subtree_epics + epic
+    let doomed_epics = epic.subtree_epics + {epic}
 
     -- Deletes epic and all linked subtasks and sub-epics (recursively)
     ensures:
@@ -464,14 +464,15 @@ rule DeleteEpicRefused {
     -- LOWEST-ID readable subtree task that is not done — not the first one a
     -- subtree walk happens to reach — so the same epic always names the same
     -- task. The tasks the client could not decode are counted and named by id.
-    let unreadable = filter(epic.subtree_tasks, t => not decodable(t))
-    let undone = filter(epic.subtree_tasks, t => decodable(t) and t.status != done)
-    let blocking_task = min_by(undone, t => t.id)    -- null when undone is empty
+    -- decoded(ts) and undecoded(ts) are black boxes: the tasks of ts the
+    -- client could, and could not, decode (decodable, in DeleteEpic).
+    -- lowest_id(ts) is a black box: the task in ts with the smallest id, or
+    -- null when ts is empty.
+    let unreadable = undecoded(epic.subtree_tasks)
+    let undone = decoded(epic.subtree_tasks) where status != done
+    let blocking_task = lowest_id(undone)
 
     ensures:
-        for task in epic.subtree_tasks:
-            task.worktree = task.worktree
-            current_agent(task).tmux_window = current_agent(task).tmux_window
         UserInformed(
             about: delete_refused,
             epic: epic,
@@ -508,8 +509,8 @@ rule DeleteEpicRefused {
         -- only honest answer.
         --
         -- Only the client pre-check (EpicService::ensure_deletable) composes
-        -- this message. The store's delete_epic reducer is unchanged and
-        -- still has the final say over its own true rows.
+        -- this message. The store's delete_epic reducer has the final say
+        -- over its own true rows.
 }
 
 -- == MCP Epic Tools ==
