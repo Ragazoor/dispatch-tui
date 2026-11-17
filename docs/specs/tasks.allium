@@ -385,6 +385,8 @@ rule MoveTaskForward {
 
     let next = next_status(task.status)
     let was_running = task.status = running
+    -- Only a task with a worktree has a current agent to hold the stamp.
+    let has_agent = task.worktree != null
 
     -- Moving to Done requires explicit confirmation via ConfirmDone
     requires: next != done
@@ -395,6 +397,9 @@ rule MoveTaskForward {
     ensures:
         if was_running:
             current_agent(task).stop_pending = false
+    ensures:
+        if next = running and has_agent:
+            current_agent(task).last_pre_tool_use_at = now
 
     @guidance
         -- Manual movement (forward or backward) clears the task's agent
@@ -409,13 +414,16 @@ rule MoveTaskForward {
         -- core/Task's PendingStopOnlyWhileRunning invariant for why every
         -- leaving-running write must do this.
         -- sub_status is always reset to the default for the new status.
-        -- Any manual-move transition into Running (not just Review ->
-        -- Running) also stamps last_pre_tool_use_at = now, so
+        -- Any manual-move transition into Running (forward here, Review ->
+        -- Running in MoveTaskBackward) of a task with a worktree also stamps
+        -- its current agent's last_pre_tool_use_at = now, so
         -- ClassifyAgentActivity does not immediately report the task Stale
-        -- (see agent-health.allium). This includes Backlog -> Running, which
-        -- provisions no worktree; the seed is harmless there because both
-        -- the classifier and crash detection only consider tasks with a
-        -- tmux_window.
+        -- (see agent-health.allium). A task with no worktree has no current
+        -- agent to hold the stamp, and the store refuses a session fact on
+        -- no agent, so a Backlog -> Running move of a task that never ran
+        -- writes none. Nothing is lost: a manual move provisions no window,
+        -- and both the classifier and crash detection only consider tasks
+        -- with a tmux_window.
         -- Supports batch operation on multi-selected tasks. Batch forward
         -- splits when the selection includes Review tasks: non-Review
         -- tasks move immediately, Review tasks are collected for a single
@@ -429,6 +437,7 @@ rule MoveTaskBackward {
 
     let prev = prev_status(task.status)
     let was_running = task.status = running
+    let has_agent = task.worktree != null
 
     -- Kill tmux window when moving backward, but preserve worktree for resume
     ensures: task.status = prev
@@ -438,6 +447,10 @@ rule MoveTaskBackward {
     ensures:
         if was_running:
             current_agent(task).stop_pending = false
+    -- Review -> Running seeds the activity stamp as MoveTaskForward does.
+    ensures:
+        if prev = running and has_agent:
+            current_agent(task).last_pre_tool_use_at = now
 
     @guidance
         -- Manual movement (forward or backward) clears the task's agent
@@ -757,8 +770,8 @@ rule ClearBuildOutputOfDoneTask {
         -- cleanup cannot reach outside the worktree.
         --
         -- The search walks the whole tree, because a nested crate builds into
-        -- its own target/ (a nested crate's own target/), and a
-        -- top-level-only search leaves that behind in every Done worktree.
+        -- its own target/, and a top-level-only search leaves that behind in
+        -- every Done worktree.
         -- The walk does not descend into a tagged directory (it is removed
         -- whole, so a tag below it is not listed separately) or into any
         -- directory holding its own .git entry (file or directory): that is
@@ -1402,7 +1415,7 @@ rule ToggleBookmarkFromBoard {
     -- `b` on a task card (keybindings: board.normal toggle_bookmark, "on a
     -- task card"). On an epic or work package card the row does not apply,
     -- so the key does nothing (keybindings: KeyWithoutARowCannotAct).
-    ensures: BookmarkSet(viewer: viewer, task: task,
+    ensures: BookmarkSet(subscriber: viewer, task: task,
                          bookmarked: not exists core/Bookmark{subscriber: viewer, task: task})
 
     @guidance
@@ -1973,7 +1986,8 @@ rule CopyTask {
         sub_status: default_sub_status(backlog),
         tag: confirmed_tag,              -- source.tag seeds it; user re-confirms
         phoenix: armed_phoenix,          -- false unless armed at InputTag
-        wrap_up_mode: source.wrap_up_mode,
+        base_branch: confirmed_base_branch,  -- picked at InputBaseBranch; never the source's
+        wrap_up_mode: confirmed_wrap_up_mode,  -- source.wrap_up_mode seeds it; user re-confirms
         model: confirmed_model,          -- source.model seeds it; user re-confirms
         created_at: now,
         updated_at: now
@@ -1983,7 +1997,8 @@ rule CopyTask {
         -- Copies a subset of fields from the source task, including the tag and
         -- the wrap_up_mode preference and the model. Fields that are NOT
         -- copied: plan,
-        -- worktree, tmux_window, url, epic, sort_order, base_branch, phoenix.
+        -- worktree, tmux_window, url, epic, sort_order, phoenix, and
+        -- base_branch, which the flow asks for afresh (see below).
         -- auto_run_plan is NOT copied — like plan_path, it's tied to a
         -- specific (unshared) plan file, and this field is set by skills
         -- (decompose-review) rather than being a human TUI preference.
@@ -2109,9 +2124,14 @@ rule EditTask {
 
     ensures:
         let edited = EditorSession(task)
-        if edited.title != "": task.title = edited.title
-        if edited.description != "": task.description = edited.description
-        if edited.repo_path != "": task.repo_path = edited.repo_path
+        -- An empty TITLE, DESCRIPTION, REPO_PATH or BASE_BRANCH keeps the
+        -- opened value, so it is no change.
+        if edited.title != "" and edited.title != opened.title:
+            task.title = edited.title
+        if edited.description != "" and edited.description != opened.description:
+            task.description = edited.description
+        if edited.repo_path != "" and edited.repo_path != opened.repo_path:
+            task.repo_path = edited.repo_path
         -- A STATUS section that repeats the opened status is no change, so
         -- the sub_status is kept.
         if edited.status != null and edited.status != opened.status:
@@ -2133,11 +2153,15 @@ rule EditTask {
             -- PendingStopOnlyWhileRunning invariant.
             if prior = running and edited.status != running:
                 current_agent(task).stop_pending = false
-        if edited.plan != "": task.plan_path = edited.plan
-        else: task.plan_path = null
-        if edited.tag != "": task.tag = edited.tag
-        else: task.tag = null
-        if edited.base_branch != "": task.base_branch = edited.base_branch
+        -- An empty PLAN or TAG clears the field.
+        let plan = if edited.plan != "": edited.plan else: null
+        if plan != opened.plan_path:
+            task.plan_path = plan
+        let tag = if edited.tag != "": edited.tag else: null
+        if tag != opened.tag:
+            task.tag = tag
+        if edited.base_branch != "" and edited.base_branch != opened.base_branch:
+            task.base_branch = edited.base_branch
         -- The two preference writes are SetWrapUpMode and SetModel, raised
         -- only for a section the user changed (see "Only fields the user
         -- changed are written" above).
@@ -2145,17 +2169,22 @@ rule EditTask {
             SetWrapUpMode(task: task, mode: edited.wrap_up_mode)
         if edited.model != opened.model:
             SetModel(task: task, model: edited.model)
-        task.phoenix = edited.phoenix ?? false
+        let phoenix = edited.phoenix ?? false
+        if phoenix != opened.phoenix:
+            task.phoenix = phoenix
         -- url updated from the URL/URL_TYPE sections per the semantics
         -- in the comment above; left untouched when unchanged.
         let desired_url =
             if edited.url = "": null
             else if edited.url_type != null: core/TaskUrl{url: edited.url, url_type: edited.url_type}
-            else if task.url != null and task.url.url = edited.url:
-                core/TaskUrl{url: edited.url, url_type: task.url.url_type}
+            else if opened.url != null and opened.url.url = edited.url:
+                core/TaskUrl{url: edited.url, url_type: opened.url.url_type}
             else: core/TaskUrl{url: edited.url, url_type: infer_url_type(edited.url)}
-        if desired_url != task.url: task.url = desired_url
-        task.updated_at = now
+        if desired_url != opened.url:
+            task.url = desired_url
+        -- A save that changes nothing writes nothing, so it stamps nothing.
+        if edit_changes_a_field(edited, opened):
+            task.updated_at = now
 
     @guidance
         -- Status changes via the editor bypass normal transition
@@ -2487,7 +2516,7 @@ rule UpdateTaskIsOneTransaction {
     -- cached rows. A refusal of either half (the epic does not exist, a
     -- sub_status illegal for the status the row will hold, a schedule the
     -- module refuses) leaves the task, its epic and its repo as they were.
-    requires: task.exists
+    requires: exists task
 
     -- The epic before the call; an ensures-block `if` reads the post-call one.
     let prior_epic = task.epic
