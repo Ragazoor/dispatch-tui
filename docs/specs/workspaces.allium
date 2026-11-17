@@ -84,6 +84,263 @@ use "./work-packages.allium" as wp
 use "./epics.allium" as epics
 
 ------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The checks the store runs inside its write reducers, whichever client
+-- calls them (the StoreWriteChecks surface fulfils them). Each check refuses
+-- the write and writes nothing when it fails. caller() is the identity the
+-- reducer runs under.
+contract StoreWriteChecks {
+    @invariant EpicIsPrivateOnlyWithACreator
+        -- Raised by create_epic and set_epic_visibility. For epic and the
+        -- visibility asked for:
+        --     visibility = public or epic.created_by != null
+        -- CreateEpicInWorkspace and SetEpicVisibility state the same check.
+        --
+        -- A private epic is seen only by its creator, so one with no creator
+        -- (created_by null: legacy or feed-made) would be seen by nobody.
+        -- Applies to creation (CreateEpicInWorkspace) and to
+        -- SetEpicVisibility alike.
+
+    @invariant RepoGroupsStayPublic
+        -- Two checks, one per write:
+        --   create_epic and set_epic_visibility, for epic and the visibility
+        --   asked for (CreateEpicInWorkspace and SetEpicVisibility state it too):
+        --     visibility = public or epic.origin != repo_group
+        --   patch_epic, when the patch names an origin:
+        --     origin = epic.origin
+        --     or (origin != repo_group and epic.origin != repo_group)
+        --
+        -- A repo-group sub-epic (origin = repo_group) is found
+        -- by its title and origin by whoever routes a task into the grouped
+        -- root (epics.allium: RegroupEpic, route_target), so it must be seen
+        -- by everyone who sees its parent. So an epic with origin =
+        -- repo_group is never private: set_epic_visibility refuses to make
+        -- one private ("a repo-group epic cannot be private"), and
+        -- create_epic refuses a private one with that origin
+        -- (CreateEpicInWorkspace). A repo-group sub-epic under a private
+        -- root is still hidden by that root (D5); it is only never private
+        -- itself.
+        -- The origin is set by routing alone, so the store's patch_epic
+        -- refuses a patch that changes origin to or from repo_group ("a
+        -- repo-group origin is set by routing and cannot be changed"). A
+        -- patch naming the origin the epic already has is no change and is
+        -- let through. No MCP tool takes an origin (core.allium: Epic.origin);
+        -- this guards the store against any client that writes the column.
+        -- Module: check_repo_group_stays_public, check_origin_patch.
+
+    @invariant EpicStaysInItsWorkspace
+        -- Raised by patch_epic when the patch names a parent: epic moves under
+        -- destination (null: the epic becomes a root epic).
+        --     destination = null
+        --     or (destination.workspace = epic.workspace
+        --         and destination.visible_to(caller()))
+        --
+        -- Re-parenting inside one workspace is unchanged; re-parenting across
+        -- workspaces is refused. Changing workspace is MoveEpicToWorkspace,
+        -- never a side effect of re-parenting. A re-parent that changes who
+        -- the epic is private to also needs ReParentingKeepsTheHolder.
+
+    @invariant ReParentingKeepsTheHolder
+        -- Two checks, one per move.
+        --   An epic re-parent (patch_epic naming a parent; destination null: the
+        --   epic becomes a root epic). The epic's holder after the move is its own
+        --   creator if it is private itself, else the destination's holder
+        --   (core.allium: Epic.private_holder), else null at the root:
+        --     holder_after = epic.private_holder
+        --     or caller() = epic.created_by
+        --     or epic.workspace.is_admin(caller())
+        --     or is_super_admin(caller())
+        --   A task move (set_task_epic, update_task with an epic; destination null:
+        --   onto the user board of the owner). A task has no visibility of its
+        --   own: in an epic it is the epic's holder's, and epic-less it is private
+        --   to its owner (D2). So holder_before is task.epic.private_holder, or
+        --   task.owner for an epic-less task, and holder_after is
+        --   destination.private_holder:
+        --     destination = null
+        --     or holder_after = holder_before
+        --     or caller() = holder_before
+        --     or destination.workspace.is_admin(caller())
+        --     or is_super_admin(caller())
+        --   A detach (destination null) is judged by TaskMovesStayInTheWorkspace
+        --   alone: its authority is the task's creator, not the holder.
+        --
+        -- A move that changes who an
+        -- item is private to (into a private epic, out of one, or between
+        -- two) is a visibility change, so it needs the authority
+        -- SetEpicVisibility needs, on top of sight (EpicStaysInItsWorkspace,
+        -- TaskEntersAnEpicTheCallerCanSee). A move that keeps the holder
+        -- needs nothing extra.
+        -- For an epic the authority is over the epic MOVED, never the
+        -- destination: its creator, an admin of its workspace, or a
+        -- super-admin. It covers a move to the root as well. A private epic
+        -- is its own creator's wherever it sits, so only a public epic's
+        -- move can change its holder; that move takes its public subtree
+        -- with it. Refusal: "only the creator or an admin may move an epic
+        -- into or out of a private epic". Module: check_epic_move,
+        -- epic_move_changes_holder (shared with MemoryReducerCaller).
+        -- The authority is the person the task is private to now (their own
+        -- work is theirs to expose or keep), an
+        -- admin of the workspace it moves into (or out of, for a move onto
+        -- a user board), or a super-admin. The destination is the epic the
+        -- task lands in after repo-group routing (route_target), which
+        -- shares its grouped root's holder. A move onto a user board, or
+        -- into another workspace's epic, is judged first
+        -- (TaskMovesStayInTheWorkspace), so the authority above only
+        -- ever judges a move inside one workspace, or an epic-less task
+        -- joining an epic. Refusal: "task N: only the person it is private
+        -- to, or an admin, may move it into or out of a private epic".
+        -- Module: check_task_move, task_move_permitted (shared with
+        -- MemoryReducerCaller).
+        -- The store itself (the operator) is exempt, as from every sight
+        -- check (WritesRequireSight). Separately, the repo-group relinks
+        -- (RegroupEpic, FlattenEpic, the reroute after a repo_path change)
+        -- need no check from anyone: a repo-group sub-epic is always public
+        -- (RepoGroupsStayPublic), so it shares its grouped root's holder and
+        -- a task moving between them keeps its holder.
+
+    @invariant TaskEntersAnEpicTheCallerCanSee
+        -- Raised by task_create and set_task_epic with an epic: task is placed in
+        -- epic.
+        --     epic.visible_to(caller())
+        --
+        -- Covers task creation in an epic and moving a task into one. An
+        -- epic-less task needs no sight check: it lands on the caller's own
+        -- user board (core.allium: OwnerTracksUserBoardTask). A move, onto a
+        -- user board included, that changes who the task is private to also
+        -- needs ReParentingKeepsTheHolder.
+
+    @invariant TaskMovesStayInTheWorkspace
+        -- Raised by set_task_epic and update_task with an epic: task moves into
+        -- destination (null: onto the user board of the owner).
+        --     task.epic = null
+        --     or (destination != null and destination.workspace = task.epic.workspace)
+        --     or (destination = null and (
+        --             caller() = task.created_by
+        --             or task.epic.workspace.is_admin(caller())
+        --             or is_super_admin(caller())))
+        --
+        -- A task in an epic belongs to that epic's workspace and does not
+        -- leave it for another workspace's epic. It leaves for a user board
+        -- (a DETACH) only by the person who created it, an admin of its
+        -- workspace or a super-admin, because that hides it from the team
+        -- that was working on it. The task lands on the
+        -- CALLER's board. A teammate who is none of those is refused: "task
+        -- N: only its creator or an admin may detach it from its epic". The
+        -- detach is judged by this rule alone, not also by
+        -- ReParentingKeepsTheHolder, whose holder arithmetic would ask a
+        -- creator in a public epic for admin authority on top. The store
+        -- itself (the operator) is exempt. A task on a user board has no
+        -- workspace, so it may join any epic the caller sees
+        -- (TaskEntersAnEpicTheCallerCanSee).
+        -- Only the store itself can still move a task across workspaces; it
+        -- drops the task's package links
+        -- (LinkedItemsShareThePackagesWorkspace, D6), in move_task_row.
+        -- A detach is also refused while a person other than the caller's
+        -- own hosts hold a current agent or an open request on the task: the
+        -- detach would hide the task from the host that is running it (the
+        -- store refuses rather than serve a hosted task past sight). Refusal: "task N: another person's
+        -- host is running it; detach it once that agent has ended".
+        -- Module: task_detach_strands_a_host (shared with MemoryReducerCaller).
+        -- A detach also leaves the workspace for the package links, as a
+        -- cross-workspace move does (D6).
+        -- Refusals: "task N: a task stays in its workspace; it cannot move
+        -- into another workspace", and for a detach by someone with no
+        -- authority "task N: only its creator or an admin may detach it from
+        -- its epic". Module: check_task_move, task_move_leaves_workspace,
+        -- task_move_is_detach, task_detach_permitted (shared with
+        -- MemoryReducerCaller).
+
+    @invariant LinkOnlyInsideTheWorkspace
+        -- Raised by every link of item to package (work-packages.allium: LinkItem):
+        --     package.visible_to(caller())
+        --     item.visible_to(caller())
+        --     item_workspace(item) = null or item_workspace(item) = package.workspace
+        --
+        -- The store's check on every link, whichever path asks for it
+        -- (CreateWorkPackage, the link picker, work-package_update). A refused
+        -- link writes nothing. item_workspace is the epic's workspace for an
+        -- epic, the epic's workspace for an epic task, and null for a
+        -- main-board task, which may be linked anywhere and stays private to
+        -- its owner (D6).
+
+    @invariant WritesRequireSight
+        -- Raised by every reducer that changes, dispatches, wraps up, closes,
+        -- links, subscribes to or rates a task, epic, package or learning, for
+        -- that item:
+        --     item.visible_to(caller())
+        --
+        -- Every reducer that changes, dispatches, wraps up, closes, links,
+        -- subscribes to or rates a task, epic, package or learning first
+        -- checks the caller can see it. A refusal names no detail of the
+        -- item, so a refusal cannot be used to probe for a private one.
+        -- Teammates may still act on each other's work in a workspace they
+        -- share; this narrows that to work they can see.
+        -- Two writes need more than sight, because they decide who sees an
+        -- item: a visibility change (SetEpicVisibility,
+        -- SetWorkPackageVisibility) and a move that changes who an item is
+        -- private to (ReParentingKeepsTheHolder). Those are for the creator
+        -- (for a task, the person it is private to), an admin or a
+        -- super-admin.
+        -- Unlinking an item the caller cannot see from a package is a
+        -- no-op, as for an item that is not linked (work-packages.allium:
+        -- UnlinkItem).
+        --
+        -- UnseenIsAsMissing. An item the caller cannot see is
+        -- answered exactly as an item that does not exist: a reducer that
+        -- ignores a missing id ignores an unseen one, and one that refuses a
+        -- missing id refuses an unseen one with the same words. So the
+        -- answer never tells a caller whether a private item is there.
+        -- One exception is named: deleting an epic cascades through its
+        -- subtree, so it is refused ("cannot delete right now") when the
+        -- subtree holds an epic the caller cannot see, rather than taking
+        -- someone's private sub-epic with it.
+        --
+        -- The operator (the store's own scheduled calls) is exempt from every
+        -- sight check: it is the trust boundary (docs/architecture.md, "Read
+        -- enforcement: per-caller views"), not a
+        -- person with a membership. The publisher is not exempt; it only may
+        -- call the seed_* reducers.
+        --
+        -- Identities are the caller's, never a client's claim. A created epic
+        -- or work package is stamped created_by = the caller whatever the row
+        -- says; subscribe_to_epic, unsubscribe_from_epic and mark_task_seen
+        -- refuse a subscriber that is not the caller. Only the operator may
+        -- name another identity.
+        --
+        -- The same holds for the owner of a user-board task.
+        -- A task created with no epic, or detached from its epic (set_task_epic,
+        -- update_task), lands on the CALLER's own board: owner = the caller
+        -- whatever the argument says. Without that, Bob could detach a
+        -- teammate's task with owner = Bob and take it, or with an owner no one
+        -- is and hide it. A created task (task_create, create_task_signalled)
+        -- is also stamped created_by = the caller. The `owner` argument stays
+        -- in the signatures for the operator, the one caller who may name
+        -- another person. A task that joins an epic carries no owner.
+        --
+        -- Module-made epics. A feed's grouped and role-routed sub-epics
+        -- inherit the parent's workspace. A managed feed's root epics
+        -- (ensure_managed_epics) are created in the calling person's
+        -- lowest-numbered workspace, and not at all for a person in none.
+        --
+        -- Hooks and ingest. The agent hooks (stop, pre-tool, notification,
+        -- prompt, subagent), PR-learnings gate and feed ingest are writes like
+        -- any other: an unseen task or epic is answered as a missing one. A
+        -- managed root epic is found only among epics the caller can see, so a
+        -- second person in another workspace gets a root of their own.
+        -- Module: the hook reducers (try_record_stop, record_pre_tool_use,
+        -- record_notification, record_user_prompt_submit,
+        -- mark_pr_learnings_gate_shown, subagent_*) read the task through
+        -- visible_task; ingest_feed reads its epic through visible_epic;
+        -- ensure_managed_epics looks only among visible epics. Host-internal
+        -- calls are not exempt: only the operator is.
+        --
+        -- Created-by. Every new epic and work package is stamped with the
+        -- caller, so a private one always has someone to be private to.
+}
+
+------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
 
@@ -385,50 +642,6 @@ rule RemoveMember {
 
 -- Epics -------------------------------------------------------
 
-rule EpicIsPrivateOnlyWithACreator {
-    when: EpicVisibilityRequested(epic, visibility)
-
-    requires: visibility = public or epic.created_by != null
-
-    ensures: EpicVisibilityAllowed(epic)
-
-    @guidance
-        -- A private epic is seen only by its creator, so one with no creator
-        -- (created_by null: legacy or feed-made) would be seen by nobody.
-        -- Applies to creation (CreateEpicInWorkspace) and to
-        -- SetEpicVisibility alike.
-}
-
-rule RepoGroupsStayPublic {
-    when: EpicVisibilityRequested(epic, visibility)
-       or EpicOriginPatched(epic, origin)
-
-    requires: visibility = public or epic.origin != repo_group
-    requires: origin = epic.origin
-              or (origin != repo_group and epic.origin != repo_group)
-
-    ensures: EpicChangeAllowed(epic)
-
-    @guidance
-        -- A repo-group sub-epic (origin = repo_group) is found
-        -- by its title and origin by whoever routes a task into the grouped
-        -- root (epics.allium: RegroupEpic, route_target), so it must be seen
-        -- by everyone who sees its parent. So an epic with origin =
-        -- repo_group is never private: set_epic_visibility refuses to make
-        -- one private ("a repo-group epic cannot be private"), and
-        -- create_epic refuses a private one with that origin
-        -- (CreateEpicInWorkspace). A repo-group sub-epic under a private
-        -- root is still hidden by that root (D5); it is only never private
-        -- itself.
-        -- The origin is set by routing alone, so the store's patch_epic
-        -- refuses a patch that changes origin to or from repo_group ("a
-        -- repo-group origin is set by routing and cannot be changed"). A
-        -- patch naming the origin the epic already has is no change and is
-        -- let through. No MCP tool takes an origin (core.allium: Epic.origin);
-        -- this guards the store against any client that writes the column.
-        -- Module: check_repo_group_stays_public, check_origin_patch.
-}
-
 rule CreateEpicInWorkspace {
     when: EpicCreated(epic, workspace, parent_epic?, visibility)
 
@@ -573,93 +786,6 @@ rule ClaimsFollowTaskSight {
             not exists b
 }
 
-rule EpicStaysInItsWorkspace {
-    when: EpicMoved(epic, destination)    -- destination null: the epic becomes a root epic
-
-    requires:
-        destination = null
-        or (destination.workspace = epic.workspace
-            and destination.visible_to(caller()))
-
-    ensures: EpicMoveAllowed(epic)
-
-    @guidance
-        -- Re-parenting inside one workspace is unchanged; re-parenting across
-        -- workspaces is refused. Changing workspace is MoveEpicToWorkspace,
-        -- never a side effect of re-parenting. A re-parent that changes who
-        -- the epic is private to also needs ReParentingKeepsTheHolder.
-}
-
-rule ReParentingKeepsTheHolder {
-    when: EpicMoved(epic, destination)          -- destination null: the epic becomes a root epic
-       or TaskMoved(task, destination, owner)   -- destination null: onto the user board of `owner`
-
-    -- An epic's holder after the move: its own creator if it is private
-    -- itself, else the destination's holder (core.allium: Epic.private_holder).
-    let epic_holder_after =
-        if epic.visibility = private: epic.created_by
-        else if destination != null: destination.private_holder
-        else: null
-
-    -- A task has no visibility of its own: in an epic it is the epic's
-    -- holder's, and epic-less it is private to its owner (D2).
-    let task_holder_before =
-        if task.epic != null: task.epic.private_holder else: task.owner
-    let task_holder_after = destination.private_holder
-    let task_workspace = destination.workspace
-
-    requires:
-        epic_holder_after = epic.private_holder
-        or caller() = epic.created_by
-        or epic.workspace.is_admin(caller())
-        or is_super_admin(caller())
-    requires:
-        -- A detach (destination null) is judged by TaskMovesStayInTheWorkspace
-        -- alone: its authority is the task's creator, not the holder.
-        destination = null
-        or task_holder_after = task_holder_before
-        or caller() = task_holder_before
-        or task_workspace.is_admin(caller())
-        or is_super_admin(caller())
-
-    ensures: MoveAllowed()
-
-    @guidance
-        -- A move that changes who an
-        -- item is private to (into a private epic, out of one, or between
-        -- two) is a visibility change, so it needs the authority
-        -- SetEpicVisibility needs, on top of sight (EpicStaysInItsWorkspace,
-        -- TaskEntersAnEpicTheCallerCanSee). A move that keeps the holder
-        -- needs nothing extra.
-        -- For an epic the authority is over the epic MOVED, never the
-        -- destination: its creator, an admin of its workspace, or a
-        -- super-admin. It covers a move to the root as well. A private epic
-        -- is its own creator's wherever it sits, so only a public epic's
-        -- move can change its holder; that move takes its public subtree
-        -- with it. Refusal: "only the creator or an admin may move an epic
-        -- into or out of a private epic". Module: check_epic_move,
-        -- epic_move_changes_holder (shared with MemoryReducerCaller).
-        -- The authority is the person the task is private to now (their own
-        -- work is theirs to expose or keep), an
-        -- admin of the workspace it moves into (or out of, for a move onto
-        -- a user board), or a super-admin. The destination is the epic the
-        -- task lands in after repo-group routing (route_target), which
-        -- shares its grouped root's holder. A move onto a user board, or
-        -- into another workspace's epic, is judged first
-        -- (TaskMovesStayInTheWorkspace), so the authority above only
-        -- ever judges a move inside one workspace, or an epic-less task
-        -- joining an epic. Refusal: "task N: only the person it is private
-        -- to, or an admin, may move it into or out of a private epic".
-        -- Module: check_task_move, task_move_permitted (shared with
-        -- MemoryReducerCaller).
-        -- The store itself (the operator) is exempt, as from every sight
-        -- check (WritesRequireSight). Separately, the repo-group relinks
-        -- (RegroupEpic, FlattenEpic, the reroute after a repo_path change)
-        -- need no check from anyone: a repo-group sub-epic is always public
-        -- (RepoGroupsStayPublic), so it shares its grouped root's holder and
-        -- a task moving between them keeps its holder.
-}
-
 rule MoveEpicToWorkspace {
     when: MoveEpicToWorkspace(epic, destination)
 
@@ -730,67 +856,6 @@ rule MoveEpicToWorkspace {
 
 -- Tasks -----------------------------------------------------
 
-rule TaskEntersAnEpicTheCallerCanSee {
-    when: TaskPlacedInEpic(task, epic)
-
-    requires: epic.visible_to(caller())
-
-    ensures: TaskPlacementAllowed(task, epic)
-
-    @guidance
-        -- Covers task creation in an epic and moving a task into one. An
-        -- epic-less task needs no sight check: it lands on the caller's own
-        -- user board (core.allium: OwnerTracksUserBoardTask). A move, onto a
-        -- user board included, that changes who the task is private to also
-        -- needs ReParentingKeepsTheHolder.
-}
-
-rule TaskMovesStayInTheWorkspace {
-    when: TaskMoved(task, destination, owner)    -- destination null: onto the user board of `owner`
-
-    requires:
-        task.epic = null
-        or (destination != null and destination.workspace = task.epic.workspace)
-        or (destination = null and (
-                caller() = task.created_by
-                or task.epic.workspace.is_admin(caller())
-                or is_super_admin(caller())))
-
-    ensures: TaskMoveAllowed(task)
-
-    @guidance
-        -- A task in an epic belongs to that epic's workspace and does not
-        -- leave it for another workspace's epic. It leaves for a user board
-        -- (a DETACH) only by the person who created it, an admin of its
-        -- workspace or a super-admin, because that hides it from the team
-        -- that was working on it. The task lands on the
-        -- CALLER's board. A teammate who is none of those is refused: "task
-        -- N: only its creator or an admin may detach it from its epic". The
-        -- detach is judged by this rule alone, not also by
-        -- ReParentingKeepsTheHolder, whose holder arithmetic would ask a
-        -- creator in a public epic for admin authority on top. The store
-        -- itself (the operator) is exempt. A task on a user board has no
-        -- workspace, so it may join any epic the caller sees
-        -- (TaskEntersAnEpicTheCallerCanSee).
-        -- Only the store itself can still move a task across workspaces; it
-        -- drops the task's package links
-        -- (LinkedItemsShareThePackagesWorkspace, D6), in move_task_row.
-        -- A detach is also refused while a person other than the caller's
-        -- own hosts hold a current agent or an open request on the task: the
-        -- detach would hide the task from the host that is running it (the
-        -- store refuses rather than serve a hosted task past sight). Refusal: "task N: another person's
-        -- host is running it; detach it once that agent has ended".
-        -- Module: task_detach_strands_a_host (shared with MemoryReducerCaller).
-        -- A detach also leaves the workspace for the package links, as a
-        -- cross-workspace move does (D6).
-        -- Refusals: "task N: a task stays in its workspace; it cannot move
-        -- into another workspace", and for a detach by someone with no
-        -- authority "task N: only its creator or an admin may detach it from
-        -- its epic". Module: check_task_move, task_move_leaves_workspace,
-        -- task_move_is_detach, task_detach_permitted (shared with
-        -- MemoryReducerCaller).
-}
-
 -- Work packages ----------------------------------------------
 --
 -- A package is created in a workspace its creator belongs to, with a
@@ -805,24 +870,6 @@ rule SetWorkPackageVisibility {
               or is_super_admin(caller())
 
     ensures: package.visibility = visibility
-}
-
-rule LinkOnlyInsideTheWorkspace {
-    when: wp/LinkItem(package, item)
-
-    requires: package.visible_to(caller())
-    requires: item.visible_to(caller())
-    requires: item_workspace(item) = null or item_workspace(item) = package.workspace
-
-    ensures: LinkAllowed(package, item)
-
-    @guidance
-        -- The store's check on every link, whichever path asks for it
-        -- (CreateWorkPackage, the link picker, work-package_update). A refused
-        -- link writes nothing. item_workspace is the epic's workspace for an
-        -- epic, the epic's workspace for an epic task, and null for a
-        -- main-board task, which may be linked anywhere and stays private to
-        -- its owner (D6).
 }
 
 -- Naming a workspace and a visibility from the board ----------------------
@@ -933,83 +980,6 @@ rule SuperAdminDeletesUnseenItem {
 }
 
 -- Writes ------------------------------------------------------
-
-rule WritesRequireSight {
-    when: WriteToItem(item)
-
-    requires: item.visible_to(caller())
-
-    ensures: WriteAllowed(item)
-
-    @guidance
-        -- Every reducer that changes, dispatches, wraps up, closes, links,
-        -- subscribes to or rates a task, epic, package or learning first
-        -- checks the caller can see it. A refusal names no detail of the
-        -- item, so a refusal cannot be used to probe for a private one.
-        -- Teammates may still act on each other's work in a workspace they
-        -- share; this narrows that to work they can see.
-        -- Two writes need more than sight, because they decide who sees an
-        -- item: a visibility change (SetEpicVisibility,
-        -- SetWorkPackageVisibility) and a move that changes who an item is
-        -- private to (ReParentingKeepsTheHolder). Those are for the creator
-        -- (for a task, the person it is private to), an admin or a
-        -- super-admin.
-        -- Unlinking an item the caller cannot see from a package is a
-        -- no-op, as for an item that is not linked (work-packages.allium:
-        -- UnlinkItem).
-        --
-        -- UnseenIsAsMissing. An item the caller cannot see is
-        -- answered exactly as an item that does not exist: a reducer that
-        -- ignores a missing id ignores an unseen one, and one that refuses a
-        -- missing id refuses an unseen one with the same words. So the
-        -- answer never tells a caller whether a private item is there.
-        -- One exception is named: deleting an epic cascades through its
-        -- subtree, so it is refused ("cannot delete right now") when the
-        -- subtree holds an epic the caller cannot see, rather than taking
-        -- someone's private sub-epic with it.
-        --
-        -- The operator (the store's own scheduled calls) is exempt from every
-        -- sight check: it is the trust boundary (docs/architecture.md, "Read
-        -- enforcement: per-caller views"), not a
-        -- person with a membership. The publisher is not exempt; it only may
-        -- call the seed_* reducers.
-        --
-        -- Identities are the caller's, never a client's claim. A created epic
-        -- or work package is stamped created_by = the caller whatever the row
-        -- says; subscribe_to_epic, unsubscribe_from_epic and mark_task_seen
-        -- refuse a subscriber that is not the caller. Only the operator may
-        -- name another identity.
-        --
-        -- The same holds for the owner of a user-board task.
-        -- A task created with no epic, or detached from its epic (set_task_epic,
-        -- update_task), lands on the CALLER's own board: owner = the caller
-        -- whatever the argument says. Without that, Bob could detach a
-        -- teammate's task with owner = Bob and take it, or with an owner no one
-        -- is and hide it. A created task (task_create, create_task_signalled)
-        -- is also stamped created_by = the caller. The `owner` argument stays
-        -- in the signatures for the operator, the one caller who may name
-        -- another person. A task that joins an epic carries no owner.
-        --
-        -- Module-made epics. A feed's grouped and role-routed sub-epics
-        -- inherit the parent's workspace. A managed feed's root epics
-        -- (ensure_managed_epics) are created in the calling person's
-        -- lowest-numbered workspace, and not at all for a person in none.
-        --
-        -- Hooks and ingest. The agent hooks (stop, pre-tool, notification,
-        -- prompt, subagent), PR-learnings gate and feed ingest are writes like
-        -- any other: an unseen task or epic is answered as a missing one. A
-        -- managed root epic is found only among epics the caller can see, so a
-        -- second person in another workspace gets a root of their own.
-        -- Module: the hook reducers (try_record_stop, record_pre_tool_use,
-        -- record_notification, record_user_prompt_submit,
-        -- mark_pr_learnings_gate_shown, subagent_*) read the task through
-        -- visible_task; ingest_feed reads its epic through visible_epic;
-        -- ensure_managed_epics looks only among visible epics. Host-internal
-        -- calls are not exempt: only the operator is.
-        --
-        -- Created-by. Every new epic and work package is stamped with the
-        -- caller, so a private one always has someone to be private to.
-}
 
 -- Learnings and settings -------------------------------------
 
@@ -1288,32 +1258,24 @@ surface StoreLifecycle {
         StoreUpgradedToWorkspaces()
 }
 
--- The checks the store runs inside its write reducers, whichever client
--- calls them. Each names the reducers that raise it.
+-- The store's write reducers, whichever client calls them. They run the
+-- StoreWriteChecks contract's checks, and the writes below also start the
+-- rules that listen to them.
 surface StoreWriteChecks {
     facing _: core/StoreClient
 
     provides:
         -- create_epic (CreateEpicInWorkspace).
         EpicCreated(epic, workspace, parent_epic?, visibility)
-        -- create_epic and set_epic_visibility (EpicIsPrivateOnlyWithACreator,
-        -- RepoGroupsStayPublic).
-        EpicVisibilityRequested(epic, visibility)
-        -- patch_epic, when the patch names an origin (RepoGroupsStayPublic).
-        EpicOriginPatched(epic, origin)
-        -- patch_epic, when the patch names a parent (EpicStaysInItsWorkspace,
-        -- ReParentingKeepsTheHolder, ClaimsFollowSight).
+        -- patch_epic, when the patch names a parent (ClaimsFollowSight,
+        -- SightChangeNeverStrandsAHost).
         EpicMoved(epic, destination?)
-        -- set_task_epic and update_task with an epic (TaskMovesStayInTheWorkspace,
-        -- ReParentingKeepsTheHolder, ClaimsFollowTaskSight).
+        -- set_task_epic and update_task with an epic (ClaimsFollowTaskSight,
+        -- SightChangeNeverStrandsAHost).
         TaskMoved(task, destination?, owner)
-        -- task_create and set_task_epic with an epic
-        -- (TaskEntersAnEpicTheCallerCanSee).
-        TaskPlacedInEpic(task, epic)
-        -- Every reducer that changes, dispatches, wraps up, closes, links,
-        -- subscribes to or rates a task, epic, package or learning
-        -- (WritesRequireSight).
-        WriteToItem(item)
+
+    contracts:
+        fulfils StoreWriteChecks
 }
 
 -- What the operator does about their own name and an item's workspace at
