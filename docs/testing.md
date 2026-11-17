@@ -198,6 +198,7 @@ Most of it renders a board to a buffer and reads colours back off it, the right 
 | `focused_header_label_is_brighter_than_unfocused` | focus moves the label's brightness |
 | `each_header_label_keeps_its_column_hue_signature` | each label keeps its source hue's channel ranking at both focus states |
 | `column_top_rule_is_hued_only_while_focused` | focused rule in the identity hue, unfocused in the neutral grey, no third colour |
+| `epic_view_tints_the_enclosing_panel_but_not_the_column_grounds` | an epic view's enclosing panel is the faint purple mode tint, and the column grounds inside it stay neutral |
 | `scroll_indicators_follow_the_column_top_rule` | the focused column's overflow arrow is hued, an unfocused one's grey |
 | **`src/tui/tests/rendering.rs`** | |
 | `focused_column_ground_is_distinct_from_unfocused` | the focus step on the ground is visible |
@@ -256,7 +257,7 @@ The lit frame and the one-cell inset are both produced by `src/tui/ui/kanban/car
 
 ### Claims no render test covers
 
-- Epic view's enclosing panel tint: faintly purple as a mode signal, with the column grounds inside it neutral. One production site, no test; it is the only place purple means *mode* rather than *epic*.
+- Package view's enclosing panel tint: faintly teal. `package_view_frame_is_teal_not_epic_purple` (`src/tui/tests/work_packages.rs`) asserts the CYAN frame and that no cell takes the epic purple tint, not the teal ground itself.
 - That a cursor or multi-selected *task* card's title is bold. The epic case is asserted; the task case is not.
 - That the new-task signal and the bookmark are per viewer. The board only receives the viewer's own rows (the store's `own_unseen_tasks` and `own_bookmarks` views), so the render path has no other person's row to draw.
 

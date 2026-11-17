@@ -330,7 +330,8 @@ pub(super) fn render_column_separator(frame: &mut Frame, area: Rect) {
 
 struct SummarySegment {
     label: String,
-    /// Selectable-item count, rendered after the label at reduced emphasis.
+    /// Card count (task and epic cards, folded ones included), rendered after
+    /// the label at reduced emphasis.
     count: String,
     /// Header-bar fill and label colors, resolved per column identity + focus
     /// (`board-visuals.allium`: "Column header bar").

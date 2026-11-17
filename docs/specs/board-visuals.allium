@@ -194,8 +194,11 @@ use "./work-packages.allium" as wp
 --
 -- Each column header renders as a filled bar showing a focus prefix
 -- (`▸` when focused, `◦` when not), the column label uppercased, and the
--- count of selectable items in that column, the count at reduced emphasis
--- relative to the label.
+-- count of task and epic cards in that column, the count at reduced
+-- emphasis relative to the label. Cards hidden in a folded section or a
+-- folded epic group count too. A work-package card counts 0: it is a view
+-- onto work counted elsewhere. Section headers, epic-header rows and
+-- separators are not cards and are not counted.
 --
 -- A bar spans exactly the horizontal extent of the column it labels — no
 -- more and no less — and the separators between columns are part of no
@@ -1100,7 +1103,7 @@ enum HuedSurface {
                                -- of the two hued flat areas on the screen,
                                -- and the board's frame rather than a column
                                -- ground — see "Column ground and card
-                               -- surface". No test covers it.
+                               -- surface".
     package_view_panel_ground  -- the same for a package view: faintly teal,
                                -- with a CYAN border and title
 }
@@ -1257,8 +1260,9 @@ surface ColumnHeaderBar {
 
     @guarantee HeaderShowsPrefixLabelAndCount
         -- Each header renders a focus prefix (`▸` focused, `◦` not), the
-        -- column label uppercased, and the count of selectable items in that
-        -- column, the count at reduced emphasis relative to the label.
+        -- column label uppercased, and the count of task and epic cards in
+        -- that column, folded ones included and work-package cards not, the
+        -- count at reduced emphasis relative to the label.
 
     @guarantee SelectAllCheckboxIsNeutralAndTaskStatusOnly
         -- The focused column's header carries the select-all checkbox, behind
@@ -1324,8 +1328,8 @@ surface ColumnGround {
         -- other is the board. With the package view's teal panel
         -- (HuedSurface.package_view_panel_ground) these are the only hued
         -- flat areas on the screen (HuedSurface.epic_view_panel_ground), and
-        -- the only place purple means MODE rather than EPIC — and no test
-        -- covers them.
+        -- the only place purple means MODE rather than EPIC. Coverage is in
+        -- docs/testing.md ("Board visuals coverage").
 }
 
 surface ColumnFocusHairlines {
