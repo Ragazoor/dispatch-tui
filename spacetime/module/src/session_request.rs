@@ -135,7 +135,7 @@ pub const SESSION_REASON_TASK_CLOSED: &str = "task closed";
 pub const SESSION_REASON_TASK_DELETED: &str = "task deleted";
 
 /// `RequestExitSession`'s refusals for a token that is absent or spent.
-pub const EXIT_TOKEN_MISSING: &str = "no exit token — call wrap_up first";
+pub const EXIT_TOKEN_MISSING: &str = "no exit token — call session_wrap-up first";
 /// ...and for one that names another row, is superseded or is voided.
 pub const EXIT_TOKEN_INVALID: &str = "invalid exit token";
 

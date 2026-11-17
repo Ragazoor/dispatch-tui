@@ -205,17 +205,17 @@ rule WrapUpRateLearningNudge {
     ensures: RateLearningNudged(task: task)
 
     @guidance
-        -- The wrap_up success response for the pr action asks the agent to
+        -- The session_wrap-up success response for the pr action asks the agent to
         -- rate (helped | wrong | not_applicable) any entry surfaced to it
         -- this session and not yet rated, and says only surfaced entries can
         -- be rated. rebase and done append nothing, and a request the module
         -- refuses (store-split.allium: RequestWrapUp) gets no nudge. It is a
-        -- nudge, not a gate: exit_session needs no rating.
+        -- nudge, not a gate: session_exit needs no rating.
         -- No setting gates it, and it never mentions record_learning. The
         -- setting-gated record_learning nudge is a different behaviour on a
         -- different tool (mcp-task-tools.allium:
-        -- PrFinalisationReflectionNudge), and the normal wrap_up →
-        -- exit_session path never shows it, because that path closes the
+        -- PrFinalisationReflectionNudge), and the normal session_wrap-up →
+        -- session_exit path never shows it, because that path closes the
         -- task through the module, not through task_update.
         -- Reflection proper is the /retro skill, which the /wrap-up skill
         -- runs before its commit step, for all three actions.
@@ -293,7 +293,7 @@ rule RecordLearningViaMcp {
         -- check: a citation that resolves today rots as easily as one that
         -- never did, and nothing re-checks the knowledge base against the
         -- code. The script's fourth shape (a bare backticked snake_case span)
-        -- is not rejected, because MCP tool names (query_learnings, wrap_up)
+        -- is not rejected, because MCP tool names (query_learnings, session_wrap-up)
         -- have that shape and are a stable public interface.
         --
         -- WHERE THE CHECK STOPS. A bare PascalCase word and a short

@@ -431,7 +431,7 @@ macro_rules! task_service_api {
                 reason: String
             ) -> Result<bool, $crate::service::ServiceError>;
 
-            /// The check `wrap_up` makes before it acts: the worktree is
+            /// The check `session_wrap-up` makes before it acts: the worktree is
             /// committed. `Err(Validation)` is the refusal message.
             /// `WrapUpRefusesUnfinishedWork` in
             /// `docs/specs/mcp-task-tools.allium`.

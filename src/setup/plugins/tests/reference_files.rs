@@ -168,7 +168,7 @@ fn wrap_up_skill_has_no_dont_dispatch_the_next_subtask_section() {
 #[test]
 fn wrap_up_skill_names_exit_session_in_its_closing_sequence() {
     assert!(
-        wrap_up_closing_sequence().contains("exit_session"),
+        wrap_up_closing_sequence().contains("session_exit"),
         "wrap-up's closing sequence must name exit_session as the next call"
     );
 }

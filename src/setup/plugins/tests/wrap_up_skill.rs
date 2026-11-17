@@ -140,15 +140,15 @@ fn wrap_up_skill_says_a_failed_close_is_an_error_that_changed_nothing() {
 fn wrap_up_skill_tells_the_agent_to_call_exit_session_again_after_a_failed_close() {
     let section = failed_close_guidance();
     assert!(
-        section.contains("exit_session") && section.contains("again"),
-        "failed-close guidance must tell the agent to call exit_session again"
+        section.contains("session_exit") && section.contains("again"),
+        "failed-close guidance must tell the agent to call session_exit again"
     );
     assert!(
         section.contains("still valid"),
         "failed-close guidance must say the exit token is still valid"
     );
     assert!(
-        section.contains("wrap_up") && section.contains("do not"),
+        section.contains("session_wrap-up") && section.contains("do not"),
         "failed-close guidance must tell the agent not to call wrap_up again for a \
          fresh token"
     );
@@ -333,7 +333,7 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
         ("CancelCallsNothing", "exit without calling any tool"),
         (
             "PresetAnswerIsNotAPause",
-            "do not stop before `exit_session` returns",
+            "do not stop before `session_exit` returns",
         ),
         (
             "PresetAnswerIsNotAPause",
@@ -358,7 +358,10 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
         ),
         ("CommitBeforeWrapUp", "`git add` the relevant files by name"),
         ("CommitBeforeWrapUp", "review `git diff --cached`"),
-        ("CommitBeforeWrapUp", "`wrap_up` refuses a dirty worktree"),
+        (
+            "CommitBeforeWrapUp",
+            "`session_wrap-up` refuses a dirty worktree",
+        ),
         ("RateBeforeClosing", "Rate retrieved knowledge"),
         ("ClosingSequenceRunsInOneTurn", "back to back in one turn"),
         (
@@ -367,14 +370,14 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
         ),
         (
             "RebaseReverifiesWhenTold",
-            "commit any fix before `exit_session`",
+            "commit any fix before `session_exit`",
         ),
         ("RefusalIsShownAsWritten", "show the user the exact message"),
         ("RefusalIsShownAsWritten", "suggest resolution steps"),
         ("RefusalIsShownAsWritten", "show the exact message and stop"),
         (
             "ExitSessionNeedsAToken",
-            "Do not call `exit_session` without a token",
+            "Do not call `session_exit` without a token",
         ),
         ("ExitSessionIsMandatoryAndLast", "mandatory on every path"),
         ("ExitSessionIsMandatoryAndLast", "Make it your final action"),
@@ -417,8 +420,8 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
         "## Step 6: Verify, then commit",
         "## Step 7: The closing sequence",
         "Rate retrieved knowledge",
-        "**`wrap_up(task_id, action)`.**",
-        "**`exit_session(task_id, token, action)`**",
+        "**`session_wrap-up(task_id, action)`.**",
+        "**`session_exit(task_id, token, action)`**",
     ];
     let positions: Vec<usize> = order
         .iter()

@@ -34,7 +34,7 @@ async fn wrap_up_done_recalculates_epic_status() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "done" } })),
+        Some(json!({ "name": "session_wrap-up", "arguments": { "task_id": task_id.0, "action": "done" } })),
     )
     .await;
     assert!(
@@ -55,7 +55,7 @@ async fn wrap_up_done_recalculates_epic_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
@@ -106,7 +106,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "pr" } })),
+        Some(json!({ "name": "session_wrap-up", "arguments": { "task_id": task_id.0, "action": "pr" } })),
     )
     .await;
     assert!(
@@ -127,7 +127,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": {
                 "task_id": task_id.0,
                 "token": token,
@@ -219,7 +219,7 @@ async fn wrap_up_tool_schema_includes_done_action() {
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
     let wrap_up = tools
         .iter()
-        .find(|t| t["name"] == "wrap_up")
+        .find(|t| t["name"] == "session_wrap-up")
         .expect("wrap_up not in tool list");
     let action_enum = wrap_up["inputSchema"]["properties"]["action"]["enum"]
         .as_array()
@@ -247,7 +247,7 @@ async fn wrap_up_tool_schema_no_longer_has_pr_url() {
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
     let wrap_up = tools
         .iter()
-        .find(|t| t["name"] == "wrap_up")
+        .find(|t| t["name"] == "session_wrap-up")
         .expect("wrap_up not in tool list");
     let properties = wrap_up["inputSchema"]["properties"]
         .as_object()
@@ -265,7 +265,7 @@ async fn exit_session_tool_schema_requires_action_and_has_pr_url() {
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
     let exit_session = tools
         .iter()
-        .find(|t| t["name"] == "exit_session")
+        .find(|t| t["name"] == "session_exit")
         .expect("exit_session not in tool list");
     let required: Vec<&str> = exit_session["inputSchema"]["required"]
         .as_array()

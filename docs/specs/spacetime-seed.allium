@@ -165,9 +165,9 @@ contract IdSequenceCounter {
 -- The session request tables, `session_requests` and
 -- `session_request_timeouts` (store-split.allium: SessionRequest, W10), are
 -- left out for the same reason: a restored open row would have no timer, and
--- would block its task's next wrap_up (one open session request per task). A
+-- would block its task's next session_wrap-up (one open session request per task). A
 -- restore also loses every unconsumed exit token, which lives in those rows;
--- an agent mid-wrap-up calls wrap_up again.
+-- an agent mid-wrap-up calls session_wrap-up again.
 --
 -- `feed_requests` (store-split.allium: FeedRequest) is in-flight state too,
 -- and is left out for the same reason: a restored open request would hold its

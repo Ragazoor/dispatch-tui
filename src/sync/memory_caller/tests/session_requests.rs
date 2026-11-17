@@ -613,7 +613,7 @@ async fn a_pr_exit_session_takes_the_task_to_review_with_the_url() {
 }
 
 /// A token is consumed by the exit_session row that names it (W3), and a spent
-/// one reads "no exit token — call wrap_up first".
+/// one reads "no exit token — call session_wrap-up first".
 #[tokio::test]
 async fn an_exit_token_is_consumed_by_the_close() {
     let (caller, _rows) = caller();
@@ -623,7 +623,7 @@ async fn an_exit_token_is_consumed_by_the_close() {
 
     let again = refusal(exit(&caller, task, token, "done", "").await);
 
-    assert_eq!(again, "no exit token — call wrap_up first");
+    assert_eq!(again, "no exit token — call session_wrap-up first");
 }
 
 /// A refused close writes NOTHING and leaves the token valid for a retry: the
@@ -656,7 +656,7 @@ async fn an_exit_session_without_a_token_or_a_window_is_refused() {
 
     assert_eq!(
         refusal(exit(&caller, task, SessionRequestId(1), "done", "").await),
-        "no exit token — call wrap_up first",
+        "no exit token — call session_wrap-up first",
         "no wrap_up has finished"
     );
 

@@ -11,7 +11,7 @@ async fn wrap_up_task_not_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": 9999, "action": "rebase" }
         })),
     )
@@ -35,7 +35,7 @@ async fn wrap_up_rejects_backlog_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -69,7 +69,7 @@ async fn wrap_up_accepts_running_blocked_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -107,7 +107,7 @@ async fn wrap_up_accepts_running_active_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -149,7 +149,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -157,7 +157,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
     let text = extract_response_text(&resp);
 
     assert!(
-        text.contains("exit_session"),
+        text.contains("session_exit"),
         "response must name exit_session as the next call; got: {text}"
     );
     assert!(
@@ -207,7 +207,7 @@ async fn wrap_up_task_no_worktree() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -242,7 +242,7 @@ async fn wrap_up_invalid_action() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "teleport" }
         })),
     )
@@ -275,7 +275,7 @@ async fn wrap_up_rebase_returns_started() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -309,7 +309,7 @@ async fn wrap_up_rebase_returns_exit_token() {
         &state,
         "tools/call",
         Some(
-            json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "rebase" } }),
+            json!({ "name": "session_wrap-up", "arguments": { "task_id": task_id.0, "action": "rebase" } }),
         ),
     )
     .await;
@@ -363,7 +363,7 @@ async fn wrap_up_done_returns_exit_token() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "done" } })),
+        Some(json!({ "name": "session_wrap-up", "arguments": { "task_id": task_id.0, "action": "done" } })),
     )
     .await;
 
@@ -433,7 +433,7 @@ async fn wrap_up_pr_defers_review_and_url_to_exit_session() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "pr" }
         })),
     )
@@ -494,7 +494,7 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "pr" }
         })),
     )
@@ -522,7 +522,7 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
         "response must include the exit token; got: {text}"
     );
     assert!(
-        text.contains("exit_session"),
+        text.contains("session_exit"),
         "response should direct the agent to exit_session; got: {text}"
     );
     assert!(
@@ -553,7 +553,7 @@ async fn wrap_up_without_verdicts_still_succeeds() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -580,7 +580,7 @@ async fn wrap_up_success_omits_verify_line_when_unconfigured() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -592,7 +592,7 @@ async fn wrap_up_success_omits_verify_line_when_unconfigured() {
         "Expected no re-run line in unconfigured response, got: {text}"
     );
     assert!(
-        text.contains("exit_session"),
+        text.contains("session_exit"),
         "Expected 'exit_session' in response, got: {text}"
     );
 }
@@ -631,7 +631,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -680,7 +680,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -740,7 +740,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )

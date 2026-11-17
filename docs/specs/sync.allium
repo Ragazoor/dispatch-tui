@@ -662,9 +662,9 @@ rule SubscribeToThisHostsSessionRequests {
         -- machine whose board the task's agent talks to, so this delivers the
         -- work this host must do (store-split.allium:
         -- HostClaimsSessionRequest picks up requested rows, including the
-        -- initial rows a starting board receives), the outcome the wrap_up
-        -- MCP tool waits on, the chained_task exit_session's response names,
-        -- and the exit_session rows exit_session's no-answer settling reads
+        -- initial rows a starting board receives), the outcome the session_wrap-up
+        -- MCP tool waits on, the chained_task session_exit's response names,
+        -- and the exit_session rows session_exit's no-answer settling reads
         -- (mcp-task-tools.allium: WrapUpViaMcp, ExitSessionViaMcp). It also
         -- delivers the close rows of task_update's
         -- done path (store-split.allium: RequestCloseTask), which this host

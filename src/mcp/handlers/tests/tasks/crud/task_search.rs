@@ -110,6 +110,8 @@ async fn calling_a_renamed_write_tool_names_its_replacement() {
         ("update_task", "task_update"),
         ("dispatch_task", "task_dispatch"),
         ("resume_task", "task_resume"),
+        ("wrap_up", "session_wrap-up"),
+        ("exit_session", "session_exit"),
     ];
     for (old, new) in cases {
         let resp = call(

@@ -292,14 +292,14 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
 /// `task_update(status="done")`: a dedicated close-only call — see
 /// `MarkTaskDoneViaMcp` (docs/specs/mcp-task-tools.allium). Reachable for a
 /// session caller or a dispatched agent acting on a task other than its own;
-/// never for a dispatched agent closing itself (that stays wrap_up +
-/// exit_session), and never combined with any other field in the same call.
+/// never for a dispatched agent closing itself (that stays session_wrap-up +
+/// session_exit), and never combined with any other field in the same call.
 /// The close is the module's: one `close_task` reducer call
 /// (`store-split.allium: RequestCloseTask`) applies the Done write, rolls the
 /// epic up and, when there is a window or a PR to deal with, writes a `close`
 /// row this board's host then serves. It does NOT chain the epic's next
-/// subtask: that chain runs in the module, on an exit_session close, because
-/// only a close with a `wrap_up` behind it can say the work reached
+/// subtask: that chain runs in the module, on an session_exit close, because
+/// only a close with a `session_wrap-up` behind it can say the work reached
 /// `base_branch`.
 /// See `MarkTaskDoneViaMcp` in `docs/specs/mcp-task-tools.allium`.
 async fn handle_mark_task_done(
@@ -326,7 +326,7 @@ async fn handle_mark_task_done(
         return service_err_to_response(
             id,
             ServiceError::Validation(
-                "Cannot mark your own task done via task_update — call wrap_up then exit_session instead."
+                "Cannot mark your own task done via task_update — call session_wrap-up then session_exit instead."
                     .into(),
             ),
         );
@@ -359,7 +359,7 @@ async fn handle_mark_task_done(
                 ),
             )
         }
-        // No chain runs on this path, so unlike exit_session's, this response
+        // No chain runs on this path, so unlike session_exit's, this response
         // never names a next subtask.
         Ok(()) => JsonRpcResponse::ok(
             id,

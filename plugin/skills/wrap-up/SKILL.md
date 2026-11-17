@@ -1,15 +1,15 @@
 ---
 name: wrap-up
-description: Use to finish a dispatch task and close its session, when the work is done and the user says to wrap up, finish or close out. The user chooses the path first (rebase, draft PR, or done); it then runs the retro, verifies, commits and calls wrap_up. Always use this, never retro or a hand-called wrap_up/exit_session, to finish a task.
+description: Use to finish a dispatch task and close its session, when the work is done and the user says to wrap up, finish or close out. The user chooses the path first (rebase, draft PR, or done); it then runs the retro, verifies, commits and calls session_wrap-up. Always use this, never retro or a hand-called session_wrap-up/exit_session, to finish a task.
 ---
 
 # Wrap Up
 
-choose the action → `/retro` → verify → commit → `wrap_up(action)` → `exit_session(token, action, ...)`.
+choose the action → `/retro` → verify → commit → `session_wrap-up(action)` → `session_exit(token, action, ...)`.
 
-`wrap_up` refuses an uncommitted worktree but does not run the verify command: you do, in Step 6. `exit_session` is mandatory on every path: without it the task does not move and the session does not close.
+`session_wrap-up` refuses an uncommitted worktree but does not run the verify command: you do, in Step 6. `session_exit` is mandatory on every path: without it the task does not move and the session does not close.
 
-- **rebase** — dispatch rebases and fast-forwards `{base_branch}`; `exit_session` marks the task Done and kills your tmux window.
+- **rebase** — dispatch rebases and fast-forwards `{base_branch}`; `session_exit` marks the task Done and kills your tmux window.
 - **pr** — you do it; read `references/pr.md` when this path is chosen. Write a real title and body from the diff and run `gh pr create --draft`.
 - **done** — no git operations. For research, planning, or work already on `{base_branch}`.
 
@@ -30,7 +30,7 @@ Call `task_search`. The response is prose with one labelled line per field; a mi
 
 A `Wrap-up: refused — <reason>` line means the task cannot be wrapped up: show the user that line and stop, before the retro or any commit.
 
-A preset mode is the user's earlier answer, not a pause. Run everything from here without further input and do not stop before `exit_session` returns. The failure is silent: agents have gone idle at a blank prompt with the branch unmerged and the task stuck in `running`.
+A preset mode is the user's earlier answer, not a pause. Run everything from here without further input and do not stop before `session_exit` returns. The failure is silent: agents have gone idle at a blank prompt with the branch unmerged and the task stuck in `running`.
 
 ## Step 3: Simplify code changes (conditional)
 
@@ -46,7 +46,7 @@ Otherwise use `AskUserQuestion` and wait. Rebase fast-forwards a shared branch, 
 
 > Wrap up task #{id} (`{title}`):
 > **(r)** rebase onto `{base_branch}` — dispatch fast-forwards `{base_branch}` and kills this tmux window
-> **(p)** author and create a draft PR — you draft the title/body, run `gh pr create`, then record the URL via `exit_session`
+> **(p)** author and create a draft PR — you draft the title/body, run `gh pr create`, then record the URL via `session_exit`
 > **(d)** done — no git operations
 > **(Esc / n)** cancel
 
@@ -60,12 +60,12 @@ Run `Skill({ skill: "retro" })` and tell it which action you are wrapping up wit
 
 If `task_search` printed a `Verify command:` line, run it in your worktree now, whatever the path, and fix any failure before you go on (on the pr path this is also what keeps a red build out of the push). Dispatch does not run it for you and does not check that you did. If it fails for a reason your change did not cause, do not wrap up past it alone: coordinate with other agents and the board, as `CLAUDE.md` says.
 
-Run `git status --porcelain`. If it is not clean, `git add` the relevant files by name, review `git diff --cached`, and `git commit -m "..."` with a short message. `wrap_up` refuses a dirty worktree.
+Run `git status --porcelain`. If it is not clean, `git add` the relevant files by name, review `git diff --cached`, and `git commit -m "..."` with a short message. `session_wrap-up` refuses a dirty worktree.
 
 ## Step 7: The closing sequence
 
 Run these back to back in one turn; any pause risks going idle with `{base_branch}` already fast-forwarded and the task still in its old status.
 
 1. **Rate retrieved knowledge** you acted on and have not rated yet, as the `learnings` skill describes.
-2. **`wrap_up(task_id, action)`.** It returns an **Exit token**. After a rebase, if its response tells you to re-run the verify command, do that and commit any fix before `exit_session`. If it refuses — uncommitted changes, a rebase conflict — show the user the exact message. For a dirty tree, commit (Step 6) and call `wrap_up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `exit_session` without a token.
-3. **`exit_session(task_id, token, action)`**, plus `pr_url` on the pr path only. Make it your final action. If it errors, or succeeds but reports that the close did not take effect, read `references/exit-session-errors.md` before reacting.
+2. **`session_wrap-up(task_id, action)`.** It returns an **Exit token**. After a rebase, if its response tells you to re-run the verify command, do that and commit any fix before `session_exit`. If it refuses — uncommitted changes, a rebase conflict — show the user the exact message. For a dirty tree, commit (Step 6) and call `session_wrap-up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `session_exit` without a token.
+3. **`session_exit(task_id, token, action)`**, plus `pr_url` on the pr path only. Make it your final action. If it errors, or succeeds but reports that the close did not take effect, read `references/exit-session-errors.md` before reacting.

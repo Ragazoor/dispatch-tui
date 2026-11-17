@@ -875,7 +875,7 @@ async fn a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain
         &fx.state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": closing.0, "token": token, "action": "rebase" }
         })),
     )
@@ -906,7 +906,7 @@ async fn a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain
         &fx.state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": closing.0, "token": token, "action": "done" }
         })),
     )
@@ -980,7 +980,7 @@ async fn wrap_up_then_exit_session_chains_without_an_agent_tool_call() {
         &fx.state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": closing.0, "action": "done" }
         })),
     )
@@ -992,7 +992,7 @@ async fn wrap_up_then_exit_session_chains_without_an_agent_tool_call() {
         &fx.state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": closing.0, "token": token, "action": "done" }
         })),
     )
@@ -1058,7 +1058,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -1066,7 +1066,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
     let text = extract_response_text(&resp);
     assert!(text.contains("wrap_up complete"));
     assert!(
-        text.contains("exit_session"),
+        text.contains("session_exit"),
         "response should instruct agent to call exit_session; got: {text}"
     );
 
@@ -1116,7 +1116,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -1178,7 +1178,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )

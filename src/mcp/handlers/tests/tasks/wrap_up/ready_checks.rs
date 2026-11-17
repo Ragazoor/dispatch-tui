@@ -54,7 +54,7 @@ async fn wrap_up_never_runs_the_verify_command() {
             !text.contains("passed") && !text.contains("Verified"),
             "{action}: the board verified nothing, so it must not claim to: {text}"
         );
-        assert!(text.contains("exit_session"), "{action}: {text}");
+        assert!(text.contains("session_exit"), "{action}: {text}");
     }
 }
 
@@ -71,7 +71,7 @@ async fn a_rebase_that_moved_head_tells_the_agent_to_rerun_the_verify_command() 
         "the response must name the command to re-run: {text}"
     );
     assert!(
-        text.find("Re-run").unwrap() < text.find("exit_session").unwrap(),
+        text.find("Re-run").unwrap() < text.find("session_exit").unwrap(),
         "the re-run comes before the exit_session instruction: {text}"
     );
 }

@@ -29,7 +29,7 @@ pub enum BackgroundWrite {
 }
 
 /// The wrap-up action a task is being closed out with. Shared between
-/// `wrap_up` (whose request row records it) and `exit_session` (whose call must
+/// `session_wrap-up` (whose request row records it) and `session_exit` (whose call must
 /// name the same one), so it lives here rather than in a handler submodule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -78,7 +78,7 @@ pub struct McpDeps {
 /// answers pending rather than holding the call open to the end.
 pub const DISPATCH_TASK_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// How long `wrap_up(rebase)` waits on its request row before answering that it
+/// How long `session_wrap-up(rebase)` waits on its request row before answering that it
 /// is still open: `config.wrap_up_rebase_timeout` plus
 /// `config.session_request_backstop_grace` (`mcp-task-tools.allium:
 /// WrapUpViaMcp`), by which time this board's host or the module's backstop
@@ -115,7 +115,7 @@ pub struct McpState {
     /// How long `task_dispatch` waits on its request — [`DISPATCH_TASK_WAIT_CAP`]
     /// outside tests, which shorten it to drive the pending answer.
     pub(crate) dispatch_task_wait_cap: std::time::Duration,
-    /// How long `wrap_up(rebase)` waits on its request — [`WRAP_UP_WAIT_CAP`]
+    /// How long `session_wrap-up(rebase)` waits on its request — [`WRAP_UP_WAIT_CAP`]
     /// outside tests, which shorten it to drive the still-open answer.
     pub(crate) wrap_up_wait_cap: std::time::Duration,
     /// Fields that exist only to make async tests deterministic. See [`TestHooks`].

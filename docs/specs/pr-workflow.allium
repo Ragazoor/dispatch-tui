@@ -530,7 +530,7 @@ rule ReportPrStatus {
         -- permanent read failure toward the give-up threshold (store-split P3), and a
         -- reducer call that fails in transport as a transient one.
         -- Repeating the same report is a no-op.
-        -- A merge fails no open session request. A wrap_up rebase still
+        -- A merge fails no open session request. A session_wrap-up rebase still
         -- running for the task (RequestWrapUp accepts a review task) runs on
         -- to its own report or its deadline (store-split.allium, W7), as it
         -- does after a hand move into Done; a conflict report then finds the
@@ -567,7 +567,7 @@ rule ReportPrUnreadable {
 rule ClosePrOnDone {
     -- The routes that close a PR are the ones that write a close row; the
     -- host serving that row runs the gh call. They are:
-    --   - exit_session with action rebase or done (store-split.allium:
+    --   - session_exit with action rebase or done (store-split.allium:
     --     RequestExitSession, an exit_session row);
     --   - task_update's status="done" path (store-split.allium:
     --     RequestCloseTask, a close row);
@@ -583,7 +583,7 @@ rule ClosePrOnDone {
     requires: request.host = core/local_host()
     -- D11's second line (store-split.allium, W11).
     requires: request.requested_by = core/local_host().owner
-    -- exit_session with action pr lands the task in review, not done. A
+    -- session_exit with action pr lands the task in review, not done. A
     -- close row is always action done.
     requires: request.action != pr
 
@@ -691,7 +691,7 @@ rule WrapUpRebase {
             )
 
     @guidance
-        -- wrap_up(action="rebase") writes no task field from this host. The
+        -- session_wrap-up(action="rebase") writes no task field from this host. The
         -- conflict clear is the module's claim (store-split.allium:
         -- HostClaimsSessionRequest), the conflict write is the module's
         -- answer to a conflict report (FinishTaskConflict below, applied in
@@ -705,7 +705,7 @@ rule WrapUpRebase {
         --
         -- WrapUpRebase is the rebase mechanic only — it does NOT change
         -- task.status or kill the tmux window. The Done transition is
-        -- owned by ExitSession (the agent must call exit_session to close
+        -- owned by ExitSession (the agent must call session_exit to close
         -- its session, which marks the task done, and the window is torn
         -- down by ExitSessionTeardown).
         --
@@ -759,7 +759,7 @@ rule WrapUpRebase {
         -- conflict-path status read, the rebase abort and the fast-forward
         -- because each can block on a repository lock. None of them may wedge
         -- the host: an unbounded call here would hold the row running until
-        -- the backstop failed it, and the agent's wrap_up call would get no
+        -- the backstop failed it, and the agent's session_wrap-up call would get no
         -- token. Each is bounded by its own subprocess timeout and also by
         -- the row's deadline (above). A subprocess that times out is simply one that
         -- failed, reported through the existing `other` error — no new failure
@@ -772,22 +772,22 @@ rule WrapUpRebase {
         -- only on delete; once the task is Done its build output is cleared,
         -- tasks.allium: ClearBuildOutputOfDoneTask). finish_task performs no session teardown at
         -- all — it is the git half only — so the agent's session stays alive
-        -- until it explicitly calls exit_session. The MCP wrap_up handler returns
+        -- until it explicitly calls session_exit. The MCP session_wrap-up handler returns
         -- an exit token in its success response: the id of the done request
-        -- row. The agent MUST pass this token to exit_session to close its
+        -- row. The agent MUST pass this token to session_exit to close its
         -- session. The row records action = rebase, and the agent must call
-        -- exit_session with action="rebase"; this action-recording is
+        -- session_exit with action="rebase"; this action-recording is
         -- symmetric across all three wrap-up actions (rebase, done, pr) — see
         -- ExitSession, which owns the Done transition for every action.
-        -- Reachable only from MCP (the wrap_up tool with action "rebase");
+        -- Reachable only from MCP (the session_wrap-up tool with action "rebase");
         -- there is no board entry point.
         --
-        -- The commit check runs BEFORE this rule's rebase, in the wrap_up tool
+        -- The commit check runs BEFORE this rule's rebase, in the session_wrap-up tool
         -- itself: see WrapUpRefusesUnfinishedWork in mcp-task-tools.allium. A
         -- dirty worktree refuses the call. The board never runs the verify
-        -- command: the agent ran it before calling wrap_up, and when this
+        -- command: the agent ran it before calling session_wrap-up, and when this
         -- rebase moved the worktree's HEAD the success response tells it to
-        -- run the command again before exit_session
+        -- run the command again before session_exit
         -- (AgentsRunTheVerifyCommand in mcp-task-tools.allium).
 }
 
@@ -804,17 +804,17 @@ rule WrapUpPr {
     requires: task.host = host
 
     @guidance
-        -- This rule deliberately has no ensures clause: wrap_up(action="pr")
-        -- performs no task write whatsoever. The module writes a wrap_up
+        -- This rule deliberately has no ensures clause: session_wrap-up(action="pr")
+        -- performs no task write whatsoever. The module writes a session_wrap-up
         -- request row already done, in the same call, whose id is the exit
         -- token (store-split.allium: RequestWrapUp, W2, W3), and the tool
         -- returns prose. There is no host work and no wait. Nothing here
         -- touches updated_at, and no updated_at assertion belongs on this
         -- rule — the terminal write (status, url, cleared tmux_window,
         -- updated_at) is ExitSession's. Dispatch neither pushes nor runs
-        -- `gh pr create`: the agent does both before it calls wrap_up.
+        -- `gh pr create`: the agent does both before it calls session_wrap-up.
         --
-        -- Agent-driven PR creation. wrap_up(action="pr") takes no pr_url and
+        -- Agent-driven PR creation. session_wrap-up(action="pr") takes no pr_url and
         -- does not touch task.status or task.url. It leaves the
         -- task in status = running (its session is still alive) and issues an
         -- exit token whose row records action = pr. The pr-typed url and the review
@@ -831,9 +831,9 @@ rule WrapUpPr {
         --   gh pr create --draft --base <task.base_branch>
         --     --head <owner>:<branch> --repo <owner>/<repo>
         --     --title <agent-authored> --body <agent-authored>
-        -- then call wrap_up(action="pr") (no pr_url),
-        -- and finally call exit_session(token, action="pr", pr_url=<url>) using
-        -- the URL that `gh pr create` printed. It is exit_session that records
+        -- then call session_wrap-up(action="pr") (no pr_url),
+        -- and finally call session_exit(token, action="pr", pr_url=<url>) using
+        -- the URL that `gh pr create` printed. It is session_exit that records
         -- task.url (with url_type = pr) and moves the task to review. The
         -- --head uses the owner:branch format so `gh` resolves the branch in
         -- the same repo as --repo (rather than the authenticated user's
@@ -848,13 +848,13 @@ rule WrapUpPr {
         --
         -- There is no board entry point for any wrap-up action: no wrap-up
         -- key and no epic merge queue. Wrap-up is agent-driven through the
-        -- MCP wrap_up tool only.
+        -- MCP session_wrap-up tool only.
         --
-        -- wrap_up(action="pr") refuses a dirty worktree (see
+        -- session_wrap-up(action="pr") refuses a dirty worktree (see
         -- WrapUpRefusesUnfinishedWork in mcp-task-tools.allium). It does not run
         -- the verify command: the agent runs it before it pushes
         -- (AgentsRunTheVerifyCommand), because the PR is already open by the
-        -- time wrap_up is called.
+        -- time session_wrap-up is called.
         --
         -- The same response also carries an unconditional rate_learning nudge,
         -- specified in learnings.allium: WrapUpRateLearningNudge (not repeated
@@ -872,8 +872,8 @@ rule WrapUpDone {
     requires: task.host = host
 
     @guidance
-        -- This rule deliberately has no ensures clause: wrap_up(action="done")
-        -- performs no task write at all. The module writes a wrap_up request
+        -- This rule deliberately has no ensures clause: session_wrap-up(action="done")
+        -- performs no task write at all. The module writes a session_wrap-up request
         -- row already done, whose id is the exit token (store-split.allium:
         -- RequestWrapUp, W2, W3), and the tool returns prose, so there is
         -- nothing observable to assert about the task here — in particular no
@@ -886,20 +886,20 @@ rule WrapUpDone {
         -- integration: research tasks, planning tasks, tasks that edit
         -- only the repo root (e.g., config files already on the base branch).
         --
-        -- wrap_up(action="done") does not flip task.status to
+        -- session_wrap-up(action="done") does not flip task.status to
         -- done. It leaves the task running (its session is still alive) and
         -- issues an exit token whose row records action = done, exactly like
-        -- wrap_up(action="rebase"). The Done transition and the tmux_window
+        -- session_wrap-up(action="rebase"). The Done transition and the tmux_window
         -- teardown happen later, in the single ExitSession call, for every
         -- action alike. The agent runs the /retro skill before its commit
-        -- step, ahead of wrap_up.
+        -- step, ahead of session_wrap-up.
         --
         -- /wrap-up skill path: if task.wrap_up_mode = done (from task_search),
         -- or if the user selects "done" in Step 4, the skill calls
-        -- wrap_up(action="done"), then exit_session(token,
+        -- session_wrap-up(action="done"), then session_exit(token,
         -- action="done") — no git integration; the commit check still applies.
         --
-        -- wrap_up(action="done") is commit-checked exactly like
+        -- session_wrap-up(action="done") is commit-checked exactly like
         -- the other two actions (WrapUpRefusesUnfinishedWork in
         -- mcp-task-tools.allium).
 }
@@ -989,7 +989,7 @@ rule ExitSession {
         --     broken close into a fresh dispatch is worse than the broken close
         --     alone;
         --   • the exit token is NOT consumed. The token stays valid, so the
-        --     agent may call exit_session again;
+        --     agent may call session_exit again;
         --   • because the window is left alive, agent-health.allium's
         --     WindowGone (`agent_health/WindowGone`) never fires, so
         --     DetectCrashedAgent (agent-health.allium) is never reached: a
@@ -999,9 +999,9 @@ rule ExitSession {
         -- The MCP tool settles it by looking for an exit_session row that
         -- consumed the token (mcp-task-tools.allium: ExitSessionViaMcp).
         -- The agent-facing reaction lives in the response and in the
-        -- /wrap-up skill's exit_session-errors reference file; both say
-        -- "the token is still valid, call exit_session again", and the
-        -- skill counts "has no active session" as success. The exit_session tool
+        -- /wrap-up skill's exit-session-errors reference file; both say
+        -- "the token is still valid, call session_exit again", and the
+        -- skill counts "has no active session" as success. The session_exit tool
         -- DESCRIPTION carries none of this: it says what the tool does and
         -- nothing about how to react to its responses
         -- (mcp-task-tools.allium: TheNextCallIsNamedJustInTime). A rewrite of
@@ -1013,7 +1013,7 @@ rule ExitSession {
         -- failure-time notification (the retained status plus the live window
         -- already show the work is not done); widening DetectCrashedAgent to
         -- review (it would break the deliberate quiet detach of review tasks
-        -- that legitimately lose their window); rejecting exit_session from
+        -- that legitimately lose their window); rejecting session_exit from
         -- review outright (the Stop hook can move a task to review through no
         -- fault of the agent, which would then be unable to close at all).
         --
@@ -1033,13 +1033,13 @@ rule ExitSession {
         --
         -- The chain does NOT apply there. This rule is the sole emitter of
         -- SessionClosed, so AutoDispatchNextSubtask (epics.allium) fires only
-        -- for a close that came through exit_session — which means only for a
-        -- close that had a wrap_up ahead of it, whatever action that wrap_up
+        -- for a close that came through session_exit — which means only for a
+        -- close that had a session_wrap-up ahead of it, whatever action that session_wrap-up
         -- took (store-split.allium: EveryExitSessionHadAWrapUp).
         --
-        -- Single-call session close. exit_session returns no reflection
+        -- Single-call session close. session_exit returns no reflection
         -- prompt: the mandatory reflection is the /retro skill, which the
-        -- /wrap-up skill runs BEFORE exit_session is ever called.
+        -- /wrap-up skill runs BEFORE session_exit is ever called.
         --
         -- The exit token is issued by all three wrap-up actions (rebase, done,
         -- pr): it is the id of a done wrap_up request row, and the row records
@@ -1049,15 +1049,15 @@ rule ExitSession {
         -- refused in the tool before any call), in this order:
         --   • a missing token, no unconsumed done wrap_up row for the task
         --     (whatever the token names), or an already-consumed token →
-        --     "no exit token — call wrap_up first";
+        --     "no exit token — call session_wrap-up first";
         --     a token that names another row, one superseded by a newer
-        --     wrap_up, or one voided by a later dispatch of the task (its row
+        --     session_wrap-up, or one voided by a later dispatch of the task (its row
         --     finished before the task's latest dispatched request did;
         --     store-split.allium, W3) → "invalid exit token".
         --   • the supplied action must equal the action recorded on the row.
         --     A missing action → "action is required". A mismatch (e.g. token
-        --     issued for wrap_up(rebase) but the agent calls
-        --     exit_session(action="pr")) is rejected with an error naming both
+        --     issued for session_wrap-up(rebase) but the agent calls
+        --     session_exit(action="pr")) is rejected with an error naming both
         --     actions — this stops an agent from doing one thing and closing as
         --     another.
         --   • current_agent(task).tmux_window must be non-null. If it is already null, some
@@ -1065,7 +1065,7 @@ rule ExitSession {
         --     session down; the call reports "task #<id> has no active
         --     session" and the /wrap-up skill treats it as success, not a
         --     retryable failure. (On a normal double-close the token has also
-        --     been consumed, so a retry hits the "call wrap_up first" branch
+        --     been consumed, so a retry hits the "call session_wrap-up first" branch
         --     above before ever reaching this check.)
         --   • pr_url is required iff action = pr; it is ignored for rebase and
         --     done.
@@ -1098,7 +1098,7 @@ rule ExitSession {
         -- separate task/epic-changed notification to send.
         --
         -- Why this closes the PR-merge race (not merely narrows it): if
-        -- wrap_up("pr") set status = review with a pr-typed url, it would arm
+        -- session_wrap-up("pr") set status = review with a pr-typed url, it would arm
         -- PollPrStatus (it filters on status = review and url.url_type = pr),
         -- and from the very next tick a merge/close could fire
         -- PrMerged/PrClosed and null tmux_window while the agent is still
@@ -1118,7 +1118,7 @@ rule ExitSession {
         -- the module swallows every chain problem inside the transaction.
         -- There is deliberately no agent-facing tool for triggering it, and the
         -- /wrap-up skill carries no section telling the agent not to dispatch
-        -- the next subtask itself — exit_session owns the chain, and its own
+        -- the next subtask itself — session_exit owns the chain, and its own
         -- description says so (mcp-task-tools.allium:
         -- TheNextCallIsNamedJustInTime).
 }
@@ -1173,7 +1173,7 @@ rule ExitSessionTeardown {
         -- accepted as built (store-split.allium, W5).
         --
         -- On an exit_session row the kill targets this agent's own window,
-        -- so it ends the session that called exit_session. The MCP response
+        -- so it ends the session that called session_exit. The MCP response
         -- does not wait for it (mcp-task-tools.allium: ExitSessionViaMcp). A
         -- close row's window belongs to some other task's agent, or to none:
         -- task_update never closes the caller's own task
@@ -1237,7 +1237,7 @@ rule FinishTaskConflict {
     ensures: task.sub_status = core/SubStatus.conflict
     -- No host sends a status line or notification for it. The user learns
     -- of it from the card's conflict section (core.allium, "Column Section
-    -- Layout") and from the reason the wrap_up call returns to the agent.
+    -- Layout") and from the reason the session_wrap-up call returns to the agent.
     ensures: UserInformed(about: rebase_conflict, task: task)
 
     @guidance

@@ -257,7 +257,7 @@ rule CreateEpic {
 }
 
 -- There is no batch wrap-up for an epic. Each subtask's agent wraps its
--- own work up through the MCP wrap_up tool (see pr-workflow.allium);
+-- own work up through the MCP session_wrap-up tool (see pr-workflow.allium);
 -- there is no board-driven merge queue that sequences rebases across an
 -- epic's review tasks.
 
@@ -1132,7 +1132,7 @@ rule AutoDispatchNextSubtask {
             -- candidate (see the guidance).
             if next != null:
                 split/DispatchRequested(task: next, requester: close.host, origin: epic_chain)
-                -- Recorded for exit_session's response, which names the
+                -- Recorded for session_exit's response, which names the
                 -- subtask (mcp-task-tools.allium: ExitSessionViaMcp).
                 close.chained_task = next
 
@@ -1149,8 +1149,8 @@ rule AutoDispatchNextSubtask {
         -- close is the exit_session request row the close wrote
         -- (store-split.allium: SessionRequest).
         --
-        -- exit_session is the ONLY emitter of SessionClosed, and that is the
-        -- whole point. Reaching it requires a wrap_up first, and wrap_up is
+        -- session_exit is the ONLY emitter of SessionClosed, and that is the
+        -- whole point. Reaching it requires a session_wrap-up first, and session_wrap-up is
         -- where the work is made visible to the next subtask: action = rebase
         -- rebases onto base_branch server-side, action = pr records the PR the
         -- work landed in, action = done is the caller stating the task needed
@@ -1158,7 +1158,7 @@ rule AutoDispatchNextSubtask {
         -- into Done — task_update(status = "done") (MarkTaskDoneViaMcp in
         -- mcp-task-tools.allium) and moving a card to Done in the TUI both
         -- close the task without emitting SessionClosed, because neither has a
-        -- wrap_up behind it and so neither can say anything about base_branch.
+        -- session_wrap-up behind it and so neither can say anything about base_branch.
         -- Chaining off those would launch a successor against an arbitrary
         -- base on the say-so of a caller who was never in the closing task's
         -- session.
@@ -1194,7 +1194,7 @@ rule AutoDispatchNextSubtask {
         -- guarantee is about store state, not OS-level teardown.
         --
         -- Five ways the chain stops, all normal outcomes: the task was closed
-        -- by a route other than exit_session (see above); the closed task has
+        -- by a route other than session_exit (see above); the closed task has
         -- no epic; the epic has auto_dispatch = false (see ToggleAutoDispatch);
         -- the epic has no backlog subtask left; or every backlog subtask it has
         -- left is a phoenix one (see PhoenixIsNeverChained). In each case the epic is
@@ -1268,7 +1268,7 @@ rule AutoDispatchNextSubtask {
         -- Exclusivity is the module's: DispatchClaimExclusive (dispatch.allium)
         -- binds this chain, DispatchTaskViaMcp and the TUI keys alike.
         -- The request names the closed task's host, which is the board the
-        -- closing agent's exit_session call came through, so that board
+        -- closing agent's session_exit call came through, so that board
         -- provisions the subtask (dispatch.allium: ProvisionDispatch). Its
         -- requested_by is the close's caller, who passed the same owner check
         -- (store-split.allium: RequestExitSession, D11). The request carries no
@@ -1313,7 +1313,7 @@ rule AutoDispatchNextSubtask {
         -- this chain, so the conservative default is to launch no agent:
         -- failing open would start an agent on an epic whose operator may have
         -- turned chaining off. A store that cannot be reached fails the whole
-        -- exit_session call, close included (ExitSessionViaMcp).
+        -- session_exit call, close included (ExitSessionViaMcp).
 }
 
 rule ReportChainedDispatchFailure {
@@ -1396,7 +1396,7 @@ rule SurfaceAutoDispatchFailure {
         --
         -- A chain that stops before a subtask is selected (an unresolvable
         -- epic, or a store that cannot be reached, which fails the whole
-        -- exit_session call) does not reach this rule, and
+        -- session_exit call) does not reach this rule, and
         -- that is a scope decision rather than an omission: neither can supply
         -- the task this rule marks.
 }
@@ -1940,7 +1940,7 @@ rule ExitAllEpics {
 -- that recalculates.
 --
 -- Trigger points: whenever the set of an epic's children or their statuses
--- change. That is task status transitions (patch_task, wrap_up, dispatch and
+-- change. That is task status transitions (patch_task, session_wrap-up, dispatch and
 -- the rest), task creation or deletion within the epic, feed task upserts
 -- (ingest_feed, flat and grouped; a grouped feed's repo-group sub-epics reach
 -- the root through the climb below), and sub-epic creation, move or status

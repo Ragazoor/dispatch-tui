@@ -91,7 +91,7 @@ async fn wrap_up_call(
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": action } })),
+        Some(json!({ "name": "session_wrap-up", "arguments": { "task_id": task_id.0, "action": action } })),
     )
     .await
 }

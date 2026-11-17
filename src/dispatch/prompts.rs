@@ -823,7 +823,7 @@ fn merge_terminal(gated: bool) -> String {
 /// Find the PR, run the review command on it, present the findings and wait.
 /// One command: the diff-size branch that used to pick between two was a proxy
 /// for an effort level the command takes itself. Nothing here forbids
-/// `/wrap-up` — `wrap_up` refuses a review-tagged task (`Task::wrap_up_block`).
+/// `/wrap-up` — `session_wrap-up` refuses a review-tagged task (`Task::wrap_up_block`).
 fn pr_review_addendum(review_command: &str, pr_url: Option<&str>) -> String {
     // A feed review task's description is the PR body, so the PR is stated
     // from its pr-typed url when it has one (APrReviewRunbookStatesThePrItWasHanded).
@@ -913,7 +913,7 @@ fn is_cve_task(tag: Option<TaskTag>, epic: Option<&EpicContext>) -> bool {
 /// judgement: the dep-only file check, CI status, fetching a changelog, and
 /// writing the breaking-change summary.
 ///
-/// It does NOT tell the agent to avoid /wrap-up — `wrap_up` refuses a
+/// It does NOT tell the agent to avoid /wrap-up — `session_wrap-up` refuses a
 /// review-tagged task itself (`ReviewTasksAreNotWrappedUp` in
 /// `docs/specs/mcp-task-tools.allium`), so the rule no longer needs asking for.
 fn dependabot_review_addendum(

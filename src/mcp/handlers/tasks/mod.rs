@@ -281,8 +281,8 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) signal: bool,
 }
 
-// WrapUpAction lives in `crate::mcp` — it's shared between wrap_up (whose
-// request row records it) and exit_session (whose call must name the same
+// WrapUpAction lives in `crate::mcp` — it's shared between session_wrap-up (whose
+// request row records it) and session_exit (whose call must name the same
 // one), not a handler-local concept. Re-exported here so callers in this
 // module can keep referring to it unqualified.
 pub(super) use crate::mcp::WrapUpAction;
@@ -479,7 +479,7 @@ fn format_task_detail(
         None => text.push_str(&format!("\nModel: {} (default)", TaskModel::DEFAULT)),
     }
     // Reported here, where the `/wrap-up` skill reads the task, rather than only
-    // at `wrap_up` — the last call of its sequence. An agent that learns the
+    // at `session_wrap-up` — the last call of its sequence. An agent that learns the
     // refusal at the end has already run a retro and a commit nobody wanted.
     if let Some(block) = task.wrap_up_block() {
         text.push_str(&format!(

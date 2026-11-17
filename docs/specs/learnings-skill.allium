@@ -13,7 +13,7 @@
 --           RecordLearningViaMcp, QueryLearningsViaMcp, RateLearningViaMcp,
 --           DeleteLearningViaMcp); how entries are ranked, scoped, muted and
 --           swept (learnings.allium: Ranking, Scope Model, ArchiveStaleLearning);
---           the rating instruction in the dispatch prompt and the wrap_up
+--           the rating instruction in the dispatch prompt and the session_wrap-up
 --           nudge (learnings.allium: AugmentDispatchPromptWithLearnings,
 --           WrapUpRateLearningNudge); where /retro sits in a wrap-up
 --           (retro-skill.allium); how the skill's copy reaches an agent

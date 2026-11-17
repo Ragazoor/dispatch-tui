@@ -591,7 +591,7 @@ fn git_common_dir(repo: &std::path::Path) -> Option<std::path::PathBuf> {
 /// Keep `.worktrees/` out of the primary checkout's `git status`.
 ///
 /// A target repo's own `.gitignore` need not mention it, and then every
-/// worktree makes `?? .worktrees/` show up, so wrap_up and sync refuse the
+/// worktree makes `?? .worktrees/` show up, so session_wrap-up and sync refuse the
 /// checkout as dirty. `info/exclude` is local to the clone and never committed.
 /// Idempotent and best-effort.
 pub(super) fn ensure_worktrees_excluded(repo_path: &str) {

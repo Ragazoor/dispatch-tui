@@ -1,5 +1,5 @@
 //! Wrap-up business logic the board still owns: the host-local pre-checks
-//! `WrapUpRefusesUnfinishedWork` makes before `wrap_up` writes a request, and
+//! `WrapUpRefusesUnfinishedWork` makes before `session_wrap-up` writes a request, and
 //! the best-effort window kill a failed teardown row still owes.
 //!
 //! The rebase and the exit_session teardown are request
@@ -49,7 +49,7 @@ fn commit_check(runner: &dyn crate::process::ProcessRunner, worktree: &str) -> R
     };
     Err(format!(
         "The worktree has uncommitted changes: {}{more}. Commit them, then call \
-         wrap_up again.",
+         session_wrap-up again.",
         shown.join(", ")
     ))
 }

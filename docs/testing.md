@@ -132,7 +132,7 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 | Agent-facing skill copy (`plugin/skills/*/SKILL.md`) | `src/setup/plugins/tests.rs` (via `skill_body`) |
 | tmux semantics — which pane, which cwd, how many panes, which window a name resolves to | `tests/tmux_lifecycle.rs` (topology/cwd) / `tests/tmux_split_hook.rs` (split-pane cwd and keystroke absence) / `tests/tmux_window_targets.rs` (exact window-name resolution under prefix collisions) / `tests/tmux_diff_pane.rs` (agent-tree diff pane geometry, and which panes the toggle kills), shared rig in `tests/tmux_harness/mod.rs` |
 | tmux argv shape — that we sent the right command string | `MockProcessRunner` tests inline in `src/tmux.rs` |
-| Anything that drives a dispatch/resume/provision/finish through a mock | wherever the behaviour lives, but script the runner with `DispatchScript` (`src/dispatch/mock_sequence.rs`) — never a hand-written `vec![ok(), ok(), …]`. `DispatchScript::finish()` covers the `finish_task` rebase path, including anything that reaches it through `wrap_up` |
+| Anything that drives a dispatch/resume/provision/finish through a mock | wherever the behaviour lives, but script the runner with `DispatchScript` (`src/dispatch/mock_sequence.rs`) — never a hand-written `vec![ok(), ok(), …]`. `DispatchScript::finish()` covers the `finish_task` rebase path, including anything that reaches it through `session_wrap-up` |
 | A `pub(in crate::tui::ui)`-or-narrower helper (unreachable from `src/tui/tests/`) | inline in the owning module, e.g. `staleness_color`/`feed_role_label` in `src/tui/ui/shared.rs`, `budget_spans` in `src/tui/ui/budget.rs` |
 
 A test that builds a **real git repo** on disk must run git with a sanitised

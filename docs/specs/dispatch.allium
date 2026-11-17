@@ -1009,7 +1009,7 @@ rule DispatchResearchTask {
         -- dispatch-prompt.allium: TheResearchPromptGivesItsReasonNotARule).
         -- Prompt note: build_research_prompt emits a stripped-down
         -- trailing block — only {learning_tools_instruction}, no tdd,
-        -- allium, or wrap_up. A research agent has more use for the
+        -- allium, or session_wrap-up. A research agent has more use for the
         -- knowledge base than any other mode, so that is the one line it
         -- keeps. The research agent
         -- presents findings interactively and does not terminate via

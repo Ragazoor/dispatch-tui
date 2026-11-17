@@ -922,7 +922,7 @@ impl TaskService {
 /// The caller-facing sentence for each [`WrapUpBlock`].
 ///
 /// Free-standing so `task_search` can render the same wording it would hit at
-/// `wrap_up` — the block is reported where the `/wrap-up` skill first reads the
+/// `session_wrap-up` — the block is reported where the `/wrap-up` skill first reads the
 /// task, rather than only at the last call of its sequence, so an agent does
 /// not run a retro and a commit before learning none of it was wanted.
 pub fn wrap_up_block_message(task_id: TaskId, block: WrapUpBlock) -> String {
@@ -935,7 +935,7 @@ pub fn wrap_up_block_message(task_id: TaskId, block: WrapUpBlock) -> String {
             "Task {} is tagged `{}`, so it is not wrapped up. A review task ends when its PR \
              merges — the feed that created it deletes the card on the next poll — or when you \
              hand it back to the user. If it became real code work, retag it \
-             (task_update(task_ids=[{}], tag=\"chore\")) and call wrap_up again.",
+             (task_update(task_ids=[{}], tag=\"chore\")) and call session_wrap-up again.",
             task_id.0,
             tag.as_str(),
             task_id.0,

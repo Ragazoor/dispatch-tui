@@ -669,7 +669,7 @@ async fn wrap_up_rebase_does_not_change_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -718,7 +718,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -762,7 +762,7 @@ async fn wrap_up_accepts_string_task_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0.to_string(), "action": "rebase" }
         })),
     )

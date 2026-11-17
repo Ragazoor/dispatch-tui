@@ -127,7 +127,7 @@ impl SessionHost {
                     "session request done"
                 );
             }
-            // A failure reaches the waiting `wrap_up` through the row itself,
+            // A failure reaches the waiting `session_wrap-up` through the row itself,
             // so nothing is sent from here.
             SessionOutcome::Failed(reason) => {
                 tracing::info!(task_id = task_id.0, "session request failed: {reason}");

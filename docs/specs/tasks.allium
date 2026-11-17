@@ -871,7 +871,7 @@ rule PhoenixRespawn {
         -- EditTask) go through, when a patch moves a task into Done from
         -- another status (store-split.allium, X2); the close_task reducer of
         -- task_update's status="done" path (store-split.allium:
-        -- RequestCloseTask, X1); exit_session's close (pr-workflow.allium:
+        -- RequestCloseTask, X1); session_exit's close (pr-workflow.allium:
         -- ExitSession, inside store-split.allium's RequestExitSession); and
         -- PrMerged's write (pr-workflow.allium: ReportPrStatus). The board
         -- respawns nothing itself. Inside the transaction the
@@ -2497,12 +2497,12 @@ rule HandStatusWriteReachesTheSchedule {
 -- effect of an ordinary field update. Over MCP, Done is reachable through
 -- exactly two calls, neither of them UpdateTaskViaMcp's generic write (which
 -- refuses status=done):
---   - wrap_up + exit_session (pr-workflow.allium: ExitSessionViaMcp), the
+--   - session_wrap-up + session_exit (pr-workflow.allium: ExitSessionViaMcp), the
 --     agent's own session close, gated on an exit token.
 --   - task_update's dedicated status="done" call (mcp-task-tools.allium:
 --     MarkTaskDoneViaMcp): a session caller, or a dispatched agent acting on
 --     a task other than its own. It closes through the module's close_task
---     (store-split.allium: RequestCloseTask) without exit_session's epic
+--     (store-split.allium: RequestCloseTask) without session_exit's epic
 --     chaining (epics.allium: AutoDispatchNextSubtask).
 -- Deletion is never reachable over MCP: there is no MCP delete tool, so
 -- removing a task stays a human act at the board (DeleteTask, BatchDelete).

@@ -3,7 +3,7 @@
 --
 -- Scope: the dispatch MCP server's task tools (task_create, task_search,
 --        task_update, query_usage, task_dispatch, task_resume,
---        wrap_up, exit_session, set_verify_command, set_review_command), the
+--        session_wrap-up, session_exit, set_verify_command, set_review_command), the
 --        CLI plan attachment, the agent port that serves them, the standard
 --        every tool description and agent-facing skill is held to, and the
 --        read-only context resources (resources/list, resources/read and their
@@ -88,7 +88,7 @@ rule ToolsAdvertiseAnnotations {
     -- its other calls write, so it is declared idempotent (see
     -- epics.allium: ManagedFeedConfigViaMcp, @guidance).
     -- destructiveHint is true only where a call removes or closes something
-    -- that cannot be restored by another call (delete_learning, exit_session,
+    -- that cannot be restored by another call (delete_learning, session_exit,
     -- update_work_package, whose delete form removes the package;
     -- update_workspace and set_workspace_member, whose delete and remove forms
     -- remove the workspace or the membership; delete_unseen_item);
@@ -134,7 +134,8 @@ rule OldToolNameRedirects {
     -- hides your own task, so pass epic_id, and it returns 50 rows unless
     -- limit says otherwise"), create_task ("call task_create"), update_tasks
     -- and the older update_task ("call task_update"), dispatch_task ("call
-    -- task_dispatch") and resume_task ("call task_resume").
+    -- task_dispatch"), resume_task ("call task_resume"), wrap_up ("call
+    -- session_wrap-up") and exit_session ("call session_exit").
     ensures: UnknownToolErrorNamesNewTool()
 
     @guidance
@@ -296,7 +297,7 @@ rule UpdateTaskViaMcp {
         -- trigger it. MarkTaskDoneViaMcp below is a different matter: it CAN
         -- reach done (on a task other than the calling agent's own), and
         -- because the module's close (store-split.allium: RequestCloseTask)
-        -- runs the respawn on entering Done as exit_session's close does, a
+        -- runs the respawn on entering Done as session_exit's close does, a
         -- phoenix-armed task closed that way respawns — see that rule's own
         -- guidance.
         if phoenix != null: task.phoenix = phoenix
@@ -447,7 +448,7 @@ rule MarkTaskDoneViaMcp {
         and bookmarked = null
 
     -- A dispatched agent may not close its OWN task through this call — that
-    -- route stays wrap_up + exit_session, with its token, its ordering
+    -- route stays session_wrap-up + session_exit, with its token, its ordering
     -- guarantees and its epic chain all in one place (ExitSession,
     -- pr-workflow.allium). A session caller (a human's own Claude Code
     -- session, or a script/orchestrator with no dispatched identity of its
@@ -486,10 +487,10 @@ rule MarkTaskDoneViaMcp {
     --
     -- Why. SessionClosed is the signal AutoDispatchNextSubtask (epics.allium)
     -- keys on, and the chain's whole value is that the successor starts from a
-    -- base_branch already carrying the closed task's work. Only exit_session
-    -- can promise that: it is reachable exclusively through wrap_up, which
+    -- base_branch already carrying the closed task's work. Only session_exit
+    -- can promise that: it is reachable exclusively through session_wrap-up, which
     -- rebased onto base_branch, opened a PR, or was told explicitly that the
-    -- task needed neither. This call has no wrap_up ahead of it — no rebase,
+    -- task needed neither. This call has no session_wrap-up ahead of it — no rebase,
     -- no PR, no exit token, and (by its own requires) no relationship at all
     -- between the caller and the work being closed. A chain fired from here
     -- launches an agent against whatever base_branch happened to hold, on the
@@ -520,15 +521,15 @@ rule MarkTaskDoneViaMcp {
         -- path.
         --
         -- The chain is not part of this path at all. It is not suppressed by
-        -- a flag: it runs inside the module's exit_session
+        -- a flag: it runs inside the module's session_exit
         -- transaction (epics.allium: AutoDispatchNextSubtask), which this
         -- path never reaches. See the no-SessionClosed note above for why
         -- this path must not chain.
         --
         -- No exit token is issued, checked, or consumed anywhere on this
-        -- path — unlike exit_session, there is no wrap_up call first. That is
+        -- path — unlike session_exit, there is no session_wrap-up call first. That is
         -- the whole point: it is a distinct, deliberately simpler route to
-        -- Done for a caller who was never going to call wrap_up on this task
+        -- Done for a caller who was never going to call session_wrap-up on this task
         -- in the first place (a session closing a batch of finished cards, or
         -- an orchestrating agent closing a sibling task).
         --
@@ -544,7 +545,7 @@ rule MarkTaskDoneViaMcp {
         --      close with a status-only call."
         --   2. caller_identity is Task(t) and t = the target task_id →
         --      "Cannot mark your own task done via task_update — call
-        --      wrap_up then exit_session instead."
+        --      session_wrap-up then session_exit instead."
         --   3. Unknown task_id → the same NotFound(-32001) every other MCP
         --      task lookup uses ("Task <id> not found").
         --      The check is the service's own existence read, made before
@@ -570,7 +571,7 @@ rule MarkTaskDoneViaMcp {
         -- it respawns if it is a phoenix task — the same PhoenixRespawn
         -- (tasks.allium) any other route into Done triggers, applied in the
         -- close's own transaction. An open session request on the task (a
-        -- wrap_up rebase still running, say) does not block the close: the
+        -- session_wrap-up rebase still running, say) does not block the close: the
         -- module fails it "task closed" in the same transaction.
         --
         -- When the close does NOT land (the call is refused or the store
@@ -594,7 +595,7 @@ rule MarkTaskDoneViaMcp {
         -- own task-changed notification (and epic-changed, for a task in an
         -- epic) after the call, on either outcome. No epic auto-dispatch chain runs on either
         -- outcome, so the response text never names a chained subtask —
-        -- unlike exit_session's, which does.
+        -- unlike session_exit's, which does.
         --
         -- The schema's advertised status enum is backlog | running | review |
         -- done, which is every TaskStatus there is. There is no delete
@@ -638,10 +639,10 @@ rule PrFinalisationReflectionNudge {
         -- action = pr (status -> review plus a pr-typed url, set
         -- unconditionally regardless of any prior url), but that close is the
         -- module's (pr-workflow.allium: ExitSession, run inside
-        -- store-split.allium's RequestExitSession), and exit_session appends
+        -- store-split.allium's RequestExitSession), and session_exit appends
         -- no reflection nudge. So the nudge only appears when a caller invokes the
         -- task_update MCP tool directly to link a PR, bypassing
-        -- wrap_up/exit_session entirely. The wrap_up response carries a
+        -- session_wrap-up/session_exit entirely. The session_wrap-up response carries a
         -- different rate_learning nudge, gated to the pr action rather than
         -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
 }
@@ -994,7 +995,7 @@ rule GetTaskViaMcp {
         -- against core/SavedRepoPath.verify_command.
         -- Omitted when no verify_command is set for the repo. The line is how
         -- the agent learns the command it runs itself, while it works and
-        -- before wrap_up (AgentsRunTheVerifyCommand); the board never runs it. See also ThePromptCarriesNoVerifyCommand in
+        -- before session_wrap-up (AgentsRunTheVerifyCommand); the board never runs it. See also ThePromptCarriesNoVerifyCommand in
         -- dispatch-prompt.allium.
         -- An unknown task_id is a not-found condition, not a validation one:
         -- ServiceError::NotFound surfaces as the -32001 not-found code, the
@@ -1600,7 +1601,7 @@ rule WrapUpViaMcp {
     -- only issue an exit token whose request row records which action was
     -- requested. The terminal mutation (Done, or Review + pr-typed url) is
     -- deferred to the single ExitSessionViaMcp call. pr_url travels with
-    -- exit_session, not with wrap_up.
+    -- session_exit, not with session_wrap-up.
     --
     -- The tool ASKS: one request_wrap_up call naming
     -- this board's host (store-split.allium: RequestWrapUp). For rebase the
@@ -1610,16 +1611,16 @@ rule WrapUpViaMcp {
     ensures: split/WrapUpRequested(task: task, host: core/local_host(), action: action)
 
     @guidance
-        -- wrap_up is the mandatory step before exit_session for ALL three
+        -- session_wrap-up is the mandatory step before session_exit for ALL three
         -- actions (rebase, done, pr). The exit token is the id of the done
         -- wrap_up request row (store-split.allium, W3), which records the
         -- action; the response text carries it, and the agent must pass it
-        -- back to exit_session.
+        -- back to session_exit.
         -- action="rebase" is the only action with host work: the rebase /
         -- fast-forward via finish_task, which performs no
-        -- session teardown, so the session stays alive until exit_session.
+        -- session teardown, so the session stays alive until session_exit.
         -- action="done" and action="pr" perform no task-status or url
-        -- mutation at wrap_up time. Every action's terminal mutation is
+        -- mutation at session_wrap-up time. Every action's terminal mutation is
         -- applied later, atomically, by ExitSessionViaMcp.
         --
         -- == The request, then a wait (store-split.allium: SessionRequest) ==
@@ -1643,32 +1644,32 @@ rule WrapUpViaMcp {
         --     config.session_request_backstop_grace), by which time the host
         --     or the backstop has finished it. done: the rebase success text
         --     with the row's id as the token. failed: an INTERNAL_ERROR
-        --     "wrap_up failed: <reason>" — a conflict's reason names the
+        --     "session_wrap-up failed: <reason>" — a conflict's reason names the
         --     conflicted files, and the module has set the conflict
         --     sub_status; "timed out", "deadline passed", "host restarted"
         --     and a host-side internal error (the rebase worker died) read
-        --     the same way, and the agent calls wrap_up again once the cause
+        --     the same way, and the agent calls session_wrap-up again once the cause
         --     is fixed. Still open when the wait ends (the
         --     store unreachable): an INTERNAL_ERROR naming the request id
-        --     and saying no token was issued and to call wrap_up again; a
+        --     and saying no token was issued and to call session_wrap-up again; a
         --     second request is refused while the first is still open.
-        -- The first success line is `wrap_up complete (<task ref>, action:
+        -- The first success line is `session_wrap-up complete (<task ref>, action:
         -- <action>).`, and an unfinished-request error names `<task ref>` the
         -- same way.
         -- The success texts carry the action, that the session is NOT
         -- yet closed, "Exit token: <id>" with the
-        -- exit_session instruction naming the action (and pr_url for pr),
+        -- session_exit instruction naming the action (and pr_url for pr),
         -- the rate_learning nudge for pr (learnings.allium:
         -- WrapUpRateLearningNudge), "No git operations performed." for done,
-        -- and for rebase the warning that without exit_session the window
+        -- and for rebase the warning that without session_exit the window
         -- stays alive, plus, when the rebase moved the worktree's HEAD and the
         -- repo has a verify command, the line from AgentsRunTheVerifyCommand.
         -- The /wrap-up skill runs the /retro skill before its commit step,
-        -- ahead of wrap_up, so any agent-context fix retro makes is committed
+        -- ahead of session_wrap-up, so any agent-context fix retro makes is committed
         -- with the session's work rather than stranded after the rebase.
         -- For the pr path the agent has already run git push and
         -- gh pr create by this point, and passes the resulting URL to
-        -- exit_session (not to wrap_up).
+        -- session_exit (not to session_wrap-up).
 
 }
 
@@ -1692,18 +1693,18 @@ rule ExitSessionViaMcp {
     @guidance
         -- Single-call session close for all three wrap-up actions.
         -- Reflection is the /retro skill, which the /wrap-up skill runs
-        -- BEFORE exit_session is called.
+        -- BEFORE session_exit is called.
         --
         -- Validation, in order (all mutate nothing on failure; every refusal
         -- is an INVALID_PARAMS error):
-        --   • in the tool: a missing token → "no exit token — call wrap_up
+        --   • in the tool: a missing token → "no exit token — call session_wrap-up
         --     first"; a missing action → "action is required — pass the same
-        --     action used in wrap_up".
+        --     action used in session_wrap-up".
         --   • in the module (RequestExitSession), carrying its words: no
         --     unconsumed done wrap_up row for the task (whatever the token
         --     names), or the token's row already consumed →
-        --     "no exit token — call wrap_up first"; a token naming another
-        --     row, superseded by a newer wrap_up, or voided by a dispatch of
+        --     "no exit token — call session_wrap-up first"; a token naming another
+        --     row, superseded by a newer session_wrap-up, or voided by a dispatch of
         --     the task that finished after the token's row did
         --     (store-split.allium, W3) → "invalid exit token"; an
         --     action that differs from the row's → an error naming both
@@ -1711,7 +1712,7 @@ rule ExitSessionViaMcp {
         --     active session", which the /wrap-up skill treats as success
         --     (some other path already tore the session down; on a normal
         --     double-close the token has also been consumed, so a retry hits
-        --     the "call wrap_up first" branch first); action pr without a
+        --     the "call session_wrap-up first" branch first); action pr without a
         --     pr_url → "pr_url is required for action 'pr' — pass the URL
         --     returned by `gh pr create`"; pr_url is ignored for rebase and
         --     done.
@@ -1748,15 +1749,15 @@ rule ExitSessionViaMcp {
         -- effect").
         --
         -- No answer from the store (a transport error): the call may or may
-        -- not have landed. The tool settles it from the rows: an exit_session
+        -- not have landed. The tool settles it from the rows: a session_exit
         -- row that consumed this token means the close took effect, and the
         -- response is the accepted one; no such row means it did not, and
         -- the response is an error saying the close did not take effect, the
         -- tmux session is still alive and the token is still valid, so call
-        -- exit_session again. Neither response claims a teardown that has
+        -- session_exit again. Neither response claims a teardown that has
         -- not happened. These reactions live in the response, which reaches
         -- every caller with or without the /wrap-up skill loaded, and in the
-        -- skill's exit_session-errors reference file; the tool description
+        -- skill's exit-session-errors reference file; the tool description
         -- does not carry them (TheNextCallIsNamedJustInTime).
         --
         -- Why the pr path closes the PR-merge race: a PR task never enters
@@ -1772,7 +1773,7 @@ rule ExitSessionViaMcp {
         -- subtask still will not see it, but that is inherent to choosing the
         -- PR path rather than something this close does wrong. There is no
         -- agent-facing tool to dispatch the next subtask. The tool
-        -- description states the positive fact — that exit_session starts the
+        -- description states the positive fact — that session_exit starts the
         -- epic's next backlog subtask when the epic auto-dispatches — which is
         -- what an agent needs to not go looking for one.
 }
@@ -1801,7 +1802,7 @@ rule SetVerifyCommandViaMcp {
         -- A command containing "\n" or "\r" is rejected at the handler
         -- with JSON-RPC -32602 (invalid params) before reaching the DB,
         -- which would otherwise surface the constraint as -32603.
-        -- Nothing nudges an agent to call this tool: exit_session carries no
+        -- Nothing nudges an agent to call this tool: session_exit carries no
         -- prompt about it, and the agent only runs an already-recorded command
         -- (AgentsRunTheVerifyCommand). Recording a verify command is an explicit act by
         -- an agent or operator (see the `dispatch repo set-verify` CLI above).
@@ -2340,8 +2341,8 @@ surface McpTaskTools {
         -- description is a second wording nothing keeps in step:
         --
         --   - What to do NEXT goes in the tool's RESPONSE, where it arrives just in
-        --     time and only on the path that needs it. wrap_up's response names
-        --     exit_session as the final call; neither tool's description repeats it
+        --     time and only on the path that needs it. session_wrap-up's response names
+        --     session_exit as the final call; neither tool's description repeats it
         --     (see WrapUpViaMcp: TheNextCallIsNamedJustInTime).
         --   - Why a call is REFUSED goes in the refusal's error message, which is
         --     the only text a refused caller is certain to read
@@ -2371,7 +2372,7 @@ surface McpTaskTools {
         -- SKILL.md carries the flow every invocation walks. Detail only one branch
         -- needs lives in a references/ file beside it, and the branch names that file
         -- at the point it is taken, so the file is loaded only on that path. The
-        -- /wrap-up skill's pr path and its exit_session error handling are such
+        -- /wrap-up skill's pr path and its session_exit error handling are such
         -- branches (pr-workflow.allium: WrapUpPr, ExitSession); /retro, /allium-loop
         -- and /learnings keep their core flow in SKILL.md and move their long tails
         -- the same way.
@@ -2433,7 +2434,7 @@ surface McpTaskTools {
         -- Anywhere an MCP tool takes a task id it also takes the name of one of the
         -- task's agents.
         --
-        -- `task_search`, `task_update`, `task_dispatch`, `wrap_up` and the rest resolve
+        -- `task_search`, `task_update`, `task_dispatch`, `session_wrap-up` and the rest resolve
         -- the argument first: digits are an id, anything else is looked up as an agent
         -- name, current or ended (agents.allium: AgentNameResolvesToTask). A word that
         -- is no agent's name is the same NotFound (-32001) an unknown id gets. Results
@@ -2442,15 +2443,15 @@ surface McpTaskTools {
         -- has no `alias` field.
 
     @guarantee TheNextCallIsNamedJustInTime
-        -- The instruction to call exit_session next, as the session's final
-        -- action, is stated in wrap_up's success RESPONSE — the moment it
+        -- The instruction to call session_exit next, as the session's final
+        -- action, is stated in session_wrap-up's success RESPONSE — the moment it
         -- applies, with the token it needs beside it — and in the /wrap-up skill's
         -- closing sequence (wrap-up-skill.allium: ExitSessionIsMandatoryAndLast).
         -- It is stated in no tool description.
         --
-        -- The wrap_up and exit_session tool DESCRIPTIONS say only what each
-        -- tool does: wrap_up performs the chosen action and returns an exit
-        -- token; exit_session closes the session with that token and, when the
+        -- The session_wrap-up and session_exit tool DESCRIPTIONS say only what each
+        -- tool does: session_wrap-up performs the chosen action and returns an exit
+        -- token; session_exit closes the session with that token and, when the
         -- task's epic auto-dispatches, starts the epic's next backlog subtask.
         -- Neither carries MUST, "never stop after", or a restatement of the
         -- other's role. Those words reach every agent on every tools/list, on
@@ -2458,7 +2459,7 @@ surface McpTaskTools {
         -- times in capitals reads as distrust rather than as information.
         --
         -- The /wrap-up skill does not tell the agent to leave the epic's
-        -- next subtask alone. exit_session owns that behaviour and its
+        -- next subtask alone. session_exit owns that behaviour and its
         -- description says it happens; there is no tool an agent could
         -- misuse to do it anyway.
 
@@ -2470,9 +2471,9 @@ surface McpTaskTools {
         -- Commit. `git status --porcelain` in the task's worktree must be
         -- empty, untracked files included. A status that cannot be read (git
         -- fails or exits non-zero) refuses too: the check fails closed.
-        -- Otherwise wrap_up is refused, naming the uncommitted paths (at most
+        -- Otherwise session_wrap-up is refused, naming the uncommitted paths (at most
         -- a short list, then a count) and saying to commit them and call
-        -- wrap_up again. This also makes the retro/commit ORDER hold in the
+        -- session_wrap-up again. This also makes the retro/commit ORDER hold in the
         -- one way observable from here: a retro fix left uncommitted blocks
         -- the call instead of being stranded after the rebase.
         --
@@ -2494,21 +2495,21 @@ surface McpTaskTools {
         -- then not bounded by the agent's tool-call timeout, the board spends
         -- no time or memory on it, and there is no board-side verify state
         -- (no timeout, no wait cap, no outcome memory, no stdin or sccache
-        -- handling for it). wrap_up does not check that the command passed
+        -- handling for it). session_wrap-up does not check that the command passed
         -- and issues a token whether or not it did: the board trusts the
         -- agent.
         --
         -- The command reaches the agent through task_search's "Verify command"
         -- line (GetTaskViaMcp), and the /wrap-up skill has a step that sends
         -- the agent to run it, fix failures and commit BEFORE it calls
-        -- wrap_up. On the pr path that step comes before the push.
+        -- session_wrap-up. On the pr path that step comes before the push.
         --
-        -- One case is named just in time in wrap_up's rebase response: when
+        -- One case is named just in time in session_wrap-up's rebase response: when
         -- the rebase moved the worktree's HEAD (the base branch had commits
         -- the branch lacked, so the branch was rewritten on top of them) and
         -- the task's repo has a verify command, the success text adds a line
         -- naming the command and telling the agent to re-run it before
-        -- exit_session. A rebase that left HEAD where it was, a done or pr
+        -- session_exit. A rebase that left HEAD where it was, a done or pr
         -- action, and a repo with no verify command add no such line. The
         -- board does not run the command or check the result.
         --
@@ -2555,15 +2556,15 @@ surface McpTaskTools {
         -- has done real work and is told only "no" — it would leave the
         -- work uncommitted rather than infer the retag.
         --
-        -- The rule lives in that refusal message, not in wrap_up's tool
+        -- The rule lives in that refusal message, not in session_wrap-up's tool
         -- description. A refused caller is certain to read the error; every
         -- other caller reads the description on every tools/list and has no
         -- use for the rule. The description may say in passing that a
         -- review-tagged task is refused, and no more — the reason and the
         -- retag escape hatch are the message's.
         --
-        -- Refusing wrap_up leaves exit_session unreachable for these tasks
-        -- (ExitSessionViaMcp requires a token wrap_up mints), which is the
+        -- Refusing session_wrap-up leaves session_exit unreachable for these tasks
+        -- (ExitSessionViaMcp requires a token session_wrap-up mints), which is the
         -- intended shape: a review agent stops when it has presented its
         -- findings, exactly as build_prompt's review runbooks describe.
         --
@@ -2575,7 +2576,7 @@ surface McpTaskTools {
         -- the commit check, with the same wording.
         --
         -- The refusal is also REPORTED by GetTaskViaMcp, on a "Wrap-up:
-        -- refused — …" line carrying the same sentence. wrap_up is the last
+        -- refused — …" line carrying the same sentence. session_wrap-up is the last
         -- call of the /wrap-up skill's sequence and task_search is its second,
         -- so a refusal delivered only at the tool lets an agent run a retro
         -- and a commit that nothing wanted. One predicate answers both, so

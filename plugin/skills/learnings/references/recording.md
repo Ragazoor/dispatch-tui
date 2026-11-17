@@ -17,7 +17,7 @@ What not to record, how to pick a kind and scope, and how to write the summary. 
 
   **What to do instead:** if the fact is worth stating precisely, put it in the Allium spec or a Rust doc comment. Both are gated and re-checked on every push. The knowledge base keeps the prose.
 
-  **`record_learning` rejects only the shapes prose never produces** — a `::` citation, a call with empty parentheses, a macro invocation, a long snake_case name, a path into the tree, a source filename. A bare `TuiRuntime` or `handle_tick` passes the validator and still breaks the rule. Do not read a successful call as approval. A stable MCP tool name (`query_learnings`, `wrap_up`, ...) is fine — that is a public interface, not internal detail. So is a root manifest or a spec file (`Cargo.toml`, `package.json`, `feeds.allium`).
+  **`record_learning` rejects only the shapes prose never produces** — a `::` citation, a call with empty parentheses, a macro invocation, a long snake_case name, a path into the tree, a source filename. A bare `TuiRuntime` or `handle_tick` passes the validator and still breaks the rule. Do not read a successful call as approval. A stable MCP tool name (`query_learnings`, `session_wrap-up`, ...) is fine — that is a public interface, not internal detail. So is a root manifest or a spec file (`Cargo.toml`, `package.json`, `feeds.allium`).
 
   Bad: "A step that must behave identically on both feed paths goes in `src/feed/cycle.rs::run_feed_cycle`." <!-- allow-phantom-symbol: the actual stale citation learning #401 carried -->
   Good: "Feed-cycle logic shared by the auto-poll and manual-refresh paths must live in one place, not be duplicated per caller — see feeds.allium."

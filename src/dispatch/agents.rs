@@ -840,7 +840,7 @@ pub async fn current_agent_name(
 
 /// Fetch the verify command for a repository path from the settings store.
 ///
-/// Called by `task_search` (its "Verify command" line) and by the `wrap_up`
+/// Called by `task_search` (its "Verify command" line) and by the `session_wrap-up`
 /// handler, which only checks whether a rebase answer should tell the agent to
 /// re-run it. No prompt builder reads it, so this has no caller on a dispatch
 /// path despite living here. Returns `None`

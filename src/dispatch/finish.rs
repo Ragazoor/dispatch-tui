@@ -37,7 +37,7 @@ impl std::fmt::Display for FinishError {
             ),
             FinishError::DirtyPrimaryWorktree { path, files } => write!(
                 f,
-                "Primary worktree at {path} has uncommitted changes ({}) — commit or stash them before wrap_up can rebase",
+                "Primary worktree at {path} has uncommitted changes ({}) — commit or stash them before session_wrap-up can rebase",
                 files.join(", ")
             ),
             FinishError::RebaseConflict { branch, files } => {

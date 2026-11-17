@@ -17,9 +17,9 @@ This directory is embedded in the binary with the rest of `plugin/`, but
 
 Cases (2 runs each; the whole suite costs about $3):
 
-- `wrap-up-done`, `wrap-up-rebase` — a preset path runs to `exit_session`.
-- `wrap-up-asks-path` — no path preset: asks first, no `wrap_up`, no PR work before the choice.
-- `wrap-up-retro-order` — the retro runs before `wrap_up`.
+- `wrap-up-done`, `wrap-up-rebase` — a preset path runs to `session_exit`.
+- `wrap-up-asks-path` — no path preset: asks first, no `session_wrap-up`, no PR work before the choice.
+- `wrap-up-retro-order` — the retro runs before `session_wrap-up`.
 - `retro-done-files-task` — on `done` the retro files a task and edits nothing.
 - `learnings-rate-on-use` — rates a used entry `helped`.
 - `learnings-no-lintable` — does not record a rule a lint could check.

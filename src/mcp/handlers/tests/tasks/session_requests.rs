@@ -95,7 +95,7 @@ fn wrap_up_call(
             &state,
             "tools/call",
             Some(json!({
-                "name": "wrap_up",
+                "name": "session_wrap-up",
                 "arguments": { "task_id": task.0, "action": action }
             })),
         )
@@ -117,7 +117,7 @@ async fn exit_call(
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": arguments })),
+        Some(json!({ "name": "session_exit", "arguments": arguments })),
     )
     .await
 }
@@ -242,7 +242,7 @@ async fn wrap_up_done_and_pr_answer_at_once_with_the_rows_id_as_the_token() {
         );
         assert!(text.contains("The session is NOT yet closed."), "{text}");
         assert!(
-            text.contains(&format!("exit_session` with action=\"{action}\"")),
+            text.contains(&format!("session_exit` with action=\"{action}\"")),
             "{text}"
         );
     }
@@ -463,20 +463,20 @@ async fn exit_session_without_a_token_or_an_action_is_refused_in_the_tool() {
     let no_token = call(
         &state,
         "tools/call",
-        Some(json!({"name": "exit_session", "arguments": {"task_id": task.0, "action": "done"}})),
+        Some(json!({"name": "session_exit", "arguments": {"task_id": task.0, "action": "done"}})),
     )
     .await;
-    assert_error(&no_token, "no exit token — call wrap_up first");
+    assert_error(&no_token, "no exit token — call session_wrap-up first");
 
     let no_action = call(
         &state,
         "tools/call",
-        Some(json!({"name": "exit_session", "arguments": {"task_id": task.0, "token": "1"}})),
+        Some(json!({"name": "session_exit", "arguments": {"task_id": task.0, "token": "1"}})),
     )
     .await;
     assert_error(
         &no_action,
-        "action is required — pass the same action used in wrap_up",
+        "action is required — pass the same action used in session_wrap-up",
     );
     assert_eq!(db.get_task(task).await.unwrap().status, TaskStatus::Running);
 }
@@ -515,7 +515,7 @@ async fn a_refused_exit_session_carries_the_modules_words_and_leaves_the_token_v
     // Spent now.
     assert_error(
         &exit_call(&state, task, &token, "pr", Some("https://x/pull/1")).await,
-        "no exit token — call wrap_up first",
+        "no exit token — call session_wrap-up first",
     );
 }
 
@@ -614,7 +614,7 @@ async fn an_unsent_exit_session_is_an_error_saying_the_token_is_still_valid() {
     let message = error_message(&resp);
     assert!(message.contains("did not take effect"), "{message}");
     assert!(message.contains("still alive"), "{message}");
-    assert!(message.contains("call exit_session again"), "{message}");
+    assert!(message.contains("call session_exit again"), "{message}");
     assert_eq!(db.get_task(task).await.unwrap().status, TaskStatus::Running);
 
     let retry = exit_call(&state, task, &token, "done", None).await;
@@ -687,8 +687,8 @@ async fn the_tool_descriptions_say_what_each_tool_does() {
             .unwrap()
             .to_string()
     };
-    let wrap = describe("wrap_up");
-    let exit = describe("exit_session");
+    let wrap = describe("session_wrap-up");
+    let exit = describe("session_exit");
     assert!(wrap.contains("exit token"), "{wrap}");
     assert!(exit.contains("token"), "{exit}");
     assert!(!wrap.contains("MUST"), "{wrap}");

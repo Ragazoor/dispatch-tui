@@ -479,7 +479,7 @@ pub trait SessionRequestRead: Send + Sync {
     /// Every row this host's subscription holds, oldest first.
     async fn session_requests(&self) -> Vec<SessionRequest>;
     /// Fires whenever the subscribed rows move — a session row among them. What
-    /// a caller WAITING on a row's outcome waits on (`wrap_up`,
+    /// a caller WAITING on a row's outcome waits on (`session_wrap-up`,
     /// `mcp-task-tools.allium: WrapUpViaMcp`), so the wait is a signal, never a
     /// poll. Subscribe before writing, then re-read on each wake.
     fn session_request_changes(&self) -> tokio::sync::watch::Receiver<u64>;

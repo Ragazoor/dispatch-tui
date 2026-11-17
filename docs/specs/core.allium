@@ -366,7 +366,7 @@ enum RetrievalSource { prompt_injection | procedural | query_learnings }
 -- WrapUpMode records the preferred wrap-up path for a task, set at creation
 -- time by the user or agent. When set, the /wrap-up skill honours it instead
 -- of prompting the user: the mode IS the user's answer, given earlier, so the
--- skill runs the whole wrap-up on it — through wrap_up and exit_session —
+-- skill runs the whole wrap-up on it — through session_wrap-up and session_exit —
 -- without asking anything and without returning to an idle prompt part-way.
 -- A preset mode that only suppressed the question would be worse than no mode
 -- at all: the agent would go idle with the question it was told not to ask
@@ -867,7 +867,7 @@ entity Agent {
     -- A deferred Stop that is waiting on background work, not only on subagents.
     waiting_on_background: stop_pending and background_work.total > 0
     -- Live: it holds a window, so its session may be running. A current agent
-    -- that is not live is paused — wrap-up, exit_session, a move back to
+    -- that is not live is paused — wrap-up, session_exit, a move back to
     -- backlog, a crash or a window killed off-board took its window, and
     -- nothing ended it (A7). Derived from the window rather than stored, so a
     -- resume that re-records a window still open in tmux (dispatch.allium:
@@ -1483,7 +1483,7 @@ config {
     -- status = review AND a pr-typed url, on a task that had no url before the
     -- call. Prompt encouragement only: the nudge is appended to the response
     -- text and never gates the update itself. No other tool reads this flag —
-    -- in particular the wrap_up response does not (its rate_learning nudge is
+    -- in particular the session_wrap-up response does not (its rate_learning nudge is
     -- unconditional; see learnings.allium: WrapUpRateLearningNudge).
     -- (see mcp-task-tools.allium: PrFinalisationReflectionNudge)
     learning_reflection_enabled: Boolean = true

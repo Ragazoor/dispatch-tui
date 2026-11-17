@@ -341,7 +341,7 @@ async fn close_session_via_mcp(
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": arguments })),
+        Some(json!({ "name": "session_exit", "arguments": arguments })),
     )
     .await
 }
@@ -789,7 +789,7 @@ task_dispatch's and there is no delete tool, got: {status}"
     // TheNextCallIsNamedJustInTime: the next-call instruction lives in the
     // wrap_up response, not in an argument description.
     assert!(
-        !status.contains("exit_session"),
+        !status.contains("session_exit"),
         "task_update.status must not restate the wrap_up/exit_session sequence, got: {status}"
     );
 }
@@ -957,7 +957,7 @@ fn no_tool_description_cites_internal_symbol_names() {
     for tool in tools {
         let name = tool["name"].as_str().unwrap();
         let desc = tool["description"].as_str().unwrap();
-        for word in desc.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+        for word in desc.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-')) {
             // An empty segment covers a leading, trailing or doubled `_`.
             let is_multi_segment_snake_case = word.contains('_')
                 && word.split('_').all(|seg| {
@@ -1055,7 +1055,7 @@ it lives in the /learnings skill, got: {desc}"
 /// response, at the moment it applies.
 #[test]
 fn wrap_up_description_carries_no_next_call_mandate() {
-    let desc = tool_description("wrap_up");
+    let desc = tool_description("session_wrap-up");
     assert!(
         !desc.contains("MUST"),
         "wrap_up's description must not carry MUST, got: {desc}"
@@ -1075,7 +1075,7 @@ fn wrap_up_description_carries_no_next_call_mandate() {
 /// in passing that a review-tagged task is refused, and no more.
 #[test]
 fn wrap_up_description_leaves_the_review_refusal_reason_to_the_error() {
-    let desc = tool_description("wrap_up").to_lowercase();
+    let desc = tool_description("session_wrap-up").to_lowercase();
     for needle in ["retag", "merges", "hand it back"] {
         assert!(
             !desc.contains(needle),
@@ -1092,7 +1092,7 @@ fn wrap_up_description_leaves_the_review_refusal_reason_to_the_error() {
 /// that itself).
 #[test]
 fn exit_session_description_says_only_what_the_tool_does() {
-    let desc = tool_description("exit_session");
+    let desc = tool_description("session_exit");
     let lower = desc.to_lowercase();
     assert!(
         !desc.contains("MUST"),
@@ -1354,7 +1354,7 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("list_epics", json!({})),
         ("create_epic", json!({"title": "t"})),
         ("update_epic", json!({"epic_id": 1})),
-        ("wrap_up", json!({"task_id": 1, "action": "rebase"})),
+        ("session_wrap-up", json!({"task_id": 1, "action": "rebase"})),
         ("task_dispatch", json!({"task_id": 1})),
         ("task_resume", json!({"task_id": 1})),
         (
@@ -1371,7 +1371,7 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("set_display_name", json!({"name": "n"})),
         ("set_review_command", json!({})),
         (
-            "exit_session",
+            "session_exit",
             json!({"task_id": 1, "token": "t", "action": "rebase"}),
         ),
         ("managed_feed_config", json!({})),
@@ -1578,7 +1578,7 @@ fn tool_definitions_carry_annotations() {
     ];
     const DESTRUCTIVE: &[&str] = &[
         "delete_learning",
-        "exit_session",
+        "session_exit",
         "update_work_package",
         "update_workspace",
         "set_workspace_member",
@@ -1706,7 +1706,7 @@ fn every_tag_argument_advertises_release_please() {
 /// tags are refused, and release-please is one of them.
 #[test]
 fn wrap_up_description_names_release_please_among_the_refused_tags() {
-    let desc = tool_description("wrap_up");
+    let desc = tool_description("session_wrap-up");
     for tag in ["pr-review", "dependabot", "release-please"] {
         assert!(
             desc.contains(tag),
@@ -1724,7 +1724,6 @@ const LEGACY_TOOL_NAMES: &[&str] = &[
     "create_work_package",
     "list_work_packages",
     "update_work_package",
-    "wrap_up",
     "record_learning",
     "query_learnings",
     "rate_learning",
@@ -1741,7 +1740,6 @@ const LEGACY_TOOL_NAMES: &[&str] = &[
     "list_unseen_items",
     "delete_unseen_item",
     "set_verify_command",
-    "exit_session",
     "query_usage",
     "read_context",
     "list_keybindings",

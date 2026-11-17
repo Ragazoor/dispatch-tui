@@ -12,7 +12,7 @@ use super::{
     WrapUpAction, WrapUpArgs, INTERNAL_ERROR, INVALID_PARAMS,
 };
 
-const ERR_NO_TOKEN: &str = "no exit token — call wrap_up first";
+const ERR_NO_TOKEN: &str = "no exit token — call session_wrap-up first";
 
 fn exit_instruction(action: WrapUpAction) -> String {
     let extra_arg = match action {
@@ -20,7 +20,7 @@ fn exit_instruction(action: WrapUpAction) -> String {
         WrapUpAction::Rebase | WrapUpAction::Done => "",
     };
     format!(
-        "call `exit_session` with action=\"{}\" and this token{extra_arg}",
+        "call `session_exit` with action=\"{}\" and this token{extra_arg}",
         action.as_str()
     )
 }
@@ -32,7 +32,7 @@ fn rerun_line(command: Option<&str>) -> String {
     match command {
         Some(cmd) => format!(
             " The rebase moved your branch onto new commits. Re-run `{cmd}` in your worktree \
-             before `exit_session`, and fix any failure first."
+             before `session_exit`, and fix any failure first."
         ),
         None => String::new(),
     }
@@ -68,7 +68,7 @@ fn wrap_up_complete(
     let exit_line = exit_instruction(action);
     let tail = match action {
         WrapUpAction::Rebase => {
-            " You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
+            " You MUST call `session_exit` next as your final action — without it, the tmux window stays alive \
              and the task remains in its current status."
                 .to_string()
         }
@@ -82,7 +82,7 @@ fn wrap_up_complete(
                 }
                 WrapUpAction::Done | WrapUpAction::Rebase => "",
             };
-            format!("{rate_learning_nudge} You MUST call `exit_session` next as your final action.")
+            format!("{rate_learning_nudge} You MUST call `session_exit` next as your final action.")
         }
     };
     let no_git_note = match action {
@@ -201,7 +201,7 @@ pub(crate) async fn handle_wrap_up(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(task_id = parsed.task_id.0, action = ?parsed.action, "MCP wrap_up");
+    tracing::info!(task_id = parsed.task_id.0, action = ?parsed.action, "MCP session_wrap-up");
 
     let task = match validate_wrap_up_request(state, &id, parsed.task_id).await {
         Ok(t) => t,
@@ -358,7 +358,7 @@ pub(crate) async fn handle_exit_session(
         return JsonRpcResponse::err(
             id,
             INVALID_PARAMS,
-            "action is required — pass the same action used in wrap_up",
+            "action is required — pass the same action used in session_wrap-up",
         );
     };
     // A token that is not a row id names no row; the module refuses it in its
@@ -387,7 +387,7 @@ pub(crate) async fn handle_exit_session(
                     format!(
                         "exit_session got no answer from the shared store and the close did not \
                          take effect: {} is unchanged, your tmux session is still alive and \
-                         the token is still valid — call exit_session again.",
+                         the token is still valid — call session_exit again.",
                         task.reference()
                     ),
                 )

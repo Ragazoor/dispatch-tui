@@ -640,7 +640,7 @@ fn an_exit_token_is_consumed_by_the_close() {
 
     let again = exit_session(&store, id, token, "done", "").expect_err("a spent token");
     assert!(
-        again.contains("no exit token — call wrap_up first"),
+        again.contains("no exit token — call session_wrap-up first"),
         "{again}"
     );
     assert_eq!(store.db().session_requests().iter().count(), 2);
@@ -685,7 +685,7 @@ fn an_exit_session_without_a_token_or_a_window_is_refused() {
 
     let none = exit_session(&store, one, 5, "done", "").expect_err("no token");
     assert!(
-        none.contains("no exit token — call wrap_up first"),
+        none.contains("no exit token — call session_wrap-up first"),
         "{none}"
     );
 

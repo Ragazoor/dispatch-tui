@@ -187,7 +187,7 @@ impl ProcessRunner for DeadlineRunner {
 /// `store-split.allium: config.wrap_up_rebase_timeout`: how long a wrap_up
 /// rebase request may stay open, from `requested_at`. The module stores the
 /// deadline on the row and the host enforces the row's value; this copy is only
-/// for what has no row to read — the `wrap_up` tool's wait cap is derived from
+/// for what has no row to read — the `session_wrap-up` tool's wait cap is derived from
 /// it.
 pub const WRAP_UP_REBASE_TIMEOUT: Duration = Duration::from_secs(120);
 

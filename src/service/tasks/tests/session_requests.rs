@@ -329,7 +329,7 @@ async fn a_refused_exit_session_is_an_answer_with_the_modules_words() {
         .unwrap();
     assert_eq!(
         none,
-        SessionRequestAnswer::Refused("no exit token — call wrap_up first".into())
+        SessionRequestAnswer::Refused("no exit token — call session_wrap-up first".into())
     );
 
     let token = fx.token(task, WrapUpMode::Pr).await;

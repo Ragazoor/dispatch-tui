@@ -919,7 +919,7 @@ impl SharedRows {
 
     /// A session request row (`store-split.allium: SessionRequest`). An undecodable one is dropped,
     /// as a dispatch request is: read as open or as finished it would drive the
-    /// `wrap_up` wait and the exit token wrongly either way.
+    /// `session_wrap-up` wait and the exit token wrongly either way.
     pub fn upsert_session_request(&self, row: &bindings::SessionRequest) {
         match decode::session_request(row) {
             Ok(request) => self.write(|rows| {

@@ -116,7 +116,7 @@ fn the_failure_reasons_and_refusals_are_the_specs_wording() {
     assert_eq!(SESSION_REASON_TIMED_OUT, "timed out");
     assert_eq!(SESSION_REASON_HOST_RESTARTED, "host restarted");
     assert_eq!(SESSION_REASON_TASK_DELETED, "task deleted");
-    assert_eq!(EXIT_TOKEN_MISSING, "no exit token — call wrap_up first");
+    assert_eq!(EXIT_TOKEN_MISSING, "no exit token — call session_wrap-up first");
     assert_eq!(EXIT_TOKEN_INVALID, "invalid exit token");
 }
 

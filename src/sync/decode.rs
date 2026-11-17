@@ -626,7 +626,7 @@ pub fn agent(row: &bindings::Agent) -> Decoded<Agent> {
 /// The store's `session_requests` row as the board's [`SessionRequest`].
 ///
 /// An unknown kind, action or state refuses the row, as for dispatch requests:
-/// read as open, a row from a newer binary would keep a `wrap_up` waiting
+/// read as open, a row from a newer binary would keep a `session_wrap-up` waiting
 /// forever; read as finished, it would issue a token nobody earned. The
 /// deadline is `""` on a row with no host work and decodes to `None`.
 pub fn session_request(row: &bindings::SessionRequest) -> Decoded<SessionRequest> {

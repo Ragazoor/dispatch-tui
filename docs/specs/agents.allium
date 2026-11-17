@@ -51,7 +51,7 @@
 --   - A6, the name is the task's only second name. Tasks have no alias.
 --   - A7, an agent ends when its session can no longer be resumed: a fresh
 --     launch replaces it, its worktree goes, or its task is deleted. Closing
---     its window — wrap-up, exit_session, a move back to backlog, a crash —
+--     its window — wrap-up, session_exit, a move back to backlog, a crash —
 --     only PAUSES it. A later resume brings back the same agent, under the
 --     same name.
 --   - A8, addressing. Wherever a tool takes a task id, it also takes an agent
@@ -545,7 +545,7 @@ surface NamesForPeople {
         -- the task's display name and title beside it; one that names an
         -- epic adds the epic's title. That covers the replies that would
         -- otherwise give a bare id — task_create, task_update (one, several, done),
-        -- update_epic, task_dispatch, task_resume, wrap_up, exit_session,
+        -- update_epic, task_dispatch, task_resume, session_wrap-up, session_exit,
         -- and the work-package replies and their item lists — and the rows
         -- that name a parent by id alone (list_epics' `(parent:<id>)`).
         -- Work-package task items show their display name. The exact reply

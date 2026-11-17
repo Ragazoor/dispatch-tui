@@ -47,7 +47,7 @@ async fn wrap_up_rebase_directs_to_exit_session_not_reflection_nudge() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -55,7 +55,7 @@ async fn wrap_up_rebase_directs_to_exit_session_not_reflection_nudge() {
 
     let text = extract_response_text(&resp);
     assert!(
-        text.contains("exit_session"),
+        text.contains("session_exit"),
         "response should direct agent to call exit_session; got: {text}"
     );
     assert!(
@@ -78,7 +78,7 @@ async fn wrap_up_rebase_omits_reflection_nudge_regardless_of_setting() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -90,7 +90,7 @@ async fn wrap_up_rebase_omits_reflection_nudge_regardless_of_setting() {
         "nudge must not appear in wrap_up(rebase) even when setting=true; got: {text}"
     );
     assert!(
-        text.contains("exit_session"),
+        text.contains("session_exit"),
         "response should direct to exit_session; got: {text}"
     );
 }
@@ -154,7 +154,7 @@ async fn exit_session_pr_without_pr_url_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "pr" }
         })),
     )
@@ -182,7 +182,7 @@ async fn exit_session_action_mismatch_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": {
                 "task_id": task_id.0,
                 "token": token,
@@ -216,7 +216,7 @@ async fn exit_session_without_action_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token }
         })),
     )
@@ -235,7 +235,7 @@ async fn exit_session_after_close_token_is_gone() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
@@ -247,12 +247,12 @@ async fn exit_session_after_close_token_is_gone() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
     .await;
-    assert_error(&resp, "wrap_up first");
+    assert_error(&resp, "session_wrap-up first");
 }
 
 #[tokio::test]
@@ -284,7 +284,7 @@ async fn exit_session_full_flow_rebase() {
         &state,
         "tools/call",
         Some(
-            json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "rebase" } }),
+            json!({ "name": "session_wrap-up", "arguments": { "task_id": task_id.0, "action": "rebase" } }),
         ),
     )
     .await;
@@ -297,7 +297,7 @@ async fn exit_session_full_flow_rebase() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "rebase" }
         })),
     )
@@ -345,7 +345,7 @@ async fn wrap_up_second_call_overwrites_token() {
         &state,
         "tools/call",
         Some(
-            json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "rebase" } }),
+            json!({ "name": "session_wrap-up", "arguments": { "task_id": task_id.0, "action": "rebase" } }),
         ),
     )
     .await;
@@ -355,7 +355,7 @@ async fn wrap_up_second_call_overwrites_token() {
         &state,
         "tools/call",
         Some(
-            json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "rebase" } }),
+            json!({ "name": "session_wrap-up", "arguments": { "task_id": task_id.0, "action": "rebase" } }),
         ),
     )
     .await;
@@ -371,7 +371,7 @@ async fn wrap_up_second_call_overwrites_token() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": first_token, "action": "rebase" }
         })),
     )
@@ -387,7 +387,7 @@ async fn exit_session_unknown_task_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": 9999, "token": "any" }
         })),
     )
@@ -414,7 +414,7 @@ async fn exit_session_task_without_window_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
@@ -431,11 +431,11 @@ async fn exit_session_without_token_errors() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "action": "done" } })),
+        Some(json!({ "name": "session_exit", "arguments": { "task_id": task_id.0, "action": "done" } })),
     )
     .await;
 
-    assert_error(&resp, "wrap_up first");
+    assert_error(&resp, "session_wrap-up first");
 }
 
 #[tokio::test]
@@ -450,7 +450,7 @@ async fn exit_session_with_wrong_token_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": "wrong-token", "action": "done" }
         })),
     )
@@ -489,7 +489,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -518,7 +518,7 @@ async fn exit_session_marks_task_done_with_no_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
@@ -555,7 +555,7 @@ async fn exit_session_already_done_task_stays_done() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
@@ -588,7 +588,7 @@ async fn exit_session_recalculates_epic_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
@@ -622,7 +622,7 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
@@ -651,7 +651,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )
@@ -716,7 +716,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     )
@@ -747,7 +747,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "rebase" }
         })),
     )
@@ -797,7 +797,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
+            "name": "session_wrap-up",
             "arguments": { "task_id": task_id.0, "action": "done" }
         })),
     )
@@ -810,7 +810,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
 
     let text = extract_response_text(&resp);
     assert!(
-        text.contains("exit_session"),
+        text.contains("session_exit"),
         "response should instruct to call exit_session, got: {text}"
     );
     assert!(
@@ -831,7 +831,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "exit_session",
+            "name": "session_exit",
             "arguments": { "task_id": task_id.0, "token": token, "action": "done" }
         })),
     )

@@ -333,7 +333,7 @@ def pr_metrics():
             except ValueError:
                 continue
             url = (e.get("args") or {}).get("pr_url")
-            if e.get("method") == "exit_session" and url and e["timestamp"][:10] >= RULES_FROM:
+            if e.get("method") in ("exit_session", "session_exit") and url and e["timestamp"][:10] >= RULES_FROM:
                 prs[url] = (e["task_id"], e["timestamp"])
     fetched = impl = taskid = plan = 0
     bullets = collections.Counter()  # (after the prose rule?, has a bullet) -> PRs

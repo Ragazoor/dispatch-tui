@@ -519,7 +519,7 @@ pub(super) fn reject_alongside(
 /// Fetch the task identified by `caller_id` from the DB, mapping a miss to a
 /// tool-error result that names the id. Used by handlers that resolve the
 /// caller task for context inheritance (project_id, epic_id, etc.) and by
-/// `exit_session`, whose `task_id` argument is a caller-supplied target.
+/// `session_exit`, whose `task_id` argument is a caller-supplied target.
 pub(super) async fn fetch_caller_task(
     db: &dyn crate::store::TaskReadStore,
     id: &Option<serde_json::Value>,

@@ -69,6 +69,8 @@ pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[
     ("update_task", "call task_update with task_ids: [id]"),
     ("dispatch_task", "call task_dispatch"),
     ("resume_task", "call task_resume"),
+    ("wrap_up", "call session_wrap-up"),
+    ("exit_session", "call session_exit"),
 ];
 
 /// The error text for a `tools/call` to an unregistered name. A name in
@@ -518,12 +520,12 @@ has served its purpose: its linked tasks and epics stay where they are, with the
             "required": ["work_package_id"]
         };
 
-    async write "wrap_up" => tasks::handle_wrap_up,
+    async write "session_wrap-up" => tasks::handle_wrap_up,
         "Wrap up a running or review task with one of three actions (rebase, done, pr) and return an \
-exit token for exit_session; the task stays running until then. \
+exit token for session_exit; the task stays running until then. \
 'rebase' rebases onto base_branch and fast-forwards it (blocks until complete). \
 'done' and 'pr' perform no git operations — for 'pr' you run git push and gh pr create yourself \
-and pass the resulting URL to exit_session. \
+and pass the resulting URL to session_exit. \
 A task tagged pr-review, dependabot or release-please is refused.",
         {
             "type": "object",
@@ -535,7 +537,7 @@ A task tagged pr-review, dependabot or release-please is refused.",
                 "action": {
                     "type": "string",
                     "enum": wrap_up_action_enum_values(),
-                    "description": "'rebase' — rebase onto base_branch and fast-forward it. 'done' — no git ops. 'pr' — no git ops; agent has already run gh pr create. All three return an exit token; the task stays in its current status until exit_session closes it."
+                    "description": "'rebase' — rebase onto base_branch and fast-forward it. 'done' — no git ops. 'pr' — no git ops; agent has already run gh pr create. All three return an exit token; the task stays in its current status until session_exit closes it."
                 }
             },
             "required": ["task_id", "action"]
@@ -881,10 +883,10 @@ Pass command=null to clear it.",
             "required": ["repo_path"]
         };
 
-    async destructive "exit_session" => tasks::handle_exit_session,
-        "Close your agent session with the token wrap_up returned. Applies the terminal mutation \
+    async destructive "session_exit" => tasks::handle_exit_session,
+        "Close your agent session with the token session_wrap-up returned. Applies the terminal mutation \
 atomically with clearing the tmux window: 'rebase'/'done' move the task to Done; 'pr' moves it to \
-Review and sets the PR url. The action must match the one passed to wrap_up. If the task belongs \
+Review and sets the PR url. The action must match the one passed to session_wrap-up. If the task belongs \
 to an epic with auto_dispatch enabled, closing it also starts that epic's next backlog subtask.",
         {
             "type": "object",
@@ -895,12 +897,12 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
                 },
                 "token": {
                     "type": "string",
-                    "description": "Exit token obtained from wrap_up."
+                    "description": "Exit token obtained from session_wrap-up."
                 },
                 "action": {
                     "type": "string",
                     "enum": wrap_up_action_enum_values(),
-                    "description": "Must match the action passed to wrap_up for this token."
+                    "description": "Must match the action passed to session_wrap-up for this token."
                 },
                 "pr_url": {
                     "type": "string",

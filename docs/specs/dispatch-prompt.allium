@@ -291,7 +291,7 @@ rule ComposeAgentPrompt {
         -- implementation, so stopping there is legitimate).
         -- DispatchResearchTask is an exception to the unified trailing
         -- block: its prompt includes only {learning_tools_instruction} and
-        -- omits tdd, allium, and wrap_up. The research agent
+        -- omits tdd, allium, and session_wrap-up. The research agent
         -- presents findings interactively and does not terminate via
         -- the standard wrap-up flow; its addendum says so as reasoning,
         -- not as a prohibition (TheResearchPromptGivesItsReasonNotARule).
@@ -428,7 +428,7 @@ rule RenderCveRunbook {
 -- already carries, the harness computes it and renders one branch.
 -- The agent is never handed a decision table and asked to walk it.
 
--- No review runbook prohibits /wrap-up. wrap_up refuses a review-tagged task
+-- No review runbook prohibits /wrap-up. session_wrap-up refuses a review-tagged task
 -- outright (mcp-task-tools.allium: ReviewTasksAreNotWrappedUp), so the prompt
 -- need not ask. The runbooks state instead the end state that makes wrap-up
 -- unnecessary ("the task is auto-cleaned on merge", "stop and wait for the
@@ -658,7 +658,7 @@ surface AgentPrompt {
         --
         -- The command reaches the agent through task_search's response (see
         -- GetTaskViaMcp in mcp-task-tools.allium), so it can run the check while
-        -- it works. The /wrap-up skill sends the agent to run it before wrap_up
+        -- it works. The /wrap-up skill sends the agent to run it before session_wrap-up
         -- (AgentsRunTheVerifyCommand in mcp-task-tools.allium); the board does
         -- not, so there is no second reminder to keep in step.
 
@@ -1001,7 +1001,7 @@ surface AgentPrompt {
         -- Unlike the three review runbooks, this one does NOT trim the trailing
         -- block to {learning_tools_instruction} alone. A CVE task authors its
         -- own PR and finishes through /wrap-up, so {wrap_up_instruction} is
-        -- owed to it; the review tags are the ones wrap_up refuses outright
+        -- owed to it; the review tags are the ones session_wrap-up refuses outright
         -- (see ReviewTasksAreNotWrappedUp in mcp-task-tools.allium). For the
         -- same reason TaskTag::is_review is untouched: adding a CVE routing key
         -- there would tell ColumnSection::for_task this task reviews someone

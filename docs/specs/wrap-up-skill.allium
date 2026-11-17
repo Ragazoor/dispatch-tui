@@ -8,16 +8,16 @@
 --        closes the session.
 -- Includes: WrapUp (one per invocation) and its pipeline — read the task,
 --           simplify a large change, settle the path, retro, verify and
---           commit, rate knowledge, wrap_up, exit_session; where the path
+--           commit, rate knowledge, session_wrap-up, session_exit; where the path
 --           comes from; the order the steps run in; the single turn the
---           closing sequence runs in; how a refused wrap_up is answered; the
+--           closing sequence runs in; how a refused session_wrap-up is answered; the
 --           pr path's authoring duty and the pointers to the reference files.
--- Excludes: what wrap_up and exit_session do (mcp-task-tools.allium:
+-- Excludes: what session_wrap-up and session_exit do (mcp-task-tools.allium:
 --           WrapUpViaMcp, ExitSessionViaMcp; pr-workflow.allium: WrapUpRebase,
 --           WrapUpPr, WrapUpDone, ExitSession; store-split.allium: the session
 --           seam and the exit token); what refuses a dirty tree or a review
 --           task (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork,
---           ReviewTasksAreNotWrappedUp); that wrap_up neither runs nor checks
+--           ReviewTasksAreNotWrappedUp); that session_wrap-up neither runs nor checks
 --           the verify command (mcp-task-tools.allium:
 --           AgentsRunTheVerifyCommand); the retro's own behaviour
 --           (retro-skill.allium); rating and recording knowledge
@@ -28,7 +28,7 @@
 --
 -- Design decisions:
 --   - The path is the operator's and is settled before the retro, the
---     commit and wrap_up (the simplify step only edits code and runs ahead of
+--     commit and session_wrap-up (the simplify step only edits code and runs ahead of
 --     it). Rebase fast-forwards a
 --     shared branch, the pr path opens a PR under the operator's identity and
 --     done integrates nothing, so the skill never picks one for itself. An
@@ -42,13 +42,13 @@
 --     its fixes travel with the work).
 --   - The board does not run the verify command and cannot tell that the
 --     agent did, so the skill is where it is held. It runs before the push on
---     the pr path, because the PR is open once wrap_up is called.
---   - The closing sequence runs in one turn. A pause between wrap_up and
---     exit_session risks going idle with the base branch already
+--     the pr path, because the PR is open once session_wrap-up is called.
+--   - The closing sequence runs in one turn. A pause between session_wrap-up and
+--     session_exit risks going idle with the base branch already
 --     fast-forwarded and the task still in its old status.
 --   - A refusal is shown as it was written. The skill does not work around
---     one, and never calls exit_session without a token.
---   - The pr path's detail and the exit_session error handling live in
+--     one, and never calls session_exit without a token.
+--   - The pr path's detail and the session_exit error handling live in
 --     references/, loaded only by the branch that needs them.
 
 use "./core.allium" as core
@@ -86,7 +86,7 @@ entity WrapUp {
     verify_passed: Boolean
     -- `git status --porcelain` printed nothing.
     worktree_clean: Boolean
-    -- wrap_up's exit token; absent until wrap_up answers with one.
+    -- session_wrap-up's exit token; absent until session_wrap-up answers with one.
     exit_token: String?
     -- task_search's "Wrap-up: refused" reason; printed only for a task that
     -- cannot be wrapped up.
@@ -95,7 +95,7 @@ entity WrapUp {
     pr_url: String?
     -- Times the skill has invoked the retro.
     retro_runs: Integer
-    -- Times exit_session has been called with a token.
+    -- Times session_exit has been called with a token.
     exit_calls: Integer
 
     stage: started | task_read | simplified | settled | retro_done | verified | committed | pr_ready | wrap_up_asked | closing | closed | stopped | cancelled
@@ -231,7 +231,7 @@ rule StopOnRefusedTask {
 
     @guidance
         -- The skill shows the refusal line and stops, so no retro or commit
-        -- is run for a wrap-up dispatch would refuse at wrap_up anyway
+        -- is run for a wrap-up dispatch would refuse at session_wrap-up anyway
         -- (RefusedTaskStopsEarly).
 }
 
@@ -294,7 +294,7 @@ rule AskForPath {
         -- task and its title and says what each path does: rebase has
         -- dispatch fast-forward the base branch and kill this tmux window;
         -- pr has the agent draft the title and body, run `gh pr create` and
-        -- record the URL via exit_session; done does no git operations. Even
+        -- record the URL via session_exit; done does no git operations. Even
         -- work that looks like a PR may want a rebase, so the skill does not
         -- choose (PathIsTheOperatorsChoice).
 }
@@ -390,7 +390,7 @@ rule CommitRemainingChanges {
     @guidance
         -- `git status --porcelain`; when it is not clean the agent adds the
         -- relevant files by name, reviews `git diff --cached` and commits
-        -- with a short message. wrap_up refuses a dirty worktree, so this is
+        -- with a short message. session_wrap-up refuses a dirty worktree, so this is
         -- also what lets the next step succeed (CommitBeforeWrapUp).
 }
 
@@ -454,7 +454,7 @@ rule RateKnowledgeAndWrapUp {
 
     @guidance
         -- Knowledge the agent acted on and has not rated is rated first, as
-        -- the learnings skill describes (RateBeforeClosing). Then wrap_up is
+        -- the learnings skill describes (RateBeforeClosing). Then session_wrap-up is
         -- called with the task and the action. The three steps of the
         -- closing sequence run back to back (ClosingSequenceRunsInOneTurn).
 }
@@ -479,9 +479,9 @@ rule WrapUpAnswered {
     ensures: run.stage = closing
 
     @guidance
-        -- wrap_up returns an exit token. After a rebase, when the response
+        -- session_wrap-up returns an exit token. After a rebase, when the response
         -- says to re-run the verify command, the agent does that and commits
-        -- any fix before exit_session (RebaseReverifiesWhenTold).
+        -- any fix before session_exit (RebaseReverifiesWhenTold).
 }
 
 rule WrapUpRefusedDirty {
@@ -496,7 +496,7 @@ rule WrapUpRefusedDirty {
 
     @guidance
         -- The agent shows the exact message, commits as in the commit step
-        -- and calls wrap_up again, through the same rating and call rule
+        -- and calls session_wrap-up again, through the same rating and call rule
         -- (RefusalIsShownAsWritten).
 }
 
@@ -511,7 +511,7 @@ rule WrapUpRefusedConflict {
 
     @guidance
         -- The agent shows the exact message and suggests steps to resolve
-        -- the conflict, and calls wrap_up again once it is resolved
+        -- the conflict, and calls session_wrap-up again once it is resolved
         -- (WrapUpAnswered; RefusalIsShownAsWritten).
 }
 
@@ -527,7 +527,7 @@ rule WrapUpRefusedOther {
     @guidance
         -- A backlog or review-tagged task, no worktree, or a main checkout
         -- not on the base branch: the agent shows the exact message and
-        -- stops. No token was issued, so exit_session is not called
+        -- stops. No token was issued, so session_exit is not called
         -- (RefusalIsShownAsWritten, ExitSessionNeedsAToken).
 }
 
@@ -545,7 +545,7 @@ rule CloseSession {
     ensures: run.exit_calls = run.exit_calls + 1
 
     @guidance
-        -- exit_session is mandatory on every path: without it the task does
+        -- session_exit is mandatory on every path: without it the task does
         -- not move and the session does not close. It carries pr_url on the
         -- pr path only, and is the agent's final action
         -- (ExitSessionIsMandatoryAndLast). When it errors, or succeeds but
@@ -584,8 +584,8 @@ rule ExitSessionDidNotTakeEffect {
 
     @guidance
         -- The close is one all-or-nothing step, so the error changed nothing
-        -- and the token is still valid: exit_session is called again with the
-        -- same arguments, and wrap_up is not. If it keeps failing the agent
+        -- and the token is still valid: session_exit is called again with the
+        -- same arguments, and session_wrap-up is not. If it keeps failing the agent
         -- tells the operator the close did not take effect and the window can
         -- be closed by hand from the TUI.
 }
@@ -599,9 +599,9 @@ rule ExitSessionTokenRefused {
     ensures: run.stage = wrap_up_asked
 
     @guidance
-        -- A missing or invalid token: it was used, or a newer wrap_up or a
-        -- new dispatch replaced it. The agent calls wrap_up again for a fresh
-        -- token (WrapUpAnswered), then exit_session with that one.
+        -- A missing or invalid token: it was used, or a newer session_wrap-up or a
+        -- new dispatch replaced it. The agent calls session_wrap-up again for a fresh
+        -- token (WrapUpAnswered), then session_exit with that one.
 }
 
 rule ExitSessionActionMismatch {
@@ -629,13 +629,13 @@ invariant RetroRunsOncePerWrapUp {
         and (run.retro_runs = 1 implies run.action != null)
 }
 
--- A session is closed only with a token wrap_up issued.
+-- A session is closed only with a token session_wrap-up issued.
 invariant NoCloseWithoutAToken {
     for run in WrapUps:
         run.exit_calls > 0 implies run.has_token
 }
 
--- A task reaches wrap_up only with its work committed and, when the repo
+-- A task reaches session_wrap-up only with its work committed and, when the repo
 -- has one, its verify command run.
 invariant WrapUpFollowsCommitAndVerify {
     for run in WrapUps:
@@ -661,7 +661,7 @@ surface WrapUpInvocation {
         -- wrap_up_mode is wrapped up with it and no question.
 }
 
--- What the wrap_up and exit_session tools and the agent's own commands answer.
+-- What the session_wrap-up and session_exit tools and the agent's own commands answer.
 surface WrapUpToolAnswers {
     facing _: core/McpClient
 
@@ -676,8 +676,8 @@ surface WrapUpToolAnswers {
         PushWasRejected(run) when run.stage = committed
 
     @guidance
-        -- wrap_up answers with an exit token or a refusal (reason one of
-        -- uncommitted_changes, rebase_conflict, other); exit_session answers
+        -- session_wrap-up answers with an exit token or a refusal (reason one of
+        -- uncommitted_changes, rebase_conflict, other); session_exit answers
         -- closed, no_active_session, not_taken_effect, token_refused or
         -- action_mismatch (mcp-task-tools.allium: WrapUpViaMcp,
         -- ExitSessionViaMcp). The verify and push outcomes are the agent's
@@ -710,7 +710,7 @@ surface WrapUpSession {
 
     @guarantee PathIsTheOperatorsChoice
         -- One of rebase, pr and done is settled before the retro, the commit
-        -- and wrap_up, and it is the operator's: an argument, else the task's
+        -- and session_wrap-up, and it is the operator's: an argument, else the task's
         -- preset wrap_up_mode, else the operator's answer to a question the
         -- skill asks and waits for. The skill never chooses for itself, even
         -- when the work looks like a PR. Any argument other than the three
@@ -718,19 +718,19 @@ surface WrapUpSession {
 
     @guarantee RefusedTaskStopsEarly
         -- When task_search prints a "Wrap-up: refused" line the skill shows it and
-        -- stops before the simplify, retro and commit steps, because wrap_up
+        -- stops before the simplify, retro and commit steps, because session_wrap-up
         -- would refuse the task and those steps would be wasted
         -- (mcp-task-tools.allium: ReviewTasksAreNotWrappedUp; ReadTask,
         -- StopOnRefusedTask).
 
     @guarantee CancelCallsNothing
         -- When the operator cancels the question, the skill exits without
-        -- calling any tool: no retro, no commit, no wrap_up (OperatorCancelled).
+        -- calling any tool: no retro, no commit, no session_wrap-up (OperatorCancelled).
 
     @guarantee PresetAnswerIsNotAPause
         -- An argument or a preset wrap_up_mode is an answer given earlier,
         -- not a pause. Everything after it runs without further input and the
-        -- skill does not stop before exit_session returns, including after the
+        -- skill does not stop before session_exit returns, including after the
         -- simplify skill's summary. The failure is silent: agents went idle at
         -- a blank prompt with the branch unmerged and the task stuck in
         -- running (SimplifyLargeChange, UsePresetPath).
@@ -745,12 +745,12 @@ surface WrapUpSession {
         -- The retro runs exactly once, after the path is settled (on done a fix
         -- would be stranded, so the retro files a task instead) and before the
         -- commit (so its fixes travel with the work). It is not run again
-        -- between wrap_up and exit_session. The follow-up tasks it files are
+        -- between session_wrap-up and session_exit. The follow-up tasks it files are
         -- left alone (RunRetro, RetroRunsOncePerWrapUp).
 
     @guarantee VerifyBeforeWrapUp
         -- When task_search prints a Verify command, the agent runs it in its own
-        -- worktree on every path and fixes any failure before wrap_up is
+        -- worktree on every path and fixes any failure before session_wrap-up is
         -- called. Dispatch does not run it and does not check that the agent
         -- did (mcp-task-tools.allium: AgentsRunTheVerifyCommand). On the pr
         -- path this also comes before the push, so a red build is not pushed
@@ -762,56 +762,56 @@ surface WrapUpSession {
         -- the board, as the repo's CLAUDE.md says (VerifyBeforeCommit).
 
     @guarantee CommitBeforeWrapUp
-        -- Before wrap_up the worktree is clean: the agent adds the relevant files
+        -- Before session_wrap-up the worktree is clean: the agent adds the relevant files
         -- by name, reviews the staged diff and commits with a short message.
-        -- wrap_up refuses a dirty worktree
+        -- session_wrap-up refuses a dirty worktree
         -- (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork), which is what
         -- makes this step the tool's to enforce and the skill's to run
         -- (CommitRemainingChanges).
 
     @guarantee RateBeforeClosing
         -- Knowledge the agent acted on and has not rated yet is rated before
-        -- wrap_up is called, as the learnings skill describes
+        -- session_wrap-up is called, as the learnings skill describes
         -- (RateKnowledgeAndWrapUp).
 
     @guarantee ClosingSequenceRunsInOneTurn
-        -- Rating, wrap_up and exit_session run back to back in one turn. A
+        -- Rating, session_wrap-up and session_exit run back to back in one turn. A
         -- pause between them risks going idle with the base branch already
         -- fast-forwarded and the task still in its old status
         -- (RateKnowledgeAndWrapUp, CloseSession).
 
     @guarantee RebaseReverifiesWhenTold
-        -- After a rebase, when wrap_up's response tells the agent to re-run the
+        -- After a rebase, when session_wrap-up's response tells the agent to re-run the
         -- verify command, the agent does that and commits any fix before
-        -- exit_session (WrapUpAnswered; mcp-task-tools.allium:
+        -- session_exit (WrapUpAnswered; mcp-task-tools.allium:
         -- AgentsRunTheVerifyCommand).
 
     @guarantee RefusalIsShownAsWritten
-        -- A refused wrap_up is shown to the operator as the tool wrote it. A
-        -- dirty tree is committed and wrap_up called again; a rebase conflict
+        -- A refused session_wrap-up is shown to the operator as the tool wrote it. A
+        -- dirty tree is committed and session_wrap-up called again; a rebase conflict
         -- gets suggested resolution steps and the skill stops; any other
         -- refusal (a backlog or review-tagged task, no worktree, the main
         -- checkout not on the base branch) stops the skill (WrapUpRefusedDirty,
         -- WrapUpRefusedConflict, WrapUpRefusedOther). Once the cause of a
-        -- conflict is fixed, wrap_up is called again.
+        -- conflict is fixed, session_wrap-up is called again.
 
     @guarantee ExitSessionNeedsAToken
-        -- exit_session is called only with the token a wrap_up answered with. A
-        -- refusal issues none, so the skill never calls exit_session after one
+        -- session_exit is called only with the token a session_wrap-up answered with. A
+        -- refusal issues none, so the skill never calls session_exit after one
         -- (CloseSession, NoCloseWithoutAToken).
 
     @guarantee ExitSessionIsMandatoryAndLast
-        -- exit_session is called on every path, because without it the task does
+        -- session_exit is called on every path, because without it the task does
         -- not move and the session does not close. It is the agent's final
         -- action, and carries pr_url on the pr path only (CloseSession).
 
     @guarantee FailedCloseReadsTheReference
-        -- When exit_session errors, or succeeds but reports that the close did
+        -- When session_exit errors, or succeeds but reports that the close did
         -- not take effect, the agent reads references/exit-session-errors.md
         -- before reacting. That file says the close is one all-or-nothing step:
         -- a failed close is an error that changed nothing, the token is still
-        -- valid, so exit_session is called again and wrap_up is not, unless the
-        -- error says the token is missing or invalid, when wrap_up is called
+        -- valid, so session_exit is called again and session_wrap-up is not, unless the
+        -- error says the token is missing or invalid, when session_wrap-up is called
         -- again for a fresh one. "has no active session" counts as already
         -- wrapped up (pr-workflow.allium: ExitSession; CloseSession,
         -- ExitSessionDidNotTakeEffect, ExitSessionTokenRefused,
@@ -821,7 +821,7 @@ surface WrapUpSession {
         -- On the pr path the agent writes the PR itself, from its own diff: a
         -- title and a body that describe the work actually shipped, then
         -- `gh pr create --draft`. Dispatch neither pushes nor authors it, and
-        -- the PR URL travels with exit_session, never with update_task
+        -- the PR URL travels with session_exit, never with update_task
         -- (pr-workflow.allium: WrapUpPr; CloseSession).
 
     @guarantee PrBodyIsWrittenForAReviewer
@@ -834,7 +834,7 @@ surface WrapUpSession {
         -- plan only for a dangerous or breaking change (PrPathIsAuthoredByTheAgent).
 
     @guarantee BranchDetailLivesInReferences
-        -- The pr path's steps and the exit_session error handling live in
+        -- The pr path's steps and the session_exit error handling live in
         -- references/pr.md and references/exit-session-errors.md, which
         -- SKILL.md names at the branch that needs them, so an agent on another
         -- path never loads them (mcp-task-tools.allium:

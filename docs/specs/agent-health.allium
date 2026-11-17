@@ -1246,7 +1246,7 @@ surface HookDelivery {
         SendMessageUndelivered(sender: core/Task, to: String, message: String)
 
     @guarantee DispatchMcpToolsAreTransparent
-        -- Dispatch's own MCP tool calls (task_search, wrap_up, task_update and
+        -- Dispatch's own MCP tool calls (task_search, session_wrap-up, task_update and
         -- the rest) trigger no hook-driven status transition: they are
         -- management, not implementation work. The hook filters them out of
         -- PreToolUse and PostToolUse before `dispatch hook` is called. Other
