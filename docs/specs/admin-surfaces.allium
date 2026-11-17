@@ -18,10 +18,9 @@
 --           how a key or a tool reaches them. The store's refusal is the
 --           answer; neither surface re-checks a role.
 --           The key rows themselves (keybindings.allium owns the table).
--- Dependencies: UserProfile, Person, SuperAdmin and the surfaces
---               WorkspaceAdministration and SuperAdministration from
---               workspaces.allium; Workspace, Membership, Epic and WorkPackage
---               from core.allium.
+-- Dependencies: UserProfile, Person, SuperAdmin and the store writes named
+--               above from workspaces.allium; Workspace, Membership, Epic and
+--               WorkPackage from core.allium.
 --
 -- Decisions, cited by id:
 --   A1. Agents are first-class users. Every key of the admin screen has an MCP
@@ -99,6 +98,7 @@ contract PersonResolution {
 rule OpenAdminScreen {
     when: OpenAdminScreenKeyPressed()
 
+    -- observable output; no rule listens.
     ensures: AdminScreenOpened(pane: workspaces_pane)
 
     @guidance
@@ -110,12 +110,14 @@ rule OpenAdminScreen {
         -- the ones they are admin of otherwise. A person who administers none
         -- sees "You administer no workspace." and, while the store has no
         -- super-admin, "No super-admin yet: press c to claim it." (A3).
-        -- Esc closes it and returns to the board; nothing is held open.
+        -- Esc or `q` closes the screen and returns to the board; nothing is
+        -- held open.
 }
 
 rule MoveAmongAdminPanes {
     when: AdminPaneKeyPressed()
 
+    -- observable output; no rule listens.
     ensures: AdminPaneChanged()
 
     @guidance
@@ -126,6 +128,12 @@ rule MoveAmongAdminPanes {
         -- the highlight inside a pane and stop at either end.
 }
 
+-- The text-input and confirmation keys below open a prompt and send nothing;
+-- the commit rules after them make the write. TextInputOpened and
+-- ConfirmationOpened are observable output; no rule listens. The prompt
+-- holds its purpose and target until the person commits it
+-- (AdminTextCommitted, AdminConfirmed) or presses Esc, which sends nothing.
+
 rule CreateWorkspaceFromScreen {
     when: CreateWorkspaceKeyPressed(admin)
 
@@ -134,51 +142,44 @@ rule CreateWorkspaceFromScreen {
     ensures: TextInputOpened(purpose: new_workspace_name)
 
     @guidance
-        -- `n`, on the Workspaces pane, super-admin only. Enter sends
-        -- CreateWorkspace(typed); a blank entry sends nothing; Esc sends
-        -- nothing. The store's refusal (name taken, too long) shows in the
-        -- error popup; success shows "Workspace <name> created" on the status
-        -- line and the new workspace is highlighted.
+        -- `n`, on the Workspaces pane, super-admin only. The input opens
+        -- empty; CreateWorkspaceOnCommit makes the write.
 }
 
 rule RenameWorkspaceFromScreen {
     when: RenameWorkspaceKeyPressed(workspace)
 
-    ensures: TextInputOpened(purpose: rename_workspace, prefilled: workspace.name)
+    ensures: TextInputOpened(purpose: rename_workspace, target: workspace,
+                             prefilled: workspace.name)
 
     @guidance
         -- `r`, on the Workspaces pane, for a workspace the person administers.
-        -- The input opens with the current name. Enter sends
-        -- RenameWorkspace(workspace, typed).
+        -- The input opens with the current name; RenameWorkspaceOnCommit
+        -- makes the write.
 }
 
 rule DeleteWorkspaceFromScreen {
-    when: DeleteWorkspaceKeyPressed(admin)
+    when: DeleteWorkspaceKeyPressed(admin, workspace)
 
     requires: admin.is_super_admin
 
-    ensures: ConfirmationOpened(purpose: delete_workspace)
+    ensures: ConfirmationOpened(purpose: delete_workspace, target: workspace)
 
     @guidance
         -- `d`, on the Workspaces pane, super-admin only. A y/n confirmation
-        -- names the workspace and how many members go with it. `y` sends
-        -- DeleteWorkspace; the store refuses while it holds any epic or
-        -- package, and the error popup says so.
+        -- names the workspace and how many members go with it;
+        -- DeleteWorkspaceOnConfirm makes the write.
 }
 
 rule AddMemberFromScreen {
     when: AddMemberKeyPressed(workspace)
 
-    ensures: TextInputOpened(purpose: member_to_add)
+    ensures: TextInputOpened(purpose: member_to_add, target: workspace)
 
     @guidance
         -- `a`, on the Workspaces or Members pane, for the highlighted
-        -- workspace. The input takes a display name or an identity
-        -- (PersonResolution). Enter resolves it and sends
-        -- AddMember(workspace, person, member); an ambiguous or unknown name
-        -- shows PersonResolution's refusal in the error popup and adds
-        -- nobody. The new member has the role member; `m` promotes them.
-        -- The status line reads "Added <shown name> to <workspace>".
+        -- workspace. The input opens empty and takes a display name or an
+        -- identity (PersonResolution); AddMemberOnCommit makes the write.
 }
 
 rule SetMemberRoleFromScreen {
@@ -198,12 +199,12 @@ rule SetMemberRoleFromScreen {
 rule RemoveMemberFromScreen {
     when: RemoveMemberKeyPressed(membership)
 
-    ensures: ConfirmationOpened(purpose: remove_member)
+    ensures: ConfirmationOpened(purpose: remove_member, target: membership)
 
     @guidance
         -- `x`, on the Members pane. A y/n confirmation names the person and
-        -- the workspace, and says their private items there stay unseen. `y`
-        -- sends RemoveMember.
+        -- the workspace, and says their private items there stay unseen;
+        -- RemoveMemberOnConfirm makes the write.
 }
 
 rule GrantSuperAdminFromScreen {
@@ -214,20 +215,21 @@ rule GrantSuperAdminFromScreen {
     ensures: TextInputOpened(purpose: super_admin_to_grant)
 
     @guidance
-        -- `g`, on the Super-admins pane. Takes a name like add-member does and
-        -- sends GrantSuperAdmin(person).
+        -- `g`, on the Super-admins pane. The input opens empty and takes a
+        -- name like add-member's does; GrantSuperAdminOnCommit makes the
+        -- write.
 }
 
 rule RevokeSuperAdminFromScreen {
-    when: RevokeSuperAdminKeyPressed(admin)
+    when: RevokeSuperAdminKeyPressed(admin, profile)
 
     requires: admin.is_super_admin
 
-    ensures: ConfirmationOpened(purpose: revoke_super_admin)
+    ensures: ConfirmationOpened(purpose: revoke_super_admin, target: profile)
 
     @guidance
-        -- `v`, on the Super-admins pane. A y/n confirmation. `y` sends
-        -- RevokeSuperAdmin; the store refuses the last super-admin.
+        -- `v`, on the Super-admins pane, for the highlighted super-admin. A
+        -- y/n confirmation; RevokeSuperAdminOnConfirm makes the write.
 }
 
 rule ClaimSuperAdminFromScreen {
@@ -249,15 +251,124 @@ rule DeleteUnseenItemFromScreen {
 
     requires: admin.is_super_admin
 
-    ensures: ConfirmationOpened(purpose: unseen-item_delete, item: item)
+    ensures: ConfirmationOpened(purpose: unseen_item_delete, target: item)
 
     @guidance
         -- `D`, on the Unseen items pane. Each row reads "<kind> #<id>  <workspace>
         -- by <creator shown name>  <created date>". No title: the person
         -- cannot read it (workspaces.allium D3). The confirmation says the
-        -- item is deleted for good and that an epic goes with its subtree.
-        -- `y` sends SuperAdminDeletesUnseenItem(item); an epic with an
-        -- unfinished task in its subtree is refused (A6) and the popup says so.
+        -- item is deleted for good and that an epic goes with its subtree;
+        -- DeleteUnseenItemOnConfirm makes the write.
+}
+
+------------------------------------------------------------
+-- Rules: committing a prompt
+------------------------------------------------------------
+
+-- Enter in the text input commits it (AdminTextCommitted); `y` at the
+-- confirmation commits it (AdminConfirmed). The text is trimmed, and a blank
+-- entry sends nothing. `n` and Esc close the prompt and send nothing. One rule
+-- per purpose; none re-checks a role (TheScreenRefusesNothingTheStoreAllows).
+-- A refusal shows in the error popup (AdminScreenRefreshesAfterAWrite).
+
+rule CreateWorkspaceOnCommit {
+    when: AdminTextCommitted(purpose, target, text)
+
+    let typed = trimmed(text)
+
+    requires: purpose = new_workspace_name
+    requires: typed != ""
+
+    ensures: workspaces/CreateWorkspace(typed)
+
+    @guidance
+        -- The store's refusal (name taken, too long) shows in the error
+        -- popup; success shows "Workspace <name> created" on the status line
+        -- and the new workspace is highlighted.
+}
+
+rule RenameWorkspaceOnCommit {
+    when: AdminTextCommitted(purpose, target, text)
+
+    let typed = trimmed(text)
+
+    requires: purpose = rename_workspace
+    requires: typed != ""
+
+    ensures: workspaces/RenameWorkspace(target, typed)
+}
+
+rule AddMemberOnCommit {
+    when: AdminTextCommitted(purpose, target, text)
+
+    let typed = trimmed(text)
+    let resolved = resolve_person(typed)    -- PersonResolution
+
+    requires: purpose = member_to_add
+    requires: typed != ""
+
+    ensures: workspaces/AddMember(target, resolved.identity, member)
+
+    @guidance
+        -- An ambiguous or unknown name shows PersonResolution's refusal in
+        -- the error popup and adds nobody. The new member has the role
+        -- member; `m` promotes them. The status line reads "Added <shown
+        -- name> to <workspace>".
+}
+
+rule GrantSuperAdminOnCommit {
+    when: AdminTextCommitted(purpose, target, text)
+
+    let typed = trimmed(text)
+    let resolved = resolve_person(typed)    -- PersonResolution
+
+    requires: purpose = super_admin_to_grant
+    requires: typed != ""
+
+    ensures: workspaces/GrantSuperAdmin(resolved.identity)
+}
+
+rule DeleteWorkspaceOnConfirm {
+    when: AdminConfirmed(purpose, target)
+
+    requires: purpose = delete_workspace
+
+    ensures: workspaces/DeleteWorkspace(target)
+
+    @guidance
+        -- The store refuses while the workspace holds any epic or package,
+        -- and the error popup says so.
+}
+
+rule RemoveMemberOnConfirm {
+    when: AdminConfirmed(purpose, target)
+
+    requires: purpose = remove_member
+
+    ensures: workspaces/RemoveMember(target)
+}
+
+rule RevokeSuperAdminOnConfirm {
+    when: AdminConfirmed(purpose, target)
+
+    requires: purpose = revoke_super_admin
+
+    ensures: workspaces/RevokeSuperAdmin(target.identity)
+
+    @guidance
+        -- The store refuses revoking the last super-admin.
+}
+
+rule DeleteUnseenItemOnConfirm {
+    when: AdminConfirmed(purpose, target)
+
+    requires: purpose = unseen_item_delete
+
+    ensures: workspaces/SuperAdminDeletesUnseenItem(target)
+
+    @guidance
+        -- An epic with an unfinished task in its subtree is refused (A6) and
+        -- the popup says so.
 }
 
 rule AdminScreenRefreshesAfterAWrite {
@@ -265,6 +376,7 @@ rule AdminScreenRefreshesAfterAWrite {
 
     requires: result = success
 
+    -- observable output; no rule listens.
     ensures: AdminScreenReloaded()
 
     @guidance
@@ -277,6 +389,8 @@ rule AdminScreenRefreshesAfterAWrite {
 ------------------------------------------------------------
 -- Rules: the MCP twins
 ------------------------------------------------------------
+
+-- ToolResult is observable output; no rule listens.
 
 rule ListWorkspacesTool {
     when: ListWorkspacesToolCalled(workspace_id?)
@@ -449,18 +563,22 @@ surface AdminScreen {
         -- [n], [r], [d] on the Workspaces pane.
         CreateWorkspaceKeyPressed(person) when person.is_super_admin
         RenameWorkspaceKeyPressed(workspace)
-        DeleteWorkspaceKeyPressed(person) when person.is_super_admin
+        DeleteWorkspaceKeyPressed(person, workspace) when person.is_super_admin
         -- [a], [m], [x] on the Workspaces or Members pane.
         AddMemberKeyPressed(workspace)
         ToggleRoleKeyPressed(membership)
         RemoveMemberKeyPressed(membership)
         -- [g], [v] on the Super-admins pane.
         GrantSuperAdminKeyPressed(person) when person.is_super_admin
-        RevokeSuperAdminKeyPressed(person) when person.is_super_admin
+        RevokeSuperAdminKeyPressed(person, profile) when person.is_super_admin
         -- [c] from any pane while the store has no super-admin.
         ClaimSuperAdminKeyPressed() when not UserProfiles.any(p => p.is_super_admin)
         -- [D] on the Unseen items pane, which shows UnseenItemListing.
         DeleteUnseenItemKeyPressed(person, item) when person.is_super_admin
+        -- Enter in the screen's text input (the *OnCommit rules).
+        AdminTextCommitted(purpose, target, text)
+        -- [y] at the screen's confirmation (the *OnConfirm rules).
+        AdminConfirmed(purpose, target)
 
     contracts:
         fulfils PersonResolution

@@ -467,16 +467,30 @@ rule SetDisplayName {
 rule SetOwnNameFromBoard {
     when: SetOwnNameKeyPressed()
 
+    -- observable output; no rule listens.
     ensures: NameInputOpened()
 
     @guidance
         -- The TUI twin of SetDisplayName, bound to `u` ("user") in the
         -- board's normal mode and listed in the keybinding table. The input
-        -- opens empty. Enter sends
-        -- SetDisplayName(typed); an empty or all-blank entry sends nothing
-        -- and Esc sends nothing, so the name stays as it was. A refusal from
-        -- the store (name too long) shows in the error popup; success shows
-        -- "Display name set to <name>" on the status line.
+        -- opens empty; SetOwnNameOnCommit makes the write. Esc sends
+        -- nothing, so the name stays as it was.
+}
+
+rule SetOwnNameOnCommit {
+    when: OwnNameCommitted(text)
+
+    let typed = trimmed(text)
+
+    requires: typed != ""
+
+    ensures: SetDisplayName(typed)
+
+    @guidance
+        -- Enter in the name input. An empty or all-blank entry sends
+        -- nothing. A refusal from the store (name too long) shows in the
+        -- error popup; success shows "Display name set to <name>" on the
+        -- status line.
 }
 
 rule SetDisplayNameViaMcp {
@@ -1288,6 +1302,8 @@ surface WorkspaceBoard {
     provides:
         -- [u] in normal mode (SetOwnNameFromBoard).
         SetOwnNameKeyPressed()
+        -- Enter in the name input (SetOwnNameOnCommit).
+        OwnNameCommitted(text)
         -- The new-epic and new-package forms reaching their last step
         -- (NameWorkspaceAndVisibilityFromBoard).
         EpicOrPackageFormOpened(form, parent?)
