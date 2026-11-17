@@ -9,6 +9,7 @@ use super::{validate_feed_interval, FieldUpdate, ServiceError};
 // UpdateEpicParams
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct UpdateEpicParams {
     pub epic_id: EpicId,
     pub title: Option<String>,

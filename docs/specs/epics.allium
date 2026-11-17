@@ -90,6 +90,13 @@ rule EditEpic {
     -- an error and then rendering the refused value is the worst of both: the
     -- user is told the save failed while looking at evidence it succeeded, and
     -- the display only self-corrects on the next DB refresh.
+    -- The parse errors are reported only once the save is accepted (or sends
+    -- nothing), so a refused save never also says "Edit accepted".
+    -- An accepted save shows on the board as the board's current epic with
+    -- only the sent fields changed, never as the opened snapshot: a rename,
+    -- or a status the store wrote, that arrived while the editor was open
+    -- stays on the card. A save that sends nothing changes nothing on the
+    -- board.
 
     -- The epic as the editor opened it. The change guards below compare with
     -- it, not with the row as it stands at save time, so a rename an agent

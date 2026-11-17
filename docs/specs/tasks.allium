@@ -2132,9 +2132,12 @@ rule EditTask {
     -- so a status an agent moved, or a model set, while the editor was open is
     -- not reverted by a description-only save. A refused write (the store
     -- answers an error) is reported and nothing else happens: the board does
-    -- not show the edit and the repo path is not saved. The epic editor
-    -- follows the same rule for title, description, feed command, interval and
-    -- visibility.
+    -- not show the edit and the repo path is not saved, and the parse errors
+    -- are not reported as an accepted edit. An accepted save shows on the
+    -- board as the board's current task with only the sent fields changed,
+    -- not as the opened snapshot; a save that sends nothing changes nothing
+    -- on the board. The epic editor follows the same rule for title,
+    -- description, feed command, interval and visibility.
 
     let prior = task.status
     -- The task as the editor opened it. The change guards below compare with

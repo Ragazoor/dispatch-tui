@@ -221,3 +221,84 @@ async fn an_epic_edit_writes_only_the_fields_the_user_changed() {
     assert_eq!(after.description, "New desc");
     assert_eq!(after.title, "Renamed meanwhile", "title was reverted");
 }
+
+/// A refused save never also says "Edit accepted": the parse errors are
+/// reported only once the store accepts (epics.allium: EditEpic).
+#[tokio::test]
+async fn a_refused_epic_edit_does_not_report_its_parse_errors_as_accepted() {
+    let (db, rt, mut app) = runtime_and_app().await;
+    let epic = db.create_epic("Original", "", None).await.unwrap();
+
+    // VISIBILITY is unparseable (a parse error), the interval is sub-floor
+    // (a refusal of the whole save).
+    let outcome = EditorOutcome::Saved(
+        "--- TITLE ---\nRenamed\n--- DESCRIPTION ---\n\n--- FEED_COMMAND ---\ntrue\n\
+         --- FEED_INTERVAL_SECS ---\n10\n--- VISIBILITY ---\nsideways\n"
+            .to_string(),
+    );
+    rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;
+
+    assert!(app.error_popup().is_some(), "the refusal is reported");
+    assert!(
+        !app.status_message()
+            .is_some_and(|m| m.contains("Edit accepted")),
+        "a refused save must not say it was accepted, got {:?}",
+        app.status_message()
+    );
+}
+
+/// The accepting half: the parse errors are still reported.
+#[tokio::test]
+async fn an_accepted_epic_edit_reports_its_parse_errors() {
+    let (db, rt, mut app) = runtime_and_app().await;
+    let epic = db.create_epic("Original", "", None).await.unwrap();
+
+    let outcome = EditorOutcome::Saved(
+        "--- TITLE ---\nRenamed\n--- DESCRIPTION ---\n\n--- FEED_COMMAND ---\n\n\
+         --- FEED_INTERVAL_SECS ---\n\n--- VISIBILITY ---\nsideways\n"
+            .to_string(),
+    );
+    rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;
+
+    assert_eq!(db.get_epic(epic.id).await.unwrap().title, "Renamed");
+    assert!(
+        app.status_message()
+            .is_some_and(|m| m.contains("Edit accepted with parse errors")),
+        "got {:?}",
+        app.status_message()
+    );
+}
+
+/// An accepted save changes only the sent fields on the board's current row,
+/// never pastes the opened snapshot over newer data (epics.allium: EditEpic).
+#[tokio::test]
+async fn an_accepted_epic_edit_keeps_newer_board_data_it_did_not_send() {
+    let (db, rt, mut app) = runtime_and_app().await;
+    let opened = db.create_epic("Original", "", None).await.unwrap();
+    // While the editor was open, the store moved the epic to review.
+    let mut current = opened.clone();
+    current.status = crate::models::TaskStatus::Review;
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+        vec![current],
+    )));
+
+    let outcome = EditorOutcome::Saved(
+        "--- TITLE ---\nOriginal\n--- DESCRIPTION ---\nnew words\n--- FEED_COMMAND ---\n\n\
+         --- FEED_INTERVAL_SECS ---\n\n"
+            .to_string(),
+    );
+    rt.finalize_epic_edit(&mut app, opened.clone(), outcome)
+        .await;
+
+    let shown = app
+        .epics()
+        .iter()
+        .find(|e| e.id == opened.id)
+        .expect("the epic is on the board");
+    assert_eq!(shown.description, "new words", "the sent field shows");
+    assert_eq!(
+        shown.status,
+        crate::models::TaskStatus::Review,
+        "the newer status stays"
+    );
+}

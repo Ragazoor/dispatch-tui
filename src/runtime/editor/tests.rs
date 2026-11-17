@@ -843,3 +843,72 @@ async fn finalize_description_kind_is_noop() {
         .await;
     assert!(cmds.is_empty());
 }
+
+#[tokio::test]
+async fn finalize_task_edit_does_not_report_parse_errors_of_a_refused_edit() {
+    // A refused save never also says "Edit accepted" (tasks.allium: EditTask).
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let task = seed_task(&*db).await;
+
+    let (tx, _rx) = unbounded_channel();
+    let rt = editor_runtime(db.clone(), runner.clone(), tx);
+    rt.task_svc
+        .update_task(UpdateTaskParams::for_task(task.id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+    rt.task_svc.delete_task(task.id).await.unwrap();
+    let mut app = App::new(vec![task.clone()]);
+
+    let text = crate::editor::format_editor_content(&task)
+        .replace("Original title", "Refused title")
+        .replace("--- TAG ---\n", "--- TAG ---\nnot-a-tag\n");
+    rt.exec_finalize_editor_result(
+        &mut app,
+        EditKind::TaskEdit(Box::new(task.clone())),
+        EditorOutcome::Saved(text),
+    )
+    .await;
+
+    assert!(
+        !app.status_message()
+            .is_some_and(|m| m.contains("Edit accepted")),
+        "a refused save must not say it was accepted, got {:?}",
+        app.status_message()
+    );
+}
+
+#[tokio::test]
+async fn finalize_task_edit_keeps_newer_board_data_it_did_not_send() {
+    // An accepted save changes only the sent fields on the board's current
+    // row: a status that arrived while the editor was open stays on the card.
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let snapshot = seed_task(&*db).await;
+    let text =
+        crate::editor::format_editor_content(&snapshot).replace("Original desc", "Edited desc");
+
+    let (tx, _rx) = unbounded_channel();
+    let rt = editor_runtime(db.clone(), runner.clone(), tx);
+    rt.task_svc
+        .update_task(UpdateTaskParams::for_task(snapshot.id).status(TaskStatus::Review))
+        .await
+        .unwrap();
+    let mut current = snapshot.clone();
+    current.status = TaskStatus::Review;
+    let mut app = App::new(vec![current]);
+
+    rt.exec_finalize_editor_result(
+        &mut app,
+        EditKind::TaskEdit(Box::new(snapshot.clone())),
+        EditorOutcome::Saved(text),
+    )
+    .await;
+
+    assert_eq!(app.tasks()[0].description, "Edited desc");
+    assert_eq!(
+        app.tasks()[0].status,
+        TaskStatus::Review,
+        "status was reverted"
+    );
+}

@@ -343,7 +343,6 @@ impl TuiRuntime {
         let mut fields = parse_editor_content(&text);
         let parse_errors = std::mem::take(&mut fields.errors);
         let applied = apply_task_editor_fields(&task, fields);
-        emit_parse_errors(app, &parse_errors);
 
         let task_id = task.id;
         let prior_repo_path = task.repo_path.clone();
@@ -407,17 +406,23 @@ impl TuiRuntime {
         // Only forward a url change when the edit actually altered it.
         params.url = url;
 
-        if !params.updated_field_names().is_empty() {
-            if let Err(e) = self.task_svc.update_task(params).await {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("updating task", e),
-                )));
-                // Return before the optimistic update and the repo-path save.
-                // The write was refused, so showing the edit would report an
-                // error beside evidence that it worked.
-                return vec![];
-            }
+        if params.updated_field_names().is_empty() {
+            // Nothing sent: nothing changes on the board either.
+            emit_parse_errors(app, &parse_errors);
+            return vec![];
         }
+        let sent = params.clone();
+        if let Err(e) = self.task_svc.update_task(params).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("updating task", e),
+            )));
+            // Return before the parse-error report, the optimistic update and
+            // the repo-path save. The write was refused, so saying "Edit
+            // accepted" or showing the edit would report an error beside
+            // evidence that it worked.
+            return vec![];
+        }
+        emit_parse_errors(app, &parse_errors);
 
         // Persist non-empty edited repo_path to the known list so sibling
         // feed items (e.g. other Dependabot PRs in the same repo) can be
@@ -426,20 +431,66 @@ impl TuiRuntime {
             self.exec_save_repo_path(app, repo_path.clone()).await;
         }
 
+        // Only the sent fields, onto the board's CURRENT row rather than the
+        // snapshot the editor opened with: a status an agent moved while the
+        // editor was open stays on the card (tasks.allium: EditTask).
+        let Some(current) = app.tasks().iter().find(|t| t.id == task_id).cloned() else {
+            return vec![];
+        };
         app.update(Message::Task(crate::tui::messages::TaskMessage::Edited(
             crate::tui::TaskEdit {
                 id: task_id,
-                title,
-                description,
-                repo_path,
-                status,
-                plan_path: resolved_plan_path,
-                tag,
-                base_branch,
-                wrap_up_mode,
-                model,
-                url: resolved_url,
-                phoenix,
+                title: if sent.title.is_some() {
+                    title
+                } else {
+                    current.title
+                },
+                description: if sent.description.is_some() {
+                    description
+                } else {
+                    current.description
+                },
+                repo_path: if sent.repo_path.is_some() {
+                    repo_path
+                } else {
+                    current.repo_path
+                },
+                status: if sent.status.is_some() {
+                    status
+                } else {
+                    current.status
+                },
+                plan_path: if sent.plan_path.is_some() {
+                    resolved_plan_path
+                } else {
+                    current.plan_path
+                },
+                tag: if sent.tag.is_some() { tag } else { current.tag },
+                base_branch: if sent.base_branch.is_some() {
+                    base_branch
+                } else {
+                    None
+                },
+                wrap_up_mode: if sent.wrap_up_mode.is_some() {
+                    wrap_up_mode
+                } else {
+                    current.wrap_up_mode
+                },
+                model: if sent.model.is_some() {
+                    model
+                } else {
+                    current.model
+                },
+                url: if sent.url.is_some() {
+                    resolved_url
+                } else {
+                    current.url
+                },
+                phoenix: if sent.phoenix.is_some() {
+                    phoenix
+                } else {
+                    current.phoenix
+                },
             },
         )))
     }
@@ -456,13 +507,8 @@ impl TuiRuntime {
         let mut fields = parse_epic_editor_output(&text);
         let parse_errors = std::mem::take(&mut fields.errors);
         let applied = apply_epic_editor_fields(&epic, fields);
-        emit_parse_errors(app, &parse_errors);
 
         let epic_id = epic.id;
-        // Captured before `epic` is consumed by `updated = epic` below —
-        // needed to tell "changed" from "left alone" for the take-over
-        // prompt (epics.allium: EditEpic).
-        let original_feed_command = epic.feed_command.clone();
         // Send only what the user changed against the snapshot the editor
         // opened with, so a rename made while it was open is not reverted.
         let new_feed_command = match &applied.feed_command {
@@ -483,36 +529,56 @@ impl TuiRuntime {
             params.feed_interval_secs = Some(applied.feed_interval_secs);
         }
         params.visibility = applied.visibility;
-        if !params.updated_field_names().is_empty() {
-            if let Err(e) = self.epic_svc.update_epic(params).await {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("updating epic", e),
-                )));
-                // Return before the optimistic update below. The write was refused
-                // — a sub-floor feed_interval_secs is the reachable case
-                // (epics.allium: EditEpic) — so applying it locally anyway would
-                // report an error while showing the user evidence it succeeded, and
-                // the board would only self-correct on the next DB refresh.
-                return vec![];
+        if params.updated_field_names().is_empty() {
+            // Nothing sent: nothing changes on the board either.
+            emit_parse_errors(app, &parse_errors);
+            return vec![];
+        }
+        let sent = params.clone();
+        if let Err(e) = self.epic_svc.update_epic(params).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("updating epic", e),
+            )));
+            // Return before the parse-error report and the optimistic update
+            // below. The write was refused — a sub-floor feed_interval_secs is
+            // the reachable case (epics.allium: EditEpic) — so saying "Edit
+            // accepted" or applying it locally would report an error while
+            // showing the user evidence it succeeded.
+            return vec![];
+        }
+        emit_parse_errors(app, &parse_errors);
+
+        // Only the sent fields, onto the board's CURRENT row rather than the
+        // snapshot the editor opened with: a rename or a status the store
+        // wrote while the editor was open stays on the card.
+        let feed_command_changed = matches!(
+            &sent.feed_command,
+            Some(crate::service::FieldUpdate::Set(_))
+        );
+        let mut cmds = Vec::new();
+        if let Some(mut updated) = app.epics().iter().find(|e| e.id == epic_id).cloned() {
+            if let Some(title) = sent.title {
+                updated.title = title;
             }
+            if let Some(description) = sent.description {
+                updated.description = description;
+            }
+            if let Some(command) = sent.feed_command {
+                updated.feed_command = match command {
+                    crate::service::FieldUpdate::Set(c) => Some(c),
+                    crate::service::FieldUpdate::Clear => None,
+                };
+            }
+            if let Some(interval) = sent.feed_interval_secs {
+                updated.feed_interval_secs = interval;
+            }
+            if let Some(visibility) = sent.visibility {
+                updated.visibility = visibility;
+            }
+            cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
+                Box::new(updated),
+            )));
         }
-        let mut updated = epic;
-        updated.title = applied.title;
-        updated.description = applied.description;
-        if let crate::service::FieldUpdate::Set(ref cmd) = applied.feed_command {
-            updated.feed_command = Some(cmd.clone());
-        } else {
-            updated.feed_command = None;
-        }
-        updated.feed_interval_secs = applied.feed_interval_secs;
-        if let Some(visibility) = applied.visibility {
-            updated.visibility = visibility;
-        }
-        let feed_command_changed =
-            updated.feed_command.is_some() && updated.feed_command != original_feed_command;
-        let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
-            Box::new(updated),
-        )));
 
         // Take-over prompt (epics.allium: EditEpic, feeds.allium:
         // OverrideFeedOwner): only when this edit actually CHANGES
