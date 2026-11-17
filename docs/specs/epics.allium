@@ -2015,7 +2015,8 @@ surface EpicBoard {
     provides:
         -- [E], the new-epic form (title, then description), finished. Inside an
         -- epic view the new epic is a sub-epic of the epic showing (CreateEpic).
-        CreateEpic(title, description, parent?)
+        -- The form leaves sort_order and both feed fields unset.
+        CreateEpic(title, description, sort_order?, parent?)
         -- [e] on an epic card (EditEpic).
         EditEpic(epic)
         -- [L] and [H] on an epic card (MoveEpicForward, MoveEpicBackward).
