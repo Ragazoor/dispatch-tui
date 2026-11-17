@@ -412,3 +412,112 @@ fn update_task_keeps_a_named_completion_on_a_task_already_done() {
         .expect("update_task");
     assert_eq!(store.task(id).completed_at, "2001-01-01 00:00:00.000");
 }
+
+// -- An epic's own patch recalculates its parent chain, never the epic itself
+// (epics.allium: RecalculateEpicStatus, MoveEpicForward, MoveEpicBackward).
+
+fn sub_epic(store: &Store, who: &str, parent: i64) -> i64 {
+    let row = Epic {
+        title: format!("sub of {parent}"),
+        workspace_id: TEST_WORKSPACE,
+        parent_epic_id: parent,
+        ..blank_epic()
+    };
+    store
+        .call(who, |ctx| create_epic(ctx, row))
+        .expect("create_epic");
+    store.db().epics().iter().map(|e| e.id).max().expect("epic")
+}
+
+fn set_epic(store: &Store, id: i64, patch: EpicPatch) {
+    store
+        .call("alice", |ctx| patch_epic(ctx, id, patch))
+        .expect("patch_epic");
+}
+
+fn epic_status(status: &str) -> EpicPatch {
+    EpicPatch {
+        status: Some(status.into()),
+        ..EpicPatch::default()
+    }
+}
+
+#[test]
+fn a_manual_move_into_done_with_an_unfinished_child_stays_done() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    store.create("alice", epic_task("open", epic, "running"));
+
+    set_epic(&store, epic, epic_status("done"));
+    assert_eq!(store.epic(epic).status, "done", "the placement stands");
+}
+
+#[test]
+fn a_done_epic_moved_back_with_every_child_done_stays_where_it_was_put() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    store.create("alice", epic_task("finished", epic, "done"));
+    assert_eq!(store.epic(epic).status, "done");
+    let finished_at = store.epic(epic).completed_at;
+
+    store.advance_secs(30);
+    set_epic(&store, epic, epic_status("review"));
+    let row = store.epic(epic);
+    assert_eq!(row.status, "review", "the placement stands");
+    assert_eq!(row.completed_at, finished_at, "no new completion");
+}
+
+#[test]
+fn renaming_an_epic_keeps_its_manual_placement() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    store.create("alice", epic_task("open", epic, "running"));
+    set_epic(&store, epic, epic_status("done"));
+
+    set_epic(
+        &store,
+        epic,
+        EpicPatch {
+            title: Some("Renamed".into()),
+            ..EpicPatch::default()
+        },
+    );
+    assert_eq!(store.epic(epic).status, "done");
+}
+
+#[test]
+fn a_sub_epics_status_move_still_recalculates_its_parent() {
+    let store = Store::new();
+    let parent = store.create_epic("alice", "P", false);
+    let sub = sub_epic(&store, "alice", parent);
+    assert_eq!(store.epic(parent).status, "backlog");
+
+    set_epic(&store, sub, epic_status("done"));
+    assert_eq!(store.epic(parent).status, "done", "its only child is done");
+}
+
+#[test]
+fn reparenting_an_epic_recalculates_both_parents() {
+    let store = Store::new();
+    let from = store.create_epic("alice", "From", false);
+    store.create("alice", epic_task("done in from", from, "done"));
+    let moved = sub_epic(&store, "alice", from);
+    set_epic(&store, moved, epic_status("running"));
+    assert_eq!(store.epic(from).status, "backlog");
+
+    let to = store.create_epic("alice", "To", false);
+    store.create("alice", epic_task("done in to", to, "done"));
+    assert_eq!(store.epic(to).status, "done");
+
+    set_epic(
+        &store,
+        moved,
+        EpicPatch {
+            parent_epic_id: Some(to),
+            ..EpicPatch::default()
+        },
+    );
+    assert_eq!(store.epic(from).status, "done", "only its done task is left");
+    assert_eq!(store.epic(to).status, "backlog", "a running child arrived");
+    assert_eq!(store.epic(moved).status, "running", "the moved epic is untouched");
+}

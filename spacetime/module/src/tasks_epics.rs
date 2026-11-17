@@ -1003,6 +1003,7 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     }
     row.updated_at = now(ctx);
     validate_status("epic", row.id, &row.status)?;
+    let child_of = row.parent_epic_id;
     ctx.db.epics().id().update(row);
     if command_changed {
         // Only the setter's own host may run the command now.
@@ -1018,8 +1019,11 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
         crate::config::on_sight_lost(ctx, &collect_epic_subtree_ids(ctx, id));
     }
 
-    recalculate_epic_chain(ctx, id);
-    if was_child_of != 0 {
+    // The parent chain, never the epic itself: its children did not change,
+    // and a status the caller set by hand stands (`epics.allium:
+    // RecalculateEpicStatus`, `MoveEpicForward`, `MoveEpicBackward`).
+    recalculate_epic_chain(ctx, child_of);
+    if was_child_of != child_of {
         recalculate_epic_chain(ctx, was_child_of);
     }
     Ok(())

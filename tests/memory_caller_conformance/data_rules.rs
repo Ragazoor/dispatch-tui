@@ -795,5 +795,58 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             rows_mem.verify_command("/home/b/api", "host-b").as_deref(),
             Some("make ci")
         );
+
+        // -- an epic's own patch never re-derives it (RecalculateEpicStatus) ----
+        let placed = bindings::Epic {
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let placed = real.create_epic(placed.clone()).await.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(placed)).is_some());
+        mem.align_next_epic_id(placed);
+        mem.create_epic(bindings::Epic {
+            created_by: identity.clone(),
+            ..blank_epic()
+        })
+        .await
+        .unwrap();
+        let open = bindings::Task {
+            created_by: identity.clone(),
+            ..blank_task_in_epic(placed)
+        };
+        let open_id = real.create_task(open.clone()).await.unwrap();
+        wait_for!(rows_real.task(open_id).is_some());
+        mem.align_next_task_id(open_id.0);
+        mem.create_task(open).await.unwrap();
+        for patch in [
+            bindings::EpicPatch {
+                status: Some("done".into()),
+                ..blank_epic_patch()
+            },
+            bindings::EpicPatch {
+                title: Some("renamed".into()),
+                ..blank_epic_patch()
+            },
+        ] {
+            real.patch_epic(EpicId(placed), patch.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+            mem.patch_epic(EpicId(placed), patch)
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        wait_for!(rows_real
+            .epic(EpicId(placed))
+            .is_some_and(|e| e.title == "renamed"));
+        assert_eq!(
+            rows_real.epic(EpicId(placed)).unwrap().status,
+            dispatch_tui::models::TaskStatus::Done,
+            "a manual done with an open child stands"
+        );
+        same_epic(placed);
     });
 }

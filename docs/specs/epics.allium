@@ -255,6 +255,10 @@ rule MoveEpicForward {
             epic.completed_at = now
             for task in epic.subtasks where current_agent(task).tmux_window != null:
                 current_agent(task).tmux_window = null
+    -- The move recalculates the parent chain, never the epic itself
+    -- (RecalculateEpicStatus), so the placement stands.
+    ensures:
+        if epic.parent != null: RecalculateEpicStatus(epic.parent)
 
     @guidance
         -- Uses the same next() progression as tasks:
@@ -271,6 +275,8 @@ rule MoveEpicForward {
         -- column reads it descending: an epic that has finished sorts by its
         -- own completion time in preference to the derived subtask key
         -- (board-layout.allium, "Done Column Ordering").
+        -- A manual move into done with an unfinished child stays in done
+        -- until a child changes; that change's recalculation regresses it.
 }
 
 rule MoveEpicBackward {
@@ -282,6 +288,11 @@ rule MoveEpicBackward {
 
     ensures: epic.status = prev
     ensures: epic.updated_at = now
+    -- As for MoveEpicForward: the parent chain is recalculated, the epic is
+    -- not, so a done epic moved back with all children done stays where it
+    -- was put until a child changes.
+    ensures:
+        if epic.parent != null: RecalculateEpicStatus(epic.parent)
 
     @guidance
         -- Uses the same prev() progression as tasks:
@@ -756,6 +767,7 @@ rule UpdateEpicViaMcp {
             and ancestor_chain(core/Epic{id: parent_epic_id}).count <= core/config.max_ancestor_walk
 
     let prior_status = epic.status
+    let was_child_of = epic.parent
 
     -- An auto-created repo-group sub-epic cannot be moved out of its
     -- grouping root. This covers BOTH reparenting (a new parent) and
@@ -836,6 +848,14 @@ rule UpdateEpicViaMcp {
         -- integer = reparent under that epic, null = make this a root epic.
         if parent_epic_id != omitted:
             epic.parent = if parent_epic_id = null: null else: core/Epic{id: parent_epic_id}
+    -- Every patch recalculates the epic's parent chain, and its former
+    -- parent's after a move, never the epic itself (RecalculateEpicStatus):
+    -- a status this call sets stands.
+    ensures:
+        if epic.parent != null: RecalculateEpicStatus(epic.parent)
+    ensures:
+        if was_child_of != null and was_child_of != epic.parent:
+            RecalculateEpicStatus(was_child_of)
     ensures:
         -- The store's visibility change and workspace move, with their own
         -- authority checks, in the same update_epic transaction
@@ -984,8 +1004,17 @@ rule ReparentEpicFromTui {
     -- auto-created repo-group sub-epic".
     requires: epic.origin != repo_group
 
+    let was_child_of = epic.parent
+
     ensures: epic.parent = new_parent
     ensures: epic.updated_at = now
+    -- Both parents' children changed: each is recalculated, with its chain.
+    -- The moved epic itself is not.
+    ensures:
+        if new_parent != null: RecalculateEpicStatus(new_parent)
+    ensures:
+        if was_child_of != null and was_child_of != new_parent:
+            RecalculateEpicStatus(was_child_of)
 
     @guidance
         -- Triggered from the kanban board when the user presses `m` on an
@@ -1888,7 +1917,11 @@ rule ExitAllEpics {
 -- change. That is task status transitions (patch_task, wrap_up, dispatch and
 -- the rest), task creation or deletion within the epic, feed task upserts
 -- (ingest_feed, flat and grouped; a grouped feed's repo-group sub-epics reach
--- the root through the climb below), and sub-epic creation or status change.
+-- the root through the climb below), and sub-epic creation, move or status
+-- change. An epic's own patch (a move, an edit, a reorder, a reparent)
+-- recalculates its parent chain, and its former parent's after a reparent,
+-- never the epic itself: its children did not change, and a manual placement
+-- must stand (spacetime/module/src/tasks_epics.rs::patch_epic_row).
 rule RecalculateEpicStatus {
     when: RecalculateEpicStatus(epic, visited?)
 
@@ -1934,8 +1967,8 @@ rule RecalculateEpicStatus {
         -- children, one already done with all children done, and one not done
         -- with an unfinished child all keep their row as it is. running and
         -- review are never set here; only MoveEpicForward / MoveEpicBackward
-        -- reach them, and a manual placement stands until one of the two
-        -- transitions above overrides it.
+        -- reach them, and a manual placement stands until a child changes
+        -- and one of the two transitions above overrides it.
         --
         -- A child whose status the store does not know stops the derivation
         -- for this epic: nothing is written, and the climb still goes on. Both

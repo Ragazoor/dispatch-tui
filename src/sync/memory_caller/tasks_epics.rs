@@ -909,6 +909,7 @@ impl MemoryReducerCaller {
         if check_only {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
+        let child_of = row.parent_epic_id;
         self.write_epic(&mut tables, row);
         if command_changed {
             // Only the setter's own host may run the command now.
@@ -925,8 +926,10 @@ impl MemoryReducerCaller {
             self.on_sight_lost(&mut tables, &subtree);
         }
 
-        self.recalculate_epic_chain(&mut tables, id);
-        if was_child_of != 0 {
+        // The parent chain, never the epic itself (the module's
+        // `patch_epic_row`).
+        self.recalculate_epic_chain(&mut tables, child_of);
+        if was_child_of != child_of {
             self.recalculate_epic_chain(&mut tables, was_child_of);
         }
         Ok(ReducerOutcome::Applied(vec![]))
