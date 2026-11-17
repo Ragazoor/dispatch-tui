@@ -1859,6 +1859,99 @@ rule ExitAllEpics {
         -- of the trail. On the main board Q does nothing.
 }
 
+-- == Epic Status Recalculation ==
+
+-- EpicStatusRecalculation. Epic status is persisted, and the store derives it
+-- from the epic's children (spacetime/module/src/tasks_epics.rs::recalculate_epic_chain,
+-- spacetime/module/src/support.rs::derive_epic_status). The rule below is that
+-- derivation.
+--
+-- WHERE IT IS DERIVED. At the STORE, the one place that holds all of an
+-- epic's children. No board sees all of them: an epic's subtasks can be owned
+-- by different people on different machines, and a board receives only what
+-- it subscribes to (sync.allium: SubscriptionsCoverOnlyTheOwnBoardAndItsEpics).
+-- Two boards deriving from their own subsets give two correct-looking answers
+-- (one sees only the done children and writes done, one sees a running child
+-- and writes backlog), and the epic flips between them while both are up.
+-- That is not a race locking can fix; the only fix is to stop asking the
+-- partial question. So the derivation runs once, at the store, over every
+-- child, and a board never computes it, not even for its own epics.
+--
+-- A board TRIGGERS it: the trigger points are mutations, and the store
+-- recalculates inside the same all-or-nothing change (sync.allium:
+-- EveryMutationIsAtomicAndAnswered). The new status reaches every subscribed
+-- board like any other row. A board never asks for a separate recalculation
+-- after a mutation (store-split.allium, X3): the module is the only place
+-- that recalculates.
+--
+-- Trigger points: whenever the set of an epic's children or their statuses
+-- change. That is task status transitions (patch_task, wrap_up, dispatch and
+-- the rest), task creation or deletion within the epic, feed task upserts
+-- (ingest_feed, flat and grouped; a grouped feed's repo-group sub-epics reach
+-- the root through the climb below), and sub-epic creation or status change.
+rule RecalculateEpicStatus {
+    when: RecalculateEpicStatus(epic, visited?)
+
+    -- visited counts the epics this walk recalculated before this one. Every
+    -- emission outside this rule omits it, so a walk starts at 0. The walk
+    -- recalculates at most core/config.max_epic_depth epics, the starting one
+    -- included, so a parent cycle (which the store's reparent check refuses)
+    -- ends there rather than looping. No real ancestry approaches the bound;
+    -- it turns a corrupt parent chain into one bounded walk.
+    let depth = visited ?? 0
+    requires: depth < core/config.max_epic_depth
+
+    -- "Children" is core/Epic.children: every subtask and every sub-epic,
+    -- whatever its status. A finished child sits in done or has been deleted.
+    -- status_is_known(c) is a black box: c's stored status is one the store
+    -- knows (spacetime/module/src/support.rs::KNOWN_STATUSES).
+    let children = epic.children
+    let readable = children.all(c => status_is_known(c))
+    let all_done = children.count > 0 and children.all(c => c.status = done)
+    let prior = epic.status
+
+    -- All children done: the epic is done, stamped as a task's completion is
+    -- (tasks.allium: ConfirmDone). No children is not all done, so a new epic
+    -- is never born done.
+    ensures:
+        if readable and all_done and prior != done:
+            epic.status = done
+            epic.completed_at = now
+            epic.updated_at = now
+    -- The regression: a done epic with an unfinished child goes back to
+    -- backlog. completed_at keeps the last completion.
+    ensures:
+        if readable and children.count > 0 and not all_done and prior = done:
+            epic.status = backlog
+            epic.updated_at = now
+    -- The climb runs whether or not this epic changed, and after its write.
+    ensures:
+        if epic.parent != null:
+            RecalculateEpicStatus(epic.parent, depth + 1)
+
+    @guidance
+        -- Otherwise nothing is written, not even updated_at: an epic with no
+        -- children, one already done with all children done, and one not done
+        -- with an unfinished child all keep their row as it is. running and
+        -- review are never set here; only MoveEpicForward / MoveEpicBackward
+        -- reach them, and a manual placement stands until one of the two
+        -- transitions above overrides it.
+        --
+        -- A child whose status the store does not know stops the derivation
+        -- for this epic: nothing is written, and the climb still goes on. Both
+        -- guesses are wrong in a way nobody can see: treating it as done
+        -- finishes an epic that is not finished, and treating it as unfinished
+        -- holds one open forever with nothing saying why. Declining leaves the
+        -- next recalculation free to get it right.
+        --
+        -- epic.sort_order is untouched by either transition: it is manual
+        -- ordering and nothing else. The transition into done is still the one
+        -- write that can discard a manual Done-column reorder of the epic's
+        -- card, which persists an override into completed_at (tasks.allium,
+        -- ReorderItem). Accepted: the epic genuinely finished at this moment,
+        -- and a real completion outranks an earlier hand-placement.
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
@@ -1884,118 +1977,20 @@ invariant FeedTaskIdentityPerRoutedFeed {
                 implies a.external_id != b.external_id
 }
 
--- EpicStatusRecalculation:
--- Epic status is persisted and recalculated by the module (recalculate_epic_chain).
-    --
-    -- WHERE IT IS DERIVED. At the STORE, the one place that holds all of an
-    -- epic's children.
-    --
-    -- The reason is that no board sees all of an epic's children. An epic's
-    -- subtasks can be owned by different people on different machines, and a
-    -- board receives only what it subscribes to (sync.allium:
-    -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics). A board deriving the
-    -- status from what it can see is deriving it from a subset, so:
-    --
-    --   * a board that sees only the done children concludes "all children
-    --     done" and writes done;
-    --   * a board that sees a running one writes the regression back to
-    --     backlog;
-    --   * both are following this derivation correctly, and the epic flips
-    --     between the two answers for as long as both boards are up.
-    --
-    -- That flapping is not a race to be tightened away with locking. It is two
-    -- correct answers to two different questions, and the only fix is to stop
-    -- asking the partial one. So the derivation runs once, at the store, over
-    -- every child — and a board never computes it, not even for its own epics,
-    -- because "its own" is not a property the epic has.
-    --
-    -- What a board still does is TRIGGER it: the trigger points below are
-    -- mutations, the mutations go to the store, and the store recalculates as
-    -- part of the same all-or-nothing change (sync.allium:
-    -- EveryMutationIsAtomicAndAnswered). The new status therefore arrives at
-    -- every subscribed board the same way any other row does, rather than being
-    -- computed again on each of them. A board never asks for a separate
-    -- recalculation after a mutation (store-split.allium, X3): the module is
-    -- the only place that recalculates.
-    -- It moves both forward and backward to always reflect child reality.
-    -- "Children" means core/Epic.children: the union of subtasks (Task) and
-    -- sub_epics (Epic). Each child contributes its .status value. Every child
-    -- counts: no status takes a row out of
-    -- the recalculation, so a finished child either sits in done or has been
-    -- deleted. Epic progress totals likewise count every task.
-    --
-    -- Derivation logic:
-    --   all children done (≥1 child) => done
-    --   epic is done AND has non-done children => backlog  (regression)
-    --   otherwise => no change (epic stays in current status)
-    --
-    --   The "no children" case does not auto-set to backlog — the epic
-    --   keeps its current status. A freshly-created epic starts as backlog via
-    --   the CreateEpic rule, so no information is lost.
-    --   A child whose status this binary does not recognise stops the
-    --   derivation: nothing is written, and the epic keeps what it has. Both
-    --   guesses are wrong in a way nobody can see — treating it as done
-    --   finishes an epic that is not finished, and treating it as unfinished
-    --   holds one open forever with nothing saying why. Declining leaves the
-    --   next recalculation free to get it right. The realistic producer is a
-    --   colleague's board on a version with a status this module lacks.
-    --   The running and review statuses are never set automatically; they are
-    --   only reachable via manual MoveEpicForward / MoveEpicBackward actions.
-    --   Manual placements (including running / review) are preserved across
-    --   subsequent recalc calls — only the two auto-transitions above will
-    --   override a manual placement.
-    --
-    -- The new status is written only when one of the two auto-transitions
-    -- above fires; otherwise the DB row is left untouched.
-    --
-    -- The all-active-children-done => done auto-transition also stamps
-    -- epic.completed_at = now, using the identical rule as tasks (see
-    -- tasks.allium's ConfirmDone). The done-with-active-non-done-children =>
-    -- backlog regression does NOT clear it: completed_at records the last
-    -- completion, and a regression does not unmake one — the next
-    -- all-children-done transition overwrites it. A no-op recalculation
-    -- (status does not change) never touches it, mirroring the "DB row is left
-    -- untouched" rule above. epic.sort_order is untouched by either
-    -- transition: it is manual ordering and nothing else.
-    --
-    -- This is also the one write that can discard a manual Done-column reorder
-    -- of the epic's card, which persists an override into the same field
-    -- (tasks.allium, ReorderItem). Accepted: the epic genuinely finished at
-    -- this moment, and a real completion outranks an earlier hand-placement.
-    --
-    -- Trigger points: the epic chain must be recalculated whenever the
-    -- set of children or their statuses change. This includes:
-    --   * task status transitions (patch_task, wrap_up, dispatch, etc.)
-    --   * task creation or deletion within the epic
-    --   * feed task upserts (ingest_feed) — both flat and grouped;
-    --     for grouped feeds, each sub-epic's recalculation propagates upward
-    --     to the parent automatically via the Propagation rule below.
-    --   * sub-epic creation or status change
-    --
-    -- Propagation: after recalculating an epic's status, if the epic has a
-    -- parent, the parent is recalculated as well.
-    -- This propagates status changes up the full ancestry chain, to a bounded
-    -- depth. The bound is not a modelling choice — no real ancestry approaches
-    -- it — it is what turns a corrupt parent chain into one refused
-    -- recalculation rather than an unbounded walk that takes the whole store
-    -- down with it.
-    -- The walk climbs at most core/config.max_epic_depth levels, so a parent
-    -- cycle (which the store's reparent check already refuses) ends at that
-    -- bound rather than looping.
-    --
-    -- Epic substatus (display label for epic cards):
-    --   backlog + no plan             => unplanned
-    --   backlog + has plan            => planned
-    --   running + any child blocked   => "N blocked" (N = count of running
-    --     tasks with sub_status in {needs_input, stale, crashed, conflict};
-    --     running sub-epics do not directly contribute to blocked count)
-    --   running + no blocked          => active
-    --   review                        => in review
-    --   done                          => done
-    --
-    -- Epic cards show colored status indicators (●N) for each non-zero
-    -- child count by parent status, using the column palette colors.
-    -- Sub-epic children are counted alongside task children in the indicators.
+-- Epic card status display. The substatus label on an epic card:
+--   backlog + no plan             => unplanned
+--   backlog + has plan            => planned
+--   running + any child blocked   => "N blocked" (N = count of running
+--     tasks with sub_status in {needs_input, stale, crashed, conflict};
+--     running sub-epics do not directly contribute to blocked count)
+--   running + no blocked          => active
+--   review                        => in review
+--   done                          => done
+--
+-- Epic cards show colored status indicators (●N) for each non-zero
+-- child count by parent status, using the column palette colors.
+-- Sub-epic children are counted alongside task children in the indicators.
+-- Epic progress totals count every task.
 
 ------------------------------------------------------------
 -- Surfaces

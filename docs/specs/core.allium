@@ -1002,7 +1002,8 @@ entity Epic {
 
     sub_epics: Epic with parent = this
 
-    -- Heterogeneous set used for status recalculation and dispatch ordering.
+    -- Heterogeneous set used for status recalculation (epics.allium:
+    -- RecalculateEpicStatus reads it) and dispatch ordering.
     -- Combines the epic's tasks and sub-epics; each element contributes its
     -- .status value to the parent's recalculated status. Every child counts:
     -- no status takes a row out of the recalculation short of deleting it.
