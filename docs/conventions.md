@@ -33,14 +33,16 @@ Test it with a render at a board smaller than the floor, e.g. `every_overlay_sur
 ## Single-line text-field caret
 
 Every `InputMode` that types free text into `InputState.buffer` (task/epic title,
-base branch, repo-path & quick-dispatch query) shares one caret model:
+work-package title and rename, display name, admin name input, base branch,
+repo-path & quick-dispatch query) shares one caret model:
 
 - `InputState.caret` is a **character** index into `buffer` (count of chars left
   of the caret), invariant `0..=buffer.chars().count()`. It is never a byte
   offset — conversion happens only at the edit/render call sites.
 - All caret arithmetic lives in `src/tui/text_caret.rs` (pure, unit-tested):
   `insert`, `delete_before` (Backspace), `delete_after` (Delete), `move_left`,
-  `move_right`, `word_left`/`word_right` (whitespace-only boundaries), `home`,
+  `move_right`, `word_left`/`word_right` (a word is alphanumerics and `_`;
+  whitespace and punctuation are boundaries), `home`,
   `end`, `byte_offset`. Handlers call these; they never `buffer.push`/`pop`.
 - **Every** write to the buffer goes through `InputState::set_buffer` (lands the
   caret at the end — natural for editing a prefilled value) or

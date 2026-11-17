@@ -1629,67 +1629,20 @@ surface BoardViewBadges {
 }
 
 surface TextInputField {
-    facing user: core/Operator
+    facing _: core/Operator
 
-    -- The shared single-line text buffer used by every InputMode that
-    -- types free text into the app's shared input field: task title,
-    -- epic title, base branch, repo-path query, and quick-dispatch query. Task/epic
-    -- DESCRIPTION is NOT this surface (it opens an external $EDITOR).
-    -- SearchTasks uses a separate buffer and is intentionally not on this
-    -- surface yet.
-
-    -- buffer is the text; caret is a CHARACTER index into buffer (the
-    -- text insertion point). Both start empty/zero.
-    let buffer = ""
-    let caret = 0
-
-    exposes:
-        buffer
-        caret
-
-    provides:
-        -- Insert char AT THE CARET (not appended); caret advances by one.
-        -- ensures: buffer = insert_char(buffer, caret, char); caret = caret + 1
-        TypeChar(user, char)
-
-        -- Delete the char immediately before the caret; caret moves back
-        -- one. No-op at caret 0 (guarded).
-        -- ensures: buffer = delete_before(buffer, caret); caret = caret - 1
-        Backspace(user)
-            when caret > 0
-
-        -- Delete key: delete the char AT the caret; caret unchanged.
-        -- No-op at end of buffer (guarded).
-        -- ensures: buffer = delete_at(buffer, caret)
-        DeleteForward(user)
-            when caret < len(buffer)
-
-        -- Move the caret one char left, clamped to 0.
-        -- ensures: caret = max(0, caret - 1)
-        CursorLeft(user)
-
-        -- Move the caret one char right, clamped to len(buffer).
-        -- ensures: caret = min(len(buffer), caret + 1)
-        CursorRight(user)
-
-        -- Move the caret one word left. A word char is alphanumeric or
-        -- underscore; every other char (whitespace, punctuation, path
-        -- separators like / - .) is a boundary, so this steps through
-        -- path segments.
-        -- ensures: caret = word_boundary_left(buffer, caret)
-        CursorWordLeft(user)
-
-        -- Move the caret one word right (same word/boundary rule).
-        -- ensures: caret = word_boundary_right(buffer, caret)
-        CursorWordRight(user)
-
-        -- Jump the caret to the start of the buffer.
-        -- ensures: caret = 0
-        CursorHome(user)
-
-        -- Jump the caret to the end of the buffer.
-        -- ensures: caret = len(buffer)
-        CursorEnd(user)
+    -- The shared single-line text buffer and its caret, used by every
+    -- InputMode that types free text into the app's shared input field: task
+    -- title, epic title, work-package title and rename, display name, the
+    -- admin screen's name input, base branch, repo-path query and
+    -- quick-dispatch query. Task and epic DESCRIPTION are not this surface:
+    -- they open an external $EDITOR. The board search (`/`) and the board
+    -- filter's epic search keep their own query, with no caret.
+    --
+    -- The caret is a CHARACTER index into the buffer: the text insertion
+    -- point. The keys that edit and move it are rows in the keybinding table
+    -- (keybindings.allium); the arithmetic is the UI helper
+    -- src/tui/text_caret.rs.
 
     @guarantee CaretInBounds
         -- caret is always within 0..=len(buffer) after any operation.
@@ -1717,14 +1670,18 @@ surface TextInputField {
         -- move one word (with Alt+Left/Right and the readline Alt+B / Alt+F
         -- as tmux-safe fallbacks, since some terminals drop the Ctrl
         -- modifier); Home/End jump to the buffer ends; Delete forward-deletes.
-        -- Typing and Backspace act AT THE CARET, not at the end of the buffer.
+        -- Typing inserts AT THE CARET, not at the end of the buffer, and
+        -- moves the caret one right. Backspace deletes the character before
+        -- the caret and does nothing at the start; Delete deletes the
+        -- character at the caret and does nothing at the end.
         -- The field is rendered with a reversed block cell at the caret and
         -- horizontal scrolling that keeps the caret visible when the buffer
         -- is wider than the field.
         -- The caret is a Unicode scalar (char) index, so a move or delete can
         -- split a grapheme cluster (combining marks, ZWJ emoji sequences) but
         -- never a UTF-8 codepoint. Grapheme-aware motion is out of scope here.
-        -- The insert/delete/word-boundary mechanics (insert_char,
-        -- delete_before, delete_at, word_boundary_left/right) are shared UI
-        -- helpers documented in docs/conventions.md, not domain logic.
+        -- The insert, delete and word-boundary mechanics (src/tui/text_caret.rs:
+        -- insert, delete_before, delete_after, word_left, word_right) are
+        -- shared UI helpers, described in docs/conventions.md ("Single-line
+        -- text-field caret"), not domain logic.
 }
