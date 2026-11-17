@@ -385,7 +385,7 @@ mod origin_tests {
     }
 
     /// The guard sits on the real router, ahead of every route
-    /// (`AgentPortRejectsNonLoopbackOrigins`).
+    /// (`NonLoopbackRequestsAreRefused`).
     #[tokio::test]
     async fn every_route_rejects_a_foreign_host_and_origin() {
         for path in [

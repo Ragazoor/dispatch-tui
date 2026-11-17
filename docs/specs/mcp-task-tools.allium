@@ -383,8 +383,9 @@ rule UpdateTaskViaMcp {
         -- The typed url is carried by two params: `url` (the string) and
         -- `url_type` (one of pr | security_alert | issue | other). A non-empty
         -- `url` REQUIRES `url_type`; an unknown `url_type` is rejected
-        -- unconditionally, at argument decoding. Both facts are stated by the
-        -- schema (see the typed-url contract above), not by prose. An
+        -- unconditionally, at argument decoding. The schema states the enum;
+        -- the url description states the pairing (see the typed-url contract
+        -- above). An
         -- empty-string `url` clears task.url and its type; any non-empty
         -- `url` sets task.url to a
         -- core/TaskUrl{url, url_type} value.
@@ -444,11 +445,9 @@ rule MarkTaskDoneViaMcp {
 
     -- A dedicated close-only call: no other field may travel with
     -- status="done" in the same task_update call — not even one that would
-    -- be a harmless no-op elsewhere. url_type is a case in point: everywhere
-    -- else this tool accepts it, url_type has no effect without a non-empty
-    -- url — it "folds into url" (see UpdateTaskViaMcp's guidance) rather than
-    -- owning a Task field of its own — but sending it alongside status="done"
-    -- is still rejected here, same as any other field. A close-only call
+    -- be a harmless no-op elsewhere. url_type is a case in point: it owns no
+    -- Task field of its own (it travels inside core/TaskUrl), and sending it
+    -- alongside status="done" is rejected here, same as any other field. A close-only call
     -- silently discarding an argument the caller bothered to send is a worse
     -- failure mode than a slightly stricter guard; a caller wanting both a
     -- field change and completion makes two calls — one task_update call for
@@ -552,9 +551,7 @@ rule MarkTaskDoneViaMcp {
         -- entirely ahead of UpdateTaskViaMcp's own url-pairing
         -- checks, which never run for a status="done" call:
         --   1. Any field other than status set alongside status="done"
-        --      (url_type included, even though it is inert everywhere else
-        --      this tool accepts it without an accompanying url — see the
-        --      requires clause above) →
+        --      (url_type included — see the requires clause above) →
         --      "status=\"done\" must be the only field set in this call
         --      (also set: <names>). Update other fields separately, then
         --      close with a status-only call."
@@ -567,12 +564,10 @@ rule MarkTaskDoneViaMcp {
         --      any write, on every store. On this path the close_task reducer
         --      refuses a missing task too, but in its own words, which would
         --      reach the caller only as the could-not-move-to-done reply
-        --      below; the read is what gives the NotFound answer. (On the
-        --      other task_update paths the read is what keeps a missing task
-        --      from looking like success at all: the shared store's
-        --      patch_task reducer is a deliberate silent no-op on a missing id,
-        --      since hooks race with deletes. The same holds for the TUI's
-        --      sub_status write, which goes through task_update.) A task
+        --      below; the read is what gives the NotFound answer. (The other
+        --      task_update paths need no read: the module's update_task
+        --      refuses a missing id, and the service maps that refusal to the
+        --      same NotFound.) A task
         --      deleted between the read and the close gets the
         --      could-not-move reply.
         -- A caller could trip both 1 and 2 at once; 1 is checked first, so
@@ -587,7 +582,8 @@ rule MarkTaskDoneViaMcp {
         -- (tasks.allium) any other route into Done triggers, applied in the
         -- close's own transaction. An open session request on the task (a
         -- session_wrap-up rebase still running, say) does not block the close: the
-        -- module fails it "task closed" in the same transaction.
+        -- module fails it "task closed" in the same transaction, and so does
+        -- an open dispatch request on the task.
         --
         -- When the close does NOT land (the call is refused or the store
         -- fails it): this call reports the task could not be moved to done
@@ -898,10 +894,7 @@ rule CreateTaskViaMcp {
         -- dispatched agent is indistinguishable, here, from a genuine
         -- non-dispatched session.
         --
-        -- The degradation is silent on one of the two surfaces only. An agent
-        -- launched without its per-task configuration gets no auto-scoping in
-        -- ListTasksViaMcp, with no error, and ListTasksViaMcp cannot detect
-        -- the difference. Here it does not apply: task_create requires epic_id of every caller, so a
+        -- The degradation is never silent here: task_create requires epic_id of every caller, so a
         -- misconfigured agent that omits it is REFUSED outright rather than
         -- quietly given no epic. What it loses is the refusal's help, not the
         -- refusal: TheRefusalNamesTheLikelyAnswer can only name the caller's
@@ -976,7 +969,8 @@ rule GetTaskViaMcp {
         --   resolved)], [Tag], [Plan], [<url label>: <url> — the typed label
         --   derived from url.url_type], [Worktree], Base branch,
         --   [Tmux window], [Dispatch request], [Sort order], [Verify command],
-        --   [Wrap-up mode], Model, [Phoenix], [Schedule], [Schedule error],
+        --   [Wrap-up mode], Model, [Wrap-up: refused — <reason>], [Phoenix],
+        --   [Schedule], [Schedule error],
         --   [Bookmarked], Created, Updated.
         -- [Bookmarked] renders "Bookmarked: yes" only when the board's person
         -- (see UpdateTaskViaMcp's `bookmarked`) has a core/Bookmark on the
@@ -1230,7 +1224,7 @@ rule ListTasksViaMcp {
         -- every filter has been applied (the trajectory logs show one
         -- no-argument reply of 258 KB). When rows were cut, a final line
         -- says how to get the rest:
-        --   "Showing <limit> of <total>, newest update first. Narrow with
+        --   "Showing <limit> of <total>, most recently updated first. Narrow with
         --    epic_id, status, query or the time filters, or raise limit."
         -- When nothing is cut there is no such line. A caller that must see
         -- every match (a bulk change) checks for the line and raises limit.
@@ -2327,8 +2321,10 @@ surface McpTaskTools {
         --     the only text a refused caller is certain to read
         --     (ReviewTasksAreNotWrappedUp).
         --   - A constraint the schema can express is expressed by the schema, not
-        --     prose: an enum for a closed value set, a conditional requirement for
-        --     one argument depending on another (task_update's url_type).
+        --     prose: an enum for a closed value set. A conditional requirement
+        --     (one argument depending on another) the advertised schema cannot
+        --     carry, so the dependent argument's description states it in one
+        --     clause (task_update's url).
         --   - An argument that means the same thing on every tool that takes it —
         --     base_branch, wrap_up_mode, model, auto_run_plan, phoenix, tag, sort_order —
         --     carries one short wording of that meaning, the same on each tool. A

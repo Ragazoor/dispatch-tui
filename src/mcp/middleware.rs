@@ -94,7 +94,7 @@ fn is_loopback(value: &str, bound: Option<u16>, require_port: bool) -> bool {
 
 /// Refuse a request whose `Host` or `Origin` is not loopback on the bound
 /// port — the defence against DNS rebinding and cross-origin pages
-/// (`AgentPortRejectsNonLoopbackOrigins` in `docs/specs/mcp-task-tools.allium`).
+/// (`NonLoopbackRequestsAreRefused` in `docs/specs/mcp-task-tools.allium`).
 /// Runs before identity extraction, so a rejected request never reaches a
 /// handler. A missing header passes: a browser always sends `Host`, and local
 /// clients may omit `Origin`.
