@@ -512,7 +512,10 @@ rule DeleteEpicRefused {
     -- subtree walk happens to reach — so the same epic always names the same
     -- task. The tasks the client could not decode are counted and named by id.
     -- decoded(ts) and undecoded(ts) are black boxes: the tasks of ts the
-    -- client could, and could not, decode (decodable, in DeleteEpic).
+    -- client could, and could not, decode (decodable, in DeleteEpic). The
+    -- undecodable ones are found in the board's own rows, so a sub-epic
+    -- outside its subscription is not searched for them; the store's
+    -- pre-check still judges every task's done-ness over its true rows.
     -- lowest_id(ts) is a black box: the task in ts with the smallest id, or
     -- null when ts is empty.
     let unreadable = undecoded(epic.subtree_tasks)
@@ -2058,7 +2061,10 @@ surface EpicBoard {
     provides:
         -- [E], the new-epic form (title, then description), finished. Inside an
         -- epic view the new epic is a sub-epic of the epic showing (CreateEpic).
-        -- The form leaves sort_order and both feed fields unset.
+        -- The form leaves sort_order and both feed fields unset; its last step
+        -- picks the workspace and visibility (workspaces.allium:
+        -- NameWorkspaceAndVisibilityFromBoard). An empty title or a cancelled
+        -- description editor creates nothing.
         CreateEpic(title, description, sort_order?, parent?)
         -- [e] on an epic card (EditEpic).
         EditEpic(epic)
