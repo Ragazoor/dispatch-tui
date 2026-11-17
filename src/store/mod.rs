@@ -1415,6 +1415,23 @@ impl Store {
         self.rows.upsert_task(&row);
     }
 
+    /// [`Self::plant_undecodable_task`], filed under `epic_id`: the board's
+    /// copy of a subtree task it cannot decode, while the store still holds
+    /// the readable row.
+    #[cfg(test)]
+    pub(crate) fn plant_undecodable_task_in_epic(&self, id: i64, epic_id: i64) {
+        let mut row = crate::sync::encode::create_task_row(
+            &CreateTaskRequest::fixture("From the future", "/repo"),
+            "",
+            "u",
+            "2026-10-11 12:00:00.000",
+        );
+        row.id = id;
+        row.epic_id = epic_id;
+        row.status = "teleported".into();
+        self.rows.upsert_task(&row);
+    }
+
     /// A handle over a fresh, private in-process store — one `SharedRows` and
     /// one `MemoryReducerCaller` over it — whose identity lives in
     /// `<data_dir>/host.json`. The writes settle as a fixed test user and

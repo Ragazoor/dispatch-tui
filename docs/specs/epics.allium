@@ -141,7 +141,9 @@ rule EditEpic {
         -- CHANGES feed_command to a non-empty value (not a clear, not an
         -- edit that left it untouched), and only when a core/PollOwner row
         -- already names a host other than this one. The row is read after
-        -- the write, and the store's feed_command change has by then released
+        -- the store accepts the write, so the board already holds that write's
+        -- rows (sync.allium: AnAcceptanceArrivesAfterItsRows), and the
+        -- store's feed_command change has by then released
         -- every claim held by a host of someone other than the setter
         -- (feeds.allium: FeedCommandRunsOnSettersHost), so the offer only
         -- names another host of the same person. See @guidance for the

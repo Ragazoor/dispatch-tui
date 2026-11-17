@@ -382,3 +382,40 @@ async fn epic_ensure_deletable_names_the_lowest_id_blocking_task_across_sub_epic
     assert!(msg.contains("Deep blocker"), "{msg}");
     assert!(!msg.contains("Shallow blocker"), "{msg}");
 }
+
+/// `epics.allium: DeleteEpicRefused`. The lowest undone task is one this
+/// board cannot decode, and a higher readable one blocks too: the message
+/// still names the readable one, beside the unreadable id.
+#[tokio::test]
+async fn epic_ensure_deletable_names_a_readable_blocker_above_an_unreadable_one() {
+    let store = Store::open_in_memory().unwrap();
+    let concrete = Arc::new(store);
+    let db: Arc<dyn store::TaskStore> = concrete.clone();
+    let tasks = task_svc(&db);
+    let epics = epic_svc(&db);
+    let epic = epics
+        .create_epic(CreateEpicParams::fixture("E"))
+        .await
+        .unwrap();
+    let unreadable = tasks
+        .create_task(CreateTaskParams::fixture("Lower", "/repo"))
+        .await
+        .unwrap();
+    db.set_task_epic_id(unreadable, Some(epic.id))
+        .await
+        .unwrap();
+    let readable = tasks
+        .create_task(CreateTaskParams::fixture("Readable blocker", "/repo"))
+        .await
+        .unwrap();
+    db.set_task_epic_id(readable, Some(epic.id)).await.unwrap();
+    concrete.plant_undecodable_task_in_epic(unreadable.0, epic.id.0);
+
+    let err = epics.ensure_deletable(epic.id).await.unwrap_err();
+
+    let ServiceError::Validation(msg) = err else {
+        panic!("expected Validation, got {err:?}");
+    };
+    assert!(msg.contains("Readable blocker"), "{msg}");
+    assert!(msg.contains(&format!("#{}", unreadable.0)), "{msg}");
+}
