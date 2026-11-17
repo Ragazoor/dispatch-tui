@@ -129,21 +129,27 @@ proptest! {
         let actual = rt.block_on(async {
             let db = test_db().await;
             let epic = db.create_epic("E", "", None).await.unwrap();
-            for status in &task_statuses {
-                db.create_task(CreateTaskRequest {
-                    status: *status,
-                    epic_id: Some(epic.id),
-                    ..CreateTaskRequest::fixture("t", "/r")
-                })
-                .await
-                .unwrap();
+            let create = |status: TaskStatus| CreateTaskRequest {
+                status,
+                epic_id: Some(epic.id),
+                ..CreateTaskRequest::fixture("t", "/r")
+            };
+            let (last, rest) = match task_statuses.split_last() {
+                Some((last, rest)) => (Some(*last), rest),
+                None => (None, &task_statuses[..]),
+            };
+            for status in rest {
+                db.create_task(create(*status)).await.unwrap();
             }
-            // Seed the baseline status the recalc pivots on, after the tasks:
-            // the store recalculates as each one is created, and the property
-            // is about the recalculation from this baseline.
+            // Seed the baseline the recalc pivots on. An epic's own patch never
+            // re-derives it (epics.allium: RecalculateEpicStatus), so the last
+            // child's creation is the one recalculation, over every child.
             db.patch_epic(epic.id, &EpicPatch::new().status(baseline))
                 .await
                 .unwrap();
+            if let Some(status) = last {
+                db.create_task(create(status)).await.unwrap();
+            }
             db.get_epic(epic.id).await.unwrap().status
         });
 
