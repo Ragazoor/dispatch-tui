@@ -1,8 +1,10 @@
 -- allium: 3
 -- tasks.allium
 --
--- Scope: Task lifecycle — creation, status movement, phoenix respawn,
---        build-output cleanup of Done tasks, reorder, move to epic, the
+-- Scope: Task lifecycle — creation (manual and quick dispatch's task),
+--        the per-task model and wrap-up preferences, status movement (single
+--        and batch), phoenix respawn, build-output cleanup of Done tasks,
+--        the TaskTeardown contract, reorder, move to epic, the
 --        new-task signal, bookmarks, delete and archive, copy, editor, the
 --        board-wide multi-selection the batch rules consume, section collapse
 --        and epic fold, and the module write rules every task write obeys.
@@ -603,8 +605,10 @@ rule MoveTaskForward {
     @guidance
         -- Manual movement (forward or backward) clears the task's agent
         -- notification/poll tracking flags: the review-notified and
-        -- needs-input-notified markers, the last PR-poll timestamp, and the
-        -- card message flash. Nothing else is cleared — there is no
+        -- needs-input-notified markers, the last PR-poll timestamp and the
+        -- PR-poll failure bookkeeping, the card message flash and its sent
+        -- marker, and the epic chain's auto-dispatch failure marker
+        -- (src/tui/types/state.rs::AgentTracking::clear). There is no
         -- separate tmux-output or crash-detection state.
         -- A move out of running also voids any deferred Stop
         -- (current_agent(task).stop_pending), because the bit belongs to the turn the task
@@ -654,8 +658,10 @@ rule MoveTaskBackward {
     @guidance
         -- Manual movement (forward or backward) clears the task's agent
         -- notification/poll tracking flags: the review-notified and
-        -- needs-input-notified markers, the last PR-poll timestamp, and the
-        -- card message flash. Nothing else is cleared — there is no
+        -- needs-input-notified markers, the last PR-poll timestamp and the
+        -- PR-poll failure bookkeeping, the card message flash and its sent
+        -- marker, and the epic chain's auto-dispatch failure marker
+        -- (src/tui/types/state.rs::AgentTracking::clear). There is no
         -- separate tmux-output or crash-detection state.
         -- A move out of running also voids any deferred Stop — see
         -- MoveTaskForward's guidance and core/Task's
@@ -1618,8 +1624,14 @@ rule ToggleBookmarkFromBoard {
     @guidance
         -- The status bar confirms which way it went: "Bookmarked <name>" or
         -- "Bookmark removed from <name>", <name> the task's display name (its
-        -- title when it has none yet). A refusal (SetBookmark) shows its
-        -- message in the status bar instead.
+        -- title when it has none yet).
+        --
+        -- The board refuses a Done task itself, from its own view of the
+        -- card: the status bar reads "<name> is done and cannot be
+        -- bookmarked" and no BookmarkSet is sent. A refusal from the store
+        -- (SetBookmark), which arrives only when that view is stale, shows
+        -- the store's message in the status bar and refreshes the board's
+        -- bookmarks.
         --
         -- Applies to the card under the cursor only, never to a multi-card
         -- selection: a bookmark is "this one", and a toggle over a mixed
@@ -1656,7 +1668,9 @@ rule SetBookmark {
         -- changes nothing and is not an error, so an agent can state the
         -- wanted end state without reading first.
         --
-        -- The Done refusal reads "<name> is done and cannot be bookmarked".
+        -- The store's Done refusal reads "Task <id> is done and cannot be
+        -- bookmarked". A call with no identity is refused with "cannot
+        -- bookmark without an identity".
         --
         -- Nobody else's bookmark is touched. A second person bookmarking the
         -- same task gets a row of their own.
@@ -1985,6 +1999,7 @@ rule CopyTask {
         repo_path: confirmed_repo_path,  -- user confirms or edits before creation
         status: backlog,
         sub_status: default_sub_status(backlog),
+        epic: viewed_epic,               -- the epic view's epic, else none (as CreateTask)
         tag: confirmed_tag,              -- source.tag seeds it; user re-confirms
         phoenix: armed_phoenix,          -- false unless armed at InputTag
         base_branch: confirmed_base_branch,  -- picked at InputBaseBranch; never the source's
@@ -1998,8 +2013,11 @@ rule CopyTask {
         -- Copies a subset of fields from the source task, including the tag and
         -- the wrap_up_mode preference and the model. Fields that are NOT
         -- copied: plan,
-        -- worktree, tmux_window, url, epic, sort_order, phoenix, and
-        -- base_branch, which the flow asks for afresh (see below).
+        -- worktree, tmux_window, url, sort_order, phoenix, and
+        -- base_branch, which the flow asks for afresh (see below). epic is
+        -- not copied either: as for CreateTask, a copy made in an epic view
+        -- goes into that epic, and one made in a package view is linked to
+        -- that package.
         -- auto_run_plan is NOT copied — like plan_path, it's tied to a
         -- specific (unshared) plan file, and this field is set by skills
         -- (decompose-review) rather than being a human TUI preference.
