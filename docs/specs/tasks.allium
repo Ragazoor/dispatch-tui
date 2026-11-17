@@ -1385,6 +1385,8 @@ rule ReorderItem {
         -- (falling back to the item's database id when unset), and both
         -- updated sort_order values are persisted to the database.
         -- No-op when the item is already at the boundary of its column.
+        -- The item is the card under the cursor: with the cursor on a
+        -- column's select-all row there is no item, and nothing moves.
         --
         -- In Done the swap writes completed_at instead, on both cards, and it
         -- writes it on EPIC cards too. That is the user overriding the

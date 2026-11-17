@@ -216,6 +216,16 @@ fn app_for(binding: &KeyBinding) -> App {
         Some(C::OnTaskCard) | Some(C::OffEpicCard) | Some(C::TaskWithWindow) | None => match action
         {
             "refresh_feed" => feed_epic_app(),
+            // These record only when they act: give each a card to move or a
+            // group to fold.
+            "toggle_epic_fold" => app_for(&in_context(C::OnFoldedEpicGroup)),
+            "reorder_task_down" | "reorder_task_up" => {
+                let mut app = make_app();
+                app.selection_mut().set_column(1);
+                let row = if action == "reorder_task_down" { 0 } else { 1 };
+                app.selection_mut().set_row(1, row);
+                app
+            }
             "open_pr_url" => app_with_running_task(|t| {
                 t.url = Some(crate::models::TaskUrl::new(
                     "https://github.com/example/repo/pull/42",
@@ -1307,6 +1317,33 @@ fn h_with_nothing_to_move_records_nothing() {
     assert!(app.context_holds(C::OnColumnSelectAll));
     let cmds = press(&mut app, "H");
     assert!(recorded(&cmds).is_empty(), "{:?}", recorded(&cmds));
+}
+
+/// A board.normal key with nothing to act on records nothing: on the
+/// select-all row there is no card to select, copy or reorder and no
+/// section or epic group to fold (KeyInput's navigation-only exception).
+#[test]
+fn card_keys_with_nothing_under_the_cursor_record_nothing() {
+    for key in ["v", "c", "J", "K", "z", "Z"] {
+        let mut app = make_app();
+        app.selection_mut().set_column(1);
+        app.update(Message::NavigateRow(-1));
+        assert!(app.context_holds(C::OnColumnSelectAll));
+        let mode = app.input.mode.clone();
+        let cmds = press(&mut app, key);
+        assert!(recorded(&cmds).is_empty(), "{key}: {:?}", recorded(&cmds));
+        assert_eq!(app.input.mode, mode, "{key}");
+    }
+}
+
+/// `v` on a work package card selects nothing, so it records nothing.
+#[test]
+fn toggle_select_on_a_work_package_card_records_nothing() {
+    let mut app = app_for(&in_context(C::OnWorkPackageCard));
+    assert!(app.context_holds(C::OnWorkPackageCard));
+    let cmds = press(&mut app, "v");
+    assert!(recorded(&cmds).is_empty(), "{:?}", recorded(&cmds));
+    assert!(!app.has_selection());
 }
 
 #[test]

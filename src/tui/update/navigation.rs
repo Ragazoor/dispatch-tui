@@ -122,7 +122,9 @@ impl App {
 
     pub(in crate::tui) fn handle_reorder_item(&mut self, direction: isize) -> Vec<Command> {
         let col = self.selection().column();
-        if col == 0 {
+        // The select-all row is not a card: there is nothing to reorder
+        // (tasks.allium: ReorderItem).
+        if col == 0 || self.on_select_all() {
             return vec![];
         }
         let Some(status) = TaskStatus::from_column_index(col - 1) else {

@@ -11,8 +11,10 @@ use super::key_event;
 impl App {
     /// Run the action of the board.normal row a key resolved to
     /// (`KeypressRunsItsRowsAction`). The row says which action; this says
-    /// what the action does. Every arm records the row's action id under the
-    /// key as typed (`label`), as it always has.
+    /// what the action does. An arm that takes effect records the row's action
+    /// id under the key as typed (`label`); one that finds nothing to act on
+    /// records nothing. Navigation is the exception: it records even at an
+    /// edge (keybindings.allium, KeyInput's guidance).
     pub(in crate::tui) fn run_normal(
         &mut self,
         b: &KeyBinding,
@@ -50,6 +52,11 @@ impl App {
         };
         let action = b.action;
         let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
+        // For a key that can find nothing to act on: it records only when the
+        // message issued a command or changed the mode.
+        let keyed_if_effect = |app: &mut App, msg: Message| {
+            app.dispatch_prompting_handler_keyed(|a| a.update(msg), action, label)
+        };
         Some(match action {
             "quit" => keyed(self, Message::System(SystemMessage::Quit)),
             "navigate_column" => {
@@ -70,8 +77,10 @@ impl App {
             }
             "navigate_row_first" => keyed(self, Message::NavigateRowFirst),
             "navigate_row_last" => keyed(self, Message::NavigateRowLast),
-            "reorder_task_down" => keyed(self, Message::Task(TaskMessage::ReorderItem(1))),
-            "reorder_task_up" => keyed(self, Message::Task(TaskMessage::ReorderItem(-1))),
+            "reorder_task_down" => {
+                keyed_if_effect(self, Message::Task(TaskMessage::ReorderItem(1)))
+            }
+            "reorder_task_up" => keyed_if_effect(self, Message::Task(TaskMessage::ReorderItem(-1))),
             "toggle_notifications" => {
                 keyed(self, Message::System(SystemMessage::ToggleNotifications))
             }
@@ -91,9 +100,17 @@ impl App {
                 vec![key_event(action, label)]
             }
             "select_all" => keyed(self, Message::SelectAllColumn),
-            "toggle_section_collapse" => keyed(self, Message::ToggleSectionCollapse),
-            "toggle_epic_fold" => keyed(self, Message::ToggleEpicFold),
+            "toggle_section_collapse" => keyed_if_effect(self, Message::ToggleSectionCollapse),
+            "toggle_epic_fold" => keyed_if_effect(self, Message::ToggleEpicFold),
             "toggle_select" => {
+                // Only a task or epic card can be selected; anywhere else the
+                // press selects nothing and records nothing.
+                if !matches!(
+                    self.selected_column_item(),
+                    Some(ColumnItem::Task(_) | ColumnItem::Epic(_))
+                ) {
+                    return Some(vec![]);
+                }
                 let mut cmds = self.dispatch_selection(
                     |s, id| s.update(Message::Task(TaskMessage::ToggleSelect(id))),
                     |s, id| s.update(Message::Epic(EpicMessage::ToggleSelect(id))),
@@ -216,7 +233,11 @@ impl App {
         let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
         Some(match action {
             "create_task" => keyed(self, Message::Input(InputMessage::StartNewTask)),
-            "copy_task" => keyed(self, Message::Input(InputMessage::CopyTask)),
+            "copy_task" => self.dispatch_prompting_handler_keyed(
+                |a| a.update(Message::Input(InputMessage::CopyTask)),
+                action,
+                label,
+            ),
             "move_task_forward" => {
                 self.move_key(MoveDirection::Forward, "move_task_forward", label)
             }
