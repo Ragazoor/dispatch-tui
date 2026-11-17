@@ -131,7 +131,9 @@ use "./store-split.allium" as split
 -- Every surfacing of a learning to a task writes a core/Retrieval row: source
 -- prompt_injection for the dispatch prompt and learning_search for that
 -- tool. The enum's procedural value is never written. A repeat surfacing
--- writes another row.
+-- writes another row. The write is best-effort: a failed one is logged and
+-- the learning is still surfaced, and a later rate_learning for it is then
+-- refused as not retrieved.
 
 ------------------------------------------------------------
 -- Rules

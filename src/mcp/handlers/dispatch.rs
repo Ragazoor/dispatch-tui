@@ -222,7 +222,7 @@ fn task_status_enum_values() -> Vec<&'static str> {
 // ---------------------------------------------------------------------------
 
 mcp_tools! {
-    async idempotent "task_update" => tasks::handle_update_tasks,
+    async destructive "task_update" => tasks::handle_update_tasks,
         "Update one or many tasks. Pass task_ids (one id updates one task) plus the fields to set: \
 status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
 epic_id, base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule, and bookmarked. At least one field \
@@ -609,7 +609,8 @@ status=backlog plus task_dispatch, which starts a NEW agent that has none of the
 The optional message is delivered as the first input after the session resumes; use it to say why \
 the agent was woken. Returns once the board has been asked to resume, not when the session is \
 up. Errors with 'no resumable session' when the task has no worktree or is in backlog (use \
-task_dispatch for those), and when its agent is already attached (use SendMessage).",
+task_dispatch for those); errors when its agent is already attached (use SendMessage) or its \
+worktree is on another machine.",
         {
             "type": "object",
             "properties": {
@@ -669,7 +670,7 @@ task_dispatch for those), and when its agent is already attached (use SendMessag
         "Query the knowledge base by semantic similarity to your task's context. Results are \
 ranked by embedding similarity plus a scope and upvote boost, and entries below the similarity \
 threshold are dropped — so an empty result means nothing relevant was found, not that the store is \
-empty. The entries already injected into your prompt are not, so \
+empty. The entries already injected into your prompt are not excluded, so \
 expect overlap with those. Call it when something is unclear, before guessing or asking.",
         {
             "type": "object",

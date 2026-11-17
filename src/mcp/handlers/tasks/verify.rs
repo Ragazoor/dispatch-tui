@@ -33,7 +33,8 @@ pub(crate) async fn handle_set_verify_command(
         .await
     {
         Ok(()) => {
-            let msg = match &parsed.command {
+            // A blank command clears, as the store treats it.
+            let msg = match parsed.command.as_deref().filter(|c| !c.trim().is_empty()) {
                 Some(cmd) => format!("Verify command set for `{}`: `{cmd}`", parsed.repo_path),
                 None => format!("Verify command cleared for `{}`", parsed.repo_path),
             };

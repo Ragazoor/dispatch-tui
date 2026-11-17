@@ -114,7 +114,14 @@ pub(super) async fn list_archived(
             json!({"content": [{"type": "text", "text": super::crud::empty_reply("archived tasks", filter.filters)}]}),
         );
     }
-    let cut_hint = super::crud::cut_rows(&mut records, filter.limit, "newest archived first");
+    let cut_hint = super::crud::cut_rows(
+        &mut records,
+        filter.limit,
+        "newest archived first",
+        // Only the filters this list accepts: status and the time filters are
+        // refused here (ListArchivedTasksViaMcp).
+        "epic_id, repo_paths, base_branch or query",
+    );
     let mut lines: Vec<String> = records.iter().map(archived_line).collect();
     lines.extend(cut_hint);
     JsonRpcResponse::ok(

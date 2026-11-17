@@ -344,6 +344,23 @@ async fn the_archived_list_has_the_same_default_limit() {
     assert!(lines[50].starts_with("Showing 50 of 51"), "{}", lines[50]);
 }
 
+/// ListArchivedTasksViaMcp: the cut line names only filters the archived list
+/// accepts. status and the time filters are refused there, so naming them
+/// would send the caller into a refusal.
+#[tokio::test]
+async fn the_archived_cut_line_names_only_filters_the_archived_list_accepts() {
+    let state = test_state().await;
+    for i in 0..2 {
+        let id = make(&state, &format!("gone {i}"), "", None).await;
+        archive(&state, id).await;
+    }
+    let text = search_text(&state, json!({ "archived": true, "limit": 1 })).await;
+    let cut = text.lines().last().unwrap();
+    assert!(cut.starts_with("Showing 1 of 2"), "{cut}");
+    assert!(!cut.contains("status"), "{cut}");
+    assert!(!cut.contains("time filters"), "{cut}");
+}
+
 /// A state over an in-memory store whose clock only moves when told to, so
 /// two updates are provably a second apart.
 fn state_with_clock() -> (Arc<McpState>, crate::clock::FixedClock) {

@@ -1584,6 +1584,7 @@ fn tool_definitions_carry_annotations() {
     const DESTRUCTIVE: &[&str] = &[
         "learning_delete",
         "session_exit",
+        "task_update",
         "work-package_delete",
         "update_workspace",
         "set_workspace_member",

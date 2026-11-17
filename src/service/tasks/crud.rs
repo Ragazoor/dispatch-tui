@@ -482,7 +482,19 @@ impl TaskService {
         task_id: TaskId,
         bookmarked: bool,
     ) -> Result<(), ServiceError> {
-        Ok(self.db.set_bookmark(task_id, bookmarked).await?)
+        // The module refuses a missing task in its own words; answer the
+        // NotFound every other task lookup gives.
+        self.db
+            .set_bookmark(task_id, bookmarked)
+            .await
+            .map_err(
+                |e| match e.downcast_ref::<crate::sync::writes::StoreRefusal>() {
+                    Some(r) if r.0 == format!("task {} does not exist", task_id.0) => {
+                        Self::task_not_found(task_id)
+                    }
+                    _ => ServiceError::from(e),
+                },
+            )
     }
 
     pub async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {

@@ -64,7 +64,7 @@ mcp_args! {
     #[serde(default)]
     optional status: Option<TaskStatus> = [set(status)] {
         "type": "string",
-        "description": "New status: backlog, running, review, or done. status=\"done\" is a dedicated close call: no other field may be set in the same call, and a dispatched agent cannot use it to close its own task.",
+        "description": "New status: backlog, running, review, or done.",
         "enum": crate::models::TaskStatus::MCP_UPDATABLE.iter().map(|s| s.as_str()).collect::<Vec<_>>()
     };
 

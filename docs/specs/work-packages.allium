@@ -260,7 +260,8 @@ rule LinkItem {
     @guidance
         -- Idempotent: linking an item that is already linked is a silent
         -- success, not an error. The item must exist; a link to an unknown
-        -- task or epic id is refused with not-found.
+        -- task or epic id is refused ("no task N" / "no epic N"), as invalid
+        -- params on MCP (WorkPackageMcpTools).
         -- Linking an epic and also a task inside that epic is allowed and
         -- both are kept: the user linked the task on purpose (see
         -- PackageViewCards).
@@ -656,7 +657,10 @@ surface PackageCardPlacement {
         -- done; "no items" when it holds none.
         -- When the package has a creator, the line ends " · by <creator>",
         -- the creator shown by display name or identity prefix
-        -- (workspaces.allium: CreatorIsShownByName).
+        -- (workspaces.allium: CreatorIsShownByName), then " · private" for a
+        -- private package. V on a package card toggles that visibility
+        -- (workspaces.allium: SetWorkPackageVisibility); the status bar
+        -- hints do not list it.
         -- A package card is a view onto work counted elsewhere, so the
         -- column header's card count does not include it, select-all and
         -- multi-select skip it, and H/L do nothing on it. J/K moves it among
@@ -752,8 +756,10 @@ surface WorkPackageLinkPicker {
         -- cards).
 }
 
--- The module's work-package update reducer (update_work_package), which any
--- store client may call.
+-- The module's work-package update reducer (update_work_package_with_links),
+-- which any store client may call. The module also exposes
+-- create_work_package, create_work_package_with_links, patch_work_package,
+-- link_work_package_item, unlink_work_package_item and delete_work_package.
 surface WorkPackageWriteReducers {
     facing _: core/StoreClient
 

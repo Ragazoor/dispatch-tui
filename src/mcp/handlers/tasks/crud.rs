@@ -596,6 +596,7 @@ pub(super) fn cut_rows<T>(
     rows: &mut Vec<T>,
     limit: Option<std::num::NonZeroUsize>,
     order: &str,
+    narrow_with: &str,
 ) -> Option<String> {
     let total = rows.len();
     let n = limit.map_or(DEFAULT_TASK_LIMIT, std::num::NonZeroUsize::get);
@@ -604,8 +605,7 @@ pub(super) fn cut_rows<T>(
     }
     rows.truncate(n);
     Some(format!(
-        "Showing {n} of {total}, {order}. Narrow with epic_id, status, query or the time \
-         filters, or raise limit."
+        "Showing {n} of {total}, {order}. Narrow with {narrow_with}, or raise limit."
     ))
 }
 
@@ -715,7 +715,12 @@ async fn list_tasks(
             .cmp(&a.updated_at)
             .then_with(|| b.id.0.cmp(&a.id.0))
     });
-    let cut_hint = cut_rows(&mut filtered, parsed.limit, "most recently updated first");
+    let cut_hint = cut_rows(
+        &mut filtered,
+        parsed.limit,
+        "most recently updated first",
+        "epic_id, status, query or the time filters",
+    );
     let (epic_titles, plan_goals, agents) = tokio::join!(
         super::build_epic_titles(state),
         build_plan_goal_cache(&filtered),

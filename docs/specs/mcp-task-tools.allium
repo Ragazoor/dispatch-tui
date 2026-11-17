@@ -83,13 +83,16 @@ rule ToolsAdvertiseAnnotations {
     -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
     -- nothing (task_search, epic_search, learning_search,
     -- query_usage, read_context, list_keybindings, work-package_search,
-    -- list_workspaces, list_unseen_items).
+    -- list_workspaces, list_unseen_items). The core/Retrieval rows
+    -- query_learnings records are bookkeeping of what the caller was shown,
+    -- not a change the caller makes, so they do not count.
     -- managed_feed_config is NOT in that list: its no-argument call reads but
     -- its other calls write, so it is declared idempotent (see
     -- epics.allium: ManagedFeedConfigViaMcp, @guidance).
     -- destructiveHint is true only where a call removes or closes something
     -- that cannot be restored by another call (learning_delete, session_exit,
-    -- work-package_delete;
+    -- task_update, whose status="done" form tears down the agent's window and
+    -- closes a pr-typed url's PR; work-package_delete;
     -- update_workspace and set_workspace_member, whose delete and remove forms
     -- remove the workspace or the membership; delete_unseen_item);
     -- it is false on a read-only tool. idempotentHint is true where repeating
@@ -133,7 +136,8 @@ rule OldToolNameRedirects {
     -- list_tasks ("call task_search; it no longer scopes to your own epic or
     -- hides your own task, so pass epic_id, and it returns 50 rows unless
     -- limit says otherwise"), create_task ("call task_create"), update_tasks
-    -- and the older update_task ("call task_update"), dispatch_task ("call
+    -- and the older update_task ("call task_update with
+    -- task_ids: [id]"), dispatch_task ("call
     -- task_dispatch"), resume_task ("call task_resume"), wrap_up ("call
     -- session_wrap-up"), exit_session ("call session_exit"), create_epic ("call
     -- epic_create"), list_epics ("call epic_search; it returns 50 rows unless
@@ -1097,8 +1101,10 @@ rule ListArchivedTasksViaMcp {
         -- copied fields: epic_id matches the record's epic_id (the epic it sat
         -- in, which may since be gone), repo_paths and base_branch match
         -- exactly, query matches every word against title or description,
-        -- and limit works as in ListTasksViaMcp: default 50, the same cut line
-        -- and the same "Goal" rule. There is no auto-scoping: a dispatched
+        -- and limit works as in ListTasksViaMcp: default 50, a cut line of the
+        -- same shape, and the same "Goal" rule. The cut line names only the
+        -- filters this list accepts ("Narrow with epic_id, repo_paths,
+        -- base_branch or query, or raise limit"). There is no auto-scoping: a dispatched
         -- agent that passes no epic_id lists the archive of every epic it may
         -- see.
         --
@@ -1162,7 +1168,9 @@ rule ArchivedTaskIsReadOnly {
 --     completed_* are ANDed with each other and with every other filter.
 --   - A row with no value in the field (completed_at only) is excluded by
 --     any bound on it.
---   - Output times are ISO 8601 UTC with a Z suffix (2026-11-11T08:26:37Z).
+--   - The list rows' time columns are ISO 8601 UTC with a Z suffix
+--     (2026-11-11T08:26:37Z), the form these filters take. The detail form
+--     and the archived rows show times as "2026-11-11 08:26:37 UTC".
 --   - Archived lists reject all four filters, as they reject status.
 
 rule ListTasksViaMcp {
@@ -1370,7 +1378,8 @@ rule DispatchTaskViaMcp {
         -- config.dispatch_task_wait_cap, and answers by the row's state:
         --   - dispatched: the worktree path and tmux window, and whether the
         --     worktree was created or reused (below).
-        --   - failed: an error carrying the row's reason. The claim has
+        --   - failed: an error naming the task ref and carrying the row's
+        --     reason ("dispatch failed for <task ref>: <reason>"). The claim has
         --     already been released by the module (store-split.allium:
         --     ReleaseClaimOfFailedRequest), so the task is left in backlog
         --     exactly as it was before the call, unless it was moved on
@@ -1465,7 +1474,9 @@ rule ResumeTaskViaMcp {
     @guidance
         -- task_resume and task_dispatch are two capabilities, not one: resume
         -- continues the old conversation (and can deliver a message), dispatch
-        -- starts a new agent. Each refusal names the other tool.
+        -- starts a new agent. A refusal that dispatch would answer (never
+        -- ran, no worktree) names task_dispatch; one for an attached agent
+        -- names ListAgents and SendMessage.
         -- task_resume wakes a detached (paused) agent WITH its context. It
         -- reattaches the task's worktree and starts `claude --continue`, so
         -- the agent's previous conversation is restored, and puts the task
@@ -1482,7 +1493,9 @@ rule ResumeTaskViaMcp {
         -- == Errors ==
         -- Every task_resume text, success and refusal, names the task as a
         -- task ref: `resume requested for <task ref>: ...`,
-        -- `<task ref> has no resumable session: ...`.
+        -- `<task ref> has no resumable session: ...`. Two refusals say what
+        -- is true instead: `<task ref>'s worktree is on another machine ...`
+        -- and `<task ref> already has an agent attached ...`.
         --
         -- Each refused precondition is an error that says what is wrong in
         -- plain words: the task has no worktree (it never ran, so there is
@@ -1598,7 +1611,8 @@ rule WrapUpViaMcp {
         --
         -- == The request, then a wait (store-split.allium: SessionRequest) ==
         -- The tool checks the request first, in this order: wrappable
-        -- (running or review, a worktree, ReviewTasksAreNotWrappedUp), then for
+        -- (ReviewTasksAreNotWrappedUp first, since the tag outranks the
+        -- state; then running or review with a worktree), then for
         -- rebase the branch, then WrapUpRefusesUnfinishedWork (commit), the
         -- same order the module checks (store-split.allium, W2). Only then does it call request_wrap_up. It subscribes to the request rows' changes BEFORE
         -- writing, so no change to the row is missed, and answers:
@@ -1771,7 +1785,8 @@ rule SetVerifyCommandViaMcp {
         -- set_verify_command stores (or clears) the verify command
         -- associated with a repo_path in saved_repo_paths.verify_command.
         -- A blank or whitespace-only command is normalised to null (clear)
-        -- by the DB layer, matching the trait contract.
+        -- by the DB layer, matching the trait contract, and the reply says
+        -- "cleared", as for an omitted command.
         -- A command containing "\n" or "\r" is rejected at the handler
         -- with JSON-RPC -32602 (invalid params) before reaching the DB,
         -- which would otherwise surface the constraint as -32603.

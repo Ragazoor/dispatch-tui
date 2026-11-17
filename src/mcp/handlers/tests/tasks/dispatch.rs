@@ -1392,6 +1392,8 @@ async fn dispatch_task_releases_the_claim_when_provisioning_fails() {
     let resp = call_dispatch_task(&fx.state, task_id).await;
 
     assert_error(&resp, "dispatch failed");
+    // Every task_dispatch text names the task as a task ref.
+    assert_error(&resp, &task_ref_of(&fx.state, task_id).await);
     let task = fx.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,

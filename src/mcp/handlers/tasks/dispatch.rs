@@ -83,7 +83,12 @@ pub(crate) async fn handle_dispatch_task(
             let reason = row
                 .reason
                 .unwrap_or_else(|| "no reason recorded".to_string());
-            JsonRpcResponse::err(id, INTERNAL_ERROR, format!("dispatch failed: {reason}"))
+            let task_ref = super::super::types::task_ref(state, task_id).await;
+            JsonRpcResponse::err(
+                id,
+                INTERNAL_ERROR,
+                format!("dispatch failed for {task_ref}: {reason}"),
+            )
         }
         // Still open when the wait ended: NOT an error. The dispatch carries
         // on; task_search's [Dispatch request] line shows how it ends.

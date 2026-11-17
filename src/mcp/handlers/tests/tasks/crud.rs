@@ -468,6 +468,24 @@ async fn update_task_done_unknown_task_errors() {
     assert_error(&resp, "Task 9999 not found");
 }
 
+/// UpdateTaskViaMcp: a bookmark-only call on an unknown task gets the same
+/// NotFound every other task lookup answers.
+#[tokio::test]
+async fn update_task_bookmark_only_unknown_task_is_not_found() {
+    let state = test_state().await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "task_update",
+            "arguments": { "task_ids": [9999], "bookmarked": true }
+        })),
+    )
+    .await;
+    assert_error(&resp, "Task 9999 not found");
+}
+
 #[tokio::test]
 async fn update_task_done_reachable_from_backlog_with_no_window_or_epic() {
     let state = test_state().await;
