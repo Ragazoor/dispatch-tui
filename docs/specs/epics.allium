@@ -1887,10 +1887,8 @@ invariant FeedTaskIdentityPerRoutedFeed {
 -- EpicStatusRecalculation:
 -- Epic status is persisted and recalculated by the module (recalculate_epic_chain).
     --
-    -- WHERE IT IS DERIVED. Wherever the rows live, and by whatever holds all of
-    -- them. On a single-machine install that is the local store and this has
-    -- never been an interesting question. On a board sharing a store it is the
-    -- STORE, and it has to be.
+    -- WHERE IT IS DERIVED. At the STORE, the one place that holds all of an
+    -- epic's children.
     --
     -- The reason is that no board sees all of an epic's children. An epic's
     -- subtasks can be owned by different people on different machines, and a
@@ -1916,12 +1914,9 @@ invariant FeedTaskIdentityPerRoutedFeed {
     -- part of the same all-or-nothing change (sync.allium:
     -- EveryMutationIsAtomicAndAnswered). The new status therefore arrives at
     -- every subscribed board the same way any other row does, rather than being
-    -- computed again on each of them. Nor does a board ask for a SEPARATE
-    -- recalculation after a mutation: the board-side recalculation calls that
-    -- repeated the module's own rollup (after hook events, after patch_epic
-    -- and create_epic, after a close) do not exist
-    -- (store-split.allium, X3), and the module is the only place that
-    -- recalculates.
+    -- computed again on each of them. A board never asks for a separate
+    -- recalculation after a mutation (store-split.allium, X3): the module is
+    -- the only place that recalculates.
     -- It moves both forward and backward to always reflect child reality.
     -- "Children" means core/Epic.children: the union of subtasks (Task) and
     -- sub_epics (Epic). Each child contributes its .status value. Every child
@@ -1942,9 +1937,8 @@ invariant FeedTaskIdentityPerRoutedFeed {
     --   guesses are wrong in a way nobody can see — treating it as done
     --   finishes an epic that is not finished, and treating it as unfinished
     --   holds one open forever with nothing saying why. Declining leaves the
-    --   next recalculation, perhaps by a newer binary, free to get it right.
-    --   The realistic producer is a colleague on a newer version, which only
-    --   exists once the children can come from more than one machine.
+    --   next recalculation free to get it right. The realistic producer is a
+    --   colleague's board on a version with a status this module lacks.
     --   The running and review statuses are never set automatically; they are
     --   only reachable via manual MoveEpicForward / MoveEpicBackward actions.
     --   Manual placements (including running / review) are preserved across
