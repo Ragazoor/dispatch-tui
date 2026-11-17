@@ -275,7 +275,7 @@ rule DeleteUnseenItemFromScreen {
 -- A refusal shows in the error popup (AdminScreenRefreshesAfterAWrite).
 
 rule CreateWorkspaceOnCommit {
-    when: AdminTextCommitted(purpose, target, text)
+    when: AdminTextCommitted(purpose, target?, text)
 
     let typed = trimmed(text)
 
@@ -320,7 +320,7 @@ rule AddMemberOnCommit {
 }
 
 rule GrantSuperAdminOnCommit {
-    when: AdminTextCommitted(purpose, target, text)
+    when: AdminTextCommitted(purpose, target?, text)
 
     let typed = trimmed(text)
     let resolved = resolve_person(typed)    -- PersonResolution
@@ -581,8 +581,8 @@ surface AdminScreen {
         -- [D] on the Unseen items pane, which shows UnseenItemListing.
         DeleteUnseenItemKeyPressed(person, item) when person.is_super_admin
         -- Enter in the screen's text input (the *OnCommit rules).
-        AdminTextCommitted(purpose, target, text)
-        -- [y] at the screen's confirmation (the *OnConfirm rules).
+        AdminTextCommitted(purpose, target?, text)
+        -- [y] or [Y] at the screen's confirmation (the *OnConfirm rules).
         AdminConfirmed(purpose, target)
 
     contracts:

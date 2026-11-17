@@ -258,6 +258,15 @@ async fn a_workspace_write_is_answered_by_the_store_not_the_local_list() {
         let resp = tool(&state, name, args).await;
         assert_error(&resp, "workspace 99 does not exist");
     }
+    // A removal needs the membership's id, which only the board's list holds,
+    // so it is the one answer the list gives.
+    let resp = tool(
+        &state,
+        "workspace-member_set",
+        json!({"workspace_id": 99, "person": "Bob", "remove": true}),
+    )
+    .await;
+    assert_error(&resp, "Bob is not a member of workspace 99");
 }
 
 #[tokio::test]
