@@ -47,9 +47,12 @@ rule EditEpic {
     -- Opens the user's editor — resolved by the shared rule stated with
     -- core/config.editor_fallback, the same resolution EditTask uses — with a
     -- structured file containing the epic's
-    -- title, description, feed_command and feed_interval_secs. The file
-    -- uses "--- SECTION ---" delimiters (TITLE, DESCRIPTION,
-    -- FEED_COMMAND, FEED_INTERVAL_SECS).
+    -- title, description, feed_command, feed_interval_secs, visibility and
+    -- workspace. The file uses "--- SECTION ---" delimiters (TITLE,
+    -- DESCRIPTION, FEED_COMMAND, FEED_INTERVAL_SECS, VISIBILITY, WORKSPACE).
+    -- VISIBILITY is public or private; WORKSPACE is read-only and ignored on
+    -- save (workspaces.allium, the epic form's guidance). Who may change the
+    -- visibility is the store's call (workspaces.allium: SetEpicVisibility).
     -- The user edits the file; on save, fields are parsed back. Header-shaped
     -- lines in a value are escaped and unescaped exactly as EditTask states.
     -- For title and description, an empty field retains the previous
@@ -66,6 +69,8 @@ rule EditEpic {
     -- is cleared. Unparseable input additionally records a parse error, and
     -- all accumulated errors are surfaced together as a status message
     -- ("Edit accepted with parse errors — ..."); the edit is still applied.
+    -- Only fields the user changed are written, exactly as EditTask states;
+    -- a save that changes nothing sends nothing.
     -- Status, plan_path, sort_order and auto_dispatch are not editable
     -- via the epic editor.
     --
@@ -75,7 +80,8 @@ rule EditEpic {
     -- recorded — and is then refused on save by the floor
     -- (core.allium: "Interval literals", CLAIM 2). A refusal is not the
     -- parse-error path above: the save goes through UpdateEpic as one
-    -- validated call, so a refused interval rejects the WHOLE edit. No field
+    -- validated call, so a refused interval (or a visibility change the store
+    -- refuses) rejects the WHOLE edit. No field
     -- is applied, not even an unrelated title change in the same session, and
     -- the validation error is surfaced as an error status message rather than
     -- the "Edit accepted with parse errors" one.
@@ -85,43 +91,55 @@ rule EditEpic {
     -- user is told the save failed while looking at evidence it succeeded, and
     -- the display only self-corrects on the next DB refresh.
 
-    let original_feed_command = epic.feed_command
+    -- The epic as the editor opened it. The change guards below compare with
+    -- it, not with the row as it stands at save time, so a rename an agent
+    -- made while the editor was open is not reverted by a feed-only save.
+    let opened = editor_snapshot(epic)
 
     ensures:
         let edited = EditorSession(epic)
-        -- A sub-floor interval refuses the whole edit, so every clause below
-        -- is guarded on acceptance: when the interval is refused NO field
-        -- changes, and the epic the board shows is the stored one.
-        let accepted = edited.feed_interval_secs = null
-                       or seconds(edited.feed_interval_secs) >= core/config.min_feed_interval
-        if accepted and edited.title != "": epic.title = edited.title
-        if accepted and edited.description != "": epic.description = edited.description
-        -- feed fields clear on empty rather than retaining
-        if accepted:
-            if edited.feed_command != "": epic.feed_command = edited.feed_command
-            else: epic.feed_command = null
-        if accepted:
-            if edited.feed_interval_secs != null:
-                epic.feed_interval_secs = edited.feed_interval_secs
-            else: epic.feed_interval_secs = null
+        -- An empty TITLE or DESCRIPTION keeps the opened value; an empty
+        -- FEED_COMMAND or FEED_INTERVAL_SECS clears the field.
+        let title = if edited.title != "": edited.title else: opened.title
+        let description = if edited.description != "": edited.description else: opened.description
+        let feed_command = if edited.feed_command != "": edited.feed_command else: null
+        let interval = edited.feed_interval_secs
+        -- A sub-floor interval refuses the whole edit, so every write below is
+        -- guarded on acceptance: when the interval is refused NO field
+        -- changes, and the epic the board shows is the stored one. An
+        -- interval the save leaves as opened is not sent, so it is never
+        -- refused.
+        let accepted = interval = opened.feed_interval_secs
+                       or interval = null
+                       or seconds(interval) >= core/config.min_feed_interval
+        if accepted and title != opened.title:
+            epic.title = title
+        if accepted and description != opened.description:
+            epic.description = description
+        if accepted and feed_command != opened.feed_command:
+            epic.feed_command = feed_command
+        if accepted and interval != opened.feed_interval_secs:
+            epic.feed_interval_secs = interval
+        -- An empty or unparseable VISIBILITY keeps the opened value.
+        if accepted and edited.visibility != null and edited.visibility != opened.visibility:
+            epic.visibility = edited.visibility
         -- Feed-ownership take-over offer: only when this edit actually
         -- CHANGES feed_command to a non-empty value (not a clear, not an
         -- edit that left it untouched), and only when a core/PollOwner row
         -- already names a host other than this one. See @guidance for the
         -- prompt this sits behind and feeds.allium: OverrideFeedOwner for
         -- what accepting it does.
-        if accepted and edited.feed_command != "" and edited.feed_command != original_feed_command:
+        if accepted and feed_command != null and feed_command != opened.feed_command:
             let existing_owner = core/PollOwner{scope: epic, scope_id: epic.id}
             if exists existing_owner and existing_owner.host != core/local_host():
                 FeedOwnerTakeoverOffered(epic: epic, current_owner: existing_owner.host)
 
     @guidance
         -- Unlike EditTask, the epic editor does not expose status.
-        -- Epic status is derived from subtask states via the
-        -- EpicStatusRecalculation invariant and is not directly
-        -- editable by the user.
-        -- updated_at is touched automatically by the database layer on
-        -- any patch_epic call, so the rule does not assert it directly.
+        -- Epic status is derived from its children by
+        -- RecalculateEpicStatus and is not directly editable by the user.
+        -- updated_at is touched by the store on every update_epic call,
+        -- so the rule does not assert it directly.
         -- The editor opens in a separate tmux window; tmux focus
         -- switches to that window while the TUI keeps running in
         -- its original window. On editor exit the window closes and
