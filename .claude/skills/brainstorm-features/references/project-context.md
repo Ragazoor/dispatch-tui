@@ -58,4 +58,4 @@ Tasks can be created via:
 1. TUI inline form (`n` key)
 2. MCP: `task_create` tool with title, description, repo_path, epic_id fields (epic_id is required; pass null for a standalone task)
    (also accepts `plan_path` to seed title/description from a markdown
-   plan file — used by the `/queue-plan` slash command)
+   plan file)

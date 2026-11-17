@@ -16,6 +16,8 @@
 --           output of `repo set-verify`, `repo clear-verify`, `repo list`,
 --           `prune-repo-paths`, `plan`, `spacetime dump-server|restore` and
 --           `store import`; the plan file check that precedes the store;
+--           what `uninstall` removes and what it leaves alone
+--           (UninstallForgetsThisMachine);
 --           and the terminal hand-back every companion-pane renderer owes
 --           its shell.
 -- Excludes: `dispatch tui` and everything a launch does before the board
@@ -35,8 +37,7 @@
 --           ImportOldStore), and which store the import writes into (see
 --           startup.allium: ImportBringsUpTheManagedStore);
 --           the plan attachment itself (see mcp-task-tools.allium:
---           AttachPlanViaCli); `uninstall` (see mcp-task-tools.allium, "Other
---           CLI subcommands"); where a one-shot command's log lines go (see
+--           AttachPlanViaCli); where a one-shot command's log lines go (see
 --           observability.allium).
 
 use "./core.allium" as core
@@ -391,7 +392,7 @@ rule CliCommandsNeedAHostFile {
 ------------------------------------------------------------
 
 -- The repo-path commands are operator equivalents of the MCP verify-command
--- tool (mcp-task-tools.allium: "Other CLI subcommands"). What follows is only
+-- tool (mcp-task-tools.allium: SetVerifyCommandViaMcp). What follows is only
 -- what they print. Every path the operator types is tilde-expanded before use,
 -- the same expansion saved repo paths are stored under.
 
@@ -788,20 +789,37 @@ surface DispatchCommandLine {
         -- No subcommand opens a SQLite database: not `repo`, `plan`,
         -- `prune-repo-paths`, `agent-tree`, `agent-diff`, the hooks,
         -- `uninstall` (whose `--purge` neither reads nor deletes a leftover
-        -- tasks.db — mcp-task-tools.allium, "Other CLI subcommands") nor any
+        -- tasks.db — UninstallForgetsThisMachine) nor any
         -- other, and the board does not either (storage.allium:
         -- NoSqlite, CodeNeverTouchesLegacyDatabase).
 
     @guarantee NoTaskListOrStatusCommand
         -- There is no subcommand that lists tasks or changes a task's status.
-        -- The board and the MCP tools are the only surfaces for task state
-        -- (mcp-task-tools.allium, "Other CLI subcommands").
+        -- The board and the MCP tools are the only surfaces for task state;
+        -- hooks report through `hook` and its siblings (agent-health.allium:
+        -- HookDelivery).
+
+    @guarantee UninstallForgetsThisMachine
+        -- `dispatch uninstall [--yes] [--purge]` is destructive and
+        -- operator-only: no agent or hook runs it. It removes the dispatch
+        -- MCP configuration from Claude Code. With `--purge` it also deletes
+        -- this machine's host file (host.allium: HostFile) and the log file
+        -- from the data directory, and the directory itself if that leaves it
+        -- empty. The confirmation it asks first says that this machine's
+        -- identity will be forgotten: a later launch mints a new one, and
+        -- tasks stamped with the old host id stop being this machine's. It
+        -- states no task count: tasks live in the store, which a purge does
+        -- not touch, and counting them would mean opening a database
+        -- (storage.allium: NoSqlite). It never opens, reads or deletes a
+        -- leftover `tasks.db`, `-wal` or `-shm` (storage.allium:
+        -- CodeNeverTouchesLegacyDatabase); those are the operator's to delete
+        -- by hand.
 
     @guidance
         -- SUBCOMMAND INVENTORY, and where each is specified:
         --   tui                         startup.allium
         --   plan <id> <path>            PlanFileIsCheckedBeforeTheStore; mcp-task-tools.allium: AttachPlanViaCli
-        --   uninstall [--yes] [--purge] mcp-task-tools.allium, "Other CLI subcommands"
+        --   uninstall [--yes] [--purge] UninstallForgetsThisMachine
         --   hook, hook-subagent,
         --   hook-peer-message           agent-health.allium: HookDelivery;
         --                               --undelivered: UndeliveredPeerMessage

@@ -59,12 +59,11 @@ use "./store-split.allium" as split
 -- dispatch prompt or a learning_search answer, not even for its own task: a
 -- re-dispatch or phoenix copy gets a new task id. learning_record refuses
 -- scope=task and points the agent to repo or epic (RecordLearningViaMcp).
--- Rows recorded under the old scope were archived and re-scoped to repo once
--- (the store's one-time retire step, run on the first connection after the
--- module that dropped the scope is published).
--- A row whose task sat under a private epic (anywhere up the chain) loses its
--- workspace, so it stays with its author as it did before; one with no author
--- keeps its workspace, as none would show it to everyone.
+-- A store stamped below rules version 48 archives each task-scoped row
+-- once on connect and re-scopes it to its task's repo. A row whose task sits
+-- under a private epic (anywhere up the chain) loses its workspace, so only its
+-- author sees it; one with no author keeps its workspace
+-- (spacetime/module/src/learning.rs::retire_task_scoped_learnings).
 --
 -- When learning_record omits scope_ref, the scope supplies it:
 --   scope=user    → null
@@ -170,8 +169,8 @@ rule AugmentDispatchPromptWithLearnings {
         -- not_applicable and none is helped. wrong verdicts count neither
         -- way; an archived task's verdicts are kept but never reach a board,
         -- since boards receive verdicts only for tasks they hold.
-        --   - Dispatch injection only. QueryLearningsViaMcp is unchanged, so
-        --     an agent that asks can still find a muted entry.
+        --   - Dispatch injection only. QueryLearningsViaMcp does not apply the
+        --     mute, so an agent that asks can still find a muted entry.
         --   - Per repo. An entry muted in repo A still injects in repo B.
         --   - Before ranking and the cap. A muted entry's slot goes to the
         --     next-ranked candidate.
@@ -226,7 +225,10 @@ rule RecordLearningViaMcp {
 
     requires: summary != ""
     requires: scope = user implies scope_ref = null
-    requires: scope in {repo, epic} implies scope_ref != null
+    -- An omitted scope_ref takes the scope's default (Scope Model). Only the
+    -- epic default can be missing: a task with no epic has none.
+    let ref = scope_ref ?? default_scope_ref(task, scope)
+    requires: scope = epic implies ref != null
     requires: not references_internal_code(summary) and not references_internal_code(detail)
     requires: kind = procedural implies (detail != null and detail != "")
 
@@ -235,7 +237,7 @@ rule RecordLearningViaMcp {
         summary: summary,
         detail: detail,
         scope: scope,
-        scope_ref: scope_ref ?? default_scope_ref(task, scope),
+        scope_ref: ref,
         tags: tags ?? {},
         status: approved,
         source_task: task,
@@ -260,8 +262,8 @@ rule RecordLearningViaMcp {
         -- pass derives the missing ones from the stored fields, changes
         -- nothing else, and only logs a failure.
         --
-        -- The reply says the entry is active and, for a scope other than
-        -- task, that matching dispatches will receive it. It then lists up to
+        -- The reply says the entry is active and that matching
+        -- dispatches will receive it. It then lists up to
         -- 5 approved learnings of the same kind, scope
         -- and scope_ref, and warns against keeping a duplicate when one of
         -- them already says the same thing. It does not suggest rating them:
@@ -396,6 +398,8 @@ rule DeleteLearningViaMcp {
     let learning = core/Learning{id: learning_id}
 
     requires: exists learning
+    -- A learning the caller cannot see is answered as if it did not exist.
+    requires: learning.visible_to(caller())
 
     ensures: not exists learning
 

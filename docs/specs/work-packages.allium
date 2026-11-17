@@ -47,6 +47,12 @@ use "./workspaces.allium" as workspaces
 use "./board-layout.allium" as board_layout
 
 ------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum WorkPackageItemKind { task | epic }
+
+------------------------------------------------------------
 -- Entities
 ------------------------------------------------------------
 
@@ -85,8 +91,6 @@ entity WorkPackage {
                       else: backlog
 }
 
-enum WorkPackageItemKind { task | epic }
-
 -- One link from a package to one task or one epic. Exactly one of task/epic
 -- is set, matching kind.
 entity WorkPackageLink {
@@ -116,6 +120,9 @@ entity WorkPackageLink {
 
 -- == Lifecycle ==
 
+-- trimmed(s) is a black box: s without its leading and trailing whitespace.
+-- A title is stored trimmed, and a blank one is refused.
+
 -- Creates the package and links the given items, in one store transaction:
 -- every item is checked before the first write, so a link to an unknown,
 -- unseen or out-of-workspace item refuses the whole create and no package is
@@ -123,13 +130,13 @@ entity WorkPackageLink {
 rule CreateWorkPackage {
     when: CreateWorkPackage(title, description, creator, workspace, visibility, items)
 
-    requires: title.trim() != ""
+    requires: trimmed(title) != ""
     -- A package is created only in a workspace its creator belongs to.
     requires: workspace.has_member(creator)
 
     ensures:
         let package = WorkPackage.created(
-            title: title.trim(),
+            title: trimmed(title),
             description: description,
             created_by: creator,
             workspace: workspace,
@@ -149,10 +156,10 @@ rule CreateWorkPackage {
 rule UpdateWorkPackage {
     when: UpdateWorkPackage(package, title?, description?, sort_order?)
 
-    requires: title = null or title.trim() != ""
+    requires: title = null or trimmed(title) != ""
 
     ensures:
-        if title != null: package.title = title.trim()
+        if title != null: package.title = trimmed(title)
         if description != null: package.description = description
         if sort_order != null: package.sort_order = sort_order
         package.updated_at = now
@@ -373,7 +380,7 @@ rule EnterEpicFromPackage {
 rule CreatePackageFromPicker {
     when: UserCreatesPackageInPicker(title, item, workspace, visibility)
 
-    requires: title.trim() != ""
+    requires: trimmed(title) != ""
 
     ensures:
         CreateWorkPackage(title, "", caller(), workspace, visibility, {item})
@@ -387,7 +394,7 @@ rule CreatePackageFromPicker {
 rule RenamePackageFromBoard {
     when: UserRenamesPackage(package, title)
 
-    requires: title.trim() != ""
+    requires: trimmed(title) != ""
 
     ensures: UpdateWorkPackage(package, title: title)
 
@@ -501,8 +508,10 @@ rule UpdateWorkPackageViaMcp {
               or link_epic_ids != null or unlink_epic_ids != null
               or visibility != null
     -- So is an id that appears in both a link and an unlink list.
-    requires: not (exists t in link_task_ids where t in unlink_task_ids)
-    requires: not (exists e in link_epic_ids where e in unlink_epic_ids)
+    requires: link_task_ids = null or unlink_task_ids = null
+              or not link_task_ids.any(t => t in unlink_task_ids)
+    requires: link_epic_ids = null or unlink_epic_ids = null
+              or not link_epic_ids.any(e => e in unlink_epic_ids)
 
     ensures:
         WorkPackageUpdateRequested(
@@ -654,9 +663,6 @@ surface PackageCardPlacement {
         -- the package cards only (ReorderPackage).
         -- The status bar on a package card offers Space open, e rename,
         -- x delete, n new, E epic, / search and ? help.
-        -- Computed on every render rather than cached: the placement reads
-        -- links, the epic tree and the filters, and a board holds few
-        -- packages.
 }
 
 -- What the package view's columns hold.

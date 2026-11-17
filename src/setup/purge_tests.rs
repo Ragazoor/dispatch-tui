@@ -2,7 +2,7 @@
 //! Task #16755: `dispatch uninstall --purge` forgets this machine's identity
 //! and leaves a leftover `tasks.db` alone.
 //!
-//! Spec: `mcp-task-tools.allium` ("Other CLI subcommands", `uninstall`),
+//! Spec: `cli.allium` (`UninstallForgetsThisMachine`),
 //! `storage.allium` (`CodeNeverTouchesLegacyDatabase`), `cli.allium`
 //! (`NoSubcommandOpensSqlite`).
 //!

@@ -180,9 +180,11 @@ rule UpdateTaskViaMcp {
 
     -- Typed-url validation contract. The url string and its type travel
     -- together; the handler rejects inconsistent combinations before any
-    -- mutation occurs. The advertised schema states the same contract — an
-    -- enum for url_type, and url_type required whenever url is non-empty —
-    -- so the argument descriptions carry no prose restating it.
+    -- mutation occurs. The advertised schema types url_type as an enum. It
+    -- carries no conditional requirement (tool input schemas may not accept
+    -- one at the top level), so the url description states the pairing in
+    -- one clause: "a non-empty one needs url_type"
+    -- (src/mcp/handlers/tasks/mod.rs::UpdateTaskArgs).
     --   • A non-empty url REQUIRES url_type (an unaccompanied url is rejected).
     --   • An unknown url_type (not one of UrlType's literals) is rejected —
     --     whether or not url is present. url_type is parsed into its enum at
@@ -416,7 +418,11 @@ rule UpdateTaskViaMcp {
         -- task sits inside a grouped (non-feed) subtree, the store's
         -- patch_task moves it to the correct sub-epic for the new repo_path
         -- and deletes the sub-epic it left if that is now empty
-        -- (epics.allium's routing note above RegroupEpic).
+        -- (epics.allium's routing note above RegroupEpic). Inside a grouped
+        -- subtree the repo decides, even when the same call names a specific
+        -- sub-epic: the relink lands first, then the repo_path change moves
+        -- the task to the sub-epic for the new repo, and the named sub-epic is
+        -- deleted if that leaves it empty.
         --
         -- ONE CALL. The service sends an explicit epic_id and the patch
         -- (repo_path, sub_status, status, the rest) to the store as one
@@ -872,8 +878,8 @@ rule CreateTaskViaMcp {
     --
     -- Why null is kept rather than forcing every task into an epic. A
     -- genuinely standalone task must stay expressible without inventing a
-    -- catch-all epic to park it in. The point of the change is to force a
-    -- DECISION, not to force an epic.
+    -- catch-all epic to park it in. The point is to force a DECISION, not
+    -- to force an epic.
     --
     -- TheRefusalNamesTheLikelyAnswer. The validation error for a missing
     -- epic_id is actionable, not a bare "missing field". When the caller is
@@ -1298,7 +1304,7 @@ rule ListTasksViaMcp {
 }
 
 rule QueryUsageViaMcp {
-    when: McpQueryUsage(category?, actor?, since?)
+    when: McpQueryUsage(category?, actor?, since?, limit?)
 
     -- category and actor, when supplied, are validated against their
     -- enums; an unrecognised value is rejected rather than silently
@@ -1311,7 +1317,8 @@ rule QueryUsageViaMcp {
     ensures: FeatureUsageQueried(
         category: category,
         actor: actor,
-        since: since
+        since: since,
+        limit: limit
     )
 
     @guidance
@@ -1326,6 +1333,8 @@ rule QueryUsageViaMcp {
         --   category: "keybinding" | "mcp_tool" (enum-validated)
         --   actor:    enum-validated string
         --   since:    ISO-8601 datetime; rows older than this are excluded
+        --   limit:    the most groups returned; 50 when absent, clamped to
+        --             1..500 (src/store/queries/usage.rs::query_usage)
         -- Invalid category/actor strings reject with JSON-RPC -32602; a
         -- malformed `since` likewise rejects with -32602.
         -- These are feature-usage counters (which keybindings and MCP tools
@@ -1520,64 +1529,29 @@ rule ResumeTaskViaMcp {
 rule AttachPlanViaCli {
     when: cli/CliAttachPlan(task, path)
 
-    requires: task != null
+    requires: exists task
 
     ensures: task.plan_path = path
 
     @guidance
         -- CLI command: `dispatch plan <id> <path>` attaches a plan file to
         -- an existing task. No status transition occurs; the plan attachment
-        -- is decoupled from dispatch. Used by the /queue-plan slash command (and operators) to stage
-        -- a plan onto a task before dispatching it.
+        -- is decoupled from dispatch. Operators use it to stage a plan onto a
+        -- task before dispatching it.
 }
 
--- @guidance: Other CLI subcommands (operator/diagnostic surfaces; not
--- modeled as separate rules because they do not mutate task domain state
--- beyond what existing rules already cover):
---   • `dispatch tui [--port]` — the only entry point, launching the TUI
---     --port also reads the DISPATCH_PORT env
---     var and defaults to core/config.mcp_port. It obtains its own tmux
---     session and offers to write the Claude Code MCP configuration before
---     the board draws — see startup.allium, and CreateTaskViaMcp guidance for
---     the headersHelper that configuration installs. There is no separate
---     setup command. The other subcommands that reach the store default to
---     http://127.0.0.1:3000 (startup.allium's config.managed_store_address)
---     when no store is named, and start, adopt or stop nothing: only the
---     board manages the local store.
---   • `dispatch uninstall [--yes] [--purge]` — destructive: removes the
---     dispatch MCP configuration from Claude Code; with `--purge` also
---     deletes this machine's host file (host.allium: HostFile) and the log
---     file from the data directory, and the directory itself if that leaves
---     it empty. The confirmation it asks
---     first says that this machine's identity will be forgotten — a later
---     launch mints a new one, and tasks stamped with the old host id stop
---     being this machine's — and states no task count: tasks live in the
---     store, which a purge does not touch, and counting them would mean
---     opening a database (storage.allium: NoSqlite). It
---     never opens, reads or deletes a leftover `tasks.db`, `-wal` or `-shm`
---     (storage.allium: CodeNeverTouchesLegacyDatabase); those are the
---     operator's to delete by hand.
---     Operator-only — never invoked by agents or hooks.
---   • `dispatch repo set-verify <path> <command>` /
---     `dispatch repo clear-verify <path>` / `dispatch repo list` — operator
---     equivalents of SetVerifyCommandViaMcp, writing the same
---     core/SavedRepoPath.verify_command. set-verify creates this host's
---     path entry when it has none; clear-verify refuses a path this host
---     never saved (cli.allium: ClearVerifyRefusesAPathThisHostNeverSaved).
---   • `dispatch prune-repo-paths` — drops the core/SavedRepoPath rows THIS host
---     saved whose path no longer exists on its filesystem; other hosts' rows
---     are left alone (cli.allium: PruneRepoPathsViaCli). Operator-only housekeeping.
---   • `dispatch hook <id> <kind> [--kind K] [--shells N --workflows N --monitors N --mcp-tasks N]` — see HookNotification and HookStop in agent-health.allium.
---   • `dispatch pr-gate <id>` — see PrLearningsGate in pr-workflow.allium.
---   • `dispatch caller-headers` — prints the session identity header and
---     exits 0, always. Reads nothing: not its arguments, not its working
---     directory, not the database. See CreateTaskViaMcp guidance.
---   • `dispatch verify-feed <command>` — see VerifyFeed in feeds.allium.
+-- Other CLI subcommands: the inventory, and where each one is specified, is
+-- cli.allium's (DispatchCommandLine). The ones that touch this spec's
+-- domain point back here: `dispatch repo set-verify|clear-verify|list` is
+-- the operator's equivalent of SetVerifyCommandViaMcp, and
+-- `dispatch caller-headers` prints the header CreateTaskViaMcp's guidance
+-- describes (TheHelperAnswersSessionUnconditionally).
 --
 -- There is deliberately NO CLI surface for listing tasks or changing a
 -- task's status: the board and the MCP tools are the only surfaces for
--- reading and mutating task state, and hooks use the dedicated `hook-*`
--- subcommands.
+-- reading and mutating task state (cli.allium: NoTaskListOrStatusCommand),
+-- and hooks report through `dispatch hook <id> <kind>` and its siblings
+-- (agent-health.allium: HookDelivery).
 
 -- == MCP Wrap-Up and Exit Tools ==
 
@@ -2321,7 +2295,7 @@ surface McpTaskTools {
                       recursive?, base_branch?, query?, limit?, bookmarked?,
                       archived?, updated_after?, updated_before?,
                       completed_after?, completed_before?)
-        McpQueryUsage(category?, actor?, since?)
+        McpQueryUsage(category?, actor?, since?, limit?)
         McpDispatchTask(task)
         McpResumeTask(task, message?)
         McpWrapUp(task, action)
@@ -2448,7 +2422,7 @@ surface McpTaskTools {
         -- name, current or ended (agents.allium: AgentNameResolvesToTask). A word that
         -- is no agent's name is the same NotFound (-32001) an unknown id gets. Results
         -- still report the numeric id.
-        -- There are no task aliases (agents.allium, A5), and `task_update`
+        -- There are no task aliases (agents.allium, A6), and `task_update`
         -- has no `alias` field.
 
     @guarantee TheNextCallIsNamedJustInTime
@@ -2593,10 +2567,3 @@ surface McpTaskTools {
         -- may wrap up.
 }
 
-------------------------------------------------------------
--- Open Questions
-------------------------------------------------------------
-
-open question "task_update's typed-url contract is now to be stated by the schema: url_type as an enum, and url_type required whenever url is non-empty. The second is a conditional requirement (JSON Schema if/then or a top-level combinator), and tool input schemas reaching Claude may not accept one at the top level. If the conditional cannot be expressed, does the url description keep one clause stating the dependency, or does the contract live only in the validation error?"
-
-open question "task_update naming a specific repo-group sub-epic in epic_id while also changing repo_path to a different repo: UpdateTaskViaMcp's ensures says the assignment is direct (route_target of a sub-epic is the sub-epic), but the relink is written first and patch_task's repo change then re-routes the task to the sub-epic for the new repo, so the explicit sub-epic is overridden (and deleted if left empty). Which is intended: does an explicit sub-epic win over the new repo, or does the repo always decide inside a grouped subtree?"
