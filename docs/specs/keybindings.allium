@@ -417,12 +417,18 @@ enum KeyReceiver { dispatch | tmux }
 -- agent_tree.tree, the kind of the selected tree node:
 --   on_directory              "on a directory"                  l / Right: expand_directory;
 --                                                                Space / Enter: toggle_directory
---   on_file                   "on a file"                       Space / Enter: toggle_diff
+--   on_file                   "on a file"                       Space / Enter: toggle_diff;
+--                                                                v: open_in_editor
 --   Mutually exclusive. With an empty or stale selection (no node, or one
---   the latest refresh removed) neither holds, so Space, Enter, l and Right
---   have no applicable row and do nothing.
+--   the latest refresh removed) neither holds, so Space, Enter, l, Right and
+--   v have no applicable row and do nothing.
 --
 -- A new condition is a new literal here; a row cannot invent one inline.
+-- An overlay's tab or pane is not a KeyContext: board.filter's per-tab rows
+-- (repo_filter_*, filter_toggle_done_epics, filter_search_epics,
+-- filter_fold_*) and board.admin's per-pane rows have no context, apply in
+-- every tab or pane, and name their tab or pane in the description. Pressed
+-- elsewhere, their action does nothing and records nothing.
 enum KeyContext {
     search_active | inside_nested_view | inside_epic_view | nested_view_no_search | top_level |
     with_selection |
@@ -441,7 +447,10 @@ enum KeyContext {
 ------------------------------------------------------------
 
 -- One row of the keybinding table. The table is the set of all KeyBindings;
--- there is no second list of keys anywhere in the product.
+-- every key handler, the help overlay and keybinding_search read it, and no
+-- handler keeps a key list of its own. The short key hints in the status
+-- bar, popups and pane footers are hand-written text; only the status bar's
+-- bracketed hints are checked against the table.
 entity KeyBinding {
     namespace:   KeyNamespace
 
@@ -462,7 +471,7 @@ entity KeyBinding {
     -- FeatureUsageEvent.detail records the key as key_label writes it, which
     -- is not always the table's form: Space is recorded as " " (a single
     -- literal space) while the table displays "Space", and key_label drops
-    -- modifiers ("Ctrl+Left" is recorded as "Left"). Do not treat the two
+    -- modifiers ("Ctrl+D" is recorded as "d"). Do not treat the two
     -- forms as identical when matching usage counts to rows.
     --
     -- One reserved entry, "any other key", is the catch-all: it matches a
@@ -482,7 +491,7 @@ entity KeyBinding {
     -- means the row applies throughout its namespace.
     -- Context is how one key does different things within one mode without
     -- the table lying about it: `q` is two rows in board.normal — exit_epic
-    -- "inside an epic view" and quit "on the top-level board" — each
+    -- "inside an epic or work package view" and quit "on the top-level board" — each
     -- described separately, each recorded under its own id.
     context:     KeyContext?
 
@@ -543,11 +552,14 @@ entity KeyBinding {
 
 rule KeypressRunsItsRowsAction {
     -- The table drives dispatch, it does not merely describe it. Each key
-    -- handler dispatch owns (every board mode, the companion pane's tree and
-    -- Agents sections, the diff pane) answers a key by finding the row in its
-    -- namespace that lists the key and whose context holds right now, and
-    -- running that row's action. Rebinding a key is an edit to one row and
-    -- nothing else.
+    -- handler dispatch owns (every board mode, the companion pane's tree,
+    -- Commits and Agents sections, the diff pane) answers a key by finding
+    -- the row in its namespace that lists the key and whose context holds
+    -- right now, and running that row's action. Rebinding a row's only key
+    -- is an edit to that row and nothing else. A row whose keys pick a
+    -- direction or value (navigate_row's j/k, navigate_half_page's Ctrl+D /
+    -- Ctrl+U, the tag and wrap-up pickers' letters) also has its handler
+    -- match the key itself, so rebinding one of those keys is two edits.
     when: KeyPressed(user, namespace, key)
 
     requires: namespace != tmux_global
@@ -616,20 +628,23 @@ rule KeyWithoutARowCannotAct {
 
     @guidance
         -- Characters typed into a text-bearing mode (board.text, board.search,
-        -- the board.picker.* fields that take a query) are data, not bindings
+        -- board.filter_search, the board.picker.* fields that take a query) are data, not bindings
         -- (observability.allium: is_text_entry); they are inserted, not
         -- looked up, and are deliberately outside this rule. Only typed
         -- characters are: a text field's editing keys (Backspace, Delete,
         -- caret and word motion) are rows (records_usage false), and a
         -- press with Ctrl or Alt held is never a typed character, even in a
         -- text mode, so an unbound one lands here.
-        -- "Changes nothing" is about the key's own effect. Two things any
-        -- press does, row or not, still happen on an unbound one: it ends a
+        -- "Changes nothing" is about the key's own effect. What any press
+        -- does, row or not, still happens on an unbound one: it ends a
         -- pending `gg` chord (the next key decides a chord — see
         -- agent-tree.allium: AgentTreeGgChordNeverExpires, and the board's
-        -- chord window), and in the companion and diff panes it
-        -- acknowledges a shown notice (agent-tree.allium:
-        -- ClearAgentTreeErrorNotice). Neither records anything.
+        -- chord window); in the companion and diff panes it acknowledges a
+        -- shown notice (agent-tree.allium: ClearAgentTreeErrorNotice); and on
+        -- the board, after every press, a board.normal cursor on an unseen
+        -- task marks it seen (tasks.allium: SeeTaskByLandingOnIt) and a split
+        -- pane whose pinned window is gone is respawned (split-pane.allium:
+        -- SplitPaneRespawnOnWindowCleared). None of these records usage.
 }
 
 -- == Reading the table ==
@@ -791,8 +806,8 @@ surface KeyInput {
         -- Ctrl+Left / Ctrl+Right / Alt+Left / Alt+Right / Alt+B / Alt+F
         -- (text_cursor_word_left / _right) in the text fields.
         -- Recorded usage detail drops modifiers (key_label; see
-        -- KeyBinding.keys), so a recorded "Left" may have been Ctrl+Left. The
-        -- action id tells them apart; the detail does not.
+        -- KeyBinding.keys), so Ctrl+D is recorded as "d". The action id
+        -- (navigate_half_page) tells what ran; the detail alone does not.
 
     @guarantee PanesRecordUsageLikeTheBoard
         -- The agent-tree companion pane and the diff pane record each press
