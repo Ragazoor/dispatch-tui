@@ -166,7 +166,7 @@ rule AskForRepoPath {
 rule CheckForDuplicate {
     when: request: FixRequest.stage transitions_to checking
 
-    let found = list_tasks(
+    let found = task_search(
         query: defect_keywords(request),
         repo_paths: [request.repo_path]
     )
@@ -180,9 +180,9 @@ rule CheckForDuplicate {
             request.stage = confirming
 
     @guidance
-        -- list_tasks is called with the defect's key words as `query` and
-        -- repo_paths set to the owning repo, so the search is not limited to
-        -- the caller's own epic (DuplicateCheckSearchesTheOwningRepo). An
+        -- task_search is called with the defect's key words as `query` and
+        -- repo_paths set to the owning repo, so the search covers every
+        -- epic of that repo (DuplicateCheckSearchesTheOwningRepo). An
         -- open task that already covers the defect is reported by id and the
         -- skill stops: nothing is asked and nothing is created.
 }
@@ -376,7 +376,7 @@ surface FixSession {
         -- path (ResolveOwningRepo, AskForRepoPath).
 
     @guarantee DuplicateCheckSearchesTheOwningRepo
-        -- Before anything is confirmed or created, list_tasks is called with
+        -- Before anything is confirmed or created, task_search is called with
         -- the defect's key words and repo_paths set to the owning repo. An
         -- open task that already covers the defect is reported by id and the
         -- skill stops (CheckForDuplicate, DuplicatesAreNeverCreated).

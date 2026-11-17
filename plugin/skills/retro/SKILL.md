@@ -40,7 +40,7 @@ prevented it. These surfaces reach the next agent:
 | `docs/*.md` | linked from `CLAUDE.md`, read on demand |
 | `plugin/skills/*/SKILL.md` | the skill the next agent invokes |
 | the knowledge base | injected into the prompt (see the `learnings` skill) |
-| the repo's verify command | shown in `get_task`'s response and run by the agent (not in the dispatch prompt, not by `wrap_up`) |
+| the repo's verify command | shown in `task_search`'s response and run by the agent (not in the dispatch prompt, not by `wrap_up`) |
 
 The test: would the next agent do better? Every finding must trace to a
 concrete moment from this session. A true but harmless inaccuracy is not one.
@@ -67,7 +67,7 @@ concrete defect you could not fix in scope.
 On a `done` wrap-up always file instead of fixing: nothing rebases or pushes,
 so an edit is stranded in the worktree and a task is not. Wrap-up settles the
 action before it invokes you — it is in the invocation or in `wrap_up_mode`
-from `get_task`. If you do not know it, ask.
+from `task_search`. If you do not know it, ask.
 
 `references/filing.md` has the tags, the duplicate check and the call details.
 Zero tasks is the normal outcome.

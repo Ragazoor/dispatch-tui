@@ -2,7 +2,7 @@ use super::*;
 use crate::models::{TaskId, TaskModel};
 
 // ---------------------------------------------------------------------------
-// model: create_task, update_tasks and get_task (core.allium: TaskModel,
+// model: create_task, update_tasks and task_search (core.allium: TaskModel,
 // tasks.allium: SetModel)
 // ---------------------------------------------------------------------------
 
@@ -20,7 +20,7 @@ async fn get_task_text(state: &Arc<McpState>, id: TaskId) -> String {
         &call(
             state,
             "tools/call",
-            Some(json!({ "name": "get_task", "arguments": { "task_id": id.0 } })),
+            Some(json!({ "name": "task_search", "arguments": { "task_id": id.0 } })),
         )
         .await,
     )

@@ -23,7 +23,7 @@ Run `git rev-parse --abbrev-ref HEAD` and take the leading integer of the `{id}-
 
 ## Step 2: Get task details
 
-Call `get_task`. The response is prose with one labelled line per field; a missing line means the field is unset.
+Call `task_search`. The response is prose with one labelled line per field; a missing line means the field is unset.
 
 - `Base branch: <name>` is `{base_branch}`; fall back to `main` if absent.
 - `Wrap-up mode: <mode>` (`rebase`, `pr` or `done`) is printed only when set. If present and no argument was given, treat it as an argument: skip Step 4 and use that action.
@@ -58,7 +58,7 @@ Run `Skill({ skill: "retro" })` and tell it which action you are wrapping up wit
 
 ## Step 6: Verify, then commit
 
-If `get_task` printed a `Verify command:` line, run it in your worktree now, whatever the path, and fix any failure before you go on (on the pr path this is also what keeps a red build out of the push). Dispatch does not run it for you and does not check that you did. If it fails for a reason your change did not cause, do not wrap up past it alone: coordinate with other agents and the board, as `CLAUDE.md` says.
+If `task_search` printed a `Verify command:` line, run it in your worktree now, whatever the path, and fix any failure before you go on (on the pr path this is also what keeps a red build out of the push). Dispatch does not run it for you and does not check that you did. If it fails for a reason your change did not cause, do not wrap up past it alone: coordinate with other agents and the board, as `CLAUDE.md` says.
 
 Run `git status --porcelain`. If it is not clean, `git add` the relevant files by name, review `git diff --cached`, and `git commit -m "..."` with a short message. `wrap_up` refuses a dirty worktree.
 

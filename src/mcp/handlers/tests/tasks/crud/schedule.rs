@@ -2,7 +2,7 @@ use super::*;
 use crate::models::TaskId;
 
 // ---------------------------------------------------------------------------
-// schedule: create_task, update_tasks and get_task (schedules.allium)
+// schedule: create_task, update_tasks and task_search (schedules.allium)
 // ---------------------------------------------------------------------------
 
 async fn update(state: &Arc<McpState>, args: serde_json::Value) -> JsonRpcResponse {
@@ -19,7 +19,7 @@ async fn get_task_text(state: &Arc<McpState>, id: TaskId) -> String {
         &call(
             state,
             "tools/call",
-            Some(json!({ "name": "get_task", "arguments": { "task_id": id.0 } })),
+            Some(json!({ "name": "task_search", "arguments": { "task_id": id.0 } })),
         )
         .await,
     )

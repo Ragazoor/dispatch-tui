@@ -198,7 +198,7 @@ async fn list_tasks_shows_sub_status() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -233,7 +233,7 @@ async fn get_task_shows_sub_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_task",
+            "name": "task_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -471,7 +471,7 @@ async fn create_task_with_nonexistent_epic() {
 }
 
 // =======================================================================
-// list_tasks: filtering edge cases
+// task_search: filtering edge cases
 // =======================================================================
 
 #[tokio::test]
@@ -507,7 +507,7 @@ async fn list_tasks_filters_by_epic_id() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "epic_id": epic.id.0 } })),
+        Some(json!({ "name": "task_search", "arguments": { "epic_id": epic.id.0 } })),
     )
     .await;
     assert!(resp.error.is_none());
@@ -562,7 +562,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_tasks",
+            "name": "task_search",
             "arguments": { "status": "backlog", "epic_id": epic.id.0 }
         })),
     )
@@ -594,12 +594,12 @@ async fn list_tasks_epic_filter_no_match() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "epic_id": 9999 } })),
+        Some(json!({ "name": "task_search", "arguments": { "epic_id": 9999 } })),
     )
     .await;
     assert!(resp.error.is_none());
     let text = extract_response_text(&resp);
-    assert!(text.contains("No tasks found"));
+    assert!(text.contains("No tasks match epic_id=9999"), "{text}");
 }
 
 #[tokio::test]
@@ -626,7 +626,7 @@ async fn list_tasks_done_status_filter() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "status": "done" } })),
+        Some(json!({ "name": "task_search", "arguments": { "status": "done" } })),
     )
     .await;
     assert!(resp.error.is_none());
@@ -775,7 +775,7 @@ async fn wrap_up_accepts_string_task_id() {
 }
 
 // =======================================================================
-// get_task: additional formatting checks
+// task_search: additional formatting checks
 // =======================================================================
 
 #[tokio::test]
@@ -825,7 +825,7 @@ async fn get_task_shows_all_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_task",
+            "name": "task_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -862,7 +862,7 @@ async fn get_task_without_epic_omits_epic_line() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_task",
+            "name": "task_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -875,7 +875,7 @@ async fn get_task_without_epic_omits_epic_line() {
 }
 
 // =======================================================================
-// list_tasks: format verification
+// task_search: format verification
 // =======================================================================
 
 #[tokio::test]
@@ -902,7 +902,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -940,7 +940,7 @@ async fn list_tasks_shows_epic_indicator() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -966,7 +966,7 @@ async fn list_tasks_truncates_long_descriptions() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);

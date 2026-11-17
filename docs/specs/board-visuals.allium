@@ -788,7 +788,7 @@ use "./work-packages.allium" as wp
 -- and takes the RED border, as the other hard failures do. A phoenix task
 -- re-armed after the failure still carries its ` · ◷ <when>` after it, so
 -- the card says both that the last launch failed and when the next is. The reason is
--- task.schedule_error, read through get_task (mcp-task-tools.allium:
+-- task.schedule_error, read through task_search (mcp-task-tools.allium:
 -- GetTaskViaMcp). The board offers no key to set, edit or clear a schedule
 -- (schedules.allium, S9).
 --

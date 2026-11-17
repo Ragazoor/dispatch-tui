@@ -603,7 +603,7 @@ async fn get_task_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_task",
+            "name": "task_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -620,7 +620,7 @@ async fn get_task_not_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_task",
+            "name": "task_search",
             "arguments": { "task_id": 9999 }
         })),
     )
@@ -903,6 +903,7 @@ mod model;
 mod query;
 mod schedule;
 mod sub_status;
+mod task_search;
 
 // -- Bookmarks (`tasks.allium: SetBookmark`; `mcp-task-tools.allium:
 //    UpdateTaskViaMcp`'s `bookmarked`) ---------------------------------------
@@ -923,7 +924,7 @@ fn text_of(resp: &JsonRpcResponse) -> String {
 
 #[test]
 fn update_and_list_schemas_advertise_a_boolean_bookmarked() {
-    for tool in ["update_tasks", "list_tasks"] {
+    for tool in ["update_tasks", "task_search"] {
         let def = tool_def(tool);
         assert_eq!(
             def["inputSchema"]["properties"]["bookmarked"]["type"], "boolean",
@@ -949,9 +950,9 @@ async fn update_tasks_bookmarked_sets_and_clears_this_persons_bookmark() {
         crate::store::TaskRead::bookmarked_task_ids(&*store).await,
         vec![task]
     );
-    let detail = text_of(&tool_call(&state, "get_task", json!({ "task_id": task.0 })).await);
+    let detail = text_of(&tool_call(&state, "task_search", json!({ "task_id": task.0 })).await);
     assert!(detail.contains("\nBookmarked: yes"), "{detail}");
-    let rows = text_of(&tool_call(&state, "list_tasks", json!({})).await);
+    let rows = text_of(&tool_call(&state, "task_search", json!({})).await);
     assert!(rows.contains(" bookmarked"), "{rows}");
 
     tool_call(
@@ -963,7 +964,7 @@ async fn update_tasks_bookmarked_sets_and_clears_this_persons_bookmark() {
     assert!(crate::store::TaskRead::bookmarked_task_ids(&*store)
         .await
         .is_empty());
-    let detail = text_of(&tool_call(&state, "get_task", json!({ "task_id": task.0 })).await);
+    let detail = text_of(&tool_call(&state, "task_search", json!({ "task_id": task.0 })).await);
     assert!(!detail.contains("Bookmarked"), "{detail}");
 }
 
@@ -987,9 +988,9 @@ async fn list_tasks_bookmarked_filter_keeps_only_this_persons_bookmarks() {
     )
     .await;
 
-    let only = text_of(&tool_call(&state, "list_tasks", json!({ "bookmarked": true })).await);
+    let only = text_of(&tool_call(&state, "task_search", json!({ "bookmarked": true })).await);
     assert!(only.contains("marked") && !only.contains("plain"), "{only}");
-    let others = text_of(&tool_call(&state, "list_tasks", json!({ "bookmarked": false })).await);
+    let others = text_of(&tool_call(&state, "task_search", json!({ "bookmarked": false })).await);
     assert!(
         others.contains("plain") && !others.contains("marked"),
         "{others}"
@@ -1119,7 +1120,7 @@ async fn update_tasks_refused_bookmark_leaves_the_fields_unwritten() {
     assert_eq!(title, "before", "the refused call must write nothing");
 }
 
-// -- list_tasks time filters (mcp-task-tools.allium: TimeFilterInput) --------
+// -- task_search time filters (mcp-task-tools.allium: TimeFilterInput) --------
 
 fn hours_from_now(hours: i64) -> String {
     (chrono::Utc::now() + chrono::Duration::hours(hours))
@@ -1155,7 +1156,7 @@ async fn one_done_one_open() -> (Arc<McpState>, crate::models::TaskId, crate::mo
 #[tokio::test]
 async fn list_tasks_rows_show_updated_and_completed_as_iso_utc() {
     let (state, _done, _open) = one_done_one_open().await;
-    let text = text_of(&tool_call(&state, "list_tasks", json!({})).await);
+    let text = text_of(&tool_call(&state, "task_search", json!({})).await);
     let finished = text.lines().find(|l| l.contains("finished")).unwrap();
     let open = text.lines().find(|l| l.contains("open")).unwrap();
 
@@ -1179,7 +1180,7 @@ async fn list_tasks_completed_filters_keep_only_tasks_completed_in_the_window() 
     let in_window = text_of(
         &tool_call(
             &state,
-            "list_tasks",
+            "task_search",
             json!({ "completed_after": hours_from_now(-1), "completed_before": hours_from_now(1) }),
         )
         .await,
@@ -1192,22 +1193,22 @@ async fn list_tasks_completed_filters_keep_only_tasks_completed_in_the_window() 
     let before_window = text_of(
         &tool_call(
             &state,
-            "list_tasks",
+            "task_search",
             json!({ "completed_before": hours_from_now(-1) }),
         )
         .await,
     );
-    assert!(before_window.contains("No tasks found"), "{before_window}");
+    assert!(before_window.contains("No tasks match"), "{before_window}");
 
     let after_window = text_of(
         &tool_call(
             &state,
-            "list_tasks",
+            "task_search",
             json!({ "completed_after": hours_from_now(1) }),
         )
         .await,
     );
-    assert!(after_window.contains("No tasks found"), "{after_window}");
+    assert!(after_window.contains("No tasks match"), "{after_window}");
 }
 
 #[tokio::test]
@@ -1217,7 +1218,7 @@ async fn list_tasks_updated_filters_bound_updated_at_and_combine_with_status() {
     let both = text_of(
         &tool_call(
             &state,
-            "list_tasks",
+            "task_search",
             json!({ "updated_after": hours_from_now(-1), "updated_before": hours_from_now(1) }),
         )
         .await,
@@ -1227,17 +1228,17 @@ async fn list_tasks_updated_filters_bound_updated_at_and_combine_with_status() {
     let none = text_of(
         &tool_call(
             &state,
-            "list_tasks",
+            "task_search",
             json!({ "updated_before": hours_from_now(-1) }),
         )
         .await,
     );
-    assert!(none.contains("No tasks found"), "{none}");
+    assert!(none.contains("No tasks match"), "{none}");
 
     let done_only = text_of(
         &tool_call(
             &state,
-            "list_tasks",
+            "task_search",
             json!({ "updated_after": hours_from_now(-1), "status": "done" }),
         )
         .await,
@@ -1255,16 +1256,16 @@ async fn list_tasks_after_is_inclusive_and_before_is_exclusive() {
     let exact = completed.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
 
     let at_after =
-        text_of(&tool_call(&state, "list_tasks", json!({ "completed_after": exact })).await);
+        text_of(&tool_call(&state, "task_search", json!({ "completed_after": exact })).await);
     assert!(
         at_after.contains("finished"),
         "after includes the bound: {at_after}"
     );
 
     let at_before =
-        text_of(&tool_call(&state, "list_tasks", json!({ "completed_before": exact })).await);
+        text_of(&tool_call(&state, "task_search", json!({ "completed_before": exact })).await);
     assert!(
-        at_before.contains("No tasks found"),
+        at_before.contains("No tasks match"),
         "before excludes the bound: {at_before}"
     );
 }
@@ -1278,7 +1279,7 @@ async fn list_tasks_accepts_a_numeric_offset_and_compares_in_utc() {
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
     let resp = tool_call(
         &state,
-        "list_tasks",
+        "task_search",
         json!({ "completed_after": two_hours_east }),
     )
     .await;
@@ -1295,7 +1296,7 @@ async fn list_tasks_rejects_a_time_without_a_zone_or_a_bare_date() {
         ("completed_after", "last week"),
         ("completed_before", ""),
     ] {
-        let resp = tool_call(&state, "list_tasks", json!({ param: value })).await;
+        let resp = tool_call(&state, "task_search", json!({ param: value })).await;
         assert!(is_error(&resp), "{param}={value:?} must be refused");
         assert!(
             error_message(&resp).contains(param),
@@ -1314,7 +1315,7 @@ async fn list_tasks_rejects_a_range_whose_after_is_not_before_before() {
         ("completed_after", "completed_before"),
     ] {
         for (a, b) in [("2026-11-16T00:00:00Z", t), (t, t)] {
-            let resp = tool_call(&state, "list_tasks", json!({ after: a, before: b })).await;
+            let resp = tool_call(&state, "task_search", json!({ after: a, before: b })).await;
             assert!(is_error(&resp), "{after}={a} {before}={b} must be refused");
             let msg = error_message(&resp);
             assert!(
@@ -1336,7 +1337,7 @@ async fn list_tasks_archived_rejects_the_time_filters() {
     ] {
         let resp = tool_call(
             &state,
-            "list_tasks",
+            "task_search",
             json!({ "archived": true, param: "2026-11-09T00:00:00Z" }),
         )
         .await;
@@ -1346,7 +1347,7 @@ async fn list_tasks_archived_rejects_the_time_filters() {
 
 #[test]
 fn list_tasks_schema_advertises_the_four_time_filters_as_strings() {
-    let def = tool_def("list_tasks");
+    let def = tool_def("task_search");
     for param in [
         "updated_after",
         "updated_before",

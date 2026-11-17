@@ -41,7 +41,7 @@ fn hook_script_handles_all_events() {
 fn hook_script_skips_dispatch_mcp_in_pretooluse() {
     // The PreToolUse handler must read tool_name from the JSON input
     // and skip dispatch MCP tool calls to avoid clobbering review status
-    // during wrap-up (get_task and wrap_up would otherwise set running).
+    // during wrap-up (task_search and wrap_up would otherwise set running).
     let s = hook_script();
     assert!(
         s.contains("tool_name"),

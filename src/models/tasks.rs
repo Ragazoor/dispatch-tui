@@ -616,7 +616,7 @@ impl Task {
     ///
     /// The store's own gate is the module's `validate_wrap_up_request`, which
     /// `request_wrap_up` runs; this is the board's early answer, read by
-    /// `get_task` and `TaskService::validate_wrap_up` so an agent learns the
+    /// `task_search` and `TaskService::validate_wrap_up` so an agent learns the
     /// refusal before its retro and commit.
     pub fn wrap_up_block(&self) -> Option<WrapUpBlock> {
         // The tag outranks the state. A review task is refused whatever its

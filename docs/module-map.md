@@ -146,7 +146,7 @@ lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling.
 | `src/mcp/handlers/hooks.rs` | The board side of `/hook`: applies a delivered Claude Code hook event through the task service and appends the `SendMessage` trajectory entry (see `HookDelivery` in `docs/specs/agent-health.allium`) |
 | `src/mcp/handlers/dispatch.rs` | JSON-RPC entry point (`handle_mcp`) plus the `mcp_tools!` macro that generates `tool_definitions()`, `dispatch_tool()`, and `TOOL_NAMES` from one declarative tool list |
 | `src/mcp/handlers/tasks/mod.rs` | Task arg structs, shared response helpers, re-exports |
-| `src/mcp/handlers/tasks/crud.rs` | CRUD task handlers: `update_tasks`, `create_task`, `get_task`, `list_tasks`, `query_usage` |
+| `src/mcp/handlers/tasks/crud.rs` | CRUD task handlers: `update_tasks`, `create_task`, `task_search`, `query_usage` |
 | `src/mcp/handlers/tasks/dispatch.rs` | Dispatch handler: `dispatch_task` (the epic chain that `exit_session` fires is the module's, in `request_exit_session`'s transaction) |
 | `src/mcp/handlers/tasks/resume.rs` | Resume handler: `resume_task` (refuses a task with no resumable session, then sends `BoardEvent::ResumeTask`; the board runs the Space key's resume) |
 | `src/mcp/handlers/tasks/wrap_up.rs` | Wrap-up handlers: `wrap_up` (checks, then a request row, then a wait on it for a rebase) and `exit_session` (one `request_exit_session` call, answered without waiting for the teardown); `update_tasks(status="done")` lives in `crud.rs` and makes one `close_task` call |

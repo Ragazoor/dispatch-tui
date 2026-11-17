@@ -22,7 +22,7 @@ Only two tags:
 
 ### Before you file
 
-- **Check for a duplicate** with `list_tasks`.
+- **Check for a duplicate** with `task_search`, passing `query` (and `epic_id` to look in one epic).
 - **One task per finding, not per file.** The same wrong statement in three documents is one task that lists all three.
 - **Write it so a cold agent can act.** The `title` names the change. The `description` references this task's ID and says what the next agent will hit if it stays unfixed.
 

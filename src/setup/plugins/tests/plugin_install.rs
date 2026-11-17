@@ -22,7 +22,7 @@ fn wrap_up_skill_has_the_agent_run_the_verify_command() {
     let content = skill_body("wrap-up");
     assert!(
         content.contains("## Step 6: Verify, then commit") && content.contains("`Verify command:`"),
-        "the skill must send the agent to run the get_task verify command before the commit"
+        "the skill must send the agent to run the task_search verify command before the commit"
     );
     let closing = wrap_up_closing_sequence();
     assert!(

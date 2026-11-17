@@ -57,7 +57,14 @@ pub(super) enum Access {
 /// Old tool name → the call that replaces it, as `(old, hint)`. The hint reads
 /// after "<old> was renamed: ", e.g. `("get_task", "call task_search with task_id")`.
 /// An old name is never registered, so it never appears in `tools/list`.
-pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[];
+pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[
+    ("get_task", "call task_search with task_id"),
+    (
+        "list_tasks",
+        "call task_search. It no longer scopes to your own epic or hides your own task, so pass \
+         epic_id, and it returns 50 rows unless limit says otherwise",
+    ),
+];
 
 /// The error text for a `tools/call` to an unregistered name. A name in
 /// `table` gets a second line naming the tool that replaced it.
@@ -191,23 +198,10 @@ mcp_tools! {
 status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
 epic_id, base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule, and bookmarked. At least one field \
 must be provided; every field left out is untouched. Every named task is updated whatever its status; \
-pick many ids with list_tasks (epic_id, recursive, status, base_branch). With one id the reply is \
+pick many ids with task_search (epic_id, recursive, status, base_branch), and check its reply for a last line saying rows were cut (it returns 50 unless limit says otherwise). With one id the reply is \
 \"Task N updated (fields)\" or an error. With several it is not atomic: one line per task, success \
 or failure, then a count.",
         (tasks::update_tasks_schema());
-
-    async read_only "get_task" => tasks::handle_get_task,
-        "Get the details of a task by ID, including a deleted (archived) one.",
-        {
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID"
-                }
-            },
-            "required": ["task_id"]
-        };
 
     async write "create_task" => tasks::handle_create_task,
         "Create a new task on the kanban board. Tasks always start in 'backlog' status. Your \
@@ -281,13 +275,28 @@ usually the right answer.",
             "required": ["title", "repo_path", "epic_id"]
         };
 
-    async read_only "list_tasks" => tasks::handle_list_tasks,
-        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables the epic auto-scoping, but your own task is still excluded. When called from a non-dispatched session, no auto-scoping. Output includes each task's base branch, its url under its own type label — 'PR', 'Issue', 'Security Alert' or 'Link', with the number appended where there is one — the plan goal, when available, and its updated and completed times (ISO 8601 UTC, '-' when it has not completed). To count tasks finished in a period, filter with completed_after and completed_before: the last change time also moves on later edits.",
+    async read_only "task_search" => tasks::handle_task_search,
+        "Read tasks on the kanban board, in one of two forms. With task_id and no other argument it \
+returns that one task in full, a deleted (archived) one included, and your own task too. Without \
+task_id it lists tasks, one line per task, with the filters ANDed. The list has no scope of its \
+own: nothing is derived from who calls, so a dispatched agent passes epic_id (its own is in its \
+prompt) to see its epic, and its own task is listed like any other. Rows are sorted most recently \
+updated first, ties by id descending, and at most 50 are returned unless limit says otherwise: a \
+last line gives the count shown and how to narrow. Each row shows the base branch, the url \
+under its own type label (PR, Issue, Security Alert or Link, with the number appended where there \
+is one), the goal cut to about 80 characters on one line, and the updated and completed times \
+(ISO 8601 UTC, - when it has not completed). An empty result names the filters it applied. To count \
+tasks finished in a period, filter with completed_after and completed_before: the last change time \
+also moves on later edits.",
         {
             "type": "object",
             "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "Return this one task in full (archived tasks too). It takes no other argument: every other argument below is for the list form and is refused alongside it."
+                },
                 "status": {
-                    "description": "Filter by status. Single string or array of strings.",
+                    "description": "List form: filter by status. Single string or array of strings.",
                     "oneOf": [
                         { "type": "string", "enum": task_status_enum_values() },
                         { "type": "array", "items": { "type": "string", "enum": task_status_enum_values() } }
@@ -295,53 +304,53 @@ usually the right answer.",
                 },
                 "epic_id": {
                     "type": "integer",
-                    "description": "Filter to only tasks belonging to this epic."
+                    "description": "List form: filter to only tasks belonging to this epic. Without it tasks of every epic are listed, whoever you are."
                 },
                 "repo_paths": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Filter to tasks whose repo_path is in this list."
+                    "description": "List form: filter to tasks whose repo_path is in this list."
                 },
                 "recursive": {
                     "type": "boolean",
-                    "description": "With an epic scope (epic_id, or your own epic when auto-scoped), also include tasks of every descendant epic. Rejected when no epic scope is in effect."
+                    "description": "List form: also include tasks of every descendant epic of epic_id. Rejected without epic_id."
                 },
                 "base_branch": {
                     "type": "string",
-                    "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Lists only tasks whose base_branch is exactly this."
+                    "description": "The base branch for rebase and PR operations (e.g. main, develop). In the list form, lists only tasks whose base_branch is exactly this."
                 },
                 "query": {
                     "type": "string",
-                    "description": "Text search over title and description. Split on spaces; every word must appear (any case, as part of a word) in the title or description. Combines with the other filters."
+                    "description": "List form: text search over title and description. Split on spaces; every word must appear (any case, as part of a word) in the title or description. Combines with the other filters."
                 },
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Return at most this many rows. No default: without it every match is returned. When rows are cut, the last line says how many were shown of how many."
+                    "description": "List form: return at most this many rows. Defaults to 50. When rows are cut, the last line says how many were shown of how many; raise limit to see more."
                 },
                 "bookmarked": {
                     "type": "boolean",
-                    "description": "true lists only tasks the board's person has bookmarked; false only those they have not. Combines with the other filters and does not widen your epic scope. A bookmarked task's row says 'bookmarked' after its title."
+                    "description": "List form: true lists only tasks the board's person has bookmarked; false only those they have not. Combines with the other filters. A bookmarked task's row says bookmarked after its title."
                 },
                 "archived": {
                     "type": "boolean",
-                    "description": "true lists archived (deleted) tasks instead of live ones, newest first, with their title, epic, agent and a description preview. epic_id, repo_paths, base_branch, query and limit apply; status, recursive, bookmarked and the four time filters are rejected. Defaults to false."
+                    "description": "List form: true lists archived (deleted) tasks instead of live ones, newest first, with their title, epic, agent and a description preview. epic_id, repo_paths, base_branch, query and limit apply; status, recursive, bookmarked and the four time filters are rejected. Defaults to false."
                 },
                 "updated_after": {
                     "type": "string",
-                    "description": "Keep only tasks whose last change time is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                    "description": "List form: keep only tasks whose last change time is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
                 },
                 "updated_before": {
                     "type": "string",
-                    "description": "Keep only tasks whose last change time is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                    "description": "List form: keep only tasks whose last change time is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
                 },
                 "completed_after": {
                     "type": "string",
-                    "description": "Keep only tasks whose completion time (the last time the task entered done; a task that never completed is excluded) is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                    "description": "List form: keep only tasks whose completion time (the last time the task entered done; a task that never completed is excluded) is at or after this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
                 },
                 "completed_before": {
                     "type": "string",
-                    "description": "Keep only tasks whose completion time (the last time the task entered done; a task that never completed is excluded) is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
+                    "description": "List form: keep only tasks whose completion time (the last time the task entered done; a task that never completed is excluded) is strictly before this time, an ISO 8601 time with a zone, like 2026-11-09T00:00:00Z or 2026-11-09T00:00:00+02:00. After includes the bound, before excludes it, so two windows never overlap. Combines with the other filters."
                 }
             }
         };
@@ -371,7 +380,7 @@ on each subtask, and passing it here is rejected.",
 arguments it lists every epic. Pass parent_epic_id for that epic's direct children, plus \
 recursive=true for its whole subtree. Pass query to search titles and descriptions. Use it to find an epic's ID when you only know its title. \
 Pass epic_id instead for one epic in full: its description, status, plan, parent, feed settings \
-and a count of its subtasks by status, but not the subtasks themselves — call list_tasks with \
+and a count of its subtasks by status, but not the subtasks themselves — call task_search with \
 epic_id for those. Each row shows the epic's updated and completed times (ISO 8601 UTC, '-' when it has not completed). Filter them with updated_after, updated_before, completed_after and completed_before.",
         {
             "type": "object",
@@ -849,7 +858,7 @@ in the same words. It cannot be undone, and you never read what you delete.",
     async idempotent "set_verify_command" => tasks::handle_set_verify_command,
         "Set or clear the verify command for a repository path — the check an agent working in \
 that repo must run green before declaring work complete. It never appears in a dispatch prompt. \
-It reaches the agent through the 'Verify command' line in get_task's response, and the agent \
+It reaches the agent through the 'Verify command' line in task_search's response, and the agent \
 runs it itself in its worktree. \
 Pass command=null to clear it.",
         {
@@ -924,7 +933,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
 ;
 
     async read_only "read_context" => context::handle_read_context,
-        "Return the text of one dispatch context resource, the same text the resources/read method gives for that URI. Pass skill://<name>/SKILL.md for an agent-facing skill or skill://<name>/references/<file>.md for a reference file beside it, dispatch://learnings/<id> for a validated learning from the knowledge base, dispatch://task/self for your own task, or dispatch://task/<id> for any task by id, exactly as get_task renders it. Use it to pull a skill, a reference or a learning into your context when you only have its URI; it does not search, and it does not list what exists. An unknown URI is refused with an error naming it.",
+        "Return the text of one dispatch context resource, the same text the resources/read method gives for that URI. Pass skill://<name>/SKILL.md for an agent-facing skill or skill://<name>/references/<file>.md for a reference file beside it, dispatch://learnings/<id> for a validated learning from the knowledge base, dispatch://task/self for your own task, or dispatch://task/<id> for any task by id, exactly as task_search renders it with task_id. Use it to pull a skill, a reference or a learning into your context when you only have its URI; it does not search, and it does not list what exists. An unknown URI is refused with an error naming it.",
         {
             "type": "object",
             "properties": {

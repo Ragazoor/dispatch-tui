@@ -560,10 +560,6 @@ impl TaskService {
                 Some(branch) => &t.base_branch == branch,
                 None => true,
             })
-            .filter(|t| match filter.exclude_task_id {
-                Some(excluded) => t.id != excluded,
-                None => true,
-            })
             .filter(|t| match &filter.query {
                 Some(q) => crate::models::text_query_matches(q, &t.title, &t.description),
                 None => true,
@@ -925,7 +921,7 @@ impl TaskService {
 
 /// The caller-facing sentence for each [`WrapUpBlock`].
 ///
-/// Free-standing so `get_task` can render the same wording it would hit at
+/// Free-standing so `task_search` can render the same wording it would hit at
 /// `wrap_up` — the block is reported where the `/wrap-up` skill first reads the
 /// task, rather than only at the last call of its sequence, so an agent does
 /// not run a retro and a commit before learning none of it was wanted.

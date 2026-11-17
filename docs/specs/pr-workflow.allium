@@ -894,7 +894,7 @@ rule WrapUpDone {
         -- action alike. The agent runs the /retro skill before its commit
         -- step, ahead of wrap_up.
         --
-        -- /wrap-up skill path: if task.wrap_up_mode = done (from get_task),
+        -- /wrap-up skill path: if task.wrap_up_mode = done (from task_search),
         -- or if the user selects "done" in Step 4, the skill calls
         -- wrap_up(action="done"), then exit_session(token,
         -- action="done") — no git integration; the commit check still applies.

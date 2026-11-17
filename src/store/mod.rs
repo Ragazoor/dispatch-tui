@@ -390,7 +390,7 @@ pub trait DispatchRequestRead: Send + Sync {
     /// Every row this host's subscription holds, oldest first.
     async fn dispatch_requests(&self) -> Vec<DispatchRequest>;
     /// `task`'s most recent request this subscription holds, if any — the
-    /// row `get_task`'s `[Dispatch request]` line shows.
+    /// row `task_search`'s `[Dispatch request]` line shows.
     async fn latest_dispatch_request_for_task(&self, task: TaskId) -> Option<DispatchRequest>;
     /// Fires whenever the subscribed rows move — a request row among them.
     /// What a caller WAITING on a request's outcome waits on (`dispatch_task`,

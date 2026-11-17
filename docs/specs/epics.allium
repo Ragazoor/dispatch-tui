@@ -646,7 +646,7 @@ rule ListEpicsViaMcp {
         -- Epic.completed_at, the time the epic last entered done. Both are
         -- ANDed with the scope, query and each other. The input form, the
         -- inclusive after and exclusive before, and the errors are the same
-        -- as list_tasks (mcp-task-tools.allium: TimeFilterInput). An epic
+        -- as task_search (mcp-task-tools.allium: TimeFilterInput). An epic
         -- with no completed_at is excluded by any completed_* filter.
         -- Every row carries " | Updated: <updated_at> | Completed:
         -- <completed_at>" as ISO 8601 UTC with a Z suffix, "-" when the epic
@@ -655,13 +655,13 @@ rule ListEpicsViaMcp {
         -- query is split on whitespace into words; an epic matches when
         -- every word is a case-insensitive substring of its title or its
         -- description. A blank query is the same as none. This is the same
-        -- rule as list_tasks (ListTasksViaMcp in mcp-task-tools.allium). The
+        -- rule as task_search (ListTasksViaMcp in mcp-task-tools.allium). The
         -- progress counts of a matching epic are unchanged. Nothing matching
         -- gives the usual "No epics found".
         -- limit (optional, no default) keeps the first `limit` rows after the
         -- scope and query are applied; when rows were cut the reply ends with
         -- "Showing <limit> of <total>. Narrow your query or filters." The
-        -- same rule as list_tasks.
+        -- same rule as task_search.
         --
         -- All arguments are optional. With neither it returns every epic in
         -- the database along with done/total subtask counts for each. An

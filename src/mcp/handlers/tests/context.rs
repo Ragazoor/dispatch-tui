@@ -997,7 +997,7 @@ async fn reading_a_learning_without_detail_serves_its_summary() {
     assert_eq!(item["text"].as_str().unwrap().trim(), "Only a summary");
 }
 
-/// rule-success.ResolveContextUri (own_task): the same detail get_task
+/// rule-success.ResolveContextUri (own_task): the same detail task_search
 /// renders for the caller's own task, as text/plain.
 #[tokio::test]
 async fn reading_task_self_serves_get_tasks_rendering_of_the_callers_task() {
@@ -1008,7 +1008,7 @@ async fn reading_task_self_serves_get_tasks_rendering_of_the_callers_task() {
     let get = call_as(
         &state,
         "tools/call",
-        Some(json!({ "name": "get_task", "arguments": { "task_id": task.0 } })),
+        Some(json!({ "name": "task_search", "arguments": { "task_id": task.0 } })),
         me.clone(),
     )
     .await;
@@ -1289,7 +1289,7 @@ async fn task_self_without_a_caller_task_says_the_caller_has_no_task() {
 }
 
 /// rule-success.ResolveContextUri (task): any caller reads any task by id and
-/// gets get_task's rendering, as text/plain, on both entry points.
+/// gets task_search's rendering, as text/plain, on both entry points.
 #[tokio::test]
 async fn reading_a_task_by_id_serves_get_tasks_rendering_to_any_caller() {
     let state = test_state().await;
@@ -1300,7 +1300,7 @@ async fn reading_a_task_by_id_serves_get_tasks_rendering_to_any_caller() {
     let get = call_as(
         &state,
         "tools/call",
-        Some(json!({ "name": "get_task", "arguments": { "task_id": other.0 } })),
+        Some(json!({ "name": "task_search", "arguments": { "task_id": other.0 } })),
         CallerIdentity::Task(me),
     )
     .await;

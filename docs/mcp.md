@@ -108,7 +108,7 @@ The server offers read-only context as MCP resources (`resources/list`, `resourc
 | `skill://<name>/SKILL.md` | the skill file from the copy built into the binary (`src/setup/plugins.rs::built_in_skills_dir`), never the installed copy |
 | `skill://<name>/references/<file>.md` | a file from that skill's `references/` directory |
 | `dispatch://learnings/<id>` | an approved learning's summary then detail |
-| `dispatch://task/self` | the caller's own task, rendered as `get_task` does (`src/mcp/handlers/tasks/mod.rs::task_detail_text`) |
+| `dispatch://task/self` | the caller's own task, rendered as `task_search` does (`src/mcp/handlers/tasks/mod.rs::task_detail_text`) |
 
 **Tool twin.** Claude Code does not pull resources into an agent's context by itself, so `read_context(uri)` returns the same text. Listing is paged (50 entries, opaque position-based `nextCursor`) in a fixed order: own task, skills by name, learnings by id.
 
@@ -129,11 +129,11 @@ The MCP server listens on port 3142 by default (override with `DISPATCH_PORT`), 
 RUST_LOG=dispatch=debug cargo run -- tui 2> /tmp/dispatch.log
 tail -f /tmp/dispatch.log
 
-# Send a manual JSON-RPC request to a tool (e.g. list_tasks)
+# Send a manual JSON-RPC request to a tool (e.g. task_search)
 curl -s -X POST http://127.0.0.1:3142/mcp \
   -H 'Content-Type: application/json' \
   -H 'X-Caller-Task-Id: 42' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"task_search","arguments":{}}}' \
   | jq
 
 # Reproduce a failing update — substitute the offending arguments

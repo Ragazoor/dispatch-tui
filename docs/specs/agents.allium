@@ -481,7 +481,7 @@ surface AgentIdentity {
     context task: core/Task
 
     exposes:
-        -- get_task and list_tasks show the task's display name (A18) and
+        -- task_search shows the task's display name (A18) and
         -- the state of the agent it comes from: live, paused, not started
         -- (assigned) or ended.
         task.display_name

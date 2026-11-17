@@ -653,10 +653,10 @@ surface AgentPrompt {
         -- The prompt deliberately carries no verify command. Even when
         -- task.repo_path has a SavedRepoPath row with verify_command = Some(c),
         -- no "## Verification" section is emitted and c appears nowhere in the
-        -- prompt. Carrying it there as well as in get_task's response would
+        -- prompt. Carrying it there as well as in task_search's response would
         -- be duplicated context.
         --
-        -- The command reaches the agent through get_task's response (see
+        -- The command reaches the agent through task_search's response (see
         -- GetTaskViaMcp in mcp-task-tools.allium), so it can run the check while
         -- it works. The /wrap-up skill sends the agent to run it before wrap_up
         -- (AgentsRunTheVerifyCommand in mcp-task-tools.allium); the board does
@@ -665,7 +665,7 @@ surface AgentPrompt {
     @guarantee ThePromptNamesNoToolMerelyToSayItExists
         -- Dispatch's MCP tools reach the agent as real tool schemas, so prompt
         -- prose that lists them ("the dispatch MCP tools are available —
-        -- get_task, update_tasks") shadows that list: it states no fact the
+        -- task_search, update_tasks") shadows that list: it states no fact the
         -- schema lacks, and it goes stale the moment the tool set changes,
         -- with nothing checking it. A tool is named in a prompt only where the
         -- prompt asks for a SPECIFIC call the schema cannot imply — quick
@@ -681,8 +681,8 @@ surface AgentPrompt {
         -- nudge to invoke it.
         --
         -- {epic sibling-communication} falls under the same rule. It does not
-        -- tell the agent to call list_tasks with the epic id, which would
-        -- restate list_tasks' epic_id filter. The section keeps only what is
+        -- tell the agent to call task_search with the epic id, which would
+        -- restate task_search's epic_id filter. The section keeps only what is
         -- about this task: the epic's id and title. That a sibling agent is
         -- reachable with ListAgents/SendMessage by its agent name is
         -- dispatch's convention for every task alike, so it is in the MCP

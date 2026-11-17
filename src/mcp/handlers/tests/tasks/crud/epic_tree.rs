@@ -3,7 +3,7 @@ use crate::models::{EpicId, TaskId};
 
 // ---------------------------------------------------------------------------
 // Walking an epic tree and changing many tasks at once: list_epics
-// (parent_epic_id, recursive), list_tasks (recursive, base_branch) and
+// (parent_epic_id, recursive), task_search (recursive, base_branch) and
 // update_tasks. See ListEpicsViaMcp in docs/specs/epics.allium and
 // ListTasksViaMcp / UpdateTasksViaMcp in docs/specs/mcp-task-tools.allium.
 // ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ async fn list_epics_with_childless_parent_reports_none_found() {
     assert!(extract_response_text(&resp).contains("No epics found"));
 }
 
-// -- list_tasks ---------------------------------------------------------------
+// -- task_search ---------------------------------------------------------------
 
 #[tokio::test]
 async fn list_tasks_recursive_includes_tasks_of_descendant_epics() {
@@ -185,7 +185,7 @@ async fn list_tasks_recursive_includes_tasks_of_descendant_epics() {
 
     let resp = tool(
         &state,
-        "list_tasks",
+        "task_search",
         json!({ "epic_id": t.root.0, "recursive": true }),
     )
     .await;
@@ -212,14 +212,14 @@ async fn list_tasks_without_recursive_stays_on_the_named_epic() {
     .await;
 
     let text =
-        extract_response_text(&tool(&state, "list_tasks", json!({ "epic_id": t.root.0 })).await);
+        extract_response_text(&tool(&state, "task_search", json!({ "epic_id": t.root.0 })).await);
 
     assert!(row(&text, in_root).is_some(), "{text}");
     assert!(row(&text, in_child).is_none(), "{text}");
 }
 
 #[tokio::test]
-async fn list_tasks_recursive_follows_an_agents_derived_epic_scope() {
+async fn list_tasks_recursive_follows_an_explicit_epic_for_an_agent_and_keeps_its_own_task() {
     let state = test_state().await;
     let t = make_tree(&state).await;
     let caller = make_task(&state, "caller", Some(t.root), TaskStatus::Running, "main").await;
@@ -235,21 +235,24 @@ async fn list_tasks_recursive_follows_an_agents_derived_epic_scope() {
     let resp = call_as(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "recursive": true } })),
+        Some(json!({
+            "name": "task_search",
+            "arguments": { "epic_id": t.root.0, "recursive": true }
+        })),
         CallerIdentity::Task(caller),
     )
     .await;
     let text = extract_response_text(&resp);
 
     assert!(row(&text, in_child).is_some(), "{text}");
-    assert!(row(&text, caller).is_none(), "{text}");
+    assert!(row(&text, caller).is_some(), "{text}");
 }
 
 #[tokio::test]
 async fn list_tasks_recursive_without_epic_scope_is_invalid_params() {
     let state = test_state().await;
 
-    let resp = tool(&state, "list_tasks", json!({ "recursive": true })).await;
+    let resp = tool(&state, "task_search", json!({ "recursive": true })).await;
     assert_error(&resp, "epic_id");
 }
 
@@ -260,7 +263,7 @@ async fn list_tasks_base_branch_filters_by_exact_match() {
     let on_master = make_task(&state, "on master", None, TaskStatus::Backlog, "master").await;
 
     let text = extract_response_text(
-        &tool(&state, "list_tasks", json!({ "base_branch": "master" })).await,
+        &tool(&state, "task_search", json!({ "base_branch": "master" })).await,
     );
 
     assert!(row(&text, on_master).is_some(), "{text}");
@@ -272,7 +275,7 @@ async fn list_tasks_rows_show_base_branch() {
     let state = test_state().await;
     let id = make_task(&state, "t", None, TaskStatus::Backlog, "develop").await;
 
-    let text = extract_response_text(&tool(&state, "list_tasks", json!({})).await);
+    let text = extract_response_text(&tool(&state, "task_search", json!({})).await);
 
     let line = row(&text, id).unwrap();
     assert!(line.contains(" | Base: develop"), "{line}");

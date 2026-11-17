@@ -21,7 +21,7 @@ user asks in this session. Never edit the PR's code.
 ## Step 1: Resolve the target
 
 Take the PR number or URL from the argument. With none, take it from the task
-description (`get_task` on your task) or the conversation. If there is still
+description (`task_search` on your task) or the conversation. If there is still
 none, ask the user one question.
 
 Get the facts with `gh`, passing `--repo <owner>/<repo>` when you have a URL:

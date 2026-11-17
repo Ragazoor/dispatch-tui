@@ -59,7 +59,7 @@ rebase/tend/implement/verify/weed work itself.
 
 4. **Resolve the base branch** to rebase onto each iteration — in priority order:
    1. **Task context** — if this session is running as a dispatched task, use that task's
-      `base_branch` (e.g. via the dispatch MCP `get_task` tool).
+      `base_branch` (e.g. via the dispatch MCP `task_search` tool).
    2. **Ask** — if there is no task context to read a base branch from, ask the user via
       AskUserQuestion rather than assuming `main`.
 

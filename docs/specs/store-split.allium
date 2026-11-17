@@ -153,7 +153,7 @@
 --     due scheduled task (schedules.allium: FireDueTask). dispatch_task writes
 --     the request and waits up to 30 seconds for dispatched or failed; when
 --     the wait ends first it returns the request id and its state, and
---     get_task shows the request state. The TUI's DispatchingFeedback follows
+--     task_search shows the request state. The TUI's DispatchingFeedback follows
 --     the row.
 --   - D7, the gate. Every rule the module enforces for dispatch requests is
 --     covered by the version gate above (sync.allium: config.rules_version).

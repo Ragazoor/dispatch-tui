@@ -262,7 +262,7 @@ fn learning_text(summary: &str, detail: Option<&str>) -> String {
     }
 }
 
-/// `get_task`'s text for a task; a missing task is refused with `missing`.
+/// `task_search`'s text for a task; a missing task is refused with `missing`.
 async fn task_text(
     state: &McpState,
     id: TaskId,

@@ -208,8 +208,8 @@ fn retro_skill_requires_a_duplicate_check_before_filing() {
     // in the skill told the agent to look first.
     let section = retro_section("### before you file");
     assert!(
-        section.contains("list_tasks"),
-        "retro must check for an existing task with list_tasks before filing"
+        section.contains("task_search"),
+        "retro must check for an existing task with task_search before filing"
     );
     assert!(
         section.contains("one task per finding"),
@@ -334,7 +334,7 @@ fn retro_text_holds_each_session_guarantee() {
         ),
         (
             "ActionIsKnownBeforeFixOrFile",
-            "it is in the invocation or in `wrap_up_mode` from `get_task`",
+            "it is in the invocation or in `wrap_up_mode` from `task_search`",
         ),
         (
             "ActionIsKnownBeforeFixOrFile",

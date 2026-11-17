@@ -1,4 +1,4 @@
-//! Soft delete over MCP: `get_task` and `list_tasks(archived: true)` read
+//! Soft delete over MCP: `task_search` and `task_search(archived: true)` read
 //! archived records, and the write tools refuse an archived id
 //! (mcp-task-tools.allium: GetArchivedTaskViaMcp, ListArchivedTasksViaMcp,
 //! ArchivedTaskIsReadOnly).
@@ -39,7 +39,7 @@ async fn get_task_reads_an_archived_task() {
     let state = test_state().await;
     let id = archived_task(&state, "Old work", "/a").await;
 
-    let resp = tool(&state, "get_task", json!({ "task_id": id.0 })).await;
+    let resp = tool(&state, "task_search", json!({ "task_id": id.0 })).await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
     let text = extract_response_text(&resp);
     assert!(text.contains(&format!("Task {}: Old work", id.0)), "{text}");
@@ -51,7 +51,7 @@ async fn get_task_reads_an_archived_task() {
 #[tokio::test]
 async fn get_task_on_an_id_never_used_is_still_not_found() {
     let state = test_state().await;
-    let resp = tool(&state, "get_task", json!({ "task_id": 9999 })).await;
+    let resp = tool(&state, "task_search", json!({ "task_id": 9999 })).await;
     assert!(is_error(&resp), "{resp:?}");
 }
 
@@ -65,14 +65,14 @@ async fn list_tasks_archived_lists_only_archived_records() {
         .await
         .unwrap();
 
-    let resp = tool(&state, "list_tasks", json!({ "archived": true })).await;
+    let resp = tool(&state, "task_search", json!({ "archived": true })).await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
     let text = extract_response_text(&resp);
     assert!(text.contains(&format!("#{}: Gone task", gone.0)), "{text}");
     assert!(text.contains("archived "), "{text}");
     assert!(!text.contains("Live task"), "{text}");
 
-    let live = extract_response_text(&tool(&state, "list_tasks", json!({})).await);
+    let live = extract_response_text(&tool(&state, "task_search", json!({})).await);
     assert!(
         !live.contains("Gone task"),
         "the default lists live tasks only: {live}"
@@ -89,7 +89,7 @@ async fn list_tasks_archived_applies_repo_and_query_filters_newest_first() {
     let text = extract_response_text(
         &tool(
             &state,
-            "list_tasks",
+            "task_search",
             json!({ "archived": true, "repo_paths": ["/a"], "query": "login" }),
         )
         .await,
@@ -107,8 +107,8 @@ async fn list_tasks_archived_applies_repo_and_query_filters_newest_first() {
 async fn list_tasks_archived_with_nothing_says_so() {
     let state = test_state().await;
     let text =
-        extract_response_text(&tool(&state, "list_tasks", json!({ "archived": true })).await);
-    assert_eq!(text, "No archived tasks found");
+        extract_response_text(&tool(&state, "task_search", json!({ "archived": true })).await);
+    assert_eq!(text, "No archived tasks match (no filters)");
 }
 
 #[tokio::test]
@@ -121,7 +121,7 @@ async fn list_tasks_archived_rejects_live_only_filters() {
     ] {
         let mut args = extra.clone();
         args["archived"] = json!(true);
-        let resp = tool(&state, "list_tasks", args).await;
+        let resp = tool(&state, "task_search", args).await;
         assert_error(&resp, "archived");
     }
 }

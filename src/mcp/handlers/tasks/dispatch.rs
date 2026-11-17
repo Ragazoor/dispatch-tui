@@ -86,7 +86,7 @@ pub(crate) async fn handle_dispatch_task(
             JsonRpcResponse::err(id, INTERNAL_ERROR, format!("dispatch failed: {reason}"))
         }
         // Still open when the wait ended: NOT an error. The dispatch carries
-        // on; get_task's [Dispatch request] line shows how it ends.
+        // on; task_search's [Dispatch request] line shows how it ends.
         open => {
             let state_word = open
                 .as_ref()
@@ -94,7 +94,7 @@ pub(crate) async fn handle_dispatch_task(
                 .unwrap_or(DispatchRequestState::Requested.as_str());
             let text = format!(
                 "dispatch request #{} for {} is still {state_word}; it carries on \
-                 without this call. Call get_task(task_id={}) to see how it ends — its \
+                 without this call. Call task_search(task_id={}) to see how it ends — its \
                  \"Dispatch request:\" line shows the request's state, and the worktree and \
                  tmux window once it is dispatched.",
                 request.0,

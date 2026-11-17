@@ -68,11 +68,11 @@ enum ActionSource { argument | preset_mode | operator_choice }
 entity WrapUp {
     -- The leading integer of the branch name {id}-{slug}.
     task_id: Integer
-    -- From get_task's "Base branch" line; main when the line is absent.
+    -- From task_search's "Base branch" line; main when the line is absent.
     base_branch: String
     -- The path given as the skill's argument; any other argument is ignored.
     argument: core/WrapUpMode?
-    -- get_task's "Wrap-up mode" line; printed only when set.
+    -- task_search's "Wrap-up mode" line; printed only when set.
     preset_mode: core/WrapUpMode?
     -- The settled path; absent until settled.
     action: core/WrapUpMode?
@@ -80,7 +80,7 @@ entity WrapUp {
     -- Source lines added plus removed, committed and not. Docs, configs,
     -- snapshots and lock files do not count.
     changed_source_lines: Integer
-    -- get_task's "Verify command" line; absent when none is printed.
+    -- task_search's "Verify command" line; absent when none is printed.
     verify_command: String?
     -- The agent has run verify_command, in its worktree, and it passed.
     verify_passed: Boolean
@@ -88,7 +88,7 @@ entity WrapUp {
     worktree_clean: Boolean
     -- wrap_up's exit token; absent until wrap_up answers with one.
     exit_token: String?
-    -- get_task's "Wrap-up: refused" reason; printed only for a task that
+    -- task_search's "Wrap-up: refused" reason; printed only for a task that
     -- cannot be wrapped up.
     refusal: String?
     -- The PR the agent created, on the pr path only.
@@ -141,7 +141,7 @@ entity WrapUp {
 config {
     -- What the skill says first.
     announcement: String = "I'm using the wrap-up skill to complete this task."
-    -- The base branch when get_task prints none.
+    -- The base branch when task_search prints none.
     default_base_branch: String = "main"
     -- At or above this many changed source lines the skill runs simplify.
     simplify_threshold_lines: Integer = 100
@@ -203,7 +203,7 @@ rule ReadTask {
 
     requires: follows_naming_convention(current_branch())
 
-    let task = get_task(run.task_id)
+    let task = task_search(task_id: run.task_id)
 
     ensures: run.refusal = wrap_up_refusal_line(task)
     ensures: run.base_branch = base_branch_line(task) ?? config.default_base_branch
@@ -212,7 +212,7 @@ rule ReadTask {
     ensures: run.stage = task_read
 
     @guidance
-        -- get_task answers in prose with one labelled line per field, and a
+        -- task_search answers in prose with one labelled line per field, and a
         -- missing line means the field is unset. "Base branch: <name>" is
         -- the base branch, main when absent. "Wrap-up mode: <mode>" is
         -- printed only when set; with no argument it is treated as one
@@ -353,7 +353,7 @@ rule VerifyBeforeCommit {
     ensures: run.stage = verified
 
     @guidance
-        -- When get_task printed a "Verify command:" line, the agent runs it
+        -- When task_search printed a "Verify command:" line, the agent runs it
         -- in its worktree now, whatever the path, and fixes any failure
         -- before going on. Dispatch does not run it and does not check that
         -- the agent did (VerifyBeforeWrapUp). When it fails for a reason the
@@ -373,7 +373,7 @@ rule VerifyFailedForOtherReasons {
     @guidance
         -- A failure the change did not cause, including a broken main: the
         -- agent does not wrap up past it alone. It looks for a task already
-        -- fixing it (list_tasks, ListAgents) and otherwise proposes a fix or
+        -- fixing it (task_search, ListAgents) and otherwise proposes a fix or
         -- creates and dispatches a task for it
         -- (VerifyFailureIsNotWrappedPast).
 }
@@ -717,7 +717,7 @@ surface WrapUpSession {
         -- paths is ignored (UsePresetPath, AskForPath, OperatorChoseAPath).
 
     @guarantee RefusedTaskStopsEarly
-        -- When get_task prints a "Wrap-up: refused" line the skill shows it and
+        -- When task_search prints a "Wrap-up: refused" line the skill shows it and
         -- stops before the simplify, retro and commit steps, because wrap_up
         -- would refuse the task and those steps would be wasted
         -- (mcp-task-tools.allium: ReviewTasksAreNotWrappedUp; ReadTask,
@@ -749,7 +749,7 @@ surface WrapUpSession {
         -- left alone (RunRetro, RetroRunsOncePerWrapUp).
 
     @guarantee VerifyBeforeWrapUp
-        -- When get_task prints a Verify command, the agent runs it in its own
+        -- When task_search prints a Verify command, the agent runs it in its own
         -- worktree on every path and fixes any failure before wrap_up is
         -- called. Dispatch does not run it and does not check that the agent
         -- did (mcp-task-tools.allium: AgentsRunTheVerifyCommand). On the pr

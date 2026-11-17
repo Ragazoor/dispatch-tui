@@ -4,16 +4,16 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{Agent, EpicId, Task, TaskId, TaskStatus};
+use crate::models::{Agent, Task, TaskId, TaskStatus};
 use crate::service::{
     CreateTaskParams, ListTasksFilter, ServiceError, UpdateTaskParams, UrlUpdate,
 };
 
 use super::super::time_filter;
 use super::{
-    fetch_caller_task, parse_args, service_err_to_response, tool_error, CreateTaskWithEpicArgs,
-    GetTaskArgs, JsonRpcResponse, ListTasksArgs, QueryUsageArgs, StatusFilter, UpdateTaskArgs,
-    INVALID_PARAMS,
+    fetch_caller_task, parse_args, reject_alongside, service_err_to_response, tool_error,
+    CreateTaskWithEpicArgs, JsonRpcResponse, QueryUsageArgs, StatusFilter, TaskSearchArgs,
+    UpdateTaskArgs, INVALID_PARAMS,
 };
 
 async fn handle_update_task(
@@ -466,26 +466,62 @@ pub(crate) async fn handle_create_task(
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-pub(crate) async fn handle_get_task(
+/// Rows `task_search` returns when the caller names no `limit`
+/// (`ListTasksViaMcp`, mcp-task-tools.allium).
+const DEFAULT_TASK_LIMIT: usize = 50;
+
+/// `task_search`: the `task_id` form is the detail view
+/// (`GetTaskViaMcp`), every other call the list (`ListTasksViaMcp`).
+pub(crate) async fn handle_task_search(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
-    let parsed = match parse_args::<GetTaskArgs>(&id, args) {
+    let parsed = match parse_args::<TaskSearchArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(task_id = parsed.task_id.0, "MCP get_task");
+    match parsed.task_id {
+        Some(task_id) => {
+            if let Some(refusal) = reject_alongside(
+                &id,
+                "task_id",
+                &[
+                    ("epic_id", parsed.epic_id.is_some()),
+                    ("repo_paths", parsed.repo_paths.is_some()),
+                    ("status", parsed.status.is_some()),
+                    ("recursive", parsed.recursive),
+                    ("base_branch", parsed.base_branch.is_some()),
+                    ("query", parsed.query.is_some()),
+                    ("limit", parsed.limit.is_some()),
+                    ("bookmarked", parsed.bookmarked.is_some()),
+                    ("archived", parsed.archived),
+                    ("updated_after", parsed.updated_after.is_some()),
+                    ("updated_before", parsed.updated_before.is_some()),
+                    ("completed_after", parsed.completed_after.is_some()),
+                    ("completed_before", parsed.completed_before.is_some()),
+                ],
+            ) {
+                return refusal;
+            }
+            get_task_detail(state, id, task_id).await
+        }
+        None => list_tasks(state, id, parsed).await,
+    }
+}
 
-    match state.task_svc.get_task(parsed.task_id).await {
+async fn get_task_detail(state: &McpState, id: Option<Value>, task_id: TaskId) -> JsonRpcResponse {
+    tracing::info!(task_id = task_id.0, "MCP task_search one task");
+
+    match state.task_svc.get_task(task_id).await {
         Ok(task) => {
             let text = super::task_detail_text(state, &task).await;
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
         // GetArchivedTaskViaMcp: an id with no live task may be archived.
         Err(e @ crate::service::ServiceError::NotFound(_)) => {
-            match state.db.archived_task(parsed.task_id).await {
+            match state.db.archived_task(task_id).await {
                 Ok(Some(record)) => {
                     let text = super::archived::archived_detail_text(&record);
                     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
@@ -512,42 +548,79 @@ async fn build_plan_goal_cache(tasks: &[Task]) -> HashMap<String, String> {
     cache
 }
 
-/// Resolve the epic/exclusion scope for `list_tasks`. A task caller inherits
-/// its own epic as the default scope, unless the request explicitly names an
-/// `epic_id` or `repo_paths` — an explicit scope always overrides inheritance.
-/// A session caller has no inherited scope.
-async fn resolve_list_scope(
-    state: &McpState,
-    id: &Option<Value>,
-    identity: &CallerIdentity,
-    parsed: &ListTasksArgs,
-) -> Result<(Option<EpicId>, Option<TaskId>), JsonRpcResponse> {
-    match identity {
-        CallerIdentity::Task(caller_id) => {
-            let caller = fetch_caller_task(&*state.db, id, *caller_id).await?;
-            let has_explicit_scope = parsed.epic_id.is_some() || parsed.repo_paths.is_some();
-            let epic = if has_explicit_scope {
-                None
-            } else {
-                caller.epic_id
-            };
-            Ok((epic, Some(caller.id)))
-        }
-        CallerIdentity::Session => Ok((None, None)),
+/// The filters a list call applied, as `name=value` in the order
+/// `ListTasksViaMcp` fixes, for the empty reply. `None` when it applied none.
+fn applied_filters(p: &TaskSearchArgs) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(e) = p.epic_id {
+        parts.push(format!("epic_id={}", e.0));
     }
+    if p.recursive {
+        parts.push("recursive=true".to_string());
+    }
+    if let Some(paths) = &p.repo_paths {
+        parts.push(format!("repo_paths=[{}]", paths.join(", ")));
+    }
+    if let Some(statuses) = &p.status {
+        let names: Vec<&str> = statuses.0.iter().map(|s| s.as_str()).collect();
+        parts.push(format!("status=[{}]", names.join(", ")));
+    }
+    if let Some(b) = &p.base_branch {
+        parts.push(format!("base_branch={b}"));
+    }
+    if let Some(q) = &p.query {
+        parts.push(format!("query={q:?}"));
+    }
+    if let Some(b) = p.bookmarked {
+        parts.push(format!("bookmarked={b}"));
+    }
+    for (name, value) in [
+        ("updated_after", &p.updated_after),
+        ("updated_before", &p.updated_before),
+        ("completed_after", &p.completed_after),
+        ("completed_before", &p.completed_before),
+    ] {
+        if let Some(v) = value {
+            parts.push(format!("{name}={v}"));
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(", "))
 }
 
-pub(crate) async fn handle_list_tasks(
+/// The reply for a list that matched nothing: it names the filters applied.
+pub(super) fn empty_reply(noun: &str, filters: Option<String>) -> String {
+    format!(
+        "No {noun} match {}",
+        filters.unwrap_or_else(|| "(no filters)".to_string())
+    )
+}
+
+/// Keep the first `limit` rows (50 when `limit` is `None`). Returns the line
+/// to append when rows were cut: it says how many, in what order, and how to
+/// get the rest.
+pub(super) fn cut_rows<T>(
+    rows: &mut Vec<T>,
+    limit: Option<std::num::NonZeroUsize>,
+    order: &str,
+) -> Option<String> {
+    let total = rows.len();
+    let n = limit.map_or(DEFAULT_TASK_LIMIT, std::num::NonZeroUsize::get);
+    if total <= n {
+        return None;
+    }
+    rows.truncate(n);
+    Some(format!(
+        "Showing {n} of {total}, {order}. Narrow with epic_id, status, query or the time \
+         filters, or raise limit."
+    ))
+}
+
+async fn list_tasks(
     state: &McpState,
     id: Option<Value>,
-    identity: &CallerIdentity,
-    args: Value,
+    parsed: TaskSearchArgs,
 ) -> JsonRpcResponse {
-    let parsed = match parse_args::<ListTasksArgs>(&id, args) {
-        Ok(a) => a,
-        Err(resp) => return resp,
-    };
-    tracing::info!(status = ?parsed.status, identity = ?identity, "MCP list_tasks");
+    tracing::info!(status = ?parsed.status, "MCP task_search list");
 
     if parsed.archived
         && (parsed.status.is_some() || parsed.recursive || parsed.bookmarked.is_some())
@@ -586,29 +659,26 @@ pub(crate) async fn handle_list_tasks(
         Err(resp) => return resp,
     };
 
-    let (derived_epic_id, exclude_task_id) =
-        match resolve_list_scope(state, &id, identity, &parsed).await {
-            Ok(scope) => scope,
-            Err(resp) => return resp,
-        };
+    let filters = applied_filters(&parsed);
 
     if parsed.archived {
         return super::archived::list_archived(
             state,
             id,
             super::archived::ArchivedFilter {
-                epic_id: parsed.epic_id.or(derived_epic_id),
+                epic_id: parsed.epic_id,
                 repo_paths: parsed.repo_paths.unwrap_or_default(),
                 base_branch: parsed.base_branch,
                 query: parsed.query,
                 limit: parsed.limit,
+                filters,
             },
         )
         .await;
     }
 
     let status_filter: Option<Vec<TaskStatus>> = parsed.status.map(StatusFilter::into_vec);
-    let epic_id = parsed.epic_id.or(derived_epic_id);
+    let epic_id = parsed.epic_id;
     if parsed.recursive && epic_id.is_none() {
         return JsonRpcResponse::err(
             id,
@@ -625,7 +695,6 @@ pub(crate) async fn handle_list_tasks(
             recursive: parsed.recursive,
             repo_paths: parsed.repo_paths,
             base_branch: parsed.base_branch,
-            exclude_task_id,
             query: parsed.query,
         })
         .await
@@ -643,10 +712,16 @@ pub(crate) async fn handle_list_tasks(
     if filtered.is_empty() {
         return JsonRpcResponse::ok(
             id,
-            json!({"content": [{"type": "text", "text": "No tasks found"}]}),
+            json!({"content": [{"type": "text", "text": empty_reply("tasks", filters)}]}),
         );
     }
-    let cut_hint = super::super::types::apply_limit(&mut filtered, parsed.limit);
+    // ListTasksViaMcp: most recently updated first, ties by id descending.
+    filtered.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| b.id.0.cmp(&a.id.0))
+    });
+    let cut_hint = cut_rows(&mut filtered, parsed.limit, "most recently updated first");
     let (epic_titles, plan_goals, agents) = tokio::join!(
         super::build_epic_titles(state),
         build_plan_goal_cache(&filtered),
@@ -668,14 +743,14 @@ pub(crate) async fn handle_list_tasks(
         .map(|t| {
             let goal = match t.plan_path.as_deref().and_then(|p| plan_goals.get(p)) {
                 Some(g) if !g.is_empty() => g.clone(),
-                _ => super::description_preview(&t.description),
+                _ => t.description.clone(),
             };
             super::format_task_line(
                 t,
                 bookmarks.contains(&t.id),
                 current_agents.get(&t.id).copied(),
                 &epic_titles,
-                &goal,
+                &super::goal_line(&goal),
             )
         })
         .collect();
@@ -872,7 +947,7 @@ mod tests {
             (
                 "epic_id",
                 UpdateTaskArgs {
-                    epic_id: Some(EpicId(1)),
+                    epic_id: Some(crate::models::EpicId(1)),
                     ..base_args()
                 },
             ),

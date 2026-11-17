@@ -14,7 +14,7 @@ async fn a_numeric_string_is_still_an_id() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "get_task", "arguments": {"task_id": id.0.to_string()}})),
+        Some(json!({"name": "task_search", "arguments": {"task_id": id.0.to_string()}})),
     )
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
@@ -26,7 +26,7 @@ async fn an_unknown_word_is_not_found_like_an_unknown_id() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "get_task", "arguments": {"task_id": "nope"}})),
+        Some(json!({"name": "task_search", "arguments": {"task_id": "nope"}})),
     )
     .await;
     // A tool failure, like an unknown id: an `isError` result, no protocol code.
@@ -38,8 +38,8 @@ async fn an_unknown_word_is_not_found_like_an_unknown_id() {
 async fn omitted_or_null_arguments_mean_no_arguments() {
     let state = test_state().await;
     for params in [
-        json!({"name": "list_tasks"}),
-        json!({"name": "list_tasks", "arguments": null}),
+        json!({"name": "task_search"}),
+        json!({"name": "task_search", "arguments": null}),
     ] {
         let resp = call(&state, "tools/call", Some(params.clone())).await;
         assert!(resp.error.is_none(), "{params}: {:?}", resp.error);
@@ -57,14 +57,14 @@ async fn limit_accepts_a_numeric_string_and_rejects_zero() {
     let ok = call(
         &state,
         "tools/call",
-        Some(json!({"name": "list_tasks", "arguments": {"limit": "5"}})),
+        Some(json!({"name": "task_search", "arguments": {"limit": "5"}})),
     )
     .await;
     assert_ne!(ok.result.as_ref().unwrap()["isError"].as_bool(), Some(true));
     let zero = call(
         &state,
         "tools/call",
-        Some(json!({"name": "list_tasks", "arguments": {"limit": 0}})),
+        Some(json!({"name": "task_search", "arguments": {"limit": 0}})),
     )
     .await;
     let rejected = zero.error.is_some() || zero.result.as_ref().unwrap()["isError"] == json!(true);
@@ -96,7 +96,7 @@ async fn get_task_accepts_an_agent_name_in_place_of_the_id() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "get_task", "arguments": {"task_id": name}})),
+        Some(json!({"name": "task_search", "arguments": {"task_id": name}})),
     )
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
@@ -130,7 +130,7 @@ async fn get_task_shows_the_current_agent_and_that_it_is_not_live() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "get_task", "arguments": {"task_id": name}})),
+        Some(json!({"name": "task_search", "arguments": {"task_id": name}})),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -146,7 +146,7 @@ async fn list_tasks_shows_the_current_agent_beside_the_title() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "list_tasks", "arguments": {}})),
+        Some(json!({"name": "task_search", "arguments": {}})),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -169,7 +169,7 @@ async fn a_task_not_yet_launched_shows_its_agent_as_not_started() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "get_task", "arguments": {"task_id": id.0}})),
+        Some(json!({"name": "task_search", "arguments": {"task_id": id.0}})),
     )
     .await;
     // Every task has an agent from creation (A17): not started, until launch.

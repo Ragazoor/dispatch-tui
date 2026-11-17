@@ -40,7 +40,7 @@ tool — its own description carries what the prose would say, got: {text}"
 }
 
 /// The epic section states the epic and how to reach siblings, and names no
-/// dispatch MCP tool: `list_tasks` has its own schema, so naming it restates it.
+/// dispatch MCP tool: `task_search` has its own schema, so naming it restates it.
 /// See `ThePromptNamesNoToolMerelyToSayItExists` in
 /// `docs/specs/dispatch-prompt.allium`.
 #[test]

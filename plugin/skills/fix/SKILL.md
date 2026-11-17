@@ -43,9 +43,9 @@ its branch; the task is how work reaches it.
 
 ## Step 3: Check for a duplicate
 
-Call `list_tasks` with `query` set to the key words of the defect and
-`repo_paths` set to `[repo_path]`, so the search is not limited to your own
-epic. If an open task already covers it, tell the user its id and stop.
+Call `task_search` with `query` set to the key words of the defect and
+`repo_paths` set to `[repo_path]`, so the search covers every epic of the
+owning repo. If an open task already covers it, tell the user its id and stop.
 
 ## Step 4: Confirm
 

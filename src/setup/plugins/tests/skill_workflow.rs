@@ -54,7 +54,7 @@ fn wrap_up_skill_carries_a_preset_mode_through_without_asking_or_stopping() {
         .expect("wrap-up skill must have a Step 2 that reads the task");
     assert!(
         step_2.contains("Wrap-up mode:"),
-        "Step 2 must read the preset mode off the line get_task actually \
+        "Step 2 must read the preset mode off the line task_search actually \
          prints (`Wrap-up mode: <mode>`) — the response is prose, not JSON, \
          so an agent told to look for a `wrap_up_mode` field can find \
          nothing and fall through to the question it was meant to skip"
@@ -343,7 +343,7 @@ fn fix_skill_confirms_then_creates_and_dispatches_a_fix_task_in_the_owning_repo(
             "RepoPathIsTheMainRoot",
             "ask the user for the path instead of guessing",
         ),
-        ("DuplicateCheckSearchesTheOwningRepo", "`list_tasks`"),
+        ("DuplicateCheckSearchesTheOwningRepo", "`task_search`"),
         (
             "DuplicateCheckSearchesTheOwningRepo",
             "`repo_paths` set to `[repo_path]`",
@@ -396,14 +396,14 @@ fn fix_skill_confirms_then_creates_and_dispatches_a_fix_task_in_the_owning_repo(
     // (DuplicateCheckSearchesTheOwningRepo, ConfirmBeforeCreate,
     // DispatchFollowsCreate).
     assert!(
-        at("`list_tasks`") < at("`AskUserQuestion`")
+        at("`task_search`") < at("`AskUserQuestion`")
             && at("`AskUserQuestion`") < at("`create_task`")
             && at("`create_task`") < at("`dispatch_task`"),
         "fix skill must check duplicates, then confirm, then create, then dispatch"
     );
     // ResolveOwningRepo comes before the duplicate check, which needs repo_path.
     assert!(
-        at("--git-common-dir") < at("`list_tasks`"),
+        at("--git-common-dir") < at("`task_search`"),
         "fix skill must resolve repo_path before searching it"
     );
 }

@@ -1,8 +1,8 @@
 -- allium: 3
 -- mcp-task-tools.allium
 --
--- Scope: the dispatch MCP server's task tools (create_task, get_task,
---        update_tasks, list_tasks, query_usage, dispatch_task, resume_task,
+-- Scope: the dispatch MCP server's task tools (create_task, task_search,
+--        update_tasks, query_usage, dispatch_task, resume_task,
 --        wrap_up, exit_session, set_verify_command, set_review_command), the
 --        CLI plan attachment, the agent port that serves them, the standard
 --        every tool description and agent-facing skill is held to, and the
@@ -81,7 +81,7 @@ rule ToolsAdvertiseAnnotations {
 
     -- Every tool in the list carries `annotations` with a `title` and the four
     -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
-    -- nothing (get_task, list_tasks, list_epics, query_learnings,
+    -- nothing (task_search, list_epics, query_learnings,
     -- query_usage, read_context, list_keybindings, list_work_packages,
     -- list_workspaces, list_unseen_items).
     -- managed_feed_config is NOT in that list: its no-argument call reads but
@@ -129,12 +129,17 @@ rule OldToolNameRedirects {
     -- that names the new tool, e.g. "get_task was renamed: call task_search
     -- with task_id". There is no alias: the old name does nothing.
     -- No name in the redirect table is also a registered tool.
+    -- The table holds get_task ("call task_search with task_id") and
+    -- list_tasks ("call task_search; it no longer scopes to your own epic or
+    -- hides your own task, so pass epic_id, and it returns 50 rows unless
+    -- limit says otherwise").
     ensures: UnknownToolErrorNamesNewTool()
 
     @guidance
         -- Asserted by old_tool_name_call_names_the_new_tool,
-        -- redirect_table_names_are_not_registered and
-        -- unregistered_name_gets_no_rename_hint.
+        -- redirect_table_names_are_not_registered,
+        -- unregistered_name_gets_no_rename_hint and
+        -- calling_get_task_or_list_tasks_names_task_search.
 }
 
 -- == MCP Task Tools ==
@@ -688,10 +693,14 @@ rule UpdateTasksViaMcp {
         --
         -- == Selection is explicit ids only ==
         -- There is no epic_id/recursive selection here. The caller lists the
-        -- ids with list_tasks (epic_id, recursive, status, base_branch) and
+        -- ids with task_search (epic_id, recursive, status, base_branch) and
         -- passes them. That keeps one way to select, and the caller's status
-        -- filter on list_tasks decides whether done and running tasks are
-        -- included. Every named task is updated, whatever its status.
+        -- filter on task_search decides whether done and running tasks are
+        -- included. task_search returns at most 50 rows unless limit says
+        -- otherwise: a caller that means to change every match checks the
+        -- reply for the "Showing <n> of <total>" cut line, and narrows or
+        -- raises limit when it is there. Every named task is updated,
+        -- whatever its status.
         --
         -- An empty task_ids, a task_ids that is not an array of ids, or a
         -- task_id argument is rejected as invalid params (-32602) before any
@@ -927,7 +936,9 @@ rule CreateTaskViaMcp {
 }
 
 rule GetTaskViaMcp {
-    when: McpGetTask(task_id)
+    -- The task_id form of task_search. The rule keeps its old name: tests,
+    -- the other specs and the docs cite it.
+    when: McpTaskSearch(client, task_id)
 
     requires: exists core/Task{id: task_id}
     -- An id with no live task but an ArchivedTask is GetArchivedTaskViaMcp's.
@@ -936,10 +947,14 @@ rule GetTaskViaMcp {
     ensures: TaskRetrieved(task_id)
 
     @guidance
-        -- get_task takes only task_id and is the tool a dispatched agent uses
-        -- to read its own task (title, description, plan, tag, wrap_up_mode).
-        -- Caller identity is not consulted: any caller may read any task, and
-        -- there is no auto-scoping or self-exclusion as in ListTasksViaMcp.
+        -- task_search with task_id takes no other argument and is the tool a
+        -- dispatched agent uses to read its own task (title, description,
+        -- plan, tag, wrap_up_mode). It copies list_epics' epic_id form
+        -- (GetEpicViaMcp): task_id alongside any other argument is rejected as
+        -- invalid params (-32602), and the error names the arguments that were
+        -- set. A recursive or archived of false counts as not set.
+        -- Caller identity is not consulted: any caller may read any task,
+        -- the caller's own task included.
         -- Detail lines, in render order (lines in [brackets] appear only when
         -- the field is set):
         --   Task <id>: <title>, Status, Repo, Description, Sub-status,
@@ -982,9 +997,10 @@ rule GetTaskViaMcp {
         -- ServiceError::NotFound surfaces as the -32001 not-found code, the
         -- same mapping every other NotFound uses (see CreateTaskViaMcp).
         --
-        -- == The tool description is one sentence ==
-        -- The description says, in one short sentence, that get_task returns
-        -- a task's details. The format is shown by what it returns: the
+        -- == The description states the two forms and the order ==
+        -- The description says what the two forms return, that the filters
+        -- apply to the list form only, the sort order and the default limit
+        -- (ListTasksViaMcp). It does not describe the detail format: the
         -- response is labelled "Label: value" lines, and a reader that has the
         -- response in front of it needs no prose describing it. Naming the
         -- lines a wrapping-up agent reads belongs to the /wrap-up skill, the
@@ -1002,7 +1018,7 @@ rule GetTaskViaMcp {
 }
 
 rule GetArchivedTaskViaMcp {
-    when: McpGetTask(task_id)
+    when: McpTaskSearch(client, task_id)
 
     requires: not exists core/Task{id: task_id}
     requires: exists core/ArchivedTask{id: task_id}
@@ -1014,7 +1030,7 @@ rule GetArchivedTaskViaMcp {
     ensures: ArchivedTaskRetrieved(task_id)
 
     @guidance
-        -- get_task needs no new parameter: an agent holding an old task id
+        -- The task_id form needs no new parameter: an agent holding an old task id
         -- (from a commit, a learning's source, a plan) asks for it the usual
         -- way and gets what is left. Detail lines, in render order
         -- ([brackets] only when set):
@@ -1035,11 +1051,11 @@ rule GetArchivedTaskViaMcp {
 }
 
 rule ListArchivedTasksViaMcp {
-    when: McpListTasks(caller_identity,
-                       epic_id?, repo_paths?, status?, recursive?, base_branch?,
-                       query?, limit?, bookmarked?, archived?,
-                       updated_after?, updated_before?,
-                       completed_after?, completed_before?)
+    when: McpTaskSearch(client,
+                        epic_id?, repo_paths?, status?, recursive?, base_branch?,
+                        query?, limit?, bookmarked?, archived?,
+                        updated_after?, updated_before?,
+                        completed_after?, completed_before?)
 
     requires: archived = true
 
@@ -1056,7 +1072,6 @@ rule ListArchivedTasksViaMcp {
         if limit != null: limit >= 1
 
     ensures: ArchivedTasksQueried(
-        caller_identity: caller_identity,
         epic_id: epic_id,
         repo_paths: repo_paths,
         base_branch: base_branch,
@@ -1065,7 +1080,7 @@ rule ListArchivedTasksViaMcp {
     )
 
     @guidance
-        -- archived (default false) switches list_tasks from the board's live
+        -- archived (default false) switches the list form of task_search from the board's live
         -- tasks to the caller-visible core/ArchivedTasks, read from the store
         -- on demand. It never mixes the two: archived = true lists only
         -- archived records, and the default lists only live tasks.
@@ -1074,20 +1089,22 @@ rule ListArchivedTasksViaMcp {
         -- copied fields: epic_id matches the record's epic_id (the epic it sat
         -- in, which may since be gone), repo_paths and base_branch match
         -- exactly, query matches every word against title or description,
-        -- and limit cuts with the same "Showing <limit> of <total>." line.
-        -- Auto-scoping is the same too: a dispatched agent with no explicit
-        -- epic_id or repo_paths lists its own epic's archive.
+        -- and limit works as in ListTasksViaMcp: default 50, the same cut line
+        -- and the same "Goal" rule. There is no auto-scoping: a dispatched
+        -- agent that passes no epic_id lists the archive of every epic it may
+        -- see.
         --
         -- Order: newest archived first, ties by id descending. History is
-        -- read backwards from now.
+        -- read backwards from now. The cut line says so.
         --
-        -- Output line per record:
+        -- Output line per record, one line each:
         --   #<id>: <title> | archived <archived_at>
         --   [| epic: <epic_title> (#<epic_id>)] [| agent:<agent_name>]
         --   | Base: <base_branch> [| <url label>: <url>]
-        --   | Goal: <description preview ≤200 chars>
+        --   | Goal: <description as one line, cut to 80 characters>
         -- The plan file is not read: its worktree is gone, so a plan inside
-        -- it no longer exists. Nothing found replies "No archived tasks found".
+        -- it no longer exists. Nothing found replies as in ListTasksViaMcp,
+        -- starting "No archived tasks match", with the filters named.
 }
 
 rule ArchivedTaskIsReadOnly {
@@ -1116,7 +1133,7 @@ rule ArchivedTaskIsReadOnly {
 }
 
 -- == TimeFilterInput: the shared rule for updated_* and completed_* ==
--- list_tasks and list_epics take updated_after, updated_before,
+-- task_search (list form) and list_epics take updated_after, updated_before,
 -- completed_after and completed_before; list_work_packages takes
 -- updated_after and updated_before only (a package has no completed_at, and
 -- the completed_* pair is not offered there). Every list that takes them
@@ -1141,11 +1158,13 @@ rule ArchivedTaskIsReadOnly {
 --   - Archived lists reject all four filters, as they reject status.
 
 rule ListTasksViaMcp {
-    when: McpListTasks(caller_identity,
-                       epic_id?, repo_paths?, status?, recursive?, base_branch?,
-                       query?, limit?, bookmarked?, archived?,
-                       updated_after?, updated_before?,
-                       completed_after?, completed_before?)
+    -- The list form of task_search: no task_id. (task_id is the detail form,
+    -- GetTaskViaMcp.)
+    when: McpTaskSearch(client,
+                        epic_id?, repo_paths?, status?, recursive?, base_branch?,
+                        query?, limit?, bookmarked?, archived?,
+                        updated_after?, updated_before?,
+                        completed_after?, completed_before?)
 
     -- archived = true is ListArchivedTasksViaMcp's.
     requires: archived != true
@@ -1160,17 +1179,17 @@ rule ListTasksViaMcp {
     requires: time_filters_are_valid(updated_after, updated_before)
     requires: time_filters_are_valid(completed_after, completed_before)
 
-    -- caller_identity comes from the HTTP transport (see CreateTaskViaMcp).
+    -- The caller's identity is not consulted: the same arguments give the
+    -- same rows to a dispatched agent and to a session.
 
     ensures: TasksQueried(
-        caller_identity: caller_identity,
         epic_id: epic_id,
         repo_paths: repo_paths,
         status: status,
         recursive: recursive,
         base_branch: base_branch,
         query: query,
-        limit: limit,
+        limit: limit ?? 50,
         bookmarked: bookmarked,
         updated_after: updated_after,
         updated_before: updated_before,
@@ -1179,13 +1198,50 @@ rule ListTasksViaMcp {
     )
 
     @guidance
+        -- == there is no epic scope unless the caller passes epic_id ==
+        -- Filters are ANDed. Nothing is derived from the caller: a dispatched
+        -- agent that passes no epic_id sees tasks of every epic, as a session
+        -- does. An agent finds its own epic in its prompt and passes it. The
+        -- caller's own task is NOT excluded: it is a task like any other, and
+        -- a hidden exclusion would be a filter the caller cannot see. (The
+        -- tool used to scope a dispatched agent to its epic and drop its own
+        -- task; the trajectory logs showed 33 empty replies that no argument
+        -- explained.) recursive needs an epic_id, below.
+        -- == the order decides which rows an agent sees ==
+        -- Rows are sorted by updated_at, newest first, ties by id
+        -- descending. With a limit this puts the tasks that moved most
+        -- recently in the first rows, which is what an agent looking for
+        -- current work wants. The tool description and the cut line state
+        -- the order.
+        -- == limit defaults to 50 ==
+        -- limit is optional; without it the first 50 rows are returned after
+        -- every filter has been applied (the trajectory logs show one
+        -- no-argument reply of 258 KB). When rows were cut, a final line
+        -- says how to get the rest:
+        --   "Showing <limit> of <total>, newest update first. Narrow with
+        --    epic_id, status, query or the time filters, or raise limit."
+        -- When nothing is cut there is no such line. A caller that must see
+        -- every match (a bulk change) checks for the line and raises limit.
+        -- == one line per row ==
+        -- A row never spans lines. The goal (the plan's goal when the task has
+        -- a readable plan, else the description) has every run of whitespace,
+        -- line breaks included, collapsed to one space, and is cut to 80
+        -- characters with "..." appended when it was longer. The same holds
+        -- for a title that carries a line break.
+        -- == an empty result names the filters ==
+        -- Nothing found replies "No tasks match <filters>", where <filters>
+        -- lists every argument the call applied as name=value, in the order
+        -- epic_id, recursive, repo_paths, status, base_branch, query,
+        -- bookmarked, updated_after, updated_before, completed_after,
+        -- completed_before, e.g. "No tasks match epic_id=319,
+        -- status=[backlog]". A call with no filter reads "No tasks match (no
+        -- filters)". The archived list says "No archived tasks match ...".
         -- == time filters narrow by updated_at and completed_at ==
         -- updated_after / updated_before bound Task.updated_at;
         -- completed_after / completed_before bound Task.completed_at. Each
-        -- is optional, ANDed with every other filter, and not a scope
-        -- filter: none disables auto-scoping. See TimeFilterInput for the
-        -- input form, the bounds and the validation, which list_epics and
-        -- list_work_packages share.
+        -- is optional and ANDed with every other filter. See TimeFilterInput
+        -- for the input form, the bounds and the validation, which list_epics
+        -- and list_work_packages share.
         -- completed_at records the LAST completion and survives a move out
         -- of done; updated_at moves on every later change, so a done task
         -- edited after completion is later in updated_at than in
@@ -1197,15 +1253,13 @@ rule ListTasksViaMcp {
         -- == bookmarked narrows to the board person's bookmarks ==
         -- bookmarked = true keeps only tasks the board's person (see
         -- UpdateTaskViaMcp's `bookmarked`) has a core/Bookmark on; false
-        -- keeps only those they have not; omitted does not filter. It is ANDed
-        -- with every other filter and is NOT a scope filter: it does not
-        -- disable auto-scoping, so "all my bookmarks" from a dispatched agent
-        -- needs an explicit scope, as query does. A bookmarked task's row
-        -- carries " bookmarked" after its title, with or without the filter.
+        -- keeps only those they have not; omitted does not filter. A
+        -- bookmarked task's row carries " bookmarked" after its title, with
+        -- or without the filter.
         -- == each row names the display agent ==
         -- A row for a task with an agent carries " agent:<name> (<state>)"
-        -- after the title, with the same states as get_task's Agent line
-        -- (live, paused, not started, ended). A task with no agent shows
+        -- after the title, with the same states as the detail form's Agent
+        -- line (live, paused, not started, ended). A task with no agent shows
         -- nothing.
         -- == query is a text search over title and description ==
         -- query, when set, keeps only tasks that match it. It is split on
@@ -1213,76 +1267,21 @@ rule ListTasksViaMcp {
         -- case-insensitive substring of its title or its description (a word
         -- may match in either field, different words in different fields).
         -- Word order does not matter. A blank query (empty or only
-        -- whitespace) has no words and is the same as omitting it. It is ANDed
-        -- with every other filter and it is not a scope filter: it does not
-        -- disable auto-scoping, so an agent searching with a query still
-        -- searches only its own epic unless it passes epic_id/repo_paths.
-        -- The same matching rule serves list_epics (ListEpicsViaMcp in
-        -- epics.allium). Substring, not whole-word: "dispatch" matches
-        -- "redispatch". No ranking: matches come back in the usual list order.
-        -- When nothing matches the reply is the usual "No tasks found".
-        -- == limit caps the rows, with no default ==
-        -- limit is optional and has NO default: without it the list is
-        -- complete. A default would silently truncate the plain
-        -- list that callers rely on being complete (a bulk change would miss
-        -- tasks without knowing). With limit set, the first `limit` rows in
-        -- the usual order are returned after every filter has been applied.
-        -- When rows were cut, a final line says so:
-        --   "Showing <limit> of <total>. Narrow your query or filters."
-        -- When nothing is cut there is no such line. The same rule serves
-        -- list_epics (ListEpicsViaMcp in epics.allium).
-        --
+        -- whitespace) has no words and is the same as omitting it. The same
+        -- matching rule serves list_epics (ListEpicsViaMcp in epics.allium).
+        -- Substring, not whole-word: "dispatch" matches "redispatch". No
+        -- ranking: matches come back in the order above.
         -- == recursive widens the epic scope to the whole subtree ==
-        -- recursive (default false) applies to the epic scope in effect,
-        -- explicit or auto-derived (below): with it, a task matches when its
-        -- epic is the scope epic or any descendant of it (core/Epic
-        -- parent_epic_id chain), not only the scope epic itself. Without it
-        -- the walk had to be done by hand, one get_epic per guessed id, and a
-        -- missed sub-epic silently left its tasks out of a bulk change.
-        -- recursive = true with no epic scope in effect (a session caller with
-        -- no epic_id, or an agent with no epic that passed repo_paths) is
-        -- rejected as invalid params (-32602): the board-wide list is already
-        -- every task, so the flag would mean nothing.
-        --
+        -- recursive (default false) applies to epic_id: with it, a task
+        -- matches when its epic is epic_id or any descendant of it
+        -- (core/Epic parent_epic_id chain), not only epic_id itself.
+        -- recursive = true without epic_id is rejected as invalid params
+        -- (-32602): the list with no epic is already every task, so the flag
+        -- would mean nothing.
         -- == base_branch filters by exact match and every row shows it ==
         -- base_branch, when set, keeps only tasks whose base_branch equals it
-        -- exactly. It is not a scope filter: it does not disable auto-scoping.
-        -- Every output row carries " | Base: <base_branch>", so a caller can
-        -- see which tasks need a change before making it.
-        --
-        -- When the caller is Task(t) and none of epic_id/repo_paths
-        -- are set, auto-derive scope from the caller:
-        --   caller.epic_id != null → filter by epic_id = caller.epic_id
-        -- Explicit scope filters always win over auto-derived scope.
-        -- When the caller is Task(t) alongside an explicit scope filter, the
-        -- caller's task is still excluded from results but no additional
-        -- scope is derived.
-        -- When the caller is Session, no auto-scope and no self-exclusion.
-        --
-        -- This auto-scoping is UNCHANGED by EveryTaskNamesItsEpicOrNull in
-        -- CreateTaskViaMcp. Inheriting the caller's epic was removed from
-        -- create_task only, where it silently propagated a blank into newly
-        -- created work. Here nothing is created: the caller's epic narrows a
-        -- read that would otherwise return the whole board, an omitted
-        -- epic_id simply means "no narrowing", and a wrong guess costs the
-        -- caller one over-broad list rather than a mis-parented task.
-        -- Output line per task: title, status/sub_status, tag, epic, then
-        --   | Base: <base_branch>
-        --   | Updated: <updated_at>
-        --   | Completed: <completed_at>  ("-" when the task has none)
-        --     both as ISO 8601 UTC with a Z suffix (2026-11-11T08:26:37Z)
-        --   | <label>: <url.url>  (omitted when url is null), where <label>
-        --     is the typed label derived from url.url_type: "PR #N" / "Issue #N"
-        --     / "Security Alert" / "Link"
-        --   | Goal: <plan goal>  (from **Goal:** line in plan file; falls back to
-        --                         description preview ≤200 chars when plan absent/unreadable)
-        --
-        -- == The tool description names every url label, not just PR ==
-        -- The url line is typed, so three of the four labels are not "PR". The
-        -- description names all four rather than describing the output as a PR
-        -- url: a caller
-        -- who scans for the word "PR" on a security-alert or issue task finds
-        -- nothing and concludes the task carries no link.
+        -- exactly. Every output row carries " | Base: <base_branch>", so a
+        -- caller can see which tasks need a change before making it.
 }
 
 rule QueryUsageViaMcp {
@@ -1366,7 +1365,7 @@ rule DispatchTaskViaMcp {
         --     meanwhile. The call itself releases nothing.
         --   - still requested or provisioning when the cap passes: NOT an
         --     error. The response gives the request id and its state, and
-        --     says that get_task shows how the request ends
+        --     says that task_search shows how the request ends
         --     (GetTaskViaMcp's [Dispatch request] line). The dispatch carries
         --     on; nothing is cancelled when the wait ends.
         -- Because a request always names the host that made it, and the MCP
@@ -1484,7 +1483,7 @@ rule ResumeTaskViaMcp {
         -- requested, naming the task and its tmux window. It does not wait for
         -- the session to finish starting. A launch that fails after the hand-off
         -- (tmux or claude missing) shows in the board's status line, and
-        -- get_task shows the task still detached.
+        -- task_search shows the task still detached.
         --
         -- The reply is sent before the board checks tmux for a live window, so
         -- it cannot know whether a message will be delivered. When the call
@@ -1803,7 +1802,7 @@ rule SetVerifyCommandViaMcp {
         --
         -- == The tool description does not claim prompt injection ==
         -- The description states that the command never appears in a dispatch
-        -- prompt, names the surface that does carry it (get_task's "Verify
+        -- prompt, names the surface that does carry it (task_search's "Verify
         -- command" line) and says the agent runs it itself. A description
         -- claiming prompt injection would contradict dispatch-prompt.allium
         -- and send the one reader who needs the command to the single
@@ -1865,7 +1864,7 @@ rule SetReviewCommandViaMcp {
 --
 -- A task URI is read by id and never listed: the listing offers only the
 -- caller's own task, so a caller finds another task's id elsewhere (an epic,
--- a sibling, get_task) and reads it here. It serves the same text get_task
+-- a sibling, task_search) and reads it here. It serves the same text task_search
 -- returns for that task, whoever the caller is. dispatch://task/self is the
 -- literal word "self", never an id, so the two shapes cannot overlap.
 --
@@ -2088,13 +2087,13 @@ rule ResolveContextUri {
         --     when it has one. Nothing else of the row is part of the text.
         --   • own_task — the same task detail GetTaskViaMcp returns for the
         --     caller's own task (task_detail_text is that rendering, so the
-        --     two cannot drift): every line get_task renders, in its order,
+        --     two cannot drift): every line task_search renders, in its order,
         --     including [Verify command] and any "Wrap-up: refused" line.
         --     The URI takes no id: "self" is always the caller, resolved from
         --     transport identity, never from anything in the request.
         --   • task — the same task_detail_text rendering, for the task the id
         --     names. Any caller may read any task. The rendering is
-        --     get_task's, so it carries no trajectory, usage data or host
+        --     task_search's, so it carries no trajectory, usage data or host
         --     identity.
         -- Read-only: no rule fires on a served read, and a learning read this
         -- way records no core/Retrieval (ContextReadsAreNotRetrievals).
@@ -2233,14 +2232,14 @@ surface McpContextResources {
         --   • the host's identity, or the host file it lives in
         --   • database or store paths and addresses
         --   • any epic, and any task's trajectory (a task is served only as
-        --     get_task renders it)
+        --     task_search renders it)
         --   • repository files — docs, specs, plans, source — and any file
         --     outside a built-in skill's own directory
         --   • learnings that are not validated (archived or rejected)
         -- This holds by construction: context_uri_resolves recognises five
         -- URI shapes and nothing else, none of them maps to any of the data
         -- above, a skill reference path that escapes its skill's directory
-        -- is unrecognised, and the task shapes serve get_task's
+        -- is unrecognised, and the task shapes serve task_search's
         -- rendering of a task, which carries none of it. Adding a
         -- resource kind is a change to this spec, not to a handler alone.
 
@@ -2302,11 +2301,10 @@ surface McpTaskTools {
                       plan_path?, sort_order?, tag?, base_branch?,
                       wrap_up_mode?, model?, auto_run_plan?, phoenix?,
                       schedule?, signal?)
-        McpGetTask(task_id)
-        McpListTasks(client, epic_id?, repo_paths?, status?, recursive?,
-                     base_branch?, query?, limit?, bookmarked?, archived?,
-                     updated_after?, updated_before?,
-                     completed_after?, completed_before?)
+        McpTaskSearch(client, task_id?, epic_id?, repo_paths?, status?,
+                      recursive?, base_branch?, query?, limit?, bookmarked?,
+                      archived?, updated_after?, updated_before?,
+                      completed_after?, completed_before?)
         McpQueryUsage(category?, actor?, since?)
         McpDispatchTask(task)
         McpResumeTask(task, message?)
@@ -2429,7 +2427,7 @@ surface McpTaskTools {
         -- Anywhere an MCP tool takes a task id it also takes the name of one of the
         -- task's agents.
         --
-        -- `get_task`, `update_tasks`, `dispatch_task`, `wrap_up` and the rest resolve
+        -- `task_search`, `update_tasks`, `dispatch_task`, `wrap_up` and the rest resolve
         -- the argument first: digits are an id, anything else is looked up as an agent
         -- name, current or ended (agents.allium: AgentNameResolvesToTask). A word that
         -- is no agent's name is the same NotFound (-32001) an unknown id gets. Results
@@ -2494,7 +2492,7 @@ surface McpTaskTools {
         -- and issues a token whether or not it did: the board trusts the
         -- agent.
         --
-        -- The command reaches the agent through get_task's "Verify command"
+        -- The command reaches the agent through task_search's "Verify command"
         -- line (GetTaskViaMcp), and the /wrap-up skill has a step that sends
         -- the agent to run it, fix failures and commit BEFORE it calls
         -- wrap_up. On the pr path that step comes before the push.
@@ -2572,7 +2570,7 @@ surface McpTaskTools {
         --
         -- The refusal is also REPORTED by GetTaskViaMcp, on a "Wrap-up:
         -- refused — …" line carrying the same sentence. wrap_up is the last
-        -- call of the /wrap-up skill's sequence and get_task is its second,
+        -- call of the /wrap-up skill's sequence and task_search is its second,
         -- so a refusal delivered only at the tool lets an agent run a retro
         -- and a commit that nothing wanted. One predicate answers both, so
         -- the two can not drift into disagreeing about whether a given task

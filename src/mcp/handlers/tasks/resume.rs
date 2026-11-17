@@ -51,7 +51,7 @@ pub(crate) async fn handle_resume_task(
     let text = format!(
         "resume requested for {task_ref}: the board is restarting its agent in {window} with the \
          previous conversation. The task moves to running once the session starts; \
-         get_task(task_id={n}) shows the window. A launch failure appears in the board's \
+         task_search(task_id={n}) shows the window. A launch failure appears in the board's \
          status line.{drop_note}",
         n = task_id.0,
         task_ref = task.reference(),

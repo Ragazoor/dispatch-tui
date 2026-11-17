@@ -127,84 +127,7 @@ async fn update_task_with_base_branch_updates_it() {
 // tests/tasks/dispatch.rs as `exit_session_does_not_chain_when_auto_dispatch_off`
 // — the auto_dispatch flag is now read by the session-close chain, not by a tool.
 
-// -- list_tasks: header-based caller identity ---------------------------------
-
-#[tokio::test]
-async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
-    let (state, db) = test_state_with_db().await;
-    let eid = db.create_epic("e", "", None).await.unwrap().id;
-    let me = db
-        .create_task(CreateTaskRequest {
-            status: TaskStatus::Running,
-            epic_id: Some(eid),
-            ..CreateTaskRequest::fixture("me", "/r")
-        })
-        .await
-        .unwrap();
-    let sibling = db
-        .create_task(CreateTaskRequest {
-            epic_id: Some(eid),
-            ..CreateTaskRequest::fixture("sibling", "/r")
-        })
-        .await
-        .unwrap();
-    let _unrelated = db
-        .create_task(CreateTaskRequest::fixture("unrelated", "/r"))
-        .await
-        .unwrap();
-
-    let resp = call_as(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
-        CallerIdentity::Task(me),
-    )
-    .await;
-
-    let text = extract_response_text(&resp);
-    // sibling is in scope (same epic); me is excluded (self); unrelated is out of scope.
-    assert!(
-        text.contains(&format!("[{}]", sibling.0)),
-        "expected sibling in:\n{text}"
-    );
-    assert!(
-        !text.contains(&format!("[{}]", me.0)),
-        "self should be excluded:\n{text}"
-    );
-}
-
-#[tokio::test]
-async fn list_tasks_task_identity_scopes_to_project_when_no_epic() {
-    let (state, db) = test_state_with_db().await;
-    let me = db
-        .create_task(CreateTaskRequest {
-            status: TaskStatus::Running,
-            ..CreateTaskRequest::fixture("me", "/r")
-        })
-        .await
-        .unwrap();
-    let sibling = db
-        .create_task(CreateTaskRequest::fixture("sib", "/r"))
-        .await
-        .unwrap();
-
-    let resp = call_as(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
-        CallerIdentity::Task(me),
-    )
-    .await;
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains(&format!("[{}]", sibling.0)),
-        "expected sibling:\n{text}"
-    );
-    assert!(
-        !text.contains(&format!("[{}]", me.0)),
-        "self excluded:\n{text}"
-    );
-}
+// -- task_search: header-based caller identity ---------------------------------
 
 #[tokio::test]
 async fn list_tasks_session_identity_sees_all_tasks() {
@@ -219,7 +142,7 @@ async fn list_tasks_session_identity_sees_all_tasks() {
     let resp = call_as(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
         CallerIdentity::Session,
     )
     .await;
@@ -247,7 +170,7 @@ async fn list_tasks_repo_paths_filter() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "list_tasks",
+            "name": "task_search",
             "arguments": { "repo_paths": ["/repo/a"] }
         })),
     )
@@ -276,7 +199,7 @@ async fn list_tasks_includes_pr_url_in_output() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
 
@@ -312,7 +235,7 @@ async fn list_tasks_includes_plan_goal_in_output() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
 
@@ -341,7 +264,7 @@ async fn list_tasks_falls_back_to_description_when_no_plan() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
 
@@ -360,7 +283,7 @@ async fn list_tasks_omits_pr_segment_when_no_pr_url() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
 
@@ -809,11 +732,11 @@ async fn get_task_shows_wrap_up_mode_when_set() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "get_task", "arguments": { "task_id": task_id.0 } })),
+        Some(json!({ "name": "task_search", "arguments": { "task_id": task_id.0 } })),
     )
     .await;
     let text = extract_response_text(&resp);
-    // The exact label matters, not just the words: get_task returns prose, and
+    // The exact label matters, not just the words: task_search returns prose, and
     // the /wrap-up skill reads the mode off this line by name. A rename here
     // silently sends the skill back to asking a question it was told to skip.
     assert!(
@@ -836,7 +759,7 @@ async fn get_task_shows_verify_command_when_configured() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "get_task", "arguments": { "task_id": task_id.0 } })),
+        Some(json!({ "name": "task_search", "arguments": { "task_id": task_id.0 } })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -854,7 +777,7 @@ async fn get_task_omits_verify_command_when_unconfigured() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "get_task", "arguments": { "task_id": task_id.0 } })),
+        Some(json!({ "name": "task_search", "arguments": { "task_id": task_id.0 } })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -965,7 +888,7 @@ async fn get_task_shows_phoenix_when_set_and_omits_it_otherwise() {
         &call(
             &state,
             "tools/call",
-            Some(json!({ "name": "get_task", "arguments": { "task_id": task_id.0 } })),
+            Some(json!({ "name": "task_search", "arguments": { "task_id": task_id.0 } })),
         )
         .await,
     );
@@ -987,7 +910,7 @@ async fn get_task_shows_phoenix_when_set_and_omits_it_otherwise() {
         &call(
             &state,
             "tools/call",
-            Some(json!({ "name": "get_task", "arguments": { "task_id": task_id.0 } })),
+            Some(json!({ "name": "task_search", "arguments": { "task_id": task_id.0 } })),
         )
         .await,
     );

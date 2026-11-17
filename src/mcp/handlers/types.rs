@@ -410,7 +410,7 @@ pub(super) fn apply_limit<T>(
     }
 }
 
-/// Filter for `list_tasks.status`. Deserialises from either a JSON string
+/// Filter for `task_search.status`. Deserialises from either a JSON string
 /// (`"backlog"`) or a JSON array of strings (`["backlog", "ready"]`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusFilter(pub Vec<TaskStatus>);

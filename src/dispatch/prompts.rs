@@ -247,13 +247,13 @@ pub(super) fn tdd_instruction() -> &'static str {
     "Always use TDD: express intended behaviour as tests first, then implement the minimum code to make them pass."
 }
 
-// There is deliberately no "the dispatch MCP tools are available (get_task,
+// There is deliberately no "the dispatch MCP tools are available (task_search,
 // update_tasks)" line here any more. Both tools reach the agent as real tool
 // schemas, and naming them again in prompt prose shadows that list: it states
 // no fact the schema lacks, and it goes stale the moment the tool set changes.
-// Which of `get_task`'s response lines matter is the wrap-up skill's to say,
+// Which of `task_search`'s response lines matter is the wrap-up skill's to say,
 // not the tool description's — see
-// `get_task_description_quotes_only_labels_the_renderer_emits`.
+// `task_search_description_quotes_only_labels_the_renderer_emits`.
 
 /// One-line knowledge-base nudge for dispatched agents. The earlier
 /// seven-skill checkpoint list saw <2 invocations each across hundreds

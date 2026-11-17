@@ -32,7 +32,7 @@ async fn task_identity_writes_trajectory_entry() {
         json!({
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
-            "params": { "name": "list_tasks", "arguments": {} }
+            "params": { "name": "task_search", "arguments": {} }
         }),
     )
     .await;
@@ -65,7 +65,7 @@ async fn task_identity_writes_trajectory_entry() {
     );
     assert_eq!(
         parsed["method"].as_str(),
-        Some("list_tasks"),
+        Some("task_search"),
         "method field mismatch: {parsed}"
     );
     assert_eq!(
@@ -104,7 +104,7 @@ async fn task_identity_without_worktree_still_writes_trajectory() {
         json!({
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
-            "params": { "name": "list_tasks", "arguments": {} }
+            "params": { "name": "task_search", "arguments": {} }
         }),
     )
     .await;

@@ -7,7 +7,7 @@ async fn mcp_tool_call_records_usage_event() {
     call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
 
@@ -25,7 +25,7 @@ async fn mcp_tool_call_records_usage_event() {
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].action, "list_tasks");
+    assert_eq!(results[0].action, "task_search");
     assert_eq!(results[0].category, "mcp_tool");
 }
 

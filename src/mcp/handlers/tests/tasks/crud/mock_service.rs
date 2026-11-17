@@ -62,7 +62,7 @@ async fn list_tasks_uses_service_not_db_directly() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
 
@@ -89,14 +89,14 @@ async fn get_task_accepts_string_task_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_task",
+            "name": "task_search",
             "arguments": { "task_id": task_id.0.to_string() }
         })),
     )
     .await;
     assert!(
         resp.error.is_none(),
-        "get_task should accept string task_id, got: {:?}",
+        "task_search should accept string task_id, got: {:?}",
         resp.error
     );
     let result = resp.result.unwrap();
@@ -651,7 +651,7 @@ async fn get_task_shows_wrap_up_mode() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_task",
+            "name": "task_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -660,7 +660,7 @@ async fn get_task_shows_wrap_up_mode() {
     let text = result["content"][0]["text"].as_str().unwrap();
     assert!(
         text.contains("rebase"),
-        "get_task should show wrap_up_mode: {text}"
+        "task_search should show wrap_up_mode: {text}"
     );
 }
 
@@ -690,7 +690,7 @@ async fn list_tasks_returns_all_when_no_filter() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
     )
     .await;
     assert!(resp.error.is_none());
@@ -724,7 +724,7 @@ async fn list_tasks_filters_by_single_status() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "status": "backlog" } })),
+        Some(json!({ "name": "task_search", "arguments": { "status": "backlog" } })),
     )
     .await;
     assert!(resp.error.is_none());
@@ -767,7 +767,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "status": ["backlog", "running"] } })),
+        Some(json!({ "name": "task_search", "arguments": { "status": ["backlog", "running"] } })),
     )
     .await;
     assert!(resp.error.is_none());
@@ -785,13 +785,13 @@ async fn list_tasks_empty_result() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "status": "running" } })),
+        Some(json!({ "name": "task_search", "arguments": { "status": "running" } })),
     )
     .await;
     assert!(resp.error.is_none());
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("No tasks found"));
+    assert!(text.contains("No tasks match status=[running]"), "{text}");
 }
 
 // =======================================================================
@@ -804,7 +804,7 @@ async fn list_tasks_invalid_status_string() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "status": "bogus" } })),
+        Some(json!({ "name": "task_search", "arguments": { "status": "bogus" } })),
     )
     .await;
     assert_error(&resp, "Unknown status");
@@ -816,7 +816,7 @@ async fn list_tasks_invalid_status_in_array() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "status": ["backlog", "bogus"] } })),
+        Some(json!({ "name": "task_search", "arguments": { "status": ["backlog", "bogus"] } })),
     )
     .await;
     assert_error(&resp, "Unknown status: bogus");
@@ -828,7 +828,7 @@ async fn list_tasks_status_as_number_errors() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "status": 42 } })),
+        Some(json!({ "name": "task_search", "arguments": { "status": 42 } })),
     )
     .await;
     assert_error(&resp, "expected a status string");

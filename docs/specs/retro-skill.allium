@@ -23,7 +23,7 @@
 --           (mcp-task-tools.allium: SkillCopyIsJustInTime); what create_task
 --           and record_learning do (mcp-task-tools.allium: CreateTaskViaMcp;
 --           learnings.allium: RecordLearningViaMcp); the knowledge base itself (learnings.allium);
---           the tools behind each step (list_tasks, get_task) — those are the
+--           the tools behind each step (task_search) — those are the
 --           skill's mechanics, not what it promises.
 --
 -- Design decisions:
@@ -67,7 +67,7 @@ enum ContextSurface {
     doc_page           -- docs/*.md, linked from CLAUDE.md, read on demand
     skill              -- plugin/skills/*/SKILL.md, the skill the next agent invokes
     knowledge_base     -- injected into the prompt (learnings.allium)
-    verify_command     -- shown by get_task and run by the agent
+    verify_command     -- shown by task_search and run by the agent
 }
 
 -- What a moment led to.
@@ -82,7 +82,7 @@ enum RetroTag { bug | chore }
 
 -- One run of the skill, at the end of one task's work.
 entity Retrospective {
-    -- Known from the invocation or from get_task's wrap_up_mode, else asked
+    -- Known from the invocation or from task_search's wrap_up_mode, else asked
     -- for before the retrospective starts (ActionIsKnownBeforeFixOrFile).
     action: core/WrapUpMode
     moments: Moment with retro = this
@@ -191,7 +191,7 @@ rule StartRetro {
         -- before its commit step (pr-workflow.allium and mcp-task-tools.allium
         -- hold the order); the operator may also run /retro or ask for a
         -- session retrospective. The invocation carries the action; when it
-        -- does not, the action is read from wrap_up_mode in get_task, and
+        -- does not, the action is read from wrap_up_mode in task_search, and
         -- when that does not say either, the agent asks
         -- (ActionIsKnownBeforeFixOrFile).
 }
@@ -466,7 +466,7 @@ surface RetroSession {
     @guarantee ActionIsKnownBeforeFixOrFile
         -- Fix-or-file depends on the wrap-up action, so the agent has it
         -- before it acts: from the invocation, else from wrap_up_mode in
-        -- get_task, else by asking. Retro does not guess it (StartRetro).
+        -- task_search, else by asking. Retro does not guess it (StartRetro).
 
     @guarantee OnlyOperatorFeedbackIsASubject
         -- The subject is feedback the operator actually gave. A stale spec is
@@ -532,7 +532,7 @@ surface RetroSession {
         -- a defect (FileInsteadOfFixing, OnlyBugAndChoreAreTags).
 
     @guarantee FilingIsDuplicateCheckedAndWrittenForAColdAgent
-        -- Before filing, list_tasks is searched for a task that already covers
+        -- Before filing, task_search is searched for a task that already covers
         -- the finding. A finding that spans several files is one task, not one
         -- per file. The title names the change, the description names this task
         -- and says what the next agent will hit if it stays unfixed, and

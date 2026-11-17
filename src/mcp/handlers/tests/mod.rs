@@ -581,7 +581,7 @@ async fn tools_call_handler_error_returns_is_error_result() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "get_task", "arguments": { "task_id": 999_999 } })),
+        Some(json!({ "name": "task_search", "arguments": { "task_id": 999_999 } })),
     )
     .await;
     assert!(resp.error.is_none(), "should not be a protocol error");
@@ -655,7 +655,7 @@ async fn tools_call_without_identity_returns_invalid_request_with_request_id() {
     let resp = call_with_identity(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
         Err(IdentityError::Missing),
     )
     .await;
@@ -673,7 +673,7 @@ async fn tools_call_with_conflict_identity_returns_invalid_request() {
     let resp = call_with_identity(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_search", "arguments": {} })),
         Err(IdentityError::Conflict),
     )
     .await;
@@ -812,7 +812,7 @@ fn set_verify_command_description_names_the_surfaces_that_carry_the_command() {
         !desc.contains("injected into"),
         "set_verify_command must not claim the command is injected into prompts, got: {desc}"
     );
-    for needle in ["get_task", "agent"] {
+    for needle in ["task_search", "agent"] {
         assert!(
             desc.contains(needle),
             "set_verify_command description must name the '{needle}' surface, got: {desc}"
@@ -864,20 +864,27 @@ fn every_update_tool_description_names_every_field_it_accepts() {
     );
 }
 
-/// rule-guidance.GetTaskViaMcp ("The tool description is one sentence"). The
-/// format is shown by what the call returns; naming the lines a wrapping-up
-/// agent reads belongs to the /wrap-up skill, the caller that reads them.
+/// rule-guidance.GetTaskViaMcp ("The description states the two forms and the
+/// order"). The description names both forms, the sort order and the default
+/// limit, and leaves the detail format to the response itself.
 #[test]
-fn get_task_description_is_one_sentence() {
-    let desc = tool_description("get_task");
-    assert_eq!(
-        sentence_count(&desc),
-        1,
-        "get_task's description must be one sentence, got: {desc}"
-    );
+fn task_search_description_states_forms_order_and_limit() {
+    let desc = tool_description("task_search");
+    for needle in [
+        "task_id",
+        "no other argument",
+        "most recently updated first",
+        "50",
+        "epic_id",
+    ] {
+        assert!(
+            desc.contains(needle),
+            "task_search's description must say {needle:?}, got: {desc}"
+        );
+    }
     assert!(
         !desc.contains("JSON") && !desc.contains("Verify command"),
-        "get_task's description must not describe the response format or name its lines, \
+        "task_search's description must not describe the response format or name its lines, \
 got: {desc}"
     );
 }
@@ -889,16 +896,16 @@ fn sentence_count(text: &str) -> usize {
         .count()
 }
 
-/// `list_tasks` renders a task's url under its own type label, so a
+/// `task_search` renders a task's url under its own type label, so a
 /// security-alert task prints "Security alert:" and never "PR:". The
 /// description promised a PR URL, which sends a caller scanning for the wrong
 /// word on three of the four url types.
 #[test]
-fn list_tasks_description_does_not_promise_a_pr_only_url_label() {
-    let desc = tool_description("list_tasks");
+fn task_search_description_does_not_promise_a_pr_only_url_label() {
+    let desc = tool_description("task_search");
     assert!(
         !desc.contains("PR URL"),
-        "list_tasks must not describe the url output as a PR URL, got: {desc}"
+        "task_search must not describe the url output as a PR URL, got: {desc}"
     );
     // Derived from the labels the output actually prints, so a renamed or added
     // url type fails here rather than quietly going unadvertised.
@@ -906,7 +913,7 @@ fn list_tasks_description_does_not_promise_a_pr_only_url_label() {
         let label = url_type.type_word();
         assert!(
             desc.contains(label),
-            "list_tasks description must name the '{label}' url label, got: {desc}"
+            "task_search description must name the '{label}' url label, got: {desc}"
         );
     }
 }
@@ -982,10 +989,9 @@ fn no_tool_description_cites_internal_symbol_names() {
 #[test]
 fn every_tool_description_meets_the_detail_floor() {
     const MIN_SENTENCES: usize = 3;
-    // The two descriptions the spec makes one sentence by design:
-    // GetTaskViaMcp ("The tool description is one sentence") and
+    // The description the spec makes one sentence by design:
     // learnings.allium's TheAuthoringRulesHaveOneHome.
-    const ONE_SENTENCE_BY_SPEC: [&str; 2] = ["get_task", "record_learning"];
+    const ONE_SENTENCE_BY_SPEC: [&str; 1] = ["record_learning"];
     let defs = tool_definitions();
     for tool in defs["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();
@@ -1340,12 +1346,11 @@ async fn every_tool_with_args_rejects_unknown_field() {
 
     let payloads: &[(&str, Value)] = &[
         ("update_tasks", json!({"task_ids": [1]})),
-        ("get_task", json!({"task_id": 1})),
+        ("task_search", json!({"task_id": 1})),
         (
             "create_task",
             json!({"title": "t", "repo_path": "/r", "epic_id": null}),
         ),
-        ("list_tasks", json!({})),
         ("list_epics", json!({})),
         ("create_epic", json!({"title": "t"})),
         ("update_epic", json!({"epic_id": 1})),
@@ -1561,8 +1566,7 @@ fn no_task_or_epic_status_schema_advertises_archived() {
 #[test]
 fn tool_definitions_carry_annotations() {
     const READ_ONLY: &[&str] = &[
-        "get_task",
-        "list_tasks",
+        "task_search",
         "list_epics",
         "query_learnings",
         "query_usage",
@@ -1715,9 +1719,7 @@ fn wrap_up_description_names_release_please_among_the_refused_tags() {
 /// task removes its names; the last one deletes the list and the exemption.
 const LEGACY_TOOL_NAMES: &[&str] = &[
     "update_tasks",
-    "get_task",
     "create_task",
-    "list_tasks",
     "create_epic",
     "list_epics",
     "update_epic",

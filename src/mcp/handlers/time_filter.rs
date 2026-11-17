@@ -1,4 +1,4 @@
-//! The `updated_*` and `completed_*` list filters, shared by `list_tasks`,
+//! The `updated_*` and `completed_*` list filters, shared by `task_search`,
 //! `list_epics` and `list_work_packages` (`mcp-task-tools.allium`:
 //! `TimeFilterInput`).
 //!

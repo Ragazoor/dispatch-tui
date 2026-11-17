@@ -172,7 +172,7 @@ mod tests {
     #[tokio::test]
     async fn an_oversized_result_is_capped_and_marked() {
         let dir = tempdir().unwrap();
-        let mut entry = make_entry("get_task");
+        let mut entry = make_entry("task_search");
         let big = "é".repeat(MAX_RESULT_BYTES);
         entry.result = json!({"content": [{"type": "text", "text": big}]});
         append_entry(dir.path(), &entry).await;
@@ -187,13 +187,13 @@ mod tests {
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         let result = parsed["result"].as_str().unwrap();
         assert!(result.ends_with(TRUNCATED_MARKER));
-        assert_eq!(parsed["method"], "get_task");
+        assert_eq!(parsed["method"], "task_search");
     }
 
     #[tokio::test]
     async fn a_small_result_is_kept_as_json() {
         let dir = tempdir().unwrap();
-        append_entry(dir.path(), &make_entry("get_task")).await;
+        append_entry(dir.path(), &make_entry("task_search")).await;
         let content =
             tokio::fs::read_to_string(dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"))
                 .await
@@ -238,8 +238,8 @@ mod tests {
     #[tokio::test]
     async fn append_adds_second_line() {
         let dir = tempdir().unwrap();
-        append_entry(dir.path(), &make_entry("get_task")).await;
-        append_entry(dir.path(), &make_entry("list_tasks")).await;
+        append_entry(dir.path(), &make_entry("task_search")).await;
+        append_entry(dir.path(), &make_entry("task_search")).await;
         let content =
             tokio::fs::read_to_string(dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"))
                 .await
@@ -319,7 +319,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let entry = TrajectoryEntry {
             task_id: 7,
-            ..make_entry("get_task")
+            ..make_entry("task_search")
         };
         append_entry(dir.path(), &entry).await;
         assert!(dir
@@ -334,11 +334,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let e1 = TrajectoryEntry {
             task_id: 1,
-            ..make_entry("get_task")
+            ..make_entry("task_search")
         };
         let e2 = TrajectoryEntry {
             task_id: 2,
-            ..make_entry("list_tasks")
+            ..make_entry("task_search")
         };
         append_entry(dir.path(), &e1).await;
         append_entry(dir.path(), &e2).await;
@@ -357,7 +357,7 @@ mod tests {
     #[tokio::test]
     async fn fields_round_trip_correctly() {
         let dir = tempdir().unwrap();
-        let entry = make_entry("get_task");
+        let entry = make_entry("task_search");
         let expected_ts = entry.timestamp;
         append_entry(dir.path(), &entry).await;
         let content =
@@ -367,7 +367,7 @@ mod tests {
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], SCHEMA_VERSION);
         assert_eq!(parsed["task_id"], 42);
-        assert_eq!(parsed["method"], "get_task");
+        assert_eq!(parsed["method"], "task_search");
         assert_eq!(parsed["args"], json!({"task_id": 42}));
         assert_eq!(parsed["duration_ms"], 10);
         let ts_str = parsed["timestamp"].as_str().unwrap();

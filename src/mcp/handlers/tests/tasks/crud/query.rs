@@ -1,4 +1,4 @@
-//! `list_tasks` `query`: a text search over title and description
+//! `task_search` `query`: a text search over title and description
 //! (ListTasksViaMcp, docs/specs/mcp-task-tools.allium).
 
 use super::*;
@@ -24,7 +24,7 @@ async fn list(state: &Arc<McpState>, args: Value) -> String {
     let resp = call(
         state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": args })),
+        Some(json!({ "name": "task_search", "arguments": args })),
     )
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
@@ -81,7 +81,7 @@ async fn query_with_no_match_says_no_tasks_found() {
     seed(&state).await;
     assert_eq!(
         list(&state, json!({ "query": "zzzz" })).await,
-        "No tasks found"
+        "No tasks match query=\"zzzz\""
     );
 }
 
@@ -93,7 +93,8 @@ async fn limit_caps_rows_and_says_how_many_were_cut() {
     assert_eq!(text.lines().count(), 3, "{text}");
     assert_eq!(
         text.lines().last().unwrap(),
-        "Showing 2 of 3. Narrow your query or filters."
+        "Showing 2 of 3, most recently updated first. Narrow with epic_id, status, query or the \
+         time filters, or raise limit."
     );
 }
 
@@ -112,7 +113,7 @@ async fn limit_applies_after_the_query() {
     seed(&state).await;
     let text = list(&state, json!({ "query": "login", "limit": 1 })).await;
     assert!(
-        text.ends_with("Showing 1 of 2. Narrow your query or filters."),
+        text.contains("Showing 1 of 2, most recently updated first."),
         "{text}"
     );
 }
@@ -123,7 +124,7 @@ async fn zero_limit_is_invalid_params() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_tasks", "arguments": { "limit": 0 } })),
+        Some(json!({ "name": "task_search", "arguments": { "limit": 0 } })),
     )
     .await;
     let rejected = resp.error.is_some()

@@ -4,7 +4,7 @@ Terminal kanban board for dispatching Claude Code agents into isolated git workt
 
 **Stack**: Rust (2021 edition), ratatui TUI, SpacetimeDB shared store, Axum HTTP/MCP server, tokio async runtime.
 
-**Live data is in SpacetimeDB.** Dispatch has no SQLite; query tasks through the MCP tools (`list_tasks`, `get_task`). See "Where the live data is" in [docs/reference.md](docs/reference.md).
+**Live data is in SpacetimeDB.** Dispatch has no SQLite; query tasks through the MCP tools (`task_search`). See "Where the live data is" in [docs/reference.md](docs/reference.md).
 
 `AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`.
 
@@ -16,7 +16,7 @@ cargo test
 cargo run -- tui
 ```
 
-**This repo has a verify command every dispatched agent must run green before declaring work complete — read it from `get_task`'s *Verify command* line, never from this file.** You run it, not dispatch: `wrap_up` neither runs nor checks it. How it is stored and surfaced: [docs/reference.md](docs/reference.md) ("Verify Command"). **If it fails for a reason your change did not cause, including a broken `main`, do not wrap up past it alone and do not just stop.** Coordinate with the other agents and the board: look for a task already fixing it (`list_tasks`, `ListAgents`), and if there is none, propose a fix or create and dispatch a task for it. Use judgement; there is no fixed procedure.
+**This repo has a verify command every dispatched agent must run green before declaring work complete — read it from `task_search`'s *Verify command* line, never from this file.** You run it, not dispatch: `wrap_up` neither runs nor checks it. How it is stored and surfaced: [docs/reference.md](docs/reference.md) ("Verify Command"). **If it fails for a reason your change did not cause, including a broken `main`, do not wrap up past it alone and do not just stop.** Coordinate with the other agents and the board: look for a task already fixing it (`task_search`, `ListAgents`), and if there is none, propose a fix or create and dispatch a task for it. Use judgement; there is no fixed procedure.
 
 **Dispatch-spawned sessions do not run under Claude Code's sandbox** — see `SandboxDisabledForDockerAndUnixSockets` in `docs/specs/dispatch.allium`. If you've enabled the sandbox yourself outside of dispatch, see "Sandbox (historical)" in [docs/reference.md](docs/reference.md).
 
@@ -40,7 +40,7 @@ The pre-push hook (`.githooks/pre-push`) runs `scripts/gates.sh --fix`: the form
 
 **That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op. Run it at the repo root only: inside `spacetime/module/` it reformats module files you did not touch, which `main` keeps as they are, and stales `module.wasm`'s source hash.
 
-**`./scripts/verify.sh` is what the verify command runs** (still read the command itself from `get_task`). It runs `scripts/gates.sh --check` (the same sequence the pre-push hook runs, with `cargo fmt --check`) and then `cargo test --no-fail-fast`. A wrap-up rebase lands commits on `main` without a push, so the hook never sees them; verify is what holds them to the gates. It fails when the host `rustc` is not the version `rust-toolchain.toml` pins (`scripts/check-toolchain.sh`), like the hook. With rustup the pin governs the toolchain, so this cannot drift; a distro `rustc` is accepted only while its version equals the pin.
+**`./scripts/verify.sh` is what the verify command runs** (still read the command itself from `task_search`). It runs `scripts/gates.sh --check` (the same sequence the pre-push hook runs, with `cargo fmt --check`) and then `cargo test --no-fail-fast`. A wrap-up rebase lands commits on `main` without a push, so the hook never sees them; verify is what holds them to the gates. It fails when the host `rustc` is not the version `rust-toolchain.toml` pins (`scripts/check-toolchain.sh`), like the hook. With rustup the pin governs the toolchain, so this cannot drift; a distro `rustc` is accepted only while its version equals the pin.
 
 Cite `path::symbol` (`src/feed/exec.rs::exec_feed_command`) rather than `file:NN` in docs: a symbol is checked against the real file, a line number only for existence. See "`file:NN` vs `path::symbol` citations" in `docs/conventions.md`.
 

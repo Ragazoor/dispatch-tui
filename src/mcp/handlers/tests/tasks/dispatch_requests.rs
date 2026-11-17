@@ -1,4 +1,4 @@
-//! `dispatch_task`, `get_task` and the epic chain on request rows
+//! `dispatch_task`, `task_search` and the epic chain on request rows
 //! (`store-split.allium: DispatchRequest`).
 //!
 //! `mcp-task-tools.allium: DispatchTaskViaMcp` writes a request (origin
@@ -6,7 +6,7 @@
 //! `config.dispatch_task_wait_cap` (30s), answering by the row's state:
 //! dispatched (the worktree and window), failed (an error carrying the row's
 //! reason), or still open when the cap passes (NOT an error: the request id
-//! and its state, pointing at `get_task`). `GetTaskViaMcp` shows that request
+//! and its state, pointing at `task_search`). `GetTaskViaMcp` shows that request
 //! as its `[Dispatch request]` line. `epics.allium: AutoDispatchNextSubtask`
 //! requests its next subtask with origin `epic_chain`, no mode, and moves to
 //! the next candidate on a refusal.
@@ -173,7 +173,7 @@ async fn dispatch_task_answers_with_the_rows_reason_when_it_fails() {
 }
 
 /// Still open when the cap passes: NOT an error. The answer gives the request
-/// id and its state and points at get_task; nothing is cancelled.
+/// id and its state and points at task_search; nothing is cancelled.
 #[tokio::test]
 async fn dispatch_task_answers_with_the_pending_request_when_the_wait_ends_first() {
     let (state, db) = state_with_wait_cap(Duration::ZERO);
@@ -204,7 +204,7 @@ async fn dispatch_task_answers_with_the_pending_request_when_the_wait_ends_first
     );
     assert!(text.contains("requested"), "its state: {text}");
     assert!(
-        text.contains("get_task"),
+        text.contains("task_search"),
         "where to learn how it ends: {text}"
     );
 }
@@ -284,7 +284,7 @@ async fn get_task_shows_the_dispatch_request_line() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "get_task", "arguments": {"task_id": task.0}})),
+        Some(json!({"name": "task_search", "arguments": {"task_id": task.0}})),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -315,7 +315,7 @@ async fn get_task_shows_an_open_request_without_a_reason() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "get_task", "arguments": {"task_id": task.0}})),
+        Some(json!({"name": "task_search", "arguments": {"task_id": task.0}})),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -336,7 +336,7 @@ async fn get_task_omits_the_line_when_there_is_no_request() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "get_task", "arguments": {"task_id": task.0}})),
+        Some(json!({"name": "task_search", "arguments": {"task_id": task.0}})),
     )
     .await;
 

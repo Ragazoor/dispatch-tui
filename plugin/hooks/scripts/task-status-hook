@@ -44,7 +44,7 @@ case "$EVENT" in
     PreToolUse|PostToolUse)
         TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
         # Skip dispatch MCP calls — management operations, not implementation work.
-        # Without this, the wrap-up skill's get_task and wrap_up calls clobber review status.
+        # Without this, the wrap-up skill's task_search and wrap_up calls clobber review status.
         [[ "$TOOL" == mcp__dispatch__* ]] && exit 0
         # A slow or down board must not abort the steps below (set -e).
         dispatch hook "$ID" pre_tool_use \

@@ -366,28 +366,3 @@ async fn list_tasks_filters_by_repo_paths() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "Repo A");
 }
-
-#[tokio::test]
-async fn list_tasks_excludes_caller_task() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-
-    let id1 = svc
-        .create_task(CreateTaskParams::fixture("T1", "/repo"))
-        .await
-        .unwrap();
-
-    svc.create_task(CreateTaskParams::fixture("T2", "/repo"))
-        .await
-        .unwrap();
-
-    let tasks = svc
-        .list_tasks(ListTasksFilter {
-            exclude_task_id: Some(id1),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(tasks[0].title, "T2");
-}

@@ -8,7 +8,7 @@ use crate::mcp::McpState;
 use crate::models::{ArchivedTask, EpicId, TaskId};
 
 use super::super::types::NOT_FOUND_CODE;
-use super::{description_preview, utc_stamp, JsonRpcResponse, INTERNAL_ERROR};
+use super::{goal_line, utc_stamp, JsonRpcResponse, INTERNAL_ERROR};
 
 /// The record's epic as `"<title> (#<id>)"`, or `"#<id>"` with no title.
 fn epic_label(a: &ArchivedTask) -> Option<String> {
@@ -73,17 +73,19 @@ fn archived_line(a: &ArchivedTask) -> String {
         title = a.title,
         archived = utc_stamp(a.archived_at),
         base = a.base_branch,
-        goal = description_preview(&a.description),
+        goal = goal_line(&a.description),
     )
 }
 
-/// The filters `list_tasks(archived: true)` applies.
+/// The filters `task_search(archived: true)` applies.
 pub(super) struct ArchivedFilter {
     pub(super) epic_id: Option<EpicId>,
     pub(super) repo_paths: Vec<String>,
     pub(super) base_branch: Option<String>,
     pub(super) query: Option<String>,
     pub(super) limit: Option<std::num::NonZeroUsize>,
+    /// The filters the call applied, for the empty reply.
+    pub(super) filters: Option<String>,
 }
 
 /// `ListArchivedTasksViaMcp`, after the caller's scope is resolved.
@@ -109,10 +111,10 @@ pub(super) async fn list_archived(
     if records.is_empty() {
         return JsonRpcResponse::ok(
             id,
-            json!({"content": [{"type": "text", "text": "No archived tasks found"}]}),
+            json!({"content": [{"type": "text", "text": super::crud::empty_reply("archived tasks", filter.filters)}]}),
         );
     }
-    let cut_hint = super::super::types::apply_limit(&mut records, filter.limit);
+    let cut_hint = super::crud::cut_rows(&mut records, filter.limit, "newest archived first");
     let mut lines: Vec<String> = records.iter().map(archived_line).collect();
     lines.extend(cut_hint);
     JsonRpcResponse::ok(

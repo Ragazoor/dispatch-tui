@@ -13,8 +13,8 @@ pub(super) use super::types::{
     deserialize_flexible_id, deserialize_nullable_flexible_id, deserialize_nullable_model,
     deserialize_nullable_wrap_up_mode, deserialize_optional_flexible_i64,
     deserialize_optional_flexible_id, deserialize_optional_limit, deserialize_optional_url_type,
-    fetch_caller_task, parse_args, service_err_to_response, tool_error, FlexibleId,
-    JsonRpcResponse, StatusFilter, INTERNAL_ERROR, INVALID_PARAMS,
+    fetch_caller_task, parse_args, reject_alongside, service_err_to_response, tool_error,
+    FlexibleId, JsonRpcResponse, StatusFilter, INTERNAL_ERROR, INVALID_PARAMS,
 };
 
 mod archived;
@@ -27,7 +27,7 @@ mod verify;
 mod wrap_up;
 
 pub(super) use crud::{
-    handle_create_task, handle_get_task, handle_list_tasks, handle_query_usage, handle_update_tasks,
+    handle_create_task, handle_query_usage, handle_task_search, handle_update_tasks,
 };
 pub(super) use dispatch::handle_dispatch_task;
 pub(super) use resume::handle_resume_task;
@@ -203,14 +203,11 @@ pub(super) fn update_tasks_schema() -> serde_json::Value {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct GetTaskArgs {
-    #[serde(deserialize_with = "deserialize_flexible_id")]
-    pub(super) task_id: TaskId,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct ListTasksArgs {
+pub(super) struct TaskSearchArgs {
+    /// The detail form: one task in full. Takes no other argument
+    /// (`GetTaskViaMcp`).
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_id")]
+    pub(super) task_id: Option<TaskId>,
     #[serde(default)]
     pub(super) status: Option<StatusFilter>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_id")]
@@ -364,7 +361,7 @@ pub(super) async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, Strin
         .collect()
 }
 
-/// The text `get_task` returns for `task`; `dispatch://task/self` serves the
+/// The text `task_search` returns with `task_id` for `task`; `dispatch://task/self` serves the
 /// same rendering (`task_detail_text` in the spec).
 pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
     let (epic_titles, verify_command, dispatch_request, agent, bookmarks) = tokio::join!(
@@ -403,7 +400,7 @@ fn dispatch_request_line(request: &crate::models::DispatchRequest) -> String {
     line
 }
 
-/// What `get_task` and `list_tasks` print for an agent's state: live when it
+/// What `task_search` prints for an agent's state: live when it
 /// holds a tmux window, paused when it does not, not started while assigned and
 /// ended once it has ended (`AgentIdentity`).
 fn agent_state_label(agent: &Agent) -> &'static str {
@@ -527,17 +524,22 @@ fn utc_stamp(at: chrono::DateTime<chrono::Utc>) -> String {
     at.format("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 
-fn description_preview(s: &str) -> String {
-    if s.len() > 200 {
-        let end = s
-            .char_indices()
-            .take_while(|(i, _)| *i < 200)
-            .last()
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(0);
-        format!("{}...", &s[..end])
-    } else {
-        s.to_owned()
+/// The longest goal a list row shows, in characters.
+const GOAL_LINE_CHARS: usize = 80;
+
+/// `s` on one line: every run of whitespace, line breaks included, becomes one
+/// space, and the ends are trimmed.
+fn collapse_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A goal for a list row (`ListTasksViaMcp`): one line, cut to
+/// [`GOAL_LINE_CHARS`] characters with "..." appended when it was longer.
+pub(super) fn goal_line(s: &str) -> String {
+    let one = collapse_whitespace(s);
+    match one.char_indices().nth(GOAL_LINE_CHARS) {
+        Some((end, _)) => format!("{}...", &one[..end]),
+        None => one,
     }
 }
 
@@ -578,7 +580,7 @@ fn format_task_line(
     format!(
         "- [{}] {}{}{} ({}/{}){}{} | Base: {} | Updated: {} | Completed: {}{}{}",
         t.id,
-        t.title,
+        collapse_whitespace(&t.title),
         bookmark_indicator,
         agent_indicator,
         t.status.as_str(),
@@ -754,7 +756,7 @@ mod tests {
     /// single-quoted label out of the live description, and require each to
     /// appear in the render.
     #[test]
-    fn get_task_description_quotes_only_labels_the_renderer_emits() {
+    fn task_search_description_quotes_only_labels_the_renderer_emits() {
         let mut task = make_task("main");
         task.wrap_up_mode = Some(crate::models::WrapUpMode::Rebase);
         let output = format_task_detail(
@@ -771,8 +773,8 @@ mod tests {
             .as_array()
             .expect("tools array")
             .iter()
-            .find(|t| t["name"] == "get_task")
-            .expect("get_task must be advertised")["description"]
+            .find(|t| t["name"] == "task_search")
+            .expect("task_search must be advertised")["description"]
             .as_str()
             .expect("description is a string")
             .to_string();
@@ -786,7 +788,7 @@ mod tests {
         for label in quoted {
             assert!(
                 output.contains(label),
-                "get_task's description quotes '{label}', which format_task_detail never \
+                "task_search's description quotes '{label}', which format_task_detail never \
                  emits — the description has gone stale. Rendered:\n{output}"
             );
         }
