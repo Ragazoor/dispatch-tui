@@ -2,7 +2,7 @@ use super::*;
 
 // -- close_task ------------------------------------------------------------
 //
-// `update_tasks`' done-path close is the module's (`RequestCloseTask`); the
+// `task_update`'s done-path close is the module's (`RequestCloseTask`); the
 // row it writes and the host's teardown are in `session_requests.rs`. What is
 // pinned here is the close itself, through the service.
 

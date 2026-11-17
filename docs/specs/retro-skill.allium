@@ -20,7 +20,7 @@
 --           retro fix to the commit but cannot tell whether retro ran); that
 --           a retro task sorts after planned subtasks (epics.allium:
 --           AutoDispatchNextSubtask); how the skill's copy reaches an agent
---           (mcp-task-tools.allium: SkillCopyIsJustInTime); what create_task
+--           (mcp-task-tools.allium: SkillCopyIsJustInTime); what task_create
 --           and record_learning do (mcp-task-tools.allium: CreateTaskViaMcp;
 --           learnings.allium: RecordLearningViaMcp); the knowledge base itself (learnings.allium);
 --           the tools behind each step (task_search) — those are the
@@ -315,7 +315,7 @@ rule FileInsteadOfFixing {
         )
 
     @guidance
-        -- create_task, with tag bug for a concrete defect with observable
+        -- task_create, with tag bug for a concrete defect with observable
         -- wrong behaviour and chore for a context improvement that passed
         -- the worth-changing test but that the agent must not fix itself
         -- (OnlyBugAndChoreAreFiled, FeaturesAreNeverFiled). A moment is
@@ -510,7 +510,7 @@ surface RetroSession {
     @guarantee FileWhenTheFixIsNotTheAgentsToMake
         -- A moment whose fix needs a design judgement, is not small, or
         -- concerns a pre-existing inaccuracy whose history the agent does not
-        -- know is filed with create_task, not fixed. So is a concrete defect
+        -- know is filed with task_create, not fixed. So is a concrete defect
         -- the agent could not fix in scope, as a bug (FileInsteadOfFixing).
 
     @guarantee DoneWrapUpAlwaysFiles
@@ -548,7 +548,7 @@ surface RetroSession {
         -- tool or environment running it: the sandbox, dispatch itself or
         -- Claude Code. A workaround in the repo's docs is written first if it
         -- helps the next agent, but is not sufficient closure. A defect this
-        -- task's own repo owns is filed with create_task; a defect another repo
+        -- task's own repo owns is filed with task_create; a defect another repo
         -- owns is not filed silently but flagged in the report, naming the root
         -- cause and the repo. Either way the report says the root cause is
         -- still open (FileInsteadOfFixing, FlagForeignRootCause,

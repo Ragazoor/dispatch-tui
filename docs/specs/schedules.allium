@@ -52,7 +52,7 @@
 --   - S8, the epic chain passes over a task still waiting for its time
 --     (epics.allium: AutoDispatchNextSubtask).
 --   - S9, the TUI shows a schedule and never edits it. Setting and clearing
---     are MCP-only (create_task and update_tasks' `schedule` argument).
+--     are MCP-only (task_create and task_update's `schedule` argument).
 
 use "./core.allium" as core
 use "./store-split.allium" as store_split
@@ -136,7 +136,7 @@ rule SetSchedule {
         if task.status = backlog: next_match(cron, after: now) else: null
 
     @guidance
-        -- Reached from create_task's and update_tasks' `schedule` argument
+        -- Reached from task_create's and task_update's `schedule` argument
         -- (mcp-task-tools.allium: CreateTaskViaMcp, UpdateTaskViaMcp), and
         -- applied by the store in the same write as the rest of the patch, so
         -- a task is never seen half-scheduled. Re-setting the same cron
@@ -155,7 +155,7 @@ rule ClearSchedule {
     ensures: task.schedule_error = null
 
     @guidance
-        -- update_tasks with `schedule` set to the empty string. Clearing a
+        -- task_update with `schedule` set to the empty string. Clearing a
         -- task with no schedule is a no-op, not a refusal.
 }
 
@@ -211,7 +211,7 @@ rule LeavingBacklogCancelsThePendingRun {
     ensures: task.next_due = null
 
     @guidance
-        -- A hand move (the TUI's moves and editor, update_tasks' status)
+        -- A hand move (the TUI's moves and editor, task_update's status)
         -- cancels the pending run; a close cancels it from any status
         -- (ClosingCancelsThePendingRun). A one-off is then spent:
         -- moving it back to backlog does not fire it; setting its schedule
@@ -244,7 +244,7 @@ rule ClosingCancelsThePendingRun {
     -- Every close, from any prior status. store-split.allium owns the trigger
     -- and raises it from RequestCloseTask and from a hand status write into
     -- done (HandStatusWriteReachesTheSchedule: the TUI's moves and editor,
-    -- update_tasks' status); pr-workflow.allium's ExitSession raises it for
+    -- task_update's status); pr-workflow.allium's ExitSession raises it for
     -- every action, pr included, since the module's close clears next_due
     -- whichever way the session ends.
     when: store_split/TaskClosed(task)
@@ -268,7 +268,7 @@ rule ClosingCancelsThePendingRun {
 
 rule LeavingRunningCancelsThePendingRun {
     -- A hand status write that takes a task out of running, into review or
-    -- backlog (the TUI's moves and editor, update_tasks' status). Into done
+    -- backlog (the TUI's moves and editor, task_update's status). Into done
     -- is ClosingCancelsThePendingRun.
     when: tasks/TaskStatusWrittenByHand(task, from, to)
 
@@ -373,7 +373,7 @@ invariant DueTimeIsAMatch {
 -- Surfaces
 ------------------------------------------------------------
 
--- The schedule half of create_task's and update_tasks' arguments. Setting
+-- The schedule half of task_create's and task_update's arguments. Setting
 -- and clearing are MCP-only (S9). mcp-task-tools.allium's CreateTaskViaMcp
 -- and UpdateTaskViaMcp hand the argument on; this surface is where the
 -- triggers enter this spec, since mcp-task-tools.allium already uses this
@@ -386,6 +386,6 @@ surface ScheduleArguments {
     provides:
         -- `schedule` set to a cron string.
         ScheduleSet(task, cron)
-        -- update_tasks with `schedule` set to the empty string.
+        -- task_update with `schedule` set to the empty string.
         ScheduleCleared(task)
 }

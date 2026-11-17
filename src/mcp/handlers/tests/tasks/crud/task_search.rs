@@ -99,6 +99,45 @@ async fn calling_get_task_or_list_tasks_names_task_search() {
     }
 }
 
+/// OldToolNameRedirects: each renamed write tool answers with its new name and
+/// is gone from `tools/list`.
+#[tokio::test]
+async fn calling_a_renamed_write_tool_names_its_replacement() {
+    let state = test_state().await;
+    let cases = [
+        ("create_task", "task_create"),
+        ("update_tasks", "task_update"),
+        ("update_task", "task_update"),
+        ("dispatch_task", "task_dispatch"),
+        ("resume_task", "task_resume"),
+    ];
+    for (old, new) in cases {
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": old, "arguments": {} })),
+        )
+        .await;
+        assert!(is_error(&resp), "{old} is an unknown tool");
+        let msg = error_message(&resp);
+        assert!(
+            msg.contains(&format!("{old} was renamed: call {new}")),
+            "{msg}"
+        );
+    }
+    let resp = call(&state, "tools/list", None).await;
+    let names: Vec<String> = resp.result.unwrap()["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    for (old, new) in cases {
+        assert!(!names.contains(&old.to_string()), "{old} still listed");
+        assert!(names.contains(&new.to_string()), "{new} not listed");
+    }
+}
+
 #[test]
 fn list_tasks_hint_says_epic_id_is_now_explicit() {
     let hint = crate::mcp::handlers::dispatch::OLD_TOOL_NAMES

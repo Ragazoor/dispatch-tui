@@ -57,12 +57,12 @@ the version that gets created.
 
 ## Step 5: Create and dispatch
 
-Call the `dispatch` MCP tool `create_task` with `tag`: `"fix"`, the board
+Call the `dispatch` MCP tool `task_create` with `tag`: `"fix"`, the board
 label that says a person asked for this fix. For `epic_id`, pass your own epic
 only if the fix belongs to it; otherwise pass `null` for a standalone task.
 
-If `create_task` errors, for example on a closed epic, report the error and
-stop. Otherwise call `dispatch_task` with the returned id. If that errors,
+If `task_create` errors, for example on a closed epic, report the error and
+stop. Otherwise call `task_dispatch` with the returned id. If that errors,
 report the task id and the error, and leave the task in backlog.
 
 ## Step 6: Report

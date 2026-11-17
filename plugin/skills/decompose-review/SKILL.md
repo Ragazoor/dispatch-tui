@@ -83,7 +83,7 @@ The plan must include:
 
 ### 6b. Create the subtask
 
-Call the `dispatch` MCP tool `create_task` with:
+Call the `dispatch` MCP tool `task_create` with:
 - `title`: the work package name
 - `repo_path`: main repo path from Step 4
 - `description`: one-sentence summary of what this work package addresses

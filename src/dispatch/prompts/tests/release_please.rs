@@ -153,7 +153,7 @@ fn the_release_runbook_never_authors_the_pr() {
 fn the_release_runbook_stop_terminals_set_needs_input() {
     let text = release_please_prompt(Some(RELEASE_PR_URL), None);
     assert!(
-        text.contains("update_tasks(task_ids=[42], sub_status=\"needs_input\")"),
+        text.contains("task_update(task_ids=[42], sub_status=\"needs_input\")"),
         "a stop terminal must flag the card as waiting on the user, got: {text}"
     );
 }

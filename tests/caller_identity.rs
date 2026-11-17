@@ -65,7 +65,7 @@ async fn create_task_via_task_header_does_not_inherit_epic() {
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "create_task",
+                "name": "task_create",
                 "arguments": { "title": "child", "repo_path": "/r" }
             }
         }),
@@ -89,7 +89,7 @@ async fn create_task_via_task_header_does_not_inherit_epic() {
             "jsonrpc": "2.0", "id": 2,
             "method": "tools/call",
             "params": {
-                "name": "create_task",
+                "name": "task_create",
                 "arguments": { "title": "child", "repo_path": "/r", "epic_id": null }
             }
         }),
@@ -111,7 +111,7 @@ async fn create_task_via_session_succeeds() {
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "create_task",
+                "name": "task_create",
                 "arguments": { "title": "t", "repo_path": "/r", "epic_id": null }
             }
         }),
@@ -154,7 +154,7 @@ async fn missing_identity_headers_on_tools_call_returns_32600_with_request_id() 
             "jsonrpc": "2.0", "id": 42,
             "method": "tools/call",
             "params": {
-                "name": "create_task",
+                "name": "task_create",
                 "arguments": { "title": "t", "repo_path": "/r", "epic_id": null }
             }
         }),

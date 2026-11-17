@@ -137,7 +137,7 @@ async fn apply_loop_event_message_applies_and_marks_dirty() {
     assert_eq!(app.status_message(), Some("hello"));
 }
 
-/// A `resume_task` event is the board's own resume, not a reload: it reaches
+/// A `task_resume` event is the board's own resume, not a reload: it reaches
 /// the App's handler and comes back as the same command the Space key issues.
 #[tokio::test]
 async fn apply_loop_event_resume_task_issues_the_resume_command() {

@@ -11,7 +11,7 @@
 --           bounds an auto-mode chain; the fix tag and the epic choice; the
 --           three things it never does.
 -- Excludes: how the skill's copy reaches an agent (mcp-task-tools.allium:
---           SkillCopyIsJustInTime); what create_task and dispatch_task do
+--           SkillCopyIsJustInTime); what task_create and task_dispatch do
 --           (mcp-task-tools.allium: CreateTaskViaMcp, DispatchTaskViaMcp);
 --           what the new agent does with the task (dispatch-prompt.allium);
 --           the tools behind each step (git, AskUserQuestion) — those are the
@@ -19,7 +19,7 @@
 --
 -- Design decisions:
 --   - Dispatch launches the new agent in auto mode, and that agent may invoke
---     /fix itself. The user's confirmation before create_task is the only
+--     /fix itself. The user's confirmation before task_create is the only
 --     bound on that chain, so nothing is created without it.
 --   - The skill never edits the owning repo. The task is how work reaches it;
 --     the new agent works in its own worktree.
@@ -255,7 +255,7 @@ rule CreateFixTask {
 
     requires: request.confirmed
 
-    let created = create_task(
+    let created = task_create(
         title: request.title,
         description: request.description,
         repo_path: request.repo_path,
@@ -273,7 +273,7 @@ rule CreateFixTask {
             request.stage = dispatching
 
     @guidance
-        -- create_task carries tag "fix", the board label that says a person
+        -- task_create carries tag "fix", the board label that says a person
         -- asked for this fix (FixTaskIsTagged). epic_id is the caller's own
         -- epic only if the fix belongs to it, else null for a standalone task
         -- (EpicIsTheCallersOrNone). An error, for example a closed epic, is
@@ -283,7 +283,7 @@ rule CreateFixTask {
 rule DispatchFixTask {
     when: request: FixRequest.stage transitions_to dispatching
 
-    let dispatched = dispatch_task(request.task_id)
+    let dispatched = task_dispatch(request.task_id)
 
     ensures:
         if dispatched.failed:
@@ -293,7 +293,7 @@ rule DispatchFixTask {
             request.stage = reported
 
     @guidance
-        -- dispatch_task is called with the returned id, after create_task
+        -- task_dispatch is called with the returned id, after task_create
         -- (DispatchFollowsCreate). If it errors, the skill reports the task
         -- id and the error and leaves the task in backlog.
 }
@@ -400,7 +400,7 @@ surface FixSession {
         -- CreateFixTask).
 
     @guarantee DispatchFollowsCreate
-        -- dispatch_task is called with the id create_task returned, after
+        -- task_dispatch is called with the id task_create returned, after
         -- the creation succeeded. A create error is reported and the skill
         -- stops; a dispatch error is reported with the task id and the task
         -- stays in backlog (CreateFixTask, DispatchFixTask).

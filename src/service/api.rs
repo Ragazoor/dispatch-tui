@@ -249,7 +249,7 @@ macro_rules! task_service_api {
                 task_id: $crate::models::TaskId
             ) -> Result<$crate::models::Task, $crate::service::ServiceError>;
 
-            /// `store-split.allium: RequestCloseTask`: `update_tasks`' done
+            /// `store-split.allium: RequestCloseTask`: `task_update`'s done
             /// path, one module transaction (the Done write, the epic rollup,
             /// the phoenix respawn and, when there is host work, a `close` row
             /// this host serves). `Err` means the close is not known to have

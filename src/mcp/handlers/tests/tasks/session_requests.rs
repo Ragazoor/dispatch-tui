@@ -621,9 +621,9 @@ async fn an_unsent_exit_session_is_an_error_saying_the_token_is_still_valid() {
     assert_eq!(extract_response_text(&retry), "Session closed.");
 }
 
-// -- update_tasks status="done" -------------------------------------------------------------------
+// -- task_update status="done" -------------------------------------------------------------------
 
-/// `update_tasks` status="done" closes in the module (`MarkTaskDoneViaMcp`,
+/// `task_update` status="done" closes in the module (`MarkTaskDoneViaMcp`,
 /// `RequestCloseTask`): the Done write and ONE `close` row for the host's
 /// teardown, with no token (no wrap_up or exit_session row) and no chain.
 #[tokio::test]
@@ -650,9 +650,7 @@ async fn update_tasks_done_closes_in_the_module_and_writes_a_close_row_without_a
     let resp = call(
         &state,
         "tools/call",
-        Some(
-            json!({"name": "update_tasks", "arguments": {"task_ids": [task.0], "status": "done"}}),
-        ),
+        Some(json!({"name": "task_update", "arguments": {"task_ids": [task.0], "status": "done"}})),
     )
     .await;
 

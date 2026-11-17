@@ -662,7 +662,7 @@ impl App {
         cmds
     }
 
-    /// `resume_task` (`mcp-task-tools.allium: ResumeTaskViaMcp`): the same
+    /// `task_resume` (`mcp-task-tools.allium: ResumeTaskViaMcp`): the same
     /// resume the Space key starts, with the caller's message. Unlike Space,
     /// nobody upstream has refused a foreign worktree, so say so here.
     pub(in crate::tui) fn handle_resume_requested(
@@ -674,7 +674,7 @@ impl App {
         if let Some(task) = self.board.find_task(id) {
             if !task.is_locally_owned(local_host_id.as_deref()) {
                 self.status.set(format!(
-                    "resume_task refused: {}'s worktree is on another machine",
+                    "task_resume refused: {}'s worktree is on another machine",
                     task.label()
                 ));
                 return vec![];

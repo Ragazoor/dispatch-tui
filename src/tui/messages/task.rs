@@ -61,7 +61,7 @@ pub enum TaskMessage {
     /// Space resumes `id` and, once it is resumed, goes to it
     /// (`split-pane.allium: GoToTaskSpaceResumed`).
     Resume(TaskId),
-    /// The MCP tool `resume_task` asks to resume `id`, optionally with a
+    /// The MCP tool `task_resume` asks to resume `id`, optionally with a
     /// first message for the resumed session.
     ResumeRequested {
         id: TaskId,

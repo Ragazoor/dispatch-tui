@@ -1,4 +1,4 @@
-//! `resume_task` (`mcp-task-tools.allium: ResumeTaskViaMcp`): the handler
+//! `task_resume` (`mcp-task-tools.allium: ResumeTaskViaMcp`): the handler
 //! checks what it can see, then hands the resume to the board as an event.
 
 use super::*;
@@ -35,7 +35,7 @@ async fn resume(state: &Arc<McpState>, args: Value) -> JsonRpcResponse {
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "resume_task", "arguments": args })),
+        Some(json!({ "name": "task_resume", "arguments": args })),
     )
     .await
 }
@@ -109,7 +109,7 @@ async fn resume_task_refuses_a_task_that_never_ran() {
         msg.starts_with(&task_ref_of(&state, id).await),
         "the refusal names the task by id, name and title: {msg}"
     );
-    assert!(msg.contains("dispatch_task"), "{}", msg);
+    assert!(msg.contains("task_dispatch"), "{}", msg);
     assert!(rx.try_recv().is_err(), "a refusal must not reach the board");
 }
 
@@ -234,7 +234,7 @@ async fn the_pane_view_lists_detached_agents_apart_from_live_ones() {
 }
 
 /// ResumeIsTheBoardsOwnResume: a detached task's resume is handed to the
-/// board as the same event resume_task sends, with no message.
+/// board as the same event task_resume sends, with no message.
 #[tokio::test]
 async fn a_pane_resume_of_a_detached_task_hands_it_to_the_board() {
     let (state, mut rx) = test_state_with_notify().await;

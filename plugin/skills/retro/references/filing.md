@@ -6,7 +6,7 @@ Detail for retro's "Fix it or file it": root causes outside this repo, which tag
 
 A local doc workaround treats the symptom, not the defect, so it is not sufficient closure. Write it first if it helps the next agent now, then deal with the defect itself:
 
-- **This task's own repo owns it** (for example a dispatch defect found while working in dispatch): file it with `create_task`.
+- **This task's own repo owns it** (for example a dispatch defect found while working in dispatch): file it with `task_create`.
 - **A different repo owns it** (the common case: you work in an unrelated repo and the defect is in dispatch's sandbox or Claude Code): do not file silently onto another repo's board. Flag it in the report, naming the root cause and the repo you think owns it, so the user can file it.
 
 Either way, say plainly that the root cause is still open.

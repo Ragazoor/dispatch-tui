@@ -169,7 +169,7 @@ fn memory_caller_matches_the_real_reducers() {
             .0;
         compare_epic(epic2_id_real);
 
-        // -- create_task (in the epic, backlog) ----------------------------------
+        // -- task_create (in the epic, backlog) ----------------------------------
         let task_id_real = real
             .create_task(own_task_in_epic(epic_id_real))
             .await

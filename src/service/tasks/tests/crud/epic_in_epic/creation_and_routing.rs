@@ -275,7 +275,7 @@ async fn create_task_with_an_explicit_base_branch_does_not_probe_the_repo() {
 #[tokio::test]
 async fn create_task_falls_back_to_main_when_the_repo_names_no_default() {
     // config.default_branch is the detection helper's own last resort, not a
-    // first answer. create_task stays total: it never refuses over a branch
+    // first answer. task_create stays total: it never refuses over a branch
     // the caller did not ask about.
     let db = test_db().await;
     let runner = Arc::new(crate::process::MockProcessRunner::new(vec![

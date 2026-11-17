@@ -1197,7 +1197,7 @@ async fn a_teardown_that_stalls_past_its_deadline_is_reported_deadline_passed() 
 }
 
 // ===========================================================================
-// update_tasks' done-path close: RequestCloseTask (`store-split.allium` X1)
+// task_update's done-path close: RequestCloseTask (`store-split.allium` X1)
 // ===========================================================================
 
 impl Fx {

@@ -17,7 +17,7 @@ use crate::define_str_enum;
 define_id_newtype!(SessionRequestId, session_request_id_tests);
 
 /// What a session request asks for: a wrap-up, the close that follows it, or
-/// (X1) the teardown of `update_tasks`' done-path close, which has no wrap-up
+/// (X1) the teardown of `task_update`'s done-path close, which has no wrap-up
 /// behind it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SessionRequestKind {

@@ -91,7 +91,7 @@
 --     ids grow in jumps (the store reserves them in blocks and drops the
 --     rest of a block on restart), so ids make poor names for people. The
 --     agent is created in state `assigned`, in the same write as the task,
---     on every create path: create_task, quick dispatch, a feed's insert, a
+--     on every create path: task_create, quick dispatch, a feed's insert, a
 --     phoenix respawn. Not on a seed or an import, which restore rows with
 --     their own ids and bring their own agents. The task's first dispatch
 --     claim launches the assigned agent: it becomes current under the same
@@ -544,8 +544,8 @@ surface NamesForPeople {
         -- An MCP reply that names a task keeps its id, as the key, and adds
         -- the task's display name and title beside it; one that names an
         -- epic adds the epic's title. That covers the replies that would
-        -- otherwise give a bare id — create_task, update_tasks (one, several, done),
-        -- update_epic, dispatch_task, resume_task, wrap_up, exit_session,
+        -- otherwise give a bare id — task_create, task_update (one, several, done),
+        -- update_epic, task_dispatch, task_resume, wrap_up, exit_session,
         -- and the work-package replies and their item lists — and the rows
         -- that name a parent by id alone (list_epics' `(parent:<id>)`).
         -- Work-package task items show their display name. The exact reply

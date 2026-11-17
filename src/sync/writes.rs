@@ -683,7 +683,7 @@ pub trait ReducerCaller: Send + Sync {
         action: String,
         pr_url: String,
     ) -> Result<ReducerOutcome>;
-    /// `RequestCloseTask` (`update_tasks`' done path): fail the task's open
+    /// `RequestCloseTask` (`task_update`'s done path): fail the task's open
     /// session request, apply the Done close, respawn a phoenix task, roll the
     /// epic up and, when there is host work and `host` (the caller's own) is
     /// where it is, write a `close` row; all in one transaction. No token, no

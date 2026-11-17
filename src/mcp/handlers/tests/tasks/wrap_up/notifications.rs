@@ -13,7 +13,7 @@ async fn update_task_sends_refresh_notification() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "running" }
         })),
     )
@@ -38,7 +38,7 @@ async fn create_task_sends_refresh_notification() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "Notified Task", "repo_path": "/repo", "epic_id": null }
         })),
     )
@@ -47,7 +47,7 @@ async fn create_task_sends_refresh_notification() {
 
     let event = rx
         .try_recv()
-        .expect("expected notification after create_task");
+        .expect("expected notification after task_create");
     assert!(
         matches!(event, crate::board_event::BoardEvent::TaskChanged(_)),
         "expected TaskChanged, got {event:?}"
@@ -64,7 +64,7 @@ async fn failed_update_does_not_send_notification() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "bogus" }
         })),
     )

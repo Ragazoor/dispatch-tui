@@ -1098,8 +1098,8 @@ rule ActivateTask {
         -- board.normal, Space, the task_* contexts), and the row's action id
         -- is what the press records: activate_unavailable for priority 0, the
         -- dispatch-in-progress hint and the no-worktree hint; jump_to_tmux
-        -- for priorities 1 and 3; swap_split_pane, dispatch_task,
-        -- open_retry_dialog and resume_task for the rest.
+        -- for priorities 1 and 3; swap_split_pane, task_dispatch,
+        -- open_retry_dialog and task_resume for the rest.
         --
         -- Space on an epic row (board view) enters the epic view, not this
         -- rule. Inside the epic, Space on each subtask follows the task rules
@@ -1135,7 +1135,7 @@ rule GoToTaskSpaceResumed {
         -- because another resume of the task is already in flight
         -- (ResumeTaskOncePerTask) does not turn that resume into a go-to.
         --
-        -- Only board Space sets go_to_task. The MCP tool resume_task and the
+        -- Only board Space sets go_to_task. The MCP tool task_resume and the
         -- retry dialog's [r] Resume leave tmux focus where it is: an agent's
         -- call must not pull the operator off what they are looking at. The
         -- agent-tree pane's resume has its own wait-then-jump

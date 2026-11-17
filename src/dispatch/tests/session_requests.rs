@@ -66,7 +66,7 @@ fn exit(id: i64, host: &str, state: SessionRequestState) -> SessionRequest {
     )
 }
 
-/// The row `update_tasks`' done-path close writes (`store-split.allium` X1): a
+/// The row `task_update`'s done-path close writes (`store-split.allium` X1): a
 /// teardown like an exit_session, with no wrap_up behind it.
 fn close(id: i64, host: &str, state: SessionRequestState) -> SessionRequest {
     row(id, host, SessionRequestKind::Close, WrapUpMode::Done, state)

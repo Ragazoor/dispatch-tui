@@ -185,8 +185,8 @@ dispatch spacetime restore <file>                # write a snapshot into a serve
 dispatch store import --from <store-or-folder>   # bring an old hand-started store's rows into the managed one
 ```
 
-Tasks are created and mutated via the MCP tools (`create_task`,
-`update_tasks`) — there is no CLI subcommand for creating, listing or
+Tasks are created and mutated via the MCP tools (`task_create`,
+`task_update`) — there is no CLI subcommand for creating, listing or
 updating a task.
 
 ## Configuration

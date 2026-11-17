@@ -172,7 +172,7 @@ pub async fn handle_pane_view(
 
 /// `BoardPaneView.resume_agent` (`docs/specs/agent-tree.allium`): a companion
 /// pane asks the board to resume a detached agent. The same checks and the
-/// same event as `resume_task` (`ResumeIsTheBoardsOwnResume`); a refusal is an
+/// same event as `task_resume` (`ResumeIsTheBoardsOwnResume`); a refusal is an
 /// answer, worded for the pane's notice, never an HTTP error.
 pub async fn handle_pane_resume(
     State(state): State<Arc<McpState>>,
@@ -360,7 +360,7 @@ async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Opti
             };
             return Some(format!(
                 "{not_running} It is the agent of {task_ref}.{ended} To wake it with your \
-                 message, call the dispatch MCP tool resume_task(task_id: {n}, message: <your \
+                 message, call the dispatch MCP tool task_resume(task_id: {n}, message: <your \
                  message>): the message becomes the agent's first input when its session \
                  restarts.{moves}"
             ));
@@ -376,7 +376,7 @@ async fn undelivered_hint(state: &McpState, to: &str, target_id: TaskId) -> Opti
             return Some(format!(
                 "{to} did not answer, so your message was not delivered, but the board still \
                  shows the window of {task_ref} open: the session in it has exited or is not \
-                 responding.{try_window} resume_task refuses a task whose window is open. If \
+                 responding.{try_window} task_resume refuses a task whose window is open. If \
                  the send still fails, tell your operator so they can check the window."
             ));
         }

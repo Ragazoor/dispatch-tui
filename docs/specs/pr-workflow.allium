@@ -10,7 +10,7 @@
 --           exit token, the conflict sub_status writes and their timeouts,
 --           which the store's module owns (see
 --           store-split.allium: SessionRequest, RequestWrapUp,
---           RequestExitSession and the rules after them); update_tasks'
+--           RequestExitSession and the rules after them); task_update's
 --           done-path close, which the module also owns
 --           (store-split.allium: RequestCloseTask). The host's teardown of
 --           that close's row is here (ExitSessionTeardown).
@@ -569,7 +569,7 @@ rule ClosePrOnDone {
     -- host serving that row runs the gh call. They are:
     --   - exit_session with action rebase or done (store-split.allium:
     --     RequestExitSession, an exit_session row);
-    --   - update_tasks' status="done" path (store-split.allium:
+    --   - task_update's status="done" path (store-split.allium:
     --     RequestCloseTask, a close row);
     --   - a move into Done through update_task, which ConfirmDone and
     --     EditTask's STATUS section use (store-split.allium:
@@ -629,7 +629,7 @@ rule ClosePrOnDone {
         -- no route writes a close row and a closed-without-merge PR stays
         -- closed on GitHub until a human decides what to do with the task.
         --
-        -- A RE-CLOSE. update_tasks' status="done" on a task already Done that
+        -- A RE-CLOSE. task_update's status="done" on a task already Done that
         -- carries a pr-typed url still writes a close row (RequestCloseTask),
         -- and the host serving it runs gh pr close again, which meets a PR
         -- already merged or closed and logs quietly. A plain update_task
@@ -1017,9 +1017,9 @@ rule ExitSession {
         -- review outright (the Stop hook can move a task to review through no
         -- fault of the agent, which would then be unable to close at all).
         --
-        -- == The other close: update_tasks' done path ==
+        -- == The other close: task_update's done path ==
         -- There is no board-side close. MarkTaskDoneViaMcp
-        -- (mcp-task-tools.allium) — update_tasks' dedicated status="done"
+        -- (mcp-task-tools.allium) — task_update's dedicated status="done"
         -- path — closes in the module too (store-split.allium:
         -- RequestCloseTask, X1): the same terminal fields as this rule's done
         -- branch, in one transaction, with no token and no chain, and a close
@@ -1127,7 +1127,7 @@ rule ExitSessionTeardown {
     when: split/SessionRequestClaimed(request)
 
     -- The host work of a close (store-split.allium, W5): this host's claim of
-    -- the exit_session row, or of update_tasks' done-path close row
+    -- the exit_session row, or of task_update's done-path close row
     -- (store-split.allium: RequestCloseTask, X1), was accepted
     -- (HostClaimsSessionRequest). Both kinds are served alike.
     requires: request.kind in {exit_session, close}
@@ -1176,7 +1176,7 @@ rule ExitSessionTeardown {
         -- so it ends the session that called exit_session. The MCP response
         -- does not wait for it (mcp-task-tools.allium: ExitSessionViaMcp). A
         -- close row's window belongs to some other task's agent, or to none:
-        -- update_tasks never closes the caller's own task
+        -- task_update never closes the caller's own task
         -- (mcp-task-tools.allium: MarkTaskDoneViaMcp), and does not wait
         -- for the teardown either.
 }

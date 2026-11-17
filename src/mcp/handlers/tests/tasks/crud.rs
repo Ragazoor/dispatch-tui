@@ -121,7 +121,7 @@ async fn update_task_maps_every_advertised_field_to_params() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {
                 "task_ids": [task_id.0],
                 "status": "running",
@@ -185,7 +185,7 @@ async fn update_task_valid() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "running" }
         })),
     )
@@ -206,7 +206,7 @@ async fn update_task_invalid_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "bogus" }
         })),
     )
@@ -227,7 +227,7 @@ async fn update_task_rejects_archived_as_an_unknown_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "archived" }
         })),
     )
@@ -238,7 +238,7 @@ async fn update_task_rejects_archived_as_an_unknown_status() {
     assert_eq!(task.status, before);
 }
 
-// -- update_task(status="done") — MarkTaskDoneViaMcp ------------------------
+// -- task_update(status="done") — MarkTaskDoneViaMcp ------------------------
 //
 // A dedicated close-only path (mcp-task-tools.allium: MarkTaskDoneViaMcp),
 // distinct from ExitSessionViaMcp: no exit token, reachable for a session
@@ -256,7 +256,7 @@ async fn update_task_done_marks_task_done_for_session_caller() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
     )
@@ -296,7 +296,7 @@ async fn update_task_done_reclose_keeps_existing_completed_at() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
     )
@@ -307,7 +307,7 @@ async fn update_task_done_reclose_keeps_existing_completed_at() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
     )
@@ -333,7 +333,7 @@ async fn update_task_done_rejects_when_combined_with_other_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "done", "title": "new title" }
         })),
     )
@@ -363,7 +363,7 @@ async fn update_task_done_rejects_when_combined_with_bare_url_type() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "done", "url_type": "pr" }
         })),
     )
@@ -389,7 +389,7 @@ async fn update_task_done_combined_with_url_reports_the_close_only_error_first()
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {
                 "task_ids": [task_id.0],
                 "status": "done",
@@ -414,7 +414,7 @@ async fn update_task_done_rejects_dispatched_agent_closing_its_own_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
         CallerIdentity::Task(task_id),
@@ -436,7 +436,7 @@ async fn update_task_done_allows_dispatched_agent_closing_a_different_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [other_task.0], "status": "done" }
         })),
         CallerIdentity::Task(caller_task),
@@ -460,7 +460,7 @@ async fn update_task_done_unknown_task_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [9999], "status": "done" }
         })),
     )
@@ -483,7 +483,7 @@ async fn update_task_done_reachable_from_backlog_with_no_window_or_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
     )
@@ -509,7 +509,7 @@ async fn update_task_still_allows_other_statuses() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "update_tasks",
+                "name": "task_update",
                 "arguments": { "task_ids": [task_id.0], "status": status }
             })),
         )
@@ -554,7 +554,7 @@ async fn update_task_done_rejection_does_not_block_leaving_done() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "update_tasks",
+                "name": "task_update",
                 "arguments": { "task_ids": [task_id.0], "status": status }
             })),
         )
@@ -581,7 +581,7 @@ async fn update_task_missing_args() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "update_tasks", "arguments": {} })),
+        Some(json!({ "name": "task_update", "arguments": {} })),
     )
     .await;
     assert!(is_error(&resp));
@@ -636,7 +636,7 @@ async fn create_task_minimal() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": {
                 "title": "New Task",
                 "repo_path": "/my/repo",
@@ -675,7 +675,7 @@ async fn create_task_with_plan_stays_backlog() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": {
                 "title": "Planned Task",
                 "repo_path": "/my/repo",
@@ -708,7 +708,7 @@ async fn create_task_with_description() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": {
                 "title": "Described Task",
                 "repo_path": "/repo",
@@ -727,7 +727,7 @@ async fn create_task_with_description() {
 /// `CreateTaskViaMcp`'s `signal`: advertised in the schema as a boolean.
 #[test]
 fn create_task_schema_advertises_a_boolean_signal() {
-    let def = tool_def("create_task");
+    let def = tool_def("task_create");
     assert_eq!(
         def["inputSchema"]["properties"]["signal"]["type"],
         "boolean"
@@ -766,7 +766,7 @@ async fn create_in_epic(state: &Arc<McpState>, epic: crate::models::EpicId, extr
     let resp = call(
         state,
         "tools/call",
-        Some(json!({ "name": "create_task", "arguments": arguments })),
+        Some(json!({ "name": "task_create", "arguments": arguments })),
     )
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
@@ -805,7 +805,7 @@ async fn create_task_with_signal_and_no_epic_is_created_unmarked() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "T", "repo_path": "/repo", "epic_id": null, "signal": true }
         })),
     )
@@ -825,7 +825,7 @@ async fn create_task_missing_title() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "repo_path": "/repo", "epic_id": null }
         })),
     )
@@ -842,7 +842,7 @@ async fn create_task_unknown_field_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "t", "repo_path": "/repo", "epic_id": null, "bogus_field": "x" }
         })),
     )
@@ -868,7 +868,7 @@ async fn update_task_accepts_string_task_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0.to_string()], "status": "running" }
         })),
     )
@@ -924,7 +924,7 @@ fn text_of(resp: &JsonRpcResponse) -> String {
 
 #[test]
 fn update_and_list_schemas_advertise_a_boolean_bookmarked() {
-    for tool in ["update_tasks", "task_search"] {
+    for tool in ["task_update", "task_search"] {
         let def = tool_def(tool);
         assert_eq!(
             def["inputSchema"]["properties"]["bookmarked"]["type"], "boolean",
@@ -941,7 +941,7 @@ async fn update_tasks_bookmarked_sets_and_clears_this_persons_bookmark() {
 
     let set = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "bookmarked": true }),
     )
     .await;
@@ -957,7 +957,7 @@ async fn update_tasks_bookmarked_sets_and_clears_this_persons_bookmark() {
 
     tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "bookmarked": false }),
     )
     .await;
@@ -983,7 +983,7 @@ async fn list_tasks_bookmarked_filter_keeps_only_this_persons_bookmarks() {
         .id;
     tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [marked.0], "bookmarked": true }),
     )
     .await;
@@ -1004,7 +1004,7 @@ async fn bookmarking_a_done_task_is_refused() {
     let task = state.db.list_all().await[0].id;
     let done = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "status": "done" }),
     )
     .await;
@@ -1012,7 +1012,7 @@ async fn bookmarking_a_done_task_is_refused() {
 
     let resp = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "bookmarked": true }),
     )
     .await;
@@ -1036,7 +1036,7 @@ async fn bookmarked_cannot_travel_with_status_done() {
 
     let resp = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "status": "done", "bookmarked": true }),
     )
     .await;
@@ -1059,7 +1059,7 @@ async fn update_tasks_with_only_url_type_is_still_refused() {
 
     let resp = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "url_type": "pr" }),
     )
     .await;
@@ -1077,7 +1077,7 @@ async fn update_tasks_url_type_with_bookmarked_but_no_url_is_refused() {
 
     let resp = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "url_type": "pr", "bookmarked": true }),
     )
     .await;
@@ -1102,7 +1102,7 @@ async fn update_tasks_refused_bookmark_leaves_the_fields_unwritten() {
     let task = state.db.list_all().await[0].id;
     let done = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "status": "done" }),
     )
     .await;
@@ -1110,7 +1110,7 @@ async fn update_tasks_refused_bookmark_leaves_the_fields_unwritten() {
 
     let resp = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [task.0], "title": "after", "bookmarked": true }),
     )
     .await;
@@ -1145,7 +1145,7 @@ async fn one_done_one_open() -> (Arc<McpState>, crate::models::TaskId, crate::mo
     let open = all.iter().find(|t| t.title == "open").unwrap().id;
     let resp = tool_call(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [done.0], "status": "done" }),
     )
     .await;

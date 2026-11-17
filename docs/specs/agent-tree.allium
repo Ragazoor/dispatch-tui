@@ -320,14 +320,14 @@ contract BoardPaneView {
     @invariant ResumeIsTheBoardsOwnResume
         -- The board answers resume_agent by raising the same ResumeTask
         -- (dispatch.allium) that Space on a detached card and the MCP tool
-        -- resume_task raise, with no message, after the same refusals
-        -- resume_task makes (the task never ran, has no worktree, is held by
+        -- task_resume raise, with no message, after the same refusals
+        -- task_resume makes (the task never ran, has no worktree, is held by
         -- another machine, is attached, or its worktree is gone from disk).
         -- It also refuses a task it does not hold, and refuses when it has no
         -- way to hand the resume on (no board attached, or shutting down).
         -- A refusal changes nothing. An accepted request only means the
         -- launch was handed to the board: the launch can still fail, and
-        -- says so in the board's status line, as it does for resume_task.
+        -- says so in the board's status line, as it does for task_resume.
         -- The pane never launches an agent itself.
 }
 

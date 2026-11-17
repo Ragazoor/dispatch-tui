@@ -326,7 +326,7 @@ fn spec_first_instruction_does_not_name_allium_loop() {
 }
 
 /// The two clauses both design steps share survive the rewrite: the plan doc
-/// is the agent's judgement call, attached via update_tasks, and only when it
+/// is the agent's judgement call, attached via task_update, and only when it
 /// is worth it.
 #[test]
 fn spec_first_instruction_keeps_the_plan_doc_a_judgement_call() {
@@ -336,7 +336,7 @@ fn spec_first_instruction_keeps_the_plan_doc_a_judgement_call() {
         "spec_first_instruction should mark the plan doc as the agent's call, got: {text}"
     );
     assert!(
-        text.contains("docs/plans/") && text.contains("update_tasks"),
+        text.contains("docs/plans/") && text.contains("task_update"),
         "spec_first_instruction should still say where an optional plan goes \
 and how to attach it, got: {text}"
     );
@@ -404,7 +404,7 @@ fn brainstorm_instruction_shares_the_optional_plan_and_no_stopping_point_clauses
         "the plan doc should still be offered as the agent's call, got: {text}"
     );
     assert!(
-        text.contains("update_tasks"),
+        text.contains("task_update"),
         "the fallback should say how an optional plan gets attached, got: {text}"
     );
     assert!(
@@ -463,7 +463,7 @@ fn quick_dispatch_design_step_follows_the_repos_specs() {
     );
     // The rename step is unchanged — only the design step swaps.
     assert!(
-        text.contains("call `update_tasks` with a"),
+        text.contains("call `task_update` with a"),
         "quick dispatch should still ask the agent to rename the task, got: {text}"
     );
 }

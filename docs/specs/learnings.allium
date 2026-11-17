@@ -216,7 +216,7 @@ rule WrapUpRateLearningNudge {
         -- different tool (mcp-task-tools.allium:
         -- PrFinalisationReflectionNudge), and the normal wrap_up →
         -- exit_session path never shows it, because that path closes the
-        -- task through the module, not through update_tasks.
+        -- task through the module, not through task_update.
         -- Reflection proper is the /retro skill, which the /wrap-up skill
         -- runs before its commit step, for all three actions.
 }

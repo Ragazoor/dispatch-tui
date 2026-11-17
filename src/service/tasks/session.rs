@@ -94,7 +94,7 @@ impl TaskService {
             .await?)
     }
 
-    /// `RequestCloseTask`: `update_tasks`' done path. One module transaction
+    /// `RequestCloseTask`: `task_update`'s done path. One module transaction
     /// applies the Done close (terminal write, epic rollup, phoenix respawn,
     /// the task's open session request failed "task closed") and, when the task
     /// had a window or a pr-typed url on this host, writes a `close` row that

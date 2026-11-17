@@ -1,4 +1,4 @@
-//! `dispatch_task`, `task_search` and the epic chain on request rows
+//! `task_dispatch`, `task_search` and the epic chain on request rows
 //! (`store-split.allium: DispatchRequest`).
 //!
 //! `mcp-task-tools.allium: DispatchTaskViaMcp` writes a request (origin
@@ -26,7 +26,7 @@ use crate::store::RequestDispatchAnswer;
 /// wall-clock wait for work to finish.
 const SIGNAL_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// An `McpState` whose `dispatch_task` waits at most `cap`, over an in-memory
+/// An `McpState` whose `task_dispatch` waits at most `cap`, over an in-memory
 /// store, with a runner that panics on any subprocess.
 fn state_with_wait_cap(cap: Duration) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
     let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().unwrap());
@@ -58,7 +58,7 @@ async fn request_written_for(
         }
     })
     .await
-    .expect("dispatch_task must write a request")
+    .expect("task_dispatch must write a request")
 }
 
 fn dispatch_task_call(
@@ -71,7 +71,7 @@ fn dispatch_task_call(
             &state,
             "tools/call",
             Some(json!({
-                "name": "dispatch_task",
+                "name": "task_dispatch",
                 "arguments": { "task_id": task.0 }
             })),
         )
@@ -82,7 +82,7 @@ fn dispatch_task_call(
 async fn answer(handle: tokio::task::JoinHandle<JsonRpcResponse>) -> JsonRpcResponse {
     tokio::time::timeout(SIGNAL_TIMEOUT, handle)
         .await
-        .expect("dispatch_task must answer once the row finishes")
+        .expect("task_dispatch must answer once the row finishes")
         .unwrap()
 }
 
@@ -108,14 +108,14 @@ async fn dispatch_task_requests_with_origin_mcp_and_lets_the_module_pick_the_mod
     let _ = call(
         &state,
         "tools/call",
-        Some(json!({"name": "dispatch_task", "arguments": {"task_id": task.0}})),
+        Some(json!({"name": "task_dispatch", "arguments": {"task_id": task.0}})),
     )
     .await;
 
     let row = db
         .latest_dispatch_request_for_task(task)
         .await
-        .expect("dispatch_task writes a request");
+        .expect("task_dispatch writes a request");
     assert_eq!(row.origin, DispatchOrigin::Mcp);
     assert_eq!(row.mode, DispatchMode::Research);
     assert_eq!(row.host, crate::store::MEMORY_HOST_ID);
@@ -182,7 +182,7 @@ async fn dispatch_task_answers_with_the_pending_request_when_the_wait_ends_first
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "dispatch_task", "arguments": {"task_id": task.0}})),
+        Some(json!({"name": "task_dispatch", "arguments": {"task_id": task.0}})),
     )
     .await;
 
@@ -225,7 +225,7 @@ async fn dispatch_task_reports_a_refused_request_as_not_in_backlog() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "dispatch_task", "arguments": {"task_id": task.0}})),
+        Some(json!({"name": "task_dispatch", "arguments": {"task_id": task.0}})),
     )
     .await;
 
@@ -255,7 +255,7 @@ async fn dispatch_task_reports_a_foreign_owned_task_with_the_modules_reason() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({"name": "dispatch_task", "arguments": {"task_id": task.0}})),
+        Some(json!({"name": "task_dispatch", "arguments": {"task_id": task.0}})),
     )
     .await;
 

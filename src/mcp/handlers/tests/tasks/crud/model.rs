@@ -2,7 +2,7 @@ use super::*;
 use crate::models::{TaskId, TaskModel};
 
 // ---------------------------------------------------------------------------
-// model: create_task, update_tasks and task_search (core.allium: TaskModel,
+// model: task_create, task_update and task_search (core.allium: TaskModel,
 // tasks.allium: SetModel)
 // ---------------------------------------------------------------------------
 
@@ -10,7 +10,7 @@ async fn update(state: &Arc<McpState>, args: serde_json::Value) -> JsonRpcRespon
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "update_tasks", "arguments": args })),
+        Some(json!({ "name": "task_update", "arguments": args })),
     )
     .await
 }
@@ -34,7 +34,7 @@ async fn create(state: &Arc<McpState>, extra: serde_json::Value) -> JsonRpcRespo
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "create_task", "arguments": args })),
+        Some(json!({ "name": "task_create", "arguments": args })),
     )
     .await
 }

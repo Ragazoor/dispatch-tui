@@ -239,7 +239,7 @@ mod load_init_helpers {
     }
 }
 
-/// The shared dispatch prologue. Four launch sites (dispatch_task and the epic chain
+/// The shared dispatch prologue. Four launch sites (task_dispatch and the epic chain
 /// in src/mcp/handlers/tasks/dispatch.rs, exec_quick_dispatch and exec_dispatch_agent
 /// in src/runtime/tasks.rs) run it; their own end-to-end tests cover the wiring,
 /// these pin the prologue itself.
@@ -479,7 +479,7 @@ mod backfill_embeddings {
 mod off_board_dispatch {
     use super::*;
 
-    // A launch the board did not ask for (the dispatch_task tool, or epic
+    // A launch the board did not ask for (the task_dispatch tool, or epic
     // auto-dispatch chaining). Every request is
     // provisioned by this host's reactor, so an off-board request reaches the
     // board as the same `Dispatched` message a key press does.

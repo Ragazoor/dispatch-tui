@@ -64,7 +64,7 @@ impl ChainFixture {
     }
 
     /// Like [`ChainFixture::new`], but with a `task_svc` whose `close_task`
-    /// always fails, so `update_tasks(status="done")`'s close does not take
+    /// always fails, so `task_update(status="done")`'s close does not take
     /// effect (`MarkTaskDoneViaMcp`).
     async fn with_failing_close() -> Self {
         let svc = Arc::new(FailingCloseTaskService::default());
@@ -253,7 +253,7 @@ impl ChainFixture {
             &self.state,
             "tools/call",
             Some(json!({
-                "name": "update_tasks",
+                "name": "task_update",
                 "arguments": { "task_ids": [task_id.0], "status": "done" }
             })),
         )
@@ -261,7 +261,7 @@ impl ChainFixture {
     }
 }
 
-// -- update_task(status="done") closes but never chains ----------------------
+// -- task_update(status="done") closes but never chains ----------------------
 //
 // MarkTaskDoneViaMcp (mcp-task-tools.allium) closes in the module
 // (`close_task`, store-split.allium: RequestCloseTask, X1), with no token and no
@@ -270,7 +270,7 @@ impl ChainFixture {
 // close with a wrap_up behind it can say the closed work reached base_branch.
 // These are the teardown checks plus that one divergence.
 
-/// update_task(status="done") leaves the epic's next backlog subtask in
+/// task_update(status="done") leaves the epic's next backlog subtask in
 /// backlog — the divergence from `exit_session_dispatches_first_backlog_subtask`.
 ///
 /// The assertion is sound without waiting for anything: the module's chain
@@ -293,7 +293,7 @@ async fn update_task_done_does_not_chain_the_next_subtask() {
     assert_eq!(
         next.status,
         TaskStatus::Backlog,
-        "update_task(status=\"done\") must not dispatch the next subtask"
+        "task_update(status=\"done\") must not dispatch the next subtask"
     );
     assert!(next.worktree.is_none());
     assert!(next.tmux_window.is_none());
@@ -323,7 +323,7 @@ async fn update_task_done_response_never_names_a_chained_subtask() {
     );
 }
 
-/// Closing a task with a live tmux window via update_task(status="done")
+/// Closing a task with a live tmux window via task_update(status="done")
 /// tears the window down, the same as exit_session does — parity with
 /// `exit_session_successful_close_kills_the_tmux_window`. The module writes a
 /// `close` row naming the window and this host's reactor serves it; the test
@@ -768,12 +768,12 @@ async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
 //
 // `exit_session`'s close is the module's (`store-split.allium` W4), in ONE
 // transaction with the token, the epic rollup and the chain
-// (`pr-workflow.allium: ExitSession`), and so is `update_tasks`
+// (`pr-workflow.allium: ExitSession`), and so is `task_update`
 // status="done" (`close_task`, X1): either took effect whole or not at all. The
 // board does not gate a teardown on a close; the one test below drives a
 // close call that gets no effect.
 
-/// A task service whose `close_task` always fails, so `update_tasks`' close
+/// A task service whose `close_task` always fails, so `task_update`'s close
 /// does not take effect. Every other method inherits the panicking default from
 /// `TaskServiceApiStub` — which is itself an assertion.
 #[derive(Default)]
@@ -1193,7 +1193,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
 }
 
 // ---------------------------------------------------------------------------
-// dispatch_task tests
+// task_dispatch tests
 // ---------------------------------------------------------------------------
 
 /// The exact command sequence one successful dispatch issues. Scripted rather
@@ -1203,7 +1203,7 @@ fn dispatch_runner_script() -> Arc<MockProcessRunner> {
     crate::dispatch::mock_sequence::DispatchScript::dispatch().shared_runner()
 }
 
-/// The `dispatch_task` tools/call for `task_id`.
+/// The `task_dispatch` tools/call for `task_id`.
 async fn call_dispatch_task(
     state: &Arc<McpState>,
     task_id: crate::models::TaskId,
@@ -1212,7 +1212,7 @@ async fn call_dispatch_task(
         state,
         "tools/call",
         Some(json!({
-            "name": "dispatch_task",
+            "name": "task_dispatch",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -1234,7 +1234,7 @@ async fn dispatch_task_dispatches_backlog_task() {
         "Expected 'dispatched' in response, got: {text}"
     );
 
-    // dispatch_task is synchronous — no sleep needed
+    // task_dispatch is synchronous — no sleep needed
     let task = fx.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert!(
@@ -1428,7 +1428,7 @@ async fn dispatch_task_unknown_task_id_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "dispatch_task",
+            "name": "task_dispatch",
             "arguments": { "task_id": 9999 }
         })),
     )

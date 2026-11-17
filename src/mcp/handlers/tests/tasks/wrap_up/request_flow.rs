@@ -775,7 +775,7 @@ async fn update_task_status_recalculates_epic_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "running" }
         })),
     )

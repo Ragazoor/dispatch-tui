@@ -1,7 +1,7 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// base_branch: create_task and update_task MCP schema tests
+// base_branch: task_create and update_task MCP schema tests
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -12,7 +12,7 @@ async fn create_task_with_base_branch_stores_it() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": {
                 "title": "My Feature",
                 "repo_path": "/repo",
@@ -29,7 +29,7 @@ async fn create_task_with_base_branch_stores_it() {
     assert_eq!(task.base_branch, "develop");
 }
 
-/// The base branch a `create_task` call lands on when it names none, given a
+/// The base branch a `task_create` call lands on when it names none, given a
 /// repository that answers `probe` to `git symbolic-ref refs/remotes/origin/HEAD`.
 ///
 /// Both cases differ only in that one response and the branch they expect, so
@@ -43,7 +43,7 @@ async fn base_branch_created_with(probe: anyhow::Result<std::process::Output>) -
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": {
                 "title": "Default Branch Task",
                 "repo_path": "/repo",
@@ -109,7 +109,7 @@ async fn update_task_with_base_branch_updates_it() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {
                 "task_ids": [task_id.0],
                 "base_branch": "release/2.0"
@@ -318,7 +318,7 @@ async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {
                 "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/7", "url_type": "pr",
@@ -357,7 +357,7 @@ async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {
                 "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/7", "url_type": "pr",
@@ -394,7 +394,7 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {
                 "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/7", "url_type": "pr"
@@ -429,7 +429,7 @@ async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {
                 "task_ids": [task_id.0],
                 "status": "review"
@@ -474,7 +474,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {
                 "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/2", "url_type": "pr",
@@ -491,7 +491,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
     );
 }
 
-// -- create_task: header-based caller identity --------------------------------
+// -- task_create: header-based caller identity --------------------------------
 
 // -- epic_id is required, and never inherited --------------------------------
 //
@@ -535,7 +535,7 @@ async fn create_task_task_identity_does_not_inherit_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "child", "repo_path": "/r" }
         })),
         CallerIdentity::Task(parent),
@@ -562,7 +562,7 @@ async fn create_task_session_identity_requires_epic_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "t", "repo_path": "/r" }
         })),
     )
@@ -589,7 +589,7 @@ async fn create_task_refusal_names_the_callers_epic_and_the_null_option() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "child", "repo_path": "/r" }
         })),
         CallerIdentity::Task(parent),
@@ -628,7 +628,7 @@ async fn create_task_refusal_invents_no_epic_for_an_epicless_task_caller() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "child", "repo_path": "/r" }
         })),
         CallerIdentity::Task(parent),
@@ -665,7 +665,7 @@ async fn create_task_refusal_invents_no_epic_for_a_session_caller() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "t", "repo_path": "/r" }
         })),
     )
@@ -685,7 +685,7 @@ async fn create_task_explicit_null_epic_creates_a_standalone_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "t", "repo_path": "/r", "epic_id": null }
         })),
         CallerIdentity::Task(parent),
@@ -703,7 +703,7 @@ async fn create_task_unknown_caller_identity_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "t", "repo_path": "/r", "epic_id": null }
         })),
         CallerIdentity::Task(crate::models::TaskId(99999)),
@@ -797,7 +797,7 @@ async fn create_task_accepts_phoenix() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": {
                 "title": "Weekly dep audit",
                 "repo_path": "/repo",
@@ -829,7 +829,7 @@ async fn update_task_sets_and_clears_phoenix() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "phoenix": true }
         })),
     )
@@ -840,7 +840,7 @@ async fn update_task_sets_and_clears_phoenix() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "phoenix": false }
         })),
     )
@@ -858,7 +858,7 @@ async fn update_task_omitting_phoenix_leaves_it_alone() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "phoenix": true }
         })),
     )
@@ -868,7 +868,7 @@ async fn update_task_omitting_phoenix_leaves_it_alone() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "title": "renamed" }
         })),
     )
@@ -901,7 +901,7 @@ async fn get_task_shows_phoenix_when_set_and_omits_it_otherwise() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "phoenix": true }
         })),
     )

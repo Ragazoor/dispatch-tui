@@ -21,7 +21,7 @@ fn build_prompt_with_dependabot_tag_includes_review_section() {
     assert!(text.contains("gh pr diff"));
     assert!(text.contains("gh pr checks"));
     // No pr_url on this context, so the find-it-yourself step survives.
-    assert!(text.contains("update_tasks(task_ids=[42], url="));
+    assert!(text.contains("task_update(task_ids=[42], url="));
     assert!(text.contains("url_type=\"pr\""));
     assert!(text.contains("needs_input"));
     // 1.0.0 -> 1.0.1 is a patch, so this prompt takes the merge route and
@@ -488,7 +488,7 @@ fn a_recorded_pr_url_replaces_the_extract_it_yourself_step() {
     );
     assert!(
         !text.contains("url_type="),
-        "nothing left to record, so the update_tasks(url=…) step must go, got: {text}"
+        "nothing left to record, so the task_update(url=…) step must go, got: {text}"
     );
     assert!(
         !text.contains("--repo <owner/repo>"),
@@ -514,7 +514,7 @@ fn without_a_recorded_pr_url_the_runbook_still_asks_the_agent_to_find_it() {
         &ctx,
     );
     assert!(
-        text.contains("update_tasks(task_ids=[7], url=<URL>, url_type=\"pr\")"),
+        text.contains("task_update(task_ids=[7], url=<URL>, url_type=\"pr\")"),
         "got: {text}"
     );
 }
@@ -900,7 +900,7 @@ fn a_feed_created_task_that_names_no_pr_makes_no_claim_about_a_filter() {
 }
 
 /// Provenance is read from external_id, not from having a PR url — a
-/// hand-created task can carry one, since update_tasks takes a url and the
+/// hand-created task can carry one, since task_update takes a url and the
 /// dependabot tag together.
 #[test]
 fn a_pr_url_alone_does_not_make_a_task_feed_created() {

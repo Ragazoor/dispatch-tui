@@ -120,7 +120,7 @@ async fn validate_wrap_up_refuses_a_review_tagged_task() {
             "the refusal must name the tag that caused it, got: {msg}"
         );
         assert!(
-            msg.contains("update_task"),
+            msg.contains("task_update"),
             "the refusal must name the retag escape hatch, got: {msg}"
         );
     }

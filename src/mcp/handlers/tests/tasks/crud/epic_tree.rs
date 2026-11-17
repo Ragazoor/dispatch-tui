@@ -4,7 +4,7 @@ use crate::models::{EpicId, TaskId};
 // ---------------------------------------------------------------------------
 // Walking an epic tree and changing many tasks at once: list_epics
 // (parent_epic_id, recursive), task_search (recursive, base_branch) and
-// update_tasks. See ListEpicsViaMcp in docs/specs/epics.allium and
+// task_update. See ListEpicsViaMcp in docs/specs/epics.allium and
 // ListTasksViaMcp / UpdateTasksViaMcp in docs/specs/mcp-task-tools.allium.
 // ---------------------------------------------------------------------------
 
@@ -281,7 +281,7 @@ async fn list_tasks_rows_show_base_branch() {
     assert!(line.contains(" | Base: develop"), "{line}");
 }
 
-// -- update_tasks -------------------------------------------------------------
+// -- task_update -------------------------------------------------------------
 
 #[tokio::test]
 async fn update_tasks_updates_every_named_task_whatever_its_status() {
@@ -292,7 +292,7 @@ async fn update_tasks_updates_every_named_task_whatever_its_status() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [backlog.0, running.0, done.0], "base_branch": "master" }),
     )
     .await;
@@ -320,7 +320,7 @@ async fn update_tasks_reports_a_failure_and_carries_on() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [first.0, 9999, last.0], "base_branch": "master" }),
     )
     .await;
@@ -349,7 +349,7 @@ async fn update_tasks_handles_a_repeated_id_once() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [id.0, id.0], "title": "renamed" }),
     )
     .await;
@@ -370,7 +370,7 @@ async fn update_tasks_applies_the_done_guard_to_a_single_id_as_an_error() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [id.0], "status": "done", "title": "x" }),
     )
     .await;
@@ -390,7 +390,7 @@ async fn update_tasks_applies_the_done_guard_per_task_with_several_ids() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [a.0, b.0], "status": "done", "title": "x" }),
     )
     .await;
@@ -413,7 +413,7 @@ async fn update_tasks_with_one_id_replies_with_the_single_task_line() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [id.0], "base_branch": "master" }),
     )
     .await;
@@ -433,7 +433,7 @@ async fn update_tasks_with_one_unknown_id_is_an_error() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [9999], "base_branch": "master" }),
     )
     .await;
@@ -461,7 +461,7 @@ async fn update_tasks_rejects_empty_task_ids() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [], "base_branch": "master" }),
     )
     .await;
@@ -473,7 +473,7 @@ async fn update_tasks_rejects_a_call_with_no_field() {
     let state = test_state().await;
     let id = make_task(&state, "a", None, TaskStatus::Backlog, "main").await;
 
-    let resp = tool(&state, "update_tasks", json!({ "task_ids": [id.0] })).await;
+    let resp = tool(&state, "task_update", json!({ "task_ids": [id.0] })).await;
     assert!(is_error(&resp), "{:?}", resp.result);
 }
 
@@ -484,7 +484,7 @@ async fn update_tasks_rejects_task_id() {
 
     let resp = tool(
         &state,
-        "update_tasks",
+        "task_update",
         json!({ "task_ids": [id.0], "task_id": id.0, "title": "x" }),
     )
     .await;
@@ -492,7 +492,7 @@ async fn update_tasks_rejects_task_id() {
     assert_eq!(state.db.get_task(id).await.unwrap().title, "a");
 }
 
-/// update_tasks advertises every field `UpdateTaskArgs` accepts, with task_ids
+/// task_update advertises every field `UpdateTaskArgs` accepts, with task_ids
 /// selecting the tasks and no task_id.
 #[tokio::test]
 async fn update_tasks_schema_is_update_task_args_with_task_ids() {
@@ -503,8 +503,8 @@ async fn update_tasks_schema_is_update_task_args_with_task_ids() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|t| t["name"] == "update_tasks")
-        .expect("update_tasks not listed")["inputSchema"]
+        .find(|t| t["name"] == "task_update")
+        .expect("task_update not listed")["inputSchema"]
         .clone();
     let mut keys: Vec<String> = bulk["properties"]
         .as_object()

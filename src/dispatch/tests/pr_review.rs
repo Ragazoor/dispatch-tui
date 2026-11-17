@@ -193,7 +193,7 @@ fn dispatch_prompt_includes_fetch_warning_when_fetch_fails() {
 }
 
 /// The reuse fact provisioning establishes has to survive the trip back to the
-/// caller: `dispatch_task`'s success text reads it off this result — see
+/// caller: `task_dispatch`'s success text reads it off this result — see
 /// rule-guidance.DispatchTaskViaMcp in docs/specs/mcp-task-tools.allium.
 #[test]
 fn dispatch_agent_carries_the_reuse_flag_into_its_result() {
@@ -1534,8 +1534,8 @@ fn quick_dispatch_sends_rename_prompt() {
         "prompt should mention placeholder title"
     );
     assert!(
-        prompt.contains("update_tasks"),
-        "prompt should mention update_tasks for rename"
+        prompt.contains("task_update"),
+        "prompt should mention task_update for rename"
     );
 }
 

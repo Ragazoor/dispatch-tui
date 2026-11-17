@@ -372,8 +372,8 @@ fn fix_skill_confirms_then_creates_and_dispatches_a_fix_task_in_the_owning_repo(
             "EpicIsTheCallersOrNone",
             "pass `null` for a standalone task",
         ),
-        ("DispatchFollowsCreate", "`create_task`"),
-        ("DispatchFollowsCreate", "`dispatch_task`"),
+        ("DispatchFollowsCreate", "`task_create`"),
+        ("DispatchFollowsCreate", "`task_dispatch`"),
         ("DispatchFollowsCreate", "leave the task in backlog"),
         ("NeverEditsTheOwningRepo", "Do not edit"),
         (
@@ -397,8 +397,8 @@ fn fix_skill_confirms_then_creates_and_dispatches_a_fix_task_in_the_owning_repo(
     // DispatchFollowsCreate).
     assert!(
         at("`task_search`") < at("`AskUserQuestion`")
-            && at("`AskUserQuestion`") < at("`create_task`")
-            && at("`create_task`") < at("`dispatch_task`"),
+            && at("`AskUserQuestion`") < at("`task_create`")
+            && at("`task_create`") < at("`task_dispatch`"),
         "fix skill must check duplicates, then confirm, then create, then dispatch"
     );
     // ResolveOwningRepo comes before the duplicate check, which needs repo_path.

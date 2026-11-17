@@ -36,7 +36,7 @@ async fn query_usage_mcp_tool_returns_aggregated_counts() {
     let state = test_state().await;
     let event = UsageEvent {
         category: UsageCategory::Keybinding,
-        action: "dispatch_task".to_string(),
+        action: "task_dispatch".to_string(),
         detail: Some("d".to_string()),
         actor: UsageActor::Human,
     };
@@ -62,6 +62,6 @@ async fn query_usage_mcp_tool_returns_aggregated_counts() {
         .filter(|r| r["category"] == "keybinding")
         .collect();
     assert_eq!(kb.len(), 1);
-    assert_eq!(kb[0]["action"], "dispatch_task");
+    assert_eq!(kb[0]["action"], "task_dispatch");
     assert_eq!(kb[0]["count"], 2);
 }

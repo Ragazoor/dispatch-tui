@@ -616,7 +616,7 @@ async fn undelivered_message_to_a_paused_agent_tells_the_sender_to_resume_it() {
     assert!(ok, "stderr: {stderr}");
     let context = context.expect("a paused target must produce a hint");
     assert!(
-        context.contains(&format!("resume_task(task_id: {}", target.0)),
+        context.contains(&format!("task_resume(task_id: {}", target.0)),
         "the hint must give the exact call, got: {context}"
     );
     assert!(context.contains(&name), "got: {context}");
@@ -654,7 +654,7 @@ async fn undelivered_message_to_an_ended_agent_names_the_current_one() {
     assert!(ok, "stderr: {stderr}");
     let context = context.expect("a paused target must produce a hint");
     assert!(
-        context.contains(&format!("resume_task(task_id: {}", target.0)),
+        context.contains(&format!("task_resume(task_id: {}", target.0)),
         "got: {context}"
     );
     assert!(
@@ -674,7 +674,7 @@ async fn undelivered_message_by_task_window_name_resolves_the_same_task() {
     assert!(ok, "stderr: {stderr}");
     let context = context.expect("a paused target must produce a hint");
     assert!(
-        context.contains(&format!("resume_task(task_id: {}", target.0)),
+        context.contains(&format!("task_resume(task_id: {}", target.0)),
         "got: {context}"
     );
 }
@@ -691,9 +691,9 @@ async fn undelivered_message_to_a_task_that_never_ran_says_why_and_suggests_no_d
     assert!(ok, "stderr: {stderr}");
     let context = context.expect("a known but unresumable target must produce a reason");
     assert!(context.contains("cannot be resumed"), "got: {context}");
-    assert!(!context.contains("resume_task("), "got: {context}");
+    assert!(!context.contains("task_resume("), "got: {context}");
     assert!(
-        !context.contains("dispatch_task"),
+        !context.contains("task_dispatch"),
         "starting a fresh agent is the operator's call, got: {context}"
     );
 }
@@ -710,11 +710,11 @@ async fn undelivered_message_to_a_task_whose_worktree_is_gone_says_so() {
     assert!(ok, "stderr: {stderr}");
     let context = context.expect("a known but unresumable target must produce a reason");
     assert!(context.contains("no longer on disk"), "got: {context}");
-    assert!(!context.contains("resume_task("), "got: {context}");
+    assert!(!context.contains("task_resume("), "got: {context}");
 }
 
 /// The board still holds the window, yet the send failed: the session in it
-/// has exited or does not answer. resume_task would refuse it as attached.
+/// has exited or does not answer. task_resume would refuse it as attached.
 #[tokio::test]
 async fn undelivered_message_to_a_task_with_an_open_window_points_at_the_operator() {
     let board = spawn_board().await;
@@ -726,7 +726,7 @@ async fn undelivered_message_to_a_task_with_an_open_window_points_at_the_operato
     assert!(ok, "stderr: {stderr}");
     let context = context.expect("a known target must produce a reason");
     assert!(context.contains("operator"), "got: {context}");
-    assert!(!context.contains("resume_task("), "got: {context}");
+    assert!(!context.contains("task_resume("), "got: {context}");
 }
 
 /// A session started before agents had names answers to `task-<id>`, so a

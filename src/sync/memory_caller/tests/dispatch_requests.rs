@@ -317,7 +317,7 @@ async fn report_dispatch_provisioned_records_the_result_on_the_row_and_the_task(
 }
 
 /// The host's reused-worktree answer is kept on the row
-/// (`DispatchRequest.reused_worktree`), for `dispatch_task`'s success text.
+/// (`DispatchRequest.reused_worktree`), for `task_dispatch`'s success text.
 #[tokio::test]
 async fn report_dispatch_provisioned_records_whether_the_worktree_was_reused() {
     let (caller, rows) = caller();

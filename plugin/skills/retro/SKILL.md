@@ -58,7 +58,7 @@ session proved it wrong, and the correction is small and self-evident. You have
 the context and the next step is a commit, so a fix here is cheap. A spec is
 yours to edit only to describe behaviour this session already implemented.
 
-File a task with `create_task` instead when the fix needs a design judgement,
+File a task with `task_create` instead when the fix needs a design judgement,
 is not small, concerns a pre-existing inaccuracy whose history you do not know,
 or would make a spec describe behaviour the code lacks — that is a
 spec → tests → code loop with its own dispatch. Also file a `bug` for a

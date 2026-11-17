@@ -206,7 +206,7 @@ contract TaskTeardown {
         -- prefix, not the slug, guarantees it: a rename never recomputes the
         -- stored path. Every value that sets task.worktree comes from
         -- provisioning, and the board writes back only the value it read.
-        -- CopyTask, the MCP update_tasks schema, the feed upsert and the CLI
+        -- CopyTask, the MCP task_update schema, the feed upsert and the CLI
         -- never set it. A store client that patches task.worktree by hand
         -- (patch_task accepts it, PatchTaskNeverAimsAnotherHostsTeardown)
         -- could fabricate two rows on one path; that is not a supported
@@ -296,7 +296,7 @@ rule CreateTask {
         -- Dependabot and ReleasePlease have no key: both are set by feed
         -- scripts from a PR's author (feed-scripts.allium), and a hand-made
         -- task reaches either only through the MCP tools' tag parameter
-        -- (create_task, update_tasks), whose enum is every core/TaskTag.
+        -- (task_create, task_update), whose enum is every core/TaskTag.
         --
         -- EveryKeyInItsName. Each key is a letter of the label it selects, so
         -- the hint reads b -> "[b]ug", v -> "pr-re[v]iew", x -> "fi[x]". The
@@ -370,7 +370,7 @@ rule CreateTask {
         -- records the chosen branch into the repo's history by emitting
         -- BaseBranchUsed(repo_path, base_branch) (see dispatch.allium:
         -- RecordBaseBranch). Only this manual form records history —
-        -- quick-dispatch (CreateQuickTask) and the MCP create_task tool do not.
+        -- quick-dispatch (CreateQuickTask) and the MCP task_create tool do not.
         --
         -- When base_branch is omitted, it is NOT assumed to be
         -- config.default_branch. It is resolved from the repository named by
@@ -381,12 +381,12 @@ rule CreateTask {
         -- on a repo whose default is "master" names a branch the repo does
         -- not have, and `git worktree add` rejects it at dispatch.
         -- wrap_up_mode is set during the TUI creation form (InputWrapUpMode
-        -- step, after InputBaseBranch) or via the MCP create_task tool. When
+        -- step, after InputBaseBranch) or via the MCP task_create tool. When
         -- null, the wrap-up path is decided at wrap-up time. Answering it
         -- moves the form on to InputModel.
         --
         -- ModelPicker. model is set at the InputModel step, the form's last
-        -- step, or via the MCP create_task tool. InputModel is a
+        -- step, or via the MCP task_create tool. InputModel is a
         -- single-keypress picker like InputTag: h -> haiku, s -> sonnet,
         -- o -> opus, f -> fable (EveryKeyInItsName: each key is the first
         -- letter of the alias it picks). Enter means "no explicit pick" and
@@ -404,17 +404,17 @@ rule CreateTask {
         -- CopyTask with a model shows that model as Enter's meaning instead.
         --
         -- phoenix is set at the InputTag step as described above, or via the
-        -- MCP create_task tool. It defaults to false.
+        -- MCP task_create tool. It defaults to false.
         -- Quick-dispatch (CreateQuickTask) does not offer it — a quick task is
         -- a one-off by construction, and the agent can set the flag through
-        -- update_tasks once it knows what the work is. Quick-dispatch offers no
+        -- task_update once it knows what the work is. Quick-dispatch offers no
         -- tag picker either, so there is nowhere for the p key to live.
         -- What the flag then does is PhoenixRespawn, below; setting it at
         -- creation has no effect until the task first reaches done.
         --
         -- auto_run_plan defaults to false. When true, a dispatched agent
         -- with a plan skips the "summarize and ask permission" step (see
-        -- dispatch.allium). Set by decompose-review's create_task calls,
+        -- dispatch.allium). Set by decompose-review's task_create calls,
         -- since those plans already went through the work-package
         -- confirmation step; not exposed in the TUI creation form.
         -- When invoked from the epic view, epic is set to the
@@ -433,7 +433,7 @@ rule SetModel {
     @guidance
         -- Sets or clears the model an existing task's agent launches on.
         -- Raised by the task editor's MODEL section (EditTask) and by MCP
-        -- update_tasks(model: "haiku"|"sonnet"|"opus"|"fable"|null). model = null clears it, and the
+        -- task_update(model: "haiku"|"sonnet"|"opus"|"fable"|null). model = null clears it, and the
         -- task launches on sonnet again (core/TaskModel).
         -- No status precondition, like SetWrapUpMode. The change reaches the
         -- agent at its next launch: a running agent keeps the model it was
@@ -450,7 +450,7 @@ rule SetWrapUpMode {
     @guidance
         -- Sets or clears the preferred wrap-up path on an existing task.
         -- Raised by the task editor's WRAP_UP_MODE section (EditTask) and by
-        -- MCP update_tasks(wrap_up_mode: "rebase"|"pr"|"done"|null).
+        -- MCP task_update(wrap_up_mode: "rebase"|"pr"|"done"|null).
         -- mode = null clears the preference; the next wrap-up will prompt
         -- the user to choose.
         -- This rule deliberately has no status precondition — the preference
@@ -551,7 +551,7 @@ rule CreateQuickTask {
         -- When invoked from the epic view, epic_id is set to the
         -- current epic, linking the quick task as a subtask.
         -- The task title defaults to "Quick task"; the agent is expected
-        -- to rename the task via update_tasks once the user describes the
+        -- to rename the task via task_update once the user describes the
         -- goal. The quick-dispatch agent uses a dedicated prompt
         -- (build_quick_dispatch_prompt) that opens by asking the user what
         -- they want to achieve, and then names the same design step every
@@ -743,7 +743,7 @@ rule ConfirmDone {
         -- the stamp re-reads the task. The other routes
         -- in: PrMerged and ExitSession's non-pr branch (both in
         -- pr-workflow.allium; ExitSession stamps it from the store clock in
-        -- the module), update_tasks' status="done" path
+        -- the module), task_update's status="done" path
         -- (mcp-task-tools.allium: MarkTaskDoneViaMcp, through the module's
         -- close_task; store-split.allium: RequestCloseTask), and a
         -- feed upsert whose item arrives with status
@@ -857,7 +857,7 @@ rule PhoenixRespawn {
         -- EveryRouteIntoDone. The trigger is the status transition itself, not
         -- any one operator action, so all five routes respawn: ConfirmDone (the
         -- 'x' key and a forward move out of review), the STATUS section of
-        -- EditTask, update_tasks' status="done" path (mcp-task-tools.allium:
+        -- EditTask, task_update's status="done" path (mcp-task-tools.allium:
         -- MarkTaskDoneViaMcp), ExitSession's rebase and done branches, and
         -- PrMerged (both in pr-workflow.allium). transitions_to fires only on an actual change
         -- of value, so a no-op patch that rewrites done over done never
@@ -870,7 +870,7 @@ rule PhoenixRespawn {
         -- the patch_task reducer, which the TUI's status writes (ConfirmDone,
         -- EditTask) go through, when a patch moves a task into Done from
         -- another status (store-split.allium, X2); the close_task reducer of
-        -- update_tasks' status="done" path (store-split.allium:
+        -- task_update's status="done" path (store-split.allium:
         -- RequestCloseTask, X1); exit_session's close (pr-workflow.allium:
         -- ExitSession, inside store-split.allium's RequestExitSession); and
         -- PrMerged's write (pr-workflow.allium: ReportPrStatus). The board
@@ -993,7 +993,7 @@ rule ClearBuildOutputOfDoneTask {
         --
         -- == Every route into Done ==
         -- The trigger is the state, not an operator action, so all routes
-        -- reach it: ConfirmDone, EditTask's STATUS section, update_tasks'
+        -- reach it: ConfirmDone, EditTask's STATUS section, task_update's
         -- status="done" path, ExitSession's rebase and done branches, PrMerged
         -- (so a pr wrap-up's worktree is cleared when its PR merges, not when
         -- it enters review), and a feed upsert. The host does NOT hook any of
@@ -1448,7 +1448,7 @@ rule MoveTaskToEpic {
         -- epic ReparentEpic flow instead — see epics.allium). Operates on
         -- the task under the cursor; with tasks selected, `m` moves the whole
         -- selection (BatchMoveToEpic). The epic-existence precondition is
-        -- enforced by the handler, so the MCP relink path (update_tasks with
+        -- enforced by the handler, so the MCP relink path (task_update with
         -- an epic_id, mcp-task-tools.allium) is held to it too. So are the
         -- store's checks on who may move what (workspaces.allium:
         -- TaskEntersAnEpicTheCallerCanSee, ReParentingKeepsTheHolder,
@@ -1595,7 +1595,7 @@ rule UnseenMarkEndsWithTheTaskLeavingItsEpic {
         -- "something new landed here"; a move is a different event, and the
         -- people who see the new epic were never told about this task.
         --
-        -- MoveTaskToEpic and update_tasks (UpdateTaskIsOneTransaction) raise
+        -- MoveTaskToEpic and task_update (UpdateTaskIsOneTransaction) raise
         -- TaskRelinked here. Every other path that changes task.epic ends the
         -- marks the same way, in the same write as the move: a feed routing
         -- move (feeds.allium), and the store's repo-group relinks (RegroupEpic
@@ -1693,7 +1693,7 @@ rule BookmarkEndsWithTheTaskFinishing {
         -- Unlike UnseenMarkEndsWithTheTaskLeavingItsEpic, a move
         -- to another epic does NOT end a bookmark. The person asked to come
         -- back to this task, wherever it now sits; the trail simply follows
-        -- it to its new epic. So no relink path (MoveTaskToEpic, update_tasks'
+        -- it to its new epic. So no relink path (MoveTaskToEpic, task_update's
         -- epic_id, a feed routing move, RegroupEpic, FlattenEpic, a
         -- repo_path reroute) touches a Bookmark for a person who still sees
         -- the task. A move that takes the task out of a person's sight ends
@@ -2344,7 +2344,7 @@ rule PatchTaskNeverMovesAnEpic {
         -- set_task_epic and update_task (UpdateTaskIsOneTransaction) are the ONLY
         -- ways a task changes epic; the move routes into a
         -- repo-group sub-epic, sets the owner and rolls up both the old and
-        -- the new epic. No host patch names epic_id: update_tasks sends an
+        -- the new epic. No host patch names epic_id: task_update sends an
         -- explicit epic_id through update_task
         -- (mcp-task-tools.allium: UpdateTaskViaMcp).
         --
@@ -2408,7 +2408,7 @@ rule CreateTaskNeverAimsAnotherHostsTeardown {
     ensures: TaskCreated(row: row)
 
     @guidance
-        -- create_task and create_task_signalled refuse, naming why, and write
+        -- task_create and create_task_signalled refuse, naming why, and write
         -- nothing. A host nobody registered has no owner and is not judged.
 }
 
@@ -2463,7 +2463,7 @@ rule UpdateTaskIsOneTransaction {
 rule HandStatusWriteReachesTheSchedule {
     -- Every accepted patch_task and update_task patch, in the same
     -- transaction: these are the hand status writes (the TUI's moves and
-    -- editor, update_tasks' status). The dispatch claim and the close are the
+    -- editor, task_update's status). The dispatch claim and the close are the
     -- module's own writes and do not pass through here.
     when: TaskPatchAccepted(task, patch)
 
@@ -2496,7 +2496,7 @@ rule HandStatusWriteReachesTheSchedule {
 -- refuses status=done):
 --   - wrap_up + exit_session (pr-workflow.allium: ExitSessionViaMcp), the
 --     agent's own session close, gated on an exit token.
---   - update_tasks' dedicated status="done" call (mcp-task-tools.allium:
+--   - task_update's dedicated status="done" call (mcp-task-tools.allium:
 --     MarkTaskDoneViaMcp): a session caller, or a dispatched agent acting on
 --     a task other than its own. It closes through the module's close_task
 --     (store-split.allium: RequestCloseTask) without exit_session's epic

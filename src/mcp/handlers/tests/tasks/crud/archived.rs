@@ -132,10 +132,10 @@ async fn write_tools_refuse_an_archived_task_as_archived() {
     let id = archived_task(&state, "Done and gone", "/a").await;
 
     for (name, args, verb) in [
-        ("resume_task", json!({ "task_id": id.0 }), "resumed"),
-        ("dispatch_task", json!({ "task_id": id.0 }), "dispatched"),
+        ("task_resume", json!({ "task_id": id.0 }), "resumed"),
+        ("task_dispatch", json!({ "task_id": id.0 }), "dispatched"),
         (
-            "update_tasks",
+            "task_update",
             json!({ "task_ids": [id.0], "title": "x" }),
             "changed",
         ),

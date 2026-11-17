@@ -2,14 +2,14 @@ use super::*;
 use crate::models::TaskId;
 
 // ---------------------------------------------------------------------------
-// schedule: create_task, update_tasks and task_search (schedules.allium)
+// schedule: task_create, task_update and task_search (schedules.allium)
 // ---------------------------------------------------------------------------
 
 async fn update(state: &Arc<McpState>, args: serde_json::Value) -> JsonRpcResponse {
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "update_tasks", "arguments": args })),
+        Some(json!({ "name": "task_update", "arguments": args })),
     )
     .await
 }
@@ -32,7 +32,7 @@ async fn create_task_with_a_schedule_is_armed_by_the_store() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": {
                 "title": "Weekly dep audit",
                 "repo_path": "/repo",
@@ -56,7 +56,7 @@ async fn create_task_with_an_invalid_cron_is_refused_and_creates_nothing() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": {
                 "title": "Bad",
                 "repo_path": "/repo",

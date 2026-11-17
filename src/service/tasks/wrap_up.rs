@@ -4,7 +4,7 @@
 //!
 //! The rebase and the exit_session teardown are request
 //! rows served by this host (`session.rs`), and the Conflict sub_status is the
-//! module's. So is `update_tasks`' close (a `close` row, X1).
+//! module's. So is `task_update`'s close (a `close` row, X1).
 
 use crate::models::{Task, TmuxWindow};
 use crate::service::ServiceError;

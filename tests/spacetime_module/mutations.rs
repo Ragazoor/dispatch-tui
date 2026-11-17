@@ -58,7 +58,7 @@ fn a_board_sees_the_usage_events_it_recorded_and_no_one_elses() {
                     id: 0,
                     recorded_at: "2026-09-26 10:00:00".into(),
                     category: "keybinding".into(),
-                    action: "dispatch_task".into(),
+                    action: "task_dispatch".into(),
                     detail: Some("d".into()),
                     actor: "human".into(),
                     recorded_by: String::new(),
@@ -77,7 +77,7 @@ fn a_board_sees_the_usage_events_it_recorded_and_no_one_elses() {
             .await
             .unwrap_or_else(|e| panic!("own_usage_summary: {e}"));
         assert_eq!(summary.len(), 1, "only this board's event: {summary:?}");
-        assert_eq!(summary[0].action, "dispatch_task");
+        assert_eq!(summary[0].action, "task_dispatch");
         assert_eq!(summary[0].count, 1);
     });
 }

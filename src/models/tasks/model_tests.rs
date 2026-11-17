@@ -662,7 +662,7 @@ fn task_tag_parse_roundtrip_new_tags() {
     }
 }
 
-/// `TaskTag::ALL` backs the create_task/update_tasks MCP schema's tag enum
+/// `TaskTag::ALL` backs the task_create/task_update MCP schema's tag enum
 /// (dispatch.rs) — a variant added there without updating `ALL` would
 /// silently under-advertise it.
 #[test]

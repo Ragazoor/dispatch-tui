@@ -62,7 +62,7 @@ value TrajectoryEntry {
     schema_version: String     -- semver string, e.g. "1.0.0"
     timestamp:      Timestamp  -- UTC, RFC 3339
     task_id:        Integer    -- the Task.id the server identified the caller by
-    method:         String     -- MCP tool name (e.g. "update_tasks")
+    method:         String     -- MCP tool name (e.g. "task_update")
     args:           String     -- the tool arguments as a JSON value, after an
                                -- agent name given for a task id is replaced
                                -- by that id

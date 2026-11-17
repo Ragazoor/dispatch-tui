@@ -113,7 +113,7 @@ fn with_clean_status(
 /// This board's host reactor, as the runtime runs it (`store-split.allium`:
 /// `HostClaimsDispatch`, `HostClaimsSessionRequest`): serve every `requested`
 /// dispatch and session row naming this host, once, as the rows arrive. The
-/// tools only WRITE requests (`store-split.allium` D6, W2) — `dispatch_task`, the
+/// tools only WRITE requests (`store-split.allium` D6, W2) — `task_dispatch`, the
 /// epic chain, `wrap_up(rebase)`, the `exit_session` teardown — so a test that
 /// wants an agent launched, a branch rebased or a window killed runs this beside
 /// them, over the same service. Dropped with the test's runtime.
@@ -734,47 +734,47 @@ fn tool_description(name: &str) -> String {
 /// and the recovery move"). Asserted on substrings rather than the whole string
 /// so the prose can be reworded, but the load-bearing facts cannot quietly go
 /// missing: that an existing worktree is REUSED, that its uncommitted changes
-/// survive, and that the way back into a crashed task is update_tasks to backlog
-/// then dispatch_task again.
+/// survive, and that the way back into a crashed task is task_update to backlog
+/// then task_dispatch again.
 #[test]
 fn resume_task_description_says_it_keeps_the_context_and_points_dispatch_at_fresh_starts() {
-    let desc = tool_description("resume_task");
+    let desc = tool_description("task_resume");
     for needle in [
         "context",
         "message",
-        "dispatch_task",
+        "task_dispatch",
         "no resumable session",
     ] {
         assert!(
             desc.contains(needle),
-            "resume_task description must mention '{needle}', got: {desc}"
+            "task_resume description must mention '{needle}', got: {desc}"
         );
     }
 }
 
 #[test]
 fn dispatch_task_description_points_a_paused_agent_at_resume_task() {
-    assert!(tool_description("dispatch_task").contains("resume_task"));
+    assert!(tool_description("task_dispatch").contains("task_resume"));
 }
 
 #[test]
 fn dispatch_task_description_advertises_worktree_reuse_and_the_recovery_move() {
-    let desc = tool_description("dispatch_task");
-    for needle in ["reused", "uncommitted", "update_tasks", "backlog"] {
+    let desc = tool_description("task_dispatch");
+    for needle in ["reused", "uncommitted", "task_update", "backlog"] {
         assert!(
             desc.contains(needle),
-            "dispatch_task description must mention '{needle}', got: {desc}"
+            "task_dispatch description must mention '{needle}', got: {desc}"
         );
     }
 }
 
 /// mcp-task-tools.allium: UpdateTaskViaMcp. The `status` argument lists the
 /// statuses and nothing more. The resume-a-crashed-task story is
-/// dispatch_task's (DispatchTaskViaMcp tells it once), and the aside that no MCP
+/// task_dispatch's (DispatchTaskViaMcp tells it once), and the aside that no MCP
 /// path deletes a task describes a tool that does not exist.
 #[test]
 fn update_task_status_description_tells_no_resume_story_and_no_delete_aside() {
-    let update = tool_def("update_tasks");
+    let update = tool_def("task_update");
     let status = update["inputSchema"]["properties"]["status"]["description"]
         .as_str()
         .unwrap()
@@ -782,15 +782,15 @@ fn update_task_status_description_tells_no_resume_story_and_no_delete_aside() {
     for needle in ["resum", "reuse", "worktree", "delete"] {
         assert!(
             !status.contains(needle),
-            "update_tasks.status must not carry {needle:?} — the resume story is \
-dispatch_task's and there is no delete tool, got: {status}"
+            "task_update.status must not carry {needle:?} — the resume story is \
+task_dispatch's and there is no delete tool, got: {status}"
         );
     }
     // TheNextCallIsNamedJustInTime: the next-call instruction lives in the
     // wrap_up response, not in an argument description.
     assert!(
         !status.contains("exit_session"),
-        "update_tasks.status must not restate the wrap_up/exit_session sequence, got: {status}"
+        "task_update.status must not restate the wrap_up/exit_session sequence, got: {status}"
     );
 }
 
@@ -824,7 +824,7 @@ fn set_verify_command_description_names_the_surfaces_that_carry_the_command() {
 /// that list is the first thing a caller reads. Derived from each tool's own
 /// schema rather than hardcoded, so a field added to the argument set fails
 /// here until the description learns about it — the drift that left seven of
-/// `update_tasks`'s fifteen fields unadvertised.
+/// `task_update`'ss fifteen fields unadvertised.
 ///
 /// Applies to every `update_*` tool rather than one hand-picked tool, so which
 /// of them carries the guarantee is not a judgement call.
@@ -841,10 +841,10 @@ fn every_update_tool_description_names_every_field_it_accepts() {
         let name = tool["name"].as_str().unwrap();
         let desc = tool["description"].as_str().unwrap();
         let props = tool["inputSchema"]["properties"].as_object().unwrap();
-        // `update_tasks` selects with task_ids, `update_epic` with epic_id: the
+        // `task_update` selects with task_ids, `update_epic` with epic_id: the
         // selector is not a mutable field.
         let selector = match name {
-            "update_tasks" => "task_ids".to_string(),
+            "task_update" => "task_ids".to_string(),
             _ => format!("{}_id", name.trim_start_matches("update_")),
         };
         for field in props.keys() {
@@ -860,7 +860,7 @@ fn every_update_tool_description_names_every_field_it_accepts() {
     }
     assert!(
         checked >= 2,
-        "expected update_tasks and update_epic, saw {checked}"
+        "expected task_update and update_epic, saw {checked}"
     );
 }
 
@@ -945,7 +945,7 @@ fn no_tool_description_cites_internal_symbol_names() {
         }
     }
     // Settings and enum values a caller sets or reads, not internal items.
-    // `caller_task_id` is here because create_task's description exists partly
+    // `caller_task_id` is here because task_create's description exists partly
     // to say that argument does NOT exist — naming it is the point.
     allowed.extend([
         "auto_dispatch",
@@ -1239,19 +1239,19 @@ fn no_argument_description_explains_how_the_database_guards_it() {
     }
 }
 
-/// `create_task` used to spell out the transport headers that carry caller
+/// `task_create` used to spell out the transport headers that carry caller
 /// identity. A caller cannot set, read or change them; the only actionable
 /// half is that there is no `caller_task_id` argument to pass.
 #[test]
 fn create_task_description_does_not_leak_transport_headers() {
-    let desc = tool_description("create_task");
+    let desc = tool_description("task_create");
     assert!(
         !desc.contains("X-Caller"),
-        "create_task description must not name transport headers a caller cannot set, got: {desc}"
+        "task_create description must not name transport headers a caller cannot set, got: {desc}"
     );
     assert!(
         desc.contains("caller_task_id"),
-        "create_task description must still say there is no caller_task_id argument, got: {desc}"
+        "task_create description must still say there is no caller_task_id argument, got: {desc}"
     );
 }
 
@@ -1261,10 +1261,10 @@ fn create_task_description_does_not_leak_transport_headers() {
 /// schema is the one place the requirement can be learned before it is hit.
 #[test]
 fn create_task_schema_requires_a_nullable_epic_id() {
-    let def = tool_def("create_task");
+    let def = tool_def("task_create");
     let required = def["inputSchema"]["required"]
         .as_array()
-        .expect("create_task must declare required fields")
+        .expect("task_create must declare required fields")
         .iter()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
@@ -1291,7 +1291,7 @@ fn create_task_schema_requires_a_nullable_epic_id() {
 /// argument, and the old copy told it omission was the normal case.
 #[test]
 fn create_task_description_promises_no_epic_inheritance() {
-    let def = tool_def("create_task");
+    let def = tool_def("task_create");
     let desc = def["description"].as_str().unwrap().to_string();
     let field = def["inputSchema"]["properties"]["epic_id"]["description"]
         .as_str()
@@ -1345,18 +1345,18 @@ async fn every_tool_with_args_rejects_unknown_field() {
     let state = test_state().await;
 
     let payloads: &[(&str, Value)] = &[
-        ("update_tasks", json!({"task_ids": [1]})),
+        ("task_update", json!({"task_ids": [1]})),
         ("task_search", json!({"task_id": 1})),
         (
-            "create_task",
+            "task_create",
             json!({"title": "t", "repo_path": "/r", "epic_id": null}),
         ),
         ("list_epics", json!({})),
         ("create_epic", json!({"title": "t"})),
         ("update_epic", json!({"epic_id": 1})),
         ("wrap_up", json!({"task_id": 1, "action": "rebase"})),
-        ("dispatch_task", json!({"task_id": 1})),
-        ("resume_task", json!({"task_id": 1})),
+        ("task_dispatch", json!({"task_id": 1})),
+        ("task_resume", json!({"task_id": 1})),
         (
             "record_learning",
             json!({"task_id": 1, "kind": "pitfall", "summary": "s", "scope": "user"}),
@@ -1472,7 +1472,7 @@ async fn create_task_from_session_succeeds() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "T", "repo_path": "/r", "epic_id": null }
         })),
     )
@@ -1694,7 +1694,7 @@ fn every_tag_argument_advertises_release_please() {
             "{name}.tag's description must name release-please, got: {d}"
         );
     }
-    for expected in ["create_task", "update_tasks"] {
+    for expected in ["task_create", "task_update"] {
         assert!(
             seen.iter().any(|n| n == expected),
             "{expected} must take a tag argument, saw: {seen:?}"
@@ -1718,8 +1718,6 @@ fn wrap_up_description_names_release_please_among_the_refused_tags() {
 /// Tool names that predate the `<noun>_<verb>` rule (ADR 0002). Each surface
 /// task removes its names; the last one deletes the list and the exemption.
 const LEGACY_TOOL_NAMES: &[&str] = &[
-    "update_tasks",
-    "create_task",
     "create_epic",
     "list_epics",
     "update_epic",
@@ -1727,8 +1725,6 @@ const LEGACY_TOOL_NAMES: &[&str] = &[
     "list_work_packages",
     "update_work_package",
     "wrap_up",
-    "dispatch_task",
-    "resume_task",
     "record_learning",
     "query_learnings",
     "rate_learning",

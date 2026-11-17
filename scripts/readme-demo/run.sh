@@ -13,7 +13,7 @@
 # points at the operator's real board, so the Running and Review cards are
 # staged: real worktrees and tmux windows, agent activity sent through the same
 # `dispatch hook` commands Claude Code's hooks run, and Review states through
-# `update_tasks`. Only worktree, tmux_window and host are written by SQL; no
+# `task_update`. Only worktree, tmux_window and host are written by SQL; no
 # tool sets them outside a real dispatch.
 #
 # Needs: cargo, spacetime, tmux, jq, curl, uv, google-chrome, magick, ffmpeg.
@@ -107,7 +107,7 @@ SF=$D/repos/storefront
 PA=$D/repos/payments-api
 epic() { mcp create_epic "$1" >/dev/null; }
 task() {
-    mcp create_task "$(jq -nc --arg t "$1" --arg r "$2" --argjson e "$3" --arg g "$4" --arg d "$5" \
+    mcp task_create "$(jq -nc --arg t "$1" --arg r "$2" --argjson e "$3" --arg g "$4" --arg d "$5" \
         '{title:$t,repo_path:$r,epic_id:$e,tag:$g,description:$d}')" >/dev/null
 }
 
@@ -139,9 +139,9 @@ task "Fix currency rounding in refunds" "$PA" null bug "JPY rounds to cents." # 
 task "Single-page checkout layout" "$SF" 1 feature "One page, three steps." # 21
 
 mcp create_work_package '{"title":"Black Friday launch","description":"Must ship before 28 November.","link_epic_ids":[1,4],"link_task_ids":[11]}' >/dev/null
-mcp update_tasks '{"task_ids":[5,13,18,19,20,21],"status":"done"}' >/dev/null
-mcp update_tasks '{"task_ids":[1,7,10,15],"status":"running"}' >/dev/null
-mcp update_tasks '{"task_ids":[2,8,12],"status":"review"}' >/dev/null
+mcp task_update '{"task_ids":[5,13,18,19,20,21],"status":"done"}' >/dev/null
+mcp task_update '{"task_ids":[1,7,10,15],"status":"running"}' >/dev/null
+mcp task_update '{"task_ids":[2,8,12],"status":"review"}' >/dev/null
 
 # Stage the agents: a worktree and a tmux window per card, then the hook
 # events a live agent would send.
@@ -156,9 +156,9 @@ sql_rows "SELECT id, repo_path FROM tasks WHERE status = 'running' OR status = '
 for id in 1 7 10 15; do hook hook "$id" pre_tool_use; done
 hook hook 10 notification --kind permission_prompt
 for a in explore-1 explore-2; do hook hook-subagent 1 start --agent-id "$a" --session-id demo; done
-mcp update_tasks '{"task_ids":[2],"sub_status":"approved"}' >/dev/null
-mcp update_tasks '{"task_ids":[8],"sub_status":"changes_requested"}' >/dev/null
-mcp update_tasks '{"task_ids":[12],"sub_status":"awaiting_review"}' >/dev/null
+mcp task_update '{"task_ids":[2],"sub_status":"approved"}' >/dev/null
+mcp task_update '{"task_ids":[8],"sub_status":"changes_requested"}' >/dev/null
+mcp task_update '{"task_ids":[12],"sub_status":"awaiting_review"}' >/dev/null
 wait_for 100 pane_has "Retry webhooks"
 
 # ---- capture -----------------------------------------------------------------

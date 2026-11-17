@@ -393,7 +393,7 @@ pub trait DispatchRequestRead: Send + Sync {
     /// row `task_search`'s `[Dispatch request]` line shows.
     async fn latest_dispatch_request_for_task(&self, task: TaskId) -> Option<DispatchRequest>;
     /// Fires whenever the subscribed rows move — a request row among them.
-    /// What a caller WAITING on a request's outcome waits on (`dispatch_task`,
+    /// What a caller WAITING on a request's outcome waits on (`task_dispatch`,
     /// `mcp-task-tools.allium: DispatchTaskViaMcp`), so the wait is a signal,
     /// never a poll. Subscribe before reading the row, then re-read on each
     /// wake.
@@ -509,7 +509,7 @@ pub trait SessionRequestStore: SessionRequestRead {
         action: WrapUpMode,
         pr_url: Option<&str>,
     ) -> Result<SessionRequestAnswer>;
-    /// `RequestCloseTask` (`update_tasks`' done path): the module applies the
+    /// `RequestCloseTask` (`task_update`'s done path): the module applies the
     /// Done close in one transaction and, when there is host work on this
     /// host, writes a `close` row for the board to serve. A refusal is an
     /// `Err`, as is a call that got no answer; either way nothing is known to

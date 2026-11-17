@@ -120,7 +120,7 @@ impl TaskUrl {
 mod tests {
     use super::*;
 
-    /// `UrlType::ALL` backs the update_tasks MCP schema's url_type enum
+    /// `UrlType::ALL` backs the task_update MCP schema's url_type enum
     /// (dispatch.rs) — a variant added there without updating `ALL` would
     /// silently under-advertise it.
     #[test]

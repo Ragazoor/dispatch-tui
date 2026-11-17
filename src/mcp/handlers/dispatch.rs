@@ -64,6 +64,11 @@ pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[
         "call task_search. It no longer scopes to your own epic or hides your own task, so pass \
          epic_id, and it returns 50 rows unless limit says otherwise",
     ),
+    ("create_task", "call task_create"),
+    ("update_tasks", "call task_update"),
+    ("update_task", "call task_update with task_ids: [id]"),
+    ("dispatch_task", "call task_dispatch"),
+    ("resume_task", "call task_resume"),
 ];
 
 /// The error text for a `tools/call` to an unregistered name. A name in
@@ -164,7 +169,7 @@ macro_rules! mcp_tools {
 // `&'static str`s twice.
 // ---------------------------------------------------------------------------
 
-// `pub(super)` because the `update_tasks` schema is generated from the
+// `pub(super)` because the `task_update` schema is generated from the
 // `mcp_args!` field list in `tasks::mod` and calls this from there. The helper
 // stays here with its siblings rather than following its caller.
 pub(super) fn task_tag_enum_values() -> Vec<&'static str> {
@@ -193,7 +198,7 @@ fn task_status_enum_values() -> Vec<&'static str> {
 // ---------------------------------------------------------------------------
 
 mcp_tools! {
-    async idempotent "update_tasks" => tasks::handle_update_tasks,
+    async idempotent "task_update" => tasks::handle_update_tasks,
         "Update one or many tasks. Pass task_ids (one id updates one task) plus the fields to set: \
 status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
 epic_id, base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule, and bookmarked. At least one field \
@@ -203,7 +208,7 @@ pick many ids with task_search (epic_id, recursive, status, base_branch), and ch
 or failure, then a count.",
         (tasks::update_tasks_schema());
 
-    async write "create_task" => tasks::handle_create_task,
+    async write "task_create" => tasks::handle_create_task,
         "Create a new task on the kanban board. Tasks always start in 'backlog' status. Your \
 identity as caller is established by the transport, not by an argument — there is no \
 caller_task_id to pass. epic_id is required: name the epic this task belongs to, or pass null \
@@ -536,15 +541,15 @@ A task tagged pr-review, dependabot or release-please is refused.",
             "required": ["task_id", "action"]
         };
 
-    async write "dispatch_task" => tasks::handle_dispatch_task,
+    async write "task_dispatch" => tasks::handle_dispatch_task,
         "Dispatch a backlog task by ID, then launch an agent in a tmux session. If the task has \
 no worktree directory yet, one is CREATED — from the task's base branch, or from the PR's head \
 branch for a review task carrying a PR url. If it already exists it is \
 REUSED as-is — its branch, its commits and its uncommitted changes are all still there, and the \
 agent starts in them. So a crashed or stalled task is restarted in place: set it back to backlog \
-with update_tasks, then dispatch_task it. Tell the new agent in the task what its worktree \
+with task_update, then task_dispatch it. Tell the new agent in the task what its worktree \
 already holds — it is a new agent and has none of the previous session's context. To wake a \
-paused agent WITH its context, use resume_task instead. Waits up to 30 \
+paused agent WITH its context, use task_resume instead. Waits up to 30 \
 seconds for the dispatch to complete; the success text says whether the worktree was created or \
 reused, and names it along with the tmux window. If provisioning takes longer, it returns the \
 dispatch request's id and state instead, and the dispatch carries on. Errors if the task is not in \
@@ -560,15 +565,15 @@ backlog status or the dispatch fails.",
             "required": ["task_id"]
         };
 
-    async write "resume_task" => tasks::handle_resume_task,
+    async write "task_resume" => tasks::handle_resume_task,
         "Wake a detached (paused) agent WITH its context. Reattaches the task's worktree, starts \
 the Claude session so it continues the agent's previous conversation, and puts the task back to \
-running — what pressing space on a detached agent in the TUI does. Prefer this over update_tasks \
-status=backlog plus dispatch_task, which starts a NEW agent that has none of the old context. \
+running — what pressing space on a detached agent in the TUI does. Prefer this over task_update \
+status=backlog plus task_dispatch, which starts a NEW agent that has none of the old context. \
 The optional message is delivered as the first input after the session resumes; use it to say why \
 the agent was woken. Returns once the board has been asked to resume, not when the session is \
 up. Errors with 'no resumable session' when the task has no worktree or is in backlog (use \
-dispatch_task for those), and when its agent is already attached (use SendMessage).",
+task_dispatch for those), and when its agent is already attached (use SendMessage).",
         {
             "type": "object",
             "properties": {

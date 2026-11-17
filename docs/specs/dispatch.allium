@@ -694,7 +694,7 @@ rule RecordRepoPath {
         -- through the new-task form, quick dispatch, and an edit, so that
         -- sibling feed items in the same repo resolve to it on the next feed
         -- sync (feeds.allium). The path is tilde-expanded first. MCP
-        -- create_task saves no repo path. The number of saved paths is not
+        -- task_create saves no repo path. The number of saved paths is not
         -- capped.
 }
 
@@ -728,7 +728,7 @@ rule RecordBaseBranch {
         -- BaseBranchUsed comes from exactly one entry point: confirming the
         -- manual "new task" form (BaseBranchPicker), alongside RepoPathUsed.
         -- Quick dispatch resolves its base branch from origin/HEAD and skips
-        -- the form, and MCP create_task never reaches it, so neither records.
+        -- the form, and MCP task_create never reaches it, so neither records.
         -- The history is the branches the operator chose, not every branch
         -- the system targeted. The copy-task flow goes through the same form
         -- and records like any other.
@@ -799,7 +799,7 @@ rule DispatchTask {
         -- (store-split.allium: RequestDispatch's task.host check), because a
         -- request is always provisioned on the machine that made it.
         --
-        -- MCP dispatch_task emits DispatchRequested without a mode and lets
+        -- MCP task_dispatch emits DispatchRequested without a mode and lets
         -- the module derive it; this rule and DispatchResearchTask name theirs.
 }
 
@@ -1045,7 +1045,7 @@ rule ResumeTask {
     @guidance
         -- == Who triggers it, and the optional message ==
         -- Three callers raise ResumeTask: Space on a detached card in the TUI
-        -- (no message), the MCP tool resume_task
+        -- (no message), the MCP tool task_resume
         -- (mcp-task-tools.allium: ResumeTaskViaMcp), which may carry a
         -- message, and Space on a detached row in an agent-tree pane's agents
         -- section (agent-tree.allium: ResumeDetachedAgentFromThePane), which
@@ -1059,7 +1059,7 @@ rule ResumeTask {
         -- tmux_window = null precondition stays true while a launch is in
         -- flight, and the live has_window() re-check and the launch are
         -- separate steps. A second ask in that gap (Space pressed twice, a
-        -- pane resume next to MCP resume_task, RetryResume pressed twice)
+        -- pane resume next to MCP task_resume, RetryResume pressed twice)
         -- would start a second `claude --continue` in the same worktree. So
         -- the board keeps the set of tasks with a resume in flight, refuses
         -- another resume of such a task with a status message, and drops the
@@ -1794,7 +1794,7 @@ surface DispatchActionLabel {
 }
 
 -- The ways an operator relaunches an agent into a task's existing worktree,
--- or starts over. MCP resume_task reaches ResumeTask through its own rule
+-- or starts over. MCP task_resume reaches ResumeTask through its own rule
 -- (mcp-task-tools.allium: ResumeTaskViaMcp).
 surface AgentRelaunch {
     facing _: core/Operator
@@ -1811,7 +1811,7 @@ surface AgentRelaunch {
 }
 
 -- The two writes the board makes when the operator uses a repo path or a
--- base branch. Nothing else records either: MCP create_task saves no path and
+-- base branch. Nothing else records either: MCP task_create saves no path and
 -- records no branch.
 surface RepoHistoryWrites {
     facing _: core/Operator
@@ -2080,7 +2080,7 @@ surface BaseBranchPicker {
         --
         -- Confirming this step finishes the form, which records the chosen
         -- branch and the path (RepoHistoryWrites: BaseBranchUsed and
-        -- RepoPathUsed). Quick dispatch and MCP create_task never render this
+        -- RepoPathUsed). Quick dispatch and MCP task_create never render this
         -- surface and never record branch history.
 }
 
@@ -2097,7 +2097,7 @@ surface DispatchingFeedback {
     --   - OPEN: this board's subscription holds an open request for the task
     --     (requested or provisioning). Every request this host makes is
     --     delivered to it (sync.allium: SubscribeToThisHostsDispatchRequests),
-    --     including those the epic chain and MCP dispatch_task make, and they
+    --     including those the epic chain and MCP task_dispatch make, and they
     --     survive a board restart.
     -- The surface contract is the visible behaviour of the status bar and
     -- card line-2 indicator.

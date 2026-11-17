@@ -49,7 +49,7 @@ impl DispatchRequestState {
 }
 
 /// Which launch path wrote the request (D9). `User` covers the TUI keys,
-/// retry-fresh and research; `Mcp` is `dispatch_task`; `EpicChain` is
+/// retry-fresh and research; `Mcp` is `task_dispatch`; `EpicChain` is
 /// `epics.allium: AutoDispatchNextSubtask`; `Quick` is quick dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DispatchOrigin {
@@ -92,7 +92,7 @@ pub struct DispatchRequest {
     pub tmux_window: Option<TmuxWindow>,
     /// Whether provisioning reused a worktree that already existed, as the
     /// host reported it with the dispatched report; `false` until then.
-    /// `dispatch_task`'s success text names it.
+    /// `task_dispatch`'s success text names it.
     pub reused_worktree: bool,
     /// `requested_at + config.dispatch_request_timeout`, as the module stored
     /// it. The host enforces THIS value (`dispatch.allium:

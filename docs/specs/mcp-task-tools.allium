@@ -1,8 +1,8 @@
 -- allium: 3
 -- mcp-task-tools.allium
 --
--- Scope: the dispatch MCP server's task tools (create_task, task_search,
---        update_tasks, query_usage, dispatch_task, resume_task,
+-- Scope: the dispatch MCP server's task tools (task_create, task_search,
+--        task_update, query_usage, task_dispatch, task_resume,
 --        wrap_up, exit_session, set_verify_command, set_review_command), the
 --        CLI plan attachment, the agent port that serves them, the standard
 --        every tool description and agent-facing skill is held to, and the
@@ -64,7 +64,7 @@ config {
     -- reached through nextCursor (ListContextResourcesViaMcp).
     context_list_page_size: Integer = 50
 
-    -- How long dispatch_task waits on its dispatch request before returning
+    -- How long task_dispatch waits on its dispatch request before returning
     -- the request id and its pending state (DispatchTaskViaMcp). Shorter than
     -- the request's own deadline (store-split.allium:
     -- config.dispatch_request_timeout), so a slow provisioning returns a
@@ -132,20 +132,23 @@ rule OldToolNameRedirects {
     -- The table holds get_task ("call task_search with task_id") and
     -- list_tasks ("call task_search; it no longer scopes to your own epic or
     -- hides your own task, so pass epic_id, and it returns 50 rows unless
-    -- limit says otherwise").
+    -- limit says otherwise"), create_task ("call task_create"), update_tasks
+    -- and the older update_task ("call task_update"), dispatch_task ("call
+    -- task_dispatch") and resume_task ("call task_resume").
     ensures: UnknownToolErrorNamesNewTool()
 
     @guidance
         -- Asserted by old_tool_name_call_names_the_new_tool,
         -- redirect_table_names_are_not_registered,
         -- unregistered_name_gets_no_rename_hint and
-        -- calling_get_task_or_list_tasks_names_task_search.
+        -- calling_get_task_or_list_tasks_names_task_search and
+        -- calling_a_renamed_write_tool_names_its_replacement.
 }
 
 -- == MCP Task Tools ==
 
 -- UpdateTaskViaMcp is the per-task rule behind the one update tool,
--- update_tasks (UpdateTasksViaMcp below). There is no separate update_task
+-- task_update (UpdateTasksViaMcp below). There is no separate update_task
 -- tool: a call with one id is the single-task update.
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan_path?,
@@ -335,7 +338,7 @@ rule UpdateTaskViaMcp {
             task.updated_at = now
 
     @guidance
-        -- MCP update_tasks accepts status, sub_status, plan_path, title,
+        -- MCP task_update accepts status, sub_status, plan_path, title,
         -- description, repo_path, sort_order, url, url_type, tag, epic_id,
         -- base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule
         -- and bookmarked. It does NOT
@@ -343,7 +346,7 @@ rule UpdateTaskViaMcp {
         -- and never set via MCP.
         --
         -- == The tool description enumerates every field it accepts ==
-        -- update_tasks' description opens with that list, in full, and it is
+        -- task_update's description opens with that list, in full, and it is
         -- the first thing a caller reads. An unadvertised field is one a
         -- caller reaches for a second tool to do, or does not do at all. The
         -- list is asserted
@@ -353,11 +356,11 @@ rule UpdateTaskViaMcp {
         -- the wrap-up action for the task. Pass null explicitly to clear it
         -- (omitting the field is a no-op).
         -- auto_run_plan (boolean, not nullable at the Task level) can be
-        -- set via create_task or update_tasks. Omitting it is a no-op on
-        -- update; create_task defaults it to false when absent.
+        -- set via task_create or task_update. Omitting it is a no-op on
+        -- update; task_create defaults it to false when absent.
         -- phoenix behaves the same way, and is the one field here an agent is
         -- expected to set on ITSELF: a dispatched agent that works out the task
-        -- it is running is a recurring one calls update_tasks(task_ids: [id], phoenix: true) and
+        -- it is running is a recurring one calls task_update(task_ids: [id], phoenix: true) and
         -- the recurrence survives its own session. Arming it costs nothing if
         -- wrong — the flag does nothing until the task reaches done, and the
         -- human can clear it from the editor.
@@ -386,7 +389,7 @@ rule UpdateTaskViaMcp {
         -- The board stamps nothing itself (store-split X2): a board
         -- that needs the stamp re-reads the task.
         -- The `status` argument's description lists the statuses and nothing
-        -- more. The resume-a-crashed-task story is dispatch_task's
+        -- more. The resume-a-crashed-task story is task_dispatch's
         -- (DispatchTaskViaMcp).
         -- When status or epic_id changes, the parent epic's status is
         -- recalculated (if a parent epic exists). Re-assigning a task
@@ -424,7 +427,7 @@ rule MarkTaskDoneViaMcp {
     requires: status = done
 
     -- A dedicated close-only call: no other field may travel with
-    -- status="done" in the same update_tasks call — not even one that would
+    -- status="done" in the same task_update call — not even one that would
     -- be a harmless no-op elsewhere. url_type is a case in point: everywhere
     -- else this tool accepts it, url_type has no effect without a non-empty
     -- url — it "folds into url" (see UpdateTaskViaMcp's guidance) rather than
@@ -432,7 +435,7 @@ rule MarkTaskDoneViaMcp {
     -- is still rejected here, same as any other field. A close-only call
     -- silently discarding an argument the caller bothered to send is a worse
     -- failure mode than a slightly stricter guard; a caller wanting both a
-    -- field change and completion makes two calls — one update_tasks call for
+    -- field change and completion makes two calls — one task_update call for
     -- the field, a separate status-only call to close.
     requires:
         sub_status = null and plan_path = null and title = null and description = null
@@ -499,7 +502,7 @@ rule MarkTaskDoneViaMcp {
     -- failed.
 
     @guidance
-        -- The MCP `update_tasks` tool's dedicated done-only path. The tool
+        -- The MCP `task_update` tool's dedicated done-only path. The tool
         -- checks `status = "done"` FIRST, on the arguments as sent, before
         -- the url/url_type pairing check and before any field mapping. The
         -- order matters: a check on the mapped fields would miss a url_type
@@ -540,7 +543,7 @@ rule MarkTaskDoneViaMcp {
         --      (also set: <names>). Update other fields separately, then
         --      close with a status-only call."
         --   2. caller_identity is Task(t) and t = the target task_id →
-        --      "Cannot mark your own task done via update_tasks — call
+        --      "Cannot mark your own task done via task_update — call
         --      wrap_up then exit_session instead."
         --   3. Unknown task_id → the same NotFound(-32001) every other MCP
         --      task lookup uses ("Task <id> not found").
@@ -549,11 +552,11 @@ rule MarkTaskDoneViaMcp {
         --      refuses a missing task too, but in its own words, which would
         --      reach the caller only as the could-not-move-to-done reply
         --      below; the read is what gives the NotFound answer. (On the
-        --      other update_tasks paths the read is what keeps a missing task
+        --      other task_update paths the read is what keeps a missing task
         --      from looking like success at all: the shared store's
         --      patch_task reducer is a deliberate silent no-op on a missing id,
         --      since hooks race with deletes. The same holds for the TUI's
-        --      sub_status write, which goes through update_tasks.) A task
+        --      sub_status write, which goes through task_update.) A task
         --      deleted between the read and the close gets the
         --      could-not-move reply.
         -- A caller could trip both 1 and 2 at once; 1 is checked first, so
@@ -619,7 +622,7 @@ rule PrFinalisationReflectionNudge {
 
     @guidance
         -- The sole consumer of core/config.learning_reflection_enabled. The
-        -- nudge is a sentence appended to the update_tasks success response
+        -- nudge is a sentence appended to the task_update success response
         -- text, asking the agent whether it discovered anything non-obvious
         -- about the repo or task and, if so, to call record_learning with a
         -- brief summary. It never gates or alters the update: UpdateTaskViaMcp
@@ -637,7 +640,7 @@ rule PrFinalisationReflectionNudge {
         -- module's (pr-workflow.allium: ExitSession, run inside
         -- store-split.allium's RequestExitSession), and exit_session appends
         -- no reflection nudge. So the nudge only appears when a caller invokes the
-        -- update_tasks MCP tool directly to link a PR, bypassing
+        -- task_update MCP tool directly to link a PR, bypassing
         -- wrap_up/exit_session entirely. The wrap_up response carries a
         -- different rate_learning nudge, gated to the pr action rather than
         -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
@@ -649,7 +652,7 @@ rule UpdateTasksViaMcp {
                          url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
                          model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
 
-    -- update_tasks is the only MCP tool that updates tasks. Each field has the
+    -- task_update is the only MCP tool that updates tasks. Each field has the
     -- meaning UpdateTaskViaMcp gives it.
 
     requires: task_ids.count > 0
@@ -771,7 +774,7 @@ rule CreateTaskViaMcp {
         created_at: now,
         updated_at: now
       )
-      -- schedule as on update_tasks, applied in the same store write as the
+      -- schedule as on task_update, applied in the same store write as the
       -- creation, so a refused cron creates no task.
       if schedule != null and schedule != "":
             schedules/ScheduleSet(task: task, cron: schedule)
@@ -809,7 +812,7 @@ rule CreateTaskViaMcp {
         -- The caller counts like anyone who sees the epic. An agent that
         -- wants no mark for its operator omits signal.
         --
-        -- Only create_task takes it as an argument. update_tasks does not.
+        -- Only task_create takes it as an argument. task_update does not.
         -- The one other creation path that turns it on is the reviews feed:
         -- a PR newly inserted into My Reviews or Team Reviews is created with
         -- the signal on, marking the same people this rule names (feeds.allium:
@@ -887,7 +890,7 @@ rule CreateTaskViaMcp {
         -- The degradation is silent on one of the two surfaces only. An agent
         -- launched without its per-task configuration gets no auto-scoping in
         -- ListTasksViaMcp, with no error, and ListTasksViaMcp cannot detect
-        -- the difference. Here it does not apply: create_task requires epic_id of every caller, so a
+        -- the difference. Here it does not apply: task_create requires epic_id of every caller, so a
         -- misconfigured agent that omits it is REFUSED outright rather than
         -- quietly given no epic. What it loses is the refusal's help, not the
         -- refusal: TheRefusalNamesTheLikelyAnswer can only name the caller's
@@ -917,7 +920,7 @@ rule CreateTaskViaMcp {
         -- caller-task above, and returns -32001 for the same reason: the epic
         -- named is not there, which is not the same answer as the argument
         -- being malformed. The store refuses the write and the service maps
-        -- that refusal to NotFound, so create_task and the
+        -- that refusal to NotFound, so task_create and the
         -- reassign path in MoveTaskToEpic give one answer to one operator
         -- mistake rather than -32602 and -32001 by entry point. It sits in the
         -- service rather than the handler so the TUI create path is held to it
@@ -974,7 +977,7 @@ rule GetTaskViaMcp {
         -- [Dispatch request] is not a Task field: it is the task's most recent
         -- store-split.allium DispatchRequest that this board's subscription
         -- holds, rendered as its id, state and, when failed, its reason.
-        -- Omitted when there is none. It is how a dispatch_task caller whose
+        -- Omitted when there is none. It is how a task_dispatch caller whose
         -- wait ended while the request was still pending learns how it ended.
         -- [Phoenix] renders only when the flag is true, and says the task will
         -- come back — so an agent wrapping up knows it is finishing THIS run of
@@ -1125,7 +1128,7 @@ rule ArchivedTaskIsReadOnly {
         -- the not-found code (-32001) every missing task gets, so existing
         -- callers branch the same way, and its message says
         -- "task <id> is archived and cannot be <resumed|dispatched|changed>"
-        -- so an agent learns why and does not retry. In update_tasks the
+        -- so an agent learns why and does not retry. In task_update the
         -- archived id fails like any missing id in a batch.
         --
         -- A record the caller may not see is answered as an id that never
@@ -1336,7 +1339,7 @@ rule DispatchTaskViaMcp {
         -- has_plan = false (spec-first prompt) variants — the prompt builder
         -- branches internally — and a plan-less research-tagged task gets the
         -- research mode from the module's derivation.
-        -- dispatch_task is the only remaining MCP dispatch tool: it stays the
+        -- task_dispatch is the only remaining MCP dispatch tool: it stays the
         -- explicit "dispatch this specific task" call, while epic chaining is
         -- automatic on a session close that takes effect
         -- (AutoDispatchNextSubtask in epics.allium, keyed on the SessionClosed
@@ -1386,7 +1389,7 @@ rule DispatchTaskViaMcp {
         -- to the local branch. What matters here is only that one path branches
         -- and the other does not.
         --
-        -- Every dispatch_task text names the task as a task ref, which
+        -- Every task_dispatch text names the task as a task ref, which
         -- carries the name of the agent that runs it, read after the launch:
         -- `dispatched <task ref> — <provisioning>: <path>, tmux: <window>`,
         -- `<task ref> is not in backlog (current: <status>)`,
@@ -1420,7 +1423,7 @@ rule DispatchTaskViaMcp {
         -- The description a caller reads before calling states both paths, that
         -- a reused worktree keeps its branch, commits and uncommitted changes,
         -- and the move those two facts add up to: a crashed or stalled task is
-        -- resumed in place by setting it back to backlog with update_tasks and
+        -- resumed in place by setting it back to backlog with task_update and
         -- dispatching it again. It also tells the caller to say in the task
         -- what the worktree already holds, because the resumed agent is a new
         -- agent and carries none of the crashed session's context. And it
@@ -1429,8 +1432,8 @@ rule DispatchTaskViaMcp {
         -- is told in that response, not in the description.
         --
         -- This description is the ONE place the recovery move is told. A
-        -- caller resuming a task is about to call dispatch_task, so that is
-        -- where it reads the story; update_tasks' `status` argument carries
+        -- caller resuming a task is about to call task_dispatch, so that is
+        -- where it reads the story; task_update's `status` argument carries
         -- no copy to keep in step.
 }
 
@@ -1451,11 +1454,14 @@ rule ResumeTaskViaMcp {
     ensures: ResumeTask(task: task, message: message)
 
     @guidance
-        -- resume_task wakes a detached (paused) agent WITH its context. It
+        -- task_resume and task_dispatch are two capabilities, not one: resume
+        -- continues the old conversation (and can deliver a message), dispatch
+        -- starts a new agent. Each refusal names the other tool.
+        -- task_resume wakes a detached (paused) agent WITH its context. It
         -- reattaches the task's worktree and starts `claude --continue`, so
         -- the agent's previous conversation is restored, and puts the task
-        -- back to running. The older route — update_tasks status=backlog,
-        -- then dispatch_task — starts a NEW agent in the reused worktree
+        -- back to running. The older route — task_update status=backlog,
+        -- then task_dispatch — starts a NEW agent in the reused worktree
         -- with none of that context (DispatchTaskViaMcp).
         --
         -- == Arguments ==
@@ -1465,7 +1471,7 @@ rule ResumeTaskViaMcp {
         -- why the agent was woken; the task description is not rewritten.
         --
         -- == Errors ==
-        -- Every resume_task text, success and refusal, names the task as a
+        -- Every task_resume text, success and refusal, names the task as a
         -- task ref: `resume requested for <task ref>: ...`,
         -- `<task ref> has no resumable session: ...`.
         --
@@ -1495,7 +1501,7 @@ rule ResumeTaskViaMcp {
         -- == Not for crashed worktrees ==
         -- A task whose worktree is gone cannot resume; it is re-dispatched
         -- from backlog (DispatchTaskViaMcp). The tool description and the
-        -- agent-facing skills say resume_task first, and dispatch_task only
+        -- agent-facing skills say task_resume first, and task_dispatch only
         -- when there is no session to resume.
 }
 
@@ -2342,15 +2348,15 @@ surface McpTaskTools {
         --     (ReviewTasksAreNotWrappedUp).
         --   - A constraint the schema can express is expressed by the schema, not
         --     prose: an enum for a closed value set, a conditional requirement for
-        --     one argument depending on another (update_tasks' url_type).
+        --     one argument depending on another (task_update's url_type).
         --   - An argument that means the same thing on every tool that takes it —
         --     base_branch, wrap_up_mode, model, auto_run_plan, phoenix, tag, sort_order —
         --     carries one short wording of that meaning, the same on each tool. A
         --     tool adds text only where its meaning differs (an omitted argument
         --     defaulting on create but meaning "no change" on update).
         --   - A story spanning several tools is told once, by the tool where the
-        --     caller acts on it: resuming a crashed task is dispatch_task's
-        --     (DispatchTaskViaMcp), not update_tasks' status argument's.
+        --     caller acts on it: resuming a crashed task is task_dispatch's
+        --     (DispatchTaskViaMcp), not task_update's status argument's.
         --   - Authoring rules for a tool's content live in the skill that teaches
         --     them; the description points at the skill (record_learning and the
         --     /learnings skill — learnings.allium: RecordLearningViaMcp).
@@ -2427,12 +2433,12 @@ surface McpTaskTools {
         -- Anywhere an MCP tool takes a task id it also takes the name of one of the
         -- task's agents.
         --
-        -- `task_search`, `update_tasks`, `dispatch_task`, `wrap_up` and the rest resolve
+        -- `task_search`, `task_update`, `task_dispatch`, `wrap_up` and the rest resolve
         -- the argument first: digits are an id, anything else is looked up as an agent
         -- name, current or ended (agents.allium: AgentNameResolvesToTask). A word that
         -- is no agent's name is the same NotFound (-32001) an unknown id gets. Results
         -- still report the numeric id.
-        -- There are no task aliases (agents.allium, A5), and `update_tasks`
+        -- There are no task aliases (agents.allium, A5), and `task_update`
         -- has no `alias` field.
 
     @guarantee TheNextCallIsNamedJustInTime
@@ -2544,7 +2550,7 @@ surface McpTaskTools {
         -- The refusal names the tag as the reason, says a review task ends
         -- at its PR rather than at wrap-up, and names the one way out: a
         -- review task that has genuinely become code work is retagged
-        -- (update_tasks with a non-review tag) and wrapped up as that. The
+        -- (task_update with a non-review tag) and wrapped up as that. The
         -- escape hatch is stated because the alternative is an agent that
         -- has done real work and is told only "no" — it would leave the
         -- work uncommitted rather than infer the retag.
@@ -2581,6 +2587,6 @@ surface McpTaskTools {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "update_tasks' typed-url contract is now to be stated by the schema: url_type as an enum, and url_type required whenever url is non-empty. The second is a conditional requirement (JSON Schema if/then or a top-level combinator), and tool input schemas reaching Claude may not accept one at the top level. If the conditional cannot be expressed, does the url description keep one clause stating the dependency, or does the contract live only in the validation error?"
+open question "task_update's typed-url contract is now to be stated by the schema: url_type as an enum, and url_type required whenever url is non-empty. The second is a conditional requirement (JSON Schema if/then or a top-level combinator), and tool input schemas reaching Claude may not accept one at the top level. If the conditional cannot be expressed, does the url description keep one clause stating the dependency, or does the contract live only in the validation error?"
 
-open question "update_tasks naming a specific repo-group sub-epic in epic_id while also changing repo_path to a different repo: UpdateTaskViaMcp's ensures says the assignment is direct (route_target of a sub-epic is the sub-epic), but the relink is written first and patch_task's repo change then re-routes the task to the sub-epic for the new repo, so the explicit sub-epic is overridden (and deleted if left empty). Which is intended: does an explicit sub-epic win over the new repo, or does the repo always decide inside a grouped subtree?"
+open question "task_update naming a specific repo-group sub-epic in epic_id while also changing repo_path to a different repo: UpdateTaskViaMcp's ensures says the assignment is direct (route_target of a sub-epic is the sub-epic), but the relink is written first and patch_task's repo change then re-routes the task to the sub-epic for the new repo, so the explicit sub-epic is overridden (and deleted if left empty). Which is intended: does an explicit sub-epic win over the new repo, or does the repo always decide inside a grouped subtree?"

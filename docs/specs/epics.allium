@@ -676,7 +676,7 @@ rule ListEpicsViaMcp {
         -- a caller can rebuild the tree from one call instead of one
         -- list_epics(epic_id) per epic. The id
         -- is included because it is how the caller addresses the epic in
-        -- follow-up calls (list_epics with epic_id, update_epic, create_task).
+        -- follow-up calls (list_epics with epic_id, update_epic, task_create).
         -- An empty result returns an informational "No epics found"
         -- message rather than an error.
 }
@@ -1081,7 +1081,7 @@ rule AutoDispatchNextSubtask {
         -- rebases onto base_branch server-side, action = pr records the PR the
         -- work landed in, action = done is the caller stating the task needed
         -- neither. All three chain. What does NOT chain is any other route
-        -- into Done — update_tasks(status = "done") (MarkTaskDoneViaMcp in
+        -- into Done — task_update(status = "done") (MarkTaskDoneViaMcp in
         -- mcp-task-tools.allium) and moving a card to Done in the TUI both
         -- close the task without emitting SessionClosed, because neither has a
         -- wrap_up behind it and so neither can say anything about base_branch.

@@ -977,7 +977,7 @@ rule WritesRequireSight {
         -- update_task), lands on the CALLER's own board: owner = the caller
         -- whatever the argument says. Without that, Bob could detach a
         -- teammate's task with owner = Bob and take it, or with an owner no one
-        -- is and hide it. A created task (create_task, create_task_signalled)
+        -- is and hide it. A created task (task_create, create_task_signalled)
         -- is also stamped created_by = the caller. The `owner` argument stays
         -- in the signatures for the operator, the one caller who may name
         -- another person. A task that joins an epic carries no owner.
@@ -1296,7 +1296,7 @@ surface StoreWriteChecks {
         -- set_task_epic and update_task with an epic (TaskMovesStayInTheWorkspace,
         -- ReParentingKeepsTheHolder, ClaimsFollowTaskSight).
         TaskMoved(task, destination?, owner)
-        -- create_task and set_task_epic with an epic
+        -- task_create and set_task_epic with an epic
         -- (TaskEntersAnEpicTheCallerCanSee).
         TaskPlacedInEpic(task, epic)
         -- Every reducer that changes, dispatches, wraps up, closes, links,

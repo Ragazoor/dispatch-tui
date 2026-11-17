@@ -20,7 +20,7 @@
 --           request row follows (D1–D12, W1–W13, P1–P5, X1–X6 below), the
 --           dispatch request row and its lifecycle, the session request row
 --           (wrap-up, exit-session and close) and its lifecycle,
---           update_tasks' done-path close and its close row, the feed
+--           task_update's done-path close and its close row, the feed
 --           request row (a refresh asked of an epic's poll owner, a teardown
 --           asked of the host holding a feed task the stale delete removed)
 --           and its lifecycle, the owner check on host-scoped setting writes,
@@ -147,10 +147,10 @@
 --   - D6, the callers. Every launch path that provisions writes a request
 --     row: the TUI dispatch keys, retry-fresh, research, quick dispatch
 --     (tasks.allium: CreateQuickTask creates the task, then requests), MCP
---     dispatch_task, the epic auto-dispatch chain (epics.allium:
+--     task_dispatch, the epic auto-dispatch chain (epics.allium:
 --     AutoDispatchNextSubtask, which advances on a refused request and
 --     reports AutoDispatchFailed from the row's outcome) and a board firing a
---     due scheduled task (schedules.allium: FireDueTask). dispatch_task writes
+--     due scheduled task (schedules.allium: FireDueTask). task_dispatch writes
 --     the request and waits up to 30 seconds for dispatched or failed; when
 --     the wait ends first it returns the request id and its state, and
 --     task_search shows the request state. The TUI's DispatchingFeedback follows
@@ -345,7 +345,7 @@
 --   - P5, the gate. The PR rules are covered by the version gate above.
 --
 --   Rules the module owns outright (no board-side copy):
---   - X1, the update_tasks done path (mcp-task-tools.allium:
+--   - X1, the task_update done path (mcp-task-tools.allium:
 --     MarkTaskDoneViaMcp). The tool keeps its request-shape checks at the MCP
 --     boundary (status must be the only field; a dispatched agent may not
 --     close its own task) and then calls close_task(task_id, host), host
@@ -419,7 +419,7 @@ use "./feeds.allium" as feeds
 enum RequestKind { dispatch }
 
 -- What a session request asks for (W1): a wrap-up, the close that follows
--- it, or (X1) the teardown of update_tasks' done-path close, which has no
+-- it, or (X1) the teardown of task_update's done-path close, which has no
 -- wrap-up behind it.
 enum SessionRequestKind { wrap_up | exit_session | close }
 
@@ -440,7 +440,7 @@ enum DispatchRequestMode { dispatch | research | quick }
 enum DispatchRequestState { requested | provisioning | dispatched | failed }
 
 -- Which launch path wrote the request (D9). user is the TUI keys, including
--- retry-fresh and research; mcp is dispatch_task; epic_chain is
+-- retry-fresh and research; mcp is task_dispatch; epic_chain is
 -- epics.allium's AutoDispatchNextSubtask; quick is quick dispatch; schedule
 -- is a board firing a due task (schedules.allium: FireDueTask).
 enum DispatchRequestOrigin { user | mcp | epic_chain | quick | schedule }
@@ -2021,7 +2021,7 @@ rule RequestCloseTask {
             )
 
     @guidance
-        -- The close_task reducer, called by update_tasks' dedicated
+        -- The close_task reducer, called by task_update's dedicated
         -- status="done" path (mcp-task-tools.allium: MarkTaskDoneViaMcp)
         -- with this board's own host. Everything above is ONE transaction, so
         -- the close took effect whole or not at all, and the board never
@@ -2363,4 +2363,4 @@ open question "Seeing other machines' requests: a board's subscription delivers 
 
 open question "Feed request prune emitters: FeedRequestRowsArePruned runs only from request_feed_refresh and from the stale delete that writes a teardown row, not from request_dispatch or request_wrap_up. A person who dispatches and wraps up but whose feed epics only run on one host therefore prunes finished teardown rows only when a stale delete writes the next one. Should every request write sweep all three tables, or is the sweep at the two feed writers acceptable?"
 
-open question "update_tasks' done path when close_task gets NO ANSWER: the board treats a no-answer like a refusal and the tool replies that the task could NOT be moved to done and is still in its previous status. The close may in fact have landed. A retry is a done -> done re-close (no restamp, no respawn), but for a task with a pr-typed url it writes a second close row and runs gh pr close again. Should the tool settle a no-answer by re-reading the task, as exit_session settles its own no-answer by looking for the row (mcp-task-tools.allium: ExitSessionViaMcp), or is the 'try again' reply acceptable?"
+open question "task_update's done path when close_task gets NO ANSWER: the board treats a no-answer like a refusal and the tool replies that the task could NOT be moved to done and is still in its previous status. The close may in fact have landed. A retry is a done -> done re-close (no restamp, no respawn), but for a task with a pr-typed url it writes a second close row and runs gh pr close again. Should the tool settle a no-answer by re-reading the task, as exit_session settles its own no-answer by looking for the row (mcp-task-tools.allium: ExitSessionViaMcp), or is the 'try again' reply acceptable?"

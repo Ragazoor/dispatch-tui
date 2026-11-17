@@ -12,7 +12,7 @@ pub enum SettingsCommand {
     /// Record a base_branch into a repo's most-recently-used history (see
     /// docs/specs/dispatch.allium: rule RecordBaseBranch). Emitted only from
     /// `finish_task_creation` (the manual "new task" form) — never
-    /// quick-dispatch or MCP `create_task`.
+    /// quick-dispatch or MCP `task_create`.
     SaveBaseBranch(String, String),
     /// Ask a repository what its own default branch is, so the base-branch
     /// field can stop showing the literal "main" to a repo that does not have

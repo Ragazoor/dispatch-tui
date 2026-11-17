@@ -113,7 +113,7 @@ async fn update_tasks_accepts_agent_names_in_task_ids() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": {"task_ids": [name], "title": "by agent name"}
         })),
     )

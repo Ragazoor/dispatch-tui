@@ -282,8 +282,8 @@ rule CreateTaskInPackageView {
         -- Two writes: the create, then the link. A refused link leaves the
         -- plain main-board task and shows the error; the user links it with
         -- `w`. The board re-reads its packages after the link.
-        -- MCP has no twin parameter on create_task: an agent has no view,
-        -- and create_task followed by update_work_package(link_task_ids)
+        -- MCP has no twin parameter on task_create: an agent has no view,
+        -- and task_create followed by update_work_package(link_task_ids)
         -- already does the same.
 }
 
@@ -410,7 +410,7 @@ rule DeletePackageFromBoard {
 -- == MCP tools ==
 
 -- Agents are first-class users of packages: everything the board can do has
--- a tool. Three tools, in the merged style of update_tasks: create_work_package,
+-- a tool. Three tools, in the merged style of task_update: create_work_package,
 -- list_work_packages and update_work_package (WorkPackageMcpTools).
 --
 -- Replies name what they touch (mcp-task-tools.allium:
@@ -539,7 +539,7 @@ rule DeleteWorkPackageViaMcp {
     -- A delete is a call of its own: the same call must not also rename or
     -- relink, since those writes would be thrown away with the package. A
     -- call that sets delete with any other field is invalid params (-32602)
-    -- and nothing is written. The same rule as update_tasks with
+    -- and nothing is written. The same rule as task_update with
     -- status="done" (mcp-task-tools.allium).
     requires: title = null and description = null and sort_order = null
               and link_task_ids = null and unlink_task_ids = null

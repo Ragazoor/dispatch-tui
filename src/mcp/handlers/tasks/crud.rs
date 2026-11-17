@@ -27,7 +27,7 @@ async fn handle_update_task(
         Err(resp) => return resp,
     };
     let task_id = parsed.task_id;
-    tracing::info!(task_id = task_id.0, status = ?parsed.status, "MCP update_tasks (one task)");
+    tracing::info!(task_id = task_id.0, status = ?parsed.status, "MCP task_update (one task)");
     if let Some(refused) = super::archived::archived_refusal(state, &id, task_id, "changed").await {
         return refused;
     }
@@ -128,10 +128,10 @@ fn url_update(
 }
 
 // ---------------------------------------------------------------------------
-// update_tasks
+// task_update
 // ---------------------------------------------------------------------------
 
-/// `update_tasks`, the one MCP update tool: [`handle_update_task`] applied to
+/// `task_update`, the one MCP update tool: [`handle_update_task`] applied to
 /// each of `task_ids` in turn, with the same field set. With several ids the
 /// reply is per task and the call is not atomic — a failure on one task
 /// neither stops nor rolls back the others. With exactly one id the reply is
@@ -154,7 +154,7 @@ pub(crate) async fn handle_update_tasks(
         return JsonRpcResponse::err(
             id,
             INVALID_PARAMS,
-            "update_tasks takes task_ids, not task_id".to_string(),
+            "task_update takes task_ids, not task_id".to_string(),
         );
     }
     let task_ids = match fields
@@ -180,7 +180,7 @@ pub(crate) async fn handle_update_tasks(
         return JsonRpcResponse::err(
             id,
             INVALID_PARAMS,
-            "update_tasks needs at least one field to set besides task_ids".to_string(),
+            "task_update needs at least one field to set besides task_ids".to_string(),
         );
     }
 
@@ -198,7 +198,7 @@ pub(crate) async fn handle_update_tasks(
     if let Err(resp) = parse_args::<UpdateTaskArgs>(&id, Value::Object(probe)) {
         return resp;
     }
-    tracing::info!(count = task_ids.len(), "MCP update_tasks");
+    tracing::info!(count = task_ids.len(), "MCP task_update");
 
     if let [only] = task_ids[..] {
         fields.insert("task_id".into(), json!(only.0));
@@ -289,7 +289,7 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
     .collect()
 }
 
-/// `update_tasks(status="done")`: a dedicated close-only call — see
+/// `task_update(status="done")`: a dedicated close-only call — see
 /// `MarkTaskDoneViaMcp` (docs/specs/mcp-task-tools.allium). Reachable for a
 /// session caller or a dispatched agent acting on a task other than its own;
 /// never for a dispatched agent closing itself (that stays wrap_up +
@@ -326,7 +326,7 @@ async fn handle_mark_task_done(
         return service_err_to_response(
             id,
             ServiceError::Validation(
-                "Cannot mark your own task done via update_tasks — call wrap_up then exit_session instead."
+                "Cannot mark your own task done via task_update — call wrap_up then exit_session instead."
                     .into(),
             ),
         );
@@ -348,7 +348,7 @@ async fn handle_mark_task_done(
         Err(e) => {
             tracing::warn!(
                 task_id = task_id.0,
-                "update_tasks done: the close failed: {e}"
+                "task_update done: the close failed: {e}"
             );
             tool_error(
                 id,
@@ -368,7 +368,7 @@ async fn handle_mark_task_done(
     }
 }
 
-/// The refusal text for a `create_task` call that omitted `epic_id`
+/// The refusal text for a `task_create` call that omitted `epic_id`
 /// (`TheRefusalNamesTheLikelyAnswer`, docs/specs/mcp-task-tools.allium).
 ///
 /// Actionable rather than a bare "missing field": when the caller is a
@@ -406,7 +406,7 @@ pub(crate) async fn handle_create_task(
         title = %parsed.title,
         epic_id = ?parsed.epic_id,
         identity = ?identity,
-        "MCP create_task"
+        "MCP task_create"
     );
 
     // A Task-kind caller must exist, whatever epic_id says — the check is

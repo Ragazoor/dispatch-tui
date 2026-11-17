@@ -157,7 +157,7 @@ async fn refused_response(
     )
 }
 
-/// The success text `dispatch_task` returns.
+/// The success text `task_dispatch` returns.
 ///
 /// Names which provisioning path ran — created or reused — rather than one
 /// wording for both. See rule-guidance.DispatchTaskViaMcp in

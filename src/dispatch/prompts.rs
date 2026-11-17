@@ -248,7 +248,7 @@ pub(super) fn tdd_instruction() -> &'static str {
 }
 
 // There is deliberately no "the dispatch MCP tools are available (task_search,
-// update_tasks)" line here any more. Both tools reach the agent as real tool
+// task_update)" line here any more. Both tools reach the agent as real tool
 // schemas, and naming them again in prompt prose shadows that list: it states
 // no fact the schema lacks, and it goes stale the moment the tool set changes.
 // Which of `task_search`'s response lines matter is the wrap-up skill's to say,
@@ -309,7 +309,7 @@ capture it in the repo's Allium specs with `allium:tend`, generate tests with `a
 confirm they fail before you write any code, implement the minimum that makes them pass, then \
 check spec and code agree with `allium:weed`.\n\
 \n\
-Writing a plan to docs/plans/ and attaching it with update_tasks is your judgement call, \
+Writing a plan to docs/plans/ and attaching it with task_update is your judgement call, \
 not a requirement — do it only if the implementation is big enough that its steps are \
 worth recording.\n\
 \n\
@@ -336,7 +336,7 @@ pub(super) fn brainstorm_instruction() -> &'static str {
     "If the task changes what the system does, design it with the \
 `superpowers:brainstorming` skill before you write any code. This repo has no Allium specs, so brainstorming is the design step.\n\
 \n\
-Writing a plan to docs/plans/ and attaching it with update_tasks is your judgement call, \
+Writing a plan to docs/plans/ and attaching it with task_update is your judgement call, \
 not a requirement — do it only if the implementation is big enough that its steps are \
 worth recording.\n\
 \n\
@@ -969,7 +969,7 @@ repo too, so none of them need `--repo`."
         None => (
             format!(
                 "PR: not recorded on this task. Find its URL in the task description, then call \
-update_tasks(task_ids=[{task_id_str}], url=<URL>, url_type=\"pr\") before going on."
+task_update(task_ids=[{task_id_str}], url=<URL>, url_type=\"pr\") before going on."
             ),
             String::new(),
         ),
@@ -997,7 +997,7 @@ fn release_please_addendum(task_id: TaskId, pr_url: Option<&str>, from_feed: boo
     // The runbook approves and merges, so a PR nothing vouched for must have
     // its author checked. The "do not re-check" bullet is true only when a feed
     // listed PRs by release-bot author AND the task names such a PR; either
-    // alone is not enough (`update_tasks` takes a url and the tag together, and
+    // alone is not enough (`task_update` takes a url and the tag together, and
     // other feeds set external_id too). Otherwise it is omitted and the author
     // check step takes its place. Same gate as `dependabot_review_addendum`.
     let (pr, author, author_check) = match pr_url {
@@ -1015,7 +1015,7 @@ repo too, so none of them need `--repo`."
         None => (
             format!(
                 "PR: not recorded on this task. Find its URL in the task description, then call \
-update_tasks(task_ids=[{task_id_str}], url=<URL>, url_type=\"pr\") before going on."
+task_update(task_ids=[{task_id_str}], url=<URL>, url_type=\"pr\") before going on."
             ),
             String::new(),
             format!("{}\n", AUTHOR_CHECK.trim_end()),
@@ -1045,7 +1045,7 @@ pub(super) fn build_quick_dispatch_prompt(
     let is_cve = is_cve_task(ctx.tag, epic);
     let addendum = format!(
         "This is a quick-dispatched task with a placeholder title. Start by asking the user \
-what they want to achieve. Once you understand the goal, call `update_tasks` with a \
+what they want to achieve. Once you understand the goal, call `task_update` with a \
 descriptive `title` (and optionally `description`) to rename the task on the kanban board.\n\
 \n\
 Then, before making any changes:\n\
@@ -1153,7 +1153,7 @@ pub struct PromptContext<'a> {
     ///
     /// Read only by the dependabot runbook, to decide whether to tell the
     /// agent the PR author was already filtered. Deliberately NOT derived from
-    /// `pr_url`: `update_tasks` takes a url and the dependabot tag together, so
+    /// `pr_url`: `task_update` takes a url and the dependabot tag together, so
     /// a hand-created task can carry a PR without any feed having filtered
     /// anything. See `AReviewRunbookCarriesOnlyTheBranchThatApplies` in
     /// `docs/specs/dispatch-prompt.allium`.

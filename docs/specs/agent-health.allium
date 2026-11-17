@@ -680,7 +680,7 @@ rule HookSubagentStop {
         -- has one further clear point that touches no rows at all: any
         -- status write that moves the task out of running clears it in the
         -- same write — the manual moves and ConfirmDone (tasks.allium), MCP
-        -- update_tasks (mcp-task-tools.allium) and the session close
+        -- task_update (mcp-task-tools.allium) and the session close
         -- (pr-workflow.allium: ExitSession). A deferred Stop belongs to the
         -- turn the task was running under, so letting the bit outlive that
         -- turn would let a later drain flip the task out of a status a human
@@ -1004,7 +1004,7 @@ rule HookNotification {
         --
         -- CLI surface note: `dispatch hook <id> notification [--kind K]` is a
         -- non-MCP, hook-driven entry point (src/main.rs, Commands::Hook). Unlike the
-        -- MCP update_tasks tool — which blocks generic transitions into `done`
+        -- MCP task_update tool — which blocks generic transitions into `done`
         -- so agents cannot self-promote past Review — the hook CLI drives the
         -- lifecycle steps that agents must not perform on their own.
 }
@@ -1090,7 +1090,7 @@ rule UndeliveredPeerMessage {
     -- whose session is not running is not reachable, so the send fails; the
     -- sender is then told how to wake it, or why it cannot be woken. Dispatch
     -- does not resume the target itself: the sender chooses to, by calling
-    -- resume_task with the message (mcp-task-tools.allium: ResumeTaskViaMcp),
+    -- task_resume with the message (mcp-task-tools.allium: ResumeTaskViaMcp),
     -- which delivers it as the resumed session's first input.
     when: SendMessageUndelivered(sender, to, message)
 
@@ -1116,7 +1116,7 @@ rule UndeliveredPeerMessage {
         -- The answer is added to the failed tool call's result as context the
         -- sender's Claude reads at once. SenderToldToResume names, in order:
         -- that `to` is not running; the task id and its current agent's name;
-        -- and the call to make, `resume_task(task_id: <id>, message: <your
+        -- and the call to make, `task_resume(task_id: <id>, message: <your
         -- message>)` with the id written out and the message left for the
         -- sender to repeat (it has it; echoing a long body adds noise), saying the message becomes the resumed
         -- agent's first input and that a review or done task moves back to
@@ -1124,15 +1124,15 @@ rule UndeliveredPeerMessage {
         -- goes to the task's current agent instead.
         --
         -- SenderToldWhyNotResumable gives the one reason, from the same
-        -- checks resume_task refuses on but worded for the sender (no
-        -- dispatch_task advice): a task that never ran (backlog), no
+        -- checks task_resume refuses on but worded for the sender (no
+        -- task_dispatch advice): a task that never ran (backlog), no
         -- worktree, a worktree on another machine, or a worktree gone from
         -- disk. It never suggests a fresh dispatch: a fresh agent has none of
         -- the old conversation, so starting one is the operator's decision.
-        -- The one reason resume_task does not have is a task whose window
+        -- The one reason task_resume does not have is a task whose window
         -- the board still holds open: the send failed, so the session in it
         -- has exited or does not answer. The sender is told that and told to
-        -- raise it with the operator; resume_task would refuse it as attached.
+        -- raise it with the operator; task_resume would refuse it as attached.
         -- In this open-window case only, when `to` was not the `task-<id>`
         -- name, the sender is first told to try that name: a session started
         -- before agents had names still answers to it, so a send by agent
@@ -1150,7 +1150,7 @@ rule UndeliveredPeerMessage {
         --
         -- == Why the sender resumes, not dispatch ==
         -- The operator chose this over resuming inside the hook. The sender
-        -- sees the outcome of its own resume_task call, a resume costs the
+        -- sees the outcome of its own task_resume call, a resume costs the
         -- target a session start, and the call path already exists and is
         -- already gated (ResumeTaskViaMcp). The hook only answers.
         --
@@ -1246,7 +1246,7 @@ surface HookDelivery {
         SendMessageUndelivered(sender: core/Task, to: String, message: String)
 
     @guarantee DispatchMcpToolsAreTransparent
-        -- Dispatch's own MCP tool calls (task_search, wrap_up, update_tasks and
+        -- Dispatch's own MCP tool calls (task_search, wrap_up, task_update and
         -- the rest) trigger no hook-driven status transition: they are
         -- management, not implementation work. The hook filters them out of
         -- PreToolUse and PostToolUse before `dispatch hook` is called. Other

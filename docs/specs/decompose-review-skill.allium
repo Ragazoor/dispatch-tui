@@ -15,7 +15,7 @@
 -- Excludes: when a review produces findings (preference-review.allium and
 --           whatever code review ran); how the skill's copy reaches an agent
 --           (mcp-task-tools.allium: SkillCopyIsJustInTime); what create_epic
---           and create_task do (mcp-task-tools.allium); what auto_run_plan
+--           and task_create do (mcp-task-tools.allium); what auto_run_plan
 --           and wrap_up_mode do to the executing agent (tasks.allium,
 --           dispatch-prompt.allium); the tools behind each step (git,
 --           AskUserQuestion) — those are the skill's mechanics, not what it
@@ -404,7 +404,7 @@ rule WritePlanAndCreateTask {
         -- a changes table naming every file and what to change, and a
         -- verification section (PlanHoldsEveryFinding,
         -- DecisionItemsReachThePlan). Then the subtask is created through
-        -- the dispatch create_task tool, with the plan attached by absolute
+        -- the dispatch task_create tool, with the plan attached by absolute
         -- path (EverySubtaskCarriesAPlan). auto_run_plan is true because the
         -- plan was reviewed when the packages were confirmed; it skips the
         -- question whether to start, not the Decisions section

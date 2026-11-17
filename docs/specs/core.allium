@@ -671,7 +671,7 @@ entity Task {
     -- are intentionally exempt from it:
     --   - EditTask, the tmux task editor (see tasks.allium: EditTask). May
     --     set any TaskStatus from any other.
-    --   - MCP `update_tasks` (see mcp-task-tools.allium:
+    --   - MCP `task_update` (see mcp-task-tools.allium:
     --     UpdateTaskViaMcp), the agent path. Partially restricted: it
     --     refuses `done` as a TARGET status, but applies no edge check at
     --     all beyond that, and does not constrain the SOURCE status. So an
@@ -887,7 +887,7 @@ entity Agent {
     -- = running; every status write that leaves running clears it in the same
     -- write (MoveTaskForward / MoveTaskBackward / ConfirmDone in
     -- tasks.allium, UpdateTaskViaMcp in mcp-task-tools.allium, ExitSession in
-    -- pr-workflow.allium, update_tasks' done-path close in
+    -- pr-workflow.allium, task_update's done-path close in
     -- store-split.allium's RequestCloseTask, and the drain points in
     -- agent-health.allium). The clear is the store module's, applied by
     -- patch_task to every patch that leaves running and by both closes, never
@@ -1476,9 +1476,9 @@ config {
     aging_threshold: Duration = 7.days
     weeks_threshold: Duration = 14.days
 
-    -- When true, the MCP update_tasks response carries a nudge asking the agent
+    -- When true, the MCP task_update response carries a nudge asking the agent
     -- to call record_learning if it discovered anything non-obvious — but only
-    -- when that single update_tasks call performs "PR finalisation": it sets
+    -- when that single task_update call performs "PR finalisation": it sets
     -- status = review AND a pr-typed url, on a task that had no url before the
     -- call. Prompt encouragement only: the nudge is appended to the response
     -- text and never gates the update itself. No other tool reads this flag —

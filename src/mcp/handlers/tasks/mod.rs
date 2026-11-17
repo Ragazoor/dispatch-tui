@@ -20,7 +20,7 @@ pub(super) use super::types::{
 mod archived;
 mod crud;
 // `pub(super)` so the handler tests under `handlers::tests` can reach
-// `dispatched_text`, the success wording `dispatch_task` pins.
+// `dispatched_text`, the success wording `task_dispatch` pins.
 pub(super) mod dispatch;
 mod resume;
 mod verify;
@@ -40,7 +40,7 @@ pub(super) use wrap_up::{handle_exit_session, handle_wrap_up};
 // ---------------------------------------------------------------------------
 
 mcp_args! {
-    /// Arguments for one task of the `update_tasks` MCP tool (the handler adds `task_id` per id).
+    /// Arguments for one task of the `task_update` MCP tool (the handler adds `task_id` per id).
     ///
     /// The task-field set is declared exactly once, here: the struct, the
     /// tool's JSON input schema (`update_task_schema`, the base of `update_tasks_schema`)
@@ -181,7 +181,7 @@ mcp_args! {
     };
 }
 
-/// The `update_tasks` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
+/// The `task_update` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
 /// of `task_id`, so the field set is declared once.
 pub(super) fn update_tasks_schema() -> serde_json::Value {
     let mut schema = update_task_schema();
@@ -386,7 +386,7 @@ pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
 
 /// `GetTaskViaMcp`'s `[Dispatch request]` line: the task's most recent
 /// dispatch request this board's subscription holds — its id, its state and,
-/// when failed, its reason. How a `dispatch_task` caller whose wait ended while
+/// when failed, its reason. How a `task_dispatch` caller whose wait ended while
 /// the request was still pending learns how it ended.
 fn dispatch_request_line(request: &crate::models::DispatchRequest) -> String {
     let mut line = format!(

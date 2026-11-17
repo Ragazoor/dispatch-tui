@@ -109,8 +109,8 @@ For each idea the user selected, write a concise task description (title + 2-3 s
 
 For each approved idea, create a task in the backlog:
 
-**Primary — MCP `create_task`:**
-Use the `dispatch` MCP server tool `create_task` with:
+**Primary — MCP `task_create`:**
+Use the `dispatch` MCP server tool `task_create` with:
 - `title`: the feature title
 - `description`: the refined description from Step 4
 - `repo_path`: the current working directory (resolve to the main repo root, not a worktree)
@@ -118,7 +118,7 @@ Use the `dispatch` MCP server tool `create_task` with:
   to, or pass `null` for a standalone backlog item. There is no default.
 
 If MCP is unavailable, surface that to the user — task creation is
-exclusively via the MCP `create_task` tool; there is no CLI fallback.
+exclusively via the MCP `task_create` tool; there is no CLI fallback.
 
 Report the created task IDs to the user.
 

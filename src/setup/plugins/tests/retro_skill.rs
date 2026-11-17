@@ -274,8 +274,8 @@ fn retro_root_cause_subsection_requires_filing_not_just_a_workaround() {
          sufficient closure for a tool/environment root cause"
     );
     assert!(
-        section.contains("create_task"),
-        "retro must file a same-repo root-cause defect with create_task"
+        section.contains("task_create"),
+        "retro must file a same-repo root-cause defect with task_create"
     );
     assert!(
         section.contains("not file") || section.contains("don't file silently"),
@@ -342,7 +342,7 @@ fn retro_text_holds_each_session_guarantee() {
         ),
         (
             "FileWhenTheFixIsNotTheAgentsToMake",
-            "File a task with `create_task` instead when the fix needs a design judgement",
+            "File a task with `task_create` instead when the fix needs a design judgement",
         ),
         (
             "FileWhenTheFixIsNotTheAgentsToMake",

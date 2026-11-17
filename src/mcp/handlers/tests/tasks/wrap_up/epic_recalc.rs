@@ -151,7 +151,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
 
 #[tokio::test]
 async fn dispatch_task_recalculates_epic_status() {
-    // dispatch_task on an epic's backlog task must trigger epic recalc.
+    // task_dispatch on an epic's backlog task must trigger epic recalc.
     let dir = tempfile::TempDir::new().unwrap();
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
@@ -189,7 +189,7 @@ async fn dispatch_task_recalculates_epic_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "dispatch_task",
+            "name": "task_dispatch",
             "arguments": { "task_id": task_id.0 }
         })),
     )

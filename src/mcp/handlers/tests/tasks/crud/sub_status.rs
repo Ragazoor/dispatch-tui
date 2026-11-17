@@ -21,7 +21,7 @@ async fn update_task_sets_sub_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "sub_status": "needs_input" }
         })),
     )
@@ -54,7 +54,7 @@ async fn update_task_rejects_invalid_sub_status_for_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "sub_status": "approved" }
         })),
     )
@@ -79,7 +79,7 @@ async fn update_task_rejects_bogus_sub_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "sub_status": "bogus" }
         })),
     )
@@ -105,7 +105,7 @@ async fn update_task_sub_status_with_status_change() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "review", "sub_status": "approved" }
         })),
     )
@@ -136,7 +136,7 @@ async fn update_task_status_running_with_needs_input() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "running", "sub_status": "needs_input" }
         })),
     )
@@ -166,7 +166,7 @@ async fn update_task_sub_status_invalid_for_new_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "status": "review", "sub_status": "active" }
         })),
     )
@@ -256,7 +256,7 @@ async fn update_task_nonexistent_task_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [9999], "status": "running" }
         })),
     )
@@ -273,7 +273,7 @@ async fn update_task_invalid_tag() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "tag": "invalid_tag" }
         })),
     )
@@ -291,7 +291,7 @@ async fn update_task_valid_tag() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "update_tasks",
+                "name": "task_update",
                 "arguments": { "task_ids": [task_id.0], "tag": tag }
             })),
         )
@@ -317,7 +317,7 @@ async fn update_task_rejects_epic_tag() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "tag": "epic" }
         })),
     )
@@ -342,7 +342,7 @@ async fn update_task_sets_epic_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "epic_id": epic.id.0 }
         })),
     )
@@ -367,7 +367,7 @@ async fn update_task_sort_order() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_tasks",
+            "name": "task_update",
             "arguments": { "task_ids": [task_id.0], "sort_order": 42 }
         })),
     )
@@ -379,7 +379,7 @@ async fn update_task_sort_order() {
 }
 
 // =======================================================================
-// create_task: additional validation and edge cases
+// task_create: additional validation and edge cases
 // =======================================================================
 
 #[tokio::test]
@@ -389,7 +389,7 @@ async fn create_task_invalid_tag() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "Tagged", "repo_path": "/repo", "epic_id": null, "tag": "bogus" }
         })),
     )
@@ -404,7 +404,7 @@ async fn create_task_valid_tag() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "Bug Task", "repo_path": "/repo", "epic_id": null, "tag": "bug" }
         })),
     )
@@ -422,7 +422,7 @@ async fn create_task_with_sort_order() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "Ordered Task", "repo_path": "/repo", "epic_id": null, "sort_order": 99 }
         })),
     )
@@ -440,7 +440,7 @@ async fn create_task_with_nonexistent_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "create_task",
+            "name": "task_create",
             "arguments": { "title": "Orphan", "repo_path": "/repo", "epic_id": 9999 }
         })),
     )

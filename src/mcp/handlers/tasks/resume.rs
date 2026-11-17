@@ -1,4 +1,4 @@
-//! `resume_task` (`mcp-task-tools.allium: ResumeTaskViaMcp`).
+//! `task_resume` (`mcp-task-tools.allium: ResumeTaskViaMcp`).
 //!
 //! Wakes a detached agent with its conversation. The handler refuses what the
 //! task row already shows to be impossible, then hands the resume to the board
@@ -62,7 +62,7 @@ pub(crate) async fn handle_resume_task(
 
 /// Hand a checked resume to the board, which runs the launch behind the Space
 /// key (`dispatch.allium: ResumeTask`). The one place a resume is sent from, so
-/// `resume_task` and the agent-tree pane's resume (`agent-tree.allium:
+/// `task_resume` and the agent-tree pane's resume (`agent-tree.allium:
 /// ResumeIsTheBoardsOwnResume`) are the same resume. `Err` says why nothing
 /// was sent.
 pub(crate) fn hand_resume_to_board(
@@ -80,10 +80,10 @@ pub(crate) fn hand_resume_to_board(
     .map_err(|_| "the board is shutting down; the agent was not resumed")
 }
 
-/// Why a task has no session `resume_task` can wake. Shared with the hook
+/// Why a task has no session `task_resume` can wake. Shared with the hook
 /// that answers an undelivered `SendMessage`
 /// (`agent-health.allium: UndeliveredPeerMessage`), which words each reason
-/// for the sending agent rather than for a `resume_task` caller.
+/// for the sending agent rather than for a `task_resume` caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Unresumable {
     /// Backlog: no agent has run yet.
@@ -143,17 +143,17 @@ pub(crate) fn pane_refusal_text(name: &str, why: &Unresumable) -> String {
     }
 }
 
-/// The `resume_task` refusal for `why`.
+/// The `task_resume` refusal for `why`.
 fn refusal_text(task: &str, why: &Unresumable) -> String {
     match why {
         Unresumable::NeverRan(status) => format!(
             "{task} has no resumable session: it is {status} and has not run yet. \
-             Use dispatch_task to start it."
+             Use task_dispatch to start it."
         ),
         Unresumable::NoWorktree => format!(
             "{task} has no resumable session: it has no worktree, so there is no \
-             conversation to continue. Set it back to backlog with update_tasks and \
-             dispatch_task it to start a new agent."
+             conversation to continue. Set it back to backlog with task_update and \
+             task_dispatch it to start a new agent."
         ),
         Unresumable::OtherMachine => format!(
             "{task}'s worktree is on another machine, so this machine cannot resume \
@@ -165,8 +165,8 @@ fn refusal_text(task: &str, why: &Unresumable) -> String {
         ),
         Unresumable::WorktreeGone(worktree) => format!(
             "{task} has no resumable session: its worktree {worktree} is no longer on \
-             disk, so the agent is gone. Set it back to backlog with update_tasks and \
-             dispatch_task it to start a new agent."
+             disk, so the agent is gone. Set it back to backlog with task_update and \
+             task_dispatch it to start a new agent."
         ),
     }
 }

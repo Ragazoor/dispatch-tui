@@ -72,7 +72,7 @@ pub struct McpDeps {
 }
 
 /// `mcp-task-tools.allium: config.dispatch_task_wait_cap`: how long
-/// `dispatch_task` waits on its dispatch request before answering with the
+/// `task_dispatch` waits on its dispatch request before answering with the
 /// request's id and pending state. Shorter than the request's own deadline
 /// (`crate::models::DISPATCH_REQUEST_TIMEOUT`), so a slow provisioning
 /// answers pending rather than holding the call open to the end.
@@ -109,10 +109,10 @@ pub struct McpState {
     /// Dispatch data directory (where the store's local files live). Trajectory files are
     /// written here under `trajectories/<task_id>.jsonl`.
     pub data_dir: std::path::PathBuf,
-    /// This install's host id (`HostStore::host_id`): what `resume_task`
+    /// This install's host id (`HostStore::host_id`): what `task_resume`
     /// compares a task's `host` against (`Task::is_locally_owned`).
     pub(crate) host_id: String,
-    /// How long `dispatch_task` waits on its request — [`DISPATCH_TASK_WAIT_CAP`]
+    /// How long `task_dispatch` waits on its request — [`DISPATCH_TASK_WAIT_CAP`]
     /// outside tests, which shorten it to drive the pending answer.
     pub(crate) dispatch_task_wait_cap: std::time::Duration,
     /// How long `wrap_up(rebase)` waits on its request — [`WRAP_UP_WAIT_CAP`]

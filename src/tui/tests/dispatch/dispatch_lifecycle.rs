@@ -306,7 +306,7 @@ fn resume_task_allows_a_task_owned_by_this_host() {
         .any(|c| matches!(c, Command::Task(TaskCommand::Resume { .. }))));
 }
 
-/// `resume_task` (`mcp-task-tools.allium: ResumeTaskViaMcp`) reaches the same
+/// `task_resume` (`mcp-task-tools.allium: ResumeTaskViaMcp`) reaches the same
 /// launch as Space, carrying the caller's message.
 #[test]
 fn resume_requested_launches_the_resume_with_the_message() {
