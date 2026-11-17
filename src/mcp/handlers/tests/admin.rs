@@ -239,7 +239,25 @@ async fn rename_and_delete_a_workspace() {
         "{deleted}"
     );
     let resp = tool(&state, "workspace_delete", json!({"workspace_id": 2})).await;
-    assert_error(&resp, "no workspace 2");
+    assert_error(&resp, "workspace 2 does not exist");
+}
+
+/// `admin-surfaces.allium`: the store's refusal is the answer. A workspace id
+/// the board's own list lacks still reaches the store, so a list that lags a
+/// create does not refuse a write the store accepts.
+#[tokio::test]
+async fn a_workspace_write_is_answered_by_the_store_not_the_local_list() {
+    let (state, _) = state_with_people().await;
+    for (name, args) in [
+        ("workspace_update", json!({"workspace_id": 99, "name": "X"})),
+        (
+            "workspace-member_set",
+            json!({"workspace_id": 99, "person": "Bob", "role": "member"}),
+        ),
+    ] {
+        let resp = tool(&state, name, args).await;
+        assert_error(&resp, "workspace 99 does not exist");
+    }
 }
 
 #[tokio::test]

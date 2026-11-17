@@ -75,13 +75,15 @@ impl PeopleService {
         workspace_id: i64,
         name: &str,
     ) -> Result<(), ServiceError> {
-        self.known_workspace(workspace_id).await?;
         Ok(self.db.rename_workspace(workspace_id, name).await?)
     }
 
     /// `DeleteWorkspace`. Answers the workspace's name.
     pub async fn delete_workspace(&self, workspace_id: i64) -> Result<String, ServiceError> {
-        let name = self.known_workspace(workspace_id).await?;
+        let name = self
+            .workspace_name(workspace_id)
+            .await
+            .unwrap_or_else(|| workspace_id.to_string());
         self.db.delete_workspace(workspace_id).await?;
         Ok(name)
     }
@@ -93,7 +95,6 @@ impl PeopleService {
         person: &str,
         role: MemberRole,
     ) -> Result<String, ServiceError> {
-        self.known_workspace(workspace_id).await?;
         let who = self.resolve(person).await?;
         self.db
             .add_member(workspace_id, &who.identity, role)
@@ -111,7 +112,10 @@ impl PeopleService {
         person: &str,
         role: Option<MemberRole>,
     ) -> Result<String, ServiceError> {
-        let workspace = self.known_workspace(workspace_id).await?;
+        let workspace = self
+            .workspace_name(workspace_id)
+            .await
+            .unwrap_or_else(|| format!("workspace {workspace_id}"));
         let who = self.resolve(person).await?;
         let existing = self
             .db
@@ -182,9 +186,10 @@ impl PeopleService {
             .map_err(ServiceError::Validation)
     }
 
-    /// The name of a workspace the caller can see, or the refusal a missing
-    /// one gets (an unseen workspace is answered as a missing one).
-    async fn known_workspace(&self, workspace_id: i64) -> Result<String, ServiceError> {
+    /// A workspace's name for a message, when the board's list has it. Never
+    /// a refusal: whether the workspace exists, and whether the caller may
+    /// touch it, is the store's to answer (`admin-surfaces.allium`, Excludes).
+    async fn workspace_name(&self, workspace_id: i64) -> Option<String> {
         self.db
             .admin_snapshot()
             .await
@@ -192,10 +197,5 @@ impl PeopleService {
             .into_iter()
             .find(|w| w.id == workspace_id)
             .map(|w| w.name)
-            .ok_or_else(|| {
-                ServiceError::NotFound(format!(
-                    "no workspace {workspace_id}; workspace_search shows the ones you can see"
-                ))
-            })
     }
 }
