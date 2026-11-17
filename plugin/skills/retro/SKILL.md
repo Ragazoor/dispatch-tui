@@ -92,6 +92,6 @@ resume the calling skill's next instruction in the same turn. Do not stop here.
 ## Relationship to other skills
 
 - **`learnings`** owns reusable pitfalls, conventions and preferences via
-  `record_learning`. If you find one — a convention, a pitfall, a design or
+  `learning_record`. If you find one — a convention, a pitfall, a design or
   style choice the user corrected or confirmed — record it right away, and don't wait to
   be asked.

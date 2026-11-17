@@ -1368,10 +1368,10 @@ async fn task_self_for_a_deleted_task_is_invalid_params() {
 // ---------------------------------------------------------------------------
 
 /// ContextReadsAreNotRetrievals: listing and reading a learning on both entry
-/// points records no Retrieval and touches no counter, so rate_learning still
+/// points records no Retrieval and touches no counter, so learning_rate still
 /// refuses it.
 #[tokio::test]
-async fn reading_a_learning_records_no_retrieval_and_leaves_rate_learning_guarded() {
+async fn reading_a_learning_records_no_retrieval_and_leaves_learning_rate_guarded() {
     let state = test_state().await;
     let task = new_task(&state, "Rater").await;
     let me = CallerIdentity::Task(task);
@@ -1403,8 +1403,8 @@ async fn reading_a_learning_records_no_retrieval_and_leaves_rate_learning_guarde
         &state,
         "tools/call",
         Some(json!({
-            "name": "rate_learning",
-            "arguments": { "learning_id": id.0, "task_id": task.0, "verdict": "helped" }
+            "name": "learning_rate",
+            "arguments": { "task_id": task.0, "ratings": [{ "learning_id": id.0, "verdict": "helped" }] }
         })),
         me.clone(),
     )

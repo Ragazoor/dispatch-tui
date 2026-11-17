@@ -3,11 +3,11 @@
 --
 -- Scope: the knowledge base. Agents record entries that land approved at once
 --        and reach later agents through the dispatch prompt and
---        query_learnings. Curation is automatic: agents rate entries with
---        rate_learning, and a board sweep archives stale, unvalued ones. There
+--        learning_search. Curation is automatic: agents rate entries with
+--        learning_rate, and a board sweep archives stale, unvalued ones. There
 --        is no human approval step and no TUI surface.
--- Includes: the scope model, ranking, the MCP tools (record_learning,
---           query_learnings, rate_learning, delete_learning), dispatch-prompt
+-- Includes: the scope model, ranking, the MCP tools (learning_record,
+--           learning_search, learning_rate, learning_delete), dispatch-prompt
 --           injection, the wrap-up rating nudge and the stale sweep.
 -- Excludes: the entity and enum definitions (core.allium: Learning,
 --           LearningScope, LearningKind, LearningStatus, Retrieval,
@@ -56,8 +56,8 @@ use "./store-split.allium" as split
 -- which reaches every repo.
 --
 -- There is no task scope. A learning scoped to one task would never reach a
--- dispatch prompt or a query_learnings answer, not even for its own task: a
--- re-dispatch or phoenix copy gets a new task id. record_learning refuses
+-- dispatch prompt or a learning_search answer, not even for its own task: a
+-- re-dispatch or phoenix copy gets a new task id. learning_record refuses
 -- scope=task and points the agent to repo or epic (RecordLearningViaMcp).
 -- Rows recorded under the old scope were archived and re-scoped to repo once
 -- (the store's one-time retire step, run on the first connection after the
@@ -66,7 +66,7 @@ use "./store-split.allium" as split
 -- workspace, so it stays with its author as it did before; one with no author
 -- keeps its workspace, as none would show it to everyone.
 --
--- When record_learning omits scope_ref, the scope supplies it:
+-- When learning_record omits scope_ref, the scope supplies it:
 --   scope=user    → null
 --   scope=repo    → task.repo_path
 --   scope=epic    → str(task.epic_id), refused when the task has no epic
@@ -83,16 +83,16 @@ use "./store-split.allium" as split
 -- one only while its item is also visible to the reader. A learning with no
 -- author and no workspace is visible to everyone.
 --
--- Every read path applies this one predicate for the caller: query_learnings,
--- the dispatch-prompt injection, get_learning, rate_learning and
--- delete_learning. An unseen learning is never returned and never gets a
+-- Every read path applies this one predicate for the caller: learning_search,
+-- the dispatch-prompt injection, get_learning, learning_rate and
+-- learning_delete. An unseen learning is never returned and never gets a
 -- retrieval row, and acting on it answers "not found".
 
 ------------------------------------------------------------
 -- Ranking
 ------------------------------------------------------------
 
--- Dispatch injection and query_learnings rank candidates the same way.
+-- Dispatch injection and learning_search rank candidates the same way.
 -- Only approved entries inside the scope union are candidates; an entry
 -- outside the union is never returned, however similar it is.
 --
@@ -107,7 +107,7 @@ use "./store-split.allium" as split
 --
 -- tag_filter raises a score; it never excludes an entry.
 --
--- These numbers, the dispatch injection cap of 5 and the query_learnings
+-- These numbers, the dispatch injection cap of 5 and the learning_search
 -- limit cap of 50 are fixed by design, not settings: they tune one ranking
 -- that both paths share, and a per-host value would make two boards inject
 -- different knowledge for the same task.
@@ -126,11 +126,11 @@ use "./store-split.allium" as split
 -- graph is core/Learning's.
 --
 -- There is no edit. summary, detail, kind and tags are set once by
--- record_learning; a wrong entry is deleted (delete_learning) and recorded
+-- learning_record; a wrong entry is deleted (learning_delete) and recorded
 -- again, or left to be downvoted and swept. A verdict never changes status.
 --
 -- Every surfacing of a learning to a task writes a core/Retrieval row: source
--- prompt_injection for the dispatch prompt and query_learnings for that
+-- prompt_injection for the dispatch prompt and learning_search for that
 -- tool. The enum's procedural value is never written. A repeat surfacing
 -- writes another row.
 
@@ -187,7 +187,7 @@ rule AugmentDispatchPromptWithLearnings {
         -- entry stays available everywhere it has fitted.
         --
         -- The block's own header carries the rating instruction: it names
-        -- the full call ("rate_learning(learning_id, task_id, verdict) —
+        -- the full call ("learning_rate(task_id, ratings=[{learning_id, verdict}, ...]) —
         -- helped if it applied, wrong if it misled you") and asks for
         -- not_applicable on an entry the agent read but did not use because
         -- it did not fit. The header renders only when entries were
@@ -211,8 +211,8 @@ rule WrapUpRateLearningNudge {
         -- be rated. rebase and done append nothing, and a request the module
         -- refuses (store-split.allium: RequestWrapUp) gets no nudge. It is a
         -- nudge, not a gate: session_exit needs no rating.
-        -- No setting gates it, and it never mentions record_learning. The
-        -- setting-gated record_learning nudge is a different behaviour on a
+        -- No setting gates it, and it never mentions learning_record. The
+        -- setting-gated learning_record nudge is a different behaviour on a
         -- different tool (mcp-task-tools.allium:
         -- PrFinalisationReflectionNudge), and the normal session_wrap-up →
         -- session_exit path never shows it, because that path closes the
@@ -265,7 +265,7 @@ rule RecordLearningViaMcp {
         -- 5 approved learnings of the same kind, scope
         -- and scope_ref, and warns against keeping a duplicate when one of
         -- them already says the same thing. It does not suggest rating them:
-        -- they are not retrievals for this task, so rate_learning would
+        -- they are not retrievals for this task, so learning_rate would
         -- refuse. Nothing else deduplicates.
         --
         -- references_internal_code(text) rejects summary or detail containing:
@@ -293,7 +293,7 @@ rule RecordLearningViaMcp {
         -- check: a citation that resolves today rots as easily as one that
         -- never did, and nothing re-checks the knowledge base against the
         -- code. The script's fourth shape (a bare backticked snake_case span)
-        -- is not rejected, because MCP tool names (query_learnings, session_wrap-up)
+        -- is not rejected, because MCP tool names (learning_search, session_wrap-up)
         -- have that shape and are a stable public interface.
         --
         -- WHERE THE CHECK STOPS. A bare PascalCase word and a short
@@ -315,7 +315,7 @@ rule QueryLearningsViaMcp {
 
     -- The ranked entries the call returns: the scope union for task, ranked
     -- as Ranking says against query, or against the task's title and
-    -- description when query is omitted; at most limit of them (default and
+    -- description when query is omitted; at most limit of them (default 10,
     -- cap 50; a limit below 1 counts as 1).
     let returned = ranked_learnings(task, query, tag_filter, limit)
 
@@ -325,19 +325,34 @@ rule QueryLearningsViaMcp {
         LearningsQueried(task: task, query: query, tag_filter: tag_filter, limit: limit)
 
     @guidance
+        -- The default is 10, not the cap: replies had a 90th percentile of
+        -- 16.5 KB, and the ranking puts the useful rows first. A caller that
+        -- wants more passes limit up to 50. When rows were cut, the last line
+        -- says so and names limit. An empty result names the query and the
+        -- tag_filter it applied.
         -- Unlike dispatch injection, the off-topic mute does not apply here,
         -- so an agent that asks can still find a muted entry. Every returned
-        -- entry gets a query_learnings retrieval, which makes it rateable.
+        -- entry gets a retrieval of source query_learnings (the stored name predates the rename), which makes it rateable.
 }
 
 rule RateLearningViaMcp {
     when: McpRateLearning(learning, task, verdict)
 
+    -- The learning_rate tool takes task and a non-empty list `ratings` of
+    -- (learning_id, verdict) pairs, and raises one McpRateLearning per pair.
+    -- learning_rate was the most-called tool (2083 calls, one learning each),
+    -- so one call takes every rating an agent has at hand.
+    -- The call is all or nothing: if any pair is refused, none is written and
+    -- the refusal names that pair. The rules below hold for each pair.
+    -- An empty list is invalid params (-32602). The same learning twice in
+    -- one call is invalid params too, since two verdicts for one
+    -- (task, learning) would not both stand.
+
     -- Checked before the retrieval: a learning the caller cannot see (never
     -- retrieved, or retrieved and since moved out of sight) is answered "not
     -- found", never "was not retrieved" and never "recorded".
     requires: learning.visible_to(caller())
-    -- Only an entry surfaced to this task, by injection or query_learnings,
+    -- Only an entry surfaced to this task, by injection or learning_search,
     -- can be rated. An unknown verdict string is refused too.
     requires: exists core/Retrieval{task: task, learning: learning}
 
@@ -432,7 +447,7 @@ rule ArchiveStaleLearning {
     @guidance
         -- Keeps unvalued entries out of the retrieval pool with no human in
         -- the loop. An entry that earned even one net upvote is never swept,
-        -- however old; only delete_learning, or enough wrong verdicts to
+        -- however old; only learning_delete, or enough wrong verdicts to
         -- bring its score back to zero or below, removes it.
         -- Each board checks from its tick (core/Tick), at most once an hour,
         -- and archives every eligible entry it sees in one store call. An
@@ -452,7 +467,7 @@ rule ArchiveStaleLearning {
 -- so it is stated here in prose.
 --
 -- No two approved learnings should share (kind, summary, scope, scope_ref).
--- Nothing enforces it; record_learning's reply shows similar entries so the
+-- Nothing enforces it; learning_record's reply shows similar entries so the
 -- recording agent can avoid or delete a duplicate (RecordLearningViaMcp).
 
 ------------------------------------------------------------
@@ -471,7 +486,7 @@ surface LearningMcpTools {
         McpDeleteLearning(learning_id)
 
     @guarantee TheAuthoringRulesHaveOneHome
-        -- The record_learning tool description is one sentence: it records a
+        -- The learning_record tool description is one sentence: it records a
         -- non-obvious finding to the knowledge base, and points at the
         -- /learnings skill for how to write one. Every authoring rule — name
         -- no code, a procedural entry states its boundary, the triage

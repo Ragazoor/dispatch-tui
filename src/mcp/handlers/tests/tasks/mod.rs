@@ -740,7 +740,7 @@ async fn record_learning_creates_proposed_entry() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -778,7 +778,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "pitfall",
@@ -816,7 +816,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -849,7 +849,7 @@ async fn record_learning_epic_scope_no_epic_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -871,7 +871,7 @@ async fn record_learning_user_scope_no_scope_ref() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "preference",
@@ -901,7 +901,7 @@ async fn record_learning_empty_summary_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "pitfall",
@@ -922,7 +922,7 @@ async fn record_learning_unknown_task_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": 9999,
                 "kind": "pitfall",
@@ -954,7 +954,7 @@ async fn query_learnings_returns_approved_for_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -995,7 +995,7 @@ async fn query_learnings_tag_filter_narrows_results() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0, "tag_filter": ["rust"] }
         })),
     )
@@ -1029,7 +1029,7 @@ async fn query_learnings_respects_limit() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0, "limit": 2 }
         })),
     )
@@ -1049,7 +1049,7 @@ async fn query_learnings_unknown_task_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": 9999 }
         })),
     )

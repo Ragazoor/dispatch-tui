@@ -532,7 +532,7 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
     assert_no_retro_instruction("pr", &text);
     // PR-action wrap_up still nudges the agent to rate any unrated retrieved learnings.
     assert!(
-        text.contains("rate_learning"),
+        text.contains("learning_rate"),
         "PR wrap_up response should nudge rate_learning; got: {text}"
     );
     assert!(

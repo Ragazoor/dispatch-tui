@@ -1,6 +1,6 @@
 # Recording detail
 
-What not to record, how to pick a kind and scope, and how to write the summary. Read this before calling `record_learning`.
+What not to record, how to pick a kind and scope, and how to write the summary. Read this before calling `learning_record`.
 
 ### Do NOT record:
 
@@ -17,7 +17,7 @@ What not to record, how to pick a kind and scope, and how to write the summary. 
 
   **What to do instead:** if the fact is worth stating precisely, put it in the Allium spec or a Rust doc comment. Both are gated and re-checked on every push. The knowledge base keeps the prose.
 
-  **`record_learning` rejects only the shapes prose never produces** — a `::` citation, a call with empty parentheses, a macro invocation, a long snake_case name, a path into the tree, a source filename. A bare `TuiRuntime` or `handle_tick` passes the validator and still breaks the rule. Do not read a successful call as approval. A stable MCP tool name (`query_learnings`, `session_wrap-up`, ...) is fine — that is a public interface, not internal detail. So is a root manifest or a spec file (`Cargo.toml`, `package.json`, `feeds.allium`).
+  **`learning_record` rejects only the shapes prose never produces** — a `::` citation, a call with empty parentheses, a macro invocation, a long snake_case name, a path into the tree, a source filename. A bare `TuiRuntime` or `handle_tick` passes the validator and still breaks the rule. Do not read a successful call as approval. A stable MCP tool name (`learning_search`, `session_wrap-up`, ...) is fine — that is a public interface, not internal detail. So is a root manifest or a spec file (`Cargo.toml`, `package.json`, `feeds.allium`).
 
   Bad: "A step that must behave identically on both feed paths goes in `src/feed/cycle.rs::run_feed_cycle`." <!-- allow-phantom-symbol: the actual stale citation learning #401 carried -->
   Good: "Feed-cycle logic shared by the auto-poll and manual-refresh paths must live in one place, not be duplicated per caller — see feeds.allium."
@@ -34,7 +34,7 @@ What not to record, how to pick a kind and scope, and how to write the summary. 
 | `procedural` | Step-by-step instructions that steer other agents (epic-level) |
 | `landscape` | Codebase/system overviews — service maps, module responsibilities |
 
-**A `procedural` entry must say where it stops.** It steers other agents, and an instruction that says what to do and never when to stop is not a guardrail. Its `detail` is required, and it must name the case where the agent should stop following the entry and ask a human. `record_learning` rejects a `procedural` entry with no `detail` at all; that the detail actually names a boundary is on you. No other kind needs this — a `pitfall` either bites or it doesn't.
+**A `procedural` entry must say where it stops.** It steers other agents, and an instruction that says what to do and never when to stop is not a guardrail. Its `detail` is required, and it must name the case where the agent should stop following the entry and ask a human. `learning_record` rejects a `procedural` entry with no `detail` at all; that the detail actually names a boundary is on you. No other kind needs this — a `pitfall` either bites or it doesn't.
 
 Good: summary "Sync the repo before starting work." — detail "…Stop and ask a human when the sync reports a conflict you did not cause."
 
@@ -47,7 +47,7 @@ Good: summary "Sync the repo before starting work." — detail "…Stop and ask 
 | `repo` | A fact about a family of repos that share a parent directory (every Terraform domain repo, every Scala service) | the parent directory's absolute path |
 | `epic` | Shared design decision for this epic only | omit (auto-derived) |
 
-There is no task scope: `record_learning` refuses `scope=task`. A note that only matters to one task belongs in the task's own description or plan, or in a `repo` or `epic` entry if it would help a later agent.
+There is no task scope: `learning_record` refuses `scope=task`. A note that only matters to one task belongs in the task's own description or plan, or in a `repo` or `epic` entry if it would help a later agent.
 
 **Default to `repo` for code conventions and `user` for workflow preferences.** A domain fact that holds in more than one repo is still not `user`: a `repo` entry reaches every repo under its `scope_ref`, so give it the parent directory. User-scoped Terraform and Cloud SQL facts used to reach Scala, frontend and deployment repos, where agents almost never rated them helped.
 

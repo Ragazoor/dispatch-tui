@@ -478,9 +478,9 @@ fn build_prompt_with_plan_asks_permission_before_implementing() {
 /// `task_update`'ss schema can imply that *this* task arrived with a
 /// placeholder title and needs renaming off it before anything else.
 ///
-/// It used to assert `query_learnings` in the no-plan prompt instead, on the
+/// It used to assert `learning_search` in the no-plan prompt instead, on the
 /// guarantee's second example — that only the prompt said WHEN to call it.
-/// That premise did not survive `query_learnings`'s own description gaining
+/// That premise did not survive `learning_search`'s own description gaining
 /// "Call it when something is unclear, before guessing or asking", so the
 /// nudge stopped naming any tool and this test moved to the case that is
 /// still real. The trailing block's freedom from tool names is now pinned

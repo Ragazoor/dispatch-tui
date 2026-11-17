@@ -59,7 +59,7 @@ async fn wrap_up_rebase_directs_to_exit_session_not_reflection_nudge() {
         "response should direct agent to call exit_session; got: {text}"
     );
     assert!(
-        !text.contains("record_learning"),
+        !text.contains("learning_record"),
         "reflection nudge must not appear in wrap_up(rebase) response; got: {text}"
     );
 }
@@ -86,7 +86,7 @@ async fn wrap_up_rebase_omits_reflection_nudge_regardless_of_setting() {
 
     let text = extract_response_text(&resp);
     assert!(
-        !text.contains("record_learning"),
+        !text.contains("learning_record"),
         "nudge must not appear in wrap_up(rebase) even when setting=true; got: {text}"
     );
     assert!(

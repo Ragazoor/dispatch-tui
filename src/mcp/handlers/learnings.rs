@@ -54,9 +54,15 @@ pub(super) struct QueryLearningsArgs {
 #[serde(deny_unknown_fields)]
 pub(super) struct RateLearningArgs {
     #[serde(deserialize_with = "deserialize_flexible_id")]
-    pub(super) learning_id: LearningId,
-    #[serde(deserialize_with = "deserialize_flexible_id")]
     pub(super) task_id: TaskId,
+    pub(super) ratings: Vec<Rating>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Rating {
+    #[serde(deserialize_with = "deserialize_flexible_id")]
+    pub(super) learning_id: LearningId,
     pub(super) verdict: LearningVerdict,
 }
 
@@ -136,7 +142,7 @@ async fn similar_learnings(
             .take(5)
             .collect(),
         Err(e) => {
-            tracing::warn!("record_learning: failed to query similar entries: {e}");
+            tracing::warn!("learning_record: failed to query similar entries: {e}");
             vec![]
         }
     }
@@ -232,6 +238,10 @@ fn recorded_text(
     text
 }
 
+/// Entries `learning_search` returns when `limit` is omitted. Replies had a
+/// 90th percentile of 16.5 KB at the old default of 50.
+const DEFAULT_SEARCH_LIMIT: i64 = 10;
+
 pub(super) async fn handle_query_learnings(
     state: &McpState,
     id: Option<Value>,
@@ -244,7 +254,9 @@ pub(super) async fn handle_query_learnings(
     };
 
     let task_id = parsed.task_id;
-    let limit = parsed.limit.unwrap_or(50).clamp(1, 50) as usize;
+    let query_note = parsed.query.clone();
+    let tag_note = parsed.tag_filter.clone().unwrap_or_default();
+    let limit = parsed.limit.unwrap_or(DEFAULT_SEARCH_LIMIT).clamp(1, 50) as usize;
 
     let ranked = match state
         .learning_svc
@@ -266,7 +278,11 @@ pub(super) async fn handle_query_learnings(
             json!({
                 "content": [{
                     "type": "text",
-                    "text": "No approved learnings found for this task's context."
+                    "text": format!(
+                        "No approved learnings found for this task's context (query: {}; tag_filter: {}).",
+                        query_note.as_deref().unwrap_or("task title and description"),
+                        if tag_note.is_empty() { "none".to_string() } else { tag_note.join(", ") }
+                    )
                 }]
             }),
         );
@@ -287,6 +303,13 @@ pub(super) async fn handle_query_learnings(
         })
         .collect::<Vec<_>>()
         .join("\n\n");
+    let text = if ranked.len() == limit && limit < 50 {
+        format!(
+            "{text}\n\nShowing {limit} entries; there may be more. Pass limit (max 50) for more."
+        )
+    } else {
+        text
+    };
 
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
@@ -302,34 +325,59 @@ pub(super) async fn handle_rate_learning(
         Err(e) => return e,
     };
 
+    if parsed.ratings.is_empty() {
+        return JsonRpcResponse::err(
+            id,
+            -32602,
+            "ratings must hold at least one {learning_id, verdict} pair".to_string(),
+        );
+    }
+    let mut seen = std::collections::HashSet::new();
+    for r in &parsed.ratings {
+        if !seen.insert(r.learning_id) {
+            return JsonRpcResponse::err(
+                id,
+                -32602,
+                format!(
+                    "learning {} appears twice in ratings; give one verdict per learning",
+                    r.learning_id.0
+                ),
+            );
+        }
+    }
+
     tracing::info!(
         task_id = parsed.task_id.0,
-        learning_id = parsed.learning_id.0,
-        verdict = parsed.verdict.as_str(),
-        "MCP rate_learning"
+        count = parsed.ratings.len(),
+        "MCP learning_rate"
     );
 
-    let applied = state
+    let verdicts: Vec<_> = parsed
+        .ratings
+        .iter()
+        .map(|r| (r.learning_id, r.verdict))
+        .collect();
+    if let Err(e) = state
         .learning_svc
-        .apply_verdicts(parsed.task_id, vec![(parsed.learning_id, parsed.verdict)])
-        .await;
-    if let Err(e) = applied {
+        .apply_verdicts(parsed.task_id, verdicts)
+        .await
+    {
         return service_err_to_response(id, e);
     }
-    let note = match parsed.verdict {
-        LearningVerdict::Helped => "recorded as helped (upvoted)",
-        LearningVerdict::Wrong => "recorded as wrong (downvoted; no review step)",
-        LearningVerdict::NotApplicable => "recorded as not_applicable (score unchanged)",
-    };
-    JsonRpcResponse::ok(
-        id,
-        json!({
-            "content": [{
-                "type": "text",
-                "text": format!("Learning {} {note}.", parsed.learning_id.0)
-            }]
-        }),
-    )
+    let text = parsed
+        .ratings
+        .iter()
+        .map(|r| {
+            let note = match r.verdict {
+                LearningVerdict::Helped => "recorded as helped (upvoted)",
+                LearningVerdict::Wrong => "recorded as wrong (downvoted; no review step)",
+                LearningVerdict::NotApplicable => "recorded as not_applicable (score unchanged)",
+            };
+            format!("Learning {} {note}.", r.learning_id.0)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
 pub(super) async fn handle_delete_learning(
@@ -345,7 +393,7 @@ pub(super) async fn handle_delete_learning(
 
     let learning_id = parsed.learning_id;
 
-    tracing::info!(learning_id = learning_id.0, "MCP delete_learning");
+    tracing::info!(learning_id = learning_id.0, "MCP learning_delete");
 
     match state.learning_svc.delete_learning(learning_id).await {
         Ok(()) => JsonRpcResponse::ok(

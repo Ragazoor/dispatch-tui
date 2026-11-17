@@ -339,11 +339,11 @@ enum LearningKind {
 -- learnings.allium: ArchiveStaleLearning), which is the only status change any
 -- behaviour produces. Nothing produces rejected, but stored rows may still
 -- hold it. Entries in rejected or archived are excluded from
--- prompt injection and query_learnings results.
+-- prompt injection and learning_search results.
 enum LearningStatus { approved | rejected | archived }
 
 -- VerdictKind is an agent's evaluation of a retrieved learning, submitted via
--- the rate_learning MCP tool at any point during a task and kept as a
+-- the learning_rate MCP tool at any point during a task and kept as a
 -- LearningVerdict. helped and wrong adjust the learning's net score;
 -- not_applicable does not. None changes its status.
 --   helped         — the learning applied and was useful (counts +1)
@@ -360,7 +360,7 @@ enum VerdictKind { helped | wrong | not_applicable }
 --   procedural       — never produced: procedural learnings are recorded as
 --                      prompt_injection like every other kind (learnings.allium).
 --                      Stored rows may still hold it.
---   query_learnings  — returned by an explicit query_learnings MCP call
+--   query_learnings  — returned by an explicit learning_search MCP call (the stored name predates the rename; existing rows keep it)
 enum RetrievalSource { prompt_injection | procedural | query_learnings }
 
 -- WrapUpMode records the preferred wrap-up path for a task, set at creation
@@ -1126,13 +1126,13 @@ entity Setting {
 -- approved immediately (no human approval gate) and are injected into future
 -- dispatch prompts for the matching scope. The active pool is curated entirely
 -- without a human in the loop, and there is no human-facing surface for it at
--- all: agents up/downvote via rate_learning, delete entries outright via
--- delete_learning, and a background job archives stale entries with a
+-- all: agents up/downvote via learning_rate, delete entries outright via
+-- learning_delete, and a background job archives stale entries with a
 -- non-positive score (see learnings.allium: ArchiveStaleLearning).
 entity Learning {
     kind: LearningKind
     summary: String          -- one-sentence digest; injected into dispatch prompts
-    detail: String?          -- extended context; returned by query_learnings
+    detail: String?          -- extended context; returned by learning_search
     scope: LearningScope
     scope_ref: String?       -- qualifies the scope:
                              --   scope=repo    → repo_path of the target repository
@@ -1181,7 +1181,7 @@ entity Learning {
     -- reach it, so an archived task's kept verdicts do not count
     -- (LearningVerdict, ArchivedTask). Derived from the verdict rows when asked, never
     -- stored. Dispatch injection leaves such a learning out for that repo
-    -- only; query_learnings ignores it (learnings.allium:
+    -- only; learning_search ignores it (learnings.allium:
     -- AugmentDispatchPromptWithLearnings).
     -- The verdicts counted are those the dispatching board can see: the ones
     -- on tasks its user holds (sync.allium: visible_learning_verdicts). On a
@@ -1213,7 +1213,7 @@ entity Retrieval {
 
 -- LearningVerdict is the standing verdict one task's agent gave one learning.
 -- There is at most one per (task, learning) (OneVerdictPerTaskAndLearning): a
--- repeat rate_learning call from the same task replaces it, and the learning's
+-- repeat learning_rate call from the same task replaces it, and the learning's
 -- upvote_count moves by the difference, so one task moves a learning's score by
 -- at most one in either direction (learnings.allium: RateLearningViaMcp; the
 -- store's apply_learning_verdicts reducer). A task a person deletes is
@@ -1478,12 +1478,12 @@ config {
     weeks_threshold: Duration = 14.days
 
     -- When true, the MCP task_update response carries a nudge asking the agent
-    -- to call record_learning if it discovered anything non-obvious — but only
+    -- to call learning_record if it discovered anything non-obvious — but only
     -- when that single task_update call performs "PR finalisation": it sets
     -- status = review AND a pr-typed url, on a task that had no url before the
     -- call. Prompt encouragement only: the nudge is appended to the response
     -- text and never gates the update itself. No other tool reads this flag —
-    -- in particular the session_wrap-up response does not (its rate_learning nudge is
+    -- in particular the session_wrap-up response does not (its learning_rate nudge is
     -- unconditional; see learnings.allium: WrapUpRateLearningNudge).
     -- (see mcp-task-tools.allium: PrFinalisationReflectionNudge)
     learning_reflection_enabled: Boolean = true

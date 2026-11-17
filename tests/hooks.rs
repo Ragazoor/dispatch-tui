@@ -437,7 +437,7 @@ async fn pr_gate_blocks_first_then_allows_through_the_board() {
     let board = spawn_board().await;
     let (id, stderr) = pr_gate_first_reminder(&board).await;
     assert!(
-        stderr.contains("query_learnings"),
+        stderr.contains("learning_search"),
         "expected the reminder, got: {stderr}"
     );
 
@@ -501,7 +501,7 @@ async fn pr_gate_reminder_suggests_no_tag_filter() {
     // `query_learnings` contains "query", so drop the tool name before looking
     // for the argument the reminder is supposed to steer the agent towards.
     assert!(
-        stderr.replace("query_learnings", "").contains("query"),
+        stderr.replace("learning_search", "").contains("query"),
         "reminder must point the agent at the `query` argument, got: {stderr}"
     );
 }

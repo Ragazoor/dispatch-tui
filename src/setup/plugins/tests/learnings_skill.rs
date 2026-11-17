@@ -21,7 +21,7 @@ fn learnings_skill_text_holds_each_session_guarantee() {
             "AnnouncesItself",
             "I'm using the learnings skill to interact with the knowledge base.",
         ),
-        ("QueryDirectlyWhenUnclear", "call `query_learnings` directly"),
+        ("QueryDirectlyWhenUnclear", "call `learning_search` directly"),
         (
             "QueryDirectlyWhenUnclear",
             "Do that when anything is unclear — before guessing or asking.",
@@ -53,7 +53,7 @@ fn learnings_skill_text_holds_each_session_guarantee() {
         ),
         (
             "SkimmedResultsAreNotRated",
-            "Don't rate `query_learnings` results you skimmed and didn't act on.",
+            "Don't rate `learning_search` results you skimmed and didn't act on.",
         ),
         (
             "ClearlyWrongIsDeleted",
@@ -61,7 +61,7 @@ fn learnings_skill_text_holds_each_session_guarantee() {
         ),
         (
             "ClearlyWrongIsDeleted",
-            "Use `query_learnings` first to find the entry's ID",
+            "Use `learning_search` first to find the entry's ID",
         ),
         (
             "ReflectBeforeFinishing",
@@ -89,7 +89,7 @@ fn learnings_skill_text_holds_each_session_guarantee() {
     }
 }
 
-/// RecordingDetailIsReadFirst: the "Before calling `record_learning`" step
+/// RecordingDetailIsReadFirst: the "Before calling `learning_record`" step
 /// must come before the call is described as available, and the file it names
 /// must ship with the skill, or the instruction points at nothing.
 #[test]

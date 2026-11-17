@@ -13,8 +13,8 @@ fn render_validated_knowledge_block_formats_entries() {
     assert!(out.contains("[#7 epic, \u{2191}3]"));
     assert!(out.contains("learning 7"));
     assert!(
-        out.contains("rate_learning"),
-        "validated-knowledge block should instruct rate_learning, got: {out}"
+        out.contains("learning_rate"),
+        "validated-knowledge block should instruct learning_rate, got: {out}"
     );
     assert!(
         out.contains("`not_applicable` if it did not fit this task"),

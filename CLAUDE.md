@@ -78,7 +78,7 @@ The most important thing is to stay aligned with the user. The Allium specs in `
 
 - **Ambiguity is a stop condition, not a judgement call.** If the spec is silent, contradictory, or open to more than one reading, ask. Do not pick the plausible interpretation and proceed.
 - **Behaviour changes start in the spec.** Spec first, then tests, then code. This applies to UI and interaction behaviour too — that is a first-class Allium surface, not a prose note.
-- **Agreement gets recorded, in one of two places.** A decision about *what the system does* goes into the relevant `docs/specs/*.allium` file. A decision about *how to work in this repo* — a convention, a pitfall, a gotcha that would trip the next agent — goes into the knowledge base via `record_learning`. A decision that lives only in the conversation is lost the moment the session ends.
+- **Agreement gets recorded, in one of two places.** A decision about *what the system does* goes into the relevant `docs/specs/*.allium` file. A decision about *how to work in this repo* — a convention, a pitfall, a gotcha that would trip the next agent — goes into the knowledge base via `learning_record`. A decision that lives only in the conversation is lost the moment the session ends.
 
 Each spec filename names its domain (`tasks.allium`, `dispatch.allium`, …); `core.allium` holds the shared domain model. The `allium:tend` and `allium:weed` skills keep spec and code aligned.
 

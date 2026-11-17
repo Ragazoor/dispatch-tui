@@ -104,9 +104,9 @@ rule PrLearningsGate {
         -- that matches `gh pr create` Bash commands and calls
         -- `dispatch pr-gate <id>`. The first attempt per task is blocked
         -- with a reminder to consult the knowledge base via
-        -- query_learnings; the flag persists so subsequent attempts and
+        -- learning_search; the flag persists so subsequent attempts and
         -- resumed sessions pass. One-time reminder, not enforcement —
-        -- dispatch does not verify query_learnings actually ran.
+        -- dispatch does not verify learning_search actually ran.
         --
         -- The gate reaches the board rather than the database, like every
         -- other hook (agent-health.allium: HookDelivery). It differs from the
@@ -135,7 +135,7 @@ rule PrLearningsGate {
         -- everything else until `limit` drops it. The reminder points at
         -- `query` instead, which is what the ranking keys on.
         --
-        -- The reminder names the one argument query_learnings requires,
+        -- The reminder names the one argument learning_search requires,
         -- `task_id`, with this task's own id written out, alongside `query`.
         -- Naming only `query` is read as the whole call: an agent told only
         -- `query` omits `task_id`, and the call is refused. The id is
@@ -856,7 +856,7 @@ rule WrapUpPr {
         -- (AgentsRunTheVerifyCommand), because the PR is already open by the
         -- time session_wrap-up is called.
         --
-        -- The same response also carries an unconditional rate_learning nudge,
+        -- The same response also carries an unconditional learning_rate nudge,
         -- specified in learnings.allium: WrapUpRateLearningNudge (not repeated
         -- here).
 }

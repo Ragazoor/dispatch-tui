@@ -208,7 +208,7 @@ fn wrap_up_and_learnings_agree_that_rating_is_not_deferred() {
 /// PascalCase or short snake_case name walks straight through it (task
 /// #4402: no regex separates `TuiRuntime` from `GitHub`). The skill copy
 /// is therefore the only thing keeping those out, so it has to state the
-/// rule in full rather than deferring to what `record_learning` rejects.
+/// rule in full rather than deferring to what `learning_record` rejects.
 ///
 /// Pins NoEntryNamesImplementation of `LearningsSkillSession` in `docs/specs/learnings-skill.allium`.
 #[test]
@@ -255,7 +255,7 @@ fn learnings_skill_carries_the_machine_check_triage() {
     );
 }
 
-/// `record_learning` enforces only that a procedural entry HAS a detail.
+/// `learning_record` enforces only that a procedural entry HAS a detail.
 /// What the detail must contain — the case where the agent stops and asks
 /// a human — is convention, and this copy is where it lives (task #4402,
 /// ported from OKF's required `# Escalate` section).

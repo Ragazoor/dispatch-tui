@@ -261,7 +261,7 @@ pub(super) fn tdd_instruction() -> &'static str {
 /// whenever anything is unclear.
 ///
 /// It names the `/learnings` skill and no MCP tool. The three it used to name
-/// each ended up stating the same WHEN in their own schema — `query_learnings`
+/// each ended up stating the same WHEN in their own schema — `learning_search`
 /// closes with "Call it when something is unclear, before guessing or asking",
 /// which was this line's first clause word for word — so naming them here
 /// restated three descriptions the agent already has, and went stale whenever
@@ -271,7 +271,7 @@ pub(super) fn tdd_instruction() -> &'static str {
 /// and `prompt_trailing_lines_name_no_mcp_tool` which gates it.
 ///
 /// Rating is not mentioned here either — the validated-knowledge block names
-/// the full `rate_learning` call, and it renders exactly when there is
+/// the full `learning_rate` call, and it renders exactly when there is
 /// something surfaced to rate. See `AugmentDispatchPromptWithLearnings` in
 /// `docs/specs/learnings.allium`.
 pub(super) fn learning_tools_instruction() -> &'static str {
@@ -612,7 +612,7 @@ pub(super) fn render_validated_knowledge_block(picked: &[&Learning]) -> String {
     let mut out = String::from(
         "## Validated knowledge for this task\n\n\
 The following knowledge has been validated by previous agents. Apply it where relevant. \
-When you act on an entry, call `rate_learning(learning_id, task_id, verdict)` — `helped` if it \
+When you act on an entry, call `learning_rate(task_id, ratings=[{learning_id, verdict}, ...])` — `helped` if it \
 applied, `wrong` if it misled you. Rate an entry you read but did not use `not_applicable` if \
 it did not fit this task.\n\n",
     );

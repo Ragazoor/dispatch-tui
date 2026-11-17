@@ -21,7 +21,7 @@
 --           a retro task sorts after planned subtasks (epics.allium:
 --           AutoDispatchNextSubtask); how the skill's copy reaches an agent
 --           (mcp-task-tools.allium: SkillCopyIsJustInTime); what task_create
---           and record_learning do (mcp-task-tools.allium: CreateTaskViaMcp;
+--           and learning_record do (mcp-task-tools.allium: CreateTaskViaMcp;
 --           learnings.allium: RecordLearningViaMcp); the knowledge base itself (learnings.allium);
 --           the tools behind each step (task_search) — those are the
 --           skill's mechanics, not what it promises.
@@ -369,7 +369,7 @@ rule RecordLearning {
     @guidance
         -- A reusable pitfall, convention or preference — a design or style
         -- choice the operator corrected or confirmed — is recorded with
-        -- record_learning at once, without waiting to be asked
+        -- learning_record at once, without waiting to be asked
         -- (LearningsAreRecordedWithoutBeingAsked). The learnings skill owns
         -- how.
 }
@@ -556,7 +556,7 @@ surface RetroSession {
 
     @guarantee LearningsAreRecordedWithoutBeingAsked
         -- A reusable pitfall, convention or preference the operator corrected
-        -- or confirmed is recorded with record_learning right away, and the
+        -- or confirmed is recorded with learning_record right away, and the
         -- agent does not wait to be asked (RecordLearning).
 
     @guarantee ReportHasFiveLines

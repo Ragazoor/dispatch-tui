@@ -995,7 +995,7 @@ fn every_tool_description_meets_the_detail_floor() {
     const MIN_SENTENCES: usize = 3;
     // The description the spec makes one sentence by design:
     // learnings.allium's TheAuthoringRulesHaveOneHome.
-    const ONE_SENTENCE_BY_SPEC: [&str; 1] = ["record_learning"];
+    const ONE_SENTENCE_BY_SPEC: [&str; 1] = ["learning_record"];
     let defs = tool_definitions();
     for tool in defs["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();
@@ -1033,7 +1033,7 @@ fn create_epic_description_mentions_sub_epics() {
 /// validator's rejection is the just-in-time copy for a caller without it.
 #[test]
 fn record_learning_description_is_one_sentence_pointing_at_the_skill() {
-    let desc = tool_description("record_learning");
+    let desc = tool_description("learning_record");
     assert!(
         desc.contains("/learnings"),
         "record_learning description must point at the /learnings skill, got: {desc}"
@@ -1362,15 +1362,15 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("task_dispatch", json!({"task_id": 1})),
         ("task_resume", json!({"task_id": 1})),
         (
-            "record_learning",
+            "learning_record",
             json!({"task_id": 1, "kind": "pitfall", "summary": "s", "scope": "user"}),
         ),
-        ("query_learnings", json!({"task_id": 1})),
+        ("learning_search", json!({"task_id": 1})),
         (
-            "rate_learning",
+            "learning_rate",
             json!({"learning_id": 1, "task_id": 1, "verdict": "helped"}),
         ),
-        ("delete_learning", json!({"learning_id": 1})),
+        ("learning_delete", json!({"learning_id": 1})),
         ("set_verify_command", json!({"repo_path": "/r"})),
         ("set_display_name", json!({"name": "n"})),
         ("set_review_command", json!({})),
@@ -1573,7 +1573,7 @@ fn tool_definitions_carry_annotations() {
     const READ_ONLY: &[&str] = &[
         "task_search",
         "epic_search",
-        "query_learnings",
+        "learning_search",
         "query_usage",
         "read_context",
         "list_keybindings",
@@ -1582,7 +1582,7 @@ fn tool_definitions_carry_annotations() {
         "list_unseen_items",
     ];
     const DESTRUCTIVE: &[&str] = &[
-        "delete_learning",
+        "learning_delete",
         "session_exit",
         "work-package_delete",
         "update_workspace",
@@ -1723,10 +1723,6 @@ fn wrap_up_description_names_release_please_among_the_refused_tags() {
 /// Tool names that predate the `<noun>_<verb>` rule (ADR 0002). Each surface
 /// task removes its names; the last one deletes the list and the exemption.
 const LEGACY_TOOL_NAMES: &[&str] = &[
-    "record_learning",
-    "query_learnings",
-    "rate_learning",
-    "delete_learning",
     "set_review_command",
     "managed_feed_config",
     "set_display_name",
@@ -1847,6 +1843,25 @@ fn epic_and_work_package_old_names_redirect_to_their_replacements() {
         super::dispatch::OLD_TOOL_NAMES,
     );
     assert!(msg.contains("work-package_delete"), "{msg}");
+}
+
+/// mcp-task-tools.allium: OldToolNameRedirects. Each old learning tool name
+/// points at its replacement.
+#[test]
+fn learning_old_names_redirect_to_their_replacements() {
+    for (old, new) in [
+        ("record_learning", "learning_record"),
+        ("query_learnings", "learning_search"),
+        ("rate_learning", "learning_rate"),
+        ("delete_learning", "learning_delete"),
+    ] {
+        let msg = super::dispatch::unknown_tool_message(old, super::dispatch::OLD_TOOL_NAMES);
+        assert!(
+            msg.contains(&format!("{old} was renamed: call {new}")),
+            "{old}: {msg}"
+        );
+        assert!(super::dispatch::TOOL_NAMES.contains(&new), "{new}");
+    }
 }
 
 /// mcp-task-tools.allium: OldToolNameRedirects. An old name is never also a

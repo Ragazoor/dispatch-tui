@@ -122,19 +122,19 @@ Adding a fully integrated entity involves five layers. Work through them in orde
 
 Four MCP tools manage the knowledge base from within an agent session:
 
-- **`record_learning`** — record a new entry in the knowledge base (immediately active in future dispatch prompts)
-- **`query_learnings`** — retrieve approved entries relevant to the current task's context; supports `tag_filter` and `limit`
-- **`rate_learning`** — give feedback on a retrieved entry: `helped` increments `upvote_count`; `wrong` decrements it (a downvote; may go negative) without changing status
-- **`delete_learning`** — permanently delete a knowledge base entry by ID; returns an error if the ID does not exist
+- **`learning_record`** — record a new entry in the knowledge base (immediately active in future dispatch prompts)
+- **`learning_search`** — retrieve approved entries relevant to the current task's context; supports `tag_filter` and `limit`
+- **`learning_rate`** — give feedback on a retrieved entry: `helped` increments `upvote_count`; `wrong` decrements it (a downvote; may go negative) without changing status
+- **`learning_delete`** — permanently delete a knowledge base entry by ID; returns an error if the ID does not exist
 
 **When to call these tools:**
-- Call `query_learnings` at the right moment — not just at task start.
-- Call `record_learning` when you discover a pattern worth capturing for future agents (pitfall, convention, landscape, etc.).
-- Call `rate_learning` when you act on a retrieved entry — `helped` if it applied, `wrong` if it misled you. Rate an injected entry that did not fit the task `not_applicable` (score unchanged; three from one repo with no `helped` keep the entry out of that repo's dispatch prompts). Only entries surfaced to you this task (injected or returned by `query_learnings`) can be rated.
+- Call `learning_search` at the right moment — not just at task start.
+- Call `learning_record` when you discover a pattern worth capturing for future agents (pitfall, convention, landscape, etc.).
+- Call `learning_rate` when you act on a retrieved entry — `helped` if it applied, `wrong` if it misled you. Rate an injected entry that did not fit the task `not_applicable` (score unchanged; three from one repo with no `helped` keep the entry out of that repo's dispatch prompts). Only entries surfaced to you this task (injected or returned by `learning_search`) can be rated.
 
 **Scope auto-derivation:** omit `scope_ref` — the MCP handler derives it from the task's repo or epic automatically. Pass `scope_ref` explicitly only to override.
 
-**Scopes at retrieval time**: a `query_learnings` call for a task returns the union of all approved learnings where:
+**Scopes at retrieval time**: a `learning_search` call for a task returns the union of all approved learnings where:
 - `scope = user` (always included)
 - `scope = repo` and `scope_ref` matches the task's repo path
 - `scope = epic` and `scope_ref` matches the task's epic (only if the task belongs to an epic)

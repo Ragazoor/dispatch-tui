@@ -1,7 +1,7 @@
 ---
 max_turns: 15
 timeout_seconds: 300
-allowed_tools: [Read, Glob, Grep, Skill, mcp__dispatch__rate_learning, mcp__dispatch__query_learnings, mcp__dispatch__record_learning, mcp__dispatch__delete_learning]
+allowed_tools: [Read, Glob, Grep, Skill, mcp__dispatch__learning_rate, mcp__dispatch__learning_search, mcp__dispatch__learning_record, mcp__dispatch__learning_delete]
 tags: [learnings]
 runs: 2
 ---

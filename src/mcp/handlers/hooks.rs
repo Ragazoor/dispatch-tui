@@ -35,7 +35,7 @@ fn pr_gate_reminder(task_id: TaskId) -> String {
     format!(
         "Before creating this PR, consult the knowledge base for the conventions that apply \
          to what you are submitting — the code in the diff as well as the PR title and body. \
-         Call the dispatch `query_learnings` MCP tool with `task_id` {id} and a `query` \
+         Call the dispatch `learning_search` MCP tool with `task_id` {id} and a `query` \
          describing this change, then apply what it returns and re-run the command.",
         id = task_id.0
     )

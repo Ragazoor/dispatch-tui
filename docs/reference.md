@@ -918,17 +918,17 @@ When an agent is dispatched, Dispatch queries approved learnings that match the 
 - **Always**: `repo`-scoped learnings where `scope_ref` matches the task's repo path
 - **If task belongs to an epic**: `epic`-scoped learnings for that epic
 
-`task`-scoped learnings are **not** auto-injected. They can be retrieved explicitly via `query_learnings` with a `tag_filter`.
+`task`-scoped learnings are **not** auto-injected. They can be retrieved explicitly via `learning_search` with a `tag_filter`.
 
 ### Ranking
 
 The SQL candidate query orders by kind (`procedural` first), then scope proximity (epic → repo → user), then confirmation count. That selects *which* entries are candidates; the injected block is then **RAG-ranked by relevance to the task**, so `kind` gives no precedence in the final prompt and procedural entries are not injected as a verbatim prompt prefix.
 
-The auto-inject cap is **10 learnings**. Agents can retrieve up to **50** via an explicit `query_learnings` call.
+The auto-inject cap is **10 learnings**. Agents can retrieve up to **50** via an explicit `learning_search` call.
 
 ### Recording a Learning
 
-Agents propose learnings via `record_learning`. The `scope_ref` is auto-derived from the task's context when omitted:
+Agents propose learnings via `learning_record`. The `scope_ref` is auto-derived from the task's context when omitted:
 
 ```
 scope=user    → scope_ref: (none)
@@ -937,8 +937,8 @@ scope=epic    → scope_ref: task.epic_id  (error if task has no epic)
 ```
 
 Recorded learnings are approved on creation and become eligible for injection immediately — there is no
-human approval step. Curation happens after the fact: agents rate entries via `rate_learning`, entries
-can be removed with `delete_learning`, and the background sweep archives approved-but-unhelpful entries
+human approval step. Curation happens after the fact: agents rate entries via `learning_rate`, entries
+can be removed with `learning_delete`, and the background sweep archives approved-but-unhelpful entries
 left untouched past the staleness threshold.
 
 ### Examples

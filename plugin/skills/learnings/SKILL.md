@@ -7,7 +7,7 @@ description: Manage the knowledge base lifecycle — query entries, rate the one
 
 Use this skill to interact with the shared knowledge base — recording new entries and rating entries that were surfaced to you.
 
-To *query* the knowledge base mid-task, call `query_learnings` directly with your `task_id`, describing what you are working on in `query`. Do that when anything is unclear — before guessing or asking.
+To *query* the knowledge base mid-task, call `learning_search` directly with your `task_id`, describing what you are working on in `query`. Do that when anything is unclear — before guessing or asking.
 
 Reach for `tag_filter` only when you already know the tag you want. It is a soft score boost rather than a hard filter, so a tag you guessed at does not narrow the search — it demotes everything else until `limit` drops it, and you never learn what you missed.
 
@@ -15,13 +15,13 @@ Reach for `tag_filter` only when you already know the tag you want. It is a soft
 
 ## Rating entries you acted on
 
-When you act on an entry that was surfaced to you (injected into your prompt or returned by `query_learnings`), rate it at that moment, not deferred to wrap-up:
+When you act on an entry that was surfaced to you (injected into your prompt or returned by `learning_search`), rate it at that moment, not deferred to wrap-up. One call takes any number of entries, so rate every entry you have acted on together; it is all or nothing:
 
 ```
-rate_learning(learning_id=<id>, task_id=<your task id>, verdict="helped")
+learning_rate(task_id=<your task id>, ratings=[{"learning_id": <id>, "verdict": "helped"}])
 ```
 
-Use `helped` when the entry saved you from a pitfall or guided a decision, and `wrong` when it misled you or is out of date. For an entry from "## Validated knowledge for this task" that did not fit your task, use `not_applicable`: it leaves the score alone and tells the store the entry was off-topic here; enough of these from one repo keep the entry out of that repo's dispatch prompts. No verdict changes the entry's status — there is no human review step. An entry that is clearly wrong should be deleted instead. Don't rate `query_learnings` results you skimmed and didn't act on.
+Use `helped` when the entry saved you from a pitfall or guided a decision, and `wrong` when it misled you or is out of date. For an entry from "## Validated knowledge for this task" that did not fit your task, use `not_applicable`: it leaves the score alone and tells the store the entry was off-topic here; enough of these from one repo keep the entry out of that repo's dispatch prompts. No verdict changes the entry's status — there is no human review step. An entry that is clearly wrong should be deleted instead. Don't rate `learning_search` results you skimmed and didn't act on.
 
 ## Recording new entries
 
@@ -47,7 +47,7 @@ A knowledge base entry earns its place by carrying something a machine cannot ch
 - A specific **workflow pattern** solved a cross-repo or cross-task problem elegantly
 - This epic or project has a **procedural step** every agent working here should follow
 
-### Before calling `record_learning`
+### Before calling `learning_record`
 
 Read `references/recording.md`: what not to record (above all, never name the function, type, macro, fixture, test or file that implements it), the kinds and scopes, and how to write the one-sentence summary. A `procedural` entry's `detail` must name where the agent stops and asks a human.
 
@@ -56,7 +56,7 @@ Read `references/recording.md`: what not to record (above all, never name the fu
 If a knowledge base entry is incorrect, outdated, or should be removed entirely, delete it:
 
 ```
-delete_learning(learning_id=<id>)
+learning_delete(learning_id=<id>)
 ```
 
-This permanently removes the entry. Use `query_learnings` first to find the entry's ID if you only know its content.
+This permanently removes the entry. Use `learning_search` first to find the entry's ID if you only know its content.

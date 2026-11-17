@@ -114,7 +114,7 @@ The server offers read-only context as MCP resources (`resources/list`, `resourc
 
 **Error envelopes.** A missing or malformed identity is `-32600` on `resources/list`, `resources/read` and `read_context` (`initialize` and `tools/list` stay identity-free). A URI that does not resolve is `-32602` naming the URI on `resources/read`, and the same message as an `isError` tool result on `read_context`. An invalid cursor is `-32602`; an internal failure is `-32603` (`isError` on `read_context`).
 
-**Never served.** No URI reaches an epic, a trajectory, usage data, `host.json`, the store, or a repository file; unapproved or deleted learnings read as unknown. Reads record no retrieval and write nothing, so `rate_learning` still requires a retrieval.
+**Never served.** No URI reaches an epic, a trajectory, usage data, `host.json`, the store, or a repository file; unapproved or deleted learnings read as unknown. Reads record no retrieval and write nothing, so `learning_rate` still requires a retrieval.
 
 ## Notifications
 
@@ -158,9 +158,9 @@ The Knowledge Base lets dispatched agents record knowledge entries that are auto
 
 ### End-to-end lifecycle
 
-1. **Agent records** — calls `record_learning(task_id, kind, summary, scope, ...)` during a task or at wrap-up. The entry is immediately active and will appear in future dispatch prompts for agents working in the matching scope.
+1. **Agent records** — calls `learning_record(task_id, kind, summary, scope, ...)` during a task or at wrap-up. The entry is immediately active and will appear in future dispatch prompts for agents working in the matching scope.
 2. **Future dispatches** — when an agent is launched, `dispatch_with_prompt()` queries approved entries for the task's context and prepends them to the prompt (see `docs/specs/learnings.allium`).
-3. **Agent rates** — calls `rate_learning(learning_id, task_id, verdict)` when it acts on a retrieved entry. `helped` increments `upvote_count` (raising the entry's priority in future results); `wrong` decrements `upvote_count` (a downvote; may go negative) and leaves the status unchanged; `not_applicable` (an injected entry the agent read that did not fit the task) leaves the entry untouched and records the verdict; three of them from tasks in one repo, with no `helped` there, leave the entry out of that repo's dispatch injection (it stays findable through `query_learnings`). Only entries surfaced to the task (injected or returned by `query_learnings`) can be rated. There is no human-approval step and no human-facing curation surface: entries land approved, and curation happens through MCP (`rate_learning`, `delete_learning`) plus a background job that archives approved entries with a non-positive score that have gone stale (see `docs/specs/learnings.allium`: `ArchiveStaleLearning`).
+3. **Agent rates** — calls `learning_rate(task_id, ratings)` when it acts on retrieved entries (`ratings` is a list of `{learning_id, verdict}`, applied all or nothing). `helped` increments `upvote_count` (raising the entry's priority in future results); `wrong` decrements `upvote_count` (a downvote; may go negative) and leaves the status unchanged; `not_applicable` (an injected entry the agent read that did not fit the task) leaves the entry untouched and records the verdict; three of them from tasks in one repo, with no `helped` there, leave the entry out of that repo's dispatch injection (it stays findable through `learning_search`). Only entries surfaced to the task (injected or returned by `learning_search`) can be rated. There is no human-approval step and no human-facing curation surface: entries land approved, and curation happens through MCP (`learning_rate`, `learning_delete`) plus a background job that archives approved entries with a non-positive score that have gone stale (see `docs/specs/learnings.allium`: `ArchiveStaleLearning`).
 
 ### Scope model
 
@@ -171,7 +171,7 @@ Each learning has a `scope` that determines which tasks receive it:
 | `user` | Always | `null` |
 | `repo` | Task's repo path matches | `repo_path` |
 | `epic` | Task belongs to this epic | `str(epic_id)` |
-| `task` | Only via explicit `query_learnings` | `str(task_id)` |
+| `task` | Only via explicit `learning_search` | `str(task_id)` |
 
 `scope_ref` is auto-derived from the task context when omitted. `task`-scoped entries are excluded from auto-injection (they capture task-specific outcomes and must be fetched on demand).
 

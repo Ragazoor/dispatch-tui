@@ -103,7 +103,7 @@ pub struct McpState {
     // `TaskServiceApi`, which owns the runner `McpDeps` supplies. Keeping the
     // field would let the next handler quietly reach past the service layer
     // again; its absence makes that a compile error.
-    /// Embedding service used for RAG-based query_learnings and for computing
+    /// Embedding service used for RAG-based learning_search and for computing
     /// embeddings when a learning is recorded via MCP.
     pub embedding_service: Arc<EmbeddingService>,
     /// Dispatch data directory (where the store's local files live). Trajectory files are

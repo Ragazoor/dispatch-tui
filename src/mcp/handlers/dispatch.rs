@@ -71,6 +71,16 @@ pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[
     ("resume_task", "call task_resume"),
     ("wrap_up", "call session_wrap-up"),
     ("exit_session", "call session_exit"),
+    ("record_learning", "call learning_record"),
+    (
+        "query_learnings",
+        "call learning_search. It returns 10 entries unless limit says otherwise",
+    ),
+    (
+        "rate_learning",
+        "call learning_rate. It takes task_id and a ratings list of {learning_id, verdict}",
+    ),
+    ("delete_learning", "call learning_delete"),
     ("create_epic", "call epic_create"),
     (
         "list_epics",
@@ -615,7 +625,7 @@ task_dispatch for those), and when its agent is already attached (use SendMessag
             "required": ["task_id"]
         };
 
-    async write "record_learning" => learnings::handle_record_learning,
+    async write "learning_record" => learnings::handle_record_learning,
         "Record a non-obvious, durable finding in the shared knowledge base, following the /learnings skill's authoring rules.",
         {
             "type": "object",
@@ -655,7 +665,7 @@ task_dispatch for those), and when its agent is already attached (use SendMessag
             "required": ["task_id", "kind", "summary", "scope"]
         };
 
-    async read_only "query_learnings" => learnings::handle_query_learnings,
+    async read_only "learning_search" => learnings::handle_query_learnings,
         "Query the knowledge base by semantic similarity to your task's context. Results are \
 ranked by embedding similarity plus a scope and upvote boost, and entries below the similarity \
 threshold are dropped — so an empty result means nothing relevant was found, not that the store is \
@@ -679,43 +689,55 @@ expect overlap with those. Call it when something is unclear, before guessing or
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of results to return (default 50, max 50)"
+                    "description": "Maximum number of results to return (default 10, max 50). Results are ranked best first; when exactly this many come back there may be more."
                 }
             },
             "required": ["task_id"]
         };
 
-    async write "rate_learning" => learnings::handle_rate_learning,
-        "Give feedback on a knowledge base entry that was surfaced to you this task. \
-Call any time you act on a retrieved learning. 'helped' upvotes it (a usefulness signal that \
-boosts ranking); 'wrong' downvotes it (may go negative) — neither changes its status, and \
-there is no human review step. You can only rate a learning that was surfaced to you (injected \
-into your prompt or returned by query_learnings).",
+    async write "learning_rate" => learnings::handle_rate_learning,
+        "Give feedback on knowledge base entries that were surfaced to you this task. \
+Call any time you act on retrieved learnings, and rate every entry you have acted on in one call. \
+'helped' upvotes an entry (a usefulness signal that boosts ranking); 'wrong' downvotes it (may go \
+negative) — neither changes its status, and there is no human review step. You can only rate a \
+learning that was surfaced to you (injected into your prompt or returned by learning_search). \
+The call is all or nothing: if any pair is refused, none is written and the error names it.",
         {
             "type": "object",
             "properties": {
-                "learning_id": {
-                    "type": "integer",
-                    "description": "ID of the knowledge base entry to rate"
-                },
                 "task_id": {
                     "type": "integer",
-                    "description": "ID of the task that acted on this entry"
+                    "description": "ID of the task that acted on these entries"
                 },
-                "verdict": {
-                    "type": "string",
-                    "enum": crate::models::LearningVerdict::ALL.iter().map(|v| v.as_str()).collect::<Vec<_>>(),
-                    "description": "'helped' — the entry applied and was useful (upvotes it). 'wrong' — the entry misled you or is inaccurate (downvotes it; may go negative). 'not_applicable' — you read an injected entry and it did not fit this task (score unchanged; it tells the store the entry was off-topic here). No verdict changes the entry's status."
+                "ratings": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "One {learning_id, verdict} pair per entry. A learning may appear once.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "learning_id": {
+                                "type": "integer",
+                                "description": "ID of the knowledge base entry to rate"
+                            },
+                            "verdict": {
+                                "type": "string",
+                                "enum": crate::models::LearningVerdict::ALL.iter().map(|v| v.as_str()).collect::<Vec<_>>(),
+                                "description": "'helped' — the entry applied and was useful (upvotes it). 'wrong' — the entry misled you or is inaccurate (downvotes it; may go negative). 'not_applicable' — you read an injected entry and it did not fit this task (score unchanged; it tells the store the entry was off-topic here). No verdict changes the entry's status."
+                            }
+                        },
+                        "required": ["learning_id", "verdict"]
+                    }
                 }
             },
-            "required": ["learning_id", "task_id", "verdict"]
+            "required": ["task_id", "ratings"]
         };
 
-    async destructive "delete_learning" => learnings::handle_delete_learning,
+    async destructive "learning_delete" => learnings::handle_delete_learning,
         "Delete a learning entry from the knowledge base by ID. Permanent and immediate — there \
 is no archive, no soft delete and no human review step, so the entry stops reaching other agents \
 at once. Use it for an entry that is wrong or has gone stale, rather than only downvoting it with \
-rate_learning; downvoting keeps a wrong entry in circulation. Returns an error if the ID does not \
+learning_rate; downvoting keeps a wrong entry in circulation. Returns an error if the ID does not \
 exist.",
         {
             "type": "object",

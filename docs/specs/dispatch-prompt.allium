@@ -674,7 +674,7 @@ surface AgentPrompt {
         -- mcp-task-tools.allium: ToolDescriptionsStateBehaviourAndNameNoCode.
         --
         -- {learning_tools_instruction} names the /learnings SKILL and no tool:
-        -- query_learnings, rate_learning and delete_learning each say in
+        -- learning_search, learning_rate and learning_delete each say in
         -- their own description when to call them. Trigger text for a skill
         -- is the one thing here with no schema to shadow — skills
         -- under-trigger, and a skill listing carries a description, not a

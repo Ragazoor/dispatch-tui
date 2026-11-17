@@ -22,21 +22,21 @@
 --           what it promises.
 --
 -- What learnings.allium already holds, so this spec does not repeat it:
---   - the tool contracts: record_learning's validation (non-blank summary,
+--   - the tool contracts: learning_record's validation (non-blank summary,
 --     scope and scope_ref, no code citation of the shapes a validator can
---     see, a non-blank detail on a procedural entry), query_learnings'
---     ranking, soft tag_filter and 50-entry cap, rate_learning's
+--     see, a non-blank detail on a procedural entry), learning_search'
+--     ranking, soft tag_filter and 50-entry cap, learning_rate's
 --     retrieval-first check and one standing verdict per task and learning,
---     delete_learning's permanence;
+--     learning_delete's permanence;
 --   - that no verdict changes an entry's status and no human reviews one;
---   - that the record_learning description is one sentence and every
+--   - that the learning_record description is one sentence and every
 --     authoring rule lives in this skill (TheAuthoringRulesHaveOneHome).
 --
 -- Design decisions:
 --   - The tools can refuse only what a pattern shows. The rest of the bar
 --     for an entry — judgment over lint, no always-loaded copy, no bare code
 --     name, a procedural boundary — is the skill's alone, so the skill
---     states it in full and does not defer to what record_learning rejects.
+--     states it in full and does not defer to what learning_record rejects.
 --   - A rating is made when the entry is acted on, not at wrap-up: a batch
 --     rated at the end is rated from memory, and the entries that were not
 --     acted on get rated with the ones that were.
@@ -216,7 +216,7 @@ rule RateWhenYouAct {
 
     @guidance
         -- The agent rates at the moment it acts on an entry surfaced to it,
-        -- by the dispatch prompt or by query_learnings, and not at wrap-up
+        -- by the dispatch prompt or by learning_search, and not at wrap-up
         -- (RateAtTheMomentOfActing). helped: the entry saved the agent from
         -- a pitfall or guided a decision. wrong: it misled the agent or is
         -- out of date (VerdictsMeanWhatTheySay).
@@ -234,7 +234,7 @@ rule RateOffTopicEntry {
         -- agent read and that did not fit gets not_applicable
         -- (NotApplicableForAnEntryThatDidNotFit). It leaves the score alone
         -- and feeds the per-repo dispatch mute (learnings.allium:
-        -- AugmentDispatchPromptWithLearnings). A query_learnings result the
+        -- AugmentDispatchPromptWithLearnings). A learning_search result the
         -- agent skimmed and did not act on is not rated at all
         -- (SkimmedResultsAreNotRated).
 }
@@ -249,7 +249,7 @@ rule DeleteWrongEntry {
     @guidance
         -- An entry that is incorrect, out of date or should be gone is
         -- deleted, not left to a wrong verdict (ClearlyWrongIsDeleted). The
-        -- agent finds the id with query_learnings first when it knows only
+        -- agent finds the id with learning_search first when it knows only
         -- the content. Deletion is permanent (learnings.allium:
         -- DeleteLearningViaMcp).
 }
@@ -284,7 +284,7 @@ surface LearningsSkillSession {
         -- with the knowledge base."
 
     @guarantee QueryDirectlyWhenUnclear
-        -- Mid-task, the agent calls query_learnings itself, with its task_id
+        -- Mid-task, the agent calls learning_search itself, with its task_id
         -- and a description of what it is working on in query, whenever
         -- anything is unclear, before guessing and before asking the user.
         -- The skill is not needed to query.
@@ -297,7 +297,7 @@ surface LearningsSkillSession {
 
     @guarantee RateAtTheMomentOfActing
         -- An entry surfaced to the agent (injected into its prompt or
-        -- returned by query_learnings) is rated when the agent acts on it,
+        -- returned by learning_search) is rated when the agent acts on it,
         -- not deferred to wrap-up.
 
     @guarantee VerdictsMeanWhatTheySay
@@ -313,12 +313,12 @@ surface LearningsSkillSession {
         -- one repo keep the entry out of that repo's dispatch prompts.
 
     @guarantee SkimmedResultsAreNotRated
-        -- A query_learnings result the agent skimmed and did not act on gets
+        -- A learning_search result the agent skimmed and did not act on gets
         -- no verdict.
 
     @guarantee ClearlyWrongIsDeleted
-        -- An entry that is clearly wrong is deleted with delete_learning, not
-        -- rated wrong. The agent uses query_learnings to find the id when it
+        -- An entry that is clearly wrong is deleted with learning_delete, not
+        -- rated wrong. The agent uses learning_search to find the id when it
         -- knows only the content.
 
     @guarantee ReflectBeforeFinishing
@@ -346,7 +346,7 @@ surface LearningsSkillSession {
         -- there should follow.
 
     @guarantee RecordingDetailIsReadFirst
-        -- Before calling record_learning the agent reads
+        -- Before calling learning_record the agent reads
         -- references/recording.md: what not to record, the kinds and scopes
         -- and how to write the one-sentence summary. The detail is read at
         -- the point of use, so the skill's body stays short.
@@ -373,7 +373,7 @@ surface LearningsSkillSession {
     @guarantee NoEntryNamesImplementation
         -- An entry names no function, type, macro, fixture, test or file
         -- behind a behaviour, bare names included, because a refactor
-        -- invalidates a name with nothing to re-check it. record_learning
+        -- invalidates a name with nothing to re-check it. learning_record
         -- rejects only the shapes prose never produces, so a successful call
         -- is not approval. A stable MCP tool name, a root manifest or a spec
         -- file is fine. A fact worth stating precisely goes in the Allium
@@ -381,6 +381,6 @@ surface LearningsSkillSession {
 
     @guarantee ProceduralEntriesNameWhereTheyStop
         -- A procedural entry's detail names the case where the agent stops
-        -- following the entry and asks a human. record_learning enforces
+        -- following the entry and asks a human. learning_record enforces
         -- only that the detail is present.
 }

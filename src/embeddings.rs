@@ -219,7 +219,7 @@ pub fn upvote_boost(upvote_count: i64) -> f32 {
 }
 
 /// Minimum cosine similarity for a learning to be a RAG candidate.
-/// Used by both dispatch injection and the `query_learnings` MCP tool.
+/// Used by both dispatch injection and the `learning_search` MCP tool.
 pub const RAG_SIMILARITY_THRESHOLD: f32 = 0.25;
 
 /// Decode raw embedding bytes returned by the DB into f32 vectors.

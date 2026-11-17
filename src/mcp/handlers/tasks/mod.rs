@@ -607,7 +607,7 @@ async fn reflection_nudge(db: &dyn crate::store::TaskReadStore) -> &'static str 
         .unwrap_or(true);
     if enabled {
         " Before finishing, did you discover anything non-obvious about \
-this repo or task? If so, call record_learning with a brief summary."
+this repo or task? If so, call learning_record with a brief summary."
     } else {
         ""
     }

@@ -1040,7 +1040,7 @@ rule LearningVisibility {
         -- A learning that predates workspaces has no author. One with a
         -- workspace keeps that workspace's members; a user-scoped one stays
         -- visible to everyone, as it was, since nobody can claim it.
-        -- query_learnings, prompt injection and get_learning all apply the
+        -- learning_search, prompt injection and get_learning all apply the
         -- same reader predicate, so an agent is never shown, and never
         -- records a retrieval of, a learning its host's owner cannot see.
 }

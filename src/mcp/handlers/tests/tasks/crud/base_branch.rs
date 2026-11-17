@@ -330,7 +330,7 @@ async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
 
     let text = extract_response_text(&resp);
     assert!(
-        text.contains("record_learning"),
+        text.contains("learning_record"),
         "nudge should appear when finalising a PR via update_task; got: {text}"
     );
 }
@@ -369,7 +369,7 @@ async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
 
     let text = extract_response_text(&resp);
     assert!(
-        !text.contains("record_learning"),
+        !text.contains("learning_record"),
         "nudge must not appear when reflection disabled; got: {text}"
     );
 }
@@ -405,7 +405,7 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
 
     let text = extract_response_text(&resp);
     assert!(
-        !text.contains("record_learning"),
+        !text.contains("learning_record"),
         "nudge must not appear when status is not transitioning; got: {text}"
     );
 }
@@ -440,7 +440,7 @@ async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
 
     let text = extract_response_text(&resp);
     assert!(
-        !text.contains("record_learning"),
+        !text.contains("learning_record"),
         "nudge must not appear without pr_url transition; got: {text}"
     );
 }
@@ -486,7 +486,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
 
     let text = extract_response_text(&resp);
     assert!(
-        !text.contains("record_learning"),
+        !text.contains("learning_record"),
         "nudge must not fire when pr_url was already set; got: {text}"
     );
 }

@@ -81,14 +81,14 @@ rule ToolsAdvertiseAnnotations {
 
     -- Every tool in the list carries `annotations` with a `title` and the four
     -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
-    -- nothing (task_search, epic_search, query_learnings,
+    -- nothing (task_search, epic_search, learning_search,
     -- query_usage, read_context, list_keybindings, work-package_search,
     -- list_workspaces, list_unseen_items).
     -- managed_feed_config is NOT in that list: its no-argument call reads but
     -- its other calls write, so it is declared idempotent (see
     -- epics.allium: ManagedFeedConfigViaMcp, @guidance).
     -- destructiveHint is true only where a call removes or closes something
-    -- that cannot be restored by another call (delete_learning, session_exit,
+    -- that cannot be restored by another call (learning_delete, session_exit,
     -- work-package_delete;
     -- update_workspace and set_workspace_member, whose delete and remove forms
     -- remove the workspace or the membership; delete_unseen_item);
@@ -140,7 +140,11 @@ rule OldToolNameRedirects {
     -- limit says otherwise"), update_epic ("call epic_update"),
     -- create_work_package ("call work-package_create"), list_work_packages
     -- ("call work-package_search"), update_work_package ("call
-    -- work-package_update; to delete a package call work-package_delete").
+    -- work-package_update; to delete a package call work-package_delete"),
+    -- record_learning ("call learning_record"), query_learnings ("call
+    -- learning_search; it returns 10 entries unless limit says otherwise"),
+    -- rate_learning ("call learning_rate; it takes a ratings list") and
+    -- delete_learning ("call learning_delete").
     ensures: UnknownToolErrorNamesNewTool()
 
     @guidance
@@ -630,7 +634,7 @@ rule PrFinalisationReflectionNudge {
         -- The sole consumer of core/config.learning_reflection_enabled. The
         -- nudge is a sentence appended to the task_update success response
         -- text, asking the agent whether it discovered anything non-obvious
-        -- about the repo or task and, if so, to call record_learning with a
+        -- about the repo or task and, if so, to call learning_record with a
         -- brief summary. It never gates or alters the update: UpdateTaskViaMcp
         -- applies its mutations regardless, and when the flag is false the
         -- response text is simply shorter.
@@ -648,7 +652,7 @@ rule PrFinalisationReflectionNudge {
         -- no reflection nudge. So the nudge only appears when a caller invokes the
         -- task_update MCP tool directly to link a PR, bypassing
         -- session_wrap-up/session_exit entirely. The session_wrap-up response carries a
-        -- different rate_learning nudge, gated to the pr action rather than
+        -- different learning_rate nudge, gated to the pr action rather than
         -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
 }
 
@@ -1664,7 +1668,7 @@ rule WrapUpViaMcp {
         -- The success texts carry the action, that the session is NOT
         -- yet closed, "Exit token: <id>" with the
         -- session_exit instruction naming the action (and pr_url for pr),
-        -- the rate_learning nudge for pr (learnings.allium:
+        -- the learning_rate nudge for pr (learnings.allium:
         -- WrapUpRateLearningNudge), "No git operations performed." for done,
         -- and for rebase the warning that without session_exit the window
         -- stays alive, plus, when the rebase moved the worktree's HEAD and the
@@ -2231,10 +2235,10 @@ surface McpContextResources {
     @guarantee ContextReadsAreNotRetrievals
         -- Reading a learning as a context resource records no
         -- core/Retrieval, so it does not make that learning rateable:
-        -- rate_learning still requires a retrieval (learnings.allium:
+        -- learning_rate still requires a retrieval (learnings.allium:
         -- RateLearningViaMcp), which only the dispatch prompt's injection
-        -- and query_learnings record. An agent that wants to rate a learning
-        -- it found here reaches it through query_learnings first.
+        -- and learning_search record. An agent that wants to rate a learning
+        -- it found here reaches it through learning_search first.
 
     @guarantee NeverServedDataIsUnreachable
         -- These are never served, under any URI, by resources/list,
@@ -2364,7 +2368,7 @@ surface McpTaskTools {
         --     caller acts on it: resuming a crashed task is task_dispatch's
         --     (DispatchTaskViaMcp), not task_update's status argument's.
         --   - Authoring rules for a tool's content live in the skill that teaches
-        --     them; the description points at the skill (record_learning and the
+        --     them; the description points at the skill (learning_record and the
         --     /learnings skill — learnings.allium: RecordLearningViaMcp).
         --   - Human-UI trivia (which tags the TUI offers), implementation detail
         --     (how a self-reference is guarded) and worked examples do not

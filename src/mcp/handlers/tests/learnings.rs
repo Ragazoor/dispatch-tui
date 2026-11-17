@@ -51,7 +51,7 @@ async fn create_approved_learning(
 }
 
 /// Create an approved user-scoped learning and record a prompt-injection
-/// retrieval for `task_id`, so it satisfies `rate_learning`'s retrieval guard.
+/// retrieval for `task_id`, so it satisfies `learning_rate`'s retrieval guard.
 async fn create_retrieved_learning(
     state: &Arc<McpState>,
     task_id: crate::models::TaskId,
@@ -88,7 +88,7 @@ async fn record_learning_creates_proposed_entry() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -126,7 +126,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "pitfall",
@@ -156,7 +156,7 @@ async fn record_learning_stores_an_explicit_repo_scope_ref_without_a_trailing_sl
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "pitfall",
@@ -194,7 +194,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -227,7 +227,7 @@ async fn record_learning_epic_scope_no_epic_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -249,7 +249,7 @@ async fn record_learning_user_scope_no_scope_ref() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "preference",
@@ -279,7 +279,7 @@ async fn record_learning_empty_summary_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "pitfall",
@@ -300,7 +300,7 @@ async fn record_learning_unknown_task_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": 9999,
                 "kind": "pitfall",
@@ -324,7 +324,7 @@ async fn record_learning_rejects_code_citation_in_summary() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -356,7 +356,7 @@ async fn record_learning_allows_mcp_tool_name_reference() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "procedural",
@@ -390,7 +390,7 @@ async fn record_learning_echoes_similar_approved_entries() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -411,7 +411,7 @@ async fn record_learning_echoes_similar_approved_entries() {
     // The dedup response echoes similar entries but must NOT suggest a rate call:
     // rate_learning requires a prior retrieval, which dedup matches are not.
     assert!(
-        !text.contains("upvote_learning") && !text.contains("rate_learning"),
+        !text.contains("upvote_learning") && !text.contains("learning_rate"),
         "dedup response must not suggest a rate/upvote call: {text}"
     );
 }
@@ -435,7 +435,7 @@ async fn record_learning_no_echo_when_different_kind() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "pitfall",
@@ -472,7 +472,7 @@ async fn record_learning_still_creates_when_similar_exists() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -511,7 +511,7 @@ async fn record_learning_does_not_echo_itself() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",
@@ -549,7 +549,7 @@ async fn query_learnings_returns_approved_for_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -587,7 +587,7 @@ async fn query_learnings_tag_filter_narrows_results() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0, "tag_filter": ["rust"] }
         })),
     )
@@ -619,7 +619,7 @@ async fn query_learnings_respects_limit() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0, "limit": 2 }
         })),
     )
@@ -656,7 +656,7 @@ async fn query_learnings_records_a_retrieval_per_returned_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -683,7 +683,7 @@ async fn query_learnings_unknown_task_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": 9999 }
         })),
     )
@@ -703,8 +703,8 @@ async fn rate_learning_helped_increments_count() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "rate_learning",
-            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "helped" }
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [{ "learning_id": learning_id, "verdict": "helped" }] }
         })),
     )
     .await;
@@ -725,8 +725,8 @@ async fn rate_learning_wrong_decrements_upvote_count() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "rate_learning",
-            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "wrong" }
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [{ "learning_id": learning_id, "verdict": "wrong" }] }
         })),
     )
     .await;
@@ -749,8 +749,8 @@ async fn rate_learning_not_applicable_leaves_the_score_alone() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "rate_learning",
-            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "not_applicable" }
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [{ "learning_id": learning_id, "verdict": "not_applicable" }] }
         })),
     )
     .await;
@@ -773,9 +773,9 @@ async fn rate_learning_schema_offers_not_applicable() {
     let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
     let rate = tools
         .iter()
-        .find(|t| t["name"] == "rate_learning")
+        .find(|t| t["name"] == "learning_rate")
         .expect("rate_learning listed");
-    let verdict = &rate["inputSchema"]["properties"]["verdict"];
+    let verdict = &rate["inputSchema"]["properties"]["ratings"]["items"]["properties"]["verdict"];
     assert_eq!(
         verdict["enum"],
         json!(["helped", "wrong", "not_applicable"]),
@@ -807,8 +807,8 @@ async fn rate_learning_without_retrieval_is_rejected() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "rate_learning",
-            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "helped" }
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [{ "learning_id": learning_id, "verdict": "helped" }] }
         })),
     )
     .await;
@@ -830,8 +830,8 @@ async fn rate_learning_unknown_verdict_rejected() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "rate_learning",
-            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "bogus" }
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [{ "learning_id": learning_id, "verdict": "bogus" }] }
         })),
     )
     .await;
@@ -839,6 +839,173 @@ async fn rate_learning_unknown_verdict_rejected() {
         is_error(&resp),
         "an unknown verdict string must be rejected, got: {resp:?}"
     );
+}
+
+/// learnings.allium: RateLearningViaMcp. One call carries many ratings.
+#[tokio::test]
+async fn learning_rate_applies_every_pair_in_one_call() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+    let a = create_retrieved_learning(&state, task_id, "Tip A").await;
+    let b = create_retrieved_learning(&state, task_id, "Tip B").await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [
+                { "learning_id": a, "verdict": "helped" },
+                { "learning_id": b, "verdict": "wrong" }
+            ] }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains(&format!("Learning {}", a.0)), "{text}");
+    assert!(text.contains(&format!("Learning {}", b.0)), "{text}");
+
+    assert_eq!(
+        state
+            .db
+            .get_learning(a)
+            .await
+            .unwrap()
+            .unwrap()
+            .upvote_count,
+        1
+    );
+    assert_eq!(
+        state
+            .db
+            .get_learning(b)
+            .await
+            .unwrap()
+            .unwrap()
+            .upvote_count,
+        -1
+    );
+}
+
+/// learnings.allium: RateLearningViaMcp. A refused pair writes nothing.
+#[tokio::test]
+async fn learning_rate_refused_pair_writes_nothing() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+    let seen = create_retrieved_learning(&state, task_id, "Seen").await;
+    let unseen = create_approved_learning(
+        &state,
+        "Never surfaced",
+        crate::models::LearningScope::User,
+        None,
+        &[],
+    )
+    .await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [
+                { "learning_id": seen, "verdict": "helped" },
+                { "learning_id": unseen, "verdict": "helped" }
+            ] }
+        })),
+    )
+    .await;
+    assert_error(&resp, "retriev");
+    assert_eq!(
+        state
+            .db
+            .get_learning(seen)
+            .await
+            .unwrap()
+            .unwrap()
+            .upvote_count,
+        0,
+        "the good pair must not be written when another is refused"
+    );
+}
+
+#[tokio::test]
+async fn learning_rate_empty_ratings_is_invalid_params() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [] }
+        })),
+    )
+    .await;
+    assert!(is_error(&resp), "{resp:?}");
+}
+
+#[tokio::test]
+async fn learning_rate_same_learning_twice_is_invalid_params() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+    let a = create_retrieved_learning(&state, task_id, "Tip A").await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "learning_rate",
+            "arguments": { "task_id": task_id.0, "ratings": [
+                { "learning_id": a, "verdict": "helped" },
+                { "learning_id": a, "verdict": "wrong" }
+            ] }
+        })),
+    )
+    .await;
+    assert!(is_error(&resp), "{resp:?}");
+    assert_eq!(
+        state
+            .db
+            .get_learning(a)
+            .await
+            .unwrap()
+            .unwrap()
+            .upvote_count,
+        0
+    );
+}
+
+/// learnings.allium: QueryLearningsViaMcp. The default limit is 10.
+#[tokio::test]
+async fn learning_search_returns_ten_entries_by_default() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo/default-limit").await;
+    for i in 0..12 {
+        create_approved_learning(
+            &state,
+            &format!("Entry {i}"),
+            crate::models::LearningScope::Repo,
+            Some("/repo/default-limit"),
+            &[],
+        )
+        .await;
+    }
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "learning_search", "arguments": { "task_id": task_id.0 } })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert_eq!(text.matches("\n  Tags:").count(), 10, "{text}");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "learning_search", "arguments": { "task_id": task_id.0, "limit": 50 } })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert_eq!(text.matches("\n  Tags:").count(), 12, "{text}");
 }
 
 // --- delete_learning ---------------------------------------------------------
@@ -860,7 +1027,7 @@ async fn delete_learning_success() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "delete_learning",
+            "name": "learning_delete",
             "arguments": { "learning_id": learning_id.0 }
         })),
     )
@@ -888,7 +1055,7 @@ async fn delete_learning_not_found_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "delete_learning",
+            "name": "learning_delete",
             "arguments": { "learning_id": 9999 }
         })),
     )
@@ -915,7 +1082,7 @@ async fn query_learnings_uses_query_param_when_provided() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0, "query": "how to handle errors" }
         })),
     )
@@ -946,7 +1113,7 @@ async fn query_learnings_falls_back_to_task_context_when_no_query() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0 }
         })),
     )
@@ -985,7 +1152,7 @@ async fn query_learnings_soft_tag_boost_does_not_hard_filter() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "query_learnings",
+            "name": "learning_search",
             "arguments": { "task_id": task_id.0, "tag_filter": ["rust"] }
         })),
     )
@@ -1016,7 +1183,7 @@ async fn record_learning_tool_description_defers_every_authoring_rule_to_the_ski
     let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
     let description = tools
         .iter()
-        .find(|t| t["name"] == "record_learning")
+        .find(|t| t["name"] == "learning_record")
         .expect("record_learning must be registered")["description"]
         .as_str()
         .unwrap()
@@ -1051,7 +1218,7 @@ async fn record_learning_refuses_the_removed_task_scope() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "record_learning",
+            "name": "learning_record",
             "arguments": {
                 "task_id": task_id.0,
                 "kind": "convention",

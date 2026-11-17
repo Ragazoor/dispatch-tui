@@ -148,13 +148,34 @@ def off_scope_metrics(L, R):
 LEARNING_TOOLS = ("query_learnings", "record_learning", "rate_learning")
 
 
+# Trajectories keep the names the agent called. The tools were renamed
+# (ADR 0002), so both spellings are in the logs; count them as one.
+RENAMED = {
+    "learning_search": "query_learnings",
+    "learning_record": "record_learning",
+    "learning_rate": "rate_learning",
+}
+
+
 def trajectory_events():
     for f in glob.glob(TRAJ):
         for line in open(f):
             try:
-                yield json.loads(line)
+                e = json.loads(line)
             except ValueError:
                 continue
+            if isinstance(e, dict):
+                e["method"] = RENAMED.get(e.get("method"), e.get("method"))
+            yield e
+
+
+def rated_pairs(e):
+    """(learning_id, verdict) pairs of one rate_learning event: the old call
+    carried one in its args, the new one carries a `ratings` list."""
+    args = e.get("args") or {}
+    if isinstance(args.get("ratings"), list):
+        return [(r.get("learning_id"), r.get("verdict")) for r in args["ratings"] if isinstance(r, dict)]
+    return [(args.get("learning_id"), args.get("verdict"))]
 
 
 def error_text(e):
@@ -198,8 +219,9 @@ def user_scope_metrics():
     for e in trajectory_events():
         if e["method"] == "rate_learning":
             raters.add(e["task_id"])
-            if (e.get("args") or {}).get("verdict") == "helped":
-                helped.add((e["task_id"], (e.get("args") or {}).get("learning_id")))
+            for learning_id, verdict in rated_pairs(e):
+                if verdict == "helped":
+                    helped.add((e["task_id"], learning_id))
     weeks = collections.defaultdict(lambda: [0, 0, 0, 0])
     per_entry = collections.Counter()
     for r in R:

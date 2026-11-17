@@ -1,7 +1,7 @@
 ---
 max_turns: 12
 timeout_seconds: 300
-allowed_tools: [Read, Glob, Grep, Skill, mcp__dispatch__task_search, mcp__dispatch__wrap_up, mcp__dispatch__exit_session, mcp__dispatch__create_task, mcp__dispatch__update_tasks, mcp__dispatch__record_learning, mcp__dispatch__query_learnings]
+allowed_tools: [Read, Glob, Grep, Skill, mcp__dispatch__task_search, mcp__dispatch__wrap_up, mcp__dispatch__exit_session, mcp__dispatch__create_task, mcp__dispatch__update_tasks, mcp__dispatch__learning_record, mcp__dispatch__learning_search]
 tags: [dispatch-prompt]
 runs: 2
 ---

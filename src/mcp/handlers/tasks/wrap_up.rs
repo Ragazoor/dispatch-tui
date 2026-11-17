@@ -73,16 +73,16 @@ fn wrap_up_complete(
                 .to_string()
         }
         WrapUpAction::Done | WrapUpAction::Pr => {
-            let rate_learning_nudge = match action {
+            let learning_rate_nudge = match action {
                 WrapUpAction::Pr => {
                     "\n\n\
                     Before you finish: if any knowledge base entry was surfaced to you this task \
-                    and you haven't rated it yet, call `rate_learning` now (helped, wrong, or not_applicable if it did not fit). \
+                    and you haven't rated it yet, call `learning_rate` now (helped, wrong, or not_applicable if it did not fit). \
                     You can only rate learnings that were surfaced to you during this session."
                 }
                 WrapUpAction::Done | WrapUpAction::Rebase => "",
             };
-            format!("{rate_learning_nudge} You MUST call `session_exit` next as your final action.")
+            format!("{learning_rate_nudge} You MUST call `session_exit` next as your final action.")
         }
     };
     let no_git_note = match action {
