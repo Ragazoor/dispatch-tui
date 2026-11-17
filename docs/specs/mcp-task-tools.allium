@@ -84,7 +84,7 @@ rule ToolsAdvertiseAnnotations {
     -- nothing (task_search, epic_search, learning_search,
     -- query_usage, read_context, list_keybindings, work-package_search,
     -- list_workspaces, list_unseen_items). The core/Retrieval rows
-    -- query_learnings records are bookkeeping of what the caller was shown,
+    -- learning_search records are bookkeeping of what the caller was shown,
     -- not a change the caller makes, so they do not count.
     -- managed_feed_config is NOT in that list: its no-argument call reads but
     -- its other calls write, so it is declared idempotent (see

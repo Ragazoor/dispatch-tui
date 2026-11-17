@@ -132,7 +132,7 @@ use "./store-split.allium" as split
 -- prompt_injection for the dispatch prompt and learning_search for that
 -- tool. The enum's procedural value is never written. A repeat surfacing
 -- writes another row. The write is best-effort: a failed one is logged and
--- the learning is still surfaced, and a later rate_learning for it is then
+-- the learning is still surfaced, and a later learning_rate for it is then
 -- refused as not retrieved.
 
 ------------------------------------------------------------
