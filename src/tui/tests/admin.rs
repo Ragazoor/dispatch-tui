@@ -124,6 +124,14 @@ fn esc_closes_the_screen_and_drops_its_state() {
 }
 
 #[test]
+fn q_closes_the_screen_like_esc() {
+    let mut app = open(snapshot(true));
+    press(&mut app, 'q');
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.input.admin.is_none());
+}
+
+#[test]
 fn a_snapshot_that_arrives_after_the_screen_closed_is_ignored() {
     let mut app = make_app();
     let cmds = app.update(Message::Admin(AdminMessage::Loaded(Box::new(snapshot(

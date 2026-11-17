@@ -331,7 +331,8 @@ impl App {
         self.open_admin_confirm(confirm)
     }
 
-    /// Enter in the screen's one-line input. A blank entry sends nothing.
+    /// Enter in the screen's one-line input (`admin-surfaces.allium`: the
+    /// `*OnCommit` rules). A blank entry sends nothing.
     pub(in crate::tui) fn handle_admin_submit_text(&mut self, text: String) -> Vec<Command> {
         let prompt = self
             .input
@@ -371,7 +372,8 @@ impl App {
         self.input.mode = InputMode::Admin;
     }
 
-    /// `y` or `n` at the screen's confirmation.
+    /// `y` or `n` at the screen's confirmation (`admin-surfaces.allium`: the
+    /// `*OnConfirm` rules). Only `y` sends.
     pub(in crate::tui) fn handle_admin_confirm(&mut self, yes: bool) -> Vec<Command> {
         let confirm = self
             .input

@@ -15,7 +15,8 @@ impl App {
         vec![]
     }
 
-    /// Enter in the name input. A blank entry sends nothing.
+    /// Enter in the name input (`workspaces.allium: SetOwnNameOnCommit`). A
+    /// blank entry sends nothing.
     pub(in crate::tui) fn handle_submit_display_name(&mut self, name: String) -> Vec<Command> {
         self.input.clear_buffer();
         self.input.mode = InputMode::Normal;
