@@ -111,14 +111,21 @@ rule EditEpic {
         let description = if edited.description != "": edited.description else: opened.description
         let feed_command = if edited.feed_command != "": edited.feed_command else: null
         let interval = edited.feed_interval_secs
-        -- A sub-floor interval refuses the whole edit, so every write below is
-        -- guarded on acceptance: when the interval is refused NO field
-        -- changes, and the epic the board shows is the stored one. An
-        -- interval the save leaves as opened is not sent, so it is never
-        -- refused.
-        let accepted = interval = opened.feed_interval_secs
-                       or interval = null
-                       or seconds(interval) >= core/config.min_feed_interval
+        -- A refused save refuses the whole edit, so every write below is
+        -- guarded on acceptance: when it is refused NO field changes, and the
+        -- epic the board shows is the stored one. An interval the save leaves
+        -- as opened is not sent, so it is never refused.
+        -- store_refuses(epic, edited) is a black box: the store's update_epic
+        -- refuses the sent fields for a reason other than the floor: a
+        -- feed_command change by someone who is neither the epic's creator
+        -- nor an admin of its workspace (feeds.allium: FeedCommandAuthority),
+        -- a repo-group sub-epic renamed to a sibling's title, a visibility
+        -- change the caller may not make (workspaces.allium:
+        -- SetEpicVisibility), or an epic that is gone or unseen.
+        let interval_fits = interval = opened.feed_interval_secs
+                            or interval = null
+                            or seconds(interval) >= core/config.min_feed_interval
+        let accepted = interval_fits and not store_refuses(epic, edited)
         if accepted and title != opened.title:
             epic.title = title
         if accepted and description != opened.description:
@@ -133,7 +140,11 @@ rule EditEpic {
         -- Feed-ownership take-over offer: only when this edit actually
         -- CHANGES feed_command to a non-empty value (not a clear, not an
         -- edit that left it untouched), and only when a core/PollOwner row
-        -- already names a host other than this one. See @guidance for the
+        -- already names a host other than this one. The row is read after
+        -- the write, and the store's feed_command change has by then released
+        -- every claim held by a host of someone other than the setter
+        -- (feeds.allium: FeedCommandRunsOnSettersHost), so the offer only
+        -- names another host of the same person. See @guidance for the
         -- prompt this sits behind and feeds.allium: OverrideFeedOwner for
         -- what accepting it does.
         if accepted and feed_command != null and feed_command != opened.feed_command:
