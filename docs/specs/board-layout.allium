@@ -252,19 +252,17 @@ given {
 -- core/Epic.completed_at) — a real wallclock timestamp in milliseconds, not a
 -- rank — and the column sorts on it DESCENDING.
 --
--- The field is the Done column's own. It replaced a completion rank written
--- into sort_order: the negated timestamp, folded into one shared namespace
--- with manual and feed ordering. Two orderings were wrong for as long as that
--- lasted, and both are fixed by the split rather than worked around:
---   - A feed setting a POSITIVE sort_order on a done task as ordinary manual
---     ordering was indistinguishable from a rank, and sank the card below
---     every genuinely ranked one. Nothing a feed writes reaches completed_at.
+-- The field is the Done column's own, kept apart from sort_order, which
+-- carries manual and feed ordering. Sharing one field between the two would
+-- misorder cards in two ways:
+--   - A feed that sets a POSITIVE sort_order on a done task as ordinary
+--     manual ordering would read as a completion rank. Nothing a feed writes
+--     reaches completed_at.
 --   - A task created directly IN done — a feed upsert whose item arrives with
---     status done — never passed through the transition that stamped the
---     rank, so it carried none. The feed insert stamps completed_at itself
---     (feeds.allium, UpsertFeedTasks).
--- And sort_order means one thing again: no status transition reads or writes
--- it, in either direction.
+--     status done — never passes through a status transition. The feed
+--     insert stamps completed_at itself (feeds.allium, UpsertFeedTasks).
+-- So sort_order means one thing: no status transition reads or writes it, in
+-- either direction.
 --
 -- An epic card in Done need not be a done epic. It is drawn there because part
 -- of its subtree finished (see "Epic Card Placement"). So in the Done column,
@@ -314,13 +312,11 @@ given {
 --
 -- Manual reorder in Done. Moving a card by hand swaps the two cards'
 -- completed_at values and persists them (tasks.allium, ReorderItem). This
--- works for a TASK card and for an EPIC card alike: both now own the field the
--- column reads. The epic case used to be refused outright, because the card's
--- key was derived from its subtasks and it owned nothing the column read, so
--- the swap would have persisted a value nothing rendered and the card would
--- have sat exactly where it was. Now the write lands on
--- core/Epic.completed_at, done_sort_key prefers it over the derived subtask
--- key, and the card moves.
+-- works for a TASK card and for an EPIC card alike: both own the field the
+-- column reads. For an epic the write lands on core/Epic.completed_at,
+-- done_sort_key prefers it over the derived subtask key, and the card moves.
+-- Without its own field an epic card's key would come from its subtasks
+-- alone, and a swap would persist a value nothing renders.
 --
 -- Two costs, both accepted. The swap rewrites a factual timestamp, so after a
 -- reorder the field no longer says when the work finished — that is the user
@@ -357,10 +353,9 @@ given {
 -- every epic is not a plan — so flattening it would cost more than it
 -- gives.
 --
--- Done was exempt too, on the reasoning that completed work is read at the
--- epic level. It is not: "what did we finish" is a question about tasks,
--- and an exempt Done column answered it with an epic card whose only
--- report was a count. Done now flattens with Running and Review.
+-- Done is not exempt. "What did we finish" is a question about tasks, and
+-- an exempt Done column would answer it with an epic card whose only
+-- report is a count. Done flattens with Running and Review.
 --
 -- Scope: determined by the current view.
 --   - Main board view: scope is every task that passes the
@@ -565,9 +560,9 @@ given {
 --     what the repo filter, the epic hide-list, the only-active filter and the
 --     search query all admit. A section is never described as hiding a card
 --     the user could not have seen anyway.
---   - A section with no cards renders no header, collapsed or not, exactly as
---     today. Its collapse is remembered regardless, so the header comes back
---     folded when a card next lands in it.
+--   - A section with no cards renders no header, collapsed or not. Its
+--     collapse is remembered regardless, so the header comes back folded when
+--     a card next lands in it.
 --   - Collapsing applies wherever sections render: the main board, an epic
 --     view, and a flattened column alike, all off the same recorded state.
 --     In a flattened column the section's epic headers and orphan separator
@@ -586,7 +581,7 @@ given {
 -- Interaction:
 --   - A collapsed section's header holds the cursor: it is the only way back
 --     to a section whose cards are all hidden. An expanded section's header
---     does not, so navigation with nothing collapsed is exactly as it was.
+--     does not, so navigation with nothing collapsed steps over headers.
 --     A folded section and an open header are therefore two different kinds of
 --     item, not one item with a flag: whether a thing can hold the cursor is a
 --     property of what it is, so that every reader of a column's contents gets
@@ -655,7 +650,7 @@ given {
 -- else names an epic group to fold — an unflattened column has no such row
 -- (what it shows instead are real epic cards, a different concept this
 -- feature does not touch), and neither does a flattened column with no
--- header for that epic to begin with. Today that is Done: it groups a
+-- header for that epic to begin with. Done is such a column: it groups a
 -- flattened epic's tasks by order alone and draws no header for the group
 -- (see "Done Column Ordering"), so there is nothing there to fold. Reusing
 -- BoardView.draws_epic_headers rather than a fresh per-column check keeps this
@@ -692,7 +687,7 @@ given {
 --     the header says, never replaces it.
 --   - The header holds the cursor only while it draws folded, the only way
 --     back to a group whose cards are all hidden. An open epic-header row
---     is decoration, exactly as it is today, and does not.
+--     is decoration and does not.
 --   - Folding puts the cursor on the group's own folded header; unfolding
 --     puts it on the group's first card — for a parent with no card of its
 --     own in the column, the first row of its subtree that holds the
@@ -803,13 +798,13 @@ given {
 -- new tab rather than a new board key. Only-active is heavily used and stays
 -- on the board, not in the overlay: it is a lens. Tab steps the lens forward
 -- and BackTab (Shift+Tab) steps it back, so every lens is at most two presses
--- away. There are no `A` and `F` toggle keys.
+-- away.
 --
 -- The three lenses, in cycle order:
 --   everything   → every card the board filter admits (the default)
 --   flat         → the flattened rendering (see "Flattened Mode")
 --   flat_active  → flattened, and only tasks with a live session
---                  (tmux_window set)
+--                  (current_window set)
 -- Forward wraps from flat_active to everything; backward wraps the other way.
 --
 -- Dropped lens: there is no `active` lens, only-active with the columns still
@@ -819,8 +814,8 @@ given {
 -- The lens reaches inside a package view as it does everywhere else: both
 -- halves apply there (work-packages.allium: PackageViewCards).
 --
--- What `flat_active` narrows: only tasks where tmux_window is set are
--- visible (BoardView.task_is_visible), in addition to the board filter. It
+-- What `flat_active` narrows: only tasks with a live session (current_window
+-- set) are visible (BoardView.task_is_visible), in addition to the board filter. It
 -- is called the only-active filter everywhere else in this file:
 -- BoardLens.only_active is that predicate's switch.
 --
@@ -922,7 +917,7 @@ given {
 --   back returns to the same row. Space toggles the row under the cursor in
 --   every tab. There is no toggle-all key: `a` is ignored in the overlay.
 --
---   Repos tab: the repo list, as before. Space includes or excludes the repo
+--   Repos tab: the repo list. Space includes or excludes the repo
 --   under the cursor; `1`-`9` toggle the repo at that list position
 --   regardless of the cursor; `i` switches the whole repo filter between
 --   including and excluding the toggled repos; Backspace/Delete forgets the repo path, after a
