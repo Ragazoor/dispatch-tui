@@ -482,19 +482,10 @@ impl TaskService {
         task_id: TaskId,
         bookmarked: bool,
     ) -> Result<(), ServiceError> {
-        // The module refuses a missing task in its own words; answer the
-        // NotFound every other task lookup gives.
         self.db
             .set_bookmark(task_id, bookmarked)
             .await
-            .map_err(
-                |e| match e.downcast_ref::<crate::sync::writes::StoreRefusal>() {
-                    Some(r) if r.0 == format!("task {} does not exist", task_id.0) => {
-                        Self::task_not_found(task_id)
-                    }
-                    _ => ServiceError::from(e),
-                },
-            )
+            .map_err(|e| Self::refusal_as_not_found(e, task_id, None))
     }
 
     pub async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
@@ -849,8 +840,8 @@ impl TaskService {
         ServiceError::NotFound(format!("Task {} not found", id.0))
     }
 
-    /// Map the module's "task N not found" / "epic M does not exist" refusals
-    /// of `update_task` to the `NotFound` the service's own pre-checks answer,
+    /// Map the module's "task N not found" / "task N does not exist" / "epic M
+    /// does not exist" refusals of `update_task` and `set_bookmark` to the `NotFound` the service's own pre-checks answer,
     /// so a delete that lands between the caller's look and the write reads the
     /// same as one that landed before it. Any other refusal stays what
     /// [`ServiceError::from`] makes of it.
@@ -860,7 +851,10 @@ impl TaskService {
         epic_id: Option<EpicId>,
     ) -> ServiceError {
         if let Some(refusal) = e.downcast_ref::<crate::sync::writes::StoreRefusal>() {
-            if refusal.0 == format!("task {} not found", task_id.0) {
+            // update_task says "not found", write_bookmark "does not exist".
+            if refusal.0 == format!("task {} not found", task_id.0)
+                || refusal.0 == format!("task {} does not exist", task_id.0)
+            {
                 return Self::task_not_found(task_id);
             }
             if let Some(epic_id) = epic_id {

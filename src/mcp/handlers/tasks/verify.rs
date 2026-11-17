@@ -18,8 +18,8 @@ pub(crate) async fn handle_set_verify_command(
     tracing::info!(repo_path = %parsed.repo_path, "MCP set_verify_command");
     // Newline guard returns -32602 (invalid params) for a user-input error; the DB layer
     // would surface the same constraint as -32603 (internal error), so we validate here.
-    // Blank/whitespace commands are intentionally not rejected — the store layer turns
-    // them into a clear (`RepoConfigStore::set_verify_command`).
+    // A blank/whitespace command is not rejected: it means clear. It is mapped to
+    // None once here, so the store write and the reply agree.
     if parsed
         .command
         .as_deref()
@@ -27,14 +27,14 @@ pub(crate) async fn handle_set_verify_command(
     {
         return JsonRpcResponse::err(id, INVALID_PARAMS, "command must be a single line");
     }
+    let command = parsed.command.as_deref().filter(|c| !c.trim().is_empty());
     match state
         .db
-        .set_verify_command(&parsed.repo_path, parsed.command.as_deref())
+        .set_verify_command(&parsed.repo_path, command)
         .await
     {
         Ok(()) => {
-            // A blank command clears, as the store treats it.
-            let msg = match parsed.command.as_deref().filter(|c| !c.trim().is_empty()) {
+            let msg = match command {
                 Some(cmd) => format!("Verify command set for `{}`: `{cmd}`", parsed.repo_path),
                 None => format!("Verify command cleared for `{}`", parsed.repo_path),
             };

@@ -78,11 +78,6 @@ async fn query_usage_refuses_a_limit_below_one() {
             Some(json!({ "name": "query_usage", "arguments": { "limit": bad } })),
         )
         .await;
-        let rejected = resp.error.is_some()
-            || resp
-                .result
-                .as_ref()
-                .is_some_and(|r| r["isError"] == json!(true));
-        assert!(rejected, "limit {bad} must be refused: {resp:?}");
+        assert!(is_error(&resp), "limit {bad} must be refused: {resp:?}");
     }
 }

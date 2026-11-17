@@ -42,59 +42,35 @@ async fn set_verify_command_rejects_multiline_command() {
     assert_error(&resp, "single line");
 }
 
+/// SetVerifyCommandViaMcp: an omitted or blank command clears the stored one,
+/// and the reply says "cleared", not "set".
 #[tokio::test]
-async fn set_verify_command_clears_when_command_omitted() {
-    let state = test_state().await;
-    state.db_write().save_repo_path("/my/repo").await.unwrap();
-    state
-        .db
-        .set_verify_command("/my/repo", Some("old-cmd"))
-        .await
-        .unwrap();
+async fn set_verify_command_clears_when_command_omitted_or_blank() {
+    for args in [
+        json!({ "repo_path": "/my/repo" }),
+        json!({ "repo_path": "/my/repo", "command": "   " }),
+    ] {
+        let state = test_state().await;
+        state.db_write().save_repo_path("/my/repo").await.unwrap();
+        state
+            .db
+            .set_verify_command("/my/repo", Some("old-cmd"))
+            .await
+            .unwrap();
 
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "set_verify_command",
-            "arguments": { "repo_path": "/my/repo" }
-        })),
-    )
-    .await;
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "set_verify_command", "arguments": args })),
+        )
+        .await;
 
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("cleared"),
-        "response should say cleared; got: {text}"
-    );
-
-    let stored = state.db.get_verify_command("/my/repo").await;
-    assert_eq!(stored, None);
-}
-
-/// SetVerifyCommandViaMcp: a blank command clears the stored one, and the
-/// reply says so rather than "set".
-#[tokio::test]
-async fn set_verify_command_says_cleared_for_a_blank_command() {
-    let state = test_state().await;
-    state.db_write().save_repo_path("/my/repo").await.unwrap();
-    state
-        .db
-        .set_verify_command("/my/repo", Some("old-cmd"))
-        .await
-        .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "set_verify_command",
-            "arguments": { "repo_path": "/my/repo", "command": "   " }
-        })),
-    )
-    .await;
-
-    let text = extract_response_text(&resp);
-    assert!(text.contains("cleared"), "got: {text}");
-    assert_eq!(state.db.get_verify_command("/my/repo").await, None);
+        let text = extract_response_text(&resp);
+        assert!(text.contains("cleared"), "{args}: got {text}");
+        assert_eq!(
+            state.db.get_verify_command("/my/repo").await,
+            None,
+            "{args}"
+        );
+    }
 }
