@@ -240,7 +240,9 @@ rule ClaimSuperAdminFromScreen {
     ensures: workspaces/ClaimSuperAdmin()
 
     @guidance
-        -- `c`, from any pane, only while the screen shows the claim hint. No
+        -- `c`, from any pane, while the store has no super-admin; the
+        -- screen's footer then lists `[c]` for everyone, and the claim hint
+        -- also shows to a person who administers nothing. No
         -- confirmation: it works once and is recoverable (workspaces.allium
         -- D11). While a super-admin exists the key is not in the screen's
         -- help and does nothing.
@@ -265,9 +267,10 @@ rule DeleteUnseenItemFromScreen {
 -- Rules: committing a prompt
 ------------------------------------------------------------
 
--- Enter in the text input commits it (AdminTextCommitted); `y` at the
+-- Enter in the text input commits it (AdminTextCommitted); `y` or `Y` at the
 -- confirmation commits it (AdminConfirmed). The text is trimmed, and a blank
--- entry sends nothing. `n` and Esc close the prompt and send nothing. One rule
+-- entry sends nothing. Esc in the text input, and any other key at the
+-- confirmation, close the prompt and send nothing. One rule
 -- per purpose; none re-checks a role (TheScreenRefusesNothingTheStoreAllows).
 -- A refusal shows in the error popup (AdminScreenRefreshesAfterAWrite).
 
@@ -356,7 +359,9 @@ rule RevokeSuperAdminOnConfirm {
     ensures: workspaces/RevokeSuperAdmin(target.identity)
 
     @guidance
-        -- The store refuses revoking the last super-admin.
+        -- The same path as super-admin_set (SetSuperAdminTool): revoking a
+        -- person who is no longer a super-admin changes nothing and
+        -- succeeds; the store still refuses revoking the last super-admin.
 }
 
 rule DeleteUnseenItemOnConfirm {
