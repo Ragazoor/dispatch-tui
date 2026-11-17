@@ -41,6 +41,72 @@ use "./core.allium" as core
 use "./observability.allium" as observability
 
 ------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+-- The repo's Rust test suite, the party the drift gate is demanded of.
+external entity TestSuite {}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The drift gate: obligations on the test suite, stated as a contract so that
+-- removing a check is a visible spec change rather than a quiet test deletion.
+-- There is no sweep for keys that act without a row: KeyWithoutARowCannotAct
+-- holds by construction, since a handler can only run what a row names.
+contract KeybindingDriftGate {
+    -- For one row of a dispatch-received namespace: with the row's context
+    -- set up, pressing each of its keys records the row's action id (or,
+    -- for a records_usage false row, takes its effect and records nothing).
+    -- For a catch-all row, the press is a key no other applicable row in
+    -- the namespace lists.
+    press_every_row_key: (binding: KeyBinding) -> Boolean
+
+    @invariant RecordedActionMatchesRow
+        -- Run for every row whose records_usage is true, per context. The
+        -- action id
+        -- KeypressRecordsFeatureUsage records for a press equals the action of
+        -- the row listing that key in that context. A handler that runs one
+        -- action and records another fails here, and so does a row whose id or
+        -- context has drifted from what its key actually does.
+
+    @invariant TableIsWellFormed
+        -- KeyUniquePerContext, ContextsDoNotOverlapForAKey and
+        -- ActionOncePerContext are asserted over the real table, not over a
+        -- fixture.
+
+    @invariant EveryNamespaceHasRows
+        -- Non-vacuity: every KeyNamespace other than tmux_global has at
+        -- least one row, and the per-row checks above run over each of them.
+        -- A namespace with no rows would make every check over it pass
+        -- trivially while every key in it is inert.
+
+    @invariant ModifiedPressDoesNotBorrowTheBareRow
+        -- For bare-key rows: pressing a modified form of the row's key
+        -- (Ctrl+<key>) that no row lists runs nothing and records nothing
+        -- (ModifiedPressMatchesOnlyItsOwnRow), catch-all or not.
+
+    @invariant UnrecordedRowsRecordNothing
+        -- For a row with records_usage false, the press is asserted by its
+        -- effect (the field's text or caret changed as the action says) and
+        -- by NOTHING being recorded — not the row's id, not any id.
+
+    @invariant TmuxGlobalRowsTrackTheirBindings
+        -- The tmux.global toggle_agent_tree row's key is `Prefix+` followed
+        -- by the key the runtime actually binds (agent-tree.allium:
+        -- config.agent_tree_toggle_key), so changing the toggle key without
+        -- the row, or the row without the key, fails here. Likewise the
+        -- jump_to_dispatch row's key is `Prefix+` followed by the jump-back
+        -- key the board binds and unbinds (split-pane.allium:
+        -- JumpBackToTuiWindow), written capitalised as the table writes
+        -- keys: `Prefix+Space`. The jump-back key is a named key in the
+        -- runtime (JUMP_BACK_KEY, beside AGENT_TREE_TOGGLE_KEY), not a
+        -- literal at the bind site, so the binding and the row read the same
+        -- value and changing either without the other fails here.
+}
+
+------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
@@ -271,7 +337,7 @@ enum KeyReceiver { dispatch | tmux }
 --   exclusive by these definitions. Esc on the top-level board with no
 --   search, no selection and the cursor off a select-all row has no row and
 --   does nothing; so do U and R outside an epic view.
--- board.normal, cursor-level (Enter, Space, m, H, L). The cursor is on at
+-- board.normal, cursor-level (Enter, Space, i, m, w, b, V, H, L). The cursor is on at
 -- most one of the first five (a select-all row is not a card or header);
 -- off_epic_card is the complement of on_epic_card:
 --   on_column_select_all      "on a column's select-all row"    Enter: select_all
@@ -283,11 +349,13 @@ enum KeyReceiver { dispatch | tmux }
 --                                                                Enter: jump_to_deepest_epic;
 --                                                                m: reparent_epic; H/L;
 --                                                                w: link_work_package
---   on_work_package_card      "on a work package card"          Space: enter_work_package
+--   on_work_package_card      "on a work package card"          Space: enter_work_package;
+--                                                                V: toggle_work_package_visibility
 --   on_task_card              "on a task card"                  i: open_task_detail;
 --                                                                m: move_task_to_epic (the whole
 --                                                                selection when tasks are selected);
---                                                                w: link_work_package
+--                                                                w: link_work_package;
+--                                                                b: toggle_bookmark
 --   on_flattened_task_card    "on a task card in a flattened    Enter: jump_to_task_epic
 --                              column" (BoardView.flattens;      (does nothing when the task
 --                              a subset of on_task_card)         has no epic)
@@ -545,6 +613,7 @@ rule KeyWithoutARowCannotAct {
         and (b.context = null or context_holds(b.context)))
     requires: not observability/is_text_entry(key)
 
+    -- observable output; no rule listens.
     ensures: KeyIgnored(namespace: namespace, key: key)
 
     @guidance
@@ -565,40 +634,6 @@ rule KeyWithoutARowCannotAct {
         -- ClearAgentTreeErrorNotice). Neither records anything.
 }
 
-rule ModifiedPressMatchesOnlyItsOwnRow {
-    -- A press with Ctrl or Alt held is looked up under its modified name
-    -- (see KeyBinding.keys: "Ctrl+D", "Alt+B", "Ctrl+Left") and matches only
-    -- a row that lists that modified form. It never falls back to the bare
-    -- key's row: Ctrl+c in board.normal does nothing (it is not copy_task),
-    -- and Ctrl+b at the tag step does not pick Bug. A modified press with no
-    -- row is KeyIgnored, by KeyWithoutARowCannotAct, and is not text entry.
-    when: KeyPressed(user, namespace, key)
-
-    requires: namespace != tmux_global
-    requires: key_has_ctrl_or_alt(key)
-    requires: not KeyBindings.any(b =>
-        b.namespace = namespace
-        and key in b.keys
-        and (b.context = null or context_holds(b.context)))
-
-    ensures: KeyIgnored(namespace: namespace, key: key)
-
-    @guidance
-        -- The catch-all ("any other key") does NOT cover a modified press: it
-        -- answers only plain presses. In a y/Y confirmation dialog Ctrl+y
-        -- leaves the dialog open, and in the error popup a Ctrl/Alt press does
-        -- not dismiss. A modified press never borrows the row of the key it
-        -- modifies and never falls to a catch-all; only a row listing the
-        -- modified form answers it.
-        -- Every modified key that acts therefore has a row: Ctrl+D / Ctrl+U
-        -- (navigate_half_page) and Ctrl+C (exit_pane) in the panes, and
-        -- Ctrl+Left / Ctrl+Right / Alt+Left / Alt+Right / Alt+B / Alt+F
-        -- (text_cursor_word_left / _right) in the text fields.
-        -- Recorded usage detail still drops modifiers (key_label; see
-        -- KeyBinding.keys), so a recorded "Left" may have been Ctrl+Left. The
-        -- action id tells them apart; the detail does not.
-}
-
 -- == Reading the table ==
 
 rule ListKeybindingsViaMcp {
@@ -615,6 +650,7 @@ rule ListKeybindingsViaMcp {
         if namespace != null:
             key_namespace_is_valid(namespace) or key_family_is_valid(namespace)
 
+    -- observable output; no rule listens.
     ensures: KeybindingsListed(namespace: namespace, query: query)
 
     @guidance
@@ -658,6 +694,7 @@ rule HelpOverlayIsTheTable {
     -- is in neither.
     when: HelpOverlayOpened(user)
 
+    -- observable output; no rule listens.
     ensures: KeybindingsShown(namespace: null)
 }
 
@@ -720,9 +757,6 @@ invariant LastRowKeyWarnsItDoesNotEnterAnEpic {
 -- The parties are core.allium's: the operator at the keyboard and the MCP
 -- client reading the catalogue.
 
--- The repo's Rust test suite, the party the drift gate is demanded of.
-external entity TestSuite {}
-
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
@@ -740,6 +774,26 @@ surface KeyInput {
         -- Every press in a dispatch-received namespace is answered by exactly
         -- one of KeypressRunsItsRowsAction or KeyWithoutARowCannotAct (or is
         -- text entry). There is no third path.
+
+    @guarantee ModifiedPressMatchesOnlyItsOwnRow
+        -- A press with Ctrl or Alt held is looked up under its modified name
+        -- (see KeyBinding.keys: "Ctrl+D", "Alt+B", "Ctrl+Left") and matches
+        -- only a row that lists that modified form. It never falls back to
+        -- the bare key's row: Ctrl+c in board.normal does nothing (it is not
+        -- copy_task), and Ctrl+b at the tag step does not pick Bug. It is
+        -- never text entry, so a modified press with no row is answered by
+        -- KeyWithoutARowCannotAct like any other unbound key.
+        -- The catch-all ("any other key") does NOT cover a modified press: it
+        -- answers only plain presses (KeypressRunsItsRowsAction's catch_all).
+        -- In a y/Y confirmation dialog Ctrl+y leaves the dialog open, and in
+        -- the error popup a Ctrl/Alt press does not dismiss.
+        -- Every modified key that acts therefore has a row: Ctrl+D / Ctrl+U
+        -- (navigate_half_page) and Ctrl+C (exit_pane) in the panes, and
+        -- Ctrl+Left / Ctrl+Right / Alt+Left / Alt+Right / Alt+B / Alt+F
+        -- (text_cursor_word_left / _right) in the text fields.
+        -- Recorded usage detail drops modifiers (key_label; see
+        -- KeyBinding.keys), so a recorded "Left" may have been Ctrl+Left. The
+        -- action id tells them apart; the detail does not.
 
     @guarantee PanesRecordUsageLikeTheBoard
         -- The agent-tree companion pane and the diff pane record each press
@@ -831,7 +885,7 @@ surface KeybindingCatalogue {
             binding.receiver
 
     provides:
-        McpListKeybindings(agent, namespace?)
+        McpListKeybindings(agent, namespace?, query?)
 
     @guarantee CatalogueIsTheDispatchTable
         -- The rows returned are the rows the key handlers look keys up in, not
@@ -877,61 +931,6 @@ surface HelpOverlay {
         -- tables (what Space does on a card with no worktree, how `/` matches
         -- ids, …) moves into the owning row's description or note, so it is
         -- reachable from both readers rather than from neither.
-}
-
--- The drift gate: obligations on the test suite, stated as a contract so that
--- removing a check is a visible spec change rather than a quiet test deletion.
--- There is no sweep for keys that act without a row: KeyWithoutARowCannotAct
--- holds by construction, since a handler can only run what a row names.
-contract KeybindingDriftGate {
-    -- For one row of a dispatch-received namespace: with the row's context
-    -- set up, pressing each of its keys records the row's action id (or,
-    -- for a records_usage false row, takes its effect and records nothing).
-    -- For a catch-all row, the press is a key no other applicable row in
-    -- the namespace lists.
-    press_every_row_key: (binding: KeyBinding) -> Boolean
-
-    @invariant RecordedActionMatchesRow
-        -- Run for every row whose records_usage is true, per context. The
-        -- action id
-        -- KeypressRecordsFeatureUsage records for a press equals the action of
-        -- the row listing that key in that context. A handler that runs one
-        -- action and records another fails here, and so does a row whose id or
-        -- context has drifted from what its key actually does.
-
-    @invariant TableIsWellFormed
-        -- KeyUniquePerContext, ContextsDoNotOverlapForAKey and
-        -- ActionOncePerContext are asserted over the real table, not over a
-        -- fixture.
-
-    @invariant EveryNamespaceHasRows
-        -- Non-vacuity: every KeyNamespace other than tmux_global has at
-        -- least one row, and the per-row checks above run over each of them.
-        -- A namespace with no rows would make every check over it pass
-        -- trivially while every key in it is inert.
-
-    @invariant ModifiedPressDoesNotBorrowTheBareRow
-        -- For bare-key rows: pressing a modified form of the row's key
-        -- (Ctrl+<key>) that no row lists runs nothing and records nothing
-        -- (ModifiedPressMatchesOnlyItsOwnRow), catch-all or not.
-
-    @invariant UnrecordedRowsRecordNothing
-        -- For a row with records_usage false, the press is asserted by its
-        -- effect (the field's text or caret changed as the action says) and
-        -- by NOTHING being recorded — not the row's id, not any id.
-
-    @invariant TmuxGlobalRowsTrackTheirBindings
-        -- The tmux.global toggle_agent_tree row's key is `Prefix+` followed
-        -- by the key the runtime actually binds (agent-tree.allium:
-        -- config.agent_tree_toggle_key), so changing the toggle key without
-        -- the row, or the row without the key, fails here. Likewise the
-        -- jump_to_dispatch row's key is `Prefix+` followed by the jump-back
-        -- key the board binds and unbinds (split-pane.allium:
-        -- JumpBackToTuiWindow), written capitalised as the table writes
-        -- keys: `Prefix+Space`. The jump-back key is a named key in the
-        -- runtime (JUMP_BACK_KEY, beside AGENT_TREE_TOGGLE_KEY), not a
-        -- literal at the bind site, so the binding and the row read the same
-        -- value and changing either without the other fails here.
 }
 
 surface KeybindingTestSuite {

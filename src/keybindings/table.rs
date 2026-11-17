@@ -1517,7 +1517,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["Space", "Enter"],
         None,
         "jump_to_agent",
-        "Switch tmux to the agent's window. Does nothing on your own task or with no agent under the cursor",
+        "Switch tmux to the agent's window, or resume the agent when it has no window. Does nothing on your own task or with no agent under the cursor",
         None,
     ),
     row(
