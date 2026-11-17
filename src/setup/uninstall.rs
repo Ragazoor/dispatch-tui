@@ -15,8 +15,8 @@ pub(super) struct UninstallPaths {
 impl UninstallPaths {
     /// Resolve the real `$HOME`-derived locations used in production.
     ///
-    /// `data_dir` is the operator's `--db` / `DISPATCH_DATA_DIR`: it names the data
-    /// directory the purge works in, and is never opened.
+    /// `data_dir` is the operator's `--data-dir` / `DISPATCH_DATA_DIR`: it names
+    /// the data directory the purge works in, and is never opened.
     fn resolve(data_dir: &Path) -> Result<Self> {
         let claude_dir = claude_dir()?;
         Ok(Self {
@@ -29,8 +29,8 @@ impl UninstallPaths {
     }
 }
 
-/// `data_dir` is the global `--db` (default: the XDG data directory's
-/// `tasks.db`); `--purge` works in its parent directory.
+/// `data_dir` is the global `--data-dir` (default: the XDG data directory);
+/// `--purge` works in that directory.
 pub fn run_uninstall(yes: bool, purge: bool, data_dir: &Path) -> Result<()> {
     let paths = UninstallPaths::resolve(data_dir)?;
     run_uninstall_in(&paths, &StdinConfirmer, yes, purge)

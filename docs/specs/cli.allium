@@ -801,19 +801,32 @@ surface DispatchCommandLine {
 
     @guarantee UninstallForgetsThisMachine
         -- `dispatch uninstall [--yes] [--purge]` is destructive and
-        -- operator-only: no agent or hook runs it. It removes the dispatch
-        -- MCP configuration from Claude Code. With `--purge` it also deletes
-        -- this machine's host file (host.allium: HostFile) and the log file
-        -- from the data directory, and the directory itself if that leaves it
-        -- empty. The confirmation it asks first says that this machine's
-        -- identity will be forgotten: a later launch mints a new one, and
-        -- tasks stamped with the old host id stop being this machine's. It
-        -- states no task count: tasks live in the store, which a purge does
-        -- not touch, and counting them would mean opening a database
-        -- (storage.allium: NoSqlite). It never opens, reads or deletes a
-        -- leftover `tasks.db`, `-wal` or `-shm` (storage.allium:
-        -- CodeNeverTouchesLegacyDatabase); those are the operator's to delete
-        -- by hand.
+        -- operator-only: nothing in dispatch, no agent and no hook calls it.
+        -- It prints its plan to stderr, then asks one "Continue?" that
+        -- defaults to yes and that `--yes` skips. It then removes, each on a
+        -- best-effort basis (a failure warns and the rest still run): the
+        -- dispatch plugin directory, the `dispatch` MCP server entry from
+        -- Claude Code's user configuration and from the legacy
+        -- `~/.claude/.mcp.json`, and the status line settings file. Claude
+        -- Code's `settings.json` is left alone.
+        -- With `--purge` it then deletes this machine's host file (host.allium:
+        -- HostFile) and the log file from the data directory, and the
+        -- directory itself if that leaves it empty. Before that it asks a
+        -- second prompt that defaults to no and that `--yes` never skips: it
+        -- says this machine's identity will be forgotten (a later launch
+        -- mints a new one, and tasks stamped with the old host id stop being
+        -- this machine's). With neither file present it skips the prompt and
+        -- the purge. The prompt states no task count: tasks live in the
+        -- store, which a purge does not touch, and counting them would mean
+        -- opening a database (storage.allium: NoSqlite). It never opens,
+        -- reads or deletes a leftover `tasks.db`, `-wal` or `-shm`
+        -- (storage.allium: CodeNeverTouchesLegacyDatabase); when the
+        -- directory still holds other files, it says those are no longer used
+        -- and are the operator's to delete by hand.
+        -- A prompt that cannot be answered (closed input) counts as no, never
+        -- as consent, and is not a failure. It ends "Uninstall complete." when
+        -- it removed anything, else "Nothing to remove."; a declined
+        -- "Continue?" prints "Aborted." and exits with success.
 
     @guidance
         -- SUBCOMMAND INVENTORY, and where each is specified:
