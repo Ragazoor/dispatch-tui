@@ -30,12 +30,12 @@
 --           agent-tree.allium, startup.allium). Their rows here are a
 --           catalogue entry, not the mechanism.
 --
--- Why this exists: an agent driving the board read `G` as "enter the epic"
--- (it jumps to the last row of the column; Space enters an epic) because no
--- surface gave it an overview of the keys. Key knowledge was spread across
--- per-mode handlers, a hand-written help overlay and a prose table in
--- docs/reference.md, and the three could disagree. One table, read by all of
--- them, makes disagreement impossible rather than merely discouraged.
+-- Why this exists: an agent with no overview of the keys guesses them, and
+-- reads `G` as "enter the epic" (it jumps to the last row of the column;
+-- Space enters an epic). Key knowledge kept in per-mode handlers, a
+-- hand-written help overlay and a prose key table can disagree. One table,
+-- read by all of them, makes disagreement impossible rather than merely
+-- discouraged.
 
 use "./core.allium" as core
 use "./observability.allium" as observability
@@ -115,8 +115,8 @@ contract KeybindingDriftGate {
 -- agent_diff are two rows, and may run two different actions.
 --
 -- Published names (the MCP tool's `namespace` argument, the grouping headers in
--- its output and in the help overlay) are the dotted forms. Inventory of the
--- board's modes taken from the TUI's input modes and overlays as of this spec:
+-- its output and in the help overlay) are the dotted forms. One namespace per
+-- input mode and overlay of the TUI:
 --
 --   board_normal                 board.normal                 the kanban board, no dialog or overlay open
 --   board_detail                 board.detail                 the task-detail overlay
@@ -255,9 +255,9 @@ contract KeybindingDriftGate {
 -- board's; that is the handler's property, not the row's (see
 -- KeypressRunsItsRowsAction).
 --
--- board.confirm, one of the eight originally agreed names, is kept as the
--- FAMILY name of the per-dialog namespaces: no row has it as its namespace,
--- and each dialog's namespace keeps today's confirm_* action ids intact. The
+-- board.confirm is the FAMILY name of the per-dialog namespaces: no row has
+-- it as its namespace, and each dialog's rows carry confirm_* action ids
+-- (confirm_quit_yes, confirm_<dialog>_no, …). The
 -- picker family (board.picker.*) is the same arrangement. Family names are
 -- accepted by keybinding_search as a filter (ListKeybindingsViaMcp).
 --
@@ -299,9 +299,8 @@ enum KeyReceiver { dispatch | tmux }
 -- reading of prose. Each literal carries plain words as its display text
 -- (the help overlay and keybinding_search show the words, never the literal).
 --
--- Inventoried from the board's and the companion pane's handlers as of this
--- spec. The conditions
--- for one key are defined to be mutually exclusive: where today's handler
+-- Inventoried from the board's and the companion pane's handlers. The
+-- conditions for one key are defined to be mutually exclusive: where a handler
 -- tests them in priority order, each literal's definition below already
 -- excludes every condition that outranks it, and that definition is the
 -- same whichever key uses the literal. So ContextsDoNotOverlapForAKey holds
@@ -411,8 +410,8 @@ enum KeyReceiver { dispatch | tmux }
 --                              or Done task, never a Running
 --                              one (that is stuck_task)
 -- board.detail:
---   detail_zoomed             "with the detail zoomed"          (no row guarded by it
---                                                                today: `z` toggles zoom
+--   detail_zoomed             "with the detail zoomed"          (no row guarded by it:
+--                                                                `z` toggles zoom
 --                                                                both ways and no other
 --                                                                key changes meaning)
 -- agent_tree.tree, the kind of the selected tree node:
@@ -468,7 +467,7 @@ entity KeyBinding {
     --
     -- One reserved entry, "any other key", is the catch-all: it matches a
     -- press no other applicable row in the namespace lists, and only then
-    -- (lowest priority). It exists for the modes whose behaviour today is
+    -- (lowest priority). It exists for the modes that answer
     -- "anything else": every y/Y confirmation dialog, where any key but y/Y
     -- is confirm_<dialog>_no, and the error popup, where any key is
     -- dismiss_error. The three dialogs with their own key sets have no
@@ -484,16 +483,15 @@ entity KeyBinding {
     -- Context is how one key does different things within one mode without
     -- the table lying about it: `q` is two rows in board.normal — exit_epic
     -- "inside an epic view" and quit "on the top-level board" — each
-    -- described separately, each recorded under its own id as today.
+    -- described separately, each recorded under its own id.
     context:     KeyContext?
 
     -- Stable action id. Reuses the feature-usage action names
     -- (observability.allium: FeatureUsageEvent.action — navigate_row_last,
-    -- toggle_help, exit_epic, confirm_quit_yes, …) so the usage history
-    -- recorded before the table existed keeps its meaning. Named after the
-    -- effect, never the key: rebinding edits `keys`, not `action`. The
-    -- agent-tree and diff panes, which recorded nothing before, name their
-    -- actions the same way, reusing a board id where the effect is the same
+    -- toggle_help, exit_epic, confirm_quit_yes, …) so one id means one
+    -- action across the whole usage history. Named after the effect, never
+    -- the key: rebinding edits `keys`, not `action`. The agent-tree and diff
+    -- panes name their actions the same way, reusing a board id where the effect is the same
     -- (`G` in agent_diff is navigate_row_last).
     action:      String
 
@@ -572,7 +570,7 @@ rule KeypressRunsItsRowsAction {
         -- two rows of a namespace that share a key from both applying at once.
         -- A listed key always beats the catch-all; the catch-all row runs only
         -- for a press no applicable row lists. When the catch-all runs, the
-        -- recorded detail is the key actually pressed, as today.
+        -- recorded detail is the key actually pressed.
         -- context_holds evaluates one KeyContext against the board at press
         -- time — what the cursor is on, whether an epic view or split view is
         -- open. It is the same evaluation the drift gate uses to set a row's
@@ -741,7 +739,8 @@ invariant ActionOncePerContext {
                 implies a.action != b.action
 }
 
--- The `G` row carries the warning that motivated this spec. Expressed on the
+-- The `G` row carries the warning this spec exists for (see "Why this
+-- exists" above). Expressed on the
 -- one row that must carry it rather than as a general rule, because a note is
 -- table content, and this is the one note the table may not lose.
 invariant LastRowKeyWarnsItDoesNotEnterAnEpic {
@@ -863,9 +862,9 @@ surface KeyInput {
         -- (navigate_row, navigate_row_first, navigate_row_last,
         -- navigate_half_page and the board's column and scroll motions) is
         -- recorded even when the cursor or scroll is already at the edge and
-        -- nothing moves. The board and both panes behave this way today, and
-        -- keeping it keeps usage history comparable across the change to
-        -- table-driven dispatch. This is the one exception to "a press that
+        -- nothing moves. The board and both panes behave this way, so a
+        -- navigation count means the same in every pane and across the whole
+        -- usage history. This is the one exception to "a press that
         -- changes nothing records nothing"; it does not extend further. H/L
         -- with neither a selection nor a card under the cursor move nothing
         -- and record nothing (see the off_epic_card context).
@@ -926,11 +925,12 @@ surface HelpOverlay {
         -- the overlay does not answer to.
 
     @guidance
-        -- docs/reference.md's Key Bindings section is reduced to a pointer at
-        -- this overlay and at keybinding_search. Prose that used to live in its
-        -- tables (what Space does on a card with no worktree, how `/` matches
-        -- ids, …) moves into the owning row's description or note, so it is
-        -- reachable from both readers rather than from neither.
+        -- docs/reference.md's Key Bindings section is a pointer at this
+        -- overlay and at keybinding_search, with no key list of its own.
+        -- What a key does in a particular case (what Space does on a card with
+        -- no worktree, how `/` matches ids, …) lives in the owning row's
+        -- description or note, so it is reachable from both readers rather
+        -- than from neither.
 }
 
 surface KeybindingTestSuite {
