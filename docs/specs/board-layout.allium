@@ -328,9 +328,8 @@ given {
 --
 -- A card with no completed_at at all sorts last, below every dated card, and
 -- is refused a manual reorder — there is no value to swap. It is specified
--- because the ordering must be total, not because it is expected: the schema
--- migration dates every pre-existing done row, and every route into done since
--- stamps one, so nothing is left to reach it.
+-- because the ordering must be total, not because it is expected: every route
+-- into done stamps one.
 
 ------------------------------------------------------------
 -- Flattened Mode
@@ -1263,7 +1262,7 @@ entity BoardView {
     -- its substatus label come from these and nothing else: the epic
     -- substatus (epics.allium, "Epic substatus") computed over this slice,
     -- mapped as in section_of's note below.
-    placing_tasks_in(epic, status): filter(placing_tasks(epic), t => t.status = status)
+    placing_tasks_in(epic, column): placing_tasks(epic) where status = column
 
     -- The key an epic's card sorts by in the Done column, read descending
     -- ("Done Column Ordering"). The epic's own completion time wins when it
@@ -1368,6 +1367,10 @@ entity BoardView {
 
     @guidance
         -- == Black boxes ==
+        -- filter(coll, x => p): the elements of coll for which p holds. Used
+        -- where p names the element itself (`c in owners`,
+        -- `task_is_visible(t)`), which `coll where p` cannot: a `where`
+        -- predicate reads only the element's fields.
         -- own_match(title, id, query): board_search_filter's predicate.
         -- latest_completion(tasks): the greatest completed_at among the
         -- tasks, null when none has one.
