@@ -777,7 +777,12 @@ surface KeyInput {
         -- Esc, which cancels the whole form. A typed character, Enter or a
         -- caret key does nothing: the description comes from the editor
         -- alone, and a board press never submits one. An editor result that
-        -- arrives after the cancel finds no form and creates nothing.
+        -- arrives after the cancel finds no form and creates nothing. The
+        -- step has no text field, so a typed character there is not text
+        -- entry: it has no row and changes nothing (KeyWithoutARowCannotAct).
+        -- When the editor never opens (one is already open, or its window
+        -- or file cannot be made), the board shows the error and the form
+        -- stays at this step until Esc; the status line names Esc.
 
     @guarantee PaneStartupScreenIsOutsideUsage
         -- While a companion or diff pane waits for its task, or shows its

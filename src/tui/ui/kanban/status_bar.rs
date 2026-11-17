@@ -67,7 +67,7 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
         ),
         InputMode::InputTitle => hint("Creating task: enter title", YELLOW),
         InputMode::InputDescription => {
-            hint("Creating task: opening $EDITOR for description", YELLOW)
+            hint("Creating task: opening $EDITOR for description  [Esc] cancel", YELLOW)
         }
         InputMode::InputRepoPath => hint("Creating task: enter repo path", YELLOW),
         InputMode::InputTag => hint_text(
@@ -82,7 +82,7 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
         InputMode::ConfirmDone => hint_text(app, "Move to Done? [y/n]", YELLOW),
         InputMode::InputEpicTitle => hint("Creating epic: enter title", PURPLE),
         InputMode::InputEpicDescription => {
-            hint("Creating epic: opening $EDITOR for description", PURPLE)
+            hint("Creating epic: opening $EDITOR for description  [Esc] cancel", PURPLE)
         }
         InputMode::ConfirmDeleteEpic => hint_text(app, "Delete epic and subtasks? [y/n]", RED),
         InputMode::Help => hint("[?] or [Esc] to close help", CYAN),

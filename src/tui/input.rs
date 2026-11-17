@@ -263,17 +263,11 @@ impl App {
             InputMode::InputTitle => self.update(Message::Input(
                 crate::tui::messages::InputMessage::SubmitTitle(value),
             )),
-            InputMode::InputDescription => self.update(Message::Input(
-                crate::tui::messages::InputMessage::SubmitDescription(value),
-            )),
             InputMode::InputRepoPath => self.update(Message::Input(
                 crate::tui::messages::InputMessage::SubmitRepoPath(value),
             )),
             InputMode::InputEpicTitle => self.update(Message::Epic(
                 crate::tui::messages::EpicMessage::SubmitTitle(value),
-            )),
-            InputMode::InputEpicDescription => self.update(Message::Epic(
-                crate::tui::messages::EpicMessage::SubmitDescription(value),
             )),
             InputMode::InputBaseBranch => self.update(Message::Input(
                 crate::tui::messages::InputMessage::SubmitBaseBranch(value),

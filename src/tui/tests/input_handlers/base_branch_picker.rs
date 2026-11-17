@@ -1634,9 +1634,10 @@ fn handle_key_input_title_routes_to_text_input() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-/// InputDescription mode routes to the text input handler.
+/// InputDescription mode routes to the description-editor namespace, whose
+/// one row is Esc (keybindings.allium: DescriptionEditorTakesOnlyEsc).
 #[test]
-fn handle_key_input_description_routes_to_text_input() {
+fn handle_key_input_description_esc_cancels() {
     let mut app = make_app();
     app.input.mode = InputMode::InputDescription;
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));

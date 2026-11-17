@@ -181,8 +181,11 @@ fn render_status_bar_input_description() {
     app.input.mode = InputMode::InputDescription;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Creating task: opening $EDITOR for description"),
-        "InputDescription mode should show 'Creating task: opening $EDITOR for description'"
+        buffer_contains(
+            &buf,
+            "Creating task: opening $EDITOR for description  [Esc] cancel"
+        ),
+        "InputDescription mode should show the editor hint and its one key, Esc"
     );
 }
 
