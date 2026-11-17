@@ -137,8 +137,8 @@ contract StoreWriteChecks {
         --     or (destination.workspace = epic.workspace
         --         and destination.visible_to(caller()))
         --
-        -- Re-parenting inside one workspace is unchanged; re-parenting across
-        -- workspaces is refused. Changing workspace is MoveEpicToWorkspace,
+        -- Re-parenting inside one workspace needs sight of the destination;
+        -- re-parenting across workspaces is refused. Changing workspace is MoveEpicToWorkspace,
         -- never a side effect of re-parenting. A re-parent that changes who
         -- the epic is private to also needs ReParentingKeepsTheHolder.
 
