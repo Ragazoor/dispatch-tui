@@ -529,6 +529,9 @@ rule DeleteEpicRefused {
         -- Lowest id is what the store's own delete_epic guard names too
         -- (spacetime/module/src/tasks_epics.rs::first_undone_task_in), so a
         -- refusal from either check points at the same task.
+        -- The pre-check's answer (spacetime/module/src/views.rs::delete_check_for)
+        -- lists every undone subtree task, lowest id first, so a lower-id
+        -- task this board cannot decode never hides its lowest readable one.
         --
         -- WHY UNREADABLE TASKS BLOCK. A row the client cannot decode is
         -- skipped by its reads, so it is invisible on the board but still in

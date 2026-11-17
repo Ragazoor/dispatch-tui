@@ -763,8 +763,9 @@ pub struct DeleteBlocker {
 /// the store's true rows. Empty means the reducers would not refuse it.
 #[derive(spacetimedb::SpacetimeType, Clone, Debug, PartialEq, Default)]
 pub struct DeleteCheck {
-    /// For each requested epic, the lowest-id task in its subtree that is not
-    /// done; for each requested task, the task itself when it is not done.
+    /// For each requested epic, every task in its subtree that is not done,
+    /// lowest id first; for each requested task, the task itself when it is
+    /// not done.
     pub blockers: Vec<DeleteBlocker>,
     /// A refusal that names no task: a subtree this caller cannot fully see,
     /// or one nested too deep to delete.
@@ -817,19 +818,23 @@ pub fn delete_check_for(
             ));
             return check;
         }
-        let first_undone = doomed
+        // Every undone task, lowest id first, not just the lowest: a board
+        // that cannot decode the lowest one still names its lowest readable
+        // blocker (`epics.allium: DeleteEpicRefused`).
+        let mut undone: Vec<_> = doomed
             .iter()
             .flat_map(|e| r.tasks_in_epic(*e))
             .filter(|t| t.status != DONE)
-            .min_by_key(|t| t.id);
-        if let Some(t) = first_undone {
-            check.blockers.push(DeleteBlocker {
+            .collect();
+        undone.sort_by_key(|t| t.id);
+        check
+            .blockers
+            .extend(undone.into_iter().map(|t| DeleteBlocker {
                 epic_id: id,
                 task_id: t.id,
                 title: t.title,
                 status: t.status,
-            });
-        }
+            }));
     }
     for &id in task_ids {
         let Some(task) = r.task(id) else { continue };

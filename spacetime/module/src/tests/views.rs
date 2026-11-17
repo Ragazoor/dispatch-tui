@@ -743,8 +743,11 @@ fn status_task(id: i64, epic_id: i64, status: &str) -> Task {
     }
 }
 
+/// Every undone task, lowest id first: the board drops the ones it cannot
+/// decode and names the lowest readable one (`epics.allium:
+/// DeleteEpicRefused`), so a lower-id unreadable task must not hide it.
 #[test]
-fn delete_check_names_the_lowest_undone_task_in_a_subtree() {
+fn delete_check_names_every_undone_task_in_a_subtree_lowest_first() {
     let mut store = tree();
     store.tasks = vec![
         status_task(30, 5, "running"),
@@ -759,7 +762,7 @@ fn delete_check_names_the_lowest_undone_task_in_a_subtree() {
             .iter()
             .map(|b| (b.epic_id, b.task_id, b.status.as_str()))
             .collect::<Vec<_>>(),
-        [(1, 25, "review")]
+        [(1, 25, "review"), (1, 30, "running")]
     );
 }
 
