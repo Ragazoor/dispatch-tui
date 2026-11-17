@@ -355,7 +355,7 @@ fn lookup_over_the_real_table_reads_g_as_the_last_row_not_enter_epic() {
 
 // ---- KeyContext words ------------------------------------------------------
 
-/// The plain words are the spec's: the help overlay and list_keybindings show
+/// The plain words are the spec's: the help overlay and keybinding_search show
 /// them, never the literal.
 #[test]
 fn view_level_context_words_are_the_specs() {

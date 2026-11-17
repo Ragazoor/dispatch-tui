@@ -3,7 +3,7 @@
 //!
 //! This module is a leaf (no `tui`, `db` or `mcp` dependency) so every reader
 //! of the table - the key handlers, the `?` help overlay and the
-//! `list_keybindings` MCP tool - can depend on it. It holds the data and the
+//! `keybinding_search` MCP tool - can depend on it. It holds the data and the
 //! pure relations over it; evaluating a [`KeyContext`] against a live board
 //! (`context_holds`) belongs to the TUI.
 //!
@@ -111,7 +111,7 @@ pub enum KeyNamespace {
 
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
-    /// order `list_keybindings` and the help overlay group by.
+    /// order `keybinding_search` and the help overlay group by.
     pub const ALL: [KeyNamespace; 39] = [
         Self::BoardNormal,
         Self::BoardDetail,
@@ -213,7 +213,7 @@ impl KeyNamespace {
     }
 }
 
-/// Family names accepted by `list_keybindings` as a filter: a prefix standing
+/// Family names accepted by `keybinding_search` as a filter: a prefix standing
 /// for every `board.confirm.*` / `board.picker.*` namespace.
 pub const KEY_FAMILIES: [&str; 2] = ["board.confirm", "board.picker"];
 

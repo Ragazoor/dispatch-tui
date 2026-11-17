@@ -5,7 +5,7 @@ use crate::mcp::McpState;
 
 use super::{parse_args, JsonRpcResponse, SetVerifyCommandArgs, INTERNAL_ERROR, INVALID_PARAMS};
 
-pub(crate) async fn handle_set_verify_command(
+pub(crate) async fn handle_verify_command_set(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
@@ -15,7 +15,7 @@ pub(crate) async fn handle_set_verify_command(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(repo_path = %parsed.repo_path, "MCP set_verify_command");
+    tracing::info!(repo_path = %parsed.repo_path, "MCP verify-command_set");
     // Newline guard returns -32602 (invalid params) for a user-input error; the DB layer
     // would surface the same constraint as -32603 (internal error), so we validate here.
     // A blank/whitespace command is not rejected: it means clear. It is mapped to

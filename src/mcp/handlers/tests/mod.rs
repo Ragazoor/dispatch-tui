@@ -803,19 +803,19 @@ task_dispatch's and there is no delete tool, got: {status}"
 /// and the two surfaces that do carry it are named.
 #[test]
 fn set_verify_command_description_names_the_surfaces_that_carry_the_command() {
-    let desc = tool_description("set_verify_command");
+    let desc = tool_description("verify-command_set");
     assert!(
         desc.contains("never appears in a dispatch prompt"),
-        "set_verify_command must state that the command reaches no dispatch prompt, got: {desc}"
+        "verify-command_set must state that the command reaches no dispatch prompt, got: {desc}"
     );
     assert!(
         !desc.contains("injected into"),
-        "set_verify_command must not claim the command is injected into prompts, got: {desc}"
+        "verify-command_set must not claim the command is injected into prompts, got: {desc}"
     );
     for needle in ["task_search", "agent"] {
         assert!(
             desc.contains(needle),
-            "set_verify_command description must name the '{needle}' surface, got: {desc}"
+            "verify-command_set description must name the '{needle}' surface, got: {desc}"
         );
     }
 }
@@ -1126,11 +1126,11 @@ epic's next backlog subtask when the epic auto-dispatches, got: {desc}"
 /// output better than a sample does.
 #[test]
 fn list_keybindings_description_carries_no_worked_example() {
-    let desc = tool_description("list_keybindings");
+    let desc = tool_description("keybinding_search");
     let lower = desc.to_lowercase();
     assert!(
         !lower.contains("for example") && !lower.contains("e.g."),
-        "list_keybindings' description must not carry a worked example, got: {desc}"
+        "keybinding_search' description must not carry a worked example, got: {desc}"
     );
 }
 
@@ -1371,35 +1371,38 @@ async fn every_tool_with_args_rejects_unknown_field() {
             json!({"learning_id": 1, "task_id": 1, "verdict": "helped"}),
         ),
         ("learning_delete", json!({"learning_id": 1})),
-        ("set_verify_command", json!({"repo_path": "/r"})),
-        ("set_display_name", json!({"name": "n"})),
-        ("set_review_command", json!({})),
+        ("verify-command_set", json!({"repo_path": "/r"})),
+        ("display-name_set", json!({"name": "n"})),
+        ("review-command_read", json!({})),
+        ("review-command_set", json!({"command": "/c"})),
         (
             "session_exit",
             json!({"task_id": 1, "token": "t", "action": "rebase"}),
         ),
-        ("managed_feed_config", json!({})),
-        ("query_usage", json!({})),
-        ("list_keybindings", json!({})),
-        ("read_context", json!({"uri": "dispatch://task/self"})),
+        ("feed-config_read", json!({})),
+        ("feed-config_set", json!({"reviews_command": null})),
+        ("usage_read", json!({})),
+        ("keybinding_search", json!({})),
+        ("context_read", json!({"uri": "dispatch://task/self"})),
         ("work-package_create", json!({"title": "t"})),
         ("work-package_search", json!({})),
         ("work-package_update", json!({"work_package_id": 1})),
         ("work-package_delete", json!({"work_package_id": 1})),
-        ("list_workspaces", json!({})),
-        ("create_workspace", json!({"name": "n"})),
-        ("update_workspace", json!({"workspace_id": 1})),
+        ("workspace_search", json!({})),
+        ("workspace_create", json!({"name": "n"})),
+        ("workspace_update", json!({"workspace_id": 1, "name": "n"})),
+        ("workspace_delete", json!({"workspace_id": 1})),
         (
-            "set_workspace_member",
+            "workspace-member_set",
             json!({"workspace_id": 1, "person": "p"}),
         ),
         (
-            "set_super_admin",
+            "super-admin_set",
             json!({"person": "p", "super_admin": true}),
         ),
-        ("claim_super_admin", json!({})),
-        ("list_unseen_items", json!({})),
-        ("delete_unseen_item", json!({"kind": "epic", "item_id": 1})),
+        ("super-admin_claim", json!({})),
+        ("unseen-item_search", json!({})),
+        ("unseen-item_delete", json!({"kind": "epic", "item_id": 1})),
     ];
 
     let covered: std::collections::BTreeSet<&str> = payloads.iter().map(|(n, _)| *n).collect();
@@ -1574,21 +1577,22 @@ fn tool_definitions_carry_annotations() {
         "task_search",
         "epic_search",
         "learning_search",
-        "query_usage",
-        "read_context",
-        "list_keybindings",
+        "usage_read",
+        "context_read",
+        "keybinding_search",
         "work-package_search",
-        "list_workspaces",
-        "list_unseen_items",
+        "workspace_search",
+        "unseen-item_search",
+        "review-command_read",
+        "feed-config_read",
     ];
     const DESTRUCTIVE: &[&str] = &[
         "learning_delete",
         "session_exit",
         "task_update",
         "work-package_delete",
-        "update_workspace",
-        "set_workspace_member",
-        "delete_unseen_item",
+        "workspace_delete",
+        "unseen-item_delete",
     ];
     let defs = tool_definitions();
     for tool in defs["tools"].as_array().unwrap() {
@@ -1627,27 +1631,55 @@ fn tool_definitions_carry_annotations() {
     }
 }
 
-/// epics.allium: ManagedFeedConfigViaMcp @guidance. The merged tool reads on a
-/// no-argument call but writes otherwise, and its hints can say only one thing:
-/// not read-only, not destructive, idempotent.
+/// epics.allium: ManagedFeedConfigViaMcp @guidance. The merged
+/// managed_feed_config read on a no-argument call and wrote otherwise, so its
+/// hints said one thing for two behaviours. It is split (docs/adr/0002,
+/// decision 4): feed-config_read is read-only, feed-config_set is idempotent,
+/// and neither is destructive.
 #[test]
-fn managed_feed_config_is_declared_a_write_not_a_read() {
+fn feed_config_is_split_into_a_read_tool_and_an_idempotent_set_tool() {
     let defs = tool_definitions();
-    let tool = defs["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["name"] == "managed_feed_config")
-        .expect("managed_feed_config is registered");
-    let ann = &tool["annotations"];
-    assert_eq!(ann["readOnlyHint"], false);
-    assert_eq!(ann["destructiveHint"], false);
-    assert_eq!(ann["idempotentHint"], true);
-    let desc = tool["description"].as_str().unwrap();
-    assert!(
-        desc.contains("no arguments"),
-        "the description must say a no-argument call only reads: {desc}"
-    );
+    let tools = defs["tools"].as_array().unwrap();
+    let ann = |name: &str| {
+        tools
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is registered"))["annotations"]
+            .clone()
+    };
+    let read = ann("feed-config_read");
+    assert_eq!(read["readOnlyHint"], true);
+    assert_eq!(read["destructiveHint"], false);
+    let set = ann("feed-config_set");
+    assert_eq!(set["readOnlyHint"], false);
+    assert_eq!(set["destructiveHint"], false);
+    assert_eq!(set["idempotentHint"], true);
+    assert!(!super::dispatch::TOOL_NAMES.contains(&"managed_feed_config"));
+}
+
+/// decision 4: the same split for the review command. The read tool takes no
+/// arguments; the set tool requires the command.
+#[test]
+fn review_command_is_split_into_a_read_tool_and_an_idempotent_set_tool() {
+    let defs = tool_definitions();
+    let tools = defs["tools"].as_array().unwrap();
+    let tool = |name: &str| {
+        tools
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is registered"))
+            .clone()
+    };
+    let read = tool("review-command_read");
+    assert_eq!(read["annotations"]["readOnlyHint"], true);
+    assert!(read["inputSchema"]["properties"]
+        .as_object()
+        .is_none_or(|p| p.is_empty()));
+    let set = tool("review-command_set");
+    assert_eq!(set["annotations"]["readOnlyHint"], false);
+    assert_eq!(set["annotations"]["idempotentHint"], true);
+    assert_eq!(set["inputSchema"]["required"], json!(["command"]));
+    assert!(!super::dispatch::TOOL_NAMES.contains(&"set_review_command"));
 }
 
 /// mcp-task-tools.allium: ToolsAdvertiseAnnotations. Every argument of every
@@ -1721,26 +1753,6 @@ fn wrap_up_description_names_release_please_among_the_refused_tags() {
     }
 }
 
-/// Tool names that predate the `<noun>_<verb>` rule (ADR 0002). Each surface
-/// task removes its names; the last one deletes the list and the exemption.
-const LEGACY_TOOL_NAMES: &[&str] = &[
-    "set_review_command",
-    "managed_feed_config",
-    "set_display_name",
-    "list_workspaces",
-    "create_workspace",
-    "update_workspace",
-    "set_workspace_member",
-    "set_super_admin",
-    "claim_super_admin",
-    "list_unseen_items",
-    "delete_unseen_item",
-    "set_verify_command",
-    "query_usage",
-    "read_context",
-    "list_keybindings",
-];
-
 fn is_noun_verb(name: &str) -> bool {
     let word = |w: &str| {
         !w.is_empty()
@@ -1752,25 +1764,11 @@ fn is_noun_verb(name: &str) -> bool {
         && !name.starts_with("dispatch_")
 }
 
-/// mcp-task-tools.allium: ToolNamesAreNounVerb.
+/// mcp-task-tools.allium: ToolNamesAreNounVerb. No name is exempt.
 #[test]
-fn tool_names_are_noun_verb_or_legacy() {
+fn tool_names_are_noun_verb() {
     for name in super::dispatch::TOOL_NAMES {
-        if LEGACY_TOOL_NAMES.contains(name) {
-            continue;
-        }
         assert!(is_noun_verb(name), "{name} is not <noun>_<verb>");
-    }
-}
-
-/// The allow-list only holds registered names, so it shrinks with each rename.
-#[test]
-fn legacy_tool_names_are_all_registered() {
-    for name in LEGACY_TOOL_NAMES {
-        assert!(
-            super::dispatch::TOOL_NAMES.contains(name),
-            "{name} is on the legacy list but not registered; remove it"
-        );
     }
 }
 
@@ -1861,6 +1859,37 @@ fn learning_old_names_redirect_to_their_replacements() {
             msg.contains(&format!("{old} was renamed: call {new}")),
             "{old}: {msg}"
         );
+        assert!(super::dispatch::TOOL_NAMES.contains(&new), "{new}");
+    }
+}
+
+/// mcp-task-tools.allium: OldToolNameRedirects. Each old config, admin and
+/// context name is in the table and its hint names the tool that replaced it.
+#[test]
+fn config_admin_and_context_old_names_redirect_to_their_replacements() {
+    for (old, new) in [
+        ("set_verify_command", "verify-command_set"),
+        ("set_review_command", "review-command_read"),
+        ("set_review_command", "review-command_set"),
+        ("managed_feed_config", "feed-config_read"),
+        ("managed_feed_config", "feed-config_set"),
+        ("set_display_name", "display-name_set"),
+        ("list_workspaces", "workspace_search"),
+        ("create_workspace", "workspace_create"),
+        ("update_workspace", "workspace_update"),
+        ("update_workspace", "workspace_delete"),
+        ("set_workspace_member", "workspace-member_set"),
+        ("set_super_admin", "super-admin_set"),
+        ("claim_super_admin", "super-admin_claim"),
+        ("list_unseen_items", "unseen-item_search"),
+        ("delete_unseen_item", "unseen-item_delete"),
+        ("query_usage", "usage_read"),
+        ("read_context", "context_read"),
+        ("list_keybindings", "keybinding_search"),
+    ] {
+        let msg = super::dispatch::unknown_tool_message(old, super::dispatch::OLD_TOOL_NAMES);
+        assert!(msg.contains(&format!("{old} was renamed:")), "{old}: {msg}");
+        assert!(msg.contains(new), "{old} must point at {new}: {msg}");
         assert!(super::dispatch::TOOL_NAMES.contains(&new), "{new}");
     }
 }

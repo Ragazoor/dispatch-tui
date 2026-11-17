@@ -7,9 +7,10 @@
 --        can see, and the MCP tools that are the agent's twin of every key.
 -- Includes: AdminScreen and its panes, the rules each key runs, how a person
 --           is named by display name (PersonResolution), UnseenItemListing,
---           and the MCP tools list_workspaces, create_workspace,
---           update_workspace, set_workspace_member, set_super_admin,
---           claim_super_admin, list_unseen_items, delete_unseen_item.
+--           and the MCP tools workspace_search, workspace_create,
+--           workspace_update, workspace_delete, workspace-member_set,
+--           super-admin_set, super-admin_claim, unseen-item_search,
+--           unseen-item_delete.
 -- Excludes: What each store write does and who may do it (workspaces.allium:
 --           CreateWorkspace, RenameWorkspace, DeleteWorkspace, AddMember,
 --           SetMemberRole, RemoveMember, ClaimSuperAdmin, GrantSuperAdmin,
@@ -25,10 +26,11 @@
 -- Decisions, cited by id:
 --   A1. Agents are first-class users. Every key of the admin screen has an MCP
 --       twin, and the tools follow docs/mcp-tool-design.md: capability, not
---       endpoint. A grant and a revoke are one tool (set_super_admin); a role
---       change and a removal are one tool (set_workspace_member); a rename and
---       a delete are one tool (update_workspace; docs/adr/0002 splits the
---       delete out in a later task).
+--       endpoint. A grant and a revoke are one tool (super-admin_set); a role
+--       change and a removal are one tool (workspace-member_set). A rename and
+--       a delete are two tools (workspace_update, workspace_delete): a delete
+--       flag on an update tool would make the whole tool destructive
+--       (docs/adr/0002, decision 4).
 --       Claiming is its own tool: it takes no person and has its own
 --       precondition.
 --   A2. People are found by display name. Names need not be unique
@@ -87,7 +89,7 @@ contract PersonResolution {
         -- An ambiguous text is refused, listing each match as
         -- "<shown name> (<identity prefix>)" and saying to name one by
         -- identity. A text that matches nobody is refused saying no one has
-        -- that name and pointing at list_workspaces for the directory.
+        -- that name and pointing at workspace_search for the directory.
 }
 
 ------------------------------------------------------------
@@ -247,7 +249,7 @@ rule DeleteUnseenItemFromScreen {
 
     requires: admin.is_super_admin
 
-    ensures: ConfirmationOpened(purpose: delete_unseen_item, item: item)
+    ensures: ConfirmationOpened(purpose: unseen-item_delete, item: item)
 
     @guidance
         -- `D`, on the Unseen items pane. Each row reads "<kind> #<id>  <workspace>
@@ -299,7 +301,7 @@ rule ListWorkspacesTool {
         -- apart (A2). `workspace_id` narrows to one workspace and its members;
         -- the directory is then left out, to keep the answer short. A person
         -- sees the workspaces they belong to; a super-admin sees all.
-        -- The result says when claim_super_admin is available.
+        -- The result says when super-admin_claim is available.
 }
 
 rule CreateWorkspaceTool {
@@ -313,22 +315,31 @@ rule CreateWorkspaceTool {
 }
 
 rule UpdateWorkspaceTool {
-    when: UpdateWorkspaceToolCalled(workspace_id, name?, delete?)
+    when: UpdateWorkspaceToolCalled(workspace_id, name)
 
     let workspace = core/Workspace{id: workspace_id}
 
-    requires: (name != null) != (delete = true)
-
-    ensures:
-        if name != null: workspaces/RenameWorkspace(workspace, name)
-        if delete = true: workspaces/DeleteWorkspace(workspace)
+    ensures: workspaces/RenameWorkspace(workspace, name)
 
     @guidance
-        -- destructive, because delete is an
-        -- argument of it. Exactly one of name and delete is given; both or
-        -- neither is refused with the shape of a valid call. Rename needs a
-        -- super-admin or the workspace's admin; delete needs a super-admin and
-        -- an empty workspace, both by the store.
+        -- idempotent. Renaming to the name it already has changes nothing and
+        -- succeeds. Needs a super-admin or the workspace's admin, by the
+        -- store. The tool takes no delete flag: workspace_delete is its own
+        -- tool, so this one stays honestly idempotent.
+}
+
+rule DeleteWorkspaceTool {
+    when: DeleteWorkspaceToolCalled(workspace_id)
+
+    let workspace = core/Workspace{id: workspace_id}
+
+    ensures: workspaces/DeleteWorkspace(workspace)
+
+    @guidance
+        -- destructive. Needs a super-admin and an empty workspace, both by
+        -- the store; one still holding an epic or work package, private ones
+        -- included, is refused. Deleting removes its memberships and its
+        -- learnings and cannot be undone.
 }
 
 rule SetWorkspaceMemberTool {
@@ -346,8 +357,11 @@ rule SetWorkspaceMemberTool {
         else: workspaces/AddMember(workspace, resolved.identity, role)
 
     @guidance
-        -- destructive, because remove is an argument of it. One tool for the
-        -- three membership changes: giving a role to a person who is not in the
+        -- idempotent. The hint is true by the repo's own meaning of
+        -- destructive, which is something no other call restores: a removed
+        -- person is added back with a role, and their private items are seen
+        -- again, so nothing is lost. Repeating the same call leaves the same
+        -- membership. One tool for the three membership changes: giving a role to a person who is not in the
         -- workspace adds them, giving one to a member changes it, remove
         -- takes them out. person is a display name or an identity (A2); an
         -- ambiguous one is refused with the matches. Removing someone who is
@@ -391,7 +405,7 @@ rule ListUnseenItemsTool {
         -- caller: every unseen item for a super-admin, nothing for anyone
         -- else, who also gets a line saying so. Each item is kind, id,
         -- workspace, creator by shown name and created date, and never a
-        -- title or content. The result points at delete_unseen_item as the
+        -- title or content. The result points at unseen-item_delete as the
         -- only thing to do with one.
 }
 
@@ -403,7 +417,7 @@ rule DeleteUnseenItemTool {
     ensures: workspaces/SuperAdminDeletesUnseenItem(item)
 
     @guidance
-        -- destructive. kind is epic or work_package, as list_unseen_items
+        -- destructive. kind is epic or work_package, as unseen-item_search
         -- names it. A public item, an unknown id and an item the caller may
         -- not delete are all refused in the store's words (workspaces.allium:
         -- UnseenIsAsMissing).
@@ -503,21 +517,23 @@ surface AdminTools {
     facing _: core/McpClient
 
     provides:
-        -- list_workspaces (ListWorkspacesTool). Read-only.
+        -- workspace_search (ListWorkspacesTool). Read-only.
         ListWorkspacesToolCalled(workspace_id?)
-        -- create_workspace (CreateWorkspaceTool). Write.
+        -- workspace_create (CreateWorkspaceTool). Write.
         CreateWorkspaceToolCalled(name)
-        -- update_workspace (UpdateWorkspaceTool). Destructive.
-        UpdateWorkspaceToolCalled(workspace_id, name?, delete?)
-        -- set_workspace_member (SetWorkspaceMemberTool). Destructive.
+        -- workspace_update (UpdateWorkspaceTool). Idempotent.
+        UpdateWorkspaceToolCalled(workspace_id, name)
+        -- workspace_delete (DeleteWorkspaceTool). Destructive.
+        DeleteWorkspaceToolCalled(workspace_id)
+        -- workspace-member_set (SetWorkspaceMemberTool). Idempotent.
         SetWorkspaceMemberToolCalled(workspace_id, person, role?, remove?)
-        -- set_super_admin (SetSuperAdminTool). Idempotent.
+        -- super-admin_set (SetSuperAdminTool). Idempotent.
         SetSuperAdminToolCalled(person, super_admin)
-        -- claim_super_admin (ClaimSuperAdminTool). Write.
+        -- super-admin_claim (ClaimSuperAdminTool). Write.
         ClaimSuperAdminToolCalled()
-        -- list_unseen_items (ListUnseenItemsTool). Read-only.
+        -- unseen-item_search (ListUnseenItemsTool). Read-only.
         ListUnseenItemsToolCalled()
-        -- delete_unseen_item (DeleteUnseenItemTool). Destructive.
+        -- unseen-item_delete (DeleteUnseenItemTool). Destructive.
         DeleteUnseenItemToolCalled(kind, item_id)
 
     contracts:

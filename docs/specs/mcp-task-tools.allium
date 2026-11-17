@@ -2,12 +2,13 @@
 -- mcp-task-tools.allium
 --
 -- Scope: the dispatch MCP server's task tools (task_create, task_search,
---        task_update, query_usage, task_dispatch, task_resume,
---        session_wrap-up, session_exit, set_verify_command, set_review_command), the
+--        task_update, usage_read, task_dispatch, task_resume,
+--        session_wrap-up, session_exit, verify-command_set, review-command_read,
+--        review-command_set), the
 --        CLI plan attachment, the agent port that serves them, the standard
 --        every tool description and agent-facing skill is held to, and the
 --        read-only context resources (resources/list, resources/read and their
---        tool twin read_context).
+--        tool twin context_read).
 -- Excludes: task lifecycle (tasks.allium); dispatch and retry
 --           (dispatch.allium); the epic tools (epics.allium); the learnings
 --           tools (learnings.allium: LearningMcpTools); the work-package tools
@@ -82,19 +83,21 @@ rule ToolsAdvertiseAnnotations {
     -- Every tool in the list carries `annotations` with a `title` and the four
     -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
     -- nothing (task_search, epic_search, learning_search,
-    -- query_usage, read_context, list_keybindings, work-package_search,
-    -- list_workspaces, list_unseen_items). The core/Retrieval rows
-    -- learning_search records are bookkeeping of what the caller was shown,
-    -- not a change the caller makes, so they do not count.
-    -- managed_feed_config is NOT in that list: its no-argument call reads but
-    -- its other calls write, so it is declared idempotent (see
-    -- epics.allium: ManagedFeedConfigViaMcp, @guidance).
+    -- usage_read, context_read, keybinding_search, work-package_search,
+    -- workspace_search, unseen-item_search, review-command_read,
+    -- feed-config_read). The core/Retrieval rows learning_search records are
+    -- bookkeeping of what the caller was shown, not a change the caller makes,
+    -- so they do not count. A tool that reads in one call and writes in
+    -- another is split (docs/adr/0002, decision 4): review-command_set and
+    -- feed-config_set are idempotent, and each has a read twin.
     -- destructiveHint is true only where a call removes or closes something
     -- that cannot be restored by another call (learning_delete, session_exit,
     -- task_update, whose status="done" form tears down the agent's window and
-    -- closes a pr-typed url's PR; work-package_delete;
-    -- update_workspace and set_workspace_member, whose delete and remove forms
-    -- remove the workspace or the membership; delete_unseen_item);
+    -- closes a pr-typed url's PR; work-package_delete; workspace_delete;
+    -- unseen-item_delete).
+    -- workspace-member_set is not on that list although it has a remove form:
+    -- a removed person is added back with a role and their private items are
+    -- seen again, so it is idempotent, not destructive.
     -- it is false on a read-only tool. idempotentHint is true where repeating
     -- the identical call leaves the same state. openWorldHint is false on every
     -- tool: dispatch reaches no system outside itself through them.
@@ -114,14 +117,13 @@ rule ToolNamesAreNounVerb {
     -- Every registered tool name is `<noun>_<verb>` and matches
     -- ^[a-z0-9-]+_[a-z0-9-]+$: the noun first and singular, one verb, a `-`
     -- only inside a word, and no `dispatch_` prefix (the server name already
-    -- gives the target). Names that predate the rule sit on a legacy
-    -- allow-list in the test, which shrinks as each tool is renamed.
+    -- gives the target). No name is exempt: the legacy allow-list is gone.
     -- The title in a tool's annotations splits the name on `_` and on `-`,
     -- so `work-package_search` is titled "Work Package Search".
     ensures: ToolNamesMatchPattern()
 
     @guidance
-        -- Asserted by tool_names_are_noun_verb_or_legacy and
+        -- Asserted by tool_names_are_noun_verb and
         -- annotations_title_splits_hyphenated_words.
 }
 
@@ -147,8 +149,21 @@ rule OldToolNameRedirects {
     -- work-package_update; to delete a package call work-package_delete"),
     -- record_learning ("call learning_record"), query_learnings ("call
     -- learning_search; it returns 10 entries unless limit says otherwise"),
-    -- rate_learning ("call learning_rate; it takes a ratings list") and
-    -- delete_learning ("call learning_delete").
+    -- rate_learning ("call learning_rate; it takes a ratings list"),
+    -- delete_learning ("call learning_delete"), set_verify_command ("call
+    -- verify-command_set"), set_review_command ("call review-command_read to
+    -- read it, review-command_set to set it"), managed_feed_config ("call
+    -- feed-config_read to read, feed-config_set to change"), set_display_name
+    -- ("call display-name_set"), list_workspaces ("call workspace_search"),
+    -- create_workspace ("call workspace_create"), update_workspace ("call
+    -- workspace_update to rename; to delete call workspace_delete"),
+    -- set_workspace_member ("call workspace-member_set"), set_super_admin
+    -- ("call super-admin_set"), claim_super_admin ("call super-admin_claim"),
+    -- list_unseen_items ("call unseen-item_search"), delete_unseen_item
+    -- ("call unseen-item_delete"), query_usage ("call usage_read"),
+    -- read_context ("call context_read") and list_keybindings ("call
+    -- keybinding_search; with no arguments it returns an index of namespaces,
+    -- so pass namespace or query").
     ensures: UnknownToolErrorNamesNewTool()
 
     @guidance
@@ -1319,7 +1334,7 @@ rule QueryUsageViaMcp {
     )
 
     @guidance
-        -- query_usage returns aggregated feature-usage counts grouped by
+        -- usage_read returns aggregated feature-usage counts grouped by
         -- category + action (with detail, actor, total count and the most
         -- recent use timestamp per group), over the events this board's
         -- identity recorded. The store aggregates them on demand
@@ -1782,7 +1797,7 @@ rule SetVerifyCommandViaMcp {
     )
 
     @guidance
-        -- set_verify_command stores (or clears) the verify command
+        -- verify-command_set stores (or clears) the verify command
         -- associated with a repo_path in saved_repo_paths.verify_command.
         -- A blank or whitespace-only command is normalised to null (clear)
         -- by the DB layer, matching the trait contract, and the reply says
@@ -1804,27 +1819,38 @@ rule SetVerifyCommandViaMcp {
         -- surface that never carries it.
 }
 
-rule SetReviewCommandViaMcp {
-    when: McpSetReviewCommand(command?)
+rule ReadReviewCommandViaMcp {
+    when: McpReadReviewCommand()
 
-    -- A command is one line, like a verify command.
-    requires:
-        if command != null:
-            not spans_lines(command)
-
-    -- Omitting `command` is a read: nothing is written and the reply names
-    -- the command in effect. A blank command restores the default.
-    ensures:
-        if command != null:
-            settings/SaveSetting(
-                key: settings/config.review_command_key,
-                value: if is_blank(command): "" else: trim(command)
-            )
+    -- Read-only, no arguments. The reply names the command in effect.
+    ensures: ReviewCommandShown(command: settings/review_command())
 
     @guidance
-        -- set_review_command names the command a pr_review task's runbook
+        -- review-command_read is the read half of the old set_review_command,
+        -- split out so each tool has one honest access class (docs/adr/0002,
+        -- decision 4). It writes nothing. The reply is the saved command, or
+        -- settings/config.default_review_command when none is saved or it is
+        -- blank.
+}
+
+rule SetReviewCommandViaMcp {
+    when: McpSetReviewCommand(command)
+
+    -- A command is one line, like a verify command. It is required: a call
+    -- without it is refused, and reading is review-command_read.
+    requires: not spans_lines(command)
+
+    -- A blank command restores the default.
+    ensures:
+        settings/SaveSetting(
+            key: settings/config.review_command_key,
+            value: if is_blank(command): "" else: trim(command)
+        )
+
+    @guidance
+        -- idempotent. review-command_set names the command a pr_review task's runbook
         -- runs (dispatch-prompt.allium: RenderPrReviewRunbook), for this host.
-        -- The reply always names the command now in effect, either the saved
+        -- The reply names the command now in effect, either the saved
         -- one or settings/config.default_review_command. A command
         -- containing "\n" or "\r" is rejected at the handler with -32602.
         -- The tool exists so the operator and agents can set a personal
@@ -1889,15 +1915,15 @@ rule SetReviewCommandViaMcp {
 --
 -- Agents are first-class MCP users: Claude Code does not load MCP resources
 -- into an agent's context by itself today, so every resource is also reachable
--- through a tool, read_context, which returns the same text. A read carries
--- `via` — resources_read or read_context — naming the entry point it arrived
+-- through a tool, context_read, which returns the same text. A read carries
+-- `via` — resources_read or context_read — naming the entry point it arrived
 -- through; it chooses the response envelope — for a success and for a
 -- refusal — and nothing else. The two entry
 -- points share one identity check, one resolution (ResolveContextUri) and one
 -- refusal (RejectUnresolvedContextUri), so they cannot disagree about who may
 -- read, which URIs exist, or what they say.
 --
--- Caller identity. resources/list, resources/read and read_context all
+-- Caller identity. resources/list, resources/read and context_read all
 -- consume caller identity (dispatch://task/self and the listing depend on it),
 -- so all three reject a missing or malformed identity with JSON-RPC -32600,
 -- echoing the request's id — the same answer every tools/call gives (see
@@ -2016,11 +2042,11 @@ rule ReadContextViaMcp {
     ensures: ContextReadRequested(
         caller_identity: caller_identity,
         uri: uri,
-        via: read_context
+        via: context_read
     )
 
     @guidance
-        -- read_context(uri) — uri is REQUIRED. The tool twin of
+        -- context_read(uri) — uri is REQUIRED. The tool twin of
         -- resources/read: its success result is a text content block
         -- carrying exactly the text resources/read returns for the same URI
         -- and caller. It is refused under exactly the conditions
@@ -2029,23 +2055,23 @@ rule ReadContextViaMcp {
         -- no own task) or an internal failure comes back as a tool result
         -- with isError: true carrying that message, not as a JSON-RPC error
         -- — the tools/call dispatcher wraps every tool error that way, and
-        -- read_context is no exception. The one JSON-RPC error it gives is
+        -- context_read is no exception. The one JSON-RPC error it gives is
         -- -32600 for a missing or malformed identity, which tools/call
         -- rejects before any tool runs, so before that wrap. It exists because
         -- Claude Code cannot pull an MCP resource into an agent's context by
         -- itself today, and agents are first-class MCP users: a capability
         -- reachable only as a resource is one an agent cannot use.
         -- Description standard (McpTaskTools: ToolDescriptionsStateBehaviourAndNameNoCode): the description
-        -- says that read_context returns the text of a dispatch context
+        -- says that context_read returns the text of a dispatch context
         -- resource and names the URI shapes; it does not restate the
         -- resolution table or the error codes.
-        -- Being a tools/call, a read_context call is counted in feature usage
+        -- Being a tools/call, a context_read call is counted in feature usage
         -- like every other tool (QueryUsageViaMcp). That counter is not
         -- domain state; ContextResourcesAreReadOnly is about the resources.
         -- For a task caller, tools/call also appends the call and its result
         -- text to the agent's trajectory, like every tool; resources/read
         -- records nothing. The trajectory is not domain state either.
-        -- read_context rejects unknown arguments like every other tool;
+        -- context_read rejects unknown arguments like every other tool;
         -- TheToolTwinServesTheSameText is about the URI, not extra arguments.
 }
 
@@ -2107,7 +2133,7 @@ rule RejectUnresolvedContextUri {
         -- with one message, which names the URI. Only the envelope depends on
         -- via:
         --   resources_read — a JSON-RPC error, -32602 (invalid params).
-        --   read_context   — a tool result with isError: true whose text is
+        --   context_read   — a tool result with isError: true whose text is
         --                    the message (the existing tool-error
         --                    convention; see ReadContextViaMcp).
         -- That covers an unrecognised URI (any other scheme or path,
@@ -2130,7 +2156,7 @@ rule RejectUnresolvedContextUri {
         -- An internal failure while producing a resolvable resource's text
         -- (a store read that fails, for instance) is -32603 on resources/read,
         -- never -32602, because the caller asked for something that exists;
-        -- on read_context it is an isError result carrying the same message.
+        -- on context_read it is an isError result carrying the same message.
 }
 
 ------------------------------------------------------------
@@ -2161,7 +2187,7 @@ surface McpContextResources {
     @guarantee ListedMeansReadable
         -- At any one moment, every URI resources/list returns to a caller,
         -- across all its pages, resolves for that caller on resources/read
-        -- and read_context. Task URIs by id resolve without being listed. A listed URI can stop
+        -- and context_read. Task URIs by id resolve without being listed. A listed URI can stop
         -- resolving later (a learning archived or deleted), and then reads as
         -- unknown.
 
@@ -2175,20 +2201,20 @@ surface McpContextResources {
 
     @guarantee TheToolTwinServesTheSameText
         -- For every URI and caller identity — present, missing or malformed —
-        -- read_context succeeds exactly when resources/read does and returns
+        -- context_read succeeds exactly when resources/read does and returns
         -- the same text, and is refused under exactly the same conditions
         -- with the same message text. Only the error envelope differs:
-        --   condition                      resources/read   read_context
+        --   condition                      resources/read   context_read
         --   -----------------------------  ---------------  -----------------
         --   missing or malformed identity  -32600           -32600
         --   URI does not resolve           -32602           isError result
         --   internal failure               -32603           isError result
-        -- read_context follows the existing tool-error convention (every
+        -- context_read follows the existing tool-error convention (every
         -- tool error is a tool result with isError: true); identity is the
         -- exception because tools/call rejects it before any tool runs.
 
     @guarantee IdentityIsRequired
-        -- resources/list, resources/read and read_context each refuse a
+        -- resources/list, resources/read and context_read each refuse a
         -- missing or malformed caller identity with -32600, as tools/call
         -- does. initialize and tools/list do not consult identity.
 
@@ -2221,9 +2247,9 @@ surface McpContextResources {
 
     @guarantee NeverServedDataIsUnreachable
         -- These are never served, under any URI, by resources/list,
-        -- resources/read or read_context, whatever the caller:
+        -- resources/read or context_read, whatever the caller:
         --   • agent trajectories (the recorded tool-call history of a task)
-        --   • feature-usage data (what query_usage aggregates)
+        --   • feature-usage data (what usage_read aggregates)
         --   • the host's identity, or the host file it lives in
         --   • database or store paths and addresses
         --   • any epic, and any task's trajectory (a task is served only as
@@ -2242,10 +2268,10 @@ surface McpContextResources {
         -- A URI that does not resolve — unrecognised, escaping a skill's
         -- directory, deleted, archived, rejected, or task/self
         -- with no caller task — is refused with a message naming the URI.
-        -- resources/read answers with JSON-RPC -32602; read_context answers
+        -- resources/read answers with JSON-RPC -32602; context_read answers
         -- with an isError tool result carrying the same message. An internal
         -- failure serving a resolvable URI is -32603 on resources/read and an
-        -- isError result on read_context.
+        -- isError result on context_read.
 
     @guarantee InstructionsCoverOnlyConventionsNoSchemaStates
         -- initialize's response carries an `instructions` string. Claude Code
@@ -2306,7 +2332,8 @@ surface McpTaskTools {
         McpWrapUp(task, action)
         McpExitSession(task, token?, action?, pr_url?)
         McpSetVerifyCommand(repo_path, command?)
-        McpSetReviewCommand(command?)
+        McpReadReviewCommand()
+        McpSetReviewCommand(command)
 
     @guarantee ToolDescriptionsStateBehaviourAndNameNoCode
         -- A tool's `description` and its arguments' descriptions are an agent-facing

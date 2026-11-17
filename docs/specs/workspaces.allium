@@ -1324,7 +1324,7 @@ surface WorkspaceMcpTools {
     facing _: core/McpClient
 
     provides:
-        -- set_display_name (SetDisplayNameViaMcp). Write, idempotent.
+        -- display-name_set (SetDisplayNameViaMcp). Write, idempotent.
         SetDisplayNameToolCalled(name)
 }
 

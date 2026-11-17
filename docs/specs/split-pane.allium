@@ -1183,7 +1183,7 @@ rule JumpBackToTuiWindow {
         -- Installed by src/runtime/mod.rs::setup_tmux_for_tui and removed by
         -- src/runtime/mod.rs::teardown_tmux_for_tui. Best-effort: a failing tmux call does not prevent the TUI starting.
         --
-        -- Surfaced in the in-TUI help overlay ([?]) and in list_keybindings
+        -- Surfaced in the in-TUI help overlay ([?]) and in keybinding_search
         -- as a row of the tmux.global group, marked as handled by tmux,
         -- alongside the agent-tree toggle (see agent-tree.allium's
         -- BindAgentTreeToggle and keybindings.allium) so both tmux-global

@@ -27,12 +27,12 @@ mod verify;
 mod wrap_up;
 
 pub(super) use crud::{
-    handle_create_task, handle_query_usage, handle_task_search, handle_update_tasks,
+    handle_create_task, handle_task_search, handle_update_tasks, handle_usage_read,
 };
 pub(super) use dispatch::handle_dispatch_task;
 pub(super) use resume::handle_resume_task;
 pub(crate) use resume::{hand_resume_to_board, pane_refusal_text, unresumable, Unresumable};
-pub(super) use verify::handle_set_verify_command;
+pub(super) use verify::handle_verify_command_set;
 pub(super) use wrap_up::{handle_exit_session, handle_wrap_up};
 
 // ---------------------------------------------------------------------------

@@ -376,18 +376,18 @@ fn tool_def_from(defs: &Value, name: &str) -> Value {
 // -----------------------------------------------------------------------
 
 #[test]
-fn set_display_name_is_a_write_and_idempotent() {
+fn display_name_set_is_a_write_and_idempotent() {
     let defs = tool_definitions();
-    let hints = tool_def_from(&defs, "set_display_name")["annotations"].clone();
+    let hints = tool_def_from(&defs, "display-name_set")["annotations"].clone();
     assert_eq!(hints["readOnlyHint"], json!(false));
     assert_eq!(hints["destructiveHint"], json!(false));
     assert_eq!(hints["idempotentHint"], json!(true));
 }
 
 #[tokio::test]
-async fn set_display_name_saves_the_trimmed_name() {
+async fn display_name_set_saves_the_trimmed_name() {
     let state = test_state().await;
-    let resp = tool(&state, "set_display_name", json!({"name": "  Alice  "})).await;
+    let resp = tool(&state, "display-name_set", json!({"name": "  Alice  "})).await;
     assert!(!is_error(&resp), "{resp:?}");
     assert!(
         format!("{resp:?}").contains("Display name set to Alice"),
@@ -396,16 +396,16 @@ async fn set_display_name_saves_the_trimmed_name() {
 }
 
 #[tokio::test]
-async fn set_display_name_refuses_a_blank_name() {
+async fn display_name_set_refuses_a_blank_name() {
     let state = test_state().await;
-    let resp = tool(&state, "set_display_name", json!({"name": "   "})).await;
+    let resp = tool(&state, "display-name_set", json!({"name": "   "})).await;
     assert!(is_error(&resp), "{resp:?}");
 }
 
 #[tokio::test]
-async fn set_display_name_refuses_a_name_over_the_limit() {
+async fn display_name_set_refuses_a_name_over_the_limit() {
     let state = test_state().await;
-    let resp = tool(&state, "set_display_name", json!({"name": "x".repeat(65)})).await;
+    let resp = tool(&state, "display-name_set", json!({"name": "x".repeat(65)})).await;
     assert!(is_error(&resp), "{resp:?}");
 }
 
@@ -423,7 +423,7 @@ async fn list_work_packages_names_the_creator_by_display_name_or_prefix() {
         "no name set: the 8-character prefix is shown: {listed}"
     );
 
-    let resp = tool(&state, "set_display_name", json!({"name": "Alice"})).await;
+    let resp = tool(&state, "display-name_set", json!({"name": "Alice"})).await;
     assert!(!is_error(&resp), "{resp:?}");
     let listed = format!("{:?}", tool(&state, "work-package_search", json!({})).await);
     assert!(listed.contains("Created by: Alice"), "{listed}");

@@ -7,7 +7,9 @@ the board, the agent-tree and diff panes, the `?` help overlay and the MCP tool 
 it. There is no key list in this document to drift out of date:
 
 - **In the TUI**: press `?` for the overlay, generated from the table and grouped by mode.
-- **From an agent**: call the `list_keybindings` MCP tool, optionally with a `namespace`
+- **From an agent**: call the `keybinding_search` MCP tool. With no arguments it returns an index of
+  the namespaces (the whole table is about 44 KB); pass a `namespace`, or a `query` to search every
+  namespace for a key, action or description
   (`board.normal`, `board.detail`, `board.search`, `board.picker`, `board.confirm`,
   `agent_tree.tree`, `agent_tree.commits`, `agent_tree.agents`, `agent_diff`, `tmux.global`, …). Each row
   carries its keys, the context it applies in, its action id and any warning (for
@@ -463,7 +465,7 @@ Managed epics are identified by **role**, not title: rename `My Reviews` to
 for a managed root to opt out into: if you **delete** it (with its subtree all
 done), dispatch re-provisions it on the next run for as long as its command is
 still configured. To actually opt out, clear the command via
-`managed_feed_config` instead of deleting the epic — a re-provisioned epic
+`feed-config_set` instead of deleting the epic — a re-provisioned epic
 also starts with no retired-feed-item records, so any still-open item you had
 deleted reappears. The three review sub-epics carry **no** `feed_command` of
 their own — only the parent is polled, and the parent's single emission fans
@@ -471,12 +473,12 @@ out to them.
 
 > **Configuring the scripts.** The four settings are read **at TUI startup** to
 > provision the managed tree, and are configured **only over MCP** — there is no
-> in-app editor. Use the `managed_feed_config` tool: with no arguments it reads
-> the settings; with arguments it writes them (each field is optional: omit to
-> leave unchanged, pass `null` to clear) and replies with the result. A write
-> re-provisions the managed tree immediately, so no restart is needed. The tool is
-> annotated as a write (idempotent, not read-only) because its hints cannot
-> describe both calls.
+> in-app editor. Use the `feed-config_read` tool to read the
+> settings and `feed-config_set` to write them (each field is optional but at
+> least one is required: omit to leave unchanged, pass `null` to clear). It
+> replies with the result. A write re-provisions the managed tree immediately,
+> so no restart is needed. The read is read-only and the write idempotent, so
+> each tool's hints are true.
 
 ### Migration: remove old hand-wired review/dependabot epics
 
@@ -963,7 +965,7 @@ summary="This epic adds the learning store; consult docs/specs/core.allium befor
 
 ## Verify Command
 
-A per-repo, single-line shell command that dispatched agents must run before declaring work complete. Stored on the `repo_paths` row for the task's `repo_path`, and shared by every row with the same GitHub path (one repository on several machines runs the same command); set via the `set_verify_command` MCP tool or `cargo run -- repo set-verify <path> <command>`. Newlines and carriage returns are rejected — chain steps with `&&` or `;`. It never appears in the dispatch prompt. It reaches the agent through `task_search`'s "Verify command" line, and the agent runs it itself in its worktree, guided by the wrap-up skill. The board never runs it and `session_wrap-up` does not check the result; `session_wrap-up` refuses only a worktree with uncommitted changes, and after a rebase that moved the branch its response tells the agent to re-run the command. See `AgentsRunTheVerifyCommand` and `WrapUpRefusesUnfinishedWork` in `docs/specs/mcp-task-tools.allium`.
+A per-repo, single-line shell command that dispatched agents must run before declaring work complete. Stored on the `repo_paths` row for the task's `repo_path`, and shared by every row with the same GitHub path (one repository on several machines runs the same command); set via the `verify-command_set` MCP tool or `cargo run -- repo set-verify <path> <command>`. Newlines and carriage returns are rejected — chain steps with `&&` or `;`. It never appears in the dispatch prompt. It reaches the agent through `task_search`'s "Verify command" line, and the agent runs it itself in its worktree, guided by the wrap-up skill. The board never runs it and `session_wrap-up` does not check the result; `session_wrap-up` refuses only a worktree with uncommitted changes, and after a rebase that moved the branch its response tells the agent to re-run the command. See `AgentsRunTheVerifyCommand` and `WrapUpRefusesUnfinishedWork` in `docs/specs/mcp-task-tools.allium`.
 
 ## Releases
 
@@ -1006,4 +1008,4 @@ A SKILL.md carries the flow every invocation walks; detail only one branch needs
 
 ## Review Command
 
-The command a `pr_review` task's prompt tells its agent to run on the PR. It is the per-host `review_command` setting, `/dispatch:preference-review` when unset or blank. That skill reads the operator's review preference files from `$DISPATCH_REVIEW_CONTEXT`, else `~/.local/share/dispatch/review-context` (general.md, languages/<language>.md, repos/<owner>__<repo>.md), and reviews without preferences when the folder is missing. Read or set it with the `set_review_command` MCP tool (no arguments reads; a blank command restores the default). It is read when a task launches, so a change reaches the next launch, not a running agent. See `RenderPrReviewRunbook` in `docs/specs/dispatch-prompt.allium` and `SetReviewCommandViaMcp` in `docs/specs/mcp-task-tools.allium`.
+The command a `pr_review` task's prompt tells its agent to run on the PR. It is the per-host `review_command` setting, `/dispatch:preference-review` when unset or blank. That skill reads the operator's review preference files from `$DISPATCH_REVIEW_CONTEXT`, else `~/.local/share/dispatch/review-context` (general.md, languages/<language>.md, repos/<owner>__<repo>.md), and reviews without preferences when the folder is missing. Read it with the `review-command_read` MCP tool and set it with `review-command_set` (a blank command restores the default). It is read when a task launches, so a change reaches the next launch, not a running agent. See `RenderPrReviewRunbook` in `docs/specs/dispatch-prompt.allium` and `ReadReviewCommandViaMcp` and `SetReviewCommandViaMcp` in `docs/specs/mcp-task-tools.allium`.

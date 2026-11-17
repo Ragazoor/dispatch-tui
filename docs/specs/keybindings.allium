@@ -3,7 +3,7 @@
 --
 -- Scope: The keybinding table — the one place every key the product answers to
 --        is declared — and the three things it drives: which action a pressed
---        key runs, the `?` help overlay, and the read-only `list_keybindings`
+--        key runs, the `?` help overlay, and the read-only `keybinding_search`
 --        MCP tool through which an agent can see every key at once.
 -- Includes: KeyNamespace (one per input mode a key is looked up in);
 --           KeyBinding (one row: namespace, keys, optional context guard,
@@ -189,7 +189,7 @@ use "./observability.allium" as observability
 -- FAMILY name of the per-dialog namespaces: no row has it as its namespace,
 -- and each dialog's namespace keeps today's confirm_* action ids intact. The
 -- picker family (board.picker.*) is the same arrangement. Family names are
--- accepted by list_keybindings as a filter (ListKeybindingsViaMcp).
+-- accepted by keybinding_search as a filter (ListKeybindingsViaMcp).
 --
 -- The task-detail zoom is not a namespace: it is a state of board.detail
 -- (the detail view's zoomed flag, toggled by `z`), not an input mode, and
@@ -227,7 +227,7 @@ enum KeyReceiver { dispatch | tmux }
 -- The condition a context-guarded row applies under. A fixed set, so a test
 -- can set each one up and the overlap check is a table lookup rather than a
 -- reading of prose. Each literal carries plain words as its display text
--- (the help overlay and list_keybindings show the words, never the literal).
+-- (the help overlay and keybinding_search show the words, never the literal).
 --
 -- Inventoried from the board's and the companion pane's handlers as of this
 -- spec. The conditions
@@ -403,7 +403,7 @@ entity KeyBinding {
     -- catch-all and ignore an unlisted key: board.confirm.retry (r, f, Esc)
     -- and the two tree-picker confirmations, board.confirm.move_to_epic and
     -- board.confirm.reparent_epic (y, n, Esc/q). It is listed, so it is visible — the help overlay and
-    -- list_keybindings show it like any other row.
+    -- keybinding_search show it like any other row.
     keys:        Set<String>
 
     -- When the row applies: one KeyContext condition, shown to readers as
@@ -599,9 +599,9 @@ rule ModifiedPressMatchesOnlyItsOwnRow {
 
 rule ListKeybindingsViaMcp {
     -- Agents are first-class users of the board, and an agent that cannot see
-    -- the keys guesses them. list_keybindings returns the table itself, so
+    -- the keys guesses them. keybinding_search returns the table itself, so
     -- what the agent reads is what the handlers run.
-    when: McpListKeybindings(agent, namespace?)
+    when: McpListKeybindings(agent, namespace?, query?)
 
     -- The filter accepts a namespace name or a family name (board.confirm,
     -- board.picker). Only a name that is neither is rejected, and the
@@ -611,23 +611,33 @@ rule ListKeybindingsViaMcp {
         if namespace != null:
             key_namespace_is_valid(namespace) or key_family_is_valid(namespace)
 
-    ensures: KeybindingsListed(namespace: namespace)
+    ensures: KeybindingsListed(namespace: namespace, query: query)
 
     @guidance
         -- Read-only: no argument changes the table, and the call has no side
         -- effect beyond the usual mcp_tool usage record.
-        -- Output is grouped by namespace (published dotted names), in the
-        -- KeyNamespace order above; within a group, every row with its keys,
+        -- The whole table is about 44 KB, so a call with neither namespace
+        -- nor query returns an index and not the table: one entry per
+        -- namespace, in the KeyNamespace order above, with its published
+        -- dotted name, receiver and number of rows, and a last line saying to
+        -- pass namespace for a group's keys or query to search every group.
+        -- With a namespace or a query the output is grouped by namespace, in
+        -- KeyNamespace order; within a group, every row with its keys,
         -- context, action id, description and note (context and note omitted
         -- when absent; context shown as its plain words). With a namespace
         -- name supplied, exactly that one group is returned; with a family
         -- name, every group in that family (board.confirm returns every
         -- board.confirm.* group), in KeyNamespace order.
+        -- query keeps the rows whose keys, action id or description contain it,
+        -- ignoring case, and drops a group left with none. It narrows the
+        -- groups namespace chose, so the two combine. A query that matches
+        -- nothing says which namespace and query it applied, and is not an
+        -- error. The reply is compact JSON, not pretty-printed.
         -- tmux_global rows are included and marked as handled by tmux, so an
         -- agent learns the prefix bindings exist without mistaking them for
         -- keys the board answers.
         -- An invalid namespace rejects with JSON-RPC -32602, the same code
-        -- query_usage uses for an invalid category (mcp-task-tools.allium:
+        -- usage_read uses for an invalid category (mcp-task-tools.allium:
         -- QueryUsageViaMcp).
         -- The tool description says what the call returns and that the filter
         -- takes a namespace or family name. It carries no worked example: the
@@ -845,7 +855,7 @@ surface HelpOverlay {
 
     @guidance
         -- docs/reference.md's Key Bindings section is reduced to a pointer at
-        -- this overlay and at list_keybindings. Prose that used to live in its
+        -- this overlay and at keybinding_search. Prose that used to live in its
         -- tables (what Space does on a card with no worktree, how `/` matches
         -- ids, …) moves into the owning row's description or note, so it is
         -- reachable from both readers rather than from neither.

@@ -112,7 +112,7 @@ pub struct AdminSnapshot {
     /// The identity this board writes as; `None` until it settles.
     pub me: Option<String>,
     pub i_am_super_admin: bool,
-    /// No super-admin exists, so `claim_super_admin` would work.
+    /// No super-admin exists, so `super-admin_claim` would work.
     pub claimable: bool,
     /// Every workspace the person administers or belongs to: all of them for
     /// a super-admin.
@@ -170,7 +170,7 @@ pub fn resolve_person<'a>(
     match matches.as_slice() {
         [one] => Ok(one),
         [] => Err(format!(
-            "no one is called '{wanted}'; list_workspaces shows the directory of people"
+            "no one is called '{wanted}'; workspace_search shows the directory of people"
         )),
         many => Err(format!(
             "more than one person matches '{wanted}': {}. Name one by identity",

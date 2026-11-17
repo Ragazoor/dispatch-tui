@@ -93,6 +93,33 @@ pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[
         "update_work_package",
         "call work-package_update. To delete a package, call work-package_delete",
     ),
+    ("set_verify_command", "call verify-command_set"),
+    (
+        "set_review_command",
+        "call review-command_read to read it, review-command_set (command required) to set it",
+    ),
+    (
+        "managed_feed_config",
+        "call feed-config_read to read, feed-config_set (at least one field) to change",
+    ),
+    ("set_display_name", "call display-name_set"),
+    ("list_workspaces", "call workspace_search"),
+    ("create_workspace", "call workspace_create"),
+    (
+        "update_workspace",
+        "call workspace_update to rename. To delete a workspace, call workspace_delete",
+    ),
+    ("set_workspace_member", "call workspace-member_set"),
+    ("set_super_admin", "call super-admin_set"),
+    ("claim_super_admin", "call super-admin_claim"),
+    ("list_unseen_items", "call unseen-item_search"),
+    ("delete_unseen_item", "call unseen-item_delete"),
+    ("query_usage", "call usage_read"),
+    ("read_context", "call context_read"),
+    (
+        "list_keybindings",
+        "call keybinding_search. With no arguments it returns an index of namespaces, so pass namespace or query for keys",
+    ),
 ];
 
 /// The error text for a `tools/call` to an unregistered name. A name in
@@ -472,7 +499,7 @@ loop.",
                 "feed_append_only": { "type": "boolean", "description": "When true, this epic's feed only ever adds tasks: one whose item is missing from a later emission is kept, not removed. For a feed whose source emits events that are never retracted (a log scan), where absence means nothing. Close such a task from the TUI once it is done: deleting it retires its external id under this epic forever, so an append-only feed never recreates it. Pass false to restore the default, where the feed mirrors its source and removes what the emission omits." },
                 "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." },
                 "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only its creator does. Changeable by the creator or a workspace admin." },
-                "workspace_id": { "type": "integer", "description": "Move this root epic and its tree to the workspace with this id (see list_workspaces). Super-admin, or admin of both workspaces." }
+                "workspace_id": { "type": "integer", "description": "Move this root epic and its tree to the workspace with this id (see workspace_search). Super-admin, or admin of both workspaces." }
             },
             "required": ["epic_id"]
         };
@@ -751,31 +778,50 @@ exist.",
             "required": ["learning_id"]
         };
 
-    async idempotent "set_review_command" => review_command::handle_set_review_command,
-        "Read or set the command a PR review task runs on its PR, for this machine. It \
-defaults to /dispatch:preference-review and shows up in the task's prompt, so it applies to the next launch, \
-not an agent already running. Call it with no arguments to only read the command in effect; that \
-call changes nothing. Pass command to set it, for example a personal skill such as /review-pr; a \
-blank command restores the default. The reply names the command now in effect.",
+    async read_only "review-command_read" => review_command::handle_review_command_read,
+        "Read the command a PR review task runs on its PR, for this machine. It defaults to \
+/dispatch:preference-review and shows up in the task's prompt, so a change reaches the next launch, \
+not an agent already running. Takes no arguments and changes nothing. The reply names the command \
+in effect. To change it, call review-command_set.",
+        {
+            "type": "object",
+            "properties": {}
+        };
+
+    async idempotent "review-command_set" => review_command::handle_review_command_set,
+        "Set the command a PR review task runs on its PR, for this machine, for example a personal \
+skill such as /review-pr. It shows up in the task's prompt, so it applies to the next launch, not \
+an agent already running. A blank command restores the default, /dispatch:preference-review. \
+Repeating the same call changes nothing. The reply names the command now in effect. To only read \
+it, call review-command_read.",
         {
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The single-line review command, e.g. /review-pr. Blank restores /dispatch:preference-review. Omit to read."
+                    "description": "The single-line review command, e.g. /review-pr. Blank restores /dispatch:preference-review."
                 }
-            }
+            },
+            "required": ["command"]
         };
 
-    async idempotent "managed_feed_config" => managed_feeds::handle_managed_feed_config,
-        "Read or change the managed-feed configuration: the PR-reviews and CVE feed commands and \
-their poll intervals (in seconds). Call it with no arguments to only read the current values; \
-that call changes nothing. Pass any field to change it: each field is triple-state — omit to \
-leave unchanged, pass null to clear, or pass a value to set. Either way the reply is the \
-resulting configuration, and unset values are reported as unset, which is how you tell a \
-disabled feed from one running on the default interval. A change re-provisions the managed epic \
-tree, so enabling a feed creates its epics immediately. Omit an interval to fall back to the \
-default feed interval.",
+    async read_only "feed-config_read" => managed_feeds::handle_feed_config_read,
+        "Read the managed-feed configuration: the PR-reviews and CVE feed commands and their poll \
+intervals (in seconds). Takes no arguments and changes nothing. Unset values are reported as \
+unset, which is how you tell a disabled feed from one running on the default interval. To change \
+them, call feed-config_set.",
+        {
+            "type": "object",
+            "properties": {}
+        };
+
+    async idempotent "feed-config_set" => managed_feeds::handle_feed_config_set,
+        "Change the managed-feed configuration: the PR-reviews and CVE feed commands and their poll \
+intervals (in seconds). Pass at least one field; a call with none is refused, and feed-config_read \
+reads the current values. Each field is triple-state: omit to leave unchanged, pass null to clear, \
+or pass a value to set. The reply is the resulting configuration. A change re-provisions the \
+managed epic tree, so enabling a feed creates its epics immediately. Omit an interval to fall back \
+to the default feed interval.",
         {
             "type": "object",
             "properties": {
@@ -786,7 +832,7 @@ default feed interval.",
             }
         };
 
-    async idempotent "set_display_name" => people::handle_set_display_name,
+    async idempotent "display-name_set" => people::handle_display_name_set,
         "Set your display name: the name the board and other tools show beside what you create, \
 instead of the short prefix of your identity. It names the person whose board this agent runs \
 under, not the agent. The name is trimmed, must not be blank and can be at most 64 characters; \
@@ -800,13 +846,13 @@ Returns the saved name.",
             "required": ["name"]
         };
 
-    async read_only "list_workspaces" => admin::handle_list_workspaces,
+    async read_only "workspace_search" => admin::handle_workspace_search,
         "List the workspaces you can see, who is in each and in which role, who the super-admins are, \
 and the directory of every person by display name and short identity. Use it to find the \
-workspace_id and the person to name in epic_create, set_workspace_member and set_super_admin: \
+workspace_id and the person to name in epic_create, workspace-member_set and super-admin_set: \
 people are named by display name, and the directory tells two people with one name apart by \
 identity. A person sees the workspaces they belong to; a super-admin sees all of them. It \
-also says when claim_super_admin would work. It returns no epics, tasks or other content.",
+also says when super-admin_claim would work. It returns no epics, tasks or other content.",
         {
             "type": "object",
             "properties": {
@@ -814,10 +860,10 @@ also says when claim_super_admin would work. It returns no epics, tasks or other
             }
         };
 
-    async write "create_workspace" => admin::handle_create_workspace,
+    async write "workspace_create" => admin::handle_workspace_create,
         "Create a workspace: a place where people collaborate, holding epics and work packages. Only a \
 super-admin may. The new workspace has no members, not even you; add people, yourself included, \
-with set_workspace_member. Names are unique across the store, trimmed, and at most 64 characters. \
+with workspace-member_set. Names are unique across the store, trimmed, and at most 64 characters. \
 Returns the new workspace's id and name.",
         {
             "type": "object",
@@ -827,23 +873,33 @@ Returns the new workspace's id and name.",
             "required": ["name"]
         };
 
-    async destructive "update_workspace" => admin::handle_update_workspace,
-        "Rename a workspace with name, or delete it with delete=true; give exactly one. A super-admin or \
-an admin of the workspace may rename it. Only a super-admin may delete, and only an empty \
-workspace: one still holding an epic or work package, private ones included, is refused, so empty \
-it first (list_unseen_items and delete_unseen_item reach private items nobody can see). Deleting \
-removes its memberships and its learnings and cannot be undone. Returns what changed.",
+    async idempotent "workspace_update" => admin::handle_workspace_update,
+        "Rename a workspace. A super-admin or an admin of the workspace may. Renaming to the name it \
+already has changes nothing. Returns what changed. To delete a workspace, call workspace_delete.",
         {
             "type": "object",
             "properties": {
-                "workspace_id": { "type": "integer", "description": "The workspace to rename or delete, from list_workspaces." },
-                "name": { "type": "string", "description": "The new name, 1 to 64 characters after trimming, not used by another workspace. Give this or delete, not both." },
-                "delete": { "type": "boolean", "description": "When true, delete the workspace. Give this or name, not both. False is the same as leaving it out." }
+                "workspace_id": { "type": "integer", "description": "The workspace to rename, from workspace_search." },
+                "name": { "type": "string", "description": "The new name, 1 to 64 characters after trimming, not used by another workspace." }
+            },
+            "required": ["workspace_id", "name"]
+        };
+
+    async destructive "workspace_delete" => admin::handle_workspace_delete,
+        "Delete a workspace. Only a super-admin may, and only an empty workspace: one still holding an \
+epic or work package, private ones included, is refused, so empty it first (unseen-item_search and \
+unseen-item_delete reach private items nobody can see). Deleting removes its memberships and its \
+learnings and cannot be undone. Returns what was deleted. To rename a workspace, call \
+workspace_update.",
+        {
+            "type": "object",
+            "properties": {
+                "workspace_id": { "type": "integer", "description": "The workspace to delete, from workspace_search." }
             },
             "required": ["workspace_id"]
         };
 
-    async destructive "set_workspace_member" => admin::handle_set_workspace_member,
+    async idempotent "workspace-member_set" => admin::handle_workspace_member_set,
         "Add a person to a workspace, change their role there, or remove them; one call does one of the \
 three. Give role to add the person (if they are not a member) or to change their role (if they are); \
 give remove=true to take them out. A super-admin or an admin of the workspace may. Removing a \
@@ -853,7 +909,7 @@ changed.",
         {
             "type": "object",
             "properties": {
-                "workspace_id": { "type": "integer", "description": "The workspace, from list_workspaces." },
+                "workspace_id": { "type": "integer", "description": "The workspace, from workspace_search." },
                 "person": { "type": "string", "description": "The person's display name, or their identity (or its first 8 or more characters) when two people share a name. A name more than one person has is refused with the matches." },
                 "role": { "type": "string", "enum": ["admin", "member"], "description": "The role to give: admin can manage the workspace's members, member cannot. Adds the person when they are not a member. Give this or remove, not both." },
                 "remove": { "type": "boolean", "description": "When true, remove the person from the workspace; they must be a member. Give this or role, not both. False is the same as leaving it out." }
@@ -861,11 +917,11 @@ changed.",
             "required": ["workspace_id", "person"]
         };
 
-    async idempotent "set_super_admin" => admin::handle_set_super_admin,
+    async idempotent "super-admin_set" => admin::handle_super_admin_set,
         "Make a person a super-admin or stop them being one. Only a super-admin may. A super-admin \
 manages every workspace and may delete private items nobody can see, but cannot read them. \
 Repeating a call that already holds changes nothing. Taking the role from the last super-admin is \
-refused. To become the first one yourself, use claim_super_admin. Returns the person's name and \
+refused. To become the first one yourself, use super-admin_claim. Returns the person's name and \
 their new standing.",
         {
             "type": "object",
@@ -876,40 +932,40 @@ their new standing.",
             "required": ["person", "super_admin"]
         };
 
-    async write "claim_super_admin" => admin::handle_claim_super_admin,
+    async write "super-admin_claim" => admin::handle_super_admin_claim,
         "Make yourself the first super-admin. It works only while the store has none, and then once: \
-after that it is refused and a super-admin uses set_super_admin to add more. You are the person \
+after that it is refused and a super-admin uses super-admin_set to add more. You are the person \
 whose board this agent runs under. Takes no arguments. Returns your new standing.",
         {
             "type": "object",
             "properties": {}
         };
 
-    async read_only "list_unseen_items" => admin::handle_list_unseen_items,
+    async read_only "unseen-item_search" => admin::handle_unseen_item_search,
         "List private epics and work packages that nobody can see any more because their creator has \
 left the workspace. Only a super-admin sees any; for anyone else the list is empty. Each entry is \
 its kind, id, workspace, creator and created date, never a title or content. The only thing to \
-do with one is delete_unseen_item.",
+do with one is unseen-item_delete.",
         {
             "type": "object",
             "properties": {}
         };
 
-    async destructive "delete_unseen_item" => admin::handle_delete_unseen_item,
+    async destructive "unseen-item_delete" => admin::handle_unseen_item_delete,
         "Permanently delete a private epic or work package that nobody can see, chosen from \
-list_unseen_items. Only a super-admin may. An epic is deleted with its sub-epics and tasks, and is \
+unseen-item_search. Only a super-admin may. An epic is deleted with its sub-epics and tasks, and is \
 refused while any task in it is not done. A public item, or an id that does not exist, is refused \
 in the same words. It cannot be undone, and you never read what you delete.",
         {
             "type": "object",
             "properties": {
-                "kind": { "type": "string", "enum": ["epic", "work_package"], "description": "The kind of item, as list_unseen_items names it." },
-                "item_id": { "type": "integer", "description": "The item's id from list_unseen_items." }
+                "kind": { "type": "string", "enum": ["epic", "work_package"], "description": "The kind of item, as unseen-item_search names it." },
+                "item_id": { "type": "integer", "description": "The item's id from unseen-item_search." }
             },
             "required": ["kind", "item_id"]
         };
 
-    async idempotent "set_verify_command" => tasks::handle_set_verify_command,
+    async idempotent "verify-command_set" => tasks::handle_verify_command_set,
         "Set or clear the verify command for a repository path — the check an agent working in \
 that repo must run green before declaring work complete. It never appears in a dispatch prompt. \
 It reaches the agent through the 'Verify command' line in task_search's response, and the agent \
@@ -959,7 +1015,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
             "required": ["task_id", "token", "action"]
         };
 
-    async read_only "query_usage" => tasks::handle_query_usage,
+    async read_only "usage_read" => tasks::handle_usage_read,
         "Query aggregated feature usage counts. Returns events grouped by category/action/actor, ordered by count ascending (least-used first). Useful for identifying unused keybindings or MCP tools.",
         {
             "type": "object",
@@ -987,7 +1043,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
         }
 ;
 
-    async read_only "read_context" => context::handle_read_context,
+    async read_only "context_read" => context::handle_context_read,
         "Return the text of one dispatch context resource, the same text the resources/read method gives for that URI. Pass skill://<name>/SKILL.md for an agent-facing skill or skill://<name>/references/<file>.md for a reference file beside it, dispatch://learnings/<id> for a validated learning from the knowledge base, dispatch://task/self for your own task, or dispatch://task/<id> for any task by id, exactly as task_search renders it with task_id. Use it to pull a skill, a reference or a learning into your context when you only have its URI; it does not search, and it does not list what exists. An unknown URI is refused with an error naming it.",
         {
             "type": "object",
@@ -1001,14 +1057,18 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
         }
 ;
 
-    async read_only "list_keybindings" => keybindings::handle_list_keybindings,
-        "List every key the dispatch board, the agent-tree and diff panes, and tmux answer to, grouped by input mode (namespace), straight from the table the key handlers read. Each row has its keys, the context it applies under (when it has one), the action id, a description and a note where a key is easy to misread. Read-only.",
+    async read_only "keybinding_search" => keybindings::handle_keybinding_search,
+        "Search the keys the dispatch board, the agent-tree and diff panes, and tmux answer to, straight from the table the key handlers read. With no arguments it returns an index, not the table: one entry per input mode (namespace) with its row count, which is small. Pass namespace for one mode's keys, or query to find rows across every mode. Each row has its keys, the context it applies under (when it has one), the action id, a description and a note where a key is easy to misread. Read-only.",
         {
             "type": "object",
             "properties": {
                 "namespace": {
                     "type": "string",
-                    "description": "Optional filter: one namespace (e.g. 'board.normal', 'agent_diff', 'tmux.global') or a family ('board.confirm', 'board.picker') for all its namespaces. Omit for every namespace. An unknown name is rejected with the list of valid ones."
+                    "description": "Optional filter: one namespace (e.g. 'board.normal', 'agent_diff', 'tmux.global') or a family ('board.confirm', 'board.picker') for all its namespaces. An unknown name is rejected with the list of valid ones."
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Optional text. Keeps the rows whose keys, action id or description contain it, ignoring case, and drops a namespace left with none. Combines with namespace."
                 }
             }
         }

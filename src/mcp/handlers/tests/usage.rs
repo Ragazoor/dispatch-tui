@@ -46,7 +46,7 @@ async fn query_usage_mcp_tool_returns_aggregated_counts() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "query_usage", "arguments": {} })),
+        Some(json!({ "name": "usage_read", "arguments": {} })),
     )
     .await;
 
@@ -75,7 +75,7 @@ async fn query_usage_refuses_a_limit_below_one() {
         let resp = call(
             &state,
             "tools/call",
-            Some(json!({ "name": "query_usage", "arguments": { "limit": bad } })),
+            Some(json!({ "name": "usage_read", "arguments": { "limit": bad } })),
         )
         .await;
         assert!(is_error(&resp), "limit {bad} must be refused: {resp:?}");

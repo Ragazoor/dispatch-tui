@@ -108,7 +108,7 @@ fn apply_board_event(event: crate::board_event::BoardEvent, rt: &TuiRuntime) -> 
     match event {
         BoardEvent::Refresh => {
             // A broad refresh may follow a managed-feed config save
-            // (managed_feed_config) that enabled a feed on a
+            // (feed-config_set) that enabled a feed on a
             // previously feed-less instance. Invalidate the FeedRunner
             // cache so the next tick re-queries for feed commands and
             // starts polling the freshly-provisioned epics rather than

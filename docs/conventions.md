@@ -226,7 +226,7 @@ temporary data directory holding a host file. The shared Host registry gets a
 mirror via `sync.allium: RegisterHostOnConnect`.
 
 **Some reads are done in Rust because a subscription cannot express them.**
-`query_usage` (task #4915) groups and counts rows, which no subscription's
+`usage_read` (task #4915) groups and counts rows, which no subscription's
 `WHERE` clause can do. It is served on demand by the module's
 `own_usage_summary` procedure (task #98756), not by a view or a standing
 subscription: a view over usage re-runs on every recorded event.

@@ -86,7 +86,7 @@ impl UsageEvent {
     }
 }
 
-/// Aggregated usage row returned by query_usage.
+/// Aggregated usage row returned by usage_read.
 #[derive(Debug, Clone)]
 pub struct UsageSummary {
     pub category: String,
@@ -101,7 +101,7 @@ pub struct UsageSummary {
 mod tests {
     use super::*;
 
-    /// `UsageCategory::ALL`/`UsageActor::ALL` back the query_usage MCP
+    /// `UsageCategory::ALL`/`UsageActor::ALL` back the usage_read MCP
     /// schema's category/actor enums (dispatch.rs) — a variant added there
     /// without updating `ALL` would silently under-advertise it.
     #[test]

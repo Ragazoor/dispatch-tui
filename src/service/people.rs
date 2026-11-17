@@ -194,7 +194,7 @@ impl PeopleService {
             .map(|w| w.name)
             .ok_or_else(|| {
                 ServiceError::NotFound(format!(
-                    "no workspace {workspace_id}; list_workspaces shows the ones you can see"
+                    "no workspace {workspace_id}; workspace_search shows the ones you can see"
                 ))
             })
     }

@@ -285,7 +285,7 @@ fn every_row_of_the_table_is_in_the_overlay_under_its_namespace() {
 }
 
 /// The `G` row's note is the warning that motivated the table; it must be on
-/// screen in the overlay, not only in list_keybindings.
+/// screen in the overlay, not only in keybinding_search.
 #[test]
 fn the_last_row_keys_warning_is_in_the_overlay() {
     let body = overlay_body();

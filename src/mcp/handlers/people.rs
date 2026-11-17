@@ -1,4 +1,4 @@
-//! The `set_display_name` tool (`docs/specs/workspaces.allium:
+//! The `display-name_set` tool (`docs/specs/workspaces.allium:
 //! SetDisplayNameViaMcp`): a thin wrapper over `PeopleService`.
 
 use serde::Deserialize;
@@ -15,7 +15,7 @@ struct SetDisplayNameArgs {
     name: String,
 }
 
-pub(super) async fn handle_set_display_name(
+pub(super) async fn handle_display_name_set(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
@@ -25,7 +25,7 @@ pub(super) async fn handle_set_display_name(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!("MCP set_display_name");
+    tracing::info!("MCP display-name_set");
     match state.people_svc.set_display_name(&parsed.name).await {
         Ok(saved) => {
             state.notify();

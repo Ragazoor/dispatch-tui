@@ -1,6 +1,6 @@
 //! mcp-task-tools.allium: "MCP context resources" and the
 //! `McpContextResources` surface — `resources/list`, `resources/read` and their
-//! tool twin `read_context`.
+//! tool twin `context_read`.
 //!
 //! Every test drives the JSON-RPC surface through `handle_mcp`, so nothing here
 //! depends on how the handlers are factored. The skill fixtures are read from
@@ -331,7 +331,7 @@ async fn read_context(state: &Arc<McpState>, identity: Identity, uri: &str) -> J
     call_with_identity(
         state,
         "tools/call",
-        Some(json!({ "name": "read_context", "arguments": { "uri": uri } })),
+        Some(json!({ "name": "context_read", "arguments": { "uri": uri } })),
         identity,
     )
     .await
@@ -372,7 +372,7 @@ enum ReadOutcome {
     ToolError(String),
 }
 
-/// What read_context must answer, given what resources/read answered for the
+/// What context_read must answer, given what resources/read answered for the
 /// same URI and caller (TheToolTwinServesTheSameText): the same text on
 /// success; the same -32600 JSON-RPC error for a missing or malformed
 /// identity; and for -32602 / -32603 an `isError` tool result carrying the
@@ -438,7 +438,7 @@ fn expect_rpc_error(resp: &JsonRpcResponse, code: i64, what: &str) -> String {
 }
 
 /// Both entry points refuse `uri` with one message naming it: resources/read
-/// as JSON-RPC -32602, read_context as an `isError` tool result.
+/// as JSON-RPC -32602, context_read as an `isError` tool result.
 async fn assert_unknown_on_both(
     state: &Arc<McpState>,
     identity: CallerIdentity,
@@ -454,7 +454,7 @@ async fn assert_unknown_on_both(
     assert_eq!(
         read_context_outcome(&via_tool),
         ReadOutcome::ToolError(msg.clone()),
-        "read_context({uri}) must refuse with an isError result carrying resources/read's message"
+        "context_read({uri}) must refuse with an isError result carrying resources/read's message"
     );
     msg
 }
@@ -541,13 +541,13 @@ async fn no_resource_subscribe_or_write_method_is_answered() {
 }
 
 // ---------------------------------------------------------------------------
-// read_context in tools/list
+// context_read in tools/list
 // ---------------------------------------------------------------------------
 
-/// ReadContextViaMcp: read_context is a listed tool and `uri` is required.
+/// ReadContextViaMcp: context_read is a listed tool and `uri` is required.
 /// tools/list stays identity-free, so it is asserted without one too.
 #[tokio::test]
-async fn tools_list_advertises_read_context_with_a_required_uri() {
+async fn tools_list_advertises_context_read_with_a_required_uri() {
     let state = test_state().await;
     for identity in [Ok(CallerIdentity::Session), Err(IdentityError::Missing)] {
         let resp = call_with_identity(&state, "tools/list", None, identity).await;
@@ -556,17 +556,17 @@ async fn tools_list_advertises_read_context_with_a_required_uri() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|t| t["name"] == "read_context")
-            .unwrap_or_else(|| panic!("tools/list must advertise read_context"))
+            .find(|t| t["name"] == "context_read")
+            .unwrap_or_else(|| panic!("tools/list must advertise context_read"))
             .clone();
         let schema = &tool["inputSchema"];
         assert!(
             schema["properties"]["uri"].is_object(),
-            "read_context must declare a uri argument: {schema}"
+            "context_read must declare a uri argument: {schema}"
         );
         let required: Vec<&str> = schema["required"]
             .as_array()
-            .unwrap_or_else(|| panic!("read_context must declare required arguments: {schema}"))
+            .unwrap_or_else(|| panic!("context_read must declare required arguments: {schema}"))
             .iter()
             .filter_map(Value::as_str)
             .collect();
@@ -579,7 +579,7 @@ async fn tools_list_advertises_read_context_with_a_required_uri() {
         for shape in ["skill://", "dispatch://learnings/", TASK_SELF] {
             assert!(
                 desc.contains(shape),
-                "read_context description must name the {shape} URI shape, got: {desc}"
+                "context_read description must name the {shape} URI shape, got: {desc}"
             );
         }
     }
@@ -605,7 +605,7 @@ async fn every_context_entry_point_refuses_a_missing_or_malformed_identity() {
         let read_msg = expect_rpc_error(&resp, -32600, &format!("resources/read ({label})"));
 
         let resp = read_context(&state, Err(err.clone()), &skill_uri).await;
-        let tool_msg = expect_rpc_error(&resp, -32600, &format!("read_context ({label})"));
+        let tool_msg = expect_rpc_error(&resp, -32600, &format!("context_read ({label})"));
         assert_eq!(
             read_msg, tool_msg,
             "both reads refuse a {label} identity alike"
@@ -1052,7 +1052,7 @@ async fn task_self_always_names_the_calling_task() {
 // ---------------------------------------------------------------------------
 
 /// ListedMeansReadable: every listed URI resolves on both entry points for
-/// the same caller, and read_context returns exactly resources/read's text.
+/// the same caller, and context_read returns exactly resources/read's text.
 #[tokio::test]
 async fn every_listed_uri_reads_the_same_text_through_both_entry_points() {
     let state = test_state().await;
@@ -1081,17 +1081,17 @@ async fn every_listed_uri_reads_the_same_text_through_both_entry_points() {
         let via_tool = read_context_outcome(&read_context(&state, Ok(me.clone()), uri).await);
         assert_eq!(
             via_tool, via_read,
-            "read_context({uri}) must equal resources/read"
+            "context_read({uri}) must equal resources/read"
         );
     }
 }
 
 /// TheToolTwinServesTheSameText: for every URI and caller identity — present,
-/// missing or malformed — read_context succeeds exactly when resources/read
+/// missing or malformed — context_read succeeds exactly when resources/read
 /// does, with the same text; it fails with the same -32600 for identity, and
 /// otherwise with an isError result carrying resources/read's message.
 #[tokio::test]
-async fn read_context_fails_exactly_when_resources_read_does_with_the_same_error() {
+async fn context_read_fails_exactly_when_resources_read_does_with_the_same_error() {
     let state = test_state().await;
     let task = new_task(&state, "Twin").await;
     let ok = approved_learning(&state, "Served").await;
@@ -1316,7 +1316,7 @@ async fn reading_a_task_by_id_serves_get_tasks_rendering_to_any_caller() {
         let twin = call_as(
             &state,
             "tools/call",
-            Some(json!({ "name": "read_context", "arguments": { "uri": uri } })),
+            Some(json!({ "name": "context_read", "arguments": { "uri": uri } })),
             identity,
         )
         .await;
@@ -1386,7 +1386,7 @@ async fn reading_a_learning_records_no_retrieval_and_leaves_learning_rate_guarde
     let t = read_context(&state, Ok(me.clone()), &uri).await;
     assert!(
         matches!(read_context_outcome(&t), ReadOutcome::Text(_)),
-        "read_context must serve {uri}"
+        "context_read must serve {uri}"
     );
 
     let retrievals = state.db.list_retrievals_for_task(task).await.unwrap();
@@ -1558,7 +1558,7 @@ async fn tools_list_omits_removed_watch_and_poll_owner_tools() {
     for removed in ["watch_task", "override_poll_owner"] {
         assert!(!names.contains(&removed), "{removed} must not be listed");
     }
-    for kept in ["read_context", "work-package_create"] {
+    for kept in ["context_read", "work-package_create"] {
         assert!(names.contains(&kept), "{kept} must still be listed");
     }
 }

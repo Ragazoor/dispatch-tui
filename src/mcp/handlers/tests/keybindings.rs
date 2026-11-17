@@ -1,4 +1,4 @@
-//! `list_keybindings` (`ListKeybindingsViaMcp` in
+//! `keybinding_search` (`ListKeybindingsViaMcp` in
 //! `docs/specs/keybindings.allium`).
 #![allow(clippy::unwrap_used)]
 use super::*;
@@ -7,7 +7,7 @@ async fn list(state: &Arc<McpState>, args: Value) -> JsonRpcResponse {
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "list_keybindings", "arguments": args })),
+        Some(json!({ "name": "keybinding_search", "arguments": args })),
     )
     .await
 }
@@ -24,12 +24,33 @@ fn groups(resp: &JsonRpcResponse) -> Vec<Value> {
         .clone()
 }
 
+fn text_of(resp: &JsonRpcResponse) -> String {
+    resp.result.as_ref().unwrap()["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// keybindings.allium: ListKeybindingsViaMcp. With neither namespace nor query
+/// the reply is an index, not the 44 KB table: one entry per namespace in
+/// table order with its receiver and row count, then a line saying how to get
+/// the keys.
 #[tokio::test]
-async fn without_a_filter_every_namespace_is_returned_in_table_order() {
+async fn without_a_filter_an_index_of_namespaces_is_returned_in_table_order() {
     let state = test_state().await;
     let resp = list(&state, json!({})).await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
-    let names: Vec<String> = groups(&resp)
+    let text = text_of(&resp);
+    assert!(text.len() < 8_000, "the index is {} bytes", text.len());
+    let (first, hint) = text
+        .split_once('\n')
+        .expect("a hint line follows the index");
+    assert!(
+        hint.contains("namespace") && hint.contains("query"),
+        "{hint}"
+    );
+    let index: Vec<Value> = serde_json::from_str(first).unwrap();
+    let names: Vec<String> = index
         .iter()
         .map(|g| g["namespace"].as_str().unwrap().to_string())
         .collect();
@@ -38,6 +59,67 @@ async fn without_a_filter_every_namespace_is_returned_in_table_order() {
         .map(|n| n.name().to_string())
         .collect();
     assert_eq!(names, expected);
+    let normal = index
+        .iter()
+        .find(|g| g["namespace"] == "board.normal")
+        .unwrap();
+    assert_eq!(
+        normal["bindings"],
+        crate::keybindings::bindings_in(crate::keybindings::KeyNamespace::BoardNormal).count()
+    );
+    assert!(index.iter().all(|g| g["bindings"].is_number()));
+}
+
+/// keybindings.allium: ListKeybindingsViaMcp. query keeps the rows whose keys,
+/// action id or description contain it, ignoring case, across every namespace,
+/// and drops a group left with none.
+#[tokio::test]
+async fn a_query_returns_only_the_matching_rows_across_namespaces() {
+    let state = test_state().await;
+    let resp = list(&state, json!({"query": "NAVIGATE_ROW_LAST"})).await;
+    let gs = groups(&resp);
+    assert!(!gs.is_empty());
+    for g in &gs {
+        let rows = g["bindings"].as_array().unwrap();
+        assert!(!rows.is_empty(), "{} kept with no rows", g["namespace"]);
+        for r in rows {
+            let hay = format!("{} {} {}", r["keys"], r["action"], r["description"]).to_lowercase();
+            assert!(hay.contains("navigate_row_last"), "{r}");
+        }
+    }
+    assert!(gs.iter().any(|g| g["namespace"] == "board.normal"));
+}
+
+#[tokio::test]
+async fn a_query_narrows_the_namespace_it_is_combined_with() {
+    let state = test_state().await;
+    let resp = list(
+        &state,
+        json!({"namespace": "board.normal", "query": "navigate_row_last"}),
+    )
+    .await;
+    let gs = groups(&resp);
+    assert_eq!(gs.len(), 1);
+    assert_eq!(gs[0]["namespace"], "board.normal");
+    assert!(gs[0]["bindings"].as_array().unwrap().len() < 5);
+}
+
+/// A query that matches nothing is not an error: the reply names the namespace
+/// and query it applied.
+#[tokio::test]
+async fn a_query_with_no_match_names_what_it_applied() {
+    let state = test_state().await;
+    let resp = list(
+        &state,
+        json!({"namespace": "board.normal", "query": "zzzqqq"}),
+    )
+    .await;
+    assert!(resp.error.is_none() && !is_error(&resp), "{resp:?}");
+    let text = text_of(&resp);
+    assert!(
+        text.contains("zzzqqq") && text.contains("board.normal"),
+        "{text}"
+    );
 }
 
 #[tokio::test]
@@ -104,7 +186,7 @@ async fn an_unknown_namespace_is_rejected_listing_the_valid_names() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.nope"})).await;
     // tools/call re-wraps a tool's INVALID_PARAMS as an `isError` result, the
-    // same way it does for query_usage's invalid category.
+    // same way it does for usage_read's invalid category.
     assert!(is_error(&resp));
     let message = error_message(&resp);
     assert!(message.contains("board.nope"), "{message}");

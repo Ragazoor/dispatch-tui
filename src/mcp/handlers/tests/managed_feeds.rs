@@ -8,7 +8,7 @@ use serde_json::json;
 use super::{call, extract_response_text, test_state};
 
 #[tokio::test]
-async fn no_args_returns_current_config() {
+async fn the_read_tool_returns_current_config() {
     let state = test_state().await;
     state
         .db
@@ -23,7 +23,7 @@ async fn no_args_returns_current_config() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "managed_feed_config", "arguments": {} })),
+        Some(json!({ "name": "feed-config_read", "arguments": {} })),
     )
     .await;
 
@@ -33,12 +33,12 @@ async fn no_args_returns_current_config() {
 }
 
 #[tokio::test]
-async fn no_args_on_empty_reports_unset() {
+async fn the_read_tool_on_empty_reports_unset() {
     let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "managed_feed_config", "arguments": {} })),
+        Some(json!({ "name": "feed-config_read", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -50,13 +50,13 @@ use std::sync::Arc;
 use crate::mcp::McpState;
 use crate::models::FeedRole;
 
-/// Issue a managed_feed_config call with arguments and discard the response (used by the
+/// Issue a feed-config_set call with arguments and discard the response (used by the
 /// success-path tests that assert on persisted state, not the reply text).
 async fn set(state: &Arc<McpState>, args: serde_json::Value) {
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "managed_feed_config", "arguments": args })),
+        Some(json!({ "name": "feed-config_set", "arguments": args })),
     )
     .await;
 }
@@ -157,7 +157,7 @@ async fn set_negative_interval_rejected() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "managed_feed_config",
+            "name": "feed-config_set",
             "arguments": { "reviews_interval_secs": -5 }
         })),
     )
@@ -196,7 +196,7 @@ async fn set_sub_floor_interval_rejected() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "managed_feed_config",
+                "name": "feed-config_set",
                 "arguments": {
                     "reviews_command": "/scripts/fetch-reviews.sh",
                     "reviews_interval_secs": bad
@@ -280,11 +280,10 @@ async fn set_notifies_the_runtime_so_the_feed_cache_is_invalidated() {
     );
 }
 
-/// A call with no arguments is a pure read: it must not provision the managed
-/// epic tree and must not notify the runtime (epics.allium:
-/// ManagedFeedConfigViaMcp).
+/// feed-config_read is a pure read: it must not provision the managed epic
+/// tree and must not notify the runtime (epics.allium: ReadFeedConfigViaMcp).
 #[tokio::test]
-async fn no_args_is_read_only() {
+async fn the_read_tool_is_read_only() {
     let (notify_tx, mut notify_rx) =
         tokio::sync::mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
     let (state, _db) = super::test_state_with_overrides(
@@ -307,7 +306,7 @@ async fn no_args_is_read_only() {
     call(
         &state,
         "tools/call",
-        Some(json!({ "name": "managed_feed_config", "arguments": {} })),
+        Some(json!({ "name": "feed-config_read", "arguments": {} })),
     )
     .await;
 
@@ -338,7 +337,7 @@ async fn write_returns_resulting_config() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "managed_feed_config",
+            "name": "feed-config_set",
             "arguments": { "reviews_command": "/r.sh", "reviews_interval_secs": 120 }
         })),
     )
@@ -353,19 +352,47 @@ async fn write_returns_resulting_config() {
     );
 }
 
-/// The old two-tool names are gone.
+/// The old names are gone: the two-tool pair, and the merged tool that is now
+/// feed-config_read and feed-config_set.
 #[test]
 fn old_tool_names_are_gone() {
-    for old in ["get_managed_feed_config", "set_managed_feed_config"] {
+    for old in [
+        "get_managed_feed_config",
+        "set_managed_feed_config",
+        "managed_feed_config",
+    ] {
         assert!(
             !crate::mcp::handlers::dispatch::TOOL_NAMES.contains(&old),
-            "{old} must be merged into managed_feed_config"
+            "{old} must be split into feed-config_read and feed-config_set"
         );
     }
 }
 
+/// epics.allium: ManagedFeedConfigViaMcp. A set call with no field is refused,
+/// points at feed-config_read, and writes nothing.
+#[tokio::test]
+async fn a_set_call_with_no_field_is_refused_and_points_at_the_read_tool() {
+    let (notify_tx, mut notify_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
+    let (state, _db) = super::test_state_with_overrides(
+        Arc::new(crate::process::MockProcessRunner::new(vec![]))
+            as Arc<dyn crate::process::ProcessRunner>,
+        Some(notify_tx),
+        None,
+    )
+    .await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "feed-config_set", "arguments": {} })),
+    )
+    .await;
+    super::assert_error(&resp, "feed-config_read");
+    assert!(notify_rx.try_recv().is_err(), "a refusal must not notify");
+}
+
 /// Each field on its own, including an explicit null, makes the call a write.
-/// Guards `ManagedFeedConfigArgs::is_read` against a field it forgets to count.
+/// Guards the at-least-one-field check against a field it forgets to count.
 #[tokio::test]
 async fn any_single_field_makes_the_call_a_write() {
     for args in [

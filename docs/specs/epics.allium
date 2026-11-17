@@ -24,7 +24,7 @@ use "./workspaces.allium" as workspaces
 -- exactly as for hand-made feed epics.
 --
 -- NOTE — these four settings are editable ONLY over MCP, via
--- managed_feed_config (a call with no arguments reads them back). There is no
+-- feed-config_set (feed-config_read reads them back). There is no
 -- in-app TUI editor. On save, that surface persists the settings and re-fires
 -- ProvisionManagedEpics, so a newly-enabled feed provisions its epic tree
 -- without a restart.
@@ -960,20 +960,33 @@ rule UpdateEpicViaMcp {
         -- reads or writes it.
 }
 
-rule ManagedFeedConfigViaMcp {
-    when: McpManagedFeedConfig(reviews_command?, reviews_interval_secs?,
-                               cve_command?, cve_interval_secs?)
+rule ReadFeedConfigViaMcp {
+    when: McpFeedConfigRead()
 
-    -- One tool both reads and writes the four managed-feed config settings
-    -- (reviews/CVE feed commands and their poll intervals).
+    -- Read-only, no arguments: it changes nothing, does not re-provision and
+    -- does not notify the runtime. The reply is the four managed-feed config
+    -- settings, with unset values reported as unset, which is how a disabled
+    -- feed is told from one running on the default interval.
+    ensures: ManagedFeedConfigRetrieved()
+
+    @guidance
+        -- The read half of the old managed_feed_config, split out so each tool
+        -- has one honest access class (docs/adr/0002, decision 4).
+}
+
+rule ManagedFeedConfigViaMcp {
+    when: McpFeedConfigSet(reviews_command?, reviews_interval_secs?,
+                           cve_command?, cve_interval_secs?)
+
+    -- Changes the four managed-feed config settings (reviews/CVE feed
+    -- commands and their poll intervals). At least one field is required: a
+    -- call with none is refused with a message that points at
+    -- feed-config_read, and nothing is written.
     --
     -- Each field is triple-state JSON: omitted = leave the stored value
-    -- unchanged; explicit null = clear to null; a value = set.
-    --
-    -- A call with NO fields is a pure read: it changes nothing, does not
-    -- re-provision and does not notify the runtime. A call with at least one
-    -- field (null counts as a field) is a write. Either way the reply is the
-    -- resulting config, with unset values reported as unset.
+    -- unchanged; explicit null = clear to null; a value = set. Null counts as
+    -- a field. The reply is the resulting config, with unset values reported
+    -- as unset.
     --
     -- Both intervals are bound by the universal feed-cadence floor
     -- (core.allium: "Interval literals", CLAIM 2), rejected with a -32602
@@ -983,6 +996,9 @@ rule ManagedFeedConfigViaMcp {
     -- refuse on an epic must not be reachable by writing it here instead.
     -- Nothing about a dispatch-provisioned feed makes a busy loop cheaper than
     -- a user-configured one.
+    requires:
+        reviews_command != omitted or reviews_interval_secs != omitted
+        or cve_command != omitted or cve_interval_secs != omitted
     requires:
         if reviews_interval_secs != omitted and reviews_interval_secs != null:
             seconds(reviews_interval_secs) >= core/config.min_feed_interval
@@ -1000,13 +1016,9 @@ rule ManagedFeedConfigViaMcp {
         if writes.count > 0:
             settings/SetManagedFeedSettings(writes: writes)
 
-    -- After persisting a write, re-materialise the managed epic tree from the
-    -- new config. A pure read skips this.
-    ensures:
-        if reviews_command != omitted or reviews_interval_secs != omitted
-           or cve_command != omitted or cve_interval_secs != omitted:
-            ProvisionManagedEpics()
-
+    -- After persisting, re-materialise the managed epic tree from the new
+    -- config.
+    ensures: ProvisionManagedEpics()
     ensures: ManagedFeedConfigRetrieved()
 
     @guidance
@@ -1017,15 +1029,11 @@ rule ManagedFeedConfigViaMcp {
         -- request boundary; the provisioning itself is the module's
         -- ensure_managed_epics reducer (store-split.allium X4).
         --
-        -- Annotations. The tool's MCP hints can say only one thing, and the
-        -- no-argument call is a read while any other call is a write. The
-        -- declared access class is idempotent: readOnlyHint = false (honest
-        -- for the write path; a client must not auto-approve it as a read),
+        -- Annotations. The access class is idempotent: readOnlyHint = false,
         -- destructiveHint = false (a later call can set any value back) and
         -- idempotentHint = true (repeating the same call leaves the same
-        -- state). Declaring read_only would be wrong for the write path, which
-        -- is the riskier error. The description says plainly that a call with
-        -- no arguments only reads.
+        -- state). The read is its own tool, feed-config_read, which is
+        -- read-only, so neither tool's hints say two things.
         --
         -- == Black boxes ==
         -- managed_feed_writes(...) is one write per field that is not
@@ -1796,7 +1804,7 @@ rule ProvisionManagedEpics {
         -- never written for an existing epic. A managed epic the user
         -- deleted (epics.allium: DeleteEpic) is absent, so the next run
         -- creates it again for as long as its command is configured. The
-        -- opt-out is clearing the command via managed_feed_config, not
+        -- opt-out is clearing the command via feed-config_set, not
         -- deleting the epic: there is no archived state for a
         -- deleted managed epic to linger in as a "do not resurrect" marker.
         -- A re-provisioned epic starts with no RetiredFeedItems — its
@@ -2142,9 +2150,11 @@ surface EpicMcpTools {
                       feed_command?, feed_interval_secs?, group_by_repo?,
                       feed_append_only?, parent_epic_id?, visibility?,
                       workspace_id?)
-        -- managed_feed_config (ManagedFeedConfigViaMcp).
-        McpManagedFeedConfig(reviews_command?, reviews_interval_secs?,
-                             cve_command?, cve_interval_secs?)
+        -- feed-config_read (ReadFeedConfigViaMcp). Read-only.
+        McpFeedConfigRead()
+        -- feed-config_set (ManagedFeedConfigViaMcp). Idempotent.
+        McpFeedConfigSet(reviews_command?, reviews_interval_secs?,
+                         cve_command?, cve_interval_secs?)
 
     @guidance
         -- The caller is an agent or a session (core/McpClient). What a client

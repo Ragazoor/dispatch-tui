@@ -12,7 +12,7 @@ use super::types::{
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ManagedFeedConfigArgs {
+pub(super) struct FeedConfigSetArgs {
     #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub(super) reviews_command: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_i64")]
@@ -23,9 +23,13 @@ pub(super) struct ManagedFeedConfigArgs {
     pub(super) cve_interval_secs: Option<Option<i64>>,
 }
 
-impl ManagedFeedConfigArgs {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FeedConfigReadArgs {}
+
+impl FeedConfigSetArgs {
     /// True when no field was supplied (an explicit `null` counts as supplied).
-    fn is_read(&self) -> bool {
+    fn names_no_field(&self) -> bool {
         self.reviews_command.is_none()
             && self.reviews_interval_secs.is_none()
             && self.cve_command.is_none()
@@ -66,24 +70,42 @@ async fn config_summary(state: &McpState, heading: &str) -> anyhow::Result<Strin
     ))
 }
 
-/// Read or write the managed-feed config. A call with no fields is a pure read
-/// (no provisioning, no notification); any field makes it a write. Both reply
-/// with the resulting config. See `ManagedFeedConfigViaMcp` in
-/// `docs/specs/epics.allium`.
-pub(super) async fn handle_managed_feed_config(
+/// Read the managed-feed config: no provisioning, no notification. See
+/// `ReadFeedConfigViaMcp` in `docs/specs/epics.allium`.
+pub(super) async fn handle_feed_config_read(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
-    let parsed = match parse_args::<ManagedFeedConfigArgs>(&id, args) {
+    if let Err(resp) = parse_args::<FeedConfigReadArgs>(&id, args) {
+        return resp;
+    }
+    tracing::info!("MCP feed-config_read");
+    read_config(state, id).await
+}
+
+/// Write the managed-feed config. At least one field is required; the reply is
+/// the resulting config. See `ManagedFeedConfigViaMcp` in
+/// `docs/specs/epics.allium`.
+pub(super) async fn handle_feed_config_set(
+    state: &McpState,
+    id: Option<Value>,
+    _identity: &CallerIdentity,
+    args: Value,
+) -> JsonRpcResponse {
+    let parsed = match parse_args::<FeedConfigSetArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!("MCP managed_feed_config");
+    tracing::info!("MCP feed-config_set");
 
-    if parsed.is_read() {
-        return read_config(state, id).await;
+    if parsed.names_no_field() {
+        return super::types::tool_error(
+            id,
+            "give at least one of reviews_command, reviews_interval_secs, cve_command and \
+             cve_interval_secs (null clears one); to only read the configuration, call feed-config_read",
+        );
     }
     write_config(state, id, parsed).await
 }
@@ -101,7 +123,7 @@ async fn read_config(state: &McpState, id: Option<Value>) -> JsonRpcResponse {
 async fn write_config(
     state: &McpState,
     id: Option<Value>,
-    parsed: ManagedFeedConfigArgs,
+    parsed: FeedConfigSetArgs,
 ) -> JsonRpcResponse {
     // Interval validation is NOT done here. The floor is a domain invariant of
     // the field rather than a property of this entry point, so it lives in the

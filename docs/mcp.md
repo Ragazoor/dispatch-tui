@@ -110,9 +110,9 @@ The server offers read-only context as MCP resources (`resources/list`, `resourc
 | `dispatch://learnings/<id>` | an approved learning's summary then detail |
 | `dispatch://task/self` | the caller's own task, rendered as `task_search` does (`src/mcp/handlers/tasks/mod.rs::task_detail_text`) |
 
-**Tool twin.** Claude Code does not pull resources into an agent's context by itself, so `read_context(uri)` returns the same text. Listing is paged (50 entries, opaque position-based `nextCursor`) in a fixed order: own task, skills by name, learnings by id.
+**Tool twin.** Claude Code does not pull resources into an agent's context by itself, so `context_read(uri)` returns the same text. Listing is paged (50 entries, opaque position-based `nextCursor`) in a fixed order: own task, skills by name, learnings by id.
 
-**Error envelopes.** A missing or malformed identity is `-32600` on `resources/list`, `resources/read` and `read_context` (`initialize` and `tools/list` stay identity-free). A URI that does not resolve is `-32602` naming the URI on `resources/read`, and the same message as an `isError` tool result on `read_context`. An invalid cursor is `-32602`; an internal failure is `-32603` (`isError` on `read_context`).
+**Error envelopes.** A missing or malformed identity is `-32600` on `resources/list`, `resources/read` and `context_read` (`initialize` and `tools/list` stay identity-free). A URI that does not resolve is `-32602` naming the URI on `resources/read`, and the same message as an `isError` tool result on `context_read`. An invalid cursor is `-32602`; an internal failure is `-32603` (`isError` on `context_read`).
 
 **Never served.** No URI reaches an epic, a trajectory, usage data, `host.json`, the store, or a repository file; unapproved or deleted learnings read as unknown. Reads record no retrieval and write nothing, so `learning_rate` still requires a retrieval.
 

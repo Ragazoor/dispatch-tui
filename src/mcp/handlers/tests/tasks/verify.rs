@@ -9,7 +9,7 @@ async fn set_verify_command_stores_and_returns_confirmation() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "set_verify_command",
+            "name": "verify-command_set",
             "arguments": { "repo_path": "/my/repo", "command": "make test" }
         })),
     )
@@ -33,7 +33,7 @@ async fn set_verify_command_rejects_multiline_command() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "set_verify_command",
+            "name": "verify-command_set",
             "arguments": { "repo_path": "/my/repo", "command": "cargo test\ncargo clippy" }
         })),
     )
@@ -61,7 +61,7 @@ async fn set_verify_command_clears_when_command_omitted_or_blank() {
         let resp = call(
             &state,
             "tools/call",
-            Some(json!({ "name": "set_verify_command", "arguments": args })),
+            Some(json!({ "name": "verify-command_set", "arguments": args })),
         )
         .await;
 

@@ -63,14 +63,17 @@ fn tool_hints(name: &str) -> Value {
 #[test]
 fn the_tools_declare_their_access_class() {
     for (name, read_only, destructive, idempotent) in [
-        ("list_workspaces", true, false, true),
-        ("create_workspace", false, false, false),
-        ("update_workspace", false, true, false),
-        ("set_workspace_member", false, true, false),
-        ("set_super_admin", false, false, true),
-        ("claim_super_admin", false, false, false),
-        ("list_unseen_items", true, false, true),
-        ("delete_unseen_item", false, true, false),
+        ("workspace_search", true, false, true),
+        ("workspace_create", false, false, false),
+        ("workspace_update", false, false, true),
+        ("workspace_delete", false, true, false),
+        // A removed person is added back with a role, so no call is
+        // unrecoverable: idempotent, not destructive.
+        ("workspace-member_set", false, false, true),
+        ("super-admin_set", false, false, true),
+        ("super-admin_claim", false, false, false),
+        ("unseen-item_search", true, false, true),
+        ("unseen-item_delete", false, true, false),
     ] {
         let hints = tool_hints(name);
         assert_eq!(hints["readOnlyHint"], json!(read_only), "{name}");
@@ -82,11 +85,11 @@ fn the_tools_declare_their_access_class() {
 #[tokio::test]
 async fn list_workspaces_shows_members_roles_and_the_directory() {
     let (state, _) = state_with_people().await;
-    let text = ok_text(&state, "list_workspaces", json!({})).await;
+    let text = ok_text(&state, "workspace_search", json!({})).await;
     assert!(text.contains("Workspace 1: Default"), "{text}");
     assert!(text.contains("Bob (bbbbbbbb)"), "{text}");
     assert!(
-        text.contains("claim_super_admin"),
+        text.contains("super-admin_claim"),
         "no super-admin yet: {text}"
     );
 }
@@ -94,20 +97,20 @@ async fn list_workspaces_shows_members_roles_and_the_directory() {
 #[tokio::test]
 async fn a_non_super_admin_is_refused_by_the_store_in_its_words() {
     let (state, _) = state_with_people().await;
-    let resp = tool(&state, "create_workspace", json!({"name": "Ops"})).await;
+    let resp = tool(&state, "workspace_create", json!({"name": "Ops"})).await;
     assert_error(&resp, "only a super-admin");
 }
 
 #[tokio::test]
 async fn claim_then_create_then_add_a_member_by_display_name() {
     let (state, _) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
-    let made = ok_text(&state, "create_workspace", json!({"name": "Ops"})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
+    let made = ok_text(&state, "workspace_create", json!({"name": "Ops"})).await;
     assert!(made.contains("Created workspace 2: Ops"), "{made}");
 
     let added = ok_text(
         &state,
-        "set_workspace_member",
+        "workspace-member_set",
         json!({"workspace_id": 2, "person": "Bob", "role": "member"}),
     )
     .await;
@@ -115,19 +118,19 @@ async fn claim_then_create_then_add_a_member_by_display_name() {
 
     let promoted = ok_text(
         &state,
-        "set_workspace_member",
+        "workspace-member_set",
         json!({"workspace_id": 2, "person": "Bob", "role": "admin"}),
     )
     .await;
     assert!(promoted.contains("Bob is admin of Ops"), "{promoted}");
 
-    let listed = ok_text(&state, "list_workspaces", json!({"workspace_id": 2})).await;
+    let listed = ok_text(&state, "workspace_search", json!({"workspace_id": 2})).await;
     assert!(listed.contains("Bob (bbbbbbbb) admin"), "{listed}");
     assert!(!listed.contains("People (the directory"), "{listed}");
 
     let removed = ok_text(
         &state,
-        "set_workspace_member",
+        "workspace-member_set",
         json!({"workspace_id": 2, "person": "Bob", "remove": true}),
     )
     .await;
@@ -137,18 +140,18 @@ async fn claim_then_create_then_add_a_member_by_display_name() {
 #[tokio::test]
 async fn a_second_claim_is_refused() {
     let (state, _) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
-    let resp = tool(&state, "claim_super_admin", json!({})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
+    let resp = tool(&state, "super-admin_claim", json!({})).await;
     assert_error(&resp, "already exists");
 }
 
 #[tokio::test]
 async fn a_duplicated_name_is_refused_with_the_matches_and_an_identity_picks_one() {
     let (state, _) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
     let resp = tool(
         &state,
-        "set_workspace_member",
+        "workspace-member_set",
         json!({"workspace_id": 1, "person": "Ann", "role": "member"}),
     )
     .await;
@@ -157,7 +160,7 @@ async fn a_duplicated_name_is_refused_with_the_matches_and_an_identity_picks_one
 
     let added = ok_text(
         &state,
-        "set_workspace_member",
+        "workspace-member_set",
         json!({"workspace_id": 1, "person": "aaaaaaab", "role": "member"}),
     )
     .await;
@@ -167,39 +170,48 @@ async fn a_duplicated_name_is_refused_with_the_matches_and_an_identity_picks_one
 #[tokio::test]
 async fn a_call_must_choose_between_role_and_remove() {
     let (state, _) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
     for args in [
         json!({"workspace_id": 1, "person": "Bob"}),
         json!({"workspace_id": 1, "person": "Bob", "role": "member", "remove": true}),
     ] {
         assert_error(
-            &tool(&state, "set_workspace_member", args).await,
+            &tool(&state, "workspace-member_set", args).await,
             "exactly one",
         );
     }
+}
+
+/// admin-surfaces.allium: UpdateWorkspaceTool. The rename tool takes name and
+/// no delete flag; a delete flag is refused as an unknown argument, and a call
+/// without a name is refused.
+#[tokio::test]
+async fn workspace_update_takes_a_name_and_no_delete_flag() {
+    let (state, _) = state_with_people().await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
     assert_error(
-        &tool(&state, "update_workspace", json!({"workspace_id": 1})).await,
-        "exactly one",
+        &tool(&state, "workspace_update", json!({"workspace_id": 1})).await,
+        "name",
     );
     assert_error(
         &tool(
             &state,
-            "update_workspace",
+            "workspace_update",
             json!({"workspace_id": 1, "name": "X", "delete": true}),
         )
         .await,
-        "exactly one",
+        "delete",
     );
 }
 
 #[tokio::test]
 async fn removing_someone_who_is_not_a_member_is_refused() {
     let (state, _) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
-    ok_text(&state, "create_workspace", json!({"name": "Ops"})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
+    ok_text(&state, "workspace_create", json!({"name": "Ops"})).await;
     let resp = tool(
         &state,
-        "set_workspace_member",
+        "workspace-member_set",
         json!({"workspace_id": 2, "person": "Bob", "remove": true}),
     )
     .await;
@@ -209,11 +221,11 @@ async fn removing_someone_who_is_not_a_member_is_refused() {
 #[tokio::test]
 async fn rename_and_delete_a_workspace() {
     let (state, _) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
-    ok_text(&state, "create_workspace", json!({"name": "Ops"})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
+    ok_text(&state, "workspace_create", json!({"name": "Ops"})).await;
     let renamed = ok_text(
         &state,
-        "update_workspace",
+        "workspace_update",
         json!({"workspace_id": 2, "name": "Operations"}),
     )
     .await;
@@ -221,51 +233,41 @@ async fn rename_and_delete_a_workspace() {
         renamed.contains("Renamed workspace 2 to Operations"),
         "{renamed}"
     );
-    let deleted = ok_text(
-        &state,
-        "update_workspace",
-        json!({"workspace_id": 2, "delete": true}),
-    )
-    .await;
+    let deleted = ok_text(&state, "workspace_delete", json!({"workspace_id": 2})).await;
     assert!(
         deleted.contains("Deleted workspace Operations"),
         "{deleted}"
     );
-    let resp = tool(
-        &state,
-        "update_workspace",
-        json!({"workspace_id": 2, "delete": true}),
-    )
-    .await;
+    let resp = tool(&state, "workspace_delete", json!({"workspace_id": 2})).await;
     assert_error(&resp, "no workspace 2");
 }
 
 #[tokio::test]
 async fn grant_and_revoke_are_one_idempotent_tool_and_the_last_cannot_go() {
     let (state, store) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
     let granted = ok_text(
         &state,
-        "set_super_admin",
+        "super-admin_set",
         json!({"person": "Bob", "super_admin": true}),
     )
     .await;
     assert!(granted.contains("Bob is a super-admin"), "{granted}");
     ok_text(
         &state,
-        "set_super_admin",
+        "super-admin_set",
         json!({"person": "Bob", "super_admin": true}),
     )
     .await;
     ok_text(
         &state,
-        "set_super_admin",
+        "super-admin_set",
         json!({"person": "Bob", "super_admin": false}),
     )
     .await;
     ok_text(
         &state,
-        "set_super_admin",
+        "super-admin_set",
         json!({"person": "Bob", "super_admin": false}),
     )
     .await;
@@ -273,7 +275,7 @@ async fn grant_and_revoke_are_one_idempotent_tool_and_the_last_cannot_go() {
     let me = store.admin_snapshot().await.me.unwrap();
     let resp = tool(
         &state,
-        "set_super_admin",
+        "super-admin_set",
         json!({"person": me, "super_admin": false}),
     )
     .await;
@@ -283,7 +285,7 @@ async fn grant_and_revoke_are_one_idempotent_tool_and_the_last_cannot_go() {
 #[tokio::test]
 async fn an_unseen_private_epic_is_listed_without_a_title_and_deleted() {
     let (state, store) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
     ok_text(
         &state,
         "epic_create",
@@ -291,21 +293,21 @@ async fn an_unseen_private_epic_is_listed_without_a_title_and_deleted() {
     )
     .await;
     // Nothing is unseen while its creator is still a member.
-    let none = ok_text(&state, "list_unseen_items", json!({})).await;
+    let none = ok_text(&state, "unseen-item_search", json!({})).await;
     assert!(none.contains("No unseen items"), "{none}");
 
     // The super-admin takes the creator (themselves) out of the workspace.
-    let listed = ok_text(&state, "list_workspaces", json!({"workspace_id": 1})).await;
+    let listed = ok_text(&state, "workspace_search", json!({"workspace_id": 1})).await;
     assert!(listed.contains("membership"), "{listed}");
     let me = store.admin_snapshot().await.me.unwrap();
     ok_text(
         &state,
-        "set_workspace_member",
+        "workspace-member_set",
         json!({"workspace_id": 1, "person": me, "remove": true}),
     )
     .await;
 
-    let items = ok_text(&state, "list_unseen_items", json!({})).await;
+    let items = ok_text(&state, "unseen-item_search", json!({})).await;
     assert!(items.contains("epic"), "{items}");
     assert!(items.contains("Default"), "{items}");
     assert!(
@@ -321,26 +323,26 @@ async fn an_unseen_private_epic_is_listed_without_a_title_and_deleted() {
         .expect("an epic row");
     let deleted = ok_text(
         &state,
-        "delete_unseen_item",
+        "unseen-item_delete",
         json!({"kind": "epic", "item_id": id}),
     )
     .await;
     assert!(deleted.contains(&format!("Deleted epic {id}")), "{deleted}");
-    let after = ok_text(&state, "list_unseen_items", json!({})).await;
+    let after = ok_text(&state, "unseen-item_search", json!({})).await;
     assert!(after.contains("No unseen items"), "{after}");
 }
 
 #[tokio::test]
 async fn a_person_who_is_not_a_super_admin_sees_no_unseen_items() {
     let (state, _) = state_with_people().await;
-    let text = ok_text(&state, "list_unseen_items", json!({})).await;
+    let text = ok_text(&state, "unseen-item_search", json!({})).await;
     assert!(text.contains("Only a super-admin"), "{text}");
 }
 
 #[tokio::test]
 async fn a_public_item_cannot_be_deleted_through_the_hatch() {
     let (state, _) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
     ok_text(
         &state,
         "epic_create",
@@ -349,7 +351,7 @@ async fn a_public_item_cannot_be_deleted_through_the_hatch() {
     .await;
     let resp = tool(
         &state,
-        "delete_unseen_item",
+        "unseen-item_delete",
         json!({"kind": "epic", "item_id": 1}),
     )
     .await;
@@ -363,7 +365,7 @@ async fn a_non_super_admin_is_refused_even_when_the_change_would_be_a_no_op() {
     // still answers who may ask.
     let resp = tool(
         &state,
-        "set_super_admin",
+        "super-admin_set",
         json!({"person": "Bob", "super_admin": false}),
     )
     .await;
@@ -414,8 +416,8 @@ async fn a_create_in_a_workspace_the_store_accepts_is_not_stopped_by_the_local_l
 #[tokio::test]
 async fn unseen_items_are_listed_by_workspace_then_kind_then_id() {
     let (state, store) = state_with_people().await;
-    ok_text(&state, "claim_super_admin", json!({})).await;
-    ok_text(&state, "create_workspace", json!({"name": "Ops"})).await;
+    ok_text(&state, "super-admin_claim", json!({})).await;
+    ok_text(&state, "workspace_create", json!({"name": "Ops"})).await;
     let snapshot = store.admin_snapshot().await;
     let ops = snapshot
         .workspaces
@@ -440,11 +442,11 @@ async fn unseen_items_are_listed_by_workspace_then_kind_then_id() {
     let me = snapshot.me.unwrap();
     ok_text(
         &state,
-        "set_workspace_member",
+        "workspace-member_set",
         json!({"workspace_id": 1, "person": me, "remove": true}),
     )
     .await;
-    let items = ok_text(&state, "list_unseen_items", json!({})).await;
+    let items = ok_text(&state, "unseen-item_search", json!({})).await;
     let package = items.find("- work_package").expect("package listed");
     let epic = items.find("- epic").expect("epic listed");
     assert!(package < epic, "{items}");

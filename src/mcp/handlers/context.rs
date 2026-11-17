@@ -1,5 +1,5 @@
 //! MCP context resources: `resources/list`, `resources/read` and their tool
-//! twin `read_context` (`McpContextResources` in
+//! twin `context_read` (`McpContextResources` in
 //! `docs/specs/mcp-task-tools.allium`).
 //!
 //! Five URI shapes are served, nothing else: `skill://<name>/SKILL.md`,
@@ -506,9 +506,9 @@ pub(super) struct ReadContextArgs {
     uri: String,
 }
 
-/// `read_context`, the tool twin of `resources/read`. A refusal is returned as
+/// `context_read`, the tool twin of `resources/read`. A refusal is returned as
 /// a JSON-RPC error here; `tools/call` re-wraps it as an `isError` result.
-pub(crate) async fn handle_read_context(
+pub(crate) async fn handle_context_read(
     state: &McpState,
     id: Option<Value>,
     identity: &CallerIdentity,
@@ -518,7 +518,7 @@ pub(crate) async fn handle_read_context(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(uri = %args.uri, "MCP read_context");
+    tracing::info!(uri = %args.uri, "MCP context_read");
     match resolve_context(state, identity, &args.uri).await {
         Ok((_, text)) => {
             JsonRpcResponse::ok(id, json!({ "content": [{ "type": "text", "text": text }] }))

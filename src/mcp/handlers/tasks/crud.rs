@@ -761,7 +761,7 @@ async fn list_tasks(
 }
 
 // ---------------------------------------------------------------------------
-// query_usage
+// usage_read
 // ---------------------------------------------------------------------------
 
 fn parse_usage_since(s: &str) -> std::result::Result<chrono::DateTime<chrono::Utc>, String> {
@@ -775,7 +775,7 @@ fn parse_usage_since(s: &str) -> std::result::Result<chrono::DateTime<chrono::Ut
         .map_err(|_| format!("invalid `since` datetime: {s}"))
 }
 
-pub(crate) async fn handle_query_usage(
+pub(crate) async fn handle_usage_read(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,

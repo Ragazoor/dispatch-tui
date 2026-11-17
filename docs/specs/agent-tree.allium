@@ -847,7 +847,7 @@ rule BindAgentTreeToggle {
         -- block the tmux client while it runs. See ToggleAgentTreePane's own
         -- guidance for what that process does with the window name.
         --
-        -- Surfaced in the in-TUI help overlay ([?]) and in list_keybindings
+        -- Surfaced in the in-TUI help overlay ([?]) and in keybinding_search
         -- as a row of the tmux.global group, marked as handled by tmux,
         -- alongside the jump-back binding (keybindings.allium) — otherwise
         -- nothing in the TUI hints that a companion pane can be toggled at

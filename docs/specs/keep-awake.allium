@@ -240,7 +240,7 @@ surface KeepAwakeToggle {
     @guarantee KeyIsInTheTable
         -- [W] is a row of the board's normal-mode keybinding table
         -- (keybindings.allium), so it appears in the [?] help overlay and in
-        -- list_keybindings like every other key.
+        -- keybinding_search like every other key.
 }
 
 surface KeepAwakeHold {
