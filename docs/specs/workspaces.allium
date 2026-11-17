@@ -90,7 +90,10 @@ use "./epics.allium" as epics
 -- The checks the store runs inside its write reducers, whichever client
 -- calls them (the StoreWriteChecks surface fulfils them). Each check refuses
 -- the write and writes nothing when it fails. caller() is the identity the
--- reducer runs under.
+-- reducer runs under. update_epic, the board's whole-epic write, runs the
+-- checks of patch_epic, set_epic_visibility and move_epic_to_workspace for
+-- the fields it changes, so wherever one of those is named below,
+-- update_epic raises the check too.
 contract StoreWriteChecks {
     @invariant EpicIsPrivateOnlyWithACreator
         -- Raised by create_epic and set_epic_visibility. For epic and the
@@ -102,6 +105,7 @@ contract StoreWriteChecks {
         -- (created_by null: legacy or feed-made) would be seen by nobody.
         -- Applies to creation (CreateEpicInWorkspace) and to
         -- SetEpicVisibility alike.
+        -- Module: check_private_has_creator.
 
     @invariant RepoGroupsStayPublic
         -- Two checks, one per write:
@@ -142,6 +146,7 @@ contract StoreWriteChecks {
         -- MoveEpicToWorkspace, never a side effect of re-parenting. A
         -- re-parent that changes who the epic is private to also needs
         -- ReParentingKeepsTheHolder.
+        -- Module: check_epic_move.
 
     @invariant ReParentingKeepsTheHolder
         -- Two checks, one per move.
@@ -202,8 +207,8 @@ contract StoreWriteChecks {
         -- a task moving between them keeps its holder.
 
     @invariant TaskEntersAnEpicTheCallerCanSee
-        -- Raised by task_create and set_task_epic with an epic: task is placed in
-        -- epic.
+        -- Raised by create_task, create_task_signalled, set_task_epic and
+        -- update_task with an epic: task is placed in epic.
         --     epic.visible_to(caller())
         --
         -- Covers task creation in an epic and moving a task into one. An
@@ -211,6 +216,7 @@ contract StoreWriteChecks {
         -- user board (core.allium: OwnerTracksUserBoardTask). A move, onto a
         -- user board included, that changes who the task is private to also
         -- needs ReParentingKeepsTheHolder.
+        -- Module: check_task_may_enter_epic.
 
     @invariant TaskMovesStayInTheWorkspace
         -- Raised by set_task_epic and update_task with an epic: task moves into
@@ -265,6 +271,7 @@ contract StoreWriteChecks {
         -- epic, the epic's workspace for an epic task, and null for a
         -- main-board task, which may be linked anywhere and stays private to
         -- its owner (D6).
+        -- Module: check_link_allowed.
 
     @invariant WritesRequireSight
         -- Raised by every reducer that changes, dispatches, wraps up, closes,
@@ -346,10 +353,7 @@ contract StoreWriteChecks {
         -- set_epic_visibility, by patch_epic naming a parent, by
         -- move_epic_to_workspace and by remove_member. For every affected
         -- task, no person who sees it before the write, and would not see it
-        -- after, owns a host it runs on:
-        --     not (task.visible_to(person) before
-        --          and not task.visible_to(person) after
-        --          and task.runs_on_a_host_owned_by(person))
+        -- after, owns a host it runs on.
         -- The affected tasks are the moved task; the tasks of the epic's
         -- subtree; or every task of the workspace, for remove_member, whose
         -- "person" is the removed user. A task "runs on a host" while a
@@ -413,7 +417,8 @@ config {
 --   trimmed(s): s without its leading and trailing whitespace.
 --   char_count(s): the number of characters (not bytes) in s.
 --   has_control_or_format_characters(s): s holds a character of Unicode
---     category Cc or Cf (SetDisplayName says which, in full).
+--     category Cc or Cf, or a line or paragraph separator (SetDisplayName
+--     says which, in full).
 --   identity_prefix(identity, n): the first n characters of the identity's
 --     text form.
 
