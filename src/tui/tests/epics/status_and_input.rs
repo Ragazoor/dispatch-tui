@@ -229,8 +229,8 @@ fn epic_description_submit_completes_creation() {
         parent_epic_id: None,
         ..Default::default()
     });
-    app.update(Message::Epic(
-        crate::tui::messages::EpicMessage::SubmitDescription("Some description".to_string()),
+    app.update(Message::Editor(
+        crate::tui::messages::EditorMessage::DescriptionResult("Some description".to_string()),
     ));
     assert_eq!(app.input.mode, InputMode::InputPlacement);
     let cmds = app.handle_key(make_key(KeyCode::Enter));

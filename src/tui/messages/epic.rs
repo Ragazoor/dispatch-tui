@@ -34,7 +34,6 @@ pub enum EpicMessage {
     MoveStatus(EpicId, MoveDirection),
     StartNew,
     SubmitTitle(String),
-    SubmitDescription(String),
     ToggleSelect(EpicId),
     StartReparent(EpicId),
     ReparentNavigate(TreeNav),
@@ -80,10 +79,6 @@ impl EpicMessage {
             }
             EpicMessage::SubmitTitle(v) => {
                 epic_input::submit_epic_title(&mut app.input, &mut app.status, v)
-            }
-            EpicMessage::SubmitDescription(v) => {
-                epic_input::apply_epic_description(&mut app.input, v);
-                app.begin_placement(crate::tui::types::PlacementFor::Epic)
             }
             EpicMessage::ToggleSelect(id) => {
                 app.select.toggle_epic(id);

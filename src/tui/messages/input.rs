@@ -16,7 +16,6 @@ pub enum InputMessage {
     CopyTask,
     CancelInput,
     SubmitTitle(String),
-    SubmitDescription(String),
     SubmitRepoPath(String),
     SubmitTag(Option<TaskTag>),
     SubmitBaseBranch(String),
@@ -89,9 +88,6 @@ impl InputMessage {
             ),
             InputMessage::SubmitTitle(value) => {
                 forms::submit_title(&mut app.input, &mut app.status, value)
-            }
-            InputMessage::SubmitDescription(value) => {
-                forms::submit_description(&mut app.input, &mut app.status, value)
             }
             InputMessage::SubmitRepoPath(value) => forms::submit_repo_path(
                 &mut app.input,

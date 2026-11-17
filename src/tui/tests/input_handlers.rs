@@ -604,24 +604,6 @@ fn submit_tag_advances_to_description() {
 }
 
 #[test]
-fn submit_description_advances_to_repo_path() {
-    let mut app = App::new(vec![]);
-    app.input.mode = InputMode::InputDescription;
-    app.input.task_draft = Some(TaskDraft {
-        title: "T".to_string(),
-        ..Default::default()
-    });
-    app.update(Message::Input(
-        crate::tui::messages::InputMessage::SubmitDescription("my desc".to_string()),
-    ));
-    assert_eq!(app.input.mode, InputMode::InputRepoPath);
-    assert_eq!(
-        app.input.task_draft.as_ref().unwrap().description,
-        "my desc"
-    );
-}
-
-#[test]
 fn description_editor_result_advances_to_repo_path() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputDescription;

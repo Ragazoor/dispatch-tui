@@ -31,8 +31,8 @@ fn at_the_placement_step(names: &[&str], parent: Option<EpicId>) -> App {
         parent_epic_id: parent,
         ..Default::default()
     });
-    let cmds = app.update(Message::Epic(
-        crate::tui::messages::EpicMessage::SubmitDescription("d".to_string()),
+    let cmds = app.update(Message::Editor(
+        crate::tui::messages::EditorMessage::DescriptionResult("d".to_string()),
     ));
     assert!(
         cmds.is_empty(),

@@ -76,8 +76,8 @@ async fn finish_task_creation_emits_save_repo_path_and_save_base_branch() {
     app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitTag(None),
     ));
-    app.update(Message::Input(
-        crate::tui::messages::InputMessage::SubmitDescription("D".to_string()),
+    app.update(Message::Editor(
+        crate::tui::messages::EditorMessage::DescriptionResult("D".to_string()),
     ));
     app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitRepoPath("/tmp".to_string()),

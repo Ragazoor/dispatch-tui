@@ -774,8 +774,8 @@ fn a_draft_armed_at_the_tag_step_is_created_as_a_phoenix() {
 
     app.handle_key(make_key(KeyCode::Char('p')));
     app.handle_key(make_key(KeyCode::Char('c')));
-    app.update(Message::Input(
-        crate::tui::messages::InputMessage::SubmitDescription("desc".to_string()),
+    app.update(Message::Editor(
+        crate::tui::messages::EditorMessage::DescriptionResult("desc".to_string()),
     ));
     app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitRepoPath("/tmp".to_string()),
