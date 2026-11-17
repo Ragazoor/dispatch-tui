@@ -9,19 +9,25 @@ fn epic_edited_splices_all_fields_including_feed_settings() {
     let mut app = App::new(vec![]);
     app.board.epics.push(make_epic(1));
 
-    let mut edited = make_epic(1);
-    edited.title = "New Title".to_string();
-    edited.description = "New description".to_string();
-    edited.feed_command = Some("gh api repos/x/pulls".to_string());
-    edited.feed_interval_secs = Some(300);
+    let edited = crate::tui::EpicEdit {
+        id: EpicId(1),
+        title: Some("New Title".to_string()),
+        description: Some("New description".to_string()),
+        feed_command: Some(Some("gh api repos/x/pulls".to_string())),
+        feed_interval_secs: Some(Some(300)),
+        visibility: None,
+    };
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
-        Box::new(edited.clone()),
+        edited,
     )));
 
     let spliced = app.board.epics.iter().find(|e| e.id == EpicId(1)).unwrap();
-    assert_eq!(spliced.feed_command, edited.feed_command);
-    assert_eq!(spliced.feed_interval_secs, edited.feed_interval_secs);
+    assert_eq!(
+        spliced.feed_command.as_deref(),
+        Some("gh api repos/x/pulls")
+    );
+    assert_eq!(spliced.feed_interval_secs, Some(300));
     assert_eq!(spliced.title, "New Title");
     assert_eq!(spliced.description, "New description");
 }

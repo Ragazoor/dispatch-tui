@@ -62,26 +62,48 @@ impl App {
 
     pub(in crate::tui) fn handle_task_edited(&mut self, edit: TaskEdit) -> Vec<Command> {
         if let Some(t) = self.find_task_mut(edit.id) {
-            t.title = edit.title;
-            t.description = edit.description;
-            t.repo_path = edit.repo_path;
+            // Only the fields the save sent; the rest stay as the board holds
+            // them now (tasks.allium: EditTask).
+            if let Some(title) = edit.title {
+                t.title = title;
+            }
+            if let Some(description) = edit.description {
+                t.description = description;
+            }
+            if let Some(repo_path) = edit.repo_path {
+                t.repo_path = repo_path;
+            }
             // Not `set_local_status`: the editor owns sub_status separately (it
             // is not part of TaskEdit, so the current one is kept deliberately)
             // and only the leaving-Running clear applies here. The editor may
             // set any status from any other, Running -> Review included.
-            if crate::models::clears_pending_stop(t.status, edit.status) {
-                t.stop_pending = false;
+            if let Some(status) = edit.status {
+                if crate::models::clears_pending_stop(t.status, status) {
+                    t.stop_pending = false;
+                }
+                t.status = status;
             }
-            t.status = edit.status;
-            t.plan_path = edit.plan_path;
-            t.tag = edit.tag;
+            if let Some(plan_path) = edit.plan_path {
+                t.plan_path = plan_path;
+            }
+            if let Some(tag) = edit.tag {
+                t.tag = tag;
+            }
             if let Some(bb) = edit.base_branch {
                 t.base_branch = bb;
             }
-            t.wrap_up_mode = edit.wrap_up_mode;
-            t.model = edit.model;
-            t.url = edit.url;
-            t.phoenix = edit.phoenix;
+            if let Some(mode) = edit.wrap_up_mode {
+                t.wrap_up_mode = mode;
+            }
+            if let Some(model) = edit.model {
+                t.model = model;
+            }
+            if let Some(url) = edit.url {
+                t.url = url;
+            }
+            if let Some(phoenix) = edit.phoenix {
+                t.phoenix = phoenix;
+            }
             t.updated_at = chrono::Utc::now();
         }
         self.sync_board_selection();

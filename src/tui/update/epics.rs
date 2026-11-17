@@ -218,9 +218,28 @@ impl App {
         }
     }
 
-    pub(in crate::tui) fn handle_epic_edited(&mut self, epic: Epic) -> Vec<Command> {
-        if let Some(slot) = self.board.epics.iter_mut().find(|e| e.id == epic.id) {
-            *slot = epic;
+    pub(in crate::tui) fn handle_epic_edited(
+        &mut self,
+        edit: crate::tui::EpicEdit,
+    ) -> Vec<Command> {
+        // Only the fields the save sent; the rest stay as the board holds
+        // them now (epics.allium: EditEpic).
+        if let Some(e) = self.board.epics.iter_mut().find(|e| e.id == edit.id) {
+            if let Some(title) = edit.title {
+                e.title = title;
+            }
+            if let Some(description) = edit.description {
+                e.description = description;
+            }
+            if let Some(command) = edit.feed_command {
+                e.feed_command = command;
+            }
+            if let Some(interval) = edit.feed_interval_secs {
+                e.feed_interval_secs = interval;
+            }
+            if let Some(visibility) = edit.visibility {
+                e.visibility = visibility;
+            }
         }
         // An edit can reparent the epic, which reshapes the compact tree.
         self.move_skipped_epic_folds()

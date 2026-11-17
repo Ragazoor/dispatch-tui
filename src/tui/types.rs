@@ -428,25 +428,74 @@ impl Default for TaskDraft {
 }
 
 // ---------------------------------------------------------------------------
-// TaskEdit — bundled fields for Message::TaskEdited
+// TaskEdit / EpicEdit — the fields an accepted editor save sent
 // ---------------------------------------------------------------------------
 
+/// What an accepted task-editor save changed. `None` leaves the board's row
+/// as it is, so newer data that arrived while the editor was open stays
+/// (tasks.allium: EditTask); `Some(v)` writes `v`, which for a nullable
+/// field may itself be `None` (a clear).
 #[derive(Debug, Clone)]
 pub struct TaskEdit {
     pub id: TaskId,
-    pub title: String,
-    pub description: String,
-    pub repo_path: String,
-    pub status: TaskStatus,
-    pub plan_path: Option<String>,
-    pub tag: Option<TaskTag>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub repo_path: Option<String>,
+    pub status: Option<TaskStatus>,
+    pub plan_path: Option<Option<String>>,
+    pub tag: Option<Option<TaskTag>>,
     pub base_branch: Option<String>,
-    pub wrap_up_mode: Option<crate::models::WrapUpMode>,
-    pub model: Option<crate::models::TaskModel>,
-    /// Resolved post-edit url value (not a delta): `Some` to set, `None` to
-    /// clear or leave absent. Applied directly to the in-memory task snapshot.
-    pub url: Option<crate::models::TaskUrl>,
-    pub phoenix: bool,
+    pub wrap_up_mode: Option<Option<crate::models::WrapUpMode>>,
+    pub model: Option<Option<crate::models::TaskModel>>,
+    /// The resolved post-edit url.
+    pub url: Option<Option<crate::models::TaskUrl>>,
+    pub phoenix: Option<bool>,
+}
+
+impl TaskEdit {
+    /// An edit of `id` that changes nothing yet.
+    pub fn for_task(id: TaskId) -> Self {
+        Self {
+            id,
+            title: None,
+            description: None,
+            repo_path: None,
+            status: None,
+            plan_path: None,
+            tag: None,
+            base_branch: None,
+            wrap_up_mode: None,
+            model: None,
+            url: None,
+            phoenix: None,
+        }
+    }
+}
+
+/// What an accepted epic-editor save changed, on the same terms as
+/// [`TaskEdit`] (epics.allium: EditEpic).
+#[derive(Debug, Clone)]
+pub struct EpicEdit {
+    pub id: EpicId,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub feed_command: Option<Option<String>>,
+    pub feed_interval_secs: Option<Option<i64>>,
+    pub visibility: Option<crate::models::Visibility>,
+}
+
+impl EpicEdit {
+    /// An edit of `id` that changes nothing yet.
+    pub fn for_epic(id: EpicId) -> Self {
+        Self {
+            id,
+            title: None,
+            description: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            visibility: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

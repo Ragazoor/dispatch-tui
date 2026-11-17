@@ -11,7 +11,6 @@ use crate::service::{FieldUpdate, UrlUpdate};
 // UpdateTaskParams — transport-agnostic input for update_task
 // ---------------------------------------------------------------------------
 
-#[derive(Clone)]
 pub struct UpdateTaskParams {
     pub task_id: TaskId,
     pub status: Option<TaskStatus>,

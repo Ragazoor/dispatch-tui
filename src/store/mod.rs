@@ -1404,15 +1404,7 @@ impl Store {
     /// binary wrote), as the subscription would deliver it.
     #[cfg(test)]
     pub(crate) fn plant_undecodable_task(&self, id: i64) {
-        let mut row = crate::sync::encode::create_task_row(
-            &CreateTaskRequest::fixture("From the future", "/repo"),
-            "",
-            "u",
-            "2026-10-11 12:00:00.000",
-        );
-        row.id = id;
-        row.status = "teleported".into();
-        self.rows.upsert_task(&row);
+        self.plant_undecodable_task_in_epic(id, 0);
     }
 
     /// [`Self::plant_undecodable_task`], filed under `epic_id`: the board's

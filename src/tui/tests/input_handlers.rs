@@ -143,17 +143,13 @@ fn task_edited_updates_fields() {
     app.update(Message::Task(crate::tui::messages::TaskMessage::Edited(
         TaskEdit {
             id: TaskId(1),
-            title: "New".into(),
-            description: "Desc".into(),
-            repo_path: "/new".into(),
-            status: TaskStatus::Running,
-            plan_path: Some("docs/plan.md".into()),
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            model: None,
-            url: None,
-            phoenix: true,
+            title: Some("New".into()),
+            description: Some("Desc".into()),
+            repo_path: Some("/new".into()),
+            status: Some(TaskStatus::Running),
+            plan_path: Some(Some("docs/plan.md".into())),
+            phoenix: Some(true),
+            ..TaskEdit::for_task(TaskId(1))
         },
     )));
     assert_eq!(app.board.tasks[0].title, "New");

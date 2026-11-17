@@ -157,6 +157,24 @@ impl Store {
             .expect("an epic")
     }
 
+    /// Create an epic under `parent` and return the id the store gave it.
+    pub fn create_sub_epic(&self, who: &str, parent: i64) -> i64 {
+        let row = Epic {
+            title: format!("sub of {parent}"),
+            workspace_id: TEST_WORKSPACE,
+            parent_epic_id: parent,
+            ..blank_epic()
+        };
+        self.call(who, |ctx| create_epic(ctx, row))
+            .expect("create_epic");
+        self.db()
+            .epics()
+            .iter()
+            .map(|e| e.id)
+            .max()
+            .expect("an epic")
+    }
+
     pub fn max_task_id(&self) -> i64 {
         self.db().tasks().iter().map(|t| t.id).max().unwrap_or(0)
     }
@@ -205,5 +223,13 @@ pub fn status_patch(status: &str) -> TaskPatch {
     TaskPatch {
         status: Some(status.into()),
         ..TaskPatch::default()
+    }
+}
+
+/// An epic patch that sets only `status`.
+pub fn epic_status_patch(status: &str) -> EpicPatch {
+    EpicPatch {
+        status: Some(status.into()),
+        ..EpicPatch::default()
     }
 }

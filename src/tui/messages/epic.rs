@@ -26,7 +26,7 @@ pub enum EpicMessage {
     Updated(Box<Epic>),
     Created(Box<Epic>),
     Edit(EpicId),
-    Edited(Box<Epic>),
+    Edited(crate::tui::EpicEdit),
     Delete(EpicId),
     ToggleAutoDispatch(EpicId),
     ToggleGroupByRepo(EpicId),
@@ -65,7 +65,7 @@ impl EpicMessage {
             EpicMessage::Updated(epic) => app.handle_epic_updated(*epic),
             EpicMessage::Created(epic) => app.handle_epic_created(*epic),
             EpicMessage::Edit(id) => app.handle_edit_epic(id),
-            EpicMessage::Edited(epic) => app.handle_epic_edited(*epic),
+            EpicMessage::Edited(edit) => app.handle_epic_edited(edit),
             EpicMessage::Delete(id) => app.handle_delete_epic(id),
             EpicMessage::ToggleAutoDispatch(id) => {
                 selection::toggle_epic_auto_dispatch(&mut app.board.epics, id)
