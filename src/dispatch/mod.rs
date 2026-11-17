@@ -11,6 +11,10 @@ use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 ///   scripts act on it rather than on the cwd's branch, so an agent that
 ///   checks out another task's branch cannot move that task (`HookDelivery`
 ///   in docs/specs/agent-health.allium).
+/// - `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1`, so the agent can batch tool calls
+///   in one script (`DispatchedAgentsRunInCodeMode` in
+///   docs/specs/dispatch.allium). Always set; Claude Code decides whether
+///   Code Mode starts.
 /// - `RUSTC_WRAPPER=sccache`, so every `cargo build`/`cargo test` goes through
 ///   sccache's shared compiler-object cache instead of paying full
 ///   per-worktree compile cost (`DispatchedAgentsShareASccacheNotATargetDir`
@@ -29,7 +33,10 @@ fn agent_launch_env(
     task_id: crate::models::TaskId,
     worktree_path: &str,
 ) -> Vec<(&'static str, String)> {
-    let mut env = vec![("DISPATCH_TASK_ID", task_id.0.to_string())];
+    let mut env = vec![
+        ("DISPATCH_TASK_ID", task_id.0.to_string()),
+        ("CLAUDE_CODE_EXPERIMENTAL_CODE_MODE", "1".to_string()),
+    ];
     if runner.sccache_available() {
         runner.start_sccache_server();
         env.push(("RUSTC_WRAPPER", "sccache".to_string()));

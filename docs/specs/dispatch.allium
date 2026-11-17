@@ -1635,6 +1635,24 @@ surface AgentLaunchCommand {
         -- (bubblewrap, socat) rather than its required ones (tmux, git, gh,
         -- claude), which have no such fallback.
 
+    @guarantee DispatchedAgentsRunInCodeMode
+        -- Every agent launch sets CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 in the
+        -- tmux window's environment, through the same seam as RUSTC_WRAPPER
+        -- above, so DispatchTask, DispatchResearchTask, quick dispatch and
+        -- ResumeTask alike carry it. Code Mode lets Claude write one script
+        -- that makes several tool calls and returns only what it needs.
+        --
+        -- Unconditional: there is no board setting or per-task flag. Claude
+        -- Code reads the variable only from the process environment (project
+        -- settings cannot enable it), which is why the window environment is
+        -- the place. A resumed Code Mode session refuses to resume without
+        -- the variable, so ResumeTask owes it too.
+        --
+        -- Claude Code, not dispatch, decides whether Code Mode starts: it
+        -- needs a recent claude, a supported model and no telemetry export,
+        -- and otherwise runs without it. The variable is experimental and
+        -- may be removed upstream; removing it here is a one-line change.
+
     @guarantee AgentBuildsRunFewerParallelJobs
         -- Every agent launch decides CARGO_BUILD_JOBS in the tmux window's
         -- environment, through the same seam as RUSTC_WRAPPER above, so no

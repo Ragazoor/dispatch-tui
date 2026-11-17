@@ -148,6 +148,36 @@ fn resume_agent_without_message_writes_no_prompt_file() {
     assert!(!std::path::Path::new(&format!("{worktree_path}/.claude-prompt")).exists());
 }
 
+// --- Code Mode env test (DispatchedAgentsRunInCodeMode) ---
+
+#[test]
+fn dispatch_agent_sets_code_mode_env() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let script = DispatchScript::dispatch();
+    let mock = script.runner();
+
+    let task = make_task(&repo_path);
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert!(
+        new_window_args
+            .windows(2)
+            .any(|w| w == ["-e", "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1"]),
+        "new-window should carry -e CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1, got: {new_window_args:?}"
+    );
+}
+
 // --- sccache env tests (task #4899:
 // DispatchedAgentsShareASccacheNotATargetDir) ---
 
