@@ -2408,6 +2408,10 @@ surface McpTaskTools {
         -- The /preference-review skill reviews one PR against the operator's review
         -- preference files. Its behaviour is specified in its own file
         -- (preference-review.allium: PreferenceReviewSession).
+        --
+        -- The /voice skill drafts a message in the operator's voice and learns from
+        -- their edits. Its behaviour is specified in its own file
+        -- (voice-skill.allium: VoiceSession).
 
     @guarantee ToolDefinitionsFollowTheAuthoringStandard
         -- Anthropic's guidance on tool definitions (platform.claude.com "Define

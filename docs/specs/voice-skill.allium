@@ -1,0 +1,313 @@
+-- allium: 3
+-- voice-skill.allium
+--
+-- Scope: The /voice skill (plugin/skills/voice/SKILL.md): what an agent
+--        running it guarantees to the operator who asked for a message. It
+--        drafts a Slack message or team announcement in the operator's
+--        voice, and learns from the operator's edits to the draft.
+-- Includes: VoiceDraft (one per message) and its pipeline — load the voice
+--           context, draft, learn; ProposedChange, the only write the skill
+--           makes outside the conversation; the context folder's resolution
+--           and what loads; the rule that a rule edit needs a repeated change.
+-- Excludes: when the skill is invoked beyond the trigger phrases; how the
+--           skill's copy reaches an agent (mcp-task-tools.allium:
+--           SkillCopyIsJustInTime); the tools behind each step (realpath,
+--           Read) — those are the skill's mechanics, not what it promises;
+--           the content of the operator's rules, samples and observations.
+--
+-- Design decisions:
+--   - The voice files are personal and the skill is shared, so the folder is
+--     never a path written in the skill: it comes from the environment, else
+--     the fixed default ~/.local/share/dispatch/voice-context, which does
+--     not follow --data-dir.
+--   - No folder is a normal host, not an error. The skill still drafts, says
+--     it has no voice to follow, and has nothing to learn into.
+--   - The operator's own words are data. A sample holds the final text
+--     verbatim, and the skill never tidies grammar or capitalisation, in a
+--     sample or in a draft.
+--   - One edit is an anecdote. A change goes into observations.md at once,
+--     but becomes a rule only after it repeats in two or more messages.
+--   - The draft stays in the chat. Posting is a separate request.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- One message the operator asked for, from request to learning.
+entity VoiceDraft {
+    -- What the message is about, as the operator gave it.
+    request: String
+    -- The resolved absolute path of the voice context folder; absent when
+    -- no folder exists.
+    context_dir: String?
+    -- The text shown in the chat; absent until drafted.
+    draft: String?
+    -- The text the operator pasted back as final; absent until pasted.
+    final_text: String?
+
+    stage: loading | drafting | awaiting_final | learning | done
+
+    transitions stage {
+        loading -> drafting
+        drafting -> awaiting_final
+        awaiting_final -> learning
+        awaiting_final -> done
+        learning -> done
+        terminal: done
+    }
+
+    has_voice: context_dir != null
+}
+
+-- A write the skill proposes into the voice context folder.
+entity ProposedChange {
+    draft_of: VoiceDraft
+    kind: sample | observation | rule
+    -- The absolute path of the file to write.
+    path: String
+    -- The exact lines to write.
+    lines: String
+    approved: Boolean
+    -- For a rule: how many messages showed the same change.
+    repeats: Integer
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- Used when $DISPATCH_VOICE_CONTEXT is unset or blank.
+    default_context_dir: String = "~/.local/share/dispatch/voice-context"
+    -- A rule edit needs the change in at least this many messages.
+    rule_edit_min_repeats: Integer = 2
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Step 1: load ==
+
+rule StartVoiceDraft {
+    when: VoiceRequested(request)
+
+    ensures: VoiceDraft.created(
+        request: request,
+        context_dir: resolve_context_dir(),
+        draft: null,
+        final_text: null,
+        stage: loading
+    )
+    ensures: VoiceAnnounced(request: request)
+
+    @guidance
+        -- The skill opens with the sentence "I'm using the voice skill to
+        -- draft this." The folder is $DISPATCH_VOICE_CONTEXT when it is set
+        -- and not blank, else the default. It is resolved with realpath and
+        -- the absolute path is kept, because the default is a symlink and
+        -- step 3 writes there (ContextFolderComesFromTheEnvironment). A
+        -- variable that names a missing folder does not fall back to the
+        -- default.
+}
+
+rule LoadVoiceContext {
+    when: draft: VoiceDraft.stage transitions_to loading
+
+    ensures:
+        if draft.has_voice:
+            VoiceContextLoaded(files: [rules_file(draft), sample_files(draft)])
+        else:
+            NoVoiceReported()
+    ensures: draft.stage = drafting
+
+    @guidance
+        -- rules.md is read first, then every file in samples/. The skill
+        -- tells the operator which files it loaded, by resolved path, in a
+        -- message of its own before the draft (RulesBeforeSamples). With no
+        -- folder it says so in one line and drafts without a voice
+        -- (MissingFolderStillDrafts).
+}
+
+-- == Step 2: draft ==
+
+rule ShowDraft {
+    when: draft: VoiceDraft.stage transitions_to drafting
+
+    ensures: draft.draft = written_in_voice(draft)
+    ensures: DraftShown(text: draft.draft)
+    ensures: draft.stage = awaiting_final
+
+    @guidance
+        -- The draft is shown in the chat and nowhere else. The skill never
+        -- posts it to Slack, or sends or schedules it, unless the operator
+        -- asks in this session (DraftStaysInChat).
+}
+
+-- == Step 3: learn ==
+
+rule OperatorPastedFinal {
+    when: FinalTextPasted(draft, text)
+
+    requires: draft.stage = awaiting_final
+
+    ensures: draft.final_text = text
+    ensures:
+        if draft.has_voice:
+            draft.stage = learning
+        else:
+            draft.stage = done
+}
+
+rule ProposeChanges {
+    when: draft: VoiceDraft.stage transitions_to learning
+
+    let repeated = repeated_changes(draft)
+
+    ensures: ProposedChange.created(
+        draft_of: draft,
+        kind: sample,
+        path: new_sample_path(draft),
+        lines: draft.final_text,
+        approved: false,
+        repeats: 0
+    )
+    ensures: ProposedChange.created(
+        draft_of: draft,
+        kind: observation,
+        path: observations_path(draft),
+        lines: new_observation_section(draft),
+        approved: false,
+        repeats: 0
+    )
+    ensures:
+        for change in repeated:
+            ProposedChange.created(
+                draft_of: draft,
+                kind: rule,
+                path: rules_path(draft),
+                lines: rule_edit(change),
+                approved: false,
+                repeats: change.repeats
+            )
+
+    @guidance
+        -- The final text is compared with the draft. The sample is a new
+        -- file holding the final text verbatim (SampleIsVerbatim). The
+        -- observation is a new section of observations.md. A rule edit is
+        -- proposed only for a change that shows in two or more messages,
+        -- counting this one and the earlier observations
+        -- (RuleEditsNeedARepeat). Each proposal shows the absolute path and
+        -- the exact lines (ProposalsShowPathAndLines). The comparison
+        -- measures openings, rhythm and absences; it does not correct the
+        -- operator's grammar or capitalisation (NeverTidiesTheOperatorsWords).
+}
+
+rule OperatorApproved {
+    when: OperatorApprovedChange(change)
+
+    requires: change.draft_of.stage = learning
+
+    ensures: change.approved = true
+    ensures: ContextFileWritten(path: change.path, lines: change.lines)
+}
+
+rule LearningDone {
+    when: LearningFinished(draft)
+
+    requires: draft.stage = learning
+
+    ensures: draft.stage = done
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- A change reaches the folder only after the operator approved it.
+invariant NothingIsWrittenUnapproved {
+    for change in ProposedChanges:
+        ContextFileWritten(path: change.path, lines: change.lines) implies change.approved
+}
+
+-- A rule changes only for a pattern seen at least twice.
+invariant RulesNeedARepeat {
+    for change in ProposedChanges:
+        change.kind = rule implies change.repeats >= config.rule_edit_min_repeats
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface VoiceInvocation {
+    facing _: core/Operator
+
+    provides:
+        VoiceRequested(request)
+
+    @guidance
+        -- The operator says /voice (optionally followed by what the message
+        -- is about), "draft this in my voice", or asks for a Slack message
+        -- or team announcement. The plugin skill is /dispatch:voice.
+}
+
+surface VoiceSession {
+    facing _: core/Operator
+
+    context draft: VoiceDraft
+
+    exposes:
+        draft.context_dir
+        draft.draft
+
+    provides:
+        FinalTextPasted(draft, text) when draft.stage = awaiting_final
+        OperatorApprovedChange(change) when draft.stage = learning
+        LearningFinished(draft) when draft.stage = learning
+
+    @guarantee ContextFolderComesFromTheEnvironment
+        -- The folder is $DISPATCH_VOICE_CONTEXT when set and not blank, else
+        -- ~/.local/share/dispatch/voice-context. It is resolved with
+        -- realpath, and the files are read under the resolved path
+        -- (StartVoiceDraft).
+
+    @guarantee RulesBeforeSamples
+        -- rules.md is read first, then all of samples/. The operator is told
+        -- which files loaded before the draft appears (LoadVoiceContext).
+
+    @guarantee MissingFolderStillDrafts
+        -- With no folder the skill drafts without a voice, says so in one
+        -- line, and skips the learning step. A set variable that names a
+        -- missing folder does not fall back to the default
+        -- (LoadVoiceContext, OperatorPastedFinal).
+
+    @guarantee DraftStaysInChat
+        -- The draft is shown in the chat only. Nothing is posted to Slack
+        -- unless the operator asks in this session (ShowDraft).
+
+    @guarantee SampleIsVerbatim
+        -- The proposed sample file holds the operator's final text exactly as
+        -- pasted (ProposeChanges).
+
+    @guarantee RuleEditsNeedARepeat
+        -- A rule edit is proposed only when the same change shows in two or
+        -- more messages; a single edit goes into observations.md only
+        -- (ProposeChanges, RulesNeedARepeat).
+
+    @guarantee ProposalsShowPathAndLines
+        -- Each proposed write shows its absolute path and the exact lines,
+        -- and is written only after the operator approves it
+        -- (ProposeChanges, OperatorApproved, NothingIsWrittenUnapproved).
+
+    @guarantee NeverTidiesTheOperatorsWords
+        -- Grammar and capitalisation in the operator's text stay as written,
+        -- in samples, observations and rules (ProposeChanges).
+
+    @guarantee NeverCommitsInTheFolder
+        -- The approved write is the only action in the folder. The skill does
+        -- not run git there; the folder belongs to the operator
+        -- (OperatorApproved).
+}

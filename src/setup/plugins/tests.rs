@@ -120,4 +120,5 @@ mod plugin_install;
 mod reference_files;
 mod retro_skill;
 mod skill_workflow;
+mod voice_skill;
 mod wrap_up_skill;
