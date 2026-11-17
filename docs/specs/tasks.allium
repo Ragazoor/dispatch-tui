@@ -543,7 +543,7 @@ rule ConfirmDone {
         -- close_task; store-split.allium: RequestCloseTask), and a
         -- feed upsert whose item arrives with status
         -- done (feeds.allium). PrClosed (pr-workflow.allium) is NOT one of
-        -- these — a closed PR no longer transitions the task into done.
+        -- these: a closed PR does not move the task into done.
         --
         -- There is no matching clear. A write that takes a task OUT of done
         -- leaves task.completed_at exactly as it was, because the field
@@ -841,8 +841,7 @@ rule SelectAllColumn {
     -- select-all. This is the behavioural counterpart of the rendering rule
     -- that shows the checkbox on the focused column (board-visuals.allium:
     -- ColumnChrome.shows_select_all_checkbox) — the two must move together, so
-    -- neither should be changed alone. The Archive edge column, which could
-    -- do neither, went with the archived status.
+    -- neither should be changed alone.
 
     -- An empty column is a no-op.
     requires: tasks.count > 0 or epics.count > 0
@@ -1180,12 +1179,11 @@ rule ReorderItem {
         -- writes it on EPIC cards too. That is the user overriding the
         -- column's recorded order, and the cost is admitted plainly: the swap
         -- rewrites a factual timestamp, so after it the field no longer says
-        -- when the work actually finished. The alternative — refusing — was
-        -- what an epic card got before this field existed, because its key was
-        -- derived from its subtasks and it owned no field the column read.
-        -- Now it owns one (core/Epic.completed_at), and an override written
-        -- there beats the derived subtask key, so the card moves and stays
-        -- moved. See "Manual reorder in Done" in board-layout.allium.
+        -- when the work actually finished. The swap is not refused on an
+        -- epic card: the epic owns the field the column reads
+        -- (core/Epic.completed_at), and an override written there beats the
+        -- key derived from its subtasks, so the card moves and stays moved.
+        -- See "Manual reorder in Done" in board-layout.allium.
         --
         -- An epic override is not permanent. EpicStatusRecalculation
         -- (epics.allium) rewrites epic.completed_at when the epic itself
@@ -1703,14 +1701,10 @@ rule DeleteTask {
     requires: task.status = done
 
     let had_worktree = task.worktree != null
-    -- `released` is kept as a distinct name because WorktreeReleaseIsGated is
-    -- stated in terms of release, and this binding is the single place recording
-    -- that release and removal now COINCIDE: per WorktreeIsNeverShared a worktree
-    -- is never shared, so it is never merely detached, and step 2 releases a
-    -- worktree from this task exactly when the path is gone from disk — vacuously
-    -- true when the task had no worktree.
+    -- The worktree is released (WorktreeReleaseIsGated) exactly when it is
+    -- removed: per WorktreeIsNeverShared a worktree is never shared, so it is
+    -- never merely detached. True when the task had no worktree.
     let removed = worktree_removed(task)
-    let released = removed
     -- The feed that would otherwise re-insert this task, read from the task's
     -- epic chain as it stands at delete time (see core/Epic.nearest_feed_epic).
     let feed_epic = if task.epic != null: task.epic.nearest_feed_epic else: null
@@ -1722,7 +1716,7 @@ rule DeleteTask {
     -- When the worktree is not released the row stays as it is: done, with
     -- its worktree, host and tmux window (WorktreeReleaseIsGated).
     ensures:
-        if released:
+        if removed:
             not exists task
             TaskRowDeleted(task: task)
             TaskArchived(task: task)
@@ -1736,7 +1730,7 @@ rule DeleteTask {
     @guidance
         -- Soft delete: the task leaves the board for good, and a read-only
         -- core/ArchivedTask keeps what it was (ArchiveDeletedTask). The board
-        -- row, worktree, branch and window are gone exactly as before; there
+        -- row, worktree, branch and window are gone; there
         -- is no undo and no way back onto the board. That is why the TUI puts a
         -- y/n confirmation in front of it (ConfirmDeleteTask) and why no MCP
         -- tool reaches it — deleting is a human decision taken at the board.
@@ -1964,9 +1958,9 @@ rule ArchiveDeletedTask {
         -- WHAT STILL GOES. Everything TaskRowDeleted's listeners remove (the
         -- task's agents, request rows, marks, work-package links, agent state)
         -- still goes: none of it is history an agent reads. Only the learning
-        -- links are kept, which a delete used to clear: the learning keeps its
-        -- source task id, and retrievals and verdicts stay. The feed stale
-        -- delete still clears them as before, since it archives nothing.
+        -- links are kept: the learning keeps its source task id, and
+        -- retrievals and verdicts stay. The feed stale delete clears them,
+        -- since it archives nothing.
         --
         -- NO WAY BACK. Nothing turns an ArchivedTask into a Task. A request to
         -- resume, dispatch or change one is refused as archived
@@ -2613,9 +2607,9 @@ rule HandStatusWriteReachesTheSchedule {
 --     (SubStatusMovesMustBeLegal, BatchSubStatusPatchSkipsIllegalEntries),
 --     and an insert whose pair does not fit is refused
 --     (InsertedTaskSubStatusMustFit).
---   * a row stored before these checks existed with a pair that does not
---     fit is reset once to default_sub_status(its status), when the module
---     that enforces this is first published to a store.
+--   * a store stamped below rules version 51 resets every task whose pair
+--     does not fit to default_sub_status(its status) once, on connect
+--     (spacetime/module/src/tasks_epics.rs::reset_unfit_sub_statuses).
 invariant SubStatusAutoreset {
     for t in core/Tasks:
         sub_status_valid_for(t.sub_status, t.status)
