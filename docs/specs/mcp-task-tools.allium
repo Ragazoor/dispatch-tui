@@ -863,18 +863,13 @@ rule CreateTaskViaMcp {
     --
     -- Why the argument is required rather than inherited. Silent inheritance
     -- propagates a blank: an epic-less task creates an epic-less child, which
-    -- creates another. Measured on the real board, 93 of 209 omitted-epic_id
-    -- calls produced a task with no epic, and every one of them had inherited
-    -- correctly from a caller that itself had none, in chains of four and
-    -- more, with no error raised on any surface.
-    -- Requiring the argument stops the chain: a wrong answer now costs one
-    -- task instead of a lineage.
+    -- creates another, and no surface raises an error on any of them.
+    -- Requiring the argument stops the chain: a wrong answer costs one task,
+    -- not a lineage.
     --
     -- Why that is cheap to ask. The value is already in front of the agent —
-    -- the dispatch prompt states "This task is part of epic #N". Of the 236
-    -- calls that did pass an explicit epic_id, exactly one named an epic that
-    -- does not exist, and that case is already refused by the Epic.exists
-    -- requirement above.
+    -- the dispatch prompt states "This task is part of epic #N". An epic_id
+    -- that names no epic is refused by the Epic.exists requirement above.
     --
     -- Why null is kept rather than forcing every task into an epic. A
     -- genuinely standalone task must stay expressible without inventing a
@@ -1222,10 +1217,8 @@ rule ListTasksViaMcp {
         -- agent that passes no epic_id sees tasks of every epic, as a session
         -- does. An agent finds its own epic in its prompt and passes it. The
         -- caller's own task is NOT excluded: it is a task like any other, and
-        -- a hidden exclusion would be a filter the caller cannot see. (The
-        -- tool used to scope a dispatched agent to its epic and drop its own
-        -- task; the trajectory logs showed 33 empty replies that no argument
-        -- explained.) recursive needs an epic_id, below.
+        -- a hidden exclusion would be a filter the caller cannot see, and an
+        -- empty reply no argument explains. recursive needs an epic_id, below.
         -- == the order decides which rows an agent sees ==
         -- Rows are sorted by updated_at, newest first, ties by id
         -- descending. With a limit this puts the tasks that moved most
@@ -2447,7 +2440,7 @@ surface McpTaskTools {
         -- misuse to do it anyway.
 
     @guarantee WrapUpRefusesUnfinishedWork
-        -- Skipping the commit is how agents went idle with work stranded on
+        -- An agent that skips the commit goes idle with its work stranded on
         -- an uncommitted tree, so the step a tool can check cheaply is
         -- enforced by the tool, not by the /wrap-up skill's prose.
         --
