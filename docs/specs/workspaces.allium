@@ -99,7 +99,7 @@ entity UserProfile {
     -- An identity with no UserProfile row (a creator written before profiles
     -- existed) is shown by its prefix too.
     shown_name: if display_name != "": display_name
-                else: identity.prefix(config.identity_prefix_length)
+                else: identity_prefix(identity, config.identity_prefix_length)
 
     invariant OneProfilePerIdentity {
         for a in UserProfiles:
@@ -118,6 +118,14 @@ config {
     identity_prefix_length: Integer = 8
     default_workspace_name: String = "Default"
 }
+
+-- Black boxes the rules below read, on strings:
+--   trimmed(s): s without its leading and trailing whitespace.
+--   char_count(s): the number of characters (not bytes) in s.
+--   has_control_or_format_characters(s): s holds a character of Unicode
+--     category Cc or Cf (SetDisplayName says which, in full).
+--   identity_prefix(identity, n): the first n characters of the identity's
+--     text form.
 
 ------------------------------------------------------------
 -- Rules
@@ -144,12 +152,12 @@ rule SetDisplayName {
     when: SetDisplayName(name)
 
     let profile = UserProfile{identity: caller()}
-    let trimmed = name.trim()
+    let trimmed = trimmed(name)
 
     requires: exists profile
     requires: trimmed != ""
-    requires: trimmed.length <= config.display_name_max_length
-    requires: not trimmed.has_control_or_format_characters
+    requires: char_count(trimmed) <= config.display_name_max_length
+    requires: not has_control_or_format_characters(trimmed)
 
     ensures: profile.display_name = trimmed
 
@@ -211,7 +219,7 @@ rule AdoptOwnerlessUserBoardTasks {
     when: AdoptOwnerlessUserBoardTasks(super_admin)
 
     ensures:
-        for task in Tasks where task.epic = null and task.owner = null:
+        for task in core/Tasks where task.epic = null and task.owner = null:
             task.owner = super_admin
 
     @guidance
@@ -257,13 +265,13 @@ rule CreateWorkspace {
     when: CreateWorkspace(name)
 
     let creator = UserProfile{identity: caller()}
-    let trimmed = name.trim()
+    let trimmed = trimmed(name)
 
     requires: exists creator and creator.is_super_admin
     requires: trimmed != ""
-    requires: trimmed.length <= config.workspace_name_max_length
-    requires: not trimmed.has_control_or_format_characters    -- as SetDisplayName
-    requires: not Workspaces.any(w => w.name = trimmed)
+    requires: char_count(trimmed) <= config.workspace_name_max_length
+    requires: not has_control_or_format_characters(trimmed)    -- as SetDisplayName
+    requires: not core/Workspaces.any(w => w.name = trimmed)
 
     ensures: core/Workspace.created(name: trimmed, created_by: caller(), created_at: now)
 
@@ -276,13 +284,13 @@ rule CreateWorkspace {
 rule RenameWorkspace {
     when: RenameWorkspace(workspace, name)
 
-    let trimmed = name.trim()
+    let trimmed = trimmed(name)
 
     requires: is_super_admin(caller()) or workspace.is_admin(caller())
     requires: trimmed != ""
-    requires: trimmed.length <= config.workspace_name_max_length
-    requires: not trimmed.has_control_or_format_characters    -- as SetDisplayName
-    requires: not Workspaces.any(w => w != workspace and w.name = trimmed)
+    requires: char_count(trimmed) <= config.workspace_name_max_length
+    requires: not has_control_or_format_characters(trimmed)    -- as SetDisplayName
+    requires: not core/Workspaces.any(w => w != workspace and w.name = trimmed)
 
     ensures: workspace.name = trimmed
 }
@@ -292,11 +300,11 @@ rule DeleteWorkspace {
 
     requires: is_super_admin(caller())
     requires: workspace.epics.count = 0
-    requires: not WorkPackages.any(p => p.workspace = workspace)
+    requires: not wp/WorkPackages.any(p => p.workspace = workspace)
 
     ensures:
         for m in workspace.memberships: not exists m
-        for learning in Learnings where learning.workspace = workspace: not exists learning
+        for learning in core/Learnings where learning.workspace = workspace: not exists learning
         not exists workspace
 
     @guidance
@@ -346,11 +354,11 @@ rule RemoveMember {
 
     ensures:
         not exists membership
-        for s in Subscriptions where s.subscriber = user and s.epic.workspace = workspace:
+        for s in core/Subscriptions where s.subscriber = user and s.epic.workspace = workspace:
             not exists s
-        for u in UnseenTasks where u.subscriber = user and u.task.epic != null and u.task.epic.workspace = workspace:
+        for u in core/UnseenTasks where u.subscriber = user and u.task.epic != null and u.task.epic.workspace = workspace:
             not exists u
-        for b in Bookmarks where b.subscriber = user and b.task.epic != null and b.task.epic.workspace = workspace:
+        for b in core/Bookmarks where b.subscriber = user and b.task.epic != null and b.task.epic.workspace = workspace:
             not exists b
         -- A claim must not outlive the sight that made it workable: every
         -- core/PollOwner row held by a host `user` owns, epic-scoped on an
@@ -670,20 +678,20 @@ rule MoveEpicToWorkspace {
     ensures:
         for node in epic.subtree:
             node.workspace = destination
-        for learning in Learnings
+        for learning in core/Learnings
                 where learning.scope = epic
                   and learning.item_in(epic.subtree):
             learning.workspace = destination
-        for link in WorkPackageLinks
+        for link in wp/WorkPackageLinks
                 where link.item in epic.subtree or link.item in epic.subtree.tasks:
             not exists link
-        for follow in Subscriptions where follow.epic in epic.subtree:
+        for follow in core/Subscriptions where follow.epic in epic.subtree:
             if not destination.has_member(follow.subscriber):
                 not exists follow
-        for mark in Bookmarks where mark.task.epic in epic.subtree:
+        for mark in core/Bookmarks where mark.task.epic in epic.subtree:
             if not destination.has_member(mark.subscriber):
                 not exists mark
-        for unseen in UnseenTasks where unseen.task.epic in epic.subtree:
+        for unseen in core/UnseenTasks where unseen.task.epic in epic.subtree:
             if not destination.has_member(unseen.subscriber):
                 not exists unseen
         -- A host whose owner is not a member of the destination loses sight
@@ -766,7 +774,7 @@ rule TaskMovesStayInTheWorkspace {
         -- (TaskEntersAnEpicTheCallerCanSee).
         -- Only the store itself can still move a task across workspaces; it
         -- drops the task's package links
-        -- (LinkedItemsShareThePackagesWorkspace, D8), in move_task_row.
+        -- (LinkedItemsShareThePackagesWorkspace, D6), in move_task_row.
         -- A detach is also refused while a person other than the caller's
         -- own hosts hold a current agent or an open request on the task: the
         -- detach would hide the task from the host that is running it (the
@@ -774,7 +782,7 @@ rule TaskMovesStayInTheWorkspace {
         -- host is running it; detach it once that agent has ended".
         -- Module: task_detach_strands_a_host (shared with MemoryReducerCaller).
         -- A detach also leaves the workspace for the package links, as a
-        -- cross-workspace move does (A8).
+        -- cross-workspace move does (D6).
         -- Refusals: "task N: a task stays in its workspace; it cannot move
         -- into another workspace", and for a detach by someone with no
         -- authority "task N: only its creator or an admin may detach it from
@@ -837,7 +845,7 @@ rule LinkOnlyInsideTheWorkspace {
 rule NameWorkspaceAndVisibilityFromBoard {
     when: EpicOrPackageFormOpened(form, parent?)
 
-    let mine = Memberships where user = caller()
+    let mine = core/Memberships where user = caller()
 
     requires: mine.count > 0
 
@@ -939,7 +947,7 @@ rule WritesRequireSight {
         -- checks the caller can see it. A refusal names no detail of the
         -- item, so a refusal cannot be used to probe for a private one.
         -- Teammates may still act on each other's work in a workspace they
-        -- share (learning #90175); this narrows that to work they can see.
+        -- share; this narrows that to work they can see.
         -- Two writes need more than sight, because they decide who sees an
         -- item: a visibility change (SetEpicVisibility,
         -- SetWorkPackageVisibility) and a move that changes who an item is
@@ -1030,8 +1038,8 @@ rule LearningVisibility {
         -- recording_workspace is the workspace of the recording agent's
         -- task's epic. A repo-scoped learning recorded from a main-board
         -- task, or by a person with no task, has none, so it is private to
-        -- its author like the user board it came from (resolved with the
-        -- user, task #98523; there is no personal workspace, D2).
+        -- its author like the user board it came from (there is no personal
+        -- workspace, D2).
         -- The workspace follows the item afterwards: an epic tree moved
         -- (MoveEpicToWorkspace), an epic-scoped learning re-scoped to another epic
         -- (rescope_epic_learnings; learnings.allium:
@@ -1050,19 +1058,20 @@ rule LearningVisibility {
 rule MigrateStoreToWorkspaces {
     when: StoreUpgradedToWorkspaces()
 
-    requires: Workspaces.count = 0
+    let workspaces = core/Workspaces
+    requires: workspaces.count = 0
 
     ensures:
         let first = core/Workspace.created(name: config.default_workspace_name,
                                            created_by: store_publisher(),
                                            created_at: now)
-        for epic in Epics:
+        for epic in core/Epics:
             epic.workspace = first
             epic.visibility = public
-        for package in WorkPackages:
+        for package in wp/WorkPackages:
             package.workspace = first
             package.visibility = public
-        for learning in Learnings where learning.scope != user:
+        for learning in core/Learnings where learning.scope != user:
             learning.workspace = first
         for person in known_identities():
             if not exists UserProfile{identity: person}:
@@ -1102,12 +1111,12 @@ rule MigrateStoreToWorkspaces {
 ------------------------------------------------------------
 
 invariant SubEpicSharesItsParentsWorkspace {
-    for epic in Epics:
+    for epic in core/Epics:
         epic.parent != null implies epic.workspace = epic.parent.workspace
 }
 
 invariant LinkedItemsShareThePackagesWorkspace {
-    for link in WorkPackageLinks:
+    for link in wp/WorkPackageLinks:
         item_workspace(link.item) = null
             or item_workspace(link.item) = link.work_package.workspace
 }
@@ -1149,20 +1158,20 @@ surface StoreReads {
             profile.display_name
             profile.shown_name
             profile.is_super_admin
-        for w in Workspaces where w.has_member(reader.identity) or reader.is_super_admin:
+        for w in core/Workspaces where w.has_member(reader.identity) or reader.is_super_admin:
             w.name
             w.memberships
-        for epic in Epics where epic.visible_to(reader.identity):
+        for epic in core/Epics where epic.visible_to(reader.identity):
             epic
             epic.created_by
-        for task in Tasks where task.visible_to(reader.identity):
+        for task in core/Tasks where task.visible_to(reader.identity):
             task
             task.created_by
-        for package in WorkPackages where package.visible_to(reader.identity):
+        for package in wp/WorkPackages where package.visible_to(reader.identity):
             package
             package.created_by
             package.links where link_item_visible(link, reader.identity)
-        for setting in Settings where setting.host.owner = reader.identity:
+        for setting in core/Settings where setting.host.owner = reader.identity:
             setting
 
     provides:
@@ -1238,7 +1247,9 @@ surface SuperAdministration {
     facing _: SuperAdmin
 
     exposes:
-        Workspaces
+        for w in core/Workspaces:
+            w.name
+            w.memberships
 
     provides:
         CreateWorkspace(name)
