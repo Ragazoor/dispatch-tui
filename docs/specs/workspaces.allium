@@ -338,6 +338,38 @@ contract StoreWriteChecks {
         --
         -- Created-by. Every new epic and work package is stamped with the
         -- caller, so a private one always has someone to be private to.
+
+    @invariant SightChangeNeverStrandsAHost
+        -- Raised by set_task_epic and update_task with an epic (a move into
+        -- an epic; a detach is TaskMovesStayInTheWorkspace's), by
+        -- set_epic_visibility, by patch_epic naming a parent, by
+        -- move_epic_to_workspace and by remove_member. For every affected
+        -- task, no person who sees it before the write, and would not see it
+        -- after, owns a host it runs on:
+        --     not (task.visible_to(person) before
+        --          and not task.visible_to(person) after
+        --          and task.runs_on_a_host_owned_by(person))
+        -- The affected tasks are the moved task; the tasks of the epic's
+        -- subtree; or every task of the workspace, for remove_member, whose
+        -- "person" is the removed user. A task "runs on a host" while a
+        -- current agent, or an open dispatch or session request, sits on it.
+        --
+        -- Taking a task out of the sight of a person whose host holds a
+        -- current agent, or an open dispatch or session request, on it
+        -- leaves that host unable to read the task: wrap-up fails as "task
+        -- deleted" and PR polling stops. So the store refuses the change,
+        -- whoever asks, the store itself included, until the agent has
+        -- ended. The detach refusal (TaskMovesStayInTheWorkspace,
+        -- task_detach_strands_a_host) is the same check for a detach. The
+        -- refusal of an epic-level change names the epic and never a task
+        -- in it, so it leaks nothing the caller cannot see.
+        -- Refusals: "task N: another person's host is running it; move it
+        -- once that agent has ended"; "epic N: a host is running a task in
+        -- it for someone who would lose sight of it; change it once that
+        -- agent has ended"; "a host is running a task in this workspace for
+        -- the member; remove them once that agent has ended".
+        -- Module: task_move_strands_a_host, epic_change_strands_a_host,
+        -- member_removal_strands_a_host (shared with MemoryReducerCaller).
 }
 
 ------------------------------------------------------------
@@ -732,40 +764,6 @@ rule ClaimsFollowSight {
         for b in core/Bookmarks
                 where task.epic in epic.subtree and not task.visible_to(subscriber):
             not exists b
-}
-
--- A sight change never strands a running agent (task #99226, L1, decided with
--- the user: refuse on every path). Taking a task out of the sight of a person
--- whose host holds a current agent, or an open dispatch or session request, on
--- it leaves that host unable to read the task: wrap-up fails as "task deleted"
--- and PR polling stops. So the store refuses the change, whoever asks, the
--- store itself included, until the agent has ended. The detach refusal
--- (EpicStaysInItsWorkspace, task_detach_strands_a_host) is the first case of
--- this rule; the others are below. The refusal of an epic-level change names
--- the epic and never a task in it, so it leaks nothing the caller cannot see.
-rule SightChangeNeverStrandsAHost {
-    when: TaskMoved(moved, destination, owner)    -- not a detach: see above
-       or SetEpicVisibility(epic, visibility)
-       or EpicMoved(epic, destination)            -- a re-parent
-       or MoveEpicToWorkspace(epic, workspace)
-       or RemoveMember(workspace, user)
-
-    requires:
-        for task in affected_tasks:
-            not exists person where task.visible_to(person) now
-                and not task.visible_to(person) after the change
-                and task.runs_on_a_host_owned_by(person)
-    -- affected_tasks: the moved task; the tasks of the epic's subtree; or
-    -- every task of the workspace, for RemoveMember, whose "person" is the
-    -- removed user. A task "runs on a host" while a current agent, or an open
-    -- dispatch or session request, sits on it.
-    -- Refusals: "task N: another person's host is running it; move it once
-    -- that agent has ended"; "epic N: a host is running a task in it for
-    -- someone who would lose sight of it; change it once that agent has
-    -- ended"; "a host is running a task in this workspace for the member;
-    -- remove them once that agent has ended".
-    -- Module: task_move_strands_a_host, epic_change_strands_a_host,
-    -- member_removal_strands_a_host (shared with MemoryReducerCaller).
 }
 
 rule ClaimsFollowTaskSight {
@@ -1267,11 +1265,9 @@ surface StoreWriteChecks {
     provides:
         -- create_epic (CreateEpicInWorkspace).
         EpicCreated(epic, workspace, parent_epic?, visibility)
-        -- patch_epic, when the patch names a parent (ClaimsFollowSight,
-        -- SightChangeNeverStrandsAHost).
+        -- patch_epic, when the patch names a parent (ClaimsFollowSight).
         EpicMoved(epic, destination?)
-        -- set_task_epic and update_task with an epic (ClaimsFollowTaskSight,
-        -- SightChangeNeverStrandsAHost).
+        -- set_task_epic and update_task with an epic (ClaimsFollowTaskSight).
         TaskMoved(task, destination?, owner)
 
     contracts:
