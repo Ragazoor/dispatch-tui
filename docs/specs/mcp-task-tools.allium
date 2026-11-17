@@ -1306,6 +1306,8 @@ rule QueryUsageViaMcp {
         if category != null: usage_category_is_valid(category)
     requires:
         if actor != null: usage_actor_is_valid(actor)
+    -- limit, when supplied, is a positive integer, as every limit is.
+    requires: limit = null or limit >= 1
 
     ensures: FeatureUsageQueried(
         category: category,
@@ -1326,8 +1328,9 @@ rule QueryUsageViaMcp {
         --   category: "keybinding" | "mcp_tool" (enum-validated)
         --   actor:    enum-validated string
         --   since:    ISO-8601 datetime; rows older than this are excluded
-        --   limit:    the most groups returned; 50 when absent, clamped to
-        --             1..500 (src/store/queries/usage.rs::query_usage)
+        --   limit:    the most groups returned; 50 when absent, at most 500
+        --             (a larger one is cut to 500); 0 or a negative value
+        --             rejects with -32602
         -- Invalid category/actor strings reject with JSON-RPC -32602; a
         -- malformed `since` likewise rejects with -32602.
         -- These are feature-usage counters (which keybindings and MCP tools

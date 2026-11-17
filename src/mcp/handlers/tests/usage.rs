@@ -65,3 +65,24 @@ async fn query_usage_mcp_tool_returns_aggregated_counts() {
     assert_eq!(kb[0]["action"], "task_dispatch");
     assert_eq!(kb[0]["count"], 2);
 }
+
+/// mcp-task-tools.allium: QueryUsageViaMcp — `limit`, when supplied, is a
+/// positive integer. 0 and negatives are refused, never wrapped or clamped.
+#[tokio::test]
+async fn query_usage_refuses_a_limit_below_one() {
+    let state = test_state().await;
+    for bad in [json!(0), json!(-1)] {
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "query_usage", "arguments": { "limit": bad } })),
+        )
+        .await;
+        let rejected = resp.error.is_some()
+            || resp
+                .result
+                .as_ref()
+                .is_some_and(|r| r["isError"] == json!(true));
+        assert!(rejected, "limit {bad} must be refused: {resp:?}");
+    }
+}

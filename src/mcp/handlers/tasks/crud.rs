@@ -804,7 +804,7 @@ pub(crate) async fn handle_query_usage(
         category: args.category,
         actor: args.actor,
         since,
-        limit: args.limit.map(|l| l as usize),
+        limit: args.limit.map(std::num::NonZeroUsize::get),
     };
 
     match state.db.query_usage(&query).await {

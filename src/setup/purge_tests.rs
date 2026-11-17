@@ -2,9 +2,9 @@
 //! Task #16755: `dispatch uninstall --purge` forgets this machine's identity
 //! and leaves a leftover `tasks.db` alone.
 //!
-//! Spec: `cli.allium` (`UninstallForgetsThisMachine`),
-//! `storage.allium` (`CodeNeverTouchesLegacyDatabase`), `cli.allium`
-//! (`NoSubcommandOpensSqlite`).
+//! Spec: `cli.allium` (`UninstallForgetsThisMachine`,
+//! `NoSubcommandOpensSqlite`), `storage.allium`
+//! (`CodeNeverTouchesLegacyDatabase`).
 //!
 //! The confirmer answers yes (or no) to whichever prompt the purge asks, plain
 //! or dangerous, so these tests pin what is removed rather than which kind of

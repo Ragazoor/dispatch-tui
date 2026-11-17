@@ -343,8 +343,8 @@ pub(super) struct QueryUsageArgs {
     pub(super) actor: Option<String>,
     #[serde(default)]
     pub(super) since: Option<String>,
-    #[serde(default)]
-    pub(super) limit: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_limit")]
+    pub(super) limit: Option<std::num::NonZeroUsize>,
 }
 
 // ---------------------------------------------------------------------------

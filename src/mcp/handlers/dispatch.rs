@@ -979,6 +979,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
                 },
                 "limit": {
                     "type": "integer",
+                    "minimum": 1,
                     "description": "Max results (default 50, max 500)"
                 }
             }
