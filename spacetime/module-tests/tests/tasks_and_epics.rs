@@ -275,7 +275,24 @@ fn deleting_a_learning_cascades_its_retrievals_and_refuses_when_missing() {
 }
 
 #[test]
-fn recording_usage_events_prunes_beyond_the_cap() {
+fn a_caller_cannot_lower_the_usage_retention_cap() {
+    let store = Store::new();
+    for i in 1..=5 {
+        store
+            .call("alice", |ctx| {
+                record_usage_event(ctx, usage_event(&format!("action_{i}")), 1)
+            })
+            .expect("record_usage_event");
+    }
+    assert_eq!(
+        store.db().usage_events().iter().count(),
+        5,
+        "a cap of 1 from a caller prunes nothing"
+    );
+}
+
+#[test]
+fn pruning_drops_the_oldest_rows_beyond_the_cap() {
     let store = Store::new();
     for i in 1..=5 {
         store
@@ -284,8 +301,13 @@ fn recording_usage_events_prunes_beyond_the_cap() {
             })
             .expect("record_usage_event");
     }
+    let highest = store.db().usage_events().iter().map(|e| e.id).max().unwrap();
+    store.call("alice", |ctx| {
+        prune_usage_events(ctx, highest, 3);
+        Ok::<(), String>(())
+    }).expect("prune");
     let actions: Vec<String> = store.db().usage_events().iter().map(|e| e.action).collect();
-    assert_eq!(actions.len(), 3, "the table never exceeds the cap");
+    assert_eq!(actions.len(), 3, "the table is cut to the cap");
     assert!(!actions.contains(&"action_1".to_string()), "oldest pruned");
     assert!(actions.contains(&"action_5".to_string()), "newest kept");
     assert!(

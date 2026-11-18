@@ -397,6 +397,28 @@ async fn an_epic_create_carries_the_creator() {
     assert_eq!(row.created_by, "user-me");
 }
 
+/// The store stamps `feed_command_set_by` with the creator when a feed command
+/// rides in the create, so the reply names them too.
+#[tokio::test]
+async fn the_created_epic_reply_names_who_set_its_feed_command() {
+    let (writer, _caller) = writer_with(RecordingCaller::default());
+
+    let created = writer
+        .create_epic_configured(
+            "Feed",
+            "why",
+            None,
+            &crate::store::EpicBirth {
+                feed_command: Some("gh api x"),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(created.feed_setter.as_deref(), Some("user-me"));
+}
+
 /// A board with no settled identity cannot create an epic either —
 /// `sync.allium: CreatesRequireASettledIdentity`. An epic has no `owner` to
 /// fall back on the way a task does, so this is the only guard standing

@@ -58,7 +58,15 @@ pub fn write_with(
     temp.persist(path)
         .map_err(|e| e.error)
         .with_context(|| format!("replace {}", path.display()))?;
-    Ok(())
+    sync_dir(dir)
+}
+
+/// Make a rename in `dir` durable: without this a power loss right after the
+/// rename can bring the old file, or none, back.
+fn sync_dir(dir: &Path) -> anyhow::Result<()> {
+    std::fs::File::open(dir)
+        .and_then(|d| d.sync_all())
+        .with_context(|| format!("sync the directory {}", dir.display()))
 }
 
 /// The directory `path` sits in, where its temporary file goes: `.` for a
@@ -103,7 +111,7 @@ pub fn create_new_bytes(path: &Path, mode: u32, bytes: &[u8]) -> anyhow::Result<
         w.write_all(bytes).context("write the file")
     })?;
     match temp.persist_noclobber(path) {
-        Ok(_) => Ok(true),
+        Ok(_) => sync_dir(parent_dir(path)).map(|()| true),
         Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
         Err(e) => Err(anyhow::Error::new(e.error).context(format!("create {}", path.display()))),
     }

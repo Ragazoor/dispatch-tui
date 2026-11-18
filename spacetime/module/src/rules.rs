@@ -134,6 +134,12 @@ use super::*;
 ///    on an embedding-only patch; `link_work_package_item` checks the
 ///    package's sight before the item (`learnings.allium`, `workspaces.allium:
 ///    UnseenIsAsMissing`).
+/// 59: the store owns two rules a caller used to set. `record_usage_event`
+///    ignores a cap below `USAGE_EVENT_CAP`, so no caller prunes everyone's
+///    telemetry, and `save_setting` refuses the identity keys
+///    (`config.rs`; `settings.allium`, `observability.allium`). A board
+///    still sending the old rules would be refused an identity key only
+///    where it already refused it itself.
 /// 58: the hook reducers judge time and authority themselves —
 ///    `expire_background_wait` counts the cap on the store's clock, not the
 ///    caller's `now`, and it and `try_record_stop` require the caller to act
@@ -308,7 +314,7 @@ use super::*;
 /// stranger's rows would disagree with the store.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 58;
+pub const RULES_VERSION: i64 = 59;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

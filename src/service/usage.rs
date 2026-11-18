@@ -33,18 +33,14 @@ where
 mod tests {
     use super::*;
     use crate::models::{UsageActor, UsageCategory, UsageSummary};
-    use crate::store::{UsageCap, UsageQuery};
+    use crate::store::UsageQuery;
     use crate::test_log::logged_during;
 
     struct FailingUsageStore;
 
     #[async_trait::async_trait]
     impl UsageStore for FailingUsageStore {
-        async fn record_usage_event_with_cap(
-            &self,
-            _event: &UsageEvent,
-            _cap: UsageCap,
-        ) -> anyhow::Result<()> {
+        async fn record_usage_event(&self, _event: &UsageEvent) -> anyhow::Result<()> {
             Err(anyhow::anyhow!("disk on fire"))
         }
 
@@ -57,11 +53,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl UsageStore for OkUsageStore {
-        async fn record_usage_event_with_cap(
-            &self,
-            _event: &UsageEvent,
-            _cap: UsageCap,
-        ) -> anyhow::Result<()> {
+        async fn record_usage_event(&self, _event: &UsageEvent) -> anyhow::Result<()> {
             Ok(())
         }
 

@@ -519,6 +519,11 @@ impl MemoryReducerCaller {
                 "a host id must not be empty".into(),
             ));
         }
+        if module::IDENTITY_SETTING_KEYS.contains(&key.as_str()) {
+            return Ok(ReducerOutcome::Refused(format!(
+                "{key:?} is a host identity/credential key, not a generic setting"
+            )));
+        }
         let mut tables = self.lock();
         if let Err(why) = self.acting_for(&tables, &host) {
             return Ok(ReducerOutcome::Refused(why));
@@ -628,8 +633,8 @@ impl MemoryReducerCaller {
     }
 
     /// Mirrors the module's `record_usage_event` + `prune_usage_events`: the
-    /// prune runs in the same call as the insert, so no reader ever sees the
-    /// table over `cap`.
+    /// prune runs in the same call as the insert. `cap` can only raise the
+    /// module's `USAGE_EVENT_CAP`.
     pub(super) fn apply_record_usage_event(
         &self,
         row: bindings::UsageEvent,
@@ -640,6 +645,7 @@ impl MemoryReducerCaller {
                 "usage cap must be positive, got {cap}"
             )));
         }
+        let cap = cap.max(module::USAGE_EVENT_CAP);
         let mut tables = self.lock();
         let id = Self::assign_id(0, &mut tables.next_usage_event_id);
         let row = module::UsageEvent {
@@ -649,7 +655,9 @@ impl MemoryReducerCaller {
         };
         tables.usage_events.insert(id, row);
         let threshold = id - cap;
-        if threshold > 0 {
+        if threshold > 0
+            && tables.usage_events.len() as u64 > cap as u64 + module::USAGE_PRUNE_SLACK
+        {
             let stale: Vec<i64> = tables
                 .usage_events
                 .range(..=threshold)

@@ -3,18 +3,28 @@ use anyhow::Result;
 use crate::models::{UsageEvent, UsageSummary};
 use crate::sync::{decode, encode};
 
-use super::super::{Store, UsageCap, UsageQuery};
+use super::super::{Store, UsageQuery};
+
+/// The cap the board sends with every event. The store owns retention and only
+/// lets a cap raise its own, so this is the module's `USAGE_EVENT_CAP`, which
+/// a test pins.
+const USAGE_CAP_HINT: i64 = 100_000;
+
+#[cfg(test)]
+#[test]
+fn the_cap_hint_is_the_modules_retention_cap() {
+    assert_eq!(USAGE_CAP_HINT, dispatch_spacetime_module::USAGE_EVENT_CAP);
+}
 
 #[async_trait::async_trait]
 impl crate::store::UsageStore for Store {
-    /// Append-only telemetry with no id readback, no patch, no delete. `cap`
-    /// is carried on every call rather than read from a stored default, so
-    /// the reducer's prune stays in step with whatever `UsageCap` the caller
-    /// passed.
-    async fn record_usage_event_with_cap(&self, event: &UsageEvent, cap: UsageCap) -> Result<()> {
+    /// Append-only telemetry with no id readback, no patch, no delete. The
+    /// retention cap is the module's (`USAGE_EVENT_CAP`); the reducer still
+    /// takes one, so the board sends that constant.
+    async fn record_usage_event(&self, event: &UsageEvent) -> Result<()> {
         let row = encode::usage_event_row(event, &self.now());
         self.caller
-            .record_usage_event(row, cap.value() as i64)
+            .record_usage_event(row, USAGE_CAP_HINT)
             .await?
             .applied()
     }

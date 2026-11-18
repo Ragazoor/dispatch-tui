@@ -20,8 +20,8 @@
 --           core/Host.owner for the same reason. Its credential is narrower
 --           still: it is what PROVES that identity and never appears in a
 --           shared table at all. All four live in the host file (host.allium:
---           IdentityLivesInHostFile), and the board refuses a setting write
---           that names one. Also excluded: which rows a board is sent and how
+--           IdentityLivesInHostFile), and the store refuses a setting write
+--           that names one (save_setting), whoever sends it. Also excluded: which rows a board is sent and how
 --           they get there (see sync.allium: SubscribeToThisHostsSettings) —
 --           this file says whose a setting is, not how that fact is
 --           transported.

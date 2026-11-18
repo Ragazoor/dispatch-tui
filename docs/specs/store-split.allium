@@ -2188,6 +2188,10 @@ rule SaveSettingForHost {
     -- can name a script path the host's board runs (the feed commands).
     requires: host.owner != null and host.owner = caller()
 
+    -- The four identity/credential keys are never settings (settings.allium
+    -- Excludes): the store refuses them, not only the board.
+    requires: key not in {"host_id", "host_label", "user_identity", "user_identity_token"}
+
     -- Bound before the ensures, which reads the resulting state.
     let had_row = exists core/Setting{host: host, key: key}
 

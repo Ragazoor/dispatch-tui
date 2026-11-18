@@ -436,12 +436,12 @@ async fn a_usage_event_is_stamped_with_its_recorder_and_served_only_to_them() {
 }
 
 #[tokio::test]
-async fn record_usage_event_prunes_beyond_the_cap() {
+async fn a_caller_cannot_lower_the_usage_retention_cap() {
     let (caller, _rows) = caller();
     for _ in 0..5 {
-        caller.record_usage_event(usage_event(), 2).await.unwrap();
+        caller.record_usage_event(usage_event(), 1).await.unwrap();
     }
-    assert_eq!(usage_counts(&caller).await.iter().sum::<i64>(), 2);
+    assert_eq!(usage_counts(&caller).await.iter().sum::<i64>(), 5);
 }
 
 #[tokio::test]
@@ -500,6 +500,24 @@ async fn save_setting_upserts_by_host_and_key() {
         .await
         .unwrap();
     assert_eq!(rows.setting("theme").as_deref(), Some("light"));
+}
+
+#[tokio::test]
+async fn save_setting_refuses_the_identity_keys() {
+    let (caller, rows) = owning_caller();
+    for key in [
+        "host_id",
+        "host_label",
+        "user_identity",
+        "user_identity_token",
+    ] {
+        let outcome = caller
+            .save_setting("host-a".into(), key.into(), "x".into())
+            .await
+            .unwrap();
+        assert!(!outcome.won(), "{key} must be refused");
+        assert_eq!(rows.setting(key), None);
+    }
 }
 
 #[tokio::test]

@@ -468,6 +468,11 @@ pub fn host_scoped_id(host: &str, key: &str) -> String {
     format!("{host}/{key}")
 }
 
+/// Setting keys that name a host's identity or credential. They live in the
+/// host file (`host.allium: IdentityLivesInHostFile`), never in a setting row.
+pub const IDENTITY_SETTING_KEYS: [&str; 4] =
+    ["host_id", "host_label", "user_identity", "user_identity_token"];
+
 #[spacetimedb::reducer]
 pub fn save_setting(
     ctx: &ReducerContext,
@@ -477,6 +482,11 @@ pub fn save_setting(
 ) -> Result<(), String> {
     if host.trim().is_empty() {
         return Err("a host id must not be empty".to_string());
+    }
+    if IDENTITY_SETTING_KEYS.contains(&key.as_str()) {
+        return Err(format!(
+            "{key:?} is a host identity/credential key, not a generic setting"
+        ));
     }
     require_acting_for(ctx, &host)?;
     let id = host_scoped_id(&host, &key);
@@ -890,7 +900,21 @@ pub fn epics_losing_coverage(
 
 // -- Usage events (Phase 11, task #4915) -------------------------------------
 
-/// Record one usage event, then drop the oldest rows beyond `cap`.
+/// How many usage events the store keeps, across everyone. The store owns this
+/// rule: a caller's `cap` can only raise it (task #99229), because the oldest
+/// rows go for every recorder, and a cap of 1 would wipe the telemetry the
+/// keybinding analysis reads as "unused".
+pub const USAGE_EVENT_CAP: i64 = 100_000;
+
+/// How far past the cap the table may grow before a prune runs. A prune scans
+/// the table, so running it on every event past the cap would scan on every
+/// keypress; this makes it one scan per `USAGE_PRUNE_SLACK` events.
+pub const USAGE_PRUNE_SLACK: u64 = 1_000;
+
+/// Record one usage event, then drop the oldest rows beyond the retention cap.
+///
+/// `cap` is a hint that can only raise the cap above [`USAGE_EVENT_CAP`]; a
+/// non-positive one is still refused.
 ///
 /// The prune is the store's half of the cap the SQLite path enforced with a
 /// `DELETE ... WHERE id <= MAX(id) - cap` in the same transaction as the
@@ -914,11 +938,15 @@ pub fn record_usage_event(ctx: &ReducerContext, row: UsageEvent, cap: i64) -> Re
         recorded_by: caller_identity(ctx),
         ..row
     });
-    prune_usage_events(ctx, inserted.id, cap);
+    let cap = cap.max(USAGE_EVENT_CAP);
+    if ctx.db.usage_events().count() > cap as u64 + USAGE_PRUNE_SLACK {
+        prune_usage_events(ctx, inserted.id, cap);
+    }
     Ok(())
 }
 
-pub(crate) fn prune_usage_events(ctx: &ReducerContext, highest: i64, cap: i64) {
+/// Delete every usage event with `id <= highest - cap`.
+pub fn prune_usage_events(ctx: &ReducerContext, highest: i64, cap: i64) {
     let threshold = highest - cap;
     if threshold <= 0 {
         return;

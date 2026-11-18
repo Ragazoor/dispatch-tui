@@ -486,8 +486,10 @@ pub trait SessionRequestRead: Send + Sync {
 }
 
 /// The session request reducers (`store-split.allium`: `RequestWrapUp` and the
-/// host rules after it). Every call names THIS host, so a caller cannot ask or
-/// report on another machine's behalf.
+/// host rules after it). Every call but `request_exit_session` names THIS
+/// host, so a caller cannot ask or report on another machine's behalf;
+/// `request_exit_session` names none, because the module judges it by the
+/// session's token.
 ///
 /// A close rewrites its task, so this is a task mutation: reachable from the
 /// service layer, not from a read-only handle.
@@ -643,9 +645,8 @@ pub struct EpicBirth<'a> {
 #[async_trait::async_trait]
 pub trait EpicCrud: EpicRead {
     /// Create a new epic. `parent_epic_id` can be changed later via
-    /// [`EpicCrud::patch_epic`]. The DB enforces `CHECK (parent_epic_id != id)`
-    /// (migration v35) to prevent self-loops; cycle detection is handled in
-    /// the service layer before any DB write.
+    /// [`EpicCrud::patch_epic`]. A new epic cannot start a loop; the store
+    /// refuses a re-parent that would make one.
     async fn create_epic(
         &self,
         title: &str,
@@ -1043,39 +1044,10 @@ pub trait LearningRetrievalStore: Send + Sync {
 // UsageStore — narrow sub-trait for the usage_events table
 // ---------------------------------------------------------------------------
 
-/// Maximum number of events to keep in `usage_events`. Older rows are deleted
-/// when the table exceeds this cap.
-#[derive(Debug, Clone, Copy)]
-pub struct UsageCap(u64);
-
-impl UsageCap {
-    pub fn new(n: u64) -> Self {
-        assert!(n > 0, "UsageCap must be > 0");
-        Self(n)
-    }
-
-    pub fn value(self) -> u64 {
-        self.0
-    }
-}
-
-impl Default for UsageCap {
-    fn default() -> Self {
-        Self(100_000)
-    }
-}
-
 #[async_trait::async_trait]
 pub trait UsageStore: Send + Sync {
-    async fn record_usage_event(&self, event: &crate::models::UsageEvent) -> Result<()> {
-        self.record_usage_event_with_cap(event, UsageCap::default())
-            .await
-    }
-    async fn record_usage_event_with_cap(
-        &self,
-        event: &crate::models::UsageEvent,
-        cap: UsageCap,
-    ) -> Result<()>;
+    /// Retention is the store's rule (`USAGE_EVENT_CAP` in the module), not the caller's.
+    async fn record_usage_event(&self, event: &crate::models::UsageEvent) -> Result<()>;
     /// Aggregated rows ordered by count ASC so the rarest features surface
     /// first — the primary use case is identifying candidates for pruning.
     async fn query_usage(&self, query: &UsageQuery) -> Result<Vec<crate::models::UsageSummary>>;

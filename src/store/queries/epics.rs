@@ -62,17 +62,32 @@ impl super::super::EpicCrud for Store {
             &now,
         );
         let id = self.caller.create_epic(row.clone()).await?;
-        // THE ROW AS SENT, WITH THE ID FILLED IN, rather than a read-back.
-        //
-        // Elsewhere this codebase insists the row is the truth and re-reads it
-        // — a reducer's effects are read off the subscription. A create is the one
-        // case where there is nothing to drift from: every field was chosen
-        // here a moment ago, including both timestamps, and the store added
-        // exactly one thing. Re-reading would also mean waiting for the
-        // subscription to deliver a row this board may not even be subscribed
-        // to.
-        crate::sync::decode::epic(&bindings::Epic { id: id.0, ..row })
-            .map_err(|e| anyhow::anyhow!("the created epic could not be read back: {e}"))
+        // The store rewrites `workspace_id`, `parent_epic_id`, `created_by` and
+        // `feed_command_set_by` on a create (`visibility.rs::settle_new_epic`),
+        // so the row as sent can name the wrong workspace. The board's own
+        // view of the row is the truth when it has already arrived. This does
+        // not wait for the subscription: a board may never be subscribed to
+        // the row. Without it, the reply is the row as sent with the fields
+        // the store derives filled in the way it derives them.
+        if let Some(seen) = self.rows.epic(id) {
+            return Ok(seen);
+        }
+        let workspace_id = match parent_epic_id.and_then(|p| self.rows.epic(p)) {
+            Some(parent) => parent.workspace_id,
+            None => row.workspace_id,
+        };
+        let feed_command_set_by = if row.feed_command.is_empty() {
+            String::new()
+        } else {
+            row.created_by.clone()
+        };
+        crate::sync::decode::epic(&bindings::Epic {
+            id: id.0,
+            workspace_id,
+            feed_command_set_by,
+            ..row
+        })
+        .map_err(|e| anyhow::anyhow!("the created epic could not be read back: {e}"))
     }
 
     async fn ensure_managed_epics(

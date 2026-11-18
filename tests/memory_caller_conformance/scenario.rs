@@ -811,6 +811,16 @@ fn memory_caller_matches_the_real_reducers() {
             .save_setting(String::new(), "theme".into(), "purple".into())
             .await
             .unwrap();
+        let real_identity_key = real
+            .save_setting("host-a".into(), "user_identity_token".into(), "x".into())
+            .await
+            .unwrap();
+        let mem_identity_key = mem
+            .save_setting("host-a".into(), "user_identity_token".into(), "x".into())
+            .await
+            .unwrap();
+        assert!(!real_identity_key.won(), "real must refuse an identity key");
+        assert!(!mem_identity_key.won(), "mem must refuse an identity key");
         assert!(!real_empty_host.won(), "real must refuse an empty host");
         assert!(!mem_empty_host.won(), "mem must refuse an empty host");
         assert_eq!(
@@ -959,7 +969,9 @@ fn memory_caller_matches_the_real_reducers() {
         };
 
         // -- usage events (usage) ---------------------------------------------------
-        let cap = 3i64;
+        // A caller's cap is only a hint: the store keeps its own retention, so
+        // a cap of 1 prunes nothing (task #99229).
+        let cap = 1i64;
         let usage_event = |actor: &str| bindings::UsageEvent {
             id: 0,
             recorded_at: "2026-01-01 00:00:00.000".into(),
@@ -985,8 +997,8 @@ fn memory_caller_matches_the_real_reducers() {
             |rows: Vec<bindings::UsageSummaryRow>| rows.iter().map(|s| s.count).sum::<i64>();
         let usage_real = real.own_usage_summary(None, None, None, 50).await.unwrap();
         let usage_mem = mem.own_usage_summary(None, None, None, 50).await.unwrap();
-        assert_eq!(usage_total(usage_real), cap);
-        assert_eq!(usage_total(usage_mem), cap, "usage_events after prune");
+        assert_eq!(usage_total(usage_real), 5, "a caller's cap prunes nothing");
+        assert_eq!(usage_total(usage_mem), 5, "usage_events after a low cap");
         let refused_real = real
             .record_usage_event(usage_event("conformance"), 0)
             .await

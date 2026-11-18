@@ -134,7 +134,10 @@ config {
     -- when the log is already at the cap evicts the oldest events, so the log
     -- is a bounded sliding window rather than an ever-growing table. 100_000
     -- is several months of recording at observed rates, which is the horizon
-    -- pruning decisions are taken over.
+    -- pruning decisions are taken over. The store owns the cap: a caller
+    -- cannot lower it, so one caller's write never prunes everyone's events.
+    -- The table may run up to 1_000 rows past the cap before the eviction
+    -- scan runs, so the scan is not paid on every keypress.
     usage_event_row_cap: Integer = 100_000
 
     -- Wall-clock budget for the command the status-line decorator chains to
