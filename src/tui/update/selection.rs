@@ -125,13 +125,9 @@ impl App {
             return vec![];
         };
 
-        self.epic_folds
-            .toggle(fold_ref.status, fold_ref.section, fold_ref.epic);
+        self.epic_folds.toggle(fold_ref);
 
-        let target = if self
-            .epic_folds
-            .is_folded(fold_ref.status, fold_ref.section, fold_ref.epic)
-        {
+        let target = if self.epic_folds.is_folded(fold_ref) {
             Some(ColumnAnchor::EpicFold(fold_ref))
         } else {
             self.first_card_anchor_in_epic_group(fold_ref)
@@ -178,12 +174,20 @@ impl App {
         let placements = self.view().placements_or_compute(cached.as_deref());
         let items = self
             .view()
-            .column_items_for_status_with_placements(group.status, Some(&placements));
+            .column_items_for_status_with_placements(group.at.status, Some(&placements));
         // The epic's header can open a group in more than one section; only
-        // the one in the group's section counts. Each open section's run
-        // starts with its label. A header no deeper than this one ends the
-        // subtree.
-        let mut in_section = false;
+        // the one in the group's section counts. Each candidate's first
+        // selectable item is asked its own section, as
+        // `first_card_anchor_in_section` does, so the answer does not depend
+        // on where the builder puts section labels. A header no deeper than
+        // this one ends the subtree.
+        let in_group_section = |item: &ColumnItem<'_>| match item {
+            ColumnItem::Task(t) => {
+                crate::models::ColumnSection::for_task(t) == Some(group.at.section)
+            }
+            ColumnItem::FoldedEpic(h) => h.at.at == group.at,
+            _ => false,
+        };
         let within = |item: &ColumnItem<'_>, depth: usize| match item {
             ColumnItem::EpicHeader(h) => h.depth > depth,
             ColumnItem::FoldedEpic(h) => h.depth > depth,
@@ -194,24 +198,16 @@ impl App {
             .iter()
             .enumerate()
             .filter_map(|(at, item)| match item {
-                ColumnItem::SubstatusLabel(s) => {
-                    in_section = s.section == group.section;
-                    None
-                }
-                ColumnItem::FoldedSection(_) => {
-                    in_section = false;
-                    None
-                }
-                ColumnItem::EpicHeader(h) if in_section && h.epic.id == group.epic => {
-                    Some((at, h.depth))
-                }
+                ColumnItem::EpicHeader(h) if h.epic.id == group.epic => Some((at, h.depth)),
                 _ => None,
             })
             .find_map(|(at, depth)| {
                 items[at + 1..]
                     .iter()
                     .take_while(|item| within(item, depth))
-                    .find_map(ColumnItem::anchor)
+                    .find(|item| item.is_selectable())
+                    .filter(|item| in_group_section(item))
+                    .and_then(ColumnItem::anchor)
             })
     }
 
@@ -234,14 +230,17 @@ impl App {
             if folded.is_empty() {
                 continue;
             }
-            // Each section's groups, as full paths in the board's tree.
+            // Each folded section's groups, as full paths in the board's tree.
+            // A section with no fold has nothing to move and is not laid out.
             let mut sections: std::collections::BTreeMap<_, (Vec<EpicId>, Vec<Vec<EpicId>>)> =
                 std::collections::BTreeMap::new();
             for task in self.board.tasks.iter().filter(|t| t.status == status) {
                 let Some(eid) = task.epic_id.filter(|e| lookup.contains_key(e)) else {
                     continue;
                 };
-                let Some(section) = crate::models::ColumnSection::for_task(task) else {
+                let Some(section) = crate::models::ColumnSection::for_task(task)
+                    .filter(|&s| folded.iter().any(|g| g.at.section == s))
+                else {
                     continue;
                 };
                 let (seen, groups) = sections.entry(section).or_default();
@@ -261,16 +260,16 @@ impl App {
                 .collect();
             // Each fold is judged on its own section's tree only: a section
             // with no task in it leaves its folds inert.
-            for (section, epic) in folded {
-                let Some((groups, compact)) = laid_out.get(&section) else {
+            for group in folded {
+                let Some((groups, compact)) = laid_out.get(&group.at.section) else {
                     continue;
                 };
-                if compact.draws(epic) {
+                if compact.draws(group.epic) {
                     continue;
                 }
-                let takers = compact.takers(groups, epic);
+                let takers = compact.takers(groups, group.epic);
                 if !takers.is_empty() {
-                    self.epic_folds.move_down(status, section, epic, &takers);
+                    self.epic_folds.move_down(group, &takers);
                     moved = true;
                 }
             }

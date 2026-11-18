@@ -50,7 +50,7 @@ pub enum ColumnItem<'a> {
 /// Names one sub-status section: the column it is in, and the section within
 /// it. The same section name in two columns is two independent sections, so
 /// both halves are needed to identify one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SectionRef {
     pub status: TaskStatus,
     pub section: ColumnSection,
@@ -75,18 +75,16 @@ pub struct FoldedHeader {
 /// Names one flattened epic group: the column it is in, the section within
 /// that column, and the epic within the section. The same epic in two
 /// sections, or in two columns, is two independent groups.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EpicFoldRef {
-    pub status: TaskStatus,
-    pub section: ColumnSection,
+    pub at: SectionRef,
     pub epic: EpicId,
 }
 
 impl EpicFoldRef {
     pub(in crate::tui) fn new(status: TaskStatus, section: ColumnSection, epic: EpicId) -> Self {
         Self {
-            status,
-            section,
+            at: SectionRef::new(status, section),
             epic,
         }
     }

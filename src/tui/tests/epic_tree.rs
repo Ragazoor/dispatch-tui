@@ -216,8 +216,11 @@ fn folding_a_parent_hides_its_whole_subtree() {
             epic_under(30, Some(10)),
         ],
     );
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
 
     assert_eq!(
         running_layout(&app),
@@ -246,8 +249,11 @@ fn a_folded_parent_with_no_own_task_keeps_its_header_while_branches_meet() {
             epic_under(40, Some(10)),
         ],
     );
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert_eq!(running_layout(&app), vec![('F', 10, 0)]);
 }
 
@@ -259,8 +265,11 @@ fn a_fold_on_a_skipped_epic_hides_nothing() {
         vec![owned(3, 30)],
         vec![epic_under(10, None), epic_under(30, Some(10))],
     );
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert_eq!(running_layout(&app), vec![('H', 30, 0), ('T', 3, 0)]);
 }
 
@@ -272,12 +281,21 @@ fn unfolding_a_parent_keeps_its_childs_own_fold() {
         vec![owned(1, 10), owned(3, 30)],
         vec![epic_under(10, None), epic_under(30, Some(10))],
     );
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(30));
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(30),
+    ));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert_eq!(
         running_layout(&app),
         vec![('H', 10, 0), ('T', 1, 0), ('F', 30, 1)]
@@ -364,8 +382,11 @@ fn unfolding_a_parent_with_no_own_card_lands_on_its_subtrees_first_card() {
             epic_under(40, Some(10)),
         ],
     );
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     app.selection_mut().set_column(2); // Running
     for _ in 0..3 {
         app.handle_key(make_key(crossterm::event::KeyCode::Char('j')));
@@ -380,7 +401,11 @@ fn unfolding_a_parent_with_no_own_card_lands_on_its_subtrees_first_card() {
 
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
     match app.selected_column_item() {
         Some(ColumnItem::Task(t)) => assert_eq!(t.id.0, 3),
         other => panic!("cursor should rest on the child's card, got {other:?}"),
@@ -398,8 +423,11 @@ fn a_folded_child_sits_directly_under_its_parents_header() {
     let mut forty = make_epic_with_title(40, "Forty");
     forty.parent_epic_id = Some(EpicId(10));
     let mut app = flat_app(vec![owned(3, 30), owned(4, 40)], vec![ten, thirty, forty]);
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(30));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(30),
+    ));
 
     let buf = render_to_buffer(&mut app, 160, 40);
     let (_, y10) = find_text(&buf, "Ten").expect("parent header drawn");
@@ -461,8 +489,11 @@ fn a_fold_on_an_epic_that_stops_drawing_moves_to_the_epic_below() {
         vec![owned(11, 4), owned(12, 5), owned(13, 6), owned(14, a)],
         fold_move_epics(),
     );
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(a));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(a),
+    ));
 
     // A's own task and E's task finish: A no longer owns a task, and only
     // B's branch passes through it.
@@ -474,10 +505,18 @@ fn a_fold_on_an_epic_that_stops_drawing_moves_to_the_epic_below() {
 
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(a)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(a)
+        )));
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(b)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(b)
+        )));
     assert!(saves_epic_folds(&cmds), "{cmds:?}");
     assert_eq!(running_layout(&app), vec![('F', b, 0)]);
 }
@@ -513,7 +552,11 @@ fn a_fold_moves_only_in_the_section_that_skips_its_epic() {
 
     let folded = |app: &App, section, epic| {
         app.epic_folds
-            .is_folded(TaskStatus::Running, section, EpicId(epic))
+            .is_folded(crate::tui::types::EpicFoldRef::new(
+                TaskStatus::Running,
+                section,
+                EpicId(epic),
+            ))
     };
     assert!(
         folded(&app, ColumnSection::NeedsInput, a),
@@ -540,8 +583,11 @@ fn a_search_never_moves_a_fold() {
         vec![owned(11, 4), owned(12, 5), owned(13, 6)],
         fold_move_epics(),
     );
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(a));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(a),
+    ));
     app.search.query = "task 11".into();
 
     let mut same = app.board.tasks.clone();
@@ -550,7 +596,11 @@ fn a_search_never_moves_a_fold() {
 
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(a)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(a)
+        )));
     assert!(!saves_epic_folds(&cmds), "{cmds:?}");
 }
 
@@ -560,8 +610,11 @@ fn a_search_never_moves_a_fold() {
 fn a_fold_with_nothing_below_stays_put() {
     let a = 1;
     let mut app = flat_app(vec![owned(11, 4)], fold_move_epics());
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(a));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(a),
+    ));
 
     let mut gone = app.board.tasks.clone();
     gone[0].status = TaskStatus::Done;
@@ -569,7 +622,11 @@ fn a_fold_with_nothing_below_stays_put() {
 
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(a)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(a)
+        )));
     assert!(!saves_epic_folds(&cmds), "{cmds:?}");
 }
 
@@ -582,8 +639,11 @@ fn an_epic_refresh_moves_a_fold_that_no_longer_draws() {
         vec![owned(11, 4), owned(12, 5), owned(14, a)],
         fold_move_epics(),
     );
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(a));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(a),
+    ));
     // A owns task 14, so it draws. Remove it: only B's branch is left.
     let mut remaining = app.board.tasks.clone();
     remaining.retain(|t| t.id.0 != 14);
@@ -595,9 +655,17 @@ fn an_epic_refresh_moves_a_fold_that_no_longer_draws() {
 
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(a)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(a)
+        )));
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(2)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(2)
+        )));
     assert!(saves_epic_folds(&cmds), "{cmds:?}");
 }

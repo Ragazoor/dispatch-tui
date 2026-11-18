@@ -24,7 +24,12 @@ fn a_fresh_board_has_nothing_folded() {
     for &status in TaskStatus::ALL {
         for &section in ColumnSection::ALL {
             assert!(
-                !app.epic_folds.is_folded(status, section, EpicId(10)),
+                !app.epic_folds
+                    .is_folded(crate::tui::types::EpicFoldRef::new(
+                        status,
+                        section,
+                        EpicId(10)
+                    )),
                 "{status:?} {section:?}"
             );
         }
@@ -34,16 +39,30 @@ fn a_fresh_board_has_nothing_folded() {
 #[test]
 fn toggling_folds_then_unfolds() {
     let mut app = App::new(vec![]);
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
 }
 
 /// Folding is per (column, section, epic), not board-wide: the same epic folds
@@ -51,21 +70,35 @@ fn toggling_folds_then_unfolds() {
 #[test]
 fn the_same_epic_in_two_columns_folds_independently() {
     let mut app = App::new(vec![]);
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Review, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Review,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
 }
 
 #[test]
 fn only_the_column_holding_a_fold_reports_one() {
     let mut app = App::new(vec![]);
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert!(app.view().column_has_rendered_fold(TaskStatus::Running));
     assert!(!app.view().column_has_rendered_fold(TaskStatus::Review));
 }
@@ -75,13 +108,20 @@ fn only_the_column_holding_a_fold_reports_one() {
 #[test]
 fn a_live_search_query_means_no_column_has_a_rendered_fold() {
     let mut app = App::new(vec![]);
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     app.search.query = "anything".to_string();
     assert!(!app.view().column_has_rendered_fold(TaskStatus::Running));
     assert!(
         app.epic_folds
-            .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)),
+            .is_folded(crate::tui::types::EpicFoldRef::new(
+                TaskStatus::Running,
+                ColumnSection::Active,
+                EpicId(10)
+            )),
         "and the recorded fold is untouched"
     );
 }
@@ -91,8 +131,16 @@ fn a_live_search_query_means_no_column_has_a_rendered_fold() {
 #[test]
 fn the_serialised_form_round_trips() {
     let mut folds = EpicFoldState::default();
-    folds.toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
-    folds.toggle(TaskStatus::Review, ColumnSection::Active, EpicId(20));
+    folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
+    folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Review,
+        ColumnSection::Active,
+        EpicId(20),
+    ));
 
     let text = folds.serialise();
     let back = EpicFoldState::parse(&text);
@@ -115,12 +163,16 @@ fn an_unrecognised_entry_is_skipped_and_the_rest_load() {
     let folds = EpicFoldState::parse(text);
 
     let mut expected = EpicFoldState::default();
-    expected.toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
-    expected.toggle(
+    expected.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
+    expected.toggle(crate::tui::types::EpicFoldRef::new(
         TaskStatus::Review,
         ColumnSection::AwaitingReview,
         EpicId(20),
-    );
+    ));
     assert_eq!(folds, expected);
 }
 
@@ -129,16 +181,16 @@ fn an_unrecognised_entry_is_skipped_and_the_rest_load() {
 #[test]
 fn the_serialised_form_names_the_section() {
     let mut folds = EpicFoldState::default();
-    folds.toggle(
+    folds.toggle(crate::tui::types::EpicFoldRef::new(
         TaskStatus::Review,
         ColumnSection::ChangesRequested,
         EpicId(10),
-    );
-    folds.toggle(
+    ));
+    folds.toggle(crate::tui::types::EpicFoldRef::new(
         TaskStatus::Review,
         ColumnSection::AwaitingReview,
         EpicId(10),
-    );
+    ));
 
     let text = folds.serialise();
     assert_eq!(
@@ -156,11 +208,19 @@ fn an_old_column_wide_fold_folds_the_epic_in_every_section() {
     let folds = EpicFoldState::parse("review/10");
     for &section in ColumnSection::ALL {
         assert!(
-            folds.is_folded(TaskStatus::Review, section, EpicId(10)),
+            folds.is_folded(crate::tui::types::EpicFoldRef::new(
+                TaskStatus::Review,
+                section,
+                EpicId(10)
+            )),
             "{section:?}"
         );
     }
-    assert!(!folds.is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+    assert!(!folds.is_folded(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10)
+    )));
 }
 
 // --- rendering: a flattened column's epic groups ---
@@ -174,8 +234,11 @@ fn folding_an_epic_hides_its_cards_but_keeps_its_header() {
     ]);
     app.board.epics = vec![make_epic(10), make_epic(20)];
     app.filter.lens = crate::tui::types::Lens::Flat;
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
 
     let items = app
         .view()
@@ -269,12 +332,12 @@ fn unfolding_one_of_two_folded_headers_leaves_the_other_folded() {
     let mut app = straddling_app();
     app.epic_folds = EpicFoldState::parse("running/10");
     match app.selected_column_item() {
-        Some(ColumnItem::FoldedEpic(h)) => assert_eq!(h.at.section, ColumnSection::NeedsInput),
+        Some(ColumnItem::FoldedEpic(h)) => assert_eq!(h.at.at.section, ColumnSection::NeedsInput),
         other => panic!("setup: cursor should start on the first folded header, got {other:?}"),
     }
     app.update(Message::NavigateRow(1));
     match app.selected_column_item() {
-        Some(ColumnItem::FoldedEpic(h)) => assert_eq!(h.at.section, ColumnSection::Active),
+        Some(ColumnItem::FoldedEpic(h)) => assert_eq!(h.at.at.section, ColumnSection::Active),
         other => panic!("setup: cursor should reach the second folded header, got {other:?}"),
     }
 
@@ -282,10 +345,18 @@ fn unfolding_one_of_two_folded_headers_leaves_the_other_folded() {
 
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::NeedsInput, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::NeedsInput,
+            EpicId(10)
+        )));
     match app.selected_column_item() {
         Some(ColumnItem::Task(t)) => assert_eq!(t.id.0, 1),
         other => panic!("cursor should rest on task 1, got {other:?}"),
@@ -317,8 +388,11 @@ fn an_orphan_tasks_card_is_unaffected_by_any_epic_fold() {
     let mut app = App::new(vec![owned(1, SubStatus::Active, 10), running(2)]);
     app.board.epics = vec![make_epic(10)];
     app.filter.lens = crate::tui::types::Lens::Flat;
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
 
     let items = app
         .view()
@@ -342,8 +416,11 @@ fn an_epic_fold_does_nothing_in_an_unflattened_column() {
     let mut app = App::new(vec![owned(1, SubStatus::Active, 10)]);
     app.board.epics = vec![make_epic(10)];
     app.filter.lens = crate::tui::types::Lens::Everything;
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
 
     let items = app
         .view()
@@ -409,10 +486,18 @@ fn shift_z_on_a_card_folds_that_cards_epic() {
     app.handle_key(make_shift_key(KeyCode::Char('Z')));
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(20)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(20)
+        )));
 }
 
 /// The flattened Done column draws no epic header, so it has no group to fold
@@ -431,7 +516,11 @@ fn shift_z_in_the_flattened_done_column_records_no_fold() {
 
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Done, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Done,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
     assert!(cmds.is_empty(), "nothing is saved: {cmds:?}");
 }
 
@@ -442,7 +531,11 @@ fn shift_z_on_the_resulting_header_unfolds_it() {
     app.handle_key(make_shift_key(KeyCode::Char('Z')));
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
 }
 
 /// Folding leaves the cursor on the epic's own folded header, not wherever a
@@ -480,11 +573,19 @@ fn space_and_enter_unfold_a_folded_epic_header() {
         app.handle_key(make_shift_key(KeyCode::Char('Z')));
         assert!(app
             .epic_folds
-            .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+            .is_folded(crate::tui::types::EpicFoldRef::new(
+                TaskStatus::Running,
+                ColumnSection::Active,
+                EpicId(10)
+            )));
         app.handle_key(make_key(key));
         assert!(
             !app.epic_folds
-                .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)),
+                .is_folded(crate::tui::types::EpicFoldRef::new(
+                    TaskStatus::Running,
+                    ColumnSection::Active,
+                    EpicId(10)
+                )),
             "{key:?} should unfold"
         );
     }
@@ -499,7 +600,11 @@ fn shift_z_is_a_no_op_on_a_card_with_no_epic() {
     app.handle_key(make_shift_key(KeyCode::Char('Z')));
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
 }
 
 #[test]
@@ -509,7 +614,11 @@ fn shift_z_is_a_no_op_in_an_unflattened_column() {
     app.handle_key(make_shift_key(KeyCode::Char('Z')));
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
 }
 
 #[test]
@@ -519,7 +628,11 @@ fn shift_z_is_a_no_op_on_the_select_all_cursor_position() {
     app.handle_key(make_shift_key(KeyCode::Char('Z')));
     assert!(!app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
 }
 
 /// Selection is untouched: a selected card stays selected while its epic is
@@ -529,8 +642,11 @@ fn a_selected_card_stays_selected_while_its_epic_is_folded() {
     let mut app = folding_app();
     app.update(Message::SelectAllColumn);
     assert_eq!(app.select.tasks.len(), 3);
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert_eq!(app.select.tasks.len(), 3, "folding must not deselect");
 }
 
@@ -553,8 +669,11 @@ fn select_all_skips_a_folded_epics_cards() {
 #[test]
 fn an_epic_fold_and_a_section_fold_are_independent_state() {
     let mut app = folding_app();
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     assert!(!app
         .folds
         .is_collapsed(TaskStatus::Running, ColumnSection::Active));
@@ -562,7 +681,11 @@ fn an_epic_fold_and_a_section_fold_are_independent_state() {
     app.folds.toggle(TaskStatus::Running, ColumnSection::Active);
     assert!(app
         .epic_folds
-        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+        .is_folded(crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(10)
+        )));
     assert!(app
         .folds
         .is_collapsed(TaskStatus::Running, ColumnSection::Active));
@@ -574,8 +697,11 @@ fn an_epic_fold_and_a_section_fold_are_independent_state() {
 #[test]
 fn a_folded_section_hides_a_folded_epics_header_too() {
     let mut app = folding_app();
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     app.folds.toggle(TaskStatus::Running, ColumnSection::Active);
 
     let items = app
@@ -609,8 +735,11 @@ fn a_live_search_query_reopens_a_folded_epic_holding_a_match() {
     let mut app = App::new(vec![needle, owned(2, SubStatus::Active, 10)]);
     app.board.epics = vec![make_epic(10)];
     app.filter.lens = crate::tui::types::Lens::Flat;
-    app.epic_folds
-        .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
+    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
+        TaskStatus::Running,
+        ColumnSection::Active,
+        EpicId(10),
+    ));
     app.search.query = "findme".to_string();
 
     let items = app
@@ -624,7 +753,11 @@ fn a_live_search_query_reopens_a_folded_epic_holding_a_match() {
     );
     assert!(
         app.epic_folds
-            .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)),
+            .is_folded(crate::tui::types::EpicFoldRef::new(
+                TaskStatus::Running,
+                ColumnSection::Active,
+                EpicId(10)
+            )),
         "the recorded fold is untouched"
     );
 }

@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use crate::models::{ColumnSection, EpicId, TaskStatus};
+use crate::tui::types::EpicFoldRef;
 
 // SectionFoldState — which sub-status sections the user has folded
 // ---------------------------------------------------------------------------
@@ -103,68 +104,52 @@ pub const COLLAPSED_EPICS_KEY: &str = "collapsed_epics";
 /// See "Epic Folding" in `docs/specs/board-layout.allium`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EpicFoldState {
-    folded: BTreeSet<(TaskStatus, ColumnSection, EpicId)>,
+    folded: BTreeSet<EpicFoldRef>,
 }
 
 impl EpicFoldState {
-    pub(in crate::tui) fn is_folded(
-        &self,
-        status: TaskStatus,
-        section: ColumnSection,
-        epic: EpicId,
-    ) -> bool {
-        self.folded.contains(&(status, section, epic))
+    pub(in crate::tui) fn is_folded(&self, group: EpicFoldRef) -> bool {
+        self.folded.contains(&group)
     }
 
     /// Whether this column has any folded epic at all. The cheap guard
     /// `BoardView::column_has_rendered_fold` shares with
     /// [`SectionFoldState::any_in`].
     pub(in crate::tui) fn any_in(&self, status: TaskStatus) -> bool {
-        self.folded.iter().any(|&(s, _, _)| s == status)
+        self.folded.iter().any(|g| g.at.status == status)
     }
 
-    pub(in crate::tui) fn toggle(
-        &mut self,
-        status: TaskStatus,
-        section: ColumnSection,
-        epic: EpicId,
-    ) {
-        if !self.folded.remove(&(status, section, epic)) {
-            self.folded.insert((status, section, epic));
+    pub(in crate::tui) fn toggle(&mut self, group: EpicFoldRef) {
+        if !self.folded.remove(&group) {
+            self.folded.insert(group);
         }
     }
 
-    /// The folded epics in `status`'s column, each with its section.
-    pub(in crate::tui) fn folded_in(&self, status: TaskStatus) -> Vec<(ColumnSection, EpicId)> {
+    /// The folded epic groups in `status`'s column.
+    pub(in crate::tui) fn folded_in(&self, status: TaskStatus) -> Vec<EpicFoldRef> {
         self.folded
             .iter()
-            .filter(|&&(s, _, _)| s == status)
-            .map(|&(_, section, epic)| (section, epic))
+            .filter(|g| g.at.status == status)
+            .copied()
             .collect()
     }
 
     /// Move `from`'s fold onto each of `to` in the same column and section
     /// (tasks.allium: `FoldMovesToDrawnDescendant`).
-    pub(in crate::tui) fn move_down(
-        &mut self,
-        status: TaskStatus,
-        section: ColumnSection,
-        from: EpicId,
-        to: &[EpicId],
-    ) {
-        self.folded.remove(&(status, section, from));
+    pub(in crate::tui) fn move_down(&mut self, from: EpicFoldRef, to: &[EpicId]) {
+        self.folded.remove(&from);
         self.folded
-            .extend(to.iter().map(|&epic| (status, section, epic)));
+            .extend(to.iter().map(|&epic| EpicFoldRef { at: from.at, epic }));
     }
 
     /// Fold every entry into `acc`, for the same reason
     /// [`SectionFoldState::fold_into_fingerprint`] does.
     pub(in crate::tui) fn fold_into_fingerprint(&self, mut acc: u64) -> u64 {
         acc = crate::tui::fnv_fold(acc, self.folded.len() as u64);
-        for &(status, section, epic) in &self.folded {
-            acc = crate::tui::fnv_fold(acc, status as u64);
-            acc = crate::tui::fnv_fold(acc, section as u64);
-            acc = crate::tui::fnv_fold(acc, epic.0 as u64);
+        for g in &self.folded {
+            acc = crate::tui::fnv_fold(acc, g.at.status as u64);
+            acc = crate::tui::fnv_fold(acc, g.at.section as u64);
+            acc = crate::tui::fnv_fold(acc, g.epic.0 as u64);
         }
         acc
     }
@@ -174,8 +159,13 @@ impl EpicFoldState {
     pub fn serialise(&self) -> String {
         self.folded
             .iter()
-            .map(|(status, section, epic)| {
-                format!("{}/{}/{}", status.as_str(), section.as_str(), epic.0)
+            .map(|g| {
+                format!(
+                    "{}/{}/{}",
+                    g.at.status.as_str(),
+                    g.at.section.as_str(),
+                    g.epic.0
+                )
             })
             .collect::<Vec<_>>()
             .join(",")
@@ -195,26 +185,27 @@ impl EpicFoldState {
     pub fn parse(text: &str) -> Self {
         let mut folded = BTreeSet::new();
         for entry in text.split(',') {
-            let parts: Vec<&str> = entry.trim().split('/').collect();
-            match parts.as_slice() {
-                [status, section, epic] => {
-                    if let (Ok(status), Ok(section), Ok(epic)) =
-                        (status.parse(), section.parse(), epic.parse())
-                    {
-                        folded.insert((status, section, EpicId(epic)));
-                    }
-                }
-                [status, epic] => {
-                    if let (Ok(status), Ok(epic)) = (status.parse::<TaskStatus>(), epic.parse()) {
-                        folded.extend(
-                            ColumnSection::ALL
-                                .iter()
-                                .map(|&section| (status, section, EpicId(epic))),
-                        );
-                    }
-                }
-                _ => {}
-            }
+            let Some((status, rest)) = entry.trim().split_once('/') else {
+                continue;
+            };
+            let Ok(status) = status.parse::<TaskStatus>() else {
+                continue;
+            };
+            let (sections, epic): (Vec<ColumnSection>, &str) = match rest.split_once('/') {
+                Some((section, epic)) => match section.parse() {
+                    Ok(section) => (vec![section], epic),
+                    Err(_) => continue,
+                },
+                None => (ColumnSection::ALL.to_vec(), rest),
+            };
+            let Ok(epic) = epic.parse() else {
+                continue;
+            };
+            folded.extend(
+                sections
+                    .into_iter()
+                    .map(|section| EpicFoldRef::new(status, section, EpicId(epic))),
+            );
         }
         Self { folded }
     }

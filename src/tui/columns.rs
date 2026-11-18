@@ -565,7 +565,7 @@ impl<'a> BoardView<'a> {
                 let Some(&epic) = epic_lookup.get(id) else {
                     continue;
                 };
-                let fold_ref = EpicFoldRef::new(at.status, at.section, epic.id);
+                let fold_ref = EpicFoldRef { at, epic: epic.id };
                 if self.epic_group_renders_folded(fold_ref) {
                     folded_at = Some(items.len());
                     items.push(ColumnItem::FoldedEpic(FoldedEpicHeader {
@@ -754,10 +754,7 @@ impl<'a> BoardView<'a> {
     /// Whether `ref_` draws folded *right now*, on the same terms as
     /// `section_renders_collapsed` (board-layout.allium: "Epic Folding").
     pub(in crate::tui) fn epic_group_renders_folded(self, ref_: EpicFoldRef) -> bool {
-        self.column_has_rendered_fold(ref_.status)
-            && self
-                .epic_folds
-                .is_folded(ref_.status, ref_.section, ref_.epic)
+        self.column_has_rendered_fold(ref_.at.status) && self.epic_folds.is_folded(ref_)
     }
 
     /// Count the column items that can hold the cursor, for a status. Use this
