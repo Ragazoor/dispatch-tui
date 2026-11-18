@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Task #4982: the companion panes read through the running board.
 //!
 //! `agent-tree.allium`'s `BoardPaneView` contract and the

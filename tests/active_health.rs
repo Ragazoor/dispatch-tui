@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Integration test: end-to-end hook-event flow through `TaskService`.
 
 use std::sync::Arc;

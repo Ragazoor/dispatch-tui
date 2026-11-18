@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Real-tmux integration tests for the **topology** dispatch builds: which
 //! windows and panes exist after an operation, on which side of a split, and
 //! with which resolved cwd.

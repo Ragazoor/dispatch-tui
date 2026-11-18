@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Integration test (WP5): provisioning the managed feed-epic tree from the
 //! reviews/CVE config, then driving one `FeedRunner::tick()` and asserting the
 //! reviews emission routes into the correct role sub-epics (WP3 router) while

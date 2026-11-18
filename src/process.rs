@@ -183,6 +183,9 @@ fn take(buf: &Mutex<Vec<u8>>) -> Vec<u8> {
 /// leads, reaching the children a group leader spawned too (`git` → `ssh`).
 /// `libc` is not a dependency, so this shells out to `kill`; the async feed
 /// runner has its own twin (`crate::feed::exec`).
+// `kill` returns at once and has no stdin to wait on; bounding it would need this
+// very function.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn kill_process_group(pgid: u32, signal: &str) {
     let _ = std::process::Command::new("kill")
         .args([&format!("-{signal}"), "--", &format!("-{pgid}")])
@@ -588,6 +591,9 @@ impl RealProcessRunner {
 }
 
 impl ProcessRunner for RealProcessRunner {
+    // The unbounded `run` is the trait's own contract; callers that can stall
+    // use `run_with_timeout`.
+    #[allow(clippy::disallowed_methods)]
     fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
         std::process::Command::new(program)
             .args(args)

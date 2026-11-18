@@ -1,4 +1,6 @@
 #![recursion_limit = "256"]
+// Test code runs real children; a hung one fails the run, not a board.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 /// Default port for the MCP server, used when `DISPATCH_PORT` is not set.
 pub const DEFAULT_PORT: u16 = 3142;

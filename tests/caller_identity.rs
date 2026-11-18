@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! End-to-end integration tests for the MCP caller-identity header flow.
 //!
 //! Exercises the actual production router (middleware + handlers) over a

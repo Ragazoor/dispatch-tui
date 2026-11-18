@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Task #16755: no production path opens SQLite, nothing touches a leftover
 //! `tasks.db`, and the one-shot commands need a host file they never write.
 //!

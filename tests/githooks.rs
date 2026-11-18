@@ -5,7 +5,7 @@
 //! that new clones never received. This test asserts the canonical, version-
 //! controlled hook exists, is executable, and runs the full check sequence — so
 //! the same drift cannot recur unnoticed.
-
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;

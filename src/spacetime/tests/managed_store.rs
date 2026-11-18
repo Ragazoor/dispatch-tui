@@ -44,6 +44,7 @@ enum Call {
     Stop,
     StopSpawned,
     FailedToSave,
+    PublishLock,
 }
 
 struct FakePorts {
@@ -124,6 +125,10 @@ impl ManagedStorePorts for FakePorts {
     fn stop_spawned_store(&self) -> bool {
         self.log(Call::StopSpawned);
         self.stop_in_time
+    }
+    fn lock_publish(&self) -> Option<crate::spacetime::managed_store::PublishLock> {
+        self.log(Call::PublishLock);
+        None
     }
     fn managed_store_failed_to_save(&self) -> bool {
         self.log(Call::FailedToSave);
@@ -1310,6 +1315,36 @@ fn a_restart_that_cannot_start_the_store_says_why() {
         store.check_health(),
         HealthOutcome::RestartFailed("did not serve HTTP".to_string())
     );
+}
+
+#[test]
+fn a_restart_whose_stop_timed_out_fails_and_never_starts_a_second_store() {
+    // The old store may still hold the port and answer: starting now would
+    // report a restart that did not happen.
+    let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
+    fake.failed_to_save = true;
+    fake.stop_in_time = false;
+    let ports = Arc::new(fake);
+    let store = held_store(&ports);
+    let starts = ports.count(Call::Start);
+
+    let HealthOutcome::RestartFailed(reason) = store.check_health() else {
+        panic!("a stop that timed out must fail the restart");
+    };
+    assert!(reason.contains("did not stop"), "{reason}");
+    assert_eq!(ports.count(Call::Start), starts);
+}
+
+#[test]
+fn a_launch_that_publishes_holds_the_publish_lock_first() {
+    let ports = Arc::new(FakePorts::new(ManagedAddressState::StoreAnswering));
+    let store = store(&ports, &Arc::new(FakeHashes::new(None)));
+    store.bring_up().unwrap();
+
+    let calls = ports.calls();
+    let lock = calls.iter().position(|c| *c == Call::PublishLock).unwrap();
+    let publish = calls.iter().position(|c| *c == Call::Publish).unwrap();
+    assert!(lock < publish, "lock before publish: {calls:?}");
 }
 
 #[test]

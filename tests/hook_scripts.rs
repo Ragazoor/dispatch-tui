@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Behaviour of the plugin hook scripts themselves, run under bash with a fake
 //! `dispatch` first on `PATH` that records its arguments.
 //!

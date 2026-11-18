@@ -10,7 +10,7 @@
 //! `wrap_up_mode` at all. These tests make that drift structural: editing one
 //! script's `wrap_up_mode` handling without the other now fails the suite.
 //! `fetch-log-warnings.sh` is pinned the same way, to `"rebase"`.
-
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;

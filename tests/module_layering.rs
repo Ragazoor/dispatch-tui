@@ -14,7 +14,7 @@
 //! `keybindings`, `editor`, `backoff`).
 //! Test files are scanned too: a test reaching upward pins the edge just as
 //! firmly as production code does.
-
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;

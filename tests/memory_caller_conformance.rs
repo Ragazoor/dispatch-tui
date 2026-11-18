@@ -38,7 +38,7 @@
 //! **Every reducer is covered.** A new reducer adds its scenarios under
 //! `memory_caller_conformance/` rather than starting a new suite —
 //! `spacetime-memory-store.allium`'s `ConformanceIsCiGated` guarantee.
-
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;

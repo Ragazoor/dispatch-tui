@@ -272,7 +272,7 @@ pub(crate) fn candidate_address() -> String {
 /// The error says "already in use" so [`on_free_address`] retries on a fresh
 /// port.
 pub(crate) fn listener_runs_with_arg(address: &str, arg: &str) -> Result<(), String> {
-    let ours = crate::spacetime::managed_store::listener_has_arg(address, arg);
+    let ours = crate::spacetime::managed_store::listener_has_arg(address, arg) == Some(true);
     if ours {
         Ok(())
     } else {
@@ -729,4 +729,196 @@ fn a_listener_is_identified_by_an_argument_on_its_command_line() {
     assert_eq!(listener_runs_with_arg(&address, &argv0), Ok(()));
     let error = listener_runs_with_arg(&address, "--data-dir=/nowhere").unwrap_err();
     assert!(is_address_in_use(&error), "{error}");
+}
+
+// ---------------------------------------------------------------------------
+// WP-10: honest restarts, bounded commands, atomic publish, group stop
+// ---------------------------------------------------------------------------
+
+/// Spawns a shell one-liner in its own process group, like the real spawner,
+/// and says whether the listener is ours.
+struct GroupSpawner {
+    script: &'static str,
+    ours: bool,
+}
+
+impl StoreSpawner for GroupSpawner {
+    fn spawn(&self, _: &str, _: &Path, _: &Path) -> std::io::Result<Child> {
+        use std::os::unix::process::CommandExt;
+        Command::new("sh")
+            .args(["-c", self.script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+    }
+
+    fn listener_is_ours(&self, _: &str, _: &Path) -> bool {
+        self.ours
+    }
+}
+
+#[test]
+fn an_answer_from_a_listener_that_is_not_our_child_does_not_count_as_started() {
+    // The old store still answers while the new child has not yet failed to
+    // bind: the start must not report success on its answer.
+    let dir = tempfile::tempdir().unwrap();
+    let store = ports(
+        Arc::new(KillOnlyRunner),
+        Arc::new(GroupSpawner {
+            script: "exec sleep 300",
+            ours: false,
+        }),
+        ping_server(),
+        dir.path(),
+        Duration::from_millis(600),
+    );
+    let error = store.start_managed_store().unwrap_err();
+    assert!(error.contains("did not serve"), "{error}");
+    assert!(store.stop_spawned_store());
+}
+
+#[test]
+fn an_answer_from_our_own_child_counts_as_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ports(
+        Arc::new(KillOnlyRunner),
+        Arc::new(GroupSpawner {
+            script: "exec sleep 300",
+            ours: true,
+        }),
+        ping_server(),
+        dir.path(),
+        TIMEOUT,
+    );
+    store.start_managed_store().unwrap();
+    assert!(store.stop_spawned_store());
+}
+
+/// Records every call's arguments, answers `kill` for real.
+struct ArgRecordingRunner(std::sync::Mutex<Vec<(String, Vec<String>)>>);
+
+impl ProcessRunner for ArgRecordingRunner {
+    fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<Output> {
+        self.0.lock().unwrap().push((
+            program.to_string(),
+            args.iter().map(|a| a.to_string()).collect(),
+        ));
+        KillOnlyRunner.run(program, args)
+    }
+}
+
+#[test]
+fn stopping_a_spawned_store_signals_its_whole_process_group() {
+    let runner = Arc::new(ArgRecordingRunner(std::sync::Mutex::new(Vec::new())));
+    let dir = tempfile::tempdir().unwrap();
+    let store = ports(
+        runner.clone(),
+        Arc::new(GroupSpawner {
+            // A wrapper that forks the real server, as `spacetime start` may.
+            script: "sleep 300 & wait",
+            ours: true,
+        }),
+        UNUSED_ADDRESS.into(),
+        dir.path(),
+        Duration::from_millis(200),
+    );
+    assert!(store.start_managed_store().is_err());
+    assert!(store.stop_spawned_store());
+
+    let calls = runner.0.lock().unwrap().clone();
+    assert!(
+        calls.iter().any(|(p, a)| p == "kill"
+            && a.len() == 3
+            && a[0] == "-TERM"
+            && a[1] == "--"
+            && a[2].starts_with('-')
+            && a[2][1..].parse::<u32>().is_ok()),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn a_command_that_stalls_does_not_hang_the_stop() {
+    // A stalled command is a timeout error, never a wait.
+    let dir = tempfile::tempdir().unwrap();
+    let hang = Arc::new(HangingRunner);
+    let store = ports(
+        hang,
+        Arc::new(FailingSpawner),
+        "127.0.0.1:1".into(),
+        dir.path(),
+        Duration::from_millis(100),
+    );
+    // Only `run_with_timeout` returns; a plain `run` would block the test.
+    assert!(store.stop_managed_store());
+    assert_eq!(store.cli_identity(), None);
+}
+
+/// A plain `run` is a failure; only the bounded call answers (with a timeout).
+struct HangingRunner;
+
+impl ProcessRunner for HangingRunner {
+    fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<Output> {
+        panic!("an unbounded run: the stop and the probes must use run_with_timeout")
+    }
+
+    fn run_with_timeout(&self, p: &str, _: &[&str], _: Duration) -> anyhow::Result<Output> {
+        anyhow::bail!("{p} timed out")
+    }
+}
+
+#[test]
+fn the_module_is_published_from_a_file_no_other_launch_shares() {
+    let runner = Arc::new(ArgRecordingRunner(std::sync::Mutex::new(Vec::new())));
+    let dir = tempfile::tempdir().unwrap();
+    let store = ports(
+        runner.clone(),
+        Arc::new(FailingSpawner),
+        UNUSED_ADDRESS.into(),
+        dir.path(),
+        TIMEOUT,
+    );
+    let _ = store.publish_embedded_module();
+
+    let calls = runner.0.lock().unwrap().clone();
+    let publish = calls
+        .iter()
+        .find(|(_, a)| a.contains(&"publish".to_string()));
+    let (_, args) = publish.expect("a publish call");
+    let wasm = &args[args.iter().position(|a| a == "-b").unwrap() + 1];
+    assert!(
+        wasm.contains(&std::process::id().to_string()),
+        "the file is per process: {wasm}"
+    );
+    assert!(
+        !Path::new(wasm).exists(),
+        "removed after the publish: {wasm}"
+    );
+}
+
+#[test]
+fn a_recorded_hash_leaves_no_temporary_file_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let record = FileModuleHashRecord::in_data_dir(dir.path());
+    assert!(record.record_module_hash("sha256:a"));
+    assert!(record.record_module_hash("sha256:b"));
+    assert_eq!(record.recorded_module_hash(), Some("sha256:b".to_string()));
+    let names: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names.len(), 1, "{names:?}");
+}
+
+#[test]
+fn the_publish_lock_is_exclusive_until_it_is_dropped() {
+    use crate::spacetime::managed_store::PublishLock;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("publish.lock");
+    let first = PublishLock::acquire(&path, Duration::from_millis(200)).unwrap();
+    assert!(PublishLock::acquire(&path, Duration::from_millis(150)).is_none());
+    drop(first);
+    assert!(PublishLock::acquire(&path, Duration::from_millis(200)).is_some());
 }

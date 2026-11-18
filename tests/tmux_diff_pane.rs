@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Real-tmux integration tests for the diff pane the agent-tree companion pane
 //! opens (docs/specs/agent-tree.allium: `SplitAgentTreeDiffPane`,
 //! `CloseAgentTreeDiffPaneWhenEmpty`, `KillAgentTreeDiffPaneWithItsTree`).

@@ -27,6 +27,8 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
 
 /// [`git`] without the success assertion, for a caller that expects git to
 /// FAIL and wants to read why.
+// Test helper: a hung git fails the test run, not a user's board.
+#[allow(clippy::disallowed_methods)]
 pub fn try_git(dir: &Path, args: &[&str]) -> Output {
     Command::new("git")
         .current_dir(dir)

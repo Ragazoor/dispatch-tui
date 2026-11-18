@@ -11,7 +11,7 @@
 //!
 //! Without these, a future git whose behaviour or wording changed would leave
 //! the leak back in place with a green suite.
-
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use dispatch_tui::dispatch::teardown_task;

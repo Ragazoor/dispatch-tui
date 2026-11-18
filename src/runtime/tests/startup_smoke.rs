@@ -317,6 +317,7 @@ const NOT_COMMITTED: &[&str] = &[
     "spacetime.pid",
     "db.lock",
     "dispatch_module.wasm",
+    "publish.lock",
 ];
 
 /// Make `tests/fixtures/previous-store/` from this binary's embedded module,

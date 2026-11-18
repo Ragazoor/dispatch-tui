@@ -2,7 +2,7 @@
 //!
 //! `cargo test` links ~30 binaries; full DWARF in each made a one-file rebuild
 //! ~20s slower (#16776). Nothing else notices if the setting is dropped.
-
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;

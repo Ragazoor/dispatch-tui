@@ -11,6 +11,7 @@
 //! Content assertions on the shipped skills' *bodies* stay in
 //! `src/setup/plugins/tests.rs`, where they can read the embedded copy.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 
 use std::fs;
 use std::path::{Path, PathBuf};

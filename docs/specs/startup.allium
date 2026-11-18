@@ -513,7 +513,15 @@ contract ManagedStoreHost {
 
     -- Stop the managed store (stop_managed_store) and start it again
     -- (start_managed_store). Null when the start succeeded; otherwise its
-    -- failure. A stop that runs out its timeout does not prevent the start.
+    -- failure. A stop that runs out its timeout FAILS the restart and starts
+    -- nothing: the old store may still hold the port and answer, so a start
+    -- could not be told from it. The failure says the old store is still
+    -- running. A start counts only when the listener answering is the process
+    -- this board spawned, not a store that already held the port.
+    --
+    -- Every command this host runs (publish, login, ss, lsof, kill) is bounded
+    -- by a timeout, so a store that accepts connections and then stalls cannot
+    -- hang the board. A stop signals the store's whole process group.
     restart_managed_store: () -> String?
 
     -- Whether the managed store's own log records, since this board took the

@@ -45,7 +45,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::process::{ProcessRunner, SUBPROCESS_TIMEOUT};
+use crate::process::{run_bounded, ProcessRunner, SUBPROCESS_TIMEOUT};
+
+/// Bound on a `spacetime publish`: generous, since the store compiles and
+/// migrates the module, but finite, so a store that accepts connections and
+/// then stalls cannot hang the bring-up.
+const PUBLISH_TIMEOUT: Duration = Duration::from_secs(300);
+/// Bound on the small helpers (`ss`, `lsof`, `kill`).
+const HELPER_TIMEOUT: Duration = Duration::from_secs(10);
 use crate::startup_abort::StartupAbort;
 
 /// `startup.allium`'s `config.managed_store_address`. Loopback only.
@@ -369,6 +376,13 @@ pub trait ManagedStorePorts: Send + Sync {
     /// Whether the store's log records a failed commit-log write since this
     /// board took the store on. Reads the log only.
     fn managed_store_failed_to_save(&self) -> bool;
+
+    /// Serialise publish-and-record across launches that share the store's
+    /// data directory. Held by the orchestrator from before the publish until
+    /// the hash is recorded. `None` when there is nothing to hold (a stand-in).
+    fn lock_publish(&self) -> Option<PublishLock> {
+        None
+    }
 }
 
 /// Where the published module's hash is kept.
@@ -408,7 +422,7 @@ impl ModuleHashRecord for FileModuleHashRecord {
             if let Some(dir) = self.path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
-            std::fs::write(&self.path, format!("{hash}\n"))
+            atomic_write(&self.path, format!("{hash}\n").as_bytes())
         };
         match write() {
             Ok(()) => true,
@@ -478,7 +492,10 @@ impl SpacetimeCliPublisher {
             .map(String::from),
         );
         let args: Vec<&str> = argv.iter().map(String::as_str).collect();
-        match self.runner.run("spacetime", &args) {
+        match self
+            .runner
+            .run_with_timeout("spacetime", &args, PUBLISH_TIMEOUT)
+        {
             Err(e) => ModulePublishOutcome::PublishFailed {
                 error: format!("{e:#}"),
             },
@@ -569,20 +586,24 @@ pub trait StoreSpawner: Send + Sync {
 
 /// Whether a process listening on `address` has `arg` as one of its command
 /// line arguments (`ss` names the listeners, `/proc/<pid>/cmdline` their argv).
-/// False when it cannot tell.
-pub fn listener_has_arg(address: &str, arg: &str) -> bool {
+/// `None` when it cannot tell (`ss` missing, failing or timing out): that is
+/// not the same as `Some(false)`, a listener that is somebody else's.
+pub fn listener_has_arg(address: &str, arg: &str) -> Option<bool> {
     let port = address.rsplit(':').next().unwrap_or_default();
     let filter = format!("sport = :{port}");
-    let Ok(out) = Command::new("ss").args(["-ltnpH", &filter]).output() else {
-        return false;
-    };
-    parse_ss_pids(&String::from_utf8_lossy(&out.stdout))
-        .iter()
-        .any(|pid| {
-            std::fs::read(format!("/proc/{pid}/cmdline"))
-                .map(|raw| raw.split(|b| *b == 0).any(|a| a == arg.as_bytes()))
-                .unwrap_or(false)
-        })
+    let out = run_bounded("ss", &["-ltnpH", &filter], None, HELPER_TIMEOUT).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(
+        parse_ss_pids(&String::from_utf8_lossy(&out.stdout))
+            .iter()
+            .any(|pid| {
+                std::fs::read(format!("/proc/{pid}/cmdline"))
+                    .map(|raw| raw.split(|b| *b == 0).any(|a| a == arg.as_bytes()))
+                    .unwrap_or(false)
+            }),
+    )
 }
 
 /// `spacetime start --listen-addr=<address> --data-dir=<dir> --non-interactive`,
@@ -671,7 +692,9 @@ impl StoreSpawner for SpacetimeStartSpawner {
     }
 
     fn listener_is_ours(&self, address: &str, data_dir: &Path) -> bool {
-        listener_has_arg(address, &format!("--data-dir={}", data_dir.display()))
+        // Only a listener known to be somebody else's is foreign: when `ss`
+        // cannot tell, the answer stands as before.
+        listener_has_arg(address, &format!("--data-dir={}", data_dir.display())) != Some(false)
     }
 }
 
@@ -772,14 +795,20 @@ impl SpacetimeManagedStore {
     /// The pids listening on the store's port, through `ss` and then `lsof`.
     fn listening_pids(&self) -> Vec<u32> {
         let filter = format!("sport = :{}", self.port());
-        if let Ok(out) = self.runner.run("ss", &["-ltnpH", &filter]) {
+        if let Ok(out) = self
+            .runner
+            .run_with_timeout("ss", &["-ltnpH", &filter], HELPER_TIMEOUT)
+        {
             let pids = parse_ss_pids(&String::from_utf8_lossy(&out.stdout));
             if !pids.is_empty() {
                 return pids;
             }
         }
         let target = format!("-iTCP:{}", self.port());
-        match self.runner.run("lsof", &["-t", &target, "-sTCP:LISTEN"]) {
+        match self
+            .runner
+            .run_with_timeout("lsof", &["-t", &target, "-sTCP:LISTEN"], HELPER_TIMEOUT)
+        {
             Ok(out) => parse_lsof_pids(&String::from_utf8_lossy(&out.stdout)),
             Err(_) => Vec::new(),
         }
@@ -787,7 +816,22 @@ impl SpacetimeManagedStore {
 
     fn signal(&self, signal: &str, pid: u32) -> bool {
         matches!(
-            self.runner.run("kill", &[signal, &pid.to_string()]),
+            self.runner
+                .run_with_timeout("kill", &[signal, &pid.to_string()], HELPER_TIMEOUT),
+            Ok(out) if out.status.success()
+        )
+    }
+
+    /// `signal` to every process in the group `pgid` leads. The spawner puts
+    /// the store in its own group, so this reaches a server the `spacetime`
+    /// wrapper forked.
+    fn signal_group(&self, signal: &str, pgid: u32) -> bool {
+        matches!(
+            self.runner.run_with_timeout(
+                "kill",
+                &[signal, "--", &format!("-{pgid}")],
+                HELPER_TIMEOUT
+            ),
             Ok(out) if out.status.success()
         )
     }
@@ -870,7 +914,13 @@ impl ManagedStorePorts for SpacetimeManagedStore {
                     ));
                 }
             }
-            if answering {
+            // And only when the listener is ours: an old store that still
+            // holds the port answers before our child has failed to bind it.
+            if answering
+                && self
+                    .spawner
+                    .listener_is_ours(&self.layout.address, &self.layout.data_dir)
+            {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -905,7 +955,10 @@ impl ManagedStorePorts for SpacetimeManagedStore {
         }
         argv.extend(["login", "show"].map(String::from));
         let args: Vec<&str> = argv.iter().map(String::as_str).collect();
-        let output = self.runner.run("spacetime", &args).ok()?;
+        let output = self
+            .runner
+            .run_with_timeout("spacetime", &args, SUBPROCESS_TIMEOUT)
+            .ok()?;
         if !output.status.success() {
             return None;
         }
@@ -920,16 +973,22 @@ impl ManagedStorePorts for SpacetimeManagedStore {
     }
 
     fn publish_embedded_module(&self) -> ModulePublishOutcome {
-        let wasm_path = self.layout.data_dir.join(EXTRACTED_MODULE_FILE);
+        // A file of this process's own: another launch's publish never reads
+        // bytes this one is still writing.
+        let wasm_path = self
+            .layout
+            .data_dir
+            .join(format!("dispatch_module.{}.wasm", std::process::id()));
         let written = std::fs::create_dir_all(&self.layout.data_dir)
-            .and_then(|()| std::fs::write(&wasm_path, self.wasm));
+            .and_then(|()| atomic_write(&wasm_path, self.wasm));
         if let Err(e) = written {
             return ModulePublishOutcome::PublishFailed {
                 error: format!("could not write the module to {}: {e}", wasm_path.display()),
             };
         }
-        let publisher = self.cli_publisher(wasm_path);
+        let publisher = self.cli_publisher(wasm_path.clone());
         let outcome = publisher.publish();
+        let _ = std::fs::remove_file(&wasm_path);
         if outcome == ModulePublishOutcome::Published {
             // A store published before the module recorded its publisher has
             // none, and `dispatch store import` would be refused. Not fatal:
@@ -939,6 +998,20 @@ impl ManagedStorePorts for SpacetimeManagedStore {
             }
         }
         outcome
+    }
+
+    fn lock_publish(&self) -> Option<PublishLock> {
+        let path = self.layout.data_dir.join(PUBLISH_LOCK_FILE);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let lock = PublishLock::acquire(&path, PUBLISH_TIMEOUT);
+        if lock.is_none() {
+            tracing::warn!(
+                "another launch holds the managed store's publish lock; going on without it"
+            );
+        }
+        lock
     }
 
     fn managed_store_failed_to_save(&self) -> bool {
@@ -985,8 +1058,20 @@ impl SpacetimeManagedStore {
                 pids.push(child.id());
             }
         }
+        // The group the spawner made leads with the child's pid. A group
+        // signal reaches a server the wrapper forked; a child outside its own
+        // group (a stand-in) falls back to the single pid.
+        let mut grouped = None;
         for pid in &pids {
-            self.signal("-TERM", *pid);
+            if tracked.as_ref().map(Child::id) == Some(*pid) {
+                if self.signal_group("-TERM", *pid) {
+                    grouped = Some(*pid);
+                } else {
+                    self.signal("-TERM", *pid);
+                }
+            } else {
+                self.signal("-TERM", *pid);
+            }
         }
 
         let deadline = Instant::now() + self.stop_timeout;
@@ -1002,7 +1087,8 @@ impl SpacetimeManagedStore {
                 .iter()
                 .filter(|pid| Some(**pid) != own_pid)
                 .all(|pid| !self.alive(*pid));
-            if child_gone && others_gone {
+            let group_gone = grouped.is_none_or(|pgid| !self.signal_group("-0", pgid));
+            if child_gone && others_gone && group_gone {
                 return true;
             }
             if Instant::now() >= deadline {
@@ -1011,6 +1097,53 @@ impl SpacetimeManagedStore {
             std::thread::sleep(POLL_STEP);
         }
     }
+}
+
+const PUBLISH_LOCK_FILE: &str = "publish.lock";
+
+/// An exclusive advisory lock on a file, released when dropped (or when the
+/// process dies).
+pub struct PublishLock {
+    _file: std::fs::File,
+}
+
+impl PublishLock {
+    /// Take the lock on `path`, polling until `timeout`. `None` when it is
+    /// held elsewhere that long, or the file cannot be opened.
+    pub fn acquire(path: &Path, timeout: Duration) -> Option<Self> {
+        use std::os::unix::io::AsRawFd;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)
+            .ok()?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            // SAFETY: `file` owns a valid open descriptor for the whole call.
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                return Some(Self { _file: file });
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(POLL_STEP);
+        }
+    }
+}
+
+/// Write `bytes` to `path` through a temporary file of this process's own and
+/// a rename, so a reader never sees a half-written file.
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -1045,6 +1178,9 @@ pub struct ManagedStore {
     /// exit path (or a signal racing a quit) stops the store once and every
     /// later call reports that same result.
     stopped: OnceLock<bool>,
+    /// Held by a health restart for its stop and start, and by every stop, so
+    /// an exit that lands mid-restart waits for the new store and stops it.
+    restart: Mutex<()>,
 }
 
 impl ManagedStore {
@@ -1060,6 +1196,7 @@ impl ManagedStore {
             held: AtomicBool::new(false),
             spawned: AtomicBool::new(false),
             stopped: OnceLock::new(),
+            restart: Mutex::new(()),
         }
     }
 
@@ -1079,6 +1216,7 @@ impl ManagedStore {
     }
 
     fn stop_once(&self, stop: impl FnOnce() -> bool) -> bool {
+        let _restart = lock(&self.restart);
         *self.stopped.get_or_init(|| {
             let in_time = stop();
             if !in_time {
@@ -1150,6 +1288,9 @@ impl ManagedStore {
         if module_action(recorded.as_deref(), &self.embedded_hash, database_exists)
             == ModuleAction::Publish
         {
+            // Held until the hash is recorded: two launches never interleave
+            // a publish with the other's record.
+            let _publish_lock = self.ports.lock_publish();
             let outcome = self.ports.publish_embedded_module();
             if let Err(abort) = after_publish(&outcome) {
                 self.stop_after_abort(holder);
@@ -1186,8 +1327,22 @@ impl ManagedStore {
         if !self.held_by_this_board() || !self.ports.managed_store_failed_to_save() {
             return HealthOutcome::Healthy;
         }
+        let _restart = lock(&self.restart);
+        // Again under the lock: an exit may have stopped the store between
+        // the check above and here, and a start now would leave a store
+        // nobody holds.
+        if self.stopped.get().is_some() {
+            return HealthOutcome::Healthy;
+        }
         if !self.ports.stop_managed_store() {
             tracing::warn!("the managed store did not stop within its timeout");
+            // The old store may still hold the port and answer, so a start
+            // could not be told from it: leave it alone and say so.
+            return HealthOutcome::RestartFailed(
+                "the old managed store did not stop within its timeout and is still running; \
+                 restart it by hand"
+                    .to_string(),
+            );
         }
         match self.ports.start_managed_store() {
             Ok(()) => HealthOutcome::Restarted,

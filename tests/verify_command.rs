@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Integration: verify_command stored under a path string equal to
 //! task.repo_path is found by the wrap-up lookup when called with
 //! the repo_path from a real task row.

@@ -14,7 +14,7 @@
 //! nobody reads. The later tests pin what keeps that floor passable: the
 //! bindings and `spacetime/module` exclusions, and a `--timeout` long enough
 //! for the live-store tests.
-
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;

@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Real-tmux integration tests for retiring the previous board and starting a
 //! fresh one in its place — `docs/specs/startup.allium`'s
 //! `RestartTheBoardInTheExistingSession` and `RetireTheBoardWindow`.

@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 use dispatch_tui::models::*;
 use dispatch_tui::store::{
     CreateLearningRow, CreateTaskRequest, EpicCrud, EpicPatch, EpicRead, LearningStore, Store,

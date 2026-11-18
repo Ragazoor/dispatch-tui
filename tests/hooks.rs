@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Integration tests for the `hook-*` subcommands and the PR gate, after they
 //! stopped opening the database.
 //!

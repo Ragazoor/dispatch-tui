@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Real-tmux integration test for the two-tier mechanism that keeps new panes in
 //! their agent's worktree: `split-window -c` for dispatch's own splits, and the
 //! `after-split-window` correction hook for splits dispatch did not make

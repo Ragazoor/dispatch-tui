@@ -1,7 +1,7 @@
 //! Guard: MCP handlers read tasks and epics through `task_svc` / `epic_svc`,
 //! never `state.db.get_task` / `state.db.get_epic`. Two read paths let the
 //! service-level behaviour (not-found mapping, error shape) drift apart.
-
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;

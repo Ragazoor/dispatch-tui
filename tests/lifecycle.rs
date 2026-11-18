@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
 use dispatch_tui::models::{DispatchMode, Task, TaskId, TaskStatus, TmuxWindow};

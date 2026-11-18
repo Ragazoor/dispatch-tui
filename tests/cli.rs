@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Integration tests for the CLI commands (plan, verify-feed, repo, and the
 //! argv boundary of the hook-* subcommands — their behaviour, and the PR
 //! gate's, lives in `tests/hooks.rs`).

@@ -3,3 +3,13 @@ allow-expect-in-tests = true
 # serde_json's `preserve_order` makes `Value` larger, which pushes
 # `JsonRpcResponse` past the default 128 bytes.
 large-error-threshold = 256
+
+# Every child process runs bounded. Command::output and ::status wait
+# forever on a child that stalls (a store that accepts connections and then
+# hangs held bring-up at "Starting the local store..."). Use
+# ProcessRunner::run_with_timeout or process::run_bounded; the few
+# deliberate sites in src/process.rs carry an #[allow] saying why.
+disallowed-methods = [
+    { path = "std::process::Command::output", reason = "unbounded wait: use ProcessRunner::run_with_timeout or process::run_bounded" },
+    { path = "std::process::Command::status", reason = "unbounded wait: use ProcessRunner::run_with_timeout or process::run_bounded" },
+]

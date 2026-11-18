@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // tests: a hung child fails the run, not a board
 //! Integration test: feed sync end-to-end via `FeedRunner::tick()`.
 //!
 //! Drives a real shell `feed_command` that emits a JSON `FeedItem` array,
