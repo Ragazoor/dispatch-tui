@@ -117,9 +117,12 @@ impl App {
             // derives the same worktree path either way, so retaining the
             // pointer would change nothing observable. The failure is still
             // reported and logged.
-            // Awaited: the re-dispatch queued next must not meet the worktree
-            // while it is being removed.
-            let cleanup = Self::take_cleanup(task, CleanupFollowUp::ClearPointer, true, None);
+            // The re-dispatch must not meet the worktree while it is being
+            // removed, and the drain must not wait for git: with a teardown to
+            // run, the re-dispatch rides on its completion message
+            // (CleanupFollowUp::ClearPointerAndRedispatch).
+            let cleanup =
+                Self::take_cleanup(task, CleanupFollowUp::ClearPointerAndRedispatch, None);
             // Retry-fresh is the likeliest leaving-Running board write to carry
             // a deferred Stop: a crashed task is still Running.
             Self::set_local_status(task, TaskStatus::Backlog);
@@ -128,6 +131,7 @@ impl App {
             self.sync_board_selection();
 
             let mut cmds = Vec::new();
+            let has_cleanup = cleanup.is_some();
             if let Some(c) = cleanup {
                 cmds.push(c);
             }
@@ -135,13 +139,16 @@ impl App {
                 fields,
             )));
             self.mark_dispatching(id);
-            // No mode: the module derives it (store-split.allium D3), so a
-            // research task without a plan goes back to research
-            // (DispatchResearchTask) and every other one to DispatchTask —
-            // the same agent the task would get from a fresh dispatch.
-            cmds.push(Command::Task(
-                crate::tui::commands::TaskCommand::DispatchAgent { id, mode: None },
-            ));
+            // Nothing to tear down: the re-dispatch goes now. No mode: the
+            // module derives it (store-split.allium D3), so a research task
+            // without a plan goes back to research (DispatchResearchTask) and
+            // every other one to DispatchTask — the same agent the task would
+            // get from a fresh dispatch.
+            if !has_cleanup {
+                cmds.push(Command::Task(
+                    crate::tui::commands::TaskCommand::DispatchAgent { id, mode: None },
+                ));
+            }
             cmds
         } else {
             vec![]

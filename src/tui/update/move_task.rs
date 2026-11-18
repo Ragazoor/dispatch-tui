@@ -124,9 +124,20 @@ impl App {
             _ => vec![task_id],
         };
         self.clear_move_task_state();
+        // Epics in the selection do not move with it: this flow moves tasks.
+        let skipped_epics = self.select.epics.len();
+        if skipped_epics > 0 {
+            self.status.set(format!(
+                "{skipped_epics} selected epic{} not moved: only tasks move to an epic",
+                if skipped_epics == 1 { "" } else { "s" }
+            ));
+        }
         if ids.len() > 1 || self.select.tasks.iter().any(|t| ids.contains(t)) {
-            self.select.tasks.clear();
-            self.dirty = true;
+            // The selection stays until the moves have answered: the ones the
+            // store refused remain selected (TaskMessage::BatchMoved).
+            return vec![Command::Task(
+                crate::tui::commands::TaskCommand::BatchMoveToEpic { ids, new_epic },
+            )];
         }
         ids.into_iter()
             .map(|id| Command::Task(crate::tui::commands::TaskCommand::MoveToEpic { id, new_epic }))

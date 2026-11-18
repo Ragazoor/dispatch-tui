@@ -463,6 +463,31 @@ impl TuiRuntime {
         self.exec_refresh_from_db(app).await
     }
 
+    /// `tasks.allium: BatchMoveToEpic`: each task moves as `MoveTaskToEpic`
+    /// moves it, a refusal is reported on its own and leaves the others moved,
+    /// and the board refreshes ONCE after the last move. The refused ids go
+    /// back to the board so they stay selected.
+    pub(super) async fn exec_batch_move_to_epic(
+        &self,
+        app: &mut App,
+        ids: Vec<models::TaskId>,
+        new_epic: Option<models::EpicId>,
+    ) -> Vec<Command> {
+        let mut refused = Vec::new();
+        for id in ids {
+            if let Err(e) = self.task_svc.move_task_to_epic(id, new_epic).await {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("moving task to epic", e),
+                )));
+                refused.push(id);
+            }
+        }
+        app.update(Message::Task(
+            crate::tui::messages::TaskMessage::BatchMoved { refused },
+        ));
+        self.exec_refresh_from_db(app).await
+    }
+
     pub(super) async fn exec_delete_task(&self, id: TaskId) {
         // A refusal touches nothing: the guard runs before the service deletes.
         if !self
@@ -476,8 +501,8 @@ impl TuiRuntime {
         }
     }
 
-    /// The delete pre-check (`DeleteTask`/`DeleteEpic`/`BatchDelete` in
-    /// tasks.allium and epics.allium): re-read the store's TRUE rows, not the
+    /// The single-task delete pre-check (`DeleteTask` in tasks.allium; a
+    /// batch and an epic delete first instead): re-read the store's TRUE rows, not the
     /// board's view, before any teardown or purge. Returns `false`
     /// after reporting a `DeleteRefused` — the caller must then do nothing.
     /// A row already gone passes: there is nothing left to protect, and any
@@ -491,7 +516,6 @@ impl TuiRuntime {
         let (task_ids, epic_ids) = match guard {
             DeleteGuard::Task(id) => (vec![*id], vec![]),
             DeleteGuard::Epic(id) => (vec![], vec![*id]),
-            DeleteGuard::Batch { task_ids, epic_ids } => (task_ids.clone(), epic_ids.clone()),
         };
         for id in task_ids {
             if let Err(e) = self.task_svc.ensure_deletable(id).await {
@@ -532,17 +556,12 @@ impl TuiRuntime {
         epic_ids: Vec<models::EpicId>,
         teardowns: Vec<crate::tui::commands::TeardownTarget>,
     ) {
-        // The one pre-check for the whole batch, before any teardown starts.
-        let guard = crate::tui::commands::DeleteGuard::Batch {
-            task_ids: task_ids.clone(),
-            epic_ids: epic_ids.clone(),
-        };
-        if !self.pass_delete_guard(&guard).await {
-            return;
-        }
-        drop(self.exec_cleanup_queues(teardowns));
+        // Delete first, tear down after: the reducer is the one atomic check
+        // against the true rows, so a refused batch tears nothing down, and an
+        // agent another board started in the meantime is never killed.
         match self.task_svc.batch_delete(&task_ids, &epic_ids).await {
             Ok(()) => {
+                drop(self.exec_cleanup_queues(teardowns));
                 let _ = self.msg_tx.send(Message::Task(
                     crate::tui::messages::TaskMessage::BatchDeleted,
                 ));
@@ -1086,7 +1105,7 @@ impl TuiRuntime {
     }
 
     /// Clear a task's `worktree`, `tmux_window` and `host` columns: the DB
-    /// half of `CleanupFollowUp::ClearPointer`, i.e. the write a teardown
+    /// half of `CleanupFollowUp::ClearPointerAndRedispatch`, i.e. the write a teardown
     /// earns by *succeeding*, applied from `handle_cleanup_succeeded`.
     ///
     /// `host` clears in the same patch as `worktree`: core/Task's
@@ -1132,9 +1151,9 @@ impl TuiRuntime {
     /// may run beside a removal that might not have happened
     /// (`WorktreeReleaseIsGated` in docs/specs/tasks.allium).
     ///
-    /// Returns the removal's handle. A delete drops it; RetryFresh's cleanup
-    /// awaits it, because a re-dispatch to the same path follows
-    /// (`run_cleanup` in src/runtime/commands.rs); tests await it.
+    /// Returns the removal's handle. The drain drops it, and so does every
+    /// caller: what must follow the removal (RetryFresh's re-dispatch) rides on
+    /// the completion message. Tests await it.
     pub(super) fn exec_cleanup(&self, request: CleanupRequest) -> tokio::task::JoinHandle<()> {
         let CleanupRequest {
             id,
@@ -1167,11 +1186,13 @@ impl TuiRuntime {
         &self,
         teardowns: Vec<crate::tui::commands::TeardownTarget>,
     ) -> Vec<tokio::task::JoinHandle<()>> {
+        let home = std::env::var("HOME").ok();
         let mut by_repo: Vec<(String, Vec<crate::tui::commands::TeardownTarget>)> = Vec::new();
         for t in teardowns {
-            match by_repo.iter_mut().find(|(repo, _)| *repo == t.repo_path) {
+            let key = repo_queue_key(&t.repo_path, home.as_deref());
+            match by_repo.iter_mut().find(|(repo, _)| *repo == key) {
                 Some((_, queue)) => queue.push(t),
-                None => by_repo.push((t.repo_path.clone(), vec![t])),
+                None => by_repo.push((key, vec![t])),
             }
         }
         by_repo
@@ -1362,6 +1383,17 @@ pub(super) struct CleanupRequest {
     pub(super) follow_up: crate::tui::commands::CleanupFollowUp,
 }
 
+/// The key a batch's teardowns queue on: the repo's expanded path, so `~/x`
+/// and `/home/u/x` are one repo and never contend on its git index lock from
+/// two queues (`BatchTeardownsAreSerialPerRepo` in docs/specs/tasks.allium).
+pub(super) fn repo_queue_key(repo_path: &str, home: Option<&str>) -> String {
+    let expanded = models::expand_tilde_with_home(repo_path, home);
+    match expanded.trim_end_matches('/') {
+        "" => expanded,
+        trimmed => trimmed.to_string(),
+    }
+}
+
 /// The message a finished [`TuiRuntime::exec_cleanup`] teardown reports.
 fn cleanup_outcome(
     id: TaskId,
@@ -1397,6 +1429,7 @@ fn cleanup_outcome(
         id,
         worktree,
         error,
+        follow_up,
     }
 }
 

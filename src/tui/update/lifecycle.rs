@@ -434,7 +434,7 @@ impl App {
     ) -> (Option<Command>, Vec<Command>) {
         let cleanup = self
             .find_task_mut(id)
-            .and_then(|t| Self::take_cleanup(t, follow_up, false, guard));
+            .and_then(|t| Self::take_cleanup(t, follow_up, guard));
         self.clear_agent_tracking(id);
         self.board.tasks.retain(|t| t.id != id);
         let mut respawn = self.move_skipped_epic_folds();
@@ -452,7 +452,7 @@ impl App {
         follow_up: CleanupFollowUp,
     ) -> Vec<Command> {
         match follow_up {
-            CleanupFollowUp::ClearPointer => {
+            CleanupFollowUp::ClearPointerAndRedispatch => {
                 // The board already cleared these optimistically; keeping it in
                 // step matters for the paths that did not (a cleanup issued for
                 // a task the board has since refreshed).
@@ -460,9 +460,16 @@ impl App {
                     task.worktree = None;
                     task.tmux_window = None;
                 }
-                vec![Command::Task(
-                    crate::tui::commands::TaskCommand::ClearWorktreePointer(id),
-                )]
+                // The removal is over, so the re-dispatch may now meet the
+                // path. No mode: the module derives it (store-split.allium D3),
+                // so a research task without a plan goes back to research.
+                vec![
+                    Command::Task(crate::tui::commands::TaskCommand::ClearWorktreePointer(id)),
+                    Command::Task(crate::tui::commands::TaskCommand::DispatchAgent {
+                        id,
+                        mode: None,
+                    }),
+                ]
             }
             CleanupFollowUp::DeleteRow => {
                 vec![Command::Task(crate::tui::commands::TaskCommand::Delete(id))]
@@ -483,12 +490,23 @@ impl App {
         id: TaskId,
         worktree: String,
         error: String,
+        follow_up: CleanupFollowUp,
     ) -> Vec<Command> {
         let label = self.board.task_label(id);
-        let mut cmds = self.handle_error(format!(
-            "Cleanup failed for {label}: {worktree} was left on disk ({error}). \
-             Delete the task again to retry."
-        ));
+        let message = if follow_up == CleanupFollowUp::ClearPointerAndRedispatch {
+            // The re-dispatch did not run: the old directory is still there.
+            self.unmark_dispatching(id);
+            format!(
+                "Retry failed for {label}: {worktree} was left on disk ({error}). \
+                 The task is back in Backlog; remove the directory, then dispatch it."
+            )
+        } else {
+            format!(
+                "Cleanup failed for {label}: {worktree} was left on disk ({error}). \
+                 Delete the task again to retry."
+            )
+        };
+        let mut cmds = self.handle_error(message);
         cmds.push(Command::Task(
             crate::tui::commands::TaskCommand::RefreshFromDb,
         ));

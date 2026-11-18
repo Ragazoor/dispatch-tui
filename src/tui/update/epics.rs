@@ -246,7 +246,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
-        // The runtime pre-checks the subtree once before any teardown starts
+        // The runtime deletes first and tears down after
         // (epics.allium: DeleteEpic), so the teardowns carry no guard of their
         // own and ride on the delete command.
         let (mut cmds, teardowns) = split_teardowns(self.teardown_epic_subtree(id, None));
@@ -295,7 +295,6 @@ impl App {
                 let cleanup = Self::take_cleanup(
                     task,
                     crate::tui::commands::CleanupFollowUp::Nothing,
-                    false,
                     guard.clone(),
                 );
                 if let Some(c) = cleanup {

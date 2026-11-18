@@ -50,14 +50,13 @@ impl ProcessRunner for SlowKillTmux {
 }
 
 /// Task 1's teardown of a worktree and a window.
-fn cleanup(follow_up: crate::tui::commands::CleanupFollowUp, await_teardown: bool) -> Command {
+fn cleanup(follow_up: crate::tui::commands::CleanupFollowUp) -> Command {
     Command::Task(TaskCommand::Cleanup {
         id: models::TaskId(1),
         repo_path: "/repo".into(),
         worktree: Some("/repo/.worktrees/1-x".into()),
         tmux_window: Some(test_tmux_window("task-1")),
         follow_up,
-        await_teardown,
         guard: None,
     })
 }
@@ -111,35 +110,6 @@ async fn retry_resume_launches_only_after_the_old_window_is_gone() {
     );
 }
 
-#[tokio::test]
-async fn a_cleanup_is_finished_before_the_next_command_starts() {
-    let db = test_db().await;
-    let (tx, _msgs) = mpsc::unbounded_channel();
-    let inner = Arc::new(MockProcessRunner::new(
-        (0..60).map(|_| MockProcessRunner::ok()).collect(),
-    ));
-    let runner = Arc::new(SlowKillTmux {
-        inner: Arc::clone(&inner),
-        alive: AtomicBool::new(true),
-    });
-    let rt = make_runtime(db.clone(), tx, runner).await;
-    let mut app = App::new(db.list_all().await);
-
-    commands::dispatch(
-        cleanup(crate::tui::commands::CleanupFollowUp::ClearPointer, true),
-        &mut app,
-        &rt,
-    )
-    .await;
-
-    // RetryFresh's re-dispatch is the next command: by now the teardown is done.
-    let calls = inner.flattened_calls();
-    assert!(
-        calls.iter().any(|c| c.contains("worktree remove")),
-        "the worktree removal must be over when the cleanup command returns; calls: {calls:?}"
-    );
-}
-
 /// A runner whose first tmux call (the teardown's window probe) blocks until
 /// the test opens the gate, so a test can look at the drain while a teardown
 /// is certainly still in flight.
@@ -173,9 +143,53 @@ impl ProcessRunner for GatedProbeTmux {
     }
 }
 
-// Only RetryFresh has a launch queued behind its teardown. A delete's teardown
-// runs in the background, so the board keeps taking keys and drawing while git
-// works (tasks.allium: TaskTeardown, WorktreeReleaseIsGated).
+// No teardown holds the drain: the board keeps taking keys and drawing while
+// git works (tasks.allium: TaskTeardown, WorktreeReleaseIsGated). RetryFresh's
+// re-dispatch rides on the completion message instead.
+#[tokio::test]
+async fn a_retry_fresh_cleanup_does_not_hold_up_the_next_command() {
+    let db = test_db().await;
+    let (tx, mut msgs) = mpsc::unbounded_channel();
+    let inner = Arc::new(MockProcessRunner::new(
+        (0..60).map(|_| MockProcessRunner::ok()).collect(),
+    ));
+    let (open_gate, gate) = std::sync::mpsc::channel();
+    let runner = Arc::new(GatedProbeTmux {
+        inner: Arc::clone(&inner),
+        gate: std::sync::Mutex::new(gate),
+    });
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let mut app = App::new(db.list_all().await);
+
+    // The teardown is held at its first tmux call until the gate opens below.
+    tokio::time::timeout(
+        TEST_TIMEOUT,
+        commands::dispatch(
+            cleanup(crate::tui::commands::CleanupFollowUp::ClearPointerAndRedispatch),
+            &mut app,
+            &rt,
+        ),
+    )
+    .await
+    .expect("RetryFresh's cleanup must not be waited for");
+
+    open_gate.send(()).unwrap();
+    let msg = tokio::time::timeout(TEST_TIMEOUT, msgs.recv())
+        .await
+        .expect("the cleanup must report")
+        .expect("sender alive");
+    assert!(
+        matches!(
+            msg,
+            Message::Task(crate::tui::messages::TaskMessage::CleanupSucceeded {
+                follow_up: crate::tui::commands::CleanupFollowUp::ClearPointerAndRedispatch,
+                ..
+            })
+        ),
+        "the follow-up travels with the completion message: {msg:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_delete_cleanup_does_not_hold_up_the_next_command() {
     let db = test_db().await;
@@ -196,7 +210,7 @@ async fn a_delete_cleanup_does_not_hold_up_the_next_command() {
     tokio::time::timeout(
         TEST_TIMEOUT,
         commands::dispatch(
-            cleanup(crate::tui::commands::CleanupFollowUp::DeleteRow, false),
+            cleanup(crate::tui::commands::CleanupFollowUp::DeleteRow),
             &mut app,
             &rt,
         ),

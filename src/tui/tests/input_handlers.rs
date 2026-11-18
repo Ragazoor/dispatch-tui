@@ -506,7 +506,10 @@ fn confirm_retry_f_key_emits_fresh() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup {
+            follow_up: crate::tui::commands::CleanupFollowUp::ClearPointerAndRedispatch,
+            ..
+        })
     )));
 }
 

@@ -437,35 +437,27 @@ rule DeleteEpic {
         -- is the store's own check_deletable answer, so such a refusal comes
         -- before any teardown.
         --
-        -- PRE-CHECK BEFORE ANY SIDE EFFECT, as for DeleteTask
-        -- (tasks.allium). The subtree's teardown — every worktree, tmux
-        -- window and branch — runs client-side
-        -- before the reducer is called, so the reducer guard alone would
-        -- refuse too late. Before ANY of them starts, the delete flow
-        -- reads the TRUE status of every task in the subtree from the
-        -- store itself (the check_deletable procedure, run in one
-        -- transaction over the module's own delete rules), not the board's
-        -- subscription view, and proceeds only if all are done. A store that
-        -- cannot be asked refuses the delete: only a real answer lets it
-        -- through. A failed pre-check refuses the delete with an error
-        -- (DeleteEpicRefused below) and touches NOTHING anywhere in the
-        -- subtree: no teardown, no row removal, no
-        -- retirement; the board is refreshed from the store, restoring the
-        -- cards it dropped optimistically. A passing pre-check runs the flow
-        -- unchanged: best-effort subtree teardown, then the guarded reducer.
+        -- DELETE FIRST, TEAR DOWN AFTER. The subtree's teardown — every
+        -- worktree, tmux window and branch — runs client-side, but only once
+        -- the delete has gone through. The check that decides the delete is
+        -- the one the delete itself makes: the service reads the TRUE status
+        -- of every task in the subtree from the store (the check_deletable
+        -- procedure, run in one transaction over the module's own delete
+        -- rules), not the board's subscription view, and the delete_epic
+        -- reducer checks again. A store that cannot be asked refuses the
+        -- delete. A refusal (DeleteEpicRefused below) touches NOTHING anywhere
+        -- in the subtree: no teardown, no row removal, no retirement; the
+        -- board is refreshed from the store, restoring the cards it dropped
+        -- optimistically. Because nothing is torn down before the reducer has
+        -- accepted, a subtree task another board reopened and resumed in the
+        -- meantime keeps its window and worktree.
         --
         -- ONE CHECK, SERIAL TEARDOWNS. As for BatchDelete (tasks.allium:
         -- BatchTeardownsAreSerialPerRepo), the delete command carries the
-        -- subtree's teardowns itself; they carry no guard of their own. The
-        -- pre-check runs ONCE for the epic, not once per subtask, and only
-        -- then are the teardowns started, one repo at a time, so a repo's
-        -- removals do not contend on its git index lock; distinct repos run
-        -- in parallel. One failure does not stop the rest of its repo's queue.
-        -- The reducer stays the final authority, and the residual is the
-        -- one DeleteTask's guidance states: a subtree task reopened between
-        -- the pre-check read and the reducer call is refused by the reducer
-        -- after the teardown has run — the only case in which
-        -- "deletes nothing" covers just the rows and their RetiredFeedItems.
+        -- subtree's teardowns itself; they carry no guard of their own. They
+        -- start after the delete, one repo at a time, so a repo's removals do
+        -- not contend on its git index lock; distinct repos run in parallel.
+        -- One failure does not stop the rest of its repo's queue.
         --
         -- Deletion is performed in a single database transaction that
         -- walks parent pointers depth-first, deleting each

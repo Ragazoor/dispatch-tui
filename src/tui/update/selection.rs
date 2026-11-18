@@ -366,9 +366,9 @@ impl App {
             return vec![];
         }
 
-        // The runtime pre-checks the whole batch once before any teardown
-        // starts (tasks.allium: BatchDelete), so the teardowns carry no guard
-        // of their own. The selection stays until the delete goes through, so
+        // The runtime makes the batch's atomic delete first and starts the
+        // teardowns only after it (tasks.allium: BatchDelete), so they carry no
+        // guard of their own. The selection stays until the delete goes through, so
         // a refusal leaves it to be narrowed (`TaskMessage::BatchDeleted`).
         let mut cleanups = Vec::new();
         let mut cmds = Vec::new();

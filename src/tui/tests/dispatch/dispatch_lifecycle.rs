@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::commands::CleanupFollowUp;
 
 #[test]
 fn dispatched_sets_fields_and_transitions_to_running() {
@@ -162,18 +163,21 @@ fn retry_fresh_emits_cleanup_and_dispatch() {
     assert!(!app.is_stale(TaskId(4)));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert_eq!(app.board.tasks[0].status, TaskStatus::Backlog);
-    // The re-dispatch queued next must not meet the worktree mid-removal, so
-    // the drain waits for this teardown.
+    // The re-dispatch must not meet the worktree mid-removal, and the drain
+    // must not wait for git: it rides on the cleanup's completion message.
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::Task(TaskCommand::Cleanup {
-            await_teardown: true,
+            follow_up: CleanupFollowUp::ClearPointerAndRedispatch,
             ..
         })
     )));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(TaskCommand::DispatchAgent { .. }))));
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Task(TaskCommand::DispatchAgent { .. }))),
+        "no re-dispatch beside the teardown: {cmds:?}"
+    );
 }
 
 /// #4096 on the retry path: a crashed task whose worktree pointer is already
@@ -200,9 +204,14 @@ fn retry_fresh_tears_down_a_window_with_no_worktree() {
         )),
         "the stale window must be torn down before the re-dispatch, got: {cmds:?}"
     );
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(TaskCommand::DispatchAgent { .. }))));
+    // The re-dispatch follows the teardown's completion, not this batch.
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(TaskCommand::Cleanup {
+            follow_up: CleanupFollowUp::ClearPointerAndRedispatch,
+            ..
+        })
+    )));
 }
 
 // -- host gating (task #4812 distributed-dispatch foundations) --------------
@@ -672,4 +681,62 @@ fn a_second_resume_of_another_task_is_not_blocked() {
     let cmds = app.update(Message::Task(TaskMessage::Resume(TaskId(5))));
 
     assert!(cmds.iter().any(is_resume), "got: {cmds:?}");
+}
+
+#[test]
+fn retry_fresh_redispatches_when_its_teardown_succeeds() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+    app.update(Message::Task(TaskMessage::RetryFresh(TaskId(4))));
+
+    let cmds = app.update(Message::Task(TaskMessage::CleanupSucceeded {
+        id: TaskId(4),
+        follow_up: CleanupFollowUp::ClearPointerAndRedispatch,
+    }));
+
+    assert!(matches!(
+        cmds.as_slice(),
+        [
+            Command::Task(TaskCommand::ClearWorktreePointer(TaskId(4))),
+            Command::Task(TaskCommand::DispatchAgent {
+                id: TaskId(4),
+                mode: None
+            })
+        ]
+    ));
+}
+
+#[test]
+fn retry_fresh_does_not_redispatch_when_its_teardown_fails() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+    app.update(Message::Task(TaskMessage::RetryFresh(TaskId(4))));
+    assert!(app.is_dispatching(TaskId(4)));
+
+    let cmds = app.update(Message::Task(TaskMessage::CleanupFailed {
+        id: TaskId(4),
+        worktree: "/repo/.worktrees/4-task".into(),
+        error: "locked".into(),
+        follow_up: CleanupFollowUp::ClearPointerAndRedispatch,
+    }));
+
+    assert!(!cmds
+        .iter()
+        .any(|c| matches!(c, Command::Task(TaskCommand::DispatchAgent { .. }))));
+    assert!(!app.is_dispatching(TaskId(4)), "the spinner must not stay");
+}
+
+#[test]
+fn retry_fresh_with_nothing_to_tear_down_dispatches_at_once() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = None;
+    task.tmux_window = None;
+    let mut app = App::new(vec![task]);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+
+    let cmds = app.update(Message::Task(TaskMessage::RetryFresh(TaskId(4))));
+
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Task(TaskCommand::DispatchAgent { .. }))));
 }

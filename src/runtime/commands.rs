@@ -206,7 +206,6 @@ async fn dispatch_task(
             worktree,
             tmux_window,
             follow_up,
-            await_teardown,
             guard,
         } => {
             let request = super::tasks::CleanupRequest {
@@ -216,7 +215,7 @@ async fn dispatch_task(
                 tmux_window,
                 follow_up,
             };
-            run_cleanup(rt, request, await_teardown, guard).await;
+            run_cleanup(rt, request, guard).await;
             vec![]
         }
         ClearWorktreePointer(id) => {
@@ -270,6 +269,7 @@ async fn dispatch_task(
             vec![]
         }
         MoveToEpic { id, new_epic } => rt.exec_move_task_to_epic(app, id, new_epic).await,
+        BatchMoveToEpic { ids, new_epic } => rt.exec_batch_move_to_epic(app, ids, new_epic).await,
         SeedActivity { id, at } => {
             rt.exec_seed_activity(app, id, at).await;
             vec![]
@@ -292,7 +292,6 @@ async fn dispatch_task(
 async fn run_cleanup(
     rt: &super::TuiRuntime,
     request: super::tasks::CleanupRequest,
-    await_teardown: bool,
     guard: Option<crate::tui::commands::DeleteGuard>,
 ) {
     if let Some(guard) = guard {
@@ -300,11 +299,10 @@ async fn run_cleanup(
             return;
         }
     }
-    // See `TaskCommand::Cleanup::await_teardown`.
-    let handle = rt.exec_cleanup(request);
-    if await_teardown {
-        let _ = handle.await;
-    }
+    // Never waited for: git can take as long as it likes while the board
+    // keeps taking keys and drawing (tasks.allium: TaskTeardown). Whatever has
+    // to follow the removal travels on its completion message.
+    drop(rt.exec_cleanup(request));
 }
 
 /// Per-domain dispatcher for [`crate::tui::commands::EpicCommand`] variants.

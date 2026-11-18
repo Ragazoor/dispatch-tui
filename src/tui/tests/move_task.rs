@@ -260,19 +260,32 @@ fn move_to_epic_with_selection_moves_every_selected_task() {
 
     let cmds = app.update(Message::Task(TaskMessage::MoveToEpicExecute));
 
+    // One command for the whole selection: one refresh after the last move.
     let moved: Vec<TaskId> = cmds
         .iter()
         .filter_map(|c| match c {
-            Command::Task(crate::tui::commands::TaskCommand::MoveToEpic { id, new_epic: None }) => {
-                Some(*id)
-            }
+            Command::Task(crate::tui::commands::TaskCommand::BatchMoveToEpic {
+                ids,
+                new_epic: None,
+            }) => Some(ids.clone()),
             _ => None,
         })
+        .flatten()
         .collect();
-    assert_eq!(moved, vec![TaskId(1), TaskId(3)]);
-    assert!(
-        app.select.tasks.is_empty(),
-        "selection clears after the move"
+    assert_eq!(moved.len(), 2);
+    assert!(moved.contains(&TaskId(1)) && moved.contains(&TaskId(3)));
+    assert_eq!(
+        app.select.tasks.len(),
+        2,
+        "the selection stays until the moves have answered"
+    );
+    // The store refused task 3: only it stays selected.
+    app.update(Message::Task(TaskMessage::BatchMoved {
+        refused: vec![TaskId(3)],
+    }));
+    assert_eq!(
+        app.select.tasks,
+        std::collections::HashSet::from([TaskId(3)])
     );
     assert_eq!(app.input.mode, InputMode::Normal);
 }
@@ -300,4 +313,24 @@ fn move_to_epic_without_selection_moves_only_the_cursor_task() {
         })
         .count();
     assert_eq!(n, 1);
+}
+
+#[test]
+fn move_to_epic_says_when_selected_epics_were_skipped() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    app.select.tasks.insert(TaskId(1));
+    app.select.tasks.insert(TaskId(2));
+    app.select.epics.insert(crate::models::EpicId(9));
+    app.update(Message::Task(TaskMessage::StartMoveToEpic(TaskId(1))));
+    if let Some(picker) = &app.interaction.move_task_picker {
+        picker.tree_state.borrow_mut().select_first();
+    }
+    app.update(Message::Task(TaskMessage::MoveToEpicConfirm));
+    app.update(Message::Task(TaskMessage::MoveToEpicExecute));
+
+    let msg = app.status.message.clone().unwrap_or_default();
+    assert!(msg.contains("1 selected epic not moved"), "got: {msg}");
 }

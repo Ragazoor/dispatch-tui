@@ -118,8 +118,12 @@ impl PersistFields {
 /// docs/specs/tasks.allium.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanupFollowUp {
-    /// Clear the task's `worktree`/`tmux_window` columns (retry-fresh).
-    ClearPointer,
+    /// Retry-fresh: clear the task's `worktree`/`tmux_window` columns, then
+    /// request the re-dispatch. Both happen on the cleanup's completion path,
+    /// so the command drain never waits for the removal, and the re-dispatch
+    /// cannot meet a worktree that is still being removed
+    /// (dispatch.allium: RetryFresh). A failed removal re-dispatches nothing.
+    ClearPointerAndRedispatch,
     /// Delete the task row. A failed removal therefore leaves the row in
     /// place, still Done and still pointing at the directory on disk, so
     /// deleting again retries the removal.
@@ -143,11 +147,6 @@ pub enum DeleteGuard {
     Task(TaskId),
     /// `DeleteEpic`: every task in this epic's subtree must be done.
     Epic(EpicId),
-    /// `BatchDelete`: every task and epic subtree in the batch, all or nothing.
-    Batch {
-        task_ids: Vec<TaskId>,
-        epic_ids: Vec<EpicId>,
-    },
 }
 
 /// One task's live resources, to be torn down by a batch delete.
@@ -193,10 +192,9 @@ pub enum TaskCommand {
     /// command is built — see
     /// `crate::tui::update::selection::App::handle_batch_delete`.
     ///
-    /// The runtime pre-checks the whole batch ONCE, then starts `teardowns`
-    /// (one repo at a time, `BatchTeardownsAreSerialPerRepo`), then makes the
-    /// atomic call. A refusal at the pre-check starts no teardown. The
-    /// teardowns carry no guard of their own. Success is reported as
+    /// The runtime makes the atomic call first, then starts `teardowns`
+    /// (one repo at a time, `BatchTeardownsAreSerialPerRepo`). A refused
+    /// batch starts no teardown. The teardowns carry no guard of their own. Success is reported as
     /// `TaskMessage::BatchDeleted`, which clears the selection.
     BatchDelete {
         task_ids: Vec<TaskId>,
@@ -246,13 +244,6 @@ pub enum TaskCommand {
         worktree: Option<String>,
         tmux_window: Option<TmuxWindow>,
         follow_up: CleanupFollowUp,
-        /// Whether the command drain waits for the teardown to finish before
-        /// the next command runs. Only a caller that queues work behind the
-        /// teardown which must not meet the worktree mid-removal sets it
-        /// (RetryFresh's re-dispatch). Otherwise the teardown runs in the
-        /// background, so the board keeps taking keys and drawing while git
-        /// works (tasks.allium: TaskTeardown).
-        await_teardown: bool,
         /// Set by the delete paths only: re-read against the store before the
         /// teardown starts; a failed check refuses and tears nothing down.
         guard: Option<DeleteGuard>,
@@ -319,6 +310,13 @@ pub enum TaskCommand {
     /// Move a task to a different epic, or detach it (`new_epic = None`).
     MoveToEpic {
         id: TaskId,
+        new_epic: Option<EpicId>,
+    },
+    /// Move a selection to one epic (or detach it), then refresh the board
+    /// ONCE after the last move. A refused task is reported on its own and
+    /// stays selected (`TaskMessage::BatchMoved`; tasks.allium: BatchMoveToEpic).
+    BatchMoveToEpic {
+        ids: Vec<TaskId>,
         new_epic: Option<EpicId>,
     },
     /// Seed `last_pre_tool_use_at` on a Backlog→Running transition.

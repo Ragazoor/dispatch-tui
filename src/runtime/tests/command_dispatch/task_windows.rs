@@ -209,7 +209,6 @@ async fn dispatch_task_cleanup_carries_its_follow_up_back_on_success() {
         worktree: Some("/repo/.worktrees/1-doomed".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
-        await_teardown: false,
         guard: None,
     }))
     .await;

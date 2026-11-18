@@ -344,7 +344,12 @@ fn retry_fresh_redispatches_through_the_standard_dispatch() {
     app.board.tasks[0].sub_status = crate::models::SubStatus::Stale;
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
-    let cmds = app.update(Message::Task(TaskMessage::RetryFresh(TaskId(4))));
+    app.update(Message::Task(TaskMessage::RetryFresh(TaskId(4))));
+    // The re-dispatch rides on the teardown's completion message.
+    let cmds = app.update(Message::Task(TaskMessage::CleanupSucceeded {
+        id: TaskId(4),
+        follow_up: crate::tui::commands::CleanupFollowUp::ClearPointerAndRedispatch,
+    }));
 
     assert!(
         cmds.iter().any(|c| matches!(

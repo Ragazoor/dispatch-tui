@@ -35,7 +35,6 @@ fn deleted_task_ids(cmds: &[Command]) -> Vec<TaskId> {
             Command::Task(TaskCommand::Cleanup {
                 id,
                 follow_up: CleanupFollowUp::DeleteRow,
-                await_teardown: false,
                 ..
             }) => Some(*id),
             _ => None,

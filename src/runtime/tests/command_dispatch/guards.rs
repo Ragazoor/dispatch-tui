@@ -98,7 +98,6 @@ async fn a_guarded_cleanup_of_a_task_not_done_in_the_store_runs_no_teardown() {
         worktree: Some("/repo/.worktrees/1-reopened".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
-        await_teardown: false,
         guard: Some(crate::tui::commands::DeleteGuard::Task(task.id)),
     }))
     .await;
@@ -128,7 +127,6 @@ async fn a_guarded_cleanup_of_a_done_task_still_tears_down() {
         worktree: Some("/repo/.worktrees/1-done".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
-        await_teardown: false,
         guard: Some(crate::tui::commands::DeleteGuard::Task(task.id)),
     }))
     .await;
@@ -159,32 +157,7 @@ async fn a_guarded_epic_teardown_is_refused_when_a_subtree_task_is_not_done() {
         worktree: Some("/repo/.worktrees/1-live".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::Nothing,
-        await_teardown: false,
         guard: Some(crate::tui::commands::DeleteGuard::Epic(epic.id)),
-    }))
-    .await;
-
-    assert!(refused(&h.next_msg().await));
-    assert!(h.mock.recorded_calls().is_empty());
-}
-
-#[tokio::test]
-async fn a_batch_guard_refuses_the_whole_batch_when_one_item_is_not_done() {
-    let mut h = quiet_harness().await;
-    let done = seed(&h.rt, "Done", models::TaskStatus::Done).await;
-    let live = seed(&h.rt, "Live", models::TaskStatus::Running).await;
-
-    h.dispatch(Command::Task(TaskCommand::Cleanup {
-        id: done.id,
-        repo_path: "/repo".into(),
-        worktree: Some("/repo/.worktrees/1-done".into()),
-        tmux_window: None,
-        follow_up: crate::tui::commands::CleanupFollowUp::Nothing,
-        await_teardown: false,
-        guard: Some(crate::tui::commands::DeleteGuard::Batch {
-            task_ids: vec![done.id, live.id],
-            epic_ids: vec![],
-        }),
     }))
     .await;
 
@@ -244,7 +217,6 @@ fn guarded_cleanup(id: models::TaskId, guard: crate::tui::commands::DeleteGuard)
         worktree: Some(format!("/repo/.worktrees/{}-lagging", id.0)),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
-        await_teardown: false,
         guard: Some(guard),
     })
 }
@@ -278,25 +250,6 @@ async fn a_guarded_epic_cleanup_runs_no_teardown_when_the_store_holds_a_live_sub
     h.dispatch(guarded_cleanup(
         id,
         crate::tui::commands::DeleteGuard::Epic(epic),
-    ))
-    .await;
-
-    assert!(refused(&h.next_msg().await));
-    assert!(h.mock.recorded_calls().is_empty());
-}
-
-#[tokio::test]
-async fn a_batch_guard_runs_no_teardown_when_the_store_says_one_item_is_not_done() {
-    let mut h = lagging_harness(vec![]).await;
-    let done = h.db.seed_lagging_task(None, "done", "done").await;
-    let live = h.db.seed_lagging_task(None, "done", "review").await;
-
-    h.dispatch(guarded_cleanup(
-        done,
-        crate::tui::commands::DeleteGuard::Batch {
-            task_ids: vec![done, live],
-            epic_ids: vec![],
-        },
     ))
     .await;
 
@@ -414,6 +367,50 @@ async fn a_refused_batch_starts_no_teardown_for_any_item() {
 
     assert!(refused(&h.next_msg().await));
     assert!(h.mock.recorded_calls().is_empty(), "nothing torn down");
+}
+
+#[tokio::test]
+async fn a_batch_that_goes_through_tears_down_after_the_delete() {
+    // Delete first, tear down from what the delete removed: the teardown runs
+    // only once the row is gone.
+    let mut h = harness(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok(),
+    ]))
+    .await;
+    let a = seed(&h.rt, "A", models::TaskStatus::Done).await;
+
+    h.dispatch(Command::Task(TaskCommand::BatchDelete {
+        task_ids: vec![a.id],
+        epic_ids: vec![],
+        teardowns: vec![target(a.id.0, "/repo")],
+    }))
+    .await;
+
+    assert!(matches!(
+        h.next_msg().await,
+        Message::Task(crate::tui::messages::TaskMessage::BatchDeleted)
+    ));
+    assert!(h.rt.database.get_task(a.id).await.is_none());
+    assert!(matches!(
+        h.next_msg().await,
+        Message::Task(crate::tui::messages::TaskMessage::CleanupSucceeded { .. })
+    ));
+}
+
+#[test]
+fn a_repo_is_one_queue_however_its_path_is_spelled() {
+    use crate::runtime::tasks::repo_queue_key;
+    let home = Some("/home/u");
+    assert_eq!(
+        repo_queue_key("~/x", home),
+        repo_queue_key("/home/u/x", home)
+    );
+    assert_eq!(
+        repo_queue_key("/home/u/x/", home),
+        repo_queue_key("/home/u/x", home)
+    );
+    assert_ne!(repo_queue_key("/a", home), repo_queue_key("/b", home));
 }
 
 #[tokio::test]

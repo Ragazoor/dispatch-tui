@@ -156,6 +156,9 @@ pub enum TaskMessage {
         id: TaskId,
         worktree: String,
         error: String,
+        /// What the cleanup was issued for, so a failure can undo what the
+        /// operation set up (RetryFresh's "dispatching" mark).
+        follow_up: CleanupFollowUp,
     },
     /// A delete's pre-check found the store's true rows not done, so nothing
     /// was torn down or purged. The board dropped the card(s) optimistically
@@ -166,6 +169,12 @@ pub enum TaskMessage {
     /// A batch delete went through: the selection it acted on is spent. A
     /// refused batch never sends this, so its selection stays to be narrowed.
     BatchDeleted,
+    /// A batch move finished. The tasks it moved leave the selection; the ones
+    /// the store refused stay selected, so the person can pick another target
+    /// or narrow the selection.
+    BatchMoved {
+        refused: Vec<TaskId>,
+    },
     ToggleSelect(TaskId),
     BatchMove {
         ids: Vec<TaskId>,
@@ -250,8 +259,14 @@ impl TaskMessage {
                 id,
                 worktree,
                 error,
-            } => app.handle_cleanup_failed(id, worktree, error),
+                follow_up,
+            } => app.handle_cleanup_failed(id, worktree, error, follow_up),
             TaskMessage::DeleteRefused { error } => app.handle_delete_refused(error),
+            TaskMessage::BatchMoved { refused } => {
+                app.select.tasks.retain(|id| refused.contains(id));
+                app.dirty = true;
+                vec![]
+            }
             TaskMessage::BatchDeleted => {
                 app.select.clear();
                 vec![]

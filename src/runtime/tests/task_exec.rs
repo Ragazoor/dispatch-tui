@@ -791,7 +791,7 @@ async fn exec_cleanup_failure_keeps_the_worktree_pointer() {
         repo_path: "/repo".into(),
         worktree: Some(worktree.into()),
         tmux_window: None,
-        follow_up: crate::tui::commands::CleanupFollowUp::ClearPointer,
+        follow_up: crate::tui::commands::CleanupFollowUp::ClearPointerAndRedispatch,
     });
     handle.await.unwrap();
 
@@ -1784,6 +1784,77 @@ async fn exec_move_task_to_epic_shows_error_for_missing_epic() {
 
     assert!(app.error_popup().is_some());
     assert_eq!(rt.database.get_task(id).await.unwrap().epic_id, None);
+}
+
+#[tokio::test]
+async fn exec_batch_move_keeps_refused_tasks_selected() {
+    let (rt, mut app) = test_runtime().await;
+    for title in ["A", "B"] {
+        rt.exec_insert_task(
+            &mut app,
+            tui::TaskDraft {
+                title: title.into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .await;
+    }
+    let ids: Vec<models::TaskId> = app.tasks().iter().map(|t| t.id).collect();
+    for id in &ids {
+        app.update(Message::Task(
+            crate::tui::messages::TaskMessage::ToggleSelect(*id),
+        ));
+    }
+
+    // An epic the store does not hold: every move is refused.
+    rt.exec_batch_move_to_epic(&mut app, ids.clone(), Some(models::EpicId(9999)))
+        .await;
+
+    assert_eq!(
+        app.selected_tasks(),
+        &ids.iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>(),
+        "refused tasks stay selected"
+    );
+    assert!(app.error_popup().is_some(), "the refusal is reported");
+}
+
+#[tokio::test]
+async fn exec_batch_move_clears_the_selection_of_what_it_moved() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt
+        .db_write()
+        .create_epic("Epic", "desc", None)
+        .await
+        .unwrap();
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "A".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(id),
+    ));
+
+    rt.exec_batch_move_to_epic(&mut app, vec![id], Some(epic.id))
+        .await;
+
+    assert_eq!(
+        rt.database.get_task(id).await.unwrap().epic_id,
+        Some(epic.id)
+    );
+    assert!(app.selected_tasks().is_empty());
 }
 
 /// `tasks.allium: ClearBuildOutputOfDoneTask`: the command removes the tagged

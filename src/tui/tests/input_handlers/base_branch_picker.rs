@@ -635,14 +635,13 @@ fn handle_key_confirm_retry_fresh() {
     app.input.mode = InputMode::ConfirmRetry(TaskId(10));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('f')));
-    // Should produce Cleanup + Dispatch
+    // The cleanup carries the re-dispatch on its completion.
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
-    )));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup {
+            follow_up: crate::tui::commands::CleanupFollowUp::ClearPointerAndRedispatch,
+            ..
+        })
     )));
     assert_eq!(*app.mode(), InputMode::Normal);
 }

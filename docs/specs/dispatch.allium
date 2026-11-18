@@ -1271,7 +1271,13 @@ rule RetryFresh {
         --
         -- The teardown of the old worktree and window is finished before the
         -- re-dispatch request is written, so provisioning never meets the
-        -- dying worktree and takes the reuse path on it.
+        -- dying worktree and takes the reuse path on it. The board does not
+        -- WAIT for it: the teardown runs in the background and the request is
+        -- written from the teardown's completion message, so keys and drawing
+        -- go on while git works. A teardown that could not remove the worktree
+        -- writes no request: the task is left in backlog with the failure
+        -- reported, and the person dispatches it once the directory is dealt
+        -- with. A task with nothing to tear down requests at once.
         --
         -- RetryFresh is the one board write that clears the worktree, host and
         -- window (tasks.allium: ABoardWriteLeavesThePointersAlone).

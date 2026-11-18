@@ -252,17 +252,15 @@ fn delete_task_with_worktree_gates_the_row_delete_on_cleanup() {
     let follow_up = cmds
         .iter()
         .find_map(|c| match c {
-            Command::Task(crate::tui::commands::TaskCommand::Cleanup {
-                follow_up,
-                await_teardown,
-                ..
-            }) => Some((*follow_up, *await_teardown)),
+            Command::Task(crate::tui::commands::TaskCommand::Cleanup { follow_up, .. }) => {
+                Some(*follow_up)
+            }
             _ => None,
         })
         .expect("delete of a task with a worktree must emit Cleanup");
     assert_eq!(
         follow_up,
-        (crate::tui::commands::CleanupFollowUp::DeleteRow, false),
+        crate::tui::commands::CleanupFollowUp::DeleteRow,
         "the cleanup owns the row delete, and runs in the background"
     );
     assert!(
