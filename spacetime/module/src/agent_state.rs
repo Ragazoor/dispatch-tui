@@ -475,6 +475,7 @@ pub fn try_record_stop(
     if row.status != RUNNING {
         return Err(format!("task {id} is not running"));
     }
+    require_acting_for_task_host(ctx, &row)?;
     // No current agent holds no subagents and no background work: the Stop
     // flips at once (A15).
     let Some(agent) = current_agent(&AgentTables(ctx), id) else {
@@ -496,14 +497,26 @@ pub fn try_record_stop(
     Ok(())
 }
 
+/// An agent's hooks reach the store through its own host's board, so only
+/// the owner of the task's host may record its Stop or end its wait. A task no
+/// host holds (empty `host`) has no agent to protect and is answered by any
+/// board, as the board's own `is_locally_owned` reads it.
+fn require_acting_for_task_host(ctx: &ReducerContext, row: &Task) -> Result<(), String> {
+    if row.host.is_empty() {
+        return Ok(());
+    }
+    require_acting_for(ctx, &row.host)
+}
+
 /// `agent-health.allium: config.background_wait_cap`: how long a Stop deferred
-/// for background work may hold a task running. The module owns it, so a
-/// board cannot shorten the wait by sending a different cutoff.
+/// for background work may hold a task running. The module owns it, and the
+/// clock it counts it on (`ctx.timestamp`), so a board can shorten the wait
+/// by neither a different cutoff nor a different `now`.
 pub const BACKGROUND_WAIT_CAP: chrono::Duration = chrono::Duration::minutes(30);
 
 /// The instant `BACKGROUND_WAIT_CAP` before `now`, in the store's timestamp
 /// format: what `stop_pending_at` and `last_pre_tool_use_at` are compared
-/// against. `now` is the board's clock, the one those two are written in.
+/// against. `now` is the store's clock (`ctx.timestamp`).
 pub fn background_wait_cutoff(now: &str) -> Result<String, String> {
     let now = chrono::NaiveDateTime::parse_from_str(now, SQLITE_TIMESTAMP)
         .map_err(|e| format!("not a store timestamp: {now:?} ({e})"))?;
@@ -515,15 +528,23 @@ pub fn background_wait_cutoff(now: &str) -> Result<String, String> {
 /// `ExpireBackgroundWait` in `docs/specs/agent-health.allium`. The board's
 /// tick asks; this write decides, against committed state, so a wake-up
 /// prompt that voided the Stop in between leaves nothing to apply. A row that
-/// does not qualify is a silent no-op. `now` is the board's clock, in the
-/// format `stop_pending_at` and `last_pre_tool_use_at` are written in; the
-/// module owns the cap and subtracts it itself.
+/// does not qualify is a silent no-op. The clock is the store's own
+/// (`ctx.timestamp`); the `now` argument stays only so the reducer's signature, and
+/// the generated client bindings with it, do not change. The module owns the
+/// cap and subtracts it itself.
 #[spacetimedb::reducer]
-pub fn expire_background_wait(ctx: &ReducerContext, id: i64, now: String) -> Result<(), String> {
-    let cutoff = background_wait_cutoff(&now)?;
+pub fn expire_background_wait(
+    ctx: &ReducerContext,
+    id: i64,
+    now: String,
+) -> Result<(), String> {
+    // Not the argument: see above.
+    let _ = now;
+    let cutoff = background_wait_cutoff(&crate::support::now(ctx))?;
     let Some(row) = visible_task(ctx, id) else {
         return Ok(());
     };
+    require_acting_for_task_host(ctx, &row)?;
     let Some(agent) = current_agent(&AgentTables(ctx), id) else {
         return Ok(());
     };

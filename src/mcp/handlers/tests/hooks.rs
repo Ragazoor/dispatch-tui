@@ -70,11 +70,12 @@ async fn missing_task_does_not_push_task_changed() {
     );
 }
 
-/// A hook for a task the store holds but this board cannot decode answers the
-/// quiet not-found outcome, so the agent's hook does not fail on every tool
-/// use (observability.allium: `ReadByIdReportsAnUndecodableTask`).
+/// A PreToolUse hook for a task the store holds but this board cannot decode
+/// still stamps the activity (the store checks `running` itself) and does not
+/// fail the agent's hook (observability.allium:
+/// `ReadByIdReportsAnUndecodableTask`).
 #[tokio::test]
-async fn a_hook_for_an_undecodable_task_answers_not_found() {
+async fn a_pre_tool_use_for_an_undecodable_task_is_still_applied() {
     use crate::hooks::wire::{HookResponse, ObserveOutcome};
     let db = Store::open_in_memory().unwrap();
     db.plant_undecodable_task(42);
@@ -86,8 +87,8 @@ async fn a_hook_for_an_undecodable_task_answers_not_found() {
         None,
     );
 
-    // PreToolUse is the event that reads the row; the others write straight
-    // to the store, which still holds it.
+    // PreToolUse is the event that reads the row; dropping it would freeze
+    // the agent's activity on every board.
     let request = HookRequest::Observe(ObservedEvent::Event {
         task_id: TaskId(42),
         kind: HookEventKind::PreToolUse,
@@ -95,9 +96,18 @@ async fn a_hook_for_an_undecodable_task_answers_not_found() {
     });
     let Json(resp) = handle_hook(State(state), Json(request)).await;
     assert!(
-        matches!(resp, HookResponse::Observed(ObserveOutcome::TaskNotFound)),
+        matches!(resp, HookResponse::Observed(ObserveOutcome::Applied)),
         "{resp:?}"
     );
+}
+
+/// The undecodable-task warning is logged once per task id, not per tool call.
+#[test]
+fn the_undecodable_task_warning_is_given_once_per_task() {
+    use crate::mcp::handlers::hooks::first_undecodable_warning;
+    assert!(first_undecodable_warning(TaskId(424_242)));
+    assert!(!first_undecodable_warning(TaskId(424_242)));
+    assert!(first_undecodable_warning(TaskId(424_243)));
 }
 
 /// A pane keypress delivered over the hook endpoint is recorded as a

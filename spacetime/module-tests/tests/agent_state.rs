@@ -21,6 +21,20 @@ fn running_task() -> (Store, i64) {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
     let id = store.create("alice", user_task("t", "alice"));
+    dispatch_running(store, id)
+}
+
+/// `running_task` on an epic every member sees, so a second person is a
+/// viewer of it.
+fn running_epic_task() -> (Store, i64) {
+    let store = Store::new();
+    store.register_host_for(HOST_A, "alice");
+    let epic = store.create_epic("alice", "e", false);
+    let id = store.create("alice", epic_task("t", epic, "backlog"));
+    dispatch_running(store, id)
+}
+
+fn dispatch_running(store: Store, id: i64) -> (Store, i64) {
     store
         .call("alice", |ctx| {
             request_dispatch(ctx, id, HOST_A.into(), "user".into(), String::new())
@@ -86,12 +100,14 @@ fn current(store: &Store, task: i64) -> Agent {
         .expect("a current agent")
 }
 
-fn expire(store: &Store, task: i64, now: &str) {
-    try_expire(store, task, now).expect("expire_background_wait");
+fn expire(store: &Store, task: i64) {
+    try_expire_as(store, "alice", task, "").expect("expire_background_wait");
 }
 
-fn try_expire(store: &Store, task: i64, now: &str) -> Result<(), String> {
-    store.call("alice", |ctx| expire_background_wait(ctx, task, now.into()))
+/// The `now` argument is the client's claim, which the module ignores: the
+/// store's own clock decides.
+fn try_expire_as(store: &Store, who: &str, task: i64, now: &str) -> Result<(), String> {
+    store.call(who, |ctx| expire_background_wait(ctx, task, now.into()))
 }
 
 /// `HookStop`: a Stop whose list holds background work defers like one with
@@ -174,9 +190,10 @@ fn idle_prompt_is_ignored_while_waiting_on_background_work() {
 #[test]
 fn expire_background_wait_flips_a_wait_past_the_cap() {
     let (store, id) = running_task();
-    try_stop_with(&store, id, "2026-10-10 13:00:00.000", shells(1)).expect("stop");
+    try_stop_with(&store, id, "2026-10-10 12:00:00.000", shells(1)).expect("stop");
+    store.advance_secs(30 * 60);
 
-    expire(&store, id, "2026-10-10 13:30:00.000");
+    expire(&store, id);
 
     assert_eq!(store.task(id).status, "review");
     assert!(!current(&store, id).stop_pending);
@@ -186,9 +203,10 @@ fn expire_background_wait_flips_a_wait_past_the_cap() {
 #[test]
 fn expire_background_wait_leaves_a_recent_stop_alone() {
     let (store, id) = running_task();
-    try_stop_with(&store, id, "2026-10-10 13:00:00.000", shells(1)).expect("stop");
+    try_stop_with(&store, id, "2026-10-10 12:00:00.000", shells(1)).expect("stop");
+    store.advance_secs(30 * 60 - 1);
 
-    expire(&store, id, "2026-10-10 13:29:59.000");
+    expire(&store, id);
 
     assert_eq!(store.task(id).status, "running");
 }
@@ -199,14 +217,15 @@ fn expire_background_wait_leaves_a_recent_stop_alone() {
 #[test]
 fn expire_background_wait_leaves_a_recently_active_agent_alone() {
     let (store, id) = running_task();
-    try_stop_with(&store, id, "2026-10-10 13:00:00.000", shells(1)).expect("stop");
+    try_stop_with(&store, id, "2026-10-10 12:00:00.000", shells(1)).expect("stop");
     store
         .call("alice", |ctx| {
-            record_pre_tool_use(ctx, id, "active".into(), "2026-10-10 13:20:00".into())
+            record_pre_tool_use(ctx, id, "active".into(), "2026-10-10 12:20:00".into())
         })
         .expect("record_pre_tool_use");
+    store.advance_secs(40 * 60);
 
-    expire(&store, id, "2026-10-10 13:40:00.000");
+    expire(&store, id);
 
     assert_eq!(store.task(id).status, "running");
 }
@@ -221,9 +240,10 @@ fn expire_background_wait_ignores_a_subagent_only_defer() {
             subagent_start(ctx, id, "a1".into(), "s1".into(), "2026-10-10 12:00:00".into())
         })
         .expect("subagent_start");
-    try_stop(&store, id, "2026-10-10 13:00:00.000").expect("stop");
+    try_stop(&store, id, "2026-10-10 12:00:00.000").expect("stop");
+    store.advance_secs(2 * 60 * 60);
 
-    expire(&store, id, "2026-10-10 14:00:00.000");
+    expire(&store, id);
 
     assert_eq!(store.task(id).status, "running");
 }
@@ -237,9 +257,10 @@ fn expire_background_wait_waits_for_live_subagents() {
             subagent_start(ctx, id, "a1".into(), "s1".into(), "2026-10-10 12:00:00".into())
         })
         .expect("subagent_start");
-    try_stop_with(&store, id, "2026-10-10 13:00:00.000", shells(1)).expect("stop");
+    try_stop_with(&store, id, "2026-10-10 12:00:00.000", shells(1)).expect("stop");
+    store.advance_secs(2 * 60 * 60);
 
-    expire(&store, id, "2026-10-10 14:00:00.000");
+    expire(&store, id);
 
     assert_eq!(store.task(id).status, "running");
 }
@@ -301,18 +322,36 @@ fn mark_pr_learnings_gate_shown_wins_exactly_once() {
     assert!(second.is_err(), "a second call must be refused");
 }
 
-/// The module owns the cap: the board sends only its own `now`, so no value it
-/// can send shortens the wait. A `now` that is not a store timestamp is
-/// refused rather than read as "long ago".
+/// The module owns the cap and the clock: no `now` a client sends, however
+/// far ahead or unreadable, shortens the wait.
 #[test]
-fn expire_background_wait_refuses_a_now_that_is_not_a_store_timestamp() {
+fn expire_background_wait_ignores_the_clients_now() {
     let (store, id) = running_task();
-    try_stop_with(&store, id, "2026-10-10 13:00:00.000", shells(1)).expect("stop");
+    try_stop_with(&store, id, "2026-10-10 12:00:00.000", shells(1)).expect("stop");
+    store.advance_secs(60);
 
-    assert!(try_expire(&store, id, "").is_err());
-    assert!(try_expire(&store, id, "yesterday").is_err());
+    try_expire_as(&store, "alice", id, "2099-01-01 00:00:00.000").expect("a far-future now");
+    try_expire_as(&store, "alice", id, "yesterday").expect("an unreadable now");
 
     assert_eq!(store.task(id).status, "running");
+}
+
+/// An agent's hooks reach the store through its own host's board: another
+/// person cannot end its wait, nor hold it by deferring its Stop.
+#[test]
+fn the_hook_reducers_require_the_caller_to_act_for_the_tasks_host() {
+    let (store, id) = running_epic_task();
+    try_stop_with(&store, id, "2026-10-10 12:00:00.000", shells(1)).expect("stop");
+    store.advance_secs(2 * 60 * 60);
+
+    assert!(try_expire_as(&store, "bob", id, "").is_err());
+    assert_eq!(store.task(id).status, "running");
+
+    let deferred = store.call("bob", |ctx| {
+        try_record_stop(ctx, id, "2026-10-10 13:59:00.000".into(), shells(1))
+    });
+    assert!(deferred.is_err());
+    assert_eq!(current(&store, id).stop_pending_at, "2026-10-10 12:00:00.000");
 }
 
 #[test]

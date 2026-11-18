@@ -191,6 +191,19 @@ pub async fn handle_pane_resume(
     }
 }
 
+/// Whether this is the first undecodable-task warning for `task_id` in this
+/// process; later ones are dropped so `app.log` does not grow by a line per
+/// tool call.
+pub(super) fn first_undecodable_warning(task_id: TaskId) -> bool {
+    static WARNED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<i64>>> =
+        std::sync::LazyLock::new(Default::default);
+    match WARNED.lock() {
+        Ok(mut warned) => warned.insert(task_id.0),
+        // A poisoned set only means a warning too many.
+        Err(_) => true,
+    }
+}
+
 async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
     // A pane keypress is usage, not a change to the task: it is recorded and
     // nothing is re-read or refreshed.
@@ -219,9 +232,12 @@ async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
         // A task this board cannot decode cannot take the event either, and
         // failing the hook would put an error in the agent's terminal on every
         // tool use for something it cannot act on. Warned here once per event
-        // instead (observability.allium: `ReadByIdReportsAnUndecodableTask`).
+        // instead (observability.allium: `ReadByIdReportsAnUndecodableTask`),
+        // once per task id: an agent fires a hook on every tool call.
         Err(ServiceError::UndecodableTask(reason)) => {
-            tracing::warn!(task_id = task_id.0, "hook event skipped: {reason}");
+            if first_undecodable_warning(task_id) {
+                tracing::warn!(task_id = task_id.0, "hook event skipped: {reason}");
+            }
             ObserveOutcome::TaskNotFound
         }
         Err(e) => {

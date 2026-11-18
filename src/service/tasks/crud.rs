@@ -641,13 +641,19 @@ impl TaskService {
                 // so a stale read self-corrects within a tick. The
                 // `status = running` guard, which cannot self-correct, rides in
                 // the write.
-                let task = self.get_task(id).await?;
-                let activity = classify_agent_activity(
-                    Some(now),
-                    task.last_notification_at,
-                    task.live_work(),
-                    now,
-                );
+                //
+                // A task this board cannot decode is still stamped, from what
+                // a row with no notification and no live work reads as: the
+                // store holds the row and checks `running` itself, and
+                // dropping the event would freeze the agent's activity on
+                // every board.
+                let (last_notification_at, live_work) = match self.get_task(id).await {
+                    Ok(task) => (task.last_notification_at, task.live_work()),
+                    Err(ServiceError::UndecodableTask(_)) => (None, 0),
+                    Err(e) => return Err(e),
+                };
+                let activity =
+                    classify_agent_activity(Some(now), last_notification_at, live_work, now);
                 self.db
                     .record_pre_tool_use(id, activity.to_sub_status(), now)
                     .await?;

@@ -192,14 +192,21 @@ impl Store {
 
     /// The verify half of predict-then-verify: keep only candidates
     /// confirmed gone from this connection's view after the reducer call
-    /// returned.
+    /// returned. A task is gone only if its epic is still in the view: a
+    /// task that left with its epic (made private, or moved out of sight,
+    /// during the round trip) may still exist, and reporting it would tear
+    /// down a live worktree and window. The ingest deletes tasks, never
+    /// epics, so a deleted task's epic stays in view.
     fn confirm_removed(
         &self,
         candidates: Vec<crate::models::Task>,
     ) -> Vec<crate::store::RemovedFeedTask> {
         let mut removed = Vec::with_capacity(candidates.len());
         for candidate in candidates {
-            if !self.rows.has_task(candidate.id) {
+            let epic_in_view = candidate
+                .epic_id
+                .is_some_and(|epic| self.rows.epic(epic).is_some());
+            if epic_in_view && !self.rows.has_task(candidate.id) {
                 removed.push(crate::store::RemovedFeedTask {
                     id: candidate.id,
                     repo_path: candidate.repo_path,

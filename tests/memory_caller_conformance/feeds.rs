@@ -793,5 +793,43 @@ fn ingest_keeps_a_worked_on_feed_task_like_the_real_module() {
         let want = vec![("x-1".to_string(), "backlog".to_string())];
         assert_eq!(statuses(&rows_mem), want);
         wait_for!(statuses(&rows_real) == want);
+
+        // Worked on again, the item leaves: kept in done, the first absence.
+        let running = bindings::TaskPatch {
+            status: Some("running".into()),
+            sub_status: Some("active".into()),
+            ..blank_task_patch()
+        };
+        real.patch_task(id_of(&rows_real, "x-1"), running.clone())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        mem.patch_task(id_of(&rows_mem, "x-1"), running.clone())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        ingest(vec![]).await;
+        let want = vec![("x-1".to_string(), "done".to_string())];
+        assert_eq!(statuses(&rows_mem), want);
+        wait_for!(statuses(&rows_real) == want);
+
+        // Resumed by hand while still absent: a later cycle leaves it running
+        // instead of closing it under its agent again.
+        real.patch_task(id_of(&rows_real, "x-1"), running.clone())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        mem.patch_task(id_of(&rows_mem, "x-1"), running)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        ingest(vec![]).await;
+        let want = vec![("x-1".to_string(), "running".to_string())];
+        assert_eq!(statuses(&rows_mem), want);
+        wait_for!(statuses(&rows_real) == want);
     });
 }

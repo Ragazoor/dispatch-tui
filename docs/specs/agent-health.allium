@@ -431,6 +431,10 @@ rule HookStop {
     let agent = current_agent(task)
 
     requires: task.status = running
+    -- An agent's hooks reach the store through its own host's board: only the
+    -- owner of the task's host may record its Stop. A task no host holds is
+    -- answered by any board.
+    requires: task.host = null or task.host.owner = caller()
 
     ensures:
         if exists agent and (agent.live_subagents > 0 or background.total > 0):
@@ -564,10 +568,13 @@ rule ExpireBackgroundWait {
         -- would race the wake-up prompt: the prompt could void the Stop in
         -- between and the patch would still move a working agent to review.
         -- The tick only asks; a row that no longer qualifies is a silent
-        -- no-op. The module owns config.background_wait_cap and subtracts it
-        -- itself: the board sends nothing but its own clock (the one
-        -- stop_pending_at and last_pre_tool_use_at are written in), so no
-        -- value a board sends can shorten a wait. The board reads the same
+        -- no-op. The module owns config.background_wait_cap and the clock it
+        -- is counted on: it subtracts the cap from its own transaction time,
+        -- and whatever `now` a board sends is ignored, so no value a board
+        -- sends can shorten a wait. The caller must also act for the task's
+        -- host (a task no host holds is answered by any board): another
+        -- viewer can neither expire a person's wait nor hold their task
+        -- running by deferring its Stop. The board reads the same
         -- constant only to avoid asking about waits that cannot have
         -- expired. Only the host that owns the task asks, as with
         -- DetectCrashedAgent, so two boards never race each other for it.

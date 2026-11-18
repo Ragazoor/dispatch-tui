@@ -528,4 +528,8 @@ fn a_task_that_left_its_feed_moves_to_done_only_from_running_or_review() {
     assert_eq!(left_feed_moves_to_done(&task("review", false)), Some(true));
     assert_eq!(left_feed_moves_to_done(&task("done", false)), Some(false), "marked only");
     assert_eq!(left_feed_moves_to_done(&task("done", true)), None, "nothing to write");
+    // A kept task someone resumed is running again with left_feed still set:
+    // the feed never closes it a second time.
+    assert_eq!(left_feed_moves_to_done(&task("running", true)), None, "resumed");
+    assert_eq!(left_feed_moves_to_done(&task("review", true)), None, "resumed");
 }

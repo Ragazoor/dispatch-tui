@@ -303,13 +303,16 @@ pub fn left_feed_is_deleted(task: &Task) -> bool {
 }
 
 /// `feeds.allium: KeepWorkedOnFeedTask`'s decision for a feed task whose
-/// item left: `None` when the task is already marked and not running or in
-/// review, so a later absent cycle writes nothing; otherwise whether it also
-/// moves into done. Shared with the board's in-memory caller, so the two
+/// item left: `None` when the task is already marked (`left_feed`), so a
+/// later absent cycle writes nothing, even if someone resumed it; otherwise
+/// whether it also moves into done (running or review). Shared with the board's in-memory caller, so the two
 /// cannot drift.
 pub fn left_feed_moves_to_done(task: &Task) -> Option<bool> {
-    let finishing = task.status == RUNNING || task.status == REVIEW;
-    (finishing || !task.left_feed).then_some(finishing)
+    // Only the first absence acts: a kept task someone resumed is theirs.
+    if task.left_feed {
+        return None;
+    }
+    Some(task.status == RUNNING || task.status == REVIEW)
 }
 
 /// The patch [`keep_left_feed_task`] moves a task into done with: the same

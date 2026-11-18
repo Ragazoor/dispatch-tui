@@ -134,6 +134,13 @@ use super::*;
 ///    on an embedding-only patch; `link_work_package_item` checks the
 ///    package's sight before the item (`learnings.allium`, `workspaces.allium:
 ///    UnseenIsAsMissing`).
+/// 58: the hook reducers judge time and authority themselves —
+///    `expire_background_wait` counts the cap on the store's clock, not the
+///    caller's `now`, and it and `try_record_stop` require the caller to act
+///    for the task's host (`agent-health.allium: HookStop`,
+///    `ExpireBackgroundWait`); a kept feed task that was resumed is not moved
+///    to done again (`feeds.allium: KeepWorkedOnFeedTask`). A board still
+///    sending the old rules would be refused, or would close a resumed task.
 /// 41: loss of sight ends claims and marks together — `on_sight_lost` and
 ///    `on_task_sight_lost` (`config.rs`) release the poll claims and end the
 ///    unseen marks and bookmarks of whoever no longer sees a task, on every
@@ -301,7 +308,7 @@ use super::*;
 /// stranger's rows would disagree with the store.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 57;
+pub const RULES_VERSION: i64 = 58;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

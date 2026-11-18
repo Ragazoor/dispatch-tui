@@ -20,6 +20,13 @@ fn feed_task_row(id: i64, epic: i64, external_id: &str) -> bindings::Task {
     row
 }
 
+/// Epic `id` as the subscription would deliver it.
+fn epic_row(id: i64) -> bindings::Epic {
+    let mut row = crate::sync::encode::create_epic_row("Feed", "", None, "user-me", AT_STORED);
+    row.id = id;
+    row
+}
+
 fn a_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
     crate::models::FeedItem {
         external_id: external_id.to_string(),
@@ -43,6 +50,7 @@ fn a_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
 #[tokio::test]
 async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
     let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_epic(&epic_row(1));
     rows.upsert_task(&feed_task_row(1, 1, "gone"));
     rows.upsert_task(&feed_task_row(2, 1, "raced"));
     rows.upsert_task(&feed_task_row(3, 1, "kept"));
@@ -82,12 +90,32 @@ async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
     );
 }
 
+/// A task that left this board's view because its epic did (it went private
+/// or moved out of sight during the round trip) still exists, so it is not
+/// reported removed: `FeedCycle` would tear down its worktree and window.
+#[tokio::test]
+async fn a_task_that_left_the_view_with_its_epic_is_not_reported_removed() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    // Epic 1 is not in this board's view, and the task leaves it too.
+    rows.upsert_task(&feed_task_row(1, 1, "unseen"));
+    let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[1]);
+    let (writer, _sent) = writer_over(rows, caller);
+
+    let outcome = writer
+        .ingest_feed(EpicId(1), &[], &[], &[], false)
+        .await
+        .unwrap();
+
+    assert!(outcome.removed.is_empty(), "{:?}", outcome.removed);
+}
+
 /// `ingest_feed` is one reducer call carrying the additive flag and the
 /// caller's identity; a reconciling call reports the rows the module removed
 /// that this board predicted, an additive one reports none.
 #[tokio::test]
 async fn ingest_feed_is_one_call_and_reports_only_confirmed_removals() {
     let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_epic(&epic_row(1));
     rows.upsert_task(&feed_task_row(1, 1, "absent-from-emission"));
     let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[1]);
     let (writer, sent) = writer_over(rows, caller);

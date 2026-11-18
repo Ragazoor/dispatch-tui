@@ -2155,10 +2155,14 @@ rule KeepWorkedOnFeedTask {
     -- (UpsertFeedTasks' match arm). It is set on a done task too, so a card
     -- the user finished by hand reopens if its item leaves and later returns.
     --
-    -- IDEMPOTENT. The item stays absent on every later trusted cycle, so this
-    -- rule fires again each time. The second firing finds the task in done
-    -- with left_feed set and writes nothing: no new completed_at, no
-    -- updated_at bump, no second close row.
+    -- IDEMPOTENT, AND ONCE ONLY. The item stays absent on every later trusted
+    -- cycle, so this rule fires again each time. Every later firing finds
+    -- left_feed set and writes nothing: no new completed_at, no updated_at
+    -- bump, no second close row. That holds whatever the task's status is
+    -- by then: a kept task someone resumed by hand (running or review again,
+    -- left_feed still set) is never moved back to done or closed under its
+    -- agent. Only the first absence acts; the item's return clears left_feed
+    -- (UpsertFeedTasks' match arm), so a later absence counts as new.
     --
     -- NEVER CLOSES THE PR. The close row is the one a hand move to done
     -- writes (store-split.allium: HandMoveReleasesAWindowTheBoardDidNotSee),
@@ -2172,6 +2176,7 @@ rule KeepWorkedOnFeedTask {
     -- DegradedNonEmptyEmission).
 
     requires: task.external_id != null and task.status != backlog
+    requires: not task.left_feed
 
     let window = task.current_window
     let teardown_host = if task.host != null: task.host else: ingest_host
@@ -2785,7 +2790,11 @@ rule RoleRoutedFeedSync {
         -- is the board's prediction narrowed to rows CONFIRMED gone after the
         -- commit, so the set torn down never exceeds the set deleted; a row
         -- raced back in by another writer is under-reported, never torn down
-        -- (see how the report is built, under UpsertFeedTasks).
+        -- (see how the report is built, under UpsertFeedTasks). "Gone" also
+        -- needs the task's epic still in the board's view: a task that left
+        -- the view because its epic went private or moved out of sight during
+        -- the round trip may still exist, so it is not reported (the ingest
+        -- deletes tasks, never epics).
         -- The cost, stated honestly: if the process dies between the commit
         -- and the teardown, the worktree is orphaned on disk with no row left
         -- to retry from. That is accepted — the alternative is holding a write

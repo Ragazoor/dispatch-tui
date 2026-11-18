@@ -280,6 +280,8 @@ impl MemoryReducerCaller {
         if row.status != RUNNING {
             return Ok(None);
         }
+        self.acting_for_task_host(&tables, &row)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         let background = module::BackgroundWork::from(background);
         // No current agent holds no subagents and no background work: the
         // Stop flips at once (A15).
@@ -304,15 +306,28 @@ impl MemoryReducerCaller {
         ))
     }
 
+    /// Mirrors the module's `require_acting_for_task_host`: a task no host
+    /// holds is answered by any board.
+    fn acting_for_task_host(&self, tables: &Tables, row: &module::Task) -> Result<(), String> {
+        if row.host.is_empty() {
+            return Ok(());
+        }
+        self.acting_for(tables, &row.host)
+    }
+
     /// Mirrors the module's `expire_background_wait`: the same predicate,
     /// `module::background_wait_expired`, and the same flip.
+    ///
+    /// The clock is the store's own, as the module's `ctx.timestamp`; the
+    /// caller's `_client_now` is ignored, and the caller must act for the
+    /// task's host.
     pub(super) fn apply_expire_background_wait(
         &self,
         id: TaskId,
-        now: DateTime<Utc>,
+        _client_now: DateTime<Utc>,
     ) -> Result<ReducerOutcome> {
         let id = id.0;
-        let cutoff = match module::background_wait_cutoff(&encode::stamp(now)) {
+        let cutoff = match module::background_wait_cutoff(&self.now()) {
             Ok(cutoff) => cutoff,
             Err(why) => return Ok(ReducerOutcome::Refused(why)),
         };
@@ -320,6 +335,9 @@ impl MemoryReducerCaller {
         let Some(row) = tables.tasks.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        if let Err(why) = self.acting_for_task_host(&tables, &row) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let Some(agent) = module::current_agent(&self.agent_store(&mut tables), id) else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };

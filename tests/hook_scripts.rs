@@ -184,6 +184,43 @@ fn stop_falls_back_to_a_plain_stop_when_the_counts_are_rejected() {
     );
 }
 
+/// A non-object element in `background_tasks` must not abort the script
+/// before the Stop is recorded: the other entries still count.
+#[test]
+fn stop_survives_a_non_object_background_task_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_on_branch(dir.path(), "7-hotfix");
+    let input = payload(
+        &repo,
+        "Stop",
+        r#","background_tasks":["oops",{"id":"b1","type":"shell","status":"running","description":"d","command":"sleep 25"}]"#,
+    );
+    let (code, calls) = run_script("task-status-hook", &input, Some("42"), 0, &repo, dir.path());
+    assert_eq!(code, Some(0));
+    assert_eq!(
+        calls.trim(),
+        "hook 42 stop --shells 1 --workflows 0 --monitors 0 --mcp-tasks 0"
+    );
+}
+
+/// Only an old binary's usage error (exit 2) falls back to the plain stop; a
+/// different failure must not turn a still-waiting task into a stopped one.
+#[test]
+fn stop_does_not_fall_back_to_a_plain_stop_on_other_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_on_branch(dir.path(), "7-hotfix");
+    let input = payload(
+        &repo,
+        "Stop",
+        r#","background_tasks":[{"id":"b1","type":"shell","status":"running","description":"d","command":"sleep 25"}]"#,
+    );
+    let (_, calls) = run_script("task-status-hook", &input, Some("42"), 1, &repo, dir.path());
+    assert_eq!(
+        calls.lines().collect::<Vec<_>>(),
+        ["hook 42 stop --shells 1 --workflows 0 --monitors 0 --mcp-tasks 0"]
+    );
+}
+
 #[test]
 fn session_start_clears_the_launch_task_not_the_branch() {
     let dir = tempfile::tempdir().unwrap();
