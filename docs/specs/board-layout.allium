@@ -787,10 +787,13 @@ given {
 --   Active: a mode whose form the panel itself draws (new task, new epic,
 --   quick dispatch, retry confirmation, and so on) reserves enough rows to
 --   show that form, bordered and titled for the mode. Most such modes need
---   a fixed number of rows; a mode that lists repositories (quick dispatch,
---   or the repo-path prompt with an empty query) grows the panel to fit
---   every matching repo instead, up to the space the board can spare — the
---   kanban board never drops below a minimum height to make room for it.
+--   a fixed number of rows; a mode that lists candidates (quick dispatch,
+--   the repo-path prompt and the base-branch prompt, whatever the query)
+--   grows the panel to fit every matching candidate and the hint row under
+--   them instead, up to the space the board can spare — the kanban board
+--   never drops below a minimum height to make room for it. When the panel
+--   is capped, the candidate list scrolls; the form's other rows and its
+--   hint row are never clipped.
 --
 --   Entering or leaving an input mode changes the panel's height
 --   immediately; the kanban board resizes on the same frame, never leaving

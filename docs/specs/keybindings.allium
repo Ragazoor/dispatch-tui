@@ -99,9 +99,16 @@ contract KeybindingDriftGate {
         -- Every bracketed key hint a board mode draws (status bar, popup,
         -- form prompt, overlay footer; not the board drawn under it) names
         -- a key of that mode's namespace, so a hint never advertises a key
-        -- the mode does not answer. The companion pane's section titles are
-        -- built from the table (PaneTitlesNameTheirOwnKeys) and asserted to
-        -- name their rows' keys.
+        -- the mode does not answer. It is read on every board.filter tab and
+        -- every board.admin pane. Four namespaces are not read: board.normal
+        -- and board.detail (their frame is the board itself), board.help
+        -- (built from the table) and board.error (its catch-all answers any
+        -- key). Three modes write their keys unbracketed and are named as
+        -- reading no hint: board.picker.move_to_epic,
+        -- board.picker.reparent_epic and board.confirm.delete_repo_path; any
+        -- other mode that reads none fails, so the check cannot go blind.
+        -- The companion pane's section titles are built from the table
+        -- (PaneTitlesNameTheirOwnKeys) and asserted to name their rows' keys.
 
     @invariant TmuxGlobalRowsTrackTheirBindings
         -- The tmux.global toggle_agent_tree row's key is `Prefix+` followed
