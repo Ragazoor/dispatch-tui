@@ -98,8 +98,17 @@ impl super::super::LearningStore for Store {
             .collect())
     }
 
+    /// Only the learnings this board's person sees: the store skips a patch to
+    /// any other, so listing it would re-embed it on every startup
+    /// (`learnings.allium: RecordLearningViaMcp`, the repair pass).
     async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>> {
-        Ok(self.rows.learnings_missing_embedding())
+        let reader = self.learning_reader().await;
+        Ok(self
+            .rows
+            .learnings_missing_embedding()
+            .into_iter()
+            .filter(|l| reader.sees(l))
+            .collect())
     }
 
     /// Always `0`. The archived count is best-effort telemetry, not a
@@ -223,5 +232,26 @@ mod tests {
         assert!(store.get_learning(LearningId(2)).await.unwrap().is_none());
         assert!(store.get_learning(LearningId(4)).await.unwrap().is_none());
         assert!(store.get_learning(LearningId(3)).await.unwrap().is_some());
+    }
+
+    /// The repair pass lists only what the reader sees: the store would skip
+    /// the write to any other row, so it would be re-embedded every startup.
+    #[tokio::test]
+    async fn the_missing_embedding_list_shows_only_what_the_reader_may_see() {
+        let store = Store::open_in_memory().unwrap();
+        for row in [
+            learning(1, 0, MEMORY_USER_ID), // private, mine
+            learning(2, 0, "someone"),      // private, theirs
+        ] {
+            store.rows.upsert_learning(&row);
+        }
+        let listed: Vec<i64> = store
+            .list_learnings_missing_embedding()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|l| l.id.0)
+            .collect();
+        assert_eq!(listed, vec![1]);
     }
 }

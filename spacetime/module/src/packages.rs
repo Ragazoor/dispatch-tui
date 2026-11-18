@@ -225,24 +225,6 @@ fn validate_item_exists(ctx: &ReducerContext, item: &WorkPackageItemRef) -> Resu
     Ok(())
 }
 
-fn validate_link_target(
-    ctx: &ReducerContext,
-    work_package_id: i64,
-    kind: &str,
-    item_id: i64,
-) -> Result<(), String> {
-    if ctx.db.work_packages().id().find(work_package_id).is_none() {
-        return Err(format!("no work package {work_package_id}"));
-    }
-    validate_item_exists(
-        ctx,
-        &WorkPackageItemRef {
-            kind: kind.to_string(),
-            item_id,
-        },
-    )
-}
-
 /// Write the link unless its derived key is present. The caller has validated
 /// the package and the item.
 fn insert_link_if_absent(ctx: &ReducerContext, work_package_id: i64, item: WorkPackageItemRef) {
@@ -267,10 +249,18 @@ pub fn link_work_package_item(
     kind: String,
     item_id: i64,
 ) -> Result<(), String> {
-    validate_link_target(ctx, work_package_id, &kind, item_id)?;
+    // Sight first: an unseen package answers as a missing one, whatever the
+    // item (`workspaces.allium: UnseenIsAsMissing`).
     let Some(package) = visible_package(ctx, work_package_id) else {
         return Err(format!("no work package {work_package_id}"));
     };
+    validate_item_exists(
+        ctx,
+        &WorkPackageItemRef {
+            kind: kind.clone(),
+            item_id,
+        },
+    )?;
     check_link_allowed(ctx, &package, &kind, item_id)?;
     insert_link_if_absent(ctx, work_package_id, WorkPackageItemRef { kind, item_id });
     Ok(())

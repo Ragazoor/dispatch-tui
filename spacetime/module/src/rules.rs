@@ -126,6 +126,14 @@ use super::*;
 ///    refused while a person who would lose sight of a task runs it from a host
 ///    (`visibility.rs: epic_change_strands_a_host`; `workspaces.allium:
 ///    SightChangeNeverStrandsAHost`).
+/// 57: learning scope and work-package sight — `create_learning` refuses a
+///    blank repo `scope_ref` and an epic one that names no epic
+///    (`epic_scope_ref_names_an_epic`); `delete_epic` and `batch_delete` move
+///    a repo-group sub-epic's learnings to its parent
+///    (`rescope_repo_group_learnings`); `patch_learning` leaves `updated_at`
+///    on an embedding-only patch; `link_work_package_item` checks the
+///    package's sight before the item (`learnings.allium`, `workspaces.allium:
+///    UnseenIsAsMissing`).
 /// 41: loss of sight ends claims and marks together — `on_sight_lost` and
 ///    `on_task_sight_lost` (`config.rs`) release the poll claims and end the
 ///    unseen marks and bookmarks of whoever no longer sees a task, on every
@@ -293,7 +301,7 @@ use super::*;
 /// stranger's rows would disagree with the store.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 56;
+pub const RULES_VERSION: i64 = 57;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

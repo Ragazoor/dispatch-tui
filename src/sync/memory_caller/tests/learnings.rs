@@ -61,6 +61,67 @@ async fn create_learning_refuses_a_scoped_learning_with_no_scope_ref() {
     assert!(outcome.is_err());
 }
 
+/// `RecordLearningViaMcp`, mirroring the module's `create_learning`.
+#[tokio::test]
+async fn create_learning_refuses_a_blank_repo_ref_and_an_epic_ref_naming_no_epic() {
+    let (caller, rows) = caller();
+    for (scope, scope_ref) in [
+        ("repo", ""),
+        ("repo", "  "),
+        ("epic", "9999"),
+        ("epic", "abc"),
+    ] {
+        let outcome = caller
+            .create_learning(bindings::Learning {
+                scope: scope.into(),
+                scope_ref: Some(scope_ref.into()),
+                ..blank_learning()
+            })
+            .await;
+        assert!(outcome.is_err(), "{scope} {scope_ref:?}");
+    }
+    assert!(rows.learning(LearningId(1)).is_none(), "nothing stored");
+}
+
+/// The startup repair pass changes nothing else: an embedding-only patch
+/// leaves `updated_at`, a content patch moves it.
+#[tokio::test]
+async fn an_embedding_only_patch_leaves_updated_at() {
+    let (caller, rows) = caller();
+    let id = caller
+        .create_learning(bindings::Learning {
+            updated_at: "2020-01-01 00:00:00.000".into(),
+            ..blank_learning()
+        })
+        .await
+        .unwrap();
+    let stamp = rows.learning(id).unwrap().updated_at;
+    caller
+        .patch_learning(
+            id,
+            bindings::LearningPatch {
+                status: None,
+                summary: None,
+                embedding: Some(Some(vec![1, 2, 3])),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.learning(id).unwrap().updated_at, stamp);
+    caller
+        .patch_learning(
+            id,
+            bindings::LearningPatch {
+                status: None,
+                summary: Some("revised".into()),
+                embedding: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_ne!(rows.learning(id).unwrap().updated_at, stamp);
+}
+
 #[tokio::test]
 async fn patch_learning_updates_fields() {
     let (caller, rows) = caller();

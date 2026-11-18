@@ -498,6 +498,71 @@ async fn flatten_re_scopes_the_deleted_sub_epics_learnings_to_the_root() {
     assert_eq!(kept.scope_ref.as_deref(), Some(root.0.to_string().as_str()));
 }
 
+/// A grouped root, its repo-group sub-epic holding one done task, and a
+/// learning scoped to the sub-epic: (root, sub, learning).
+async fn grouped_with_learning(
+    caller: &MemoryReducerCaller,
+    rows: &SharedRows,
+) -> (EpicId, EpicId, LearningId) {
+    let root = grouped_root(caller).await;
+    let id = task_in(caller, root, "/x/alpha").await;
+    let sub = rows.task(id).unwrap().epic_id.unwrap();
+    caller
+        .patch_task(
+            id,
+            bindings::TaskPatch {
+                status: Some("done".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+    let learning = caller
+        .create_learning(bindings::Learning {
+            scope: "epic".into(),
+            scope_ref: Some(sub.0.to_string()),
+            ..super::learnings::blank_learning()
+        })
+        .await
+        .unwrap();
+    (root, sub, learning)
+}
+
+/// `learnings.allium: ReScopeLearningsOnRepoGroupDelete`, by hand.
+#[tokio::test]
+async fn deleting_a_repo_group_sub_epic_by_hand_re_scopes_its_learnings() {
+    let (caller, rows) = caller();
+    let (root, sub, learning) = grouped_with_learning(&caller, &rows).await;
+    assert!(caller.delete_epic(sub).await.unwrap().won());
+    assert!(rows.epic(sub).is_none());
+    assert_eq!(
+        rows.learning(learning).unwrap().scope_ref,
+        Some(root.0.to_string())
+    );
+}
+
+#[tokio::test]
+async fn batch_deleting_a_repo_group_sub_epic_re_scopes_unless_the_parent_goes_too() {
+    let (caller, rows) = caller();
+    let (root, sub, learning) = grouped_with_learning(&caller, &rows).await;
+    assert!(caller.batch_delete(vec![], vec![sub]).await.unwrap().won());
+    assert_eq!(
+        rows.learning(learning).unwrap().scope_ref,
+        Some(root.0.to_string())
+    );
+
+    let (root, sub, learning) = grouped_with_learning(&caller, &rows).await;
+    assert!(caller
+        .batch_delete(vec![], vec![sub, root])
+        .await
+        .unwrap()
+        .won());
+    assert_eq!(
+        rows.learning(learning).unwrap().scope_ref,
+        Some(sub.0.to_string())
+    );
+}
+
 // -- a refused patch leaves nothing behind ---------------------------------------
 
 #[tokio::test]

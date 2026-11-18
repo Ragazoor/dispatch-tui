@@ -181,15 +181,13 @@ impl MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         let scope = self.scope();
         let mut tables = self.lock();
-        if !tables.work_packages.contains_key(&id.0) {
-            return Ok(ReducerOutcome::Refused(format!("no work package {id}")));
-        }
-        if let Err(why) = Self::require_item(&tables, item) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
+        // Sight first, as the module's `link_work_package_item`.
         let Some(package) = tables.visible_package(&scope, id.0) else {
             return Ok(ReducerOutcome::Refused(format!("no work package {id}")));
         };
+        if let Err(why) = Self::require_item(&tables, item) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         if let Err(why) = tables.check_link_allowed(&scope, &package, item.kind(), item.raw_id()) {
             return Ok(ReducerOutcome::Refused(why));
         }

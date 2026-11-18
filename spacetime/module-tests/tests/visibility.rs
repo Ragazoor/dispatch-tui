@@ -478,6 +478,31 @@ fn a_package_never_links_an_item_the_caller_cannot_see() {
         .is_err());
 }
 
+/// `UnseenIsAsMissing`: linking into a package the caller cannot see answers
+/// as for a missing package, whatever the item is (task #99287).
+#[test]
+fn linking_into_an_unseen_package_answers_as_for_a_missing_one() {
+    let (store, a, _) = world();
+    let package = make_package(&store, "alice", a, "private").expect("package");
+    let link = |package: i64, kind: &str, item: i64| {
+        store.call("bob", |ctx| {
+            link_work_package_item(ctx, package, kind.into(), item)
+        })
+    };
+    let missing = 999_999;
+    let epic = make_epic(&store, "bob", a, 0, "public").expect("epic");
+    for (kind, item) in [("task", 888_888), ("epic", epic)] {
+        assert_eq!(
+            link(package, kind, item),
+            Err(format!("no work package {package}"))
+        );
+        assert_eq!(
+            link(missing, kind, item),
+            Err(format!("no work package {missing}"))
+        );
+    }
+}
+
 /// The creator leaves the workspace, so the item is one nobody can see.
 fn creator_leaves(store: &Store, ws: i64, who: &str) {
     let id = store

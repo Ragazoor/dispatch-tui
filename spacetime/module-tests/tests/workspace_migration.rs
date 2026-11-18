@@ -47,14 +47,14 @@ fn package(title: &str, created_by: &str) -> WorkPackage {
     }
 }
 
-fn learning(scope: &str) -> Learning {
+fn learning(scope: &str, scope_ref: Option<String>) -> Learning {
     Learning {
         id: 0,
         kind: "pitfall".into(),
         summary: format!("a {scope} learning"),
         detail: None,
         scope: scope.into(),
-        scope_ref: (scope != "user").then(|| "/repo".to_string()),
+        scope_ref,
         tags: "[]".into(),
         status: "approved".into(),
         source_task_id: None,
@@ -96,10 +96,14 @@ fn old_store() -> Store {
     store
         .call_as_scheduler(|ctx| subscribe_to_epic(ctx, identity_of("frank"), root))
         .expect("subscribe");
-    for scope in ["repo", "epic", "user"] {
-        store
-            .call("operator", |ctx| create_learning(ctx, learning(scope)))
-            .expect("learning");
+    for (scope, scope_ref) in [
+        ("repo", Some("/repo".to_string())),
+        ("epic", Some(root.to_string())),
+        ("user", None),
+    ] {
+        // Written by the previous module, which did not check an epic ref's
+        // sight: the epic predates workspaces, so no caller sees it yet.
+        store.db().learnings().insert(learning(scope, scope_ref));
     }
     store
 }
@@ -305,7 +309,7 @@ fn deleting_an_empty_workspace_removes_its_learnings() {
                 vec![Learning {
                     id: 1,
                     workspace_id: workspace,
-                    ..learning("repo")
+                    ..learning("repo", Some("/repo".to_string()))
                 }],
             )
         })

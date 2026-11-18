@@ -396,12 +396,21 @@ mod backfill_embeddings {
             "expected 2 learnings missing embeddings"
         );
 
+        let stamp = db.get_learning(id1).await.unwrap().unwrap().updated_at;
+
         // Run the backfill using the test stub service.
         let emb_svc = EmbeddingService::new_noop();
         let db_for_backfill: Arc<dyn crate::store::LearningStore + Send + Sync> = db.clone();
         super::backfill_embeddings(db_for_backfill, emb_svc)
             .await
             .unwrap();
+
+        // The repair pass changes nothing else: `updated_at` stays, so it
+        // never postpones ArchiveStaleLearning.
+        assert_eq!(
+            db.get_learning(id1).await.unwrap().unwrap().updated_at,
+            stamp
+        );
 
         // After backfill, no learnings should be missing embeddings.
         let missing_after = db.list_learnings_missing_embedding().await.unwrap();

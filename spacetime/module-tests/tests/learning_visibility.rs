@@ -218,3 +218,149 @@ fn a_learning_from_before_workspaces_stays_visible_to_everyone() {
     assert!(can_see(&store, "alice", 900));
     assert!(can_see(&store, "carol", 900));
 }
+
+// -- task #99287: scope_ref refusals, the repair write, manual re-scope -------
+
+#[test]
+fn a_blank_repo_scope_ref_is_refused() {
+    let (store, _a, _b) = world();
+    for blank in ["", "   "] {
+        let why = record(&store, "alice", row("repo", Some(blank.into()), None))
+            .expect_err("a blank repo ref would cover every repo");
+        assert!(why.contains("non-blank scope_ref"), "{why}");
+    }
+}
+
+#[test]
+fn an_epic_scope_ref_that_names_no_epic_is_refused_like_an_unseen_one() {
+    let (store, a, _b) = world();
+    let epic = epic_in(&store, "alice", a);
+    let unseen = record(&store, "carol", row("epic", Some(epic.to_string()), None))
+        .expect_err("carol cannot see alice's epic");
+    assert_eq!(unseen, format!("epic {epic} does not exist"));
+    for missing in ["9999", "abc"] {
+        let why = record(&store, "alice", row("epic", Some(missing.into()), None))
+            .expect_err("no epic answers to this ref");
+        assert_eq!(why, format!("epic {missing} does not exist"));
+    }
+}
+
+#[test]
+fn an_embedding_only_patch_leaves_updated_at_and_a_summary_patch_moves_it() {
+    let (store, _a, _b) = world();
+    let l = record(&store, "alice", row("user", None, None)).expect("record");
+    let stamp = l.updated_at.clone();
+    store
+        .call("alice", |ctx| {
+            patch_learning(
+                ctx,
+                l.id,
+                LearningPatch {
+                    embedding: Some(Some(vec![1, 2, 3])),
+                    ..LearningPatch::default()
+                },
+            )
+        })
+        .expect("embed");
+    let after = store.db().learnings().id().find(l.id).expect("row");
+    assert_eq!(after.embedding, Some(vec![1, 2, 3]));
+    assert_eq!(
+        after.updated_at, stamp,
+        "the repair pass changes nothing else"
+    );
+    store
+        .call("alice", |ctx| {
+            patch_learning(
+                ctx,
+                l.id,
+                LearningPatch {
+                    summary: Some("revised".into()),
+                    ..LearningPatch::default()
+                },
+            )
+        })
+        .expect("revise");
+    let revised = store.db().learnings().id().find(l.id).expect("row");
+    assert_ne!(revised.updated_at, stamp);
+}
+
+/// A grouped root in `ws`, its repo-group sub-epic holding one done task,
+/// and a learning scoped to the sub-epic. Returns (root, sub, learning).
+fn grouped_with_learning(store: &Store, ws: i64) -> (i64, i64, i64) {
+    let root = epic_in(store, "alice", ws);
+    store
+        .call("alice", |ctx| {
+            patch_epic(
+                ctx,
+                root,
+                EpicPatch {
+                    group_by_repo: Some(true),
+                    ..EpicPatch::default()
+                },
+            )
+        })
+        .expect("group");
+    store.create(
+        "alice",
+        Task {
+            repo_path: "/x/alpha".into(),
+            ..epic_task("t", root, "done")
+        },
+    );
+    let sub = store
+        .db()
+        .epics()
+        .iter()
+        .find(|e| e.origin == "repo-group" && e.parent_epic_id == root)
+        .expect("repo group")
+        .id;
+    let l = record(store, "alice", row("epic", Some(sub.to_string()), None)).expect("record");
+    (root, sub, l.id)
+}
+
+fn scope_ref_of(store: &Store, id: i64) -> Option<String> {
+    store.db().learnings().id().find(id).expect("row").scope_ref
+}
+
+#[test]
+fn deleting_a_repo_group_sub_epic_by_hand_moves_its_learnings_to_the_parent() {
+    let (store, a, _b) = world();
+    let (root, sub, l) = grouped_with_learning(&store, a);
+    store
+        .call("alice", |ctx| delete_epic(ctx, sub))
+        .expect("a repo-group sub-epic can be deleted by hand");
+    assert!(store.db().epics().id().find(sub).is_none());
+    assert_eq!(scope_ref_of(&store, l), Some(root.to_string()));
+}
+
+#[test]
+fn batch_deleting_a_repo_group_sub_epic_moves_its_learnings_to_the_parent() {
+    let (store, a, _b) = world();
+    let (root, sub, l) = grouped_with_learning(&store, a);
+    store
+        .call("alice", |ctx| batch_delete(ctx, vec![], vec![sub]))
+        .expect("batch delete");
+    assert_eq!(scope_ref_of(&store, l), Some(root.to_string()));
+}
+
+#[test]
+fn a_batch_that_also_deletes_the_parent_re_scopes_nothing() {
+    let (store, a, _b) = world();
+    let (root, sub, l) = grouped_with_learning(&store, a);
+    store
+        .call("alice", |ctx| batch_delete(ctx, vec![], vec![sub, root]))
+        .expect("batch delete");
+    assert_eq!(scope_ref_of(&store, l), Some(sub.to_string()));
+}
+
+#[test]
+fn deleting_a_hand_made_sub_epic_re_scopes_nothing() {
+    let (store, a, _b) = world();
+    let root = epic_in(&store, "alice", a);
+    let sub = store.create_sub_epic("alice", root);
+    let l = record(&store, "alice", row("epic", Some(sub.to_string()), None)).expect("record");
+    store
+        .call("alice", |ctx| delete_epic(ctx, sub))
+        .expect("delete");
+    assert_eq!(scope_ref_of(&store, l.id), Some(sub.to_string()));
+}

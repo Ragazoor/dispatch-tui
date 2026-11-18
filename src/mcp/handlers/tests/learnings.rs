@@ -117,6 +117,46 @@ async fn record_learning_creates_proposed_entry() {
     assert_eq!(learnings[0].source_task_id, Some(task_id));
 }
 
+/// `RecordLearningViaMcp`: a blank repo ref would cover every repo, and an
+/// epic ref that names no epic would be stored where nothing reaches it.
+#[tokio::test]
+async fn record_learning_refuses_a_blank_repo_ref_and_an_epic_ref_naming_no_epic() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
+    for (scope, scope_ref, why) in [
+        ("repo", "", "non-blank scope_ref"),
+        ("repo", "   ", "non-blank scope_ref"),
+        ("epic", "9999", "epic 9999 does not exist"),
+        ("epic", "abc", "epic abc does not exist"),
+    ] {
+        let resp = crate::mcp::handlers::learnings::handle_record_learning(
+            &state,
+            Some(json!(1)),
+            &crate::mcp::identity::CallerIdentity::Session,
+            json!({
+                "task_id": task_id.0,
+                "kind": "pitfall",
+                "summary": "A learning with a bad scope_ref",
+                "scope": scope,
+                "scope_ref": scope_ref
+            }),
+        )
+        .await;
+        assert_error(&resp, why);
+        assert_eq!(
+            resp.error.as_ref().map(|e| e.code),
+            Some(-32602),
+            "{scope} {scope_ref:?}"
+        );
+    }
+    let stored = state
+        .db
+        .list_learnings(crate::store::LearningFilter::default())
+        .await
+        .unwrap();
+    assert!(stored.is_empty(), "nothing stored: {stored:?}");
+}
+
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_repo() {
     let state = test_state().await;
@@ -816,6 +856,34 @@ async fn rate_learning_without_retrieval_is_rejected() {
 
     let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(learning.upvote_count, 0, "no upvote on rejected rating");
+}
+
+/// `RateLearningViaMcp`: a learning that does not exist answers not found
+/// (-32001), as learning_delete does; one not retrieved stays invalid params.
+#[tokio::test]
+async fn rate_learning_of_a_missing_learning_answers_not_found() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+    // The handler's own answer: `tools/call` re-wraps any error as an
+    // `isError` result and drops the code.
+    let rate = |learning_id: i64| {
+        crate::mcp::handlers::learnings::handle_rate_learning(
+            &state,
+            Some(json!(1)),
+            &crate::mcp::identity::CallerIdentity::Session,
+            json!({ "task_id": task_id.0, "ratings": [{ "learning_id": learning_id, "verdict": "helped" }] }),
+        )
+    };
+    let resp = rate(9999).await;
+    assert_error(&resp, "learning 9999 not found");
+    assert_eq!(resp.error.as_ref().map(|e| e.code), Some(-32001));
+
+    let learning_id =
+        create_approved_learning(&state, "Tip", crate::models::LearningScope::User, None, &[])
+            .await;
+    let resp = rate(learning_id.0).await;
+    assert_error(&resp, "retriev");
+    assert_eq!(resp.error.as_ref().map(|e| e.code), Some(-32602));
 }
 
 #[tokio::test]

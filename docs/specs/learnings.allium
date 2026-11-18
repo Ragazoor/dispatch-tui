@@ -231,6 +231,14 @@ rule RecordLearningViaMcp {
     -- epic default can be missing: a task with no epic has none.
     let ref = scope_ref ?? default_scope_ref(task, scope)
     requires: scope = epic implies ref != null
+    -- A blank repo ref would cover every repo (repo_ref_covers), so an
+    -- explicit blank or whitespace-only one is refused.
+    requires: scope = repo implies not is_blank(ref)
+    -- An epic ref must name an epic the caller sees: one that names no epic
+    -- (an unknown id, or text that is no id) would be stored where nothing
+    -- can retrieve it.
+    requires: scope = epic implies epic_named(ref) != null
+    requires: scope = epic implies epic_named(ref).visible_to(caller())
     requires: not references_internal_code(summary) and not references_internal_code(detail)
     requires: kind = procedural implies (detail != null and detail != "")
 
@@ -257,12 +265,25 @@ rule RecordLearningViaMcp {
         -- scope_ref is stored with `~` expanded and no trailing "/". A blank
         -- or whitespace-only summary counts as empty.
         --
+        -- The two scope_ref refusals are the store's (create_learning), so
+        -- every write path gets them, and both answer invalid params
+        -- (-32602). A blank repo ref answers "a repo-scoped learning needs a
+        -- non-blank scope_ref". An epic ref that names no epic, and one that
+        -- names an epic the caller cannot see, both answer "epic <ref> does
+        -- not exist", so the refusal does not reveal which it was
+        -- (workspaces.allium: UnseenIsAsMissing). The operator, who sees
+        -- every epic, is refused only a missing one. Rows already stored
+        -- with such a ref stay as they are.
+        --
         -- The embedding is computed from summary, detail, kind and tags in
         -- the same write as the row, so a stored learning never carries an
         -- embedding of other values (EmbeddingConsistency). A learning with no
         -- embedding is invisible to both retrieval paths; a startup repair
         -- pass derives the missing ones from the stored fields, changes
-        -- nothing else, and only logs a failure.
+        -- nothing else (updated_at included, so the pass never postpones
+        -- ArchiveStaleLearning), and only logs a failure. It repairs only the
+        -- learnings the board's person sees: the store would skip any other
+        -- row's write, so listing it would re-embed it on every startup.
         --
         -- The reply says the entry is active and that matching
         -- dispatches will receive it. It then lists up to
@@ -392,6 +413,10 @@ rule RateLearningViaMcp {
         -- replaced.
         -- The retrieval check is the store's (the apply_learning_verdicts
         -- reducer), so every client gets the same answer.
+        -- A learning that does not exist, or that the caller cannot see,
+        -- answers not found (-32001), as learning_delete does. A learning not
+        -- retrieved for the task, an unknown verdict, an empty list and a
+        -- repeated learning answer invalid params (-32602).
 }
 
 rule DeleteLearningViaMcp {
@@ -423,8 +448,11 @@ rule ReScopeLearningsOnRepoGroupDelete {
 
     @guidance
         -- A repo-group sub-epic is deleted when grouping is turned off
-        -- (FlattenEpic, or a feed epic's FlatFeedReconcile) or when a task's
-        -- repo_path change leaves it empty. Its epic-scoped learnings move to
+        -- (FlattenEpic, or a feed epic's FlatFeedReconcile), when a task's
+        -- repo_path change leaves it empty, or by hand: DeleteEpic on the
+        -- sub-epic itself, alone or as one epic of a BatchDelete
+        -- (tasks.allium). A batch that also deletes the parent re-scopes
+        -- nothing, since the parent goes in the same transaction. Its epic-scoped learnings move to
         -- the parent so they are not orphaned, in the same store transaction
         -- as the delete, so the two land together or not at all. scope_ref
         -- is not an embedding input, so nothing is re-embedded. The workspace

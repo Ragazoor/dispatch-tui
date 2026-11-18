@@ -9,7 +9,7 @@ use crate::models::{EpicId, LearningId, LearningVerdict, RetrievalSource, TaskId
 use crate::spacetime::bindings;
 
 use super::super::encode;
-use super::super::writes::ReducerOutcome;
+use super::super::writes::{ReducerOutcome, StoreRefusal};
 use super::{MemoryReducerCaller, Tables};
 
 impl MemoryReducerCaller {
@@ -102,20 +102,23 @@ impl MemoryReducerCaller {
     pub(super) fn apply_create_learning(&self, row: bindings::Learning) -> Result<LearningId> {
         let row = module::Learning::from(row);
         module::validate_learning_scope(&row.scope, &row.scope_ref)
-            // Same wording `SdkReducerCaller`'s real refusal path surfaces, so
-            // a caller cannot tell the two backends apart from the error text
-            // alone — see `create_task`'s matching comment.
-            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+            // The type `SdkReducerCaller`'s real refusal path surfaces, so a
+            // caller cannot tell the two backends apart, by wording or by the
+            // invalid-params answer it maps to — see `create_task`.
+            .map_err(StoreRefusal)?;
         let scope = self.scope();
         let mut tables = self.lock();
         // The store places a learning itself (`LearningVisibility`).
         let row = tables.settle_new_learning(&scope, row);
-        if !tables.learning_visible(&scope, &row) {
-            return Err(anyhow::anyhow!(
-                "the shared store refused: {} {} does not exist",
+        if !tables.learning_visible(&scope, &row)
+            || !module::epic_scope_ref_names_an_epic(&*tables, &row)
+        {
+            return Err(StoreRefusal(format!(
+                "{} {} does not exist",
                 row.scope,
                 row.scope_ref.as_deref().unwrap_or("")
-            ));
+            ))
+            .into());
         }
         let id = Self::assign_id(0, &mut tables.next_learning_id);
         let row = module::Learning { id, ..row };
@@ -135,8 +138,13 @@ impl MemoryReducerCaller {
         let Some(mut row) = tables.visible_learning(&scope, id) else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
-        module::apply_learning_patch(&mut row, module::LearningPatch::from(patch));
-        row.updated_at = self.now();
+        let patch = module::LearningPatch::from(patch);
+        // The module's `patch_learning`: an embedding alone is not content.
+        let content_changed = patch.status.is_some() || patch.summary.is_some();
+        module::apply_learning_patch(&mut row, patch);
+        if content_changed {
+            row.updated_at = self.now();
+        }
         tables.learnings.insert(id, row.clone());
         self.rows.upsert_learning(&row.into());
         Ok(ReducerOutcome::Applied(vec![]))

@@ -114,7 +114,12 @@ pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String
         author: caller,
         ..row
     };
-    if !is_operator(ctx) && !learning_scope_seen(ctx, &row) {
+    // An epic ref that names no epic would store a learning nothing can
+    // reach; it is refused with the wording an unseen epic gets, and the
+    // operator, who sees every epic, is refused it too.
+    if !is_operator(ctx) && !learning_scope_seen(ctx, &row)
+        || !epic_scope_ref_names_an_epic(ctx, &row)
+    {
         return Err(format!(
             "{} {} does not exist",
             row.scope,
@@ -127,6 +132,18 @@ pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String
         ..row
     });
     Ok(())
+}
+
+/// False only for an epic-scoped learning whose `scope_ref` names no epic in
+/// `r` (an unknown id, or text that is no id): `learnings.allium:
+/// RecordLearningViaMcp`. `pub` so `MemoryReducerCaller` shares it.
+pub fn epic_scope_ref_names_an_epic(r: &impl StoreReads, row: &Learning) -> bool {
+    row.scope != "epic"
+        || row
+            .scope_ref
+            .as_deref()
+            .and_then(|s| s.parse::<i64>().ok())
+            .is_some_and(|id| r.epic(id).is_some())
 }
 
 /// `pub`, like `validate_task_ownership`: `MemoryReducerCaller`'s
@@ -143,6 +160,10 @@ pub fn validate_learning_scope(scope: &str, scope_ref: &Option<String>) -> Resul
         ("user", Some(_)) => Err("a user-scoped learning must not carry a scope_ref".to_string()),
         ("user", None) => Ok(()),
         (_, None) => Err(format!("a {scope}-scoped learning needs a scope_ref")),
+        // A blank repo ref covers every repo (`repo_ref_covers`).
+        ("repo", Some(r)) if r.trim().is_empty() => {
+            Err("a repo-scoped learning needs a non-blank scope_ref".to_string())
+        }
         (_, Some(_)) => Ok(()),
     }
 }
@@ -212,8 +233,14 @@ pub fn patch_learning(ctx: &ReducerContext, id: i64, patch: LearningPatch) -> Re
     let Some(mut row) = visible_learning(ctx, id) else {
         return Ok(());
     };
+    // An embedding is derived, not content: the startup repair pass writes
+    // it and must change nothing else (`learnings.allium:
+    // RecordLearningViaMcp`), or it would postpone `ArchiveStaleLearning`.
+    let content_changed = patch.status.is_some() || patch.summary.is_some();
     apply_learning_patch(&mut row, patch);
-    row.updated_at = now(ctx);
+    if content_changed {
+        row.updated_at = now(ctx);
+    }
     ctx.db.learnings().id().update(row);
     Ok(())
 }

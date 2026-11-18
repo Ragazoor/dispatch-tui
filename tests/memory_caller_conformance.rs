@@ -524,6 +524,8 @@ mod identity_stamping;
 mod learning_placement;
 #[path = "memory_caller_conformance/learning_rating_visibility.rs"]
 mod learning_rating_visibility;
+#[path = "memory_caller_conformance/learning_scope_refs.rs"]
+mod learning_scope_refs;
 #[path = "memory_caller_conformance/loss_of_sight.rs"]
 mod loss_of_sight;
 #[path = "memory_caller_conformance/move_epic.rs"]

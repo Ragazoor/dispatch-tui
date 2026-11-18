@@ -89,6 +89,13 @@ impl MemoryReducerCaller {
         None
     }
 
+    /// Mirrors the module's `rescope_repo_group_learnings`.
+    pub(super) fn rescope_repo_group_learnings(&self, tables: &mut Tables, epic: &module::Epic) {
+        if epic.origin == module::REPO_GROUP_ORIGIN && epic.parent_epic_id != 0 {
+            self.rescope_learnings(tables, epic.id, epic.parent_epic_id);
+        }
+    }
+
     fn delete_if_empty_repo_group(&self, tables: &mut Tables, epic_id: i64) {
         let Some(epic) = tables.epics.get(&epic_id).cloned() else {
             return;
@@ -102,9 +109,7 @@ impl MemoryReducerCaller {
             self.recalculate_epic_chain(tables, epic_id);
             return;
         }
-        if epic.parent_epic_id != 0 {
-            self.rescope_learnings(tables, epic_id, epic.parent_epic_id);
-        }
+        self.rescope_repo_group_learnings(tables, &epic);
         let doomed = Self::collect_epic_subtree_ids(tables, epic_id);
         self.delete_epic_subtree_with_feed_cleanup(tables, epic_id, &doomed);
     }
