@@ -333,6 +333,15 @@ fn append_picker_candidates<'a>(
     lines.push(Line::from(Span::styled(REPO_PICKER_HINT, styles.hint)));
 }
 
+/// Rows the repo-path step spends outside its candidate list: title, tag,
+/// description, the path field, the blank and hint rows under the list, and
+/// the two borders. The panel reserves this plus one row per candidate, and
+/// the list windows itself to what is left, so the hint row is never clipped.
+pub(in crate::tui) const REPO_PATH_FORM_ROWS: u16 = 8;
+
+/// [`REPO_PATH_FORM_ROWS`] plus the settled repo path above the branch field.
+pub(in crate::tui) const BASE_BRANCH_FORM_ROWS: u16 = REPO_PATH_FORM_ROWS + 1;
+
 pub(in crate::tui) fn input_repo_path_lines<'a>(
     app: &'a App,
     area: Rect,
@@ -351,7 +360,14 @@ pub(in crate::tui) fn input_repo_path_lines<'a>(
         caret_field("  Repo path: ", app, area, styles.active),
     ];
     let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
-    append_picker_candidates(&mut lines, &filtered, app, area, styles, 7);
+    append_picker_candidates(
+        &mut lines,
+        &filtered,
+        app,
+        area,
+        styles,
+        REPO_PATH_FORM_ROWS,
+    );
     lines
 }
 
@@ -381,7 +397,14 @@ pub(in crate::tui) fn input_base_branch_lines<'a>(
     ];
     let history = app.base_branches_for(&repo_path);
     let filtered = crate::tui::filtered_repos(history, &app.input.buffer);
-    append_picker_candidates(&mut lines, &filtered, app, area, styles, 6);
+    append_picker_candidates(
+        &mut lines,
+        &filtered,
+        app,
+        area,
+        styles,
+        BASE_BRANCH_FORM_ROWS,
+    );
     lines
 }
 

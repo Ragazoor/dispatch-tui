@@ -203,10 +203,27 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
             let rows = n as u16 + 7;
             rows.clamp(8, max_height)
         }
-        InputMode::InputRepoPath if app.input.buffer.is_empty() => {
-            // title(1) + desc(1) + path_input(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 7
-            let rows = app.board.repo_paths.len() as u16 + 7;
-            rows.clamp(8, max_height)
+        InputMode::InputRepoPath => {
+            // title(1) + tag(1) + desc(1) + path_input(1) + candidates(N) +
+            // blank(1) + hint(1) + borders(2) = N + REPO_PATH_FORM_ROWS
+            let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+            let new_entry = crate::tui::has_new_repo_option(&app.input.buffer, &filtered);
+            let n = (filtered.len() + new_entry as usize) as u16;
+            (n + crate::tui::ui::input_form::REPO_PATH_FORM_ROWS).clamp(8, max_height)
+        }
+        InputMode::InputBaseBranch => {
+            // The repo-path step's rows plus the settled repo path (1).
+            let repo_path = app
+                .input
+                .task_draft
+                .as_ref()
+                .map(|d| d.repo_path.as_str())
+                .unwrap_or_default();
+            let history = app.base_branches_for(repo_path);
+            let filtered = crate::tui::filtered_repos(history, &app.input.buffer);
+            let new_entry = crate::tui::has_new_repo_option(&app.input.buffer, &filtered);
+            let n = (filtered.len() + new_entry as usize) as u16;
+            (n + crate::tui::ui::input_form::BASE_BRANCH_FORM_ROWS).clamp(8, max_height)
         }
         // PhoenixArming's second pass (docs/specs/tasks.allium: CreateTask)
         // adds a settled "Phoenix: yes" line above the picker, so this step
@@ -229,8 +246,6 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
         InputMode::InputTitle
         | InputMode::InputTag
         | InputMode::InputDescription
-        | InputMode::InputRepoPath
-        | InputMode::InputBaseBranch
         | InputMode::InputWrapUpMode
         | InputMode::ConfirmRetry(_)
         | InputMode::InputEpicTitle

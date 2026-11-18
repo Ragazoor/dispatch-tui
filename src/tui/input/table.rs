@@ -628,7 +628,13 @@ impl App {
             "admin_close" => Close,
             _ => return vec![],
         };
-        self.dispatch_keyed(Message::Admin(msg), action, label)
+        if matches!(action, "admin_navigate" | "admin_pane") {
+            return self.dispatch_keyed(Message::Admin(msg), action, label);
+        }
+        // A per-pane key on another pane, or one the person may not use,
+        // does nothing: it records only when it issued a command or opened
+        // a prompt.
+        self.dispatch_prompting_handler_keyed(|a| a.update(Message::Admin(msg)), action, label)
     }
 
     /// The "reparent epic" tree picker.

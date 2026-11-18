@@ -1,5 +1,6 @@
 ---
 source: src/tui/tests/snapshots.rs
+assertion_line: 176
 expression: rendered
 ---
                                                                                                                   🔕  [N]
@@ -31,8 +32,6 @@ expression: rendered
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
-                              │                           │                              │
-                              │                           │                              │
 ╭ New Task ────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  Title: My new task                                                                                                  │
 │  Tag: feature                                                                                                        │
@@ -40,5 +39,7 @@ expression: rendered
 │  Repo path: /repo/alpha                                                                                              │
 │  Base branch: develop                                                                                                │
 │  ► develop                                                                                                           │
+│                                                                                                                      │
+│  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 Base branch:

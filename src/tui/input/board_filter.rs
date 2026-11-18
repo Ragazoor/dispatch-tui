@@ -49,8 +49,24 @@ impl App {
             }
             "filter_toggle_done_epics" if tab == FilterTab::Epics => M::ToggleShowDoneEpics,
             "filter_search_epics" if tab == FilterTab::Epics => M::StartEpicSearch,
-            "filter_fold_epics" if tab == FilterTab::Epics => M::ToggleEpicFold,
-            "filter_fold_all_epics" if tab == FilterTab::Epics => M::ToggleAllEpicFolds,
+            // A fold key with nothing to fold (a leaf, no parent epic, a
+            // standing query) does nothing and records nothing.
+            "filter_fold_epics"
+                if tab == FilterTab::Epics
+                    && self
+                        .filter_epic_rows()
+                        .get(self.filter_overlay.epic_cursor)
+                        .is_some_and(|r| r.has_children) =>
+            {
+                M::ToggleEpicFold
+            }
+            "filter_fold_all_epics"
+                if tab == FilterTab::Epics
+                    && self.filter_overlay.epic_query.is_empty()
+                    && self.filter_epic_rows().iter().any(|r| r.has_children) =>
+            {
+                M::ToggleAllEpicFolds
+            }
             _ => return vec![],
         };
         self.dispatch_keyed(Message::BoardFilter(msg), action, label)

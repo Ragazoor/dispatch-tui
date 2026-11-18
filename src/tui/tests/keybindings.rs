@@ -333,6 +333,39 @@ fn admin_app(mode: InputMode) -> App {
     app
 }
 
+/// The admin screen on the pane where `action` acts: a per-pane key does
+/// nothing (and records nothing) on another pane.
+fn admin_app_for(action: &str) -> App {
+    use crate::tui::types::AdminPane as P;
+    let mut app = admin_app(InputMode::Admin);
+    let pane = match action {
+        "admin_toggle_role" | "admin_remove_member" => P::Members,
+        "admin_grant_super_admin" | "admin_revoke_super_admin" => P::SuperAdmins,
+        "admin_delete_unseen_item" => P::Unseen,
+        _ => P::Workspaces,
+    };
+    if let Some(screen) = app.input.admin.as_mut() {
+        screen.pane = pane;
+        screen.snapshot.claimable = action == "admin_claim_super_admin";
+    }
+    app
+}
+
+/// The admin screen on each of its panes, for reading what each one draws.
+fn admin_apps_on_every_pane() -> Vec<App> {
+    use crate::tui::types::AdminPane as P;
+    [P::Workspaces, P::Members, P::SuperAdmins, P::Unseen]
+        .into_iter()
+        .map(|pane| {
+            let mut app = admin_app(InputMode::Admin);
+            if let Some(screen) = app.input.admin.as_mut() {
+                screen.pane = pane;
+            }
+            app
+        })
+        .collect()
+}
+
 fn with_move_task_picker() -> App {
     let mut app = make_app();
     app.board.epics = vec![make_epic(10), make_epic(11)];
@@ -429,7 +462,11 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
             let mut app = make_app();
             // Nine repos so every digit 1-9 toggles one.
             app.board.repo_paths = (1..=9).map(|i| format!("/repo/r{i}")).collect();
-            app.board.epics = vec![make_epic(10), make_epic(11)];
+            // Epic 11 is a child of 10, so the fold keys have a parent to
+            // fold under the cursor.
+            let mut child = make_epic(11);
+            child.parent_epic_id = Some(EpicId(10));
+            app.board.epics = vec![make_epic(10), child];
             app.update(Message::BoardFilter(
                 crate::tui::messages::BoardFilterMessage::Start,
             ));
@@ -543,7 +580,7 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardConfirmDeleteWorkPackage => one(draft_app(InputMode::ConfirmDeleteWorkPackage(
             crate::models::WorkPackageId(1),
         ))),
-        N::BoardAdmin => one(admin_app(InputMode::Admin)),
+        N::BoardAdmin => one(admin_app_for(binding.action)),
         N::BoardConfirmAdmin => {
             let mut app = admin_app(InputMode::ConfirmAdmin);
             if let Some(screen) = app.input.admin.as_mut() {
@@ -1153,6 +1190,7 @@ fn every_bracketed_hint_a_mode_draws_is_a_key_of_that_mode() {
 
     let mut checked = 0;
     let mut failures = Vec::new();
+    let mut hintless = Vec::new();
     for ns in board_namespaces() {
         if matches!(
             ns,
@@ -1173,7 +1211,21 @@ fn every_bracketed_hint_a_mode_draws_is_a_key_of_that_mode() {
             note: None,
             records_usage: true,
         };
-        for mut app in apps_in(&probe) {
+        let apps = match ns {
+            KeyNamespace::BoardAdmin => admin_apps_on_every_pane(),
+            KeyNamespace::BoardFilter => [FilterTab::Repos, FilterTab::Epics, FilterTab::Packages]
+                .into_iter()
+                .flat_map(|tab| {
+                    apps_in(&probe).into_iter().map(move |mut app| {
+                        app.filter_overlay.tab = tab;
+                        app
+                    })
+                })
+                .collect(),
+            _ => apps_in(&probe),
+        };
+        let before = checked;
+        for mut app in apps {
             let buf = render_to_buffer(&mut app, 160, 50);
             // The board drawn under the mode (its header's `[N]` bell, its
             // cards) is board.normal's, not the mode's: a line the mode
@@ -1202,8 +1254,23 @@ fn every_bracketed_hint_a_mode_draws_is_a_key_of_that_mode() {
                 }
             }
         }
+        if checked == before {
+            hintless.push(ns.name());
+        }
     }
     assert!(checked > 20, "the test read no hints ({checked})");
+    // These write their keys without brackets ("navigate tree above, Enter
+    // to select", "y: yes  n/Esc: cancel"), so this test reads nothing from
+    // them. Any other mode reading zero means the test stopped seeing it.
+    assert_eq!(
+        hintless,
+        [
+            "board.picker.move_to_epic",
+            "board.picker.reparent_epic",
+            "board.confirm.delete_repo_path"
+        ],
+        "modes that drew no bracketed hint"
+    );
     assert!(
         failures.is_empty(),
         "hints naming a key the mode does not have:\n{}",
@@ -1522,6 +1589,47 @@ fn toggle_select_on_a_work_package_card_records_nothing() {
     let cmds = press(&mut app, "v");
     assert!(recorded(&cmds).is_empty(), "{:?}", recorded(&cmds));
     assert!(!app.has_selection());
+}
+
+/// A per-pane admin key pressed on another pane does nothing, so it records
+/// nothing: `g` (grant super-admin) on the workspaces pane.
+#[test]
+fn an_admin_key_off_its_pane_records_nothing() {
+    let mut app = admin_app_for("admin_new_workspace");
+    for key in ["g", "v", "m", "x", "D"] {
+        let mode = app.input.mode.clone();
+        let cmds = press(&mut app, key);
+        assert!(recorded(&cmds).is_empty(), "{key}: {:?}", recorded(&cmds));
+        assert_eq!(app.input.mode, mode, "{key}");
+    }
+}
+
+/// In the filter overlay's Epics tab, `z` on a leaf and `Z` with no epic
+/// that has children fold nothing, so they record nothing.
+#[test]
+fn filter_folds_with_nothing_to_fold_record_nothing() {
+    let binding = bindings_in(KeyNamespace::BoardFilter)
+        .find(|b| b.action == "filter_fold_epics")
+        .unwrap();
+    let mut app = apps_in(binding).remove(0);
+    app.board.epics = vec![make_epic(10)];
+    app.filter_overlay.tab = FilterTab::Epics;
+    app.filter_overlay.epic_cursor = 0;
+    for key in ["z", "Z"] {
+        let cmds = press(&mut app, key);
+        assert!(recorded(&cmds).is_empty(), "{key}: {:?}", recorded(&cmds));
+    }
+}
+
+/// While the Epics tab's title search is typed, the overlay's footer names
+/// the search's own keys, not the tab's.
+#[test]
+fn the_filter_search_footer_names_the_search_keys() {
+    let binding = bindings_in(KeyNamespace::BoardFilterSearch).next().unwrap();
+    let mut app = apps_in(binding).remove(0);
+    let buf = render_to_buffer(&mut app, 160, 50);
+    assert!(buffer_contains_ignore_case(&buf, "[Backspace] delete"));
+    assert!(!buffer_contains_ignore_case(&buf, "[z] fold"));
 }
 
 #[test]
