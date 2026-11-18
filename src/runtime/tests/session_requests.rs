@@ -242,7 +242,13 @@ async fn a_session_row_held_back_for_an_unsettled_identity_is_served_once_it_set
 #[tokio::test]
 async fn a_tear_down_held_back_for_an_unsettled_identity_is_done_once_it_settles() {
     let identity = Arc::new(SettledIdentity::default());
-    let runner = Arc::new(MockProcessRunner::new(vec![]).with_windows(&["task-10"]));
+    let runner = Arc::new(
+        MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // show-options: no awaiting tag
+            MockProcessRunner::ok(), // kill-window
+        ])
+        .with_windows(&["task-10"]),
+    );
     let r = session_rig_with_identity(runner.clone(), identity.clone()).await;
     let exit_row = |state: &str| crate::spacetime::bindings::SessionRequest {
         id: 5,
@@ -299,7 +305,10 @@ async fn the_host_ignores_a_session_row_its_owner_did_not_request() {
 /// row reported done, and a wrap_up row written already done is never work.
 #[tokio::test]
 async fn the_host_serves_an_exit_session_row_and_skips_rows_with_no_host_work() {
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::ok(), // kill-window
+    ]));
     let r = session_rig(runner.clone()).await;
     let task = r.running_task().await;
     let close = r.close(task).await;
@@ -320,7 +329,9 @@ async fn the_host_serves_an_exit_session_row_and_skips_rows_with_no_host_work() 
 #[tokio::test]
 async fn an_exit_session_row_seen_to_fail_has_its_window_killed_once_more() {
     let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
         MockProcessRunner::fail("kill-window: boom"),
+        MockProcessRunner::ok(), // show-options: no awaiting tag
         MockProcessRunner::ok(),
     ]));
     let r = session_rig(runner.clone()).await;
@@ -378,7 +389,10 @@ async fn an_exit_session_row_first_seen_failed_is_history() {
 /// serves the rows still `requested`.
 #[tokio::test]
 async fn startup_fails_interrupted_rows_kills_their_windows_then_serves_requested_ones() {
-    let mut responses = vec![(None, MockProcessRunner::ok())]; // the interrupted close's kill
+    let mut responses = vec![
+        (None, MockProcessRunner::ok()), // show-options: no awaiting tag
+        (None, MockProcessRunner::ok()), // the interrupted close's kill
+    ];
     responses.extend(DispatchScript::finish().no_remote().responses());
     let runner = Arc::new(MockProcessRunner::new_with_delays(responses));
     let r = session_rig(runner.clone()).await;

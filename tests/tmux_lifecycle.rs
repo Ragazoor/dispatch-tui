@@ -982,6 +982,63 @@ fn clearing_the_pinned_task_spares_the_leftover_window_and_clears_its_tag() {
 }
 
 #[test]
+fn the_if_present_kill_spares_the_leftover_window_and_ignores_an_absent_one() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let users_pane = fx.split_unmarked_pane(&window);
+    fx.pin(&window);
+
+    dispatch::kill_task_window_if_present(&window, &fx.server.runner()).expect("spare");
+
+    assert!(fx.server.pane_exists(&users_pane));
+    assert_eq!(
+        fx.server
+            .window_option(window.as_str(), tmux::AWAITS_PANE_OPTION),
+        ""
+    );
+    let gone = fx.window(TASK_ID + 1);
+    dispatch::kill_task_window_if_present(&gone, &fx.server.runner())
+        .expect("an absent window is not an error");
+}
+
+#[test]
+fn respawning_the_pinned_pane_clears_its_home_tag() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let pinned = fx.pin(&window);
+    assert_eq!(
+        fx.server
+            .pane_option(pinned.as_str(), tmux::HOME_WINDOW_OPTION),
+        window.as_str(),
+        "the pin tags the pane"
+    );
+
+    dispatch::respawn_pinned_pane(&pinned, &fx.server.runner()).expect("respawn");
+
+    assert_eq!(
+        fx.server
+            .pane_option(pinned.as_str(), tmux::HOME_WINDOW_OPTION),
+        "",
+        "the respawned shell must not remember a home"
+    );
+}
+
+#[test]
+fn restoring_the_pinned_pane_clears_its_home_tag() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let pinned = fx.pin(&window);
+
+    dispatch::restore_pinned_pane(&pinned, &window, None, &fx.server.runner()).expect("unpin");
+
+    assert_eq!(
+        fx.server
+            .pane_option(pinned.as_str(), tmux::HOME_WINDOW_OPTION),
+        ""
+    );
+}
+
+#[test]
 fn clearing_a_task_window_with_no_awaiting_tag_still_kills_it() {
     let Some(fx) = setup_or_skip() else { return };
     let window = fx.bare_agent_window(TASK_ID);

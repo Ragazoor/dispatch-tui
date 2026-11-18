@@ -902,6 +902,7 @@ async fn exec_cleanup_kills_the_window_of_a_task_with_no_worktree() {
     let (rt, id, mut rx, runner) = cleanup_fixture_owning(
         vec![
             MockProcessRunner::ok_with_stdout(b"task-1\n"), // has_window
+            MockProcessRunner::ok(),                        // show-options: no awaiting tag
             MockProcessRunner::ok(),                        // tmux kill-window
         ],
         None,
@@ -951,6 +952,7 @@ async fn exec_cleanup_window_only_kill_failure_still_applies_the_follow_up() {
     let (rt, id, mut rx, _runner) = cleanup_fixture_owning(
         vec![
             MockProcessRunner::ok_with_stdout(b"task-1\n"), // has_window
+            MockProcessRunner::ok(),                        // show-options: no awaiting tag
             MockProcessRunner::fail("can't find window"),   // kill-window fails
         ],
         None,
@@ -994,6 +996,7 @@ async fn exec_cleanup_tears_down_even_if_another_row_names_the_worktree() {
     let (rt, id, mut rx, runner) = cleanup_fixture(
         vec![
             MockProcessRunner::ok_with_stdout(b"task-1\n"), // has_window
+            MockProcessRunner::ok(),                        // show-options: no awaiting tag
             MockProcessRunner::ok(),                        // tmux kill-window
             MockProcessRunner::ok(),                        // git worktree remove
             MockProcessRunner::ok(),                        // git branch -D

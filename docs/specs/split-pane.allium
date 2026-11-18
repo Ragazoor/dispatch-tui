@@ -1280,6 +1280,13 @@ rule PinTaskInSplitPane {
         -- tag lookup counts as "not awaiting" and the kill proceeds, as it
         -- does for any window.
         --
+        -- Every kill of a task's window follows this rule, not only the
+        -- board's: the reactor's exit_session close, the wrap-up kill of a
+        -- failed teardown row and the worktree teardown all go through
+        -- dispatch::kill_task_window (or its if-present twin), so none of
+        -- them destroys the user's shell. scripts/check-task-window-kills.sh
+        -- fails on a plain tmux kill of a task window anywhere else.
+        --
         -- == Home tag on the pinned pane ==
         -- The pinned pane itself is tagged with the window it was pinned from
         -- (the pane option @dispatch_home_window), written by the pin and
@@ -1302,6 +1309,13 @@ rule PinTaskInSplitPane {
         -- quit is unchanged: QuitExitsSplitMode restores and awaits it.
         -- Best-effort like the other tags: an untagged pane is simply not
         -- returned.
+        --
+        -- The tag is cleared when the pane stops being a pinned agent: when the
+        -- board respawns the pane after its task's window is cleared
+        -- (respawn-pane keeps pane options, so the shell would otherwise
+        -- carry the old home), and when the pane is restored to a window. A
+        -- stale home would make a later retire try to break the shell out
+        -- under a name a live window may hold, or relaunch a phantom window.
 }
 
 rule SwapSplitPane {

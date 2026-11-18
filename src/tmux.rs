@@ -1372,6 +1372,24 @@ pub fn set_pane_home(
     set_pane_option(pane_id, HOME_WINDOW_OPTION, window.as_str(), runner)
 }
 
+/// Remove `pane_id`'s [`HOME_WINDOW_OPTION`] tag. Unsetting an absent tag is not
+/// an error.
+pub fn clear_pane_home(pane_id: &PaneId, runner: &dyn ProcessRunner) -> Result<()> {
+    run_checked(
+        runner,
+        &[
+            "set-option",
+            "-p",
+            "-u",
+            "-t",
+            pane_id.as_str(),
+            HOME_WINDOW_OPTION,
+        ],
+        "set-option",
+    )?;
+    Ok(())
+}
+
 /// A pane's home tag: the window it was pinned from, and the directory the
 /// pane started in (the agent's worktree), which is written back as that
 /// window's `@dispatch_dir`.

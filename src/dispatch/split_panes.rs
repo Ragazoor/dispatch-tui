@@ -61,6 +61,13 @@ fn tag_pinned_pane(pane_id: &PaneId, window: &TmuxWindow, runner: &dyn ProcessRu
     }
 }
 
+/// Best-effort: the pane is home, so its home tag is spent.
+fn clear_home_tag(pane_id: &PaneId, runner: &dyn ProcessRunner) {
+    if let Err(e) = tmux::clear_pane_home(pane_id, runner) {
+        tracing::warn!(%pane_id, error = %e, "failed to clear the restored pane's home tag");
+    }
+}
+
 /// The companion panes of `window`, or none when the check fails.
 ///
 /// Best-effort: a failed check degrades to "no companions" rather than failing
@@ -141,6 +148,32 @@ pub fn kill_task_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Resu
     tmux::kill_window(window, runner)
 }
 
+/// [`kill_task_window`] for callers that only want the window gone when it is
+/// there (worktree teardown, a half-resumed launch): an absent window, or a
+/// failed presence query, is not an error. Same sparing of a leftover window.
+pub fn kill_task_window_if_present(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
+    match tmux::has_window(window, runner) {
+        Ok(true) => kill_task_window(window, runner),
+        Ok(false) => Ok(()),
+        Err(e) => {
+            tracing::warn!("could not check tmux window '{window}' before kill: {e}");
+            Ok(())
+        }
+    }
+}
+
+/// Respawn the pinned pane as a plain shell and forget its home window: the
+/// pane keeps its options across `respawn-pane -k`, and a stale
+/// [`tmux::HOME_WINDOW_OPTION`] would send a later retire after a window that is
+/// not its home. The tag is cleared only once the respawn lands.
+pub fn respawn_pinned_pane(pane_id: &PaneId, runner: &dyn ProcessRunner) -> Result<()> {
+    tmux::respawn_pane(pane_id, runner)?;
+    if let Err(e) = tmux::clear_pane_home(pane_id, runner) {
+        tracing::warn!(%pane_id, error = %e, "failed to clear the respawned pane's home tag");
+    }
+    Ok(())
+}
+
 /// Return the pinned `pane_id` to a standalone window named `window`.
 ///
 /// Breaks the pane out into a new window when the name is free. When a window
@@ -157,6 +190,7 @@ pub fn restore_pinned_pane(
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
     let Err(refused) = tmux::break_pane_to_window(pane_id, window, runner) else {
+        clear_home_tag(pane_id, runner);
         // break-pane -n makes a new window, and window options stay behind
         // with the old one, so the split hook's @dispatch_dir must be written
         // again (AgentWindowSplitStartsInTaskWorktree in
@@ -170,7 +204,9 @@ pub fn restore_pinned_pane(
         return Ok(());
     };
     if awaits_pane(window, pane_id, runner) {
-        tmux::rejoin_pane(pane_id, window, runner).context("rejoin pane failed")
+        tmux::rejoin_pane(pane_id, window, runner).context("rejoin pane failed")?;
+        clear_home_tag(pane_id, runner);
+        Ok(())
     } else {
         Err(refused)
     }

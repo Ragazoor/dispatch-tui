@@ -323,8 +323,10 @@ impl TaskService {
             Arc::clone(&self.clock),
             self.session_deadline(request),
         );
-        let killed =
-            tokio::task::spawn_blocking(move || crate::tmux::kill_window(&window, &runner)).await;
+        let killed = tokio::task::spawn_blocking(move || {
+            crate::dispatch::kill_task_window(&window, &runner)
+        })
+        .await;
         match killed {
             Ok(Ok(())) => None,
             // By the time a session closes its window is usually already gone,

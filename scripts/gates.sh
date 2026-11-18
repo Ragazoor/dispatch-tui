@@ -101,6 +101,12 @@ echo "single-write-service..."
 echo "single-write-service self-test..."
 bash ./scripts/test-check-single-write-service.sh
 
+echo "task-window-kills..."
+./scripts/check-task-window-kills.sh
+
+echo "task-window-kills self-test..."
+bash ./scripts/test-check-task-window-kills.sh
+
 echo "commit-msg self-test..."
 bash ./scripts/test-check-commit-msg.sh
 

@@ -1378,6 +1378,7 @@ fn cleanup_kills_window_and_removes_worktree() {
     let mock = MockProcessRunner::new(vec![
         // has_window: list-windows returns the window name in stdout
         MockProcessRunner::ok_with_stdout(b"task-42\n"),
+        MockProcessRunner::ok(), // show-options: no awaiting tag
         MockProcessRunner::ok(), // tmux kill-window
         MockProcessRunner::ok(), // git worktree remove
         MockProcessRunner::ok(), // git branch -D (best-effort)
@@ -1395,11 +1396,12 @@ fn cleanup_kills_window_and_removes_worktree() {
     assert_eq!(calls[0].0, "tmux");
     assert_eq!(calls[0].1[0], "list-windows");
     assert_eq!(calls[1].0, "tmux");
-    assert_eq!(calls[1].1[0], "kill-window");
-    assert_eq!(calls[2].0, "git");
+    assert_eq!(calls[1].1[0], "show-options");
+    assert_eq!(calls[2].1[0], "kill-window");
+    assert_eq!(calls[3].0, "git");
     // git worktree remove is invoked with -C <repo>
-    assert!(calls[2].1.contains(&"-C".to_string()));
-    assert!(calls[2].1.contains(&"remove".to_string()));
+    assert!(calls[3].1.contains(&"-C".to_string()));
+    assert!(calls[3].1.contains(&"remove".to_string()));
 }
 
 #[test]

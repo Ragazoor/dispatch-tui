@@ -87,8 +87,10 @@ impl TaskService {
     /// still there.
     pub async fn kill_session_window(&self, window: TmuxWindow) {
         let runner = self.runner.clone();
-        let joined =
-            tokio::task::spawn_blocking(move || crate::tmux::kill_window(&window, &*runner)).await;
+        let joined = tokio::task::spawn_blocking(move || {
+            crate::dispatch::kill_task_window(&window, &*runner)
+        })
+        .await;
         match joined {
             Ok(Ok(())) => {}
             // By the time a session closes its window is usually already gone,

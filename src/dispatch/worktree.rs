@@ -918,7 +918,7 @@ pub fn teardown_task(
     tracing::info!(?worktree_path, ?tmux_window, "tearing down task");
 
     if let Some(window) = tmux_window {
-        if let Err(error) = tmux::kill_window_if_present(window, runner)
+        if let Err(error) = super::kill_task_window_if_present(window, runner)
             .context("failed to kill tmux window during cleanup")
         {
             // The kill aborts before step 2 runs, so a worktree this task owns is

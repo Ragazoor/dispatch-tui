@@ -232,6 +232,7 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // list-windows (duplicate-name check)
         MockProcessRunner::ok(), // break_pane_to_window
+        MockProcessRunner::ok(), // set-option -u: clear the home tag
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
@@ -665,6 +666,7 @@ mod split_mode_via_msg_tx {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // list-windows (duplicate-name check)
             MockProcessRunner::ok(), // break_pane_to_window
+            MockProcessRunner::ok(), // set-option -u: clear the home tag
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 

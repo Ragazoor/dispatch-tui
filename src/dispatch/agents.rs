@@ -944,7 +944,7 @@ pub fn resume_agent_with_message(
         Ok(())
     })();
     if let Err(e) = launched {
-        if let Err(kill_err) = tmux::kill_window_if_present(&tmux_window, runner) {
+        if let Err(kill_err) = super::kill_task_window_if_present(&tmux_window, runner) {
             tracing::warn!(%tmux_window, "could not kill the half-resumed window: {kill_err:#}");
         }
         return Err(e);

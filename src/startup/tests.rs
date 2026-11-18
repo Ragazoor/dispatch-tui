@@ -899,6 +899,7 @@ fn retire_breaks_a_pinned_agent_out_before_it_kills_the_window() {
         MockProcessRunner::ok_with_stdout(b"%0\t\t/repo\n%1\ttask-42\t/wt/42\n"),
         MockProcessRunner::ok(), // has-session (refuse_duplicate)
         MockProcessRunner::ok(), // break-pane
+        MockProcessRunner::ok(), // set-option -u: clear the home tag
         MockProcessRunner::ok(), // set-option @dispatch_dir
         MockProcessRunner::ok_with_stdout(b"4242\n"), // pane_pid of the board's pane
         MockProcessRunner::ok(), // kill-window

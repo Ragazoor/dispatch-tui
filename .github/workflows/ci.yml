@@ -393,6 +393,12 @@ jobs:
       - name: Self-test the no-test-sleep checker
         run: bash ./scripts/test-check-no-test-sleep.sh
 
+      - name: Reject plain tmux kills of a task window
+        run: ./scripts/check-task-window-kills.sh
+
+      - name: Self-test the task-window-kills checker
+        run: bash ./scripts/test-check-task-window-kills.sh
+
       - name: Reject cross-store generated-id assertions in conformance tests
         run: ./scripts/check-conformance-ids.sh
 

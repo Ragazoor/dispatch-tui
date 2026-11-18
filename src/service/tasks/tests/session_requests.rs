@@ -934,7 +934,10 @@ async fn serve_kills_the_window_the_row_names_and_reports_done() {
     let fx = fx();
     let task = fx.running_task().await;
     let close = fx.close(task, WrapUpMode::Rebase, None).await;
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::ok(), // kill-window
+    ]));
     let svc = fx.svc(runner.clone());
     let row = fx.row(close).await;
     let window = row.tmux_window.clone().unwrap();
@@ -943,8 +946,8 @@ async fn serve_kills_the_window_the_row_names_and_reports_done() {
 
     assert!(matches!(served.outcome, SessionOutcome::Done), "{served:?}");
     let calls = runner.flattened_calls();
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("kill-window"), "{calls:?}");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls[1].contains("kill-window"), "{calls:?}");
     let _ = window;
     assert_eq!(fx.row(close).await.state, SessionRequestState::Done);
     assert_eq!(
@@ -977,9 +980,10 @@ async fn a_failed_teardown_is_recorded_and_never_reverts_the_close() {
     let fx = fx();
     let task = fx.running_task().await;
     let close = fx.close(task, WrapUpMode::Rebase, None).await;
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
-        "kill-window: server exited unexpectedly",
-    )]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::fail("kill-window: server exited unexpectedly"),
+    ]));
     let svc = fx.svc(runner);
 
     let served = svc.serve_session_request(fx.row(close).await).await;
@@ -1034,7 +1038,10 @@ async fn a_close_into_done_of_a_task_with_a_pr_runs_gh_pr_close() {
             Some("https://github.com/o/r/pull/10"),
         )
         .await;
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::ok(), // kill-window
+    ]));
     let svc = fx.svc(runner.clone());
     svc.serve_session_request(fx.row(pr_close).await).await;
     svc.wait_for_background_pr_closes().await;
@@ -1087,14 +1094,17 @@ async fn a_failed_exit_session_row_has_its_window_killed() {
     fx.caller.expire_session_request(close);
     let row = fx.row(close).await;
     assert_eq!(row.state, SessionRequestState::Failed);
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::ok(), // kill-window
+    ]));
     let svc = fx.svc(runner.clone());
 
     svc.tear_down_failed_exit_window(&row).await;
 
     let calls = runner.flattened_calls();
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("kill-window"), "{calls:?}");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls[1].contains("kill-window"), "{calls:?}");
     assert_eq!(fx.row(close).await, row, "nothing is reported");
 }
 
@@ -1120,15 +1130,16 @@ async fn only_a_failed_exit_session_row_with_a_window_is_torn_down() {
     let other = fx.running_task().await;
     let close = fx.close(other, WrapUpMode::Done, None).await;
     fx.caller.expire_session_request(close);
-    let failing = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
-        "boom",
-    )]));
+    let failing = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::fail("boom"),
+    ]));
     fx.svc(failing.clone())
         .tear_down_failed_exit_window(&fx.row(close).await)
         .await;
     assert_eq!(
         failing.recorded_calls().len(),
-        1,
+        2,
         "attempted once, swallowed"
     );
 }
@@ -1323,7 +1334,10 @@ async fn serve_a_close_row_without_a_window_only_closes_the_pr() {
     svc.close_task(task).await.unwrap();
     let row = fx.close_row(task).await;
     assert!(row.tmux_window.is_none());
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::ok(), // kill-window
+    ]));
     let svc = fx.svc(runner.clone());
 
     let served = svc.serve_session_request(row.clone()).await;
@@ -1351,14 +1365,17 @@ async fn a_failed_close_row_has_its_window_killed() {
     fx.caller.expire_session_request(row.id);
     let row = fx.row(row.id).await;
     assert_eq!(row.state, SessionRequestState::Failed);
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::ok(), // kill-window
+    ]));
     let svc = fx.svc(runner.clone());
 
     svc.tear_down_failed_exit_window(&row).await;
 
     let calls = runner.flattened_calls();
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("kill-window"), "{calls:?}");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls[1].contains("kill-window"), "{calls:?}");
 }
 
 /// A stuck wrap_up rebase does not block the close: the module fails it "task
@@ -1435,7 +1452,10 @@ async fn an_edit_into_done_with_a_pr_leaves_a_close_row_the_host_serves() {
     let rows = close_rows_of(&fx, id).await;
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].tmux_window, None, "an edit kills no window");
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::ok(), // kill-window
+    ]));
     let svc = fx.svc(runner.clone());
     let served = svc.serve_session_request(rows[0].clone()).await;
     svc.wait_for_background_pr_closes().await;
@@ -1550,7 +1570,10 @@ async fn serving_a_close_row_of_a_feed_task_kills_the_window_and_leaves_the_pr()
         .unwrap();
     let row = fx.close_row(id).await;
     assert!(row.tmux_window.is_some(), "{row:?}");
-    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // show-options: no awaiting tag
+        MockProcessRunner::ok(), // kill-window
+    ]));
     let svc = fx.svc(runner.clone());
 
     let served = svc.serve_session_request(row.clone()).await;
@@ -1558,6 +1581,6 @@ async fn serving_a_close_row_of_a_feed_task_kills_the_window_and_leaves_the_pr()
 
     assert!(matches!(served.outcome, SessionOutcome::Done), "{served:?}");
     let calls = runner.flattened_calls();
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("kill-window"), "{calls:?}");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls[1].contains("kill-window"), "{calls:?}");
 }

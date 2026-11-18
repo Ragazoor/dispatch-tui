@@ -108,6 +108,7 @@ fn resume_agent_kills_the_window_it_created_when_a_later_step_fails() {
     let mut responses = script.responses();
     // kill_window_if_present: has_window sees the window, then kill-window.
     responses.push((None, MockProcessRunner::ok_with_stdout(b"task-42\n")));
+    responses.push((None, MockProcessRunner::ok())); // show-options: no awaiting tag
     responses.push((None, MockProcessRunner::ok()));
     let mock = MockProcessRunner::new_with_delays(responses);
 
@@ -1003,6 +1004,7 @@ fn finish_task_no_tmux_window_skips_tmux_entirely() {
 fn teardown_task_kills_window_when_there_is_no_worktree() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"task-42\n"), // has_window → true
+        MockProcessRunner::ok(),                         // show-options: no awaiting tag
         MockProcessRunner::ok(),                         // tmux kill-window
     ]);
 
@@ -1220,6 +1222,7 @@ fn teardown_task_kill_window_failure_propagates() {
     // attempt the worktree remove.
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"task-42\n"), // has_window → true
+        MockProcessRunner::ok(),                         // show-options: no awaiting tag
         MockProcessRunner::fail("can't find window"),    // kill-window fails
     ]);
 

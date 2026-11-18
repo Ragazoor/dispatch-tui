@@ -78,6 +78,7 @@ async fn dispatch_split_exit_with_a_window_to_restore_breaks_the_pane_out() {
     let mut h = harness(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // list-windows (duplicate-name check)
         MockProcessRunner::ok(), // break-pane
+        MockProcessRunner::ok(), // set-option -u: clear the home tag
     ]))
     .await;
 

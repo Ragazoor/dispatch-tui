@@ -196,7 +196,7 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         let pane_id = pane_id.clone();
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = tmux::respawn_pane(&pane_id, &*runner) {
+            if let Err(e) = dispatch::respawn_pinned_pane(&pane_id, &*runner) {
                 tracing::warn!("respawn-pane failed: {e:#}");
                 // Reset only when the pane is confirmed gone; any other
                 // failure leaves the split as it is.
