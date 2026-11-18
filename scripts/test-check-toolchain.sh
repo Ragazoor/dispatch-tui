@@ -61,6 +61,9 @@ expect 1 'channel = "1.100.0"' 'rustc 1.99.0 (5f94df478 2026-08-27) (Fedora 1.99
 expect 1 'channel = "1.96.0"' 'rustc 1.99.0 (5f94df478 2026-08-27)' \
     'install rustup' 'older pin than host fails and names the fix'
 
+expect 1 'channel = "1.96.0"' 'rustc 1.99.0 (5f94df478 2026-08-27)' \
+    'rustup toolchain install 1.96.0' 'mismatch names the exact rustup command'
+
 # The distro version string must not satisfy the check by substring: the pin
 # is 1.9.0 and "1.99.0" contains "1.9", so only an exact field compare is right.
 expect 1 'channel = "1.9.0"' 'rustc 1.99.0 (5f94df478 2026-08-27)' \

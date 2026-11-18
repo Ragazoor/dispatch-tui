@@ -38,8 +38,10 @@ if [ "$host" != "$pinned" ]; then
 check-toolchain: host rustc is $host, but $TOML pins $pinned.
 cargo is not using the pinned toolchain, so clippy and the build will not match
 CI. Usually this means rustup is missing and a distro cargo is on PATH.
-Fix: install rustup (https://rustup.rs) so the pin applies, or install a distro
-rustc that matches $pinned.
+Fix: install rustup so the pin applies (sudo dnf install rustup; rustup-init;
+rustup target add wasm32-unknown-unknown), and put ~/.cargo/bin before /usr/bin
+on PATH. With rustup present, run: rustup toolchain install $pinned
+Otherwise install a distro rustc that matches $pinned.
 MSG
     exit 1
 fi
