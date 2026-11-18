@@ -45,8 +45,6 @@ use popups::{
 #[cfg(test)]
 pub(in crate::tui) use status_bar::batch_action_hints;
 use status_bar::render_status_bar;
-#[cfg(test)]
-pub(in crate::tui) use status_bar::status_line;
 
 /// A column's identity colour — the single source of truth for it.
 ///
@@ -195,35 +193,20 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
     let overhead: u16 = 9;
     let max_height = area_height.saturating_sub(overhead).max(8);
     match &app.input.mode {
-        InputMode::QuickDispatch => {
-            // header(1) + blank(1) + filter(1) + repos(N) + new_entry(0|1) + blank(1) + hint(1) + borders(2)
-            let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
-            let new_entry = crate::tui::has_new_repo_option(&app.input.buffer, &filtered);
-            let n = filtered.len() + new_entry as usize;
-            let rows = n as u16 + 7;
-            rows.clamp(8, max_height)
-        }
-        InputMode::InputRepoPath => {
-            // title(1) + tag(1) + desc(1) + path_input(1) + candidates(N) +
-            // blank(1) + hint(1) + borders(2) = N + REPO_PATH_FORM_ROWS
-            let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
-            let new_entry = crate::tui::has_new_repo_option(&app.input.buffer, &filtered);
-            let n = (filtered.len() + new_entry as usize) as u16;
-            (n + crate::tui::ui::input_form::REPO_PATH_FORM_ROWS).clamp(8, max_height)
-        }
-        InputMode::InputBaseBranch => {
-            // The repo-path step's rows plus the settled repo path (1).
-            let repo_path = app
-                .input
-                .task_draft
-                .as_ref()
-                .map(|d| d.repo_path.as_str())
-                .unwrap_or_default();
-            let history = app.base_branches_for(repo_path);
-            let filtered = crate::tui::filtered_repos(history, &app.input.buffer);
-            let new_entry = crate::tui::has_new_repo_option(&app.input.buffer, &filtered);
-            let n = (filtered.len() + new_entry as usize) as u16;
-            (n + crate::tui::ui::input_form::BASE_BRANCH_FORM_ROWS).clamp(8, max_height)
+        // The candidate pickers: one row per listed candidate plus the rows
+        // their form spends around the list (input_form's *_FORM_ROWS), so
+        // the hint row under the list is never clipped.
+        InputMode::QuickDispatch | InputMode::InputRepoPath | InputMode::InputBaseBranch => {
+            use crate::tui::ui::input_form::{
+                BASE_BRANCH_FORM_ROWS, QUICK_DISPATCH_FORM_ROWS, REPO_PATH_FORM_ROWS,
+            };
+            let form_rows = match app.input.mode {
+                InputMode::QuickDispatch => QUICK_DISPATCH_FORM_ROWS,
+                InputMode::InputRepoPath => REPO_PATH_FORM_ROWS,
+                _ => BASE_BRANCH_FORM_ROWS,
+            };
+            let listed = app.picker_row_count().unwrap_or_default() as u16;
+            (listed + form_rows).clamp(8, max_height)
         }
         // PhoenixArming's second pass (docs/specs/tasks.allium: CreateTask)
         // adds a settled "Phoenix: yes" line above the picker, so this step

@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::super::types::*;
-use super::super::{filtered_repos, fuzzy_matches_lower, has_new_repo_option, App};
+use super::super::{fuzzy_matches_lower, App};
 use crate::models::{EpicId, TaskStatus, WorkPackageId};
 
 impl App {
@@ -133,17 +133,30 @@ impl App {
         vec![]
     }
 
+    /// The epic `z` folds or unfolds: the Epics-tab row under the cursor,
+    /// when it has children. `None` means `z` does nothing (and records
+    /// nothing).
+    pub(in crate::tui) fn filter_fold_target(&self) -> Option<EpicId> {
+        self.filter_epic_rows()
+            .get(self.filter_overlay.epic_cursor)
+            .filter(|row| row.has_children)
+            .map(|row| row.id)
+    }
+
+    /// Whether `Z` has anything to fold or unfold: no standing query (it sets
+    /// folds aside) and at least one listed epic with children.
+    pub(in crate::tui) fn filter_fold_all_applies(&self) -> bool {
+        self.filter_overlay.epic_query.is_empty()
+            && self.filter_epic_rows().iter().any(|r| r.has_children)
+    }
+
     pub(in crate::tui) fn handle_toggle_filter_epic_fold(&mut self) -> Vec<Command> {
-        let rows = self.filter_epic_rows();
-        let Some(row) = rows.get(self.filter_overlay.epic_cursor) else {
+        let Some(id) = self.filter_fold_target() else {
             return vec![];
         };
-        if !row.has_children {
-            return vec![];
-        }
         let open = &mut self.filter_overlay.open_epics;
-        if !open.remove(&row.id) {
-            open.insert(row.id);
+        if !open.remove(&id) {
+            open.insert(id);
         }
         self.clamp_epic_cursor();
         self.dirty = true;
@@ -151,8 +164,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_toggle_all_filter_epic_folds(&mut self) -> Vec<Command> {
-        // A standing query sets folds aside, so there is nothing to toggle.
-        if !self.filter_overlay.epic_query.is_empty() {
+        if !self.filter_fold_all_applies() {
             return vec![];
         }
         let kept = self
@@ -251,13 +263,9 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_move_repo_cursor(&mut self, delta: isize) -> Vec<Command> {
-        let count = if let Some(candidates) = self.picker_candidates() {
-            let filtered = filtered_repos(candidates, &self.input.buffer);
-            let extra = has_new_repo_option(&self.input.buffer, &filtered) as usize;
-            filtered.len() + extra
-        } else {
-            self.board.repo_paths.len()
-        };
+        let count = self
+            .picker_row_count()
+            .unwrap_or(self.board.repo_paths.len());
         if count == 0 {
             return vec![];
         }

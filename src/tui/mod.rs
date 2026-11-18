@@ -573,6 +573,14 @@ impl App {
             None
         }
     }
+    /// Rows the current picker lists: its matching candidates, plus the
+    /// "new" entry when the query names none of them. `None` when the mode
+    /// has no picker. The panel height and the cursor's range both read it.
+    pub(in crate::tui) fn picker_row_count(&self) -> Option<usize> {
+        let candidates = self.picker_candidates()?;
+        let filtered = filtered_repos(candidates, &self.input.buffer);
+        Some(filtered.len() + has_new_repo_option(&self.input.buffer, &filtered) as usize)
+    }
     pub fn task_draft(&self) -> Option<&TaskDraft> {
         self.input.task_draft.as_ref()
     }

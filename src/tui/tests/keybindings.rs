@@ -337,18 +337,13 @@ fn admin_app(mode: InputMode) -> App {
 /// nothing (and records nothing) on another pane.
 fn admin_app_for(action: &str) -> App {
     use crate::tui::types::AdminPane as P;
-    let mut app = admin_app(InputMode::Admin);
     let pane = match action {
         "admin_toggle_role" | "admin_remove_member" => P::Members,
         "admin_grant_super_admin" | "admin_revoke_super_admin" => P::SuperAdmins,
         "admin_delete_unseen_item" => P::Unseen,
         _ => P::Workspaces,
     };
-    if let Some(screen) = app.input.admin.as_mut() {
-        screen.pane = pane;
-        screen.snapshot.claimable = action == "admin_claim_super_admin";
-    }
-    app
+    admin_app_on(pane, action == "admin_claim_super_admin")
 }
 
 /// The admin screen on each of its panes, for reading what each one draws.
@@ -356,14 +351,19 @@ fn admin_apps_on_every_pane() -> Vec<App> {
     use crate::tui::types::AdminPane as P;
     [P::Workspaces, P::Members, P::SuperAdmins, P::Unseen]
         .into_iter()
-        .map(|pane| {
-            let mut app = admin_app(InputMode::Admin);
-            if let Some(screen) = app.input.admin.as_mut() {
-                screen.pane = pane;
-            }
-            app
-        })
+        .map(|pane| admin_app_on(pane, false))
         .collect()
+}
+
+/// The admin screen showing `pane`; `claimable` lets the first super-admin
+/// be claimed.
+fn admin_app_on(pane: crate::tui::types::AdminPane, claimable: bool) -> App {
+    let mut app = admin_app(InputMode::Admin);
+    if let Some(screen) = app.input.admin.as_mut() {
+        screen.pane = pane;
+        screen.snapshot.claimable = claimable;
+    }
+    app
 }
 
 fn with_move_task_picker() -> App {
@@ -1079,15 +1079,7 @@ fn detail_zoomed_holds_only_when_zoomed() {
 fn every_family_namespace_can_be_set_up() {
     for family in ["board.confirm", "board.picker"] {
         for ns in namespaces_matching(family).unwrap() {
-            let probe = KeyBinding {
-                namespace: ns,
-                keys: &[],
-                context: None,
-                action: "",
-                description: "",
-                note: None,
-                records_usage: true,
-            };
+            let probe = probe(ns);
             assert!(!apps_in(&probe).is_empty(), "{}", ns.name());
         }
     }
@@ -1097,66 +1089,33 @@ fn every_family_namespace_can_be_set_up() {
 // Mode-bar hints
 // ---------------------------------------------------------------------------
 
-/// Every `[key]` a mode's status-bar hint advertises is a key of that mode's
-/// namespace (`HelpOverlayIsTheTable`: no second list of keys). The mode bars
-/// in `status_bar.rs` are hand-written strings beside the table; this is what
-/// catches one that kept advertising a removed key, as the `[F]lat` bar did for
-/// the normal-mode bars. A catch-all row (`ANY_OTHER_KEY`) accepts any key,
-/// so `[y/n]` passes in a confirm mode.
-#[test]
-fn mode_bar_keys_are_all_in_the_modes_namespace() {
-    fn tokens(text: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut rest = text;
-        while let Some(open) = rest.find('[') {
-            let Some(close) = rest[open..].find(']') else {
-                break;
-            };
-            let inner = &rest[open + 1..open + close];
-            out.extend(inner.split('/').map(|k| k.trim().to_string()));
-            rest = &rest[open + close + 1..];
-        }
-        out
-    }
-
-    let mut checked = 0;
-    for ns in board_namespaces() {
-        if matches!(
-            ns,
-            KeyNamespace::BoardNormal
-                | KeyNamespace::BoardDetail
-                | KeyNamespace::BoardHelp
-                | KeyNamespace::BoardError
-        ) {
-            continue;
-        }
-        let rows: Vec<&KeyBinding> = KEY_BINDINGS.iter().filter(|b| b.namespace == ns).collect();
-        let probe = KeyBinding {
-            namespace: ns,
-            keys: &[],
-            context: None,
-            action: "",
-            description: "",
-            note: None,
-            records_usage: true,
+/// The keys inside every `[...]` of `text`, split on `/`: `[q/Esc]` gives
+/// `q` and `Esc`.
+fn tokens(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        let Some(close) = rest[open..].find(']') else {
+            break;
         };
-        for app in apps_in(&probe) {
-            let (line, _) = crate::tui::ui::status_line(&app);
-            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-            for key in tokens(&text) {
-                checked += 1;
-                let known = rows
-                    .iter()
-                    .any(|b| b.keys.contains(&key.as_str()) || b.keys.contains(&ANY_OTHER_KEY));
-                assert!(
-                    known,
-                    "the {} bar advertises `{key}`, which is not a key of that namespace: {text:?}",
-                    ns.name()
-                );
-            }
-        }
+        let inner = &rest[open + 1..open + close];
+        out.extend(inner.split('/').map(|k| k.trim().to_string()));
+        rest = &rest[open + close + 1..];
     }
-    assert!(checked > 10, "the test read no hints ({checked})");
+    out
+}
+
+/// A row-less binding standing for "the mode `ns` with nothing else set up".
+fn probe(ns: KeyNamespace) -> KeyBinding {
+    KeyBinding {
+        namespace: ns,
+        keys: &[],
+        context: None,
+        action: "",
+        description: "",
+        note: None,
+        records_usage: true,
+    }
 }
 
 /// HintsNameOnlyTableKeys: every bracketed key hint anywhere in the frame a
@@ -1166,19 +1125,6 @@ fn mode_bar_keys_are_all_in_the_modes_namespace() {
 /// of Delete, Up and Down.
 #[test]
 fn every_bracketed_hint_a_mode_draws_is_a_key_of_that_mode() {
-    fn tokens(text: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut rest = text;
-        while let Some(open) = rest.find('[') {
-            let Some(close) = rest[open..].find(']') else {
-                break;
-            };
-            let inner = &rest[open + 1..open + close];
-            out.extend(inner.split('/').map(|k| k.trim().to_string()));
-            rest = &rest[open + close + 1..];
-        }
-        out
-    }
     fn table_form(hint: &str) -> &str {
         match hint {
             "Del" => "Delete",
@@ -1202,15 +1148,7 @@ fn every_bracketed_hint_a_mode_draws_is_a_key_of_that_mode() {
             continue;
         }
         let rows: Vec<&KeyBinding> = KEY_BINDINGS.iter().filter(|b| b.namespace == ns).collect();
-        let probe = KeyBinding {
-            namespace: ns,
-            keys: &[],
-            context: None,
-            action: "",
-            description: "",
-            note: None,
-            records_usage: true,
-        };
+        let probe = probe(ns);
         let apps = match ns {
             KeyNamespace::BoardAdmin => admin_apps_on_every_pane(),
             KeyNamespace::BoardFilter => [FilterTab::Repos, FilterTab::Epics, FilterTab::Packages]

@@ -52,18 +52,12 @@ impl App {
             // A fold key with nothing to fold (a leaf, no parent epic, a
             // standing query) does nothing and records nothing.
             "filter_fold_epics"
-                if tab == FilterTab::Epics
-                    && self
-                        .filter_epic_rows()
-                        .get(self.filter_overlay.epic_cursor)
-                        .is_some_and(|r| r.has_children) =>
+                if tab == FilterTab::Epics && self.filter_fold_target().is_some() =>
             {
                 M::ToggleEpicFold
             }
             "filter_fold_all_epics"
-                if tab == FilterTab::Epics
-                    && self.filter_overlay.epic_query.is_empty()
-                    && self.filter_epic_rows().iter().any(|r| r.has_children) =>
+                if tab == FilterTab::Epics && self.filter_fold_all_applies() =>
             {
                 M::ToggleAllEpicFolds
             }

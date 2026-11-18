@@ -109,9 +109,6 @@ impl ListCursor for CommitsSection {
     }
 }
 
-/// Draw the section into `area`. `selected` is the pane's selected source
-/// (`None` for unstaged work), marked in every state; `focused` decides the
-/// border colour and the cursor highlight; `alert` reddens the border.
 /// The Commits section's border title. Its keys come from the table's
 /// agent_tree.commits rows (keybindings.allium: PaneTitlesNameTheirOwnKeys).
 pub(crate) fn commits_title() -> String {
@@ -123,6 +120,9 @@ pub(crate) fn commits_title() -> String {
     )
 }
 
+/// Draw the section into `area`. `selected` is the pane's selected source
+/// (`None` for unstaged work), marked in every state; `focused` decides the
+/// border colour and the cursor highlight; `alert` reddens the border.
 pub fn render_commits(
     frame: &mut Frame,
     area: Rect,

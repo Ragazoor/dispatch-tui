@@ -231,13 +231,13 @@ impl App {
         use crate::tui::messages::{InputMessage, TaskMessage};
         let action = b.action;
         let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
+        let keyed_if_effect = |app: &mut App, msg: Message| {
+            app.dispatch_prompting_handler_keyed(|a| a.update(msg), action, label)
+        };
         Some(match action {
             "create_task" => keyed(self, Message::Input(InputMessage::StartNewTask)),
-            "copy_task" => self.dispatch_prompting_handler_keyed(
-                |a| a.update(Message::Input(InputMessage::CopyTask)),
-                action,
-                label,
-            ),
+            // With no task under the cursor there is nothing to copy.
+            "copy_task" => keyed_if_effect(self, Message::Input(InputMessage::CopyTask)),
             "move_task_forward" => {
                 self.move_key(MoveDirection::Forward, "move_task_forward", label)
             }

@@ -342,6 +342,10 @@ pub(in crate::tui) const REPO_PATH_FORM_ROWS: u16 = 8;
 /// [`REPO_PATH_FORM_ROWS`] plus the settled repo path above the branch field.
 pub(in crate::tui) const BASE_BRANCH_FORM_ROWS: u16 = REPO_PATH_FORM_ROWS + 1;
 
+/// Rows quick dispatch spends outside its candidate list: header, blank,
+/// filter field, the blank and hint rows under the list, and two borders.
+pub(in crate::tui) const QUICK_DISPATCH_FORM_ROWS: u16 = 7;
+
 pub(in crate::tui) fn input_repo_path_lines<'a>(
     app: &'a App,
     area: Rect,
@@ -527,7 +531,14 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
         Line::from(""),
         caret_field("  Filter: ", app, area, styles.active),
     ];
-    append_picker_candidates(&mut lines, &filtered, app, area, styles, 7);
+    append_picker_candidates(
+        &mut lines,
+        &filtered,
+        app,
+        area,
+        styles,
+        QUICK_DISPATCH_FORM_ROWS,
+    );
     lines
 }
 

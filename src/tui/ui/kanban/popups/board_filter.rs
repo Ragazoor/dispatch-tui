@@ -430,16 +430,19 @@ fn delete_repo_path_help_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a>
     ])
 }
 
+/// One footer hint: the bracketed key, then what it does.
+fn footer_hint(key: &'static str, label: &'static str, styles: &HintStyles) -> [Span<'static>; 2] {
+    [
+        Span::styled(key, styles.accent),
+        Span::styled(label, styles.note),
+    ]
+}
+
 /// The footer while the Epics tab's title search is being typed: only the
 /// keys board.filter_search answers, in two rows like the browse footer so
 /// starting a search never resizes the popup.
 fn append_search_help_lines<'a>(lines: &mut Vec<Line<'a>>, styles: &HintStyles) {
-    let hint = |key: &'static str, label: &'static str| {
-        [
-            Span::styled(key, styles.accent),
-            Span::styled(label, styles.note),
-        ]
-    };
+    let hint = |key, label| footer_hint(key, label, styles);
     lines.extend([
         Line::from([hint("  [Enter]", " keep  "), hint("[Esc]", " clear")].concat()),
         Line::from(hint("  [Backspace]", " delete").to_vec()),
@@ -450,12 +453,7 @@ fn append_search_help_lines<'a>(lines: &mut Vec<Line<'a>>, styles: &HintStyles) 
 /// tabs never resizes the popup. The confirm mode renders one row; the layout
 /// budget is counted from whichever this produces, not assumed.
 fn append_browse_help_lines<'a>(lines: &mut Vec<Line<'a>>, tab: FilterTab, styles: &HintStyles) {
-    let hint = |key: &'static str, label: &'static str| {
-        [
-            Span::styled(key, styles.accent),
-            Span::styled(label, styles.note),
-        ]
-    };
+    let hint = |key, label| footer_hint(key, label, styles);
     let first: Vec<Span> = match tab {
         FilterTab::Repos => [
             hint("  [j/k]", " navigate  "),
