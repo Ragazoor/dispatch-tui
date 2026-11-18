@@ -310,20 +310,19 @@ impl LearningService {
         if verdicts.is_empty() {
             return Ok(());
         }
-        match self.db.apply_verdicts_tx(task_id, &verdicts).await {
-            Ok(()) => Ok(()),
-            Err(e) => Err(match ServiceError::from(e) {
-                ServiceError::Validation(why)
-                    if why.ends_with(&format!("task {} not found", task_id.0))
-                        || verdicts.iter().any(|(id, _)| {
-                            why.ends_with(&format!("learning {} not found", id.0))
-                        }) =>
-                {
-                    ServiceError::NotFound(why)
-                }
+        let not_found = |why: &str| {
+            why.ends_with(&format!("task {} not found", task_id.0))
+                || verdicts
+                    .iter()
+                    .any(|(id, _)| why.ends_with(&format!("learning {} not found", id.0)))
+        };
+        self.db
+            .apply_verdicts_tx(task_id, &verdicts)
+            .await
+            .map_err(|e| match ServiceError::from(e) {
+                ServiceError::Validation(why) if not_found(&why) => ServiceError::NotFound(why),
                 other => other,
-            }),
-        }
+            })
     }
 
     /// Archive approved learnings that have gone stale with a non-positive score

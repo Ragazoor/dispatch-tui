@@ -866,15 +866,15 @@ async fn rate_learning_of_a_missing_learning_answers_not_found() {
     let task_id = create_task_in_repo(&state, "/repo").await;
     // The handler's own answer: `tools/call` re-wraps any error as an
     // `isError` result and drops the code.
-    let rate = |learning_id: i64| {
+    let rate = |task_id: i64, learning_id: i64| {
         crate::mcp::handlers::learnings::handle_rate_learning(
             &state,
             Some(json!(1)),
             &crate::mcp::identity::CallerIdentity::Session,
-            json!({ "task_id": task_id.0, "ratings": [{ "learning_id": learning_id, "verdict": "helped" }] }),
+            json!({ "task_id": task_id, "ratings": [{ "learning_id": learning_id, "verdict": "helped" }] }),
         )
     };
-    let resp = rate(9999).await;
+    let resp = rate(task_id.0, 9999).await;
     assert_error(&resp, "learning 9999 not found");
     assert_eq!(resp.error.as_ref().map(|e| e.code), Some(-32001));
 
@@ -882,17 +882,11 @@ async fn rate_learning_of_a_missing_learning_answers_not_found() {
         create_approved_learning(&state, "Tip", crate::models::LearningScope::User, None, &[])
             .await;
     // An unknown task answers not found too, as an unknown agent name does.
-    let resp = crate::mcp::handlers::learnings::handle_rate_learning(
-        &state,
-        Some(json!(1)),
-        &crate::mcp::identity::CallerIdentity::Session,
-        json!({ "task_id": 99_999, "ratings": [{ "learning_id": learning_id.0, "verdict": "helped" }] }),
-    )
-    .await;
+    let resp = rate(99_999, learning_id.0).await;
     assert_error(&resp, "task 99999 not found");
     assert_eq!(resp.error.as_ref().map(|e| e.code), Some(-32001));
 
-    let resp = rate(learning_id.0).await;
+    let resp = rate(task_id.0, learning_id.0).await;
     assert_error(&resp, "retriev");
     assert_eq!(resp.error.as_ref().map(|e| e.code), Some(-32602));
 }

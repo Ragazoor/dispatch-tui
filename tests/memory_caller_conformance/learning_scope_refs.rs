@@ -4,15 +4,8 @@
 //! (`learnings.allium: RecordLearningViaMcp`, `ReScopeLearningsOnRepoGroupDelete`;
 //! `workspaces.allium: UnseenIsAsMissing`.)
 
-use super::move_paths::{Pair, World};
+use super::move_paths::{refusal_of as refusal, Pair, World};
 use super::*;
-
-fn refusal(outcome: ReducerOutcome) -> String {
-    match outcome {
-        ReducerOutcome::Refused(why) => why,
-        other => panic!("expected a refusal, got {other:?}"),
-    }
-}
 
 /// One learning, with the same id on both sides.
 async fn learning_both(p: &Pair<'_>, row: bindings::Learning) -> LearningId {

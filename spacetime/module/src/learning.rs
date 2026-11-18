@@ -90,8 +90,15 @@ pub struct LearningPatch {
 /// `pub`, like `apply_task_patch`/`apply_epic_patch`: `MemoryReducerCaller`
 /// calls this directly rather than re-deriving it, per
 /// `spacetime-memory-store.allium`'s `ReducerConformance` `@guidance`.
-pub fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) {
+///
+/// Answers whether the patch touched content. An embedding is derived, not
+/// content: the startup repair pass writes it and must change nothing else
+/// (`learnings.allium: RecordLearningViaMcp`), or it would postpone
+/// `ArchiveStaleLearning`; so `updated_at` moves only when this is true.
+pub fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) -> bool {
+    let content = patch.status.is_some() || patch.summary.is_some();
     apply_patch!(row, patch, status, summary, embedding);
+    content
 }
 
 /// Create a learning. The row arrives with `id = 0`; the caller learns the
@@ -117,9 +124,8 @@ pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String
     // An epic ref that names no epic would store a learning nothing can
     // reach; it is refused with the wording an unseen epic gets, and the
     // operator, who sees every epic, is refused it too.
-    if !is_operator(ctx) && !learning_scope_seen(ctx, &row)
-        || !epic_scope_ref_names_an_epic(ctx, &row)
-    {
+    let unseen = !is_operator(ctx) && !learning_scope_seen(ctx, &row);
+    if unseen || !epic_scope_ref_names_an_epic(ctx, &row) {
         return Err(format!(
             "{} {} does not exist",
             row.scope,
@@ -233,12 +239,7 @@ pub fn patch_learning(ctx: &ReducerContext, id: i64, patch: LearningPatch) -> Re
     let Some(mut row) = visible_learning(ctx, id) else {
         return Ok(());
     };
-    // An embedding is derived, not content: the startup repair pass writes
-    // it and must change nothing else (`learnings.allium:
-    // RecordLearningViaMcp`), or it would postpone `ArchiveStaleLearning`.
-    let content_changed = patch.status.is_some() || patch.summary.is_some();
-    apply_learning_patch(&mut row, patch);
-    if content_changed {
+    if apply_learning_patch(&mut row, patch) {
         row.updated_at = now(ctx);
     }
     ctx.db.learnings().id().update(row);

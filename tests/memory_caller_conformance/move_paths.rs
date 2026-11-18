@@ -302,7 +302,7 @@ impl Pair<'_> {
     }
 }
 
-fn refusal_of(out: ReducerOutcome) -> String {
+pub(super) fn refusal_of(out: ReducerOutcome) -> String {
     match out {
         ReducerOutcome::Refused(why) => why,
         other => panic!("expected a refusal, got {other:?}"),
