@@ -967,7 +967,7 @@ in the same words. It cannot be undone, and you never read what you delete.",
 
     async idempotent "verify-command_set" => tasks::handle_verify_command_set,
         "Set or clear the verify command for a repository path — the check an agent working in \
-that repo must run green before declaring work complete. It never appears in a dispatch prompt. \
+that repo must run green before a rebase or pr wrap-up (a done wrap-up runs none). It never appears in a dispatch prompt. \
 It reaches the agent through the 'Verify command' line in task_search's response, and the agent \
 runs it itself in its worktree. \
 Pass command=null to clear it.",

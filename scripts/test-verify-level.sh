@@ -32,7 +32,7 @@ fail() {
 # A fresh repository on main with one commit, and a branch "work" from it.
 fresh() {
     rm -rf "$WORKDIR/repo"
-    mkdir -p "$WORKDIR/repo/docs/specs" "$WORKDIR/repo/docs/guide" "$WORKDIR/repo/docs/plans" "$WORKDIR/repo/src"
+    mkdir -p "$WORKDIR/repo/docs/project" "$WORKDIR/repo/docs/specs" "$WORKDIR/repo/docs/guide" "$WORKDIR/repo/docs/plans" "$WORKDIR/repo/src"
     cd "$WORKDIR/repo"
     git init -q -b main
     git config user.email test@example.com
@@ -53,7 +53,7 @@ expect() {
     local want="$1" label="$2"
     shift 2
     local got
-    got="$(bash "$LEVEL" "$@")" || fail "$label: verify-level.sh exited non-zero"
+    got="$("$LEVEL" "$@")" || fail "$label: verify-level.sh exited non-zero"
     [ "$got" = "$want" ] || fail "$label: want '$want', got '$got'"
 }
 
@@ -87,6 +87,10 @@ fresh
 echo b >>docs/specs/core.allium
 commit_all
 expect full "spec: tests read docs/specs"
+
+fresh
+echo b >docs/project/x.allium
+expect full "an .allium file outside docs/specs"
 
 fresh
 echo b >>docs/guide/index.html

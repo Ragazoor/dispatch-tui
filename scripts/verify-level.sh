@@ -24,10 +24,12 @@ fi
 
 # A path is safe when no test reads it and the gates check it themselves.
 # Tests read docs/specs/ (the spec list), docs/guide/ (the key binding guide)
-# and CLAUDE.md, so those are code here. Anything not listed is code.
+# and CLAUDE.md, so those are code here. A *.allium file anywhere under docs/
+# decides the dispatch prompt's design step (src/dispatch/allium_specs.rs), so
+# it is code too. Anything not listed is code.
 is_safe() {
     case "$1" in
-        docs/specs/* | docs/guide/*) return 1 ;;
+        docs/specs/* | docs/guide/* | *.allium) return 1 ;;
         docs/* | README.md) return 0 ;;
         *) return 1 ;;
     esac

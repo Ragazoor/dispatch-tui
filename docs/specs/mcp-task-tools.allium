@@ -2545,9 +2545,9 @@ surface McpTaskTools {
         -- when there is no change (no commits ahead of the base, no
         -- uncommitted or untracked files), runs the gates but not the tests
         -- when every changed path is on a fixed allowlist of paths no test or
-        -- gate reads as code (skills, specs and test snapshots are never on
-        -- it), and runs everything otherwise, including when it cannot find
-        -- the merge-base. The change is measured from the merge-base with the
+        -- gate reads as code (skills, specs, any .allium file and test
+        -- snapshots are never on it), and runs everything otherwise,
+        -- including when it cannot find the merge-base. The change is measured from the merge-base with the
         -- base, so commits that landed on the base since the branch forked
         -- do not count. A task whose base is not main is still measured
         -- against main (the agent adds no argument): that can only count
