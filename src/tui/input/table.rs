@@ -534,8 +534,10 @@ impl App {
             "quick_dispatch_move_cursor" => self.move_repo_cursor(action, key, label),
             "quick_dispatch_select" => {
                 let idx = self.input.repo_cursor;
-                self.dispatch_keyed(
-                    Message::Input(InputMessage::SelectQuickDispatchRepo(idx)),
+                // A cursor past the list with no typed new repo selects
+                // nothing: the press records only when it dispatched.
+                self.dispatch_prompting_handler_keyed(
+                    |a| a.update(Message::Input(InputMessage::SelectQuickDispatchRepo(idx))),
                     action,
                     label,
                 )

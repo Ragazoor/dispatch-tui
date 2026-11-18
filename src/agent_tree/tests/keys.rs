@@ -330,6 +330,15 @@ fn rig_for(binding: &crate::keybindings::KeyBinding) -> KeyRig {
         None => {}
         Some(other) => panic!("the tree pane has no context {other:?}"),
     }
+    // Collapse acts on a selection: with none there is nothing to close or
+    // step out of.
+    if binding.action == "collapse_directory" {
+        rig.press(KeyCode::Char('j'));
+    }
+    // Directories start open; expand needs a closed one.
+    if binding.action == "expand_directory" {
+        rig.press(KeyCode::Char('h'));
+    }
     if binding.namespace == KeyNamespace::AgentTreeAgents {
         rig.state.focus = Focus::Agents;
     }
@@ -373,6 +382,27 @@ fn pressing_each_key_of_each_pane_row_records_the_rows_action() {
         }
     }
     assert!(pressed > 30, "{pressed}");
+}
+
+/// `h` with nothing selected and `l` on a directory that is already open find
+/// nothing to do, so they record nothing.
+#[test]
+fn tree_expand_and_collapse_with_nothing_to_do_record_nothing() {
+    let mut rig = KeyRig::new(&three_node_changes());
+    rig.press(KeyCode::Char('h'));
+    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
+    for _ in 0..3 {
+        rig.press(KeyCode::Char('j'));
+    }
+    // Directories start open, so `l` finds nothing to expand.
+    rig.state.usage.clear();
+    rig.press(KeyCode::Char('l'));
+    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
+    // Once closed, it expands and records.
+    rig.press(KeyCode::Char('h'));
+    rig.state.usage.clear();
+    rig.press(KeyCode::Char('l'));
+    assert_eq!(recorded_usage(&rig.state).len(), 1);
 }
 
 /// A modified press with no row does nothing and records nothing, in either

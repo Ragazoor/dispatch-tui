@@ -845,8 +845,10 @@ surface KeyInput {
         -- (agent-health.allium: HookEventsPushALiveRefresh does not apply).
         --
         -- A pane sends only presses that take effect: a press with no row,
-        -- a jump_to_agent with no other agent under the cursor, or a
-        -- select_source on the row already selected, sends nothing. The sends run beside the pane's render loop, so a slow
+        -- a jump_to_agent with no other agent under the cursor, a
+        -- select_source on the row already selected, an expand_directory on a
+        -- directory that is already open, or a collapse_directory with nothing
+        -- selected, sends nothing. The sends run beside the pane's render loop, so a slow
         -- board never delays a key, and the pane waits for outstanding sends
         -- before it exits, so the closing press is not lost. A board that
         -- cannot be reached drops the press, with a warning from the pane,

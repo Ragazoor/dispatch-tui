@@ -1542,6 +1542,19 @@ fn an_admin_key_off_its_pane_records_nothing() {
     }
 }
 
+/// Enter in the quick-dispatch picker with no repo under the cursor and no new
+/// path typed selects nothing, so it records nothing and the picker stays open.
+#[test]
+fn quick_dispatch_select_with_no_repo_records_nothing() {
+    let mut app = make_app();
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.clear_buffer();
+    assert!(app.board.repo_paths.is_empty());
+    let cmds = press(&mut app, "Enter");
+    assert!(recorded(&cmds).is_empty(), "{:?}", recorded(&cmds));
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+}
+
 /// In the filter overlay's Epics tab, `z` on a leaf and `Z` with no epic
 /// that has children fold nothing, so they record nothing.
 #[test]

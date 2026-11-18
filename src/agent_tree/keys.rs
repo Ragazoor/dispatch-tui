@@ -227,12 +227,18 @@ fn run_tree_action(
             navigate_half_page(state, ns, key, half_page);
             KeyAction::Continue
         }
+        // Nothing closed, nothing to step out to: no effect, no record.
         "collapse_directory" => {
-            state.tree_state.key_left();
+            if !state.tree_state.key_left() {
+                return None;
+            }
             KeyAction::Continue
         }
+        // An already-open directory has nothing to expand.
         "expand_directory" => {
-            state.tree_state.key_right();
+            if !state.tree_state.key_right() {
+                return None;
+            }
             KeyAction::Continue
         }
         // No badge guard on the diff, and deliberately none. The editor this
