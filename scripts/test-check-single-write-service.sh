@@ -336,6 +336,60 @@ impl B {
     }
 }' '' 'a same-named helper in another impl block is not charged'
 
+# G9: a one-line `#[cfg(test)] item;` ends at its own semicolon and hides
+# nothing after it; char-literal braces are not braces; `&*self.db` and
+# `self.db.as_ref()` are aliases of `db`.
+expect 1 '#[cfg(test)] use std::fmt as _probe;
+impl S {
+    pub async fn update_thing(&self) {
+        self.db.set_a(1).await?;
+        self.db.set_b(2).await?;
+    }
+}' '' 'a one-line cfg(test) use above a double write does not hide it'
+expect 1 '#[cfg(test)] fn probe() {}
+impl S {
+    pub async fn update_thing(&self) {
+        self.db.set_a(1).await?;
+        self.db.set_b(2).await?;
+    }
+}' '' 'a one-line cfg(test) fn above a double write does not hide it'
+expect 0 'impl S {
+    #[cfg(test)] pub fn only_in_tests(&self) { self.db.set_a(1); self.db.set_b(2); }
+    pub async fn real(&self) { self.db.set_a(1).await?; }
+}' '' 'a one-line cfg(test) fn with its own body is skipped'
+expect 1 'impl S {
+    pub async fn bulk(&self) {
+        for id in ids {
+            let c = '"'}'"';
+            self.db.set_a(id).await?;
+        }
+    }
+}' '' 'a closing-brace char literal does not end a loop early'
+expect 1 'impl S {
+    pub async fn bulk(&self) {
+        let c = '"'{'"';
+        self.db.set_a(1).await?;
+        self.db.set_b(2).await?;
+    }
+}
+impl T {
+    pub async fn other(&self) { self.db.set_a(1).await?; }
+}' '' 'an opening-brace char literal does not hide the writes'
+expect 1 'impl S {
+    pub async fn deref(&self) {
+        let s = &*self.db;
+        s.set_a(1).await?;
+        s.set_b(2).await?;
+    }
+}' '' 'a &*self.db alias is followed'
+expect 1 'impl S {
+    pub async fn asref(&self) {
+        let s = self.db.as_ref();
+        s.set_a(1).await?;
+        s.set_b(2).await?;
+    }
+}' '' 'a self.db.as_ref() alias is followed'
+
 if [[ "$failures" != 0 ]]; then
     echo "$failures check-single-write-service case(s) failed" >&2
     exit 1

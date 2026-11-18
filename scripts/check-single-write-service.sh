@@ -26,11 +26,14 @@
 # up only among the `fn`s of the same `impl` block, so a same-named helper in
 # another block is not charged (G7).
 #
-# Limits, accepted: only `src/service/` is scanned; loops written as iterator
+# Limits, accepted: a helper in a second `impl` of the same type is not charged;
+# multi-line and raw string literals are not blanked; only `src/service/` is
+# scanned; loops written as iterator
 # closures (`.for_each(|x| {..})`, `.map`) are not loops here; a loop header
 # wrapped over several lines before its `{` is missed; helpers are followed
 # one level and by name within the same file (`self.x(` only, not `Self::x(`
-# or a call through another field); aliases are `let` bindings of `db` only.
+# or a call through another field); aliases are `let` bindings of `db` only
+# (`&db`, `&*db`, `db.clone()`, `db.as_ref()`, `Arc::clone(&db)`).
 #
 # Sanctioned exceptions go in scripts/single-write-service.allow, one
 # `path::function  N  reason` per line, where N is the exact number of writes
@@ -103,7 +106,7 @@ hits=$(
                 alts = "db"
                 t = body
                 gsub(/[ \t]*\.[ \t]*/, ".", t)
-                while (match(t, /let[ \t]+(mut[ \t]+)?[A-Za-z0-9_]+[^=;]*=[ \t]*(([A-Za-z0-9_]+::)*clone\()?&?(mut[ \t]+)?(self\.)?db(\.clone\(\))?\)?[ \t]*;/)) {
+                while (match(t, /let[ \t]+(mut[ \t]+)?[A-Za-z0-9_]+[^=;]*=[ \t]*(([A-Za-z0-9_]+::)*clone\()?&?(mut[ \t]+)?(\*[ \t]*)?(self\.)?db(\.clone\(\)|\.as_ref\(\))?\)?[ \t]*;/)) {
                     a = substr(t, RSTART, RLENGTH)
                     t = substr(t, RSTART + RLENGTH)
                     sub(/^let[ \t]+(mut[ \t]+)?/, "", a)
@@ -141,6 +144,8 @@ hits=$(
             # String contents blanked, so a brace inside a literal is not counted.
             function blank_strings(l) {
                 gsub(/"([^"\\]|\\.)*"/, "\"\"", l)
+                # A brace char literal (`'{'`, `'}'`) is not a brace either.
+                gsub(/\047[{}]\047/, "\047\047", l)
                 return l
             }
             function flush(    n, k, hs) {
@@ -171,17 +176,33 @@ hits=$(
                 sk_depth = 0
                 sk_brace = 0
             }
-            skipping {
-                code = blank_strings(strip_comment($0))
+            # One line of a skipped item. A line is the end of the item when its
+            # braces balance after at least one `{`, or it ends in `;` with none.
+            function skip_line(l,    code, tmp, o, c) {
+                code = blank_strings(strip_comment(l))
                 tmp = code
                 o = gsub(/[{]/, "{", tmp)
                 c = gsub(/[}]/, "}", tmp)
                 if (o > 0) sk_brace = 1
                 sk_depth += o - c
                 if (sk_depth <= 0 && (sk_brace || code ~ /;[ \t]*$/)) skipping = 0
+            }
+            skipping { skip_line($0); next }
+            # The item may follow the attribute on its own line
+            # (`#[cfg(test)] use x;`): it ends there, or goes on below.
+            /^[ \t]*#\[cfg\(test\)\]/ {
+                rest = $0
+                sub(/^[ \t]*#\[cfg\(test\)\][ \t]*/, "", rest)
+                if (rest ~ /^(\/\/.*)?$/ || rest ~ /^#\[/) {
+                    sk_armed = 1
+                } else {
+                    skipping = 1
+                    sk_depth = 0
+                    sk_brace = 0
+                    skip_line(rest)
+                }
                 next
             }
-            /^[ \t]*#\[cfg\(test\)\]/ { sk_armed = 1; next }
             sk_armed { next }
             $0 ~ FNHEAD {
                 flush()

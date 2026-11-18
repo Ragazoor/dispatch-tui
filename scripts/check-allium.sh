@@ -17,26 +17,27 @@
 # "Checker facts"). Each one has a comment beside the declaration in the spec
 # saying why it is expected. An entry is keyed on file, code and message, not
 # on the line, so an edit elsewhere in the file does not break it. A baseline
-# entry the checker no longer reports is printed as a note, not a failure: a
-# newer CLI that closes a gap must not fail one host and pass another.
+# entry the checker no longer reports fails too, so a stale entry cannot absorb
+# the same warning when it returns. The CLI version is pinned (a different one
+# may report different warnings), so every host sees the same set.
 #
 # All specs go through one invocation: checked alone, a spec reports
 # use.unresolvedPath on every `use`.
 #
-# Needs `allium` (cargo install allium-cli) at $MIN_VERSION or later, and jq.
+# Needs `allium` (cargo install allium-cli) at exactly $PIN_VERSION, and jq.
 # Behaviour is pinned by scripts/test-check-allium.sh.
 #
 # Run from the repo root:  ./scripts/check-allium.sh
 set -euo pipefail
 
-MIN_VERSION="3.6.1"
+PIN_VERSION="3.6.1"
 SPEC_DIR="docs/specs"
 BASELINE="scripts/allium-check.baseline"
 
 if ! command -v allium >/dev/null 2>&1; then
     cat >&2 <<MSG
 check-allium: \`allium\` is not on PATH.
-Install it with:  cargo install allium-cli --locked --version $MIN_VERSION
+Install it with:  cargo install allium-cli --locked --version $PIN_VERSION
 See docs/testing.md, "Toolchain and pre-push hook".
 MSG
     exit 1
@@ -48,12 +49,12 @@ if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     echo "check-allium: cannot read a version from \`allium --version\` (got \"$version\")" >&2
     exit 1
 fi
-# Numeric comparison: a string compare would rank 3.10.0 below 3.6.1.
-lowest="$(printf '%s\n%s\n' "$MIN_VERSION" "$version" | sort -V | head -n 1)"
-if [ "$lowest" != "$MIN_VERSION" ]; then
+if [ "$version" != "$PIN_VERSION" ]; then
     cat >&2 <<MSG
-check-allium: allium $version is older than $MIN_VERSION, which this gate needs.
-Upgrade with:  cargo install allium-cli --locked --version $MIN_VERSION
+check-allium: allium $version is not $PIN_VERSION, which this gate is pinned to.
+A different CLI can report warnings the baseline was not built for. Install the pin:
+  cargo install allium-cli --locked --version $PIN_VERSION
+To move the pin, change PIN_VERSION here and in CI, and re-check the baseline.
 MSG
     exit 1
 fi
@@ -152,7 +153,8 @@ MSG
     status=1
 fi
 
-# A listed warning the checker no longer reports: say so, but do not fail.
+# A listed warning the checker no longer reports fails: a stale entry would
+# absorb the same warning if it came back.
 stale=""
 while IFS= read -r entry; do
     [ -z "$entry" ] && continue
@@ -163,8 +165,9 @@ done <<EOF
 $baseline
 EOF
 if [ -n "$stale" ]; then
-    echo "check-allium: note: $BASELINE lists warnings allium no longer reports; remove them:"
-    printf '%s' "$stale"
+    echo "check-allium: $BASELINE lists warnings allium no longer reports; remove them:" >&2
+    printf '%s' "$stale" >&2
+    status=1
 fi
 
 if [ "$status" -ne 0 ]; then

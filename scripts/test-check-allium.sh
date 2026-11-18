@@ -95,11 +95,11 @@ expect() {
 
 # --- What passes. ------------------------------------------------------------
 
-expect 0 'no diagnostics passes' \
-    "$(doc docs/specs/a.allium '[]')$(doc docs/specs/b.allium '[]')" 0
+expect 0 'the baselined warning alone passes' \
+    "$(doc docs/specs/a.allium "[$BASELINED]")$(doc docs/specs/b.allium '[]')"
 
 expect 0 'info diagnostics alone pass and are counted' \
-    "$(doc docs/specs/a.allium '[]')$(doc docs/specs/b.allium "[$INFO]")" 0 3.6.1 '' '1 info'
+    "$(doc docs/specs/a.allium "[$BASELINED]")$(doc docs/specs/b.allium "[$INFO]")" 1 3.6.1 '' '1 info'
 
 expect 0 'a baselined warning passes' \
     "$(doc docs/specs/a.allium "[$BASELINED]")$(doc docs/specs/b.allium '[]')"
@@ -107,11 +107,6 @@ expect 0 'a baselined warning passes' \
 expect 0 'a baselined warning on another line still passes' \
     "$(doc docs/specs/a.allium "[$MOVED]")$(doc docs/specs/b.allium '[]')"
 
-expect 0 'a baseline entry the checker no longer reports is a note, not a failure' \
-    "$(doc docs/specs/a.allium '[]')$(doc docs/specs/b.allium '[]')" 0 3.6.1 '' 'no longer reports'
-
-expect 0 'a newer CLI passes the version floor (numeric, not string, compare)' \
-    "$(doc docs/specs/a.allium '[]')$(doc docs/specs/b.allium '[]')" 0 3.10.0
 
 # --- What fails. -------------------------------------------------------------
 
@@ -131,8 +126,18 @@ expect 1 'a baselined warning in another file does not cover this one' \
 expect 1 'a missing allium CLI fails' \
     "" 0 3.6.1 nostub 'cargo install allium-cli'
 
-expect 1 'an allium CLI older than the floor fails' \
-    "$(doc docs/specs/a.allium '[]')$(doc docs/specs/b.allium '[]')" 0 3.6.0 '' 'older than'
+expect 1 'a baseline entry the checker no longer reports fails' \
+    "$(doc docs/specs/a.allium '[]')$(doc docs/specs/b.allium '[]')" 0 3.6.1 '' 'no longer reports'
+
+expect 1 'an allium CLI older than the pin fails' \
+    "$(doc docs/specs/a.allium '[]')$(doc docs/specs/b.allium '[]')" 0 3.6.0 '' 'is not 3.6.1'
+
+# A pin, not a floor: a newer CLI may report a warning the pinned one does not.
+expect 1 'an allium CLI newer than the pin fails (numeric, not string, compare)' \
+    "$(doc docs/specs/a.allium '[]')$(doc docs/specs/b.allium '[]')" 0 3.10.0 '' 'is not 3.6.1'
+
+expect 1 'an allium CLI newer than the pin fails even when it is clean' \
+    "$(doc docs/specs/a.allium "[$BASELINED]")$(doc docs/specs/b.allium '[]')" 1 3.7.0 '' 'is not 3.6.1'
 
 expect 1 'exit 2 (no inputs) fails' \
     "" 2
