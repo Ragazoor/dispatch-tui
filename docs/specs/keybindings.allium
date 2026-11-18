@@ -83,14 +83,25 @@ contract KeybindingDriftGate {
         -- trivially while every key in it is inert.
 
     @invariant ModifiedPressDoesNotBorrowTheBareRow
-        -- For bare-key rows: pressing a modified form of the row's key
-        -- (Ctrl+<key>) that no row lists runs nothing and records nothing
+        -- For every unmodified key of every board row (a letter of either
+        -- case, a digit, punctuation, Space or a named key): pressing its
+        -- Ctrl form, when no row lists that form, runs nothing and records
+        -- nothing — no command at all and no change of mode
         -- (ModifiedPressMatchesOnlyItsOwnRow), catch-all or not.
 
     @invariant UnrecordedRowsRecordNothing
-        -- For a row with records_usage false, the press is asserted by its
-        -- effect (the field's text or caret changed as the action says) and
-        -- by NOTHING being recorded — not the row's id, not any id.
+        -- For every row with records_usage false, in every namespace that
+        -- has one, each key is asserted by its effect (the field's text or
+        -- caret changed as the action says) and by NOTHING being recorded —
+        -- not the row's id, not any id.
+
+    @invariant HintsNameOnlyTableKeys
+        -- Every bracketed key hint a board mode draws (status bar, popup,
+        -- form prompt, overlay footer; not the board drawn under it) names
+        -- a key of that mode's namespace, so a hint never advertises a key
+        -- the mode does not answer. The companion pane's section titles are
+        -- built from the table (PaneTitlesNameTheirOwnKeys) and asserted to
+        -- name their rows' keys.
 
     @invariant TmuxGlobalRowsTrackTheirBindings
         -- The tmux.global toggle_agent_tree row's key is `Prefix+` followed
@@ -449,8 +460,9 @@ enum KeyContext {
 -- One row of the keybinding table. The table is the set of all KeyBindings;
 -- every key handler, the help overlay and keybinding_search read it, and no
 -- handler keeps a key list of its own. The short key hints in the status
--- bar, popups and pane footers are hand-written text; only the status bar's
--- bracketed hints are checked against the table.
+-- bar, popups and form prompts are hand-written text, checked against the
+-- table (KeybindingDriftGate.HintsNameOnlyTableKeys); the help overlay's
+-- title and the companion pane's section titles are built from it.
 entity KeyBinding {
     namespace:   KeyNamespace
 
@@ -851,6 +863,15 @@ surface KeyInput {
         -- When the editor never opens (one is already open, or its window
         -- or file cannot be made), the board shows the error and the form
         -- stays at this step until Esc; the status line names Esc.
+
+    @guarantee PaneTitlesNameTheirOwnKeys
+        -- The companion pane's Agents and Commits section titles name the
+        -- keys that switch the agents filter, the section and the view
+        -- ("Agents (Tab: running, s: browse)", "Commits (Tab, s: agents)"),
+        -- read from the first key of the agent_tree.agents and
+        -- agent_tree.commits rows cycle_agent_filter, switch_section and
+        -- toggle_focus. Rebinding a row changes its title with no second
+        -- edit, as with the help overlay's title (OverlayTitleNamesItsOwnKeys).
 
     @guarantee PaneStartupScreenIsOutsideUsage
         -- While a companion or diff pane waits for its task, or shows its

@@ -981,6 +981,11 @@ given {
 --   Esc with a query clears the query; Esc with none closes the overlay.
 --   The query is the overlay's own: it does not touch the board's `/`
 --   search, and it is gone when the overlay closes.
+--   While the query is being typed, the footer names the typing keys
+--   instead of the tab's: `[Enter] keep  [Esc] clear` on its first row and
+--   `[Backspace] delete` on its second, so it keeps its two rows and never
+--   names a key the search does not answer (keybindings.allium:
+--   KeybindingDriftGate.HintsNameOnlyTableKeys).
 --
 --   Work packages tab: every work package, one row each, marked hidden or
 --   shown.
