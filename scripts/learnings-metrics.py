@@ -346,6 +346,52 @@ def repo_helped_metrics():
         print(f"  {name:16} {cells or '(no rated pairs yet)'}")
 
 
+WRAP_UP_METHODS = {"wrap_up", "session_wrap-up", "exit_session", "session_exit"}
+# 5491dc74 (2026-11-14) cut the wrap-up skill's rating step to "knowledge you acted on";
+# the board reinstalled it on 2026-11-16. Run 11 (task 99185) put not_applicable back.
+RATING_STEP_TRIMMED_AT = "2026-11-16"
+
+
+def wrap_up_rating_metrics():
+    """Of the tasks that ran the wrap-up closing sequence, the share that rated every entry
+    injected into their prompt, per ISO week of the first injection.
+
+    This is the rate the verdict signal depends on: an injected entry left unrated is
+    neither helped nor not_applicable, so it cannot mute an off-topic entry. Before the
+    trim it was about 90%; the two days after, 51%. Tasks that never called a wrap-up tool
+    (quick tasks, runbook cards the operator closed) are left out: the skill never ran.
+    """
+    R, V, T = table("learning_retrievals"), table("learning_verdicts"), table("tasks")
+    status = {t["id"]: t["status"] for t in T}
+    rated = {(v["task_id"], v["learning_id"]) for v in V}
+    injected = collections.defaultdict(set)
+    first = {}
+    for r in R:
+        if r["source"] == "prompt_injection" and r["retrieved_at"] >= NOT_APPLICABLE_FROM:
+            injected[r["task_id"]].add(r["learning_id"])
+            first[r["task_id"]] = min(first.get(r["task_id"], r["retrieved_at"]), r["retrieved_at"])
+    wrapped = set()
+    for f in glob.glob(TRAJ):
+        for line in open(f):
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get("method") in WRAP_UP_METHODS:
+                wrapped.add(e.get("task_id"))
+    weeks = collections.defaultdict(lambda: [0, 0])
+    for t, ls in injected.items():
+        if t not in wrapped or status.get(t) != "done":
+            continue
+        w = weeks[iso_week(first[t])]
+        w[0] += 1
+        w[1] += all((t, l) in rated for l in ls)
+    print(f"wrapped-up done tasks that rated every injected entry (skill trimmed {RATING_STEP_TRIMMED_AT}):")
+    for wk in sorted(weeks)[-4:]:
+        n, k = weeks[wk]
+        print(f"  {wk}  {k:>4}/{n:<4}{100 * k // n:>3}%")
+
+
 def pr_metrics():
     prs = {}
     for f in glob.glob(TRAJ):
@@ -383,5 +429,6 @@ if __name__ == "__main__":
     verdict_coverage_metrics()
     mute_metrics()
     repo_helped_metrics()
+    wrap_up_rating_metrics()
     if "--prs" in sys.argv:
         pr_metrics()

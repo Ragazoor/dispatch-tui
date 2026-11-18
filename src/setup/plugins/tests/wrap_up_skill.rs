@@ -375,6 +375,10 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
             "`session_wrap-up` refuses a dirty worktree",
         ),
         ("RateBeforeClosing", "Rate retrieved knowledge"),
+        (
+            "RateBeforeClosing",
+            "every entry from \"## Validated knowledge for this task\" that did not fit this task `not_applicable`",
+        ),
         ("ClosingSequenceRunsInOneTurn", "back to back in one turn"),
         ("RefusalIsShownAsWritten", "show the user the exact message"),
         ("RefusalIsShownAsWritten", "suggest resolution steps"),

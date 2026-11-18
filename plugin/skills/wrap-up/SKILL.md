@@ -66,6 +66,6 @@ Run `git status --porcelain`. If it is not clean, `git add` the relevant files b
 
 Run these back to back in one turn; any pause risks going idle with `{base_branch}` already fast-forwarded and the task still in its old status.
 
-1. **Rate retrieved knowledge** you acted on and have not rated yet, as the `learnings` skill describes.
+1. **Rate retrieved knowledge** in one `learning_rate` call: each entry you acted on and have not rated yet (`helped` or `wrong`), and every entry from "## Validated knowledge for this task" that did not fit this task `not_applicable`. Those verdicts are how the store learns to stop injecting an entry here. The `learnings` skill has the details.
 2. **`session_wrap-up(task_id, action)`.** It returns an **Exit token**. If it refuses — uncommitted changes, a rebase conflict — show the user the exact message. For a dirty tree, commit (Step 6) and call `session_wrap-up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `session_exit` without a token.
 3. **`session_exit(task_id, token, action)`**, plus `pr_url` on the pr path only. Make it your final action. If it errors, or succeeds but reports that the close did not take effect, read `references/exit-session-errors.md` before reacting.

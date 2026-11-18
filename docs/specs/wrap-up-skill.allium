@@ -466,8 +466,10 @@ rule RateKnowledgeAndWrapUp {
     ensures: run.stage = wrap_up_asked
 
     @guidance
-        -- Knowledge the agent acted on and has not rated is rated first, as
-        -- the learnings skill describes (RateBeforeClosing). Then session_wrap-up is
+        -- Knowledge the agent acted on and has not rated is rated first, and
+        -- every injected entry that did not fit the task is rated
+        -- not_applicable, as the learnings skill describes (RateBeforeClosing).
+        -- Then session_wrap-up is
         -- called with the task and the action. The three steps of the
         -- closing sequence run back to back (ClosingSequenceRunsInOneTurn).
 }
@@ -794,9 +796,17 @@ surface WrapUpSession {
         -- (CommitRemainingChanges).
 
     @guarantee RateBeforeClosing
-        -- Knowledge the agent acted on and has not rated yet is rated before
-        -- session_wrap-up is called, as the learnings skill describes
-        -- (RateKnowledgeAndWrapUp).
+        -- Before session_wrap-up is called, the agent rates knowledge it acted
+        -- on and has not rated yet (helped or wrong), and rates every entry
+        -- from "## Validated knowledge for this task" that did not fit the
+        -- task not_applicable, as the learnings skill describes
+        -- (RateKnowledgeAndWrapUp). The skill names the not_applicable case
+        -- itself, not only by reference: when its copy said only "knowledge
+        -- you acted on", the share of wrapped-up tasks that rated every
+        -- injected entry fell from 90% to 51% within two days
+        -- (docs/plans/2026-11-18-99185-learnings-iteration-11.md). The
+        -- injection's not_applicable verdicts are what mute an off-topic
+        -- entry in a repo (learnings.allium), so a skipped rating keeps it in.
 
     @guarantee ClosingSequenceRunsInOneTurn
         -- Rating, session_wrap-up and session_exit run back to back in one turn. A
