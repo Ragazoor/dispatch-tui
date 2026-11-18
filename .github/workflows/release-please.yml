@@ -85,6 +85,10 @@ jobs:
   # libstdc++ (`__cxa_call_terminate`), so ubuntu-22.04 fails to link. The
   # binary links the system OpenSSL 3 (spacetimedb-sdk -> native-tls).
   #
+  # macOS builds on macos-15 (Apple Silicon). GitHub retired the macos-14
+  # image, and a job on a retired label fails at once with "The configuration
+  # ... is not supported", so bump the label when GitHub retires this one.
+  #
   # Releases are immutable once published, so release-please creates a draft
   # (`"draft": true` in release-please-config.json), the builds upload into
   # it, and the `publish` job publishes it last.
@@ -105,7 +109,7 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
     runs-on: ${{ matrix.os }}
     # Write access only to upload release assets. Every third-party action
     # here is pinned to a commit SHA, since this token can change releases.
