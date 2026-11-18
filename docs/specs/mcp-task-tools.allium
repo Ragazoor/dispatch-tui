@@ -1017,8 +1017,9 @@ rule GetTaskViaMcp {
         -- [Verify command] is not a Task field: it is task.repo_path resolved
         -- against core/SavedRepoPath.verify_command.
         -- Omitted when no verify_command is set for the repo. The line is how
-        -- the agent learns the command it runs itself, while it works and
-        -- before session_wrap-up (AgentsRunTheVerifyCommand); the board never runs it. See also ThePromptCarriesNoVerifyCommand in
+        -- the agent learns the command it runs itself, while it works and,
+        -- on the rebase and pr paths, before session_wrap-up
+        -- (AgentsRunTheVerifyCommand); the board never runs it. See also ThePromptCarriesNoVerifyCommand in
         -- dispatch-prompt.allium.
         -- An unknown task_id is a not-found condition, not a validation one:
         -- ServiceError::NotFound surfaces as the -32001 not-found code, the
@@ -1664,8 +1665,9 @@ rule WrapUpViaMcp {
         -- the learning_rate nudge for pr (learnings.allium:
         -- WrapUpRateLearningNudge), "No git operations performed." for done,
         -- and for rebase the warning that without session_exit the window
-        -- stays alive, plus, when the rebase moved the worktree's HEAD and the
-        -- repo has a verify command, the line from AgentsRunTheVerifyCommand.
+        -- stays alive. No response names the verify command or tells the
+        -- agent to re-run it, even when the rebase moved the worktree's HEAD
+        -- (AgentsRunTheVerifyCommand).
         -- The /wrap-up skill runs the /retro skill before its commit step,
         -- ahead of session_wrap-up, so any agent-context fix retro makes is committed
         -- with the session's work rather than stranded after the rebase.
@@ -2523,16 +2525,35 @@ surface McpTaskTools {
         -- The command reaches the agent through task_search's "Verify command"
         -- line (GetTaskViaMcp), and the /wrap-up skill has a step that sends
         -- the agent to run it, fix failures and commit BEFORE it calls
-        -- session_wrap-up. On the pr path that step comes before the push.
+        -- session_wrap-up, on the rebase and pr paths only. On the pr path
+        -- that step comes before the push. The done path runs no verify
+        -- command: nothing from it lands on the base branch.
         --
-        -- One case is named just in time in session_wrap-up's rebase response: when
-        -- the rebase moved the worktree's HEAD (the base branch had commits
-        -- the branch lacked, so the branch was rewritten on top of them) and
-        -- the task's repo has a verify command, the success text adds a line
-        -- naming the command and telling the agent to re-run it before
-        -- session_exit. A rebase that left HEAD where it was, a done or pr
-        -- action, and a repo with no verify command add no such line. The
-        -- board does not run the command or check the result.
+        -- It is not run again after session_wrap-up. A rebase that moved the
+        -- worktree's HEAD (the base branch had commits the branch lacked)
+        -- gets no re-run line in its response, and the agent re-runs nothing
+        -- before session_exit. Re-running cost too much compute for what it
+        -- caught; a breakage that only the combination with the moved base
+        -- causes is left for later agents to pick up and fix.
+        --
+        -- How much the command checks is the repository's call, not
+        -- dispatch's and not the agent's. Dispatch stores one command per
+        -- repository and requires only that the agent runs it; the command
+        -- may read the change itself and scale what it checks to it. This
+        -- repository's ./scripts/verify.sh does: it takes the base branch as
+        -- an argument (main by default), passes without checking anything
+        -- when there is no change (no commits ahead of the base, no
+        -- uncommitted or untracked files), runs the gates but not the tests
+        -- when every changed path is on a fixed allowlist of paths no test or
+        -- gate reads as code (skills, specs and test snapshots are never on
+        -- it), and runs everything otherwise, including when it cannot find
+        -- the merge-base. The change is measured from the merge-base with the
+        -- base, so commits that landed on the base since the branch forked
+        -- do not count. A task whose base is not main is still measured
+        -- against main (the agent adds no argument): that can only count
+        -- more paths, so it can pick a larger level, never a smaller one.
+        -- Its first line names the level it chose, so the agent can report
+        -- what actually ran.
         --
         -- When the verify command fails for a reason the agent did not
         -- cause, including a broken base branch, no fixed procedure is

@@ -78,11 +78,6 @@ async fn test_state_with_notify() -> (
     (state, rx)
 }
 
-/// The commit the worktree is at, as `git rev-parse HEAD` prints it.
-const HEAD_A: &str = "aaaaaaa\n";
-
-const HEAD_B: &str = "bbbbbbb\n";
-
 async fn wrap_up_call(
     state: &Arc<McpState>,
     task_id: crate::models::TaskId,

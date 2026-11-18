@@ -440,11 +440,6 @@ macro_rules! task_service_api {
                 task: $crate::models::Task
             ) -> Result<(), $crate::service::ServiceError>;
 
-            /// The commit the worktree is at, or `None` when git cannot say.
-            /// `AgentsRunTheVerifyCommand` in
-            /// `docs/specs/mcp-task-tools.allium`.
-            async fn worktree_head(&self, worktree: String) -> Option<String>;
-
             /// Kill the tmux window a closed session left behind. Keeps the
             /// only tmux call the MCP layer needs behind the service boundary
             /// — see `ExitSession` in `docs/specs/pr-workflow.allium`.

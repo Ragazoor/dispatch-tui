@@ -762,9 +762,11 @@ Commit subjects take the form `<type>[(scope)][!]: <description>`, with `<type>`
 Other agents land on `main` during your session, so the snapshot you read at startup goes stale. Before wrapping up, run `git log
 --oneline main..HEAD` **and** `git log --oneline HEAD..main` — the second is the
 one that catches a base that moved under you. If it is non-empty, merge `main`
-into your branch and re-run the suite before reporting completion; a green run
-against a stale base proves nothing. Assume a function you did not write may have
-been rewritten since you read it.
+into your branch when you need its changes or to resolve a conflict. Do not re-run
+the suite only because `main` moved: that costs a full run per agent per move,
+and a later agent picks up and fixes any breakage the combination causes
+(`AgentsRunTheVerifyCommand` in `docs/specs/mcp-task-tools.allium`). Assume a
+function you did not write may have been rewritten since you read it.
 
 **Compare against `main`, not `origin/main`.** A sibling agent wrapping up with
 the rebase path fast-forwards the *local* `main` in the parent checkout and does

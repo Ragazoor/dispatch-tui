@@ -658,8 +658,9 @@ surface AgentPrompt {
         --
         -- The command reaches the agent through task_search's response (see
         -- GetTaskViaMcp in mcp-task-tools.allium), so it can run the check while
-        -- it works. The /wrap-up skill sends the agent to run it before session_wrap-up
-        -- (AgentsRunTheVerifyCommand in mcp-task-tools.allium); the board does
+        -- it works. The /wrap-up skill sends the agent to run it before
+        -- session_wrap-up on the rebase and pr paths (AgentsRunTheVerifyCommand
+        -- in mcp-task-tools.allium); the board does
         -- not, so there is no second reminder to keep in step.
 
     @guarantee ThePromptNamesNoToolMerelyToSayItExists

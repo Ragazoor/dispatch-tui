@@ -54,19 +54,6 @@ fn commit_check(runner: &dyn crate::process::ProcessRunner, worktree: &str) -> R
     ))
 }
 
-/// The commit the worktree is at, or `None` when git cannot say.
-fn head_of(runner: &dyn crate::process::ProcessRunner, worktree: &str) -> Option<String> {
-    let out = crate::git::git_in(
-        runner,
-        worktree,
-        &["rev-parse", "HEAD"],
-        crate::process::SUBPROCESS_TIMEOUT,
-    )
-    .ok()?;
-    let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (out.status.success() && !head.is_empty()).then_some(head)
-}
-
 impl TaskService {
     /// Refuse a wrap-up whose worktree has uncommitted changes —
     /// `WrapUpRefusesUnfinishedWork` in `docs/specs/mcp-task-tools.allium`.
@@ -89,17 +76,6 @@ impl TaskService {
                 "wrap_up checks worker died: {e}"
             ))),
         }
-    }
-
-    /// The commit the worktree is at, or `None` when it cannot be read. Used
-    /// around a rebase to tell whether it moved the branch
-    /// (`AgentsRunTheVerifyCommand`).
-    pub async fn worktree_head(&self, worktree: String) -> Option<String> {
-        let runner = self.runner.clone();
-        tokio::task::spawn_blocking(move || head_of(&*runner, &worktree))
-            .await
-            .ok()
-            .flatten()
     }
 
     /// Kill the tmux window a failed teardown row left behind

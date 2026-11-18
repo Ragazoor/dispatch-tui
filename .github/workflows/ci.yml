@@ -408,6 +408,9 @@ jobs:
       - name: Self-test the commit-message checker
         run: bash ./scripts/test-check-commit-msg.sh
 
+      - name: Self-test verify's change-level choice
+        run: bash ./scripts/test-verify-level.sh
+
       # fetch-reviews.sh feeds the review board; its self-test drives it against
       # a stub `gh`, so it needs no network and no credentials.
       - name: Self-test the fetch-reviews feed script

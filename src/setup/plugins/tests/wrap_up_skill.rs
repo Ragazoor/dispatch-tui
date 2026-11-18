@@ -341,7 +341,19 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
         ),
         (
             "VerifyBeforeWrapUp",
-            "run it in your worktree now, whatever the path",
+            "on the rebase and pr paths, run it in your worktree now",
+        ),
+        (
+            "VerifyBeforeWrapUp",
+            "On the done path, run no verify command",
+        ),
+        (
+            "VerifyBeforeWrapUp",
+            "exactly as printed, with no arguments added",
+        ),
+        (
+            "VerifyBeforeWrapUp",
+            "do not run it again after `session_wrap-up`",
         ),
         (
             "VerifyBeforeWrapUp",
@@ -364,14 +376,6 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
         ),
         ("RateBeforeClosing", "Rate retrieved knowledge"),
         ("ClosingSequenceRunsInOneTurn", "back to back in one turn"),
-        (
-            "RebaseReverifiesWhenTold",
-            "if its response tells you to re-run the verify command",
-        ),
-        (
-            "RebaseReverifiesWhenTold",
-            "commit any fix before `session_exit`",
-        ),
         ("RefusalIsShownAsWritten", "show the user the exact message"),
         ("RefusalIsShownAsWritten", "suggest resolution steps"),
         ("RefusalIsShownAsWritten", "show the exact message and stop"),

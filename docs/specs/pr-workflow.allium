@@ -785,9 +785,8 @@ rule WrapUpRebase {
         -- The commit check runs BEFORE this rule's rebase, in the session_wrap-up tool
         -- itself: see WrapUpRefusesUnfinishedWork in mcp-task-tools.allium. A
         -- dirty worktree refuses the call. The board never runs the verify
-        -- command: the agent ran it before calling session_wrap-up, and when this
-        -- rebase moved the worktree's HEAD the success response tells it to
-        -- run the command again before session_exit
+        -- command: the agent ran it before calling session_wrap-up, and does
+        -- not run it again when this rebase moved the worktree's HEAD
         -- (AgentsRunTheVerifyCommand in mcp-task-tools.allium).
 }
 

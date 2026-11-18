@@ -104,6 +104,9 @@ bash ./scripts/test-check-single-write-service.sh
 echo "commit-msg self-test..."
 bash ./scripts/test-check-commit-msg.sh
 
+echo "verify-level self-test..."
+bash ./scripts/test-verify-level.sh
+
 echo "fetch-reviews..."
 bash ./scripts/test-fetch-reviews.sh
 

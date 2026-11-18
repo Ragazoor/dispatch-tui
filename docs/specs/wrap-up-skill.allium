@@ -41,8 +41,15 @@
 --     stranded, so the retro files a task instead) and before the commit (so
 --     its fixes travel with the work).
 --   - The board does not run the verify command and cannot tell that the
---     agent did, so the skill is where it is held. It runs before the push on
---     the pr path, because the PR is open once session_wrap-up is called.
+--     agent did, so the skill is where it is held. It runs on the rebase and
+--     pr paths only: done lands nothing on the base branch, so there is
+--     nothing for it to protect. It runs before the push on the pr path,
+--     because the PR is open once session_wrap-up is called. It is not run
+--     again after a rebase that moved HEAD: that re-run cost too much compute
+--     for what it caught, and a breakage the moved base causes is picked up
+--     and fixed by later agents. How much the command checks is the
+--     repository's own call (mcp-task-tools.allium:
+--     AgentsRunTheVerifyCommand).
 --   - The closing sequence runs in one turn. A pause between session_wrap-up and
 --     session_exit risks going idle with the base branch already
 --     fast-forwarded and the task still in its old status.
@@ -82,7 +89,8 @@ entity WrapUp {
     changed_source_lines: Integer
     -- task_search's "Verify command" line; absent when none is printed.
     verify_command: String?
-    -- The agent has run verify_command, in its worktree, and it passed.
+    -- The agent has run verify_command, in its worktree, and it passed; or
+    -- the run needed none (no command, or the done path).
     verify_passed: Boolean
     -- `git status --porcelain` printed nothing.
     worktree_clean: Boolean
@@ -128,7 +136,8 @@ entity WrapUp {
     -- A path was given before the question: the operator already answered.
     is_preset: argument != null or preset_mode != null
     needs_question: not is_preset
-    needs_verify: verify_command != null
+    -- done lands nothing on the base branch, so it runs no verify command.
+    needs_verify: verify_command != null and action != done
     is_large_change: changed_source_lines >= config.simplify_threshold_lines
     has_token: exit_token != null
     is_pr: action = pr
@@ -353,9 +362,12 @@ rule VerifyBeforeCommit {
     ensures: run.stage = verified
 
     @guidance
-        -- When task_search printed a "Verify command:" line, the agent runs it
-        -- in its worktree now, whatever the path, and fixes any failure
-        -- before going on. Dispatch does not run it and does not check that
+        -- When task_search printed a "Verify command:" line and the path is
+        -- rebase or pr, the agent runs it in its worktree now and fixes any
+        -- failure before going on. On the done path it runs nothing: nothing
+        -- from it lands on the base branch. How much the command checks is
+        -- the repository's call; where the command says what it ran, the
+        -- agent reports that and no more. Dispatch does not run it and does not check that
         -- the agent did (VerifyBeforeWrapUp). When it fails for a reason the
         -- change did not cause, including a broken main, the agent does not
         -- wrap up past it alone: it coordinates with other agents and the
@@ -366,6 +378,7 @@ rule VerifyFailedForOtherReasons {
     when: VerifyFailedNotByTheChange(run)
 
     requires: run.stage = retro_done
+    requires: run.needs_verify
 
     ensures: CoordinationStarted(run: run)
     ensures: run.stage = stopped
@@ -479,9 +492,9 @@ rule WrapUpAnswered {
     ensures: run.stage = closing
 
     @guidance
-        -- session_wrap-up returns an exit token. After a rebase, when the response
-        -- says to re-run the verify command, the agent does that and commits
-        -- any fix before session_exit (RebaseReverifiesWhenTold).
+        -- session_wrap-up returns an exit token and the agent goes straight on
+        -- to session_exit. After a rebase that moved HEAD it does not re-run
+        -- the verify command (VerifyBeforeWrapUp).
 }
 
 rule WrapUpRefusedDirty {
@@ -635,8 +648,8 @@ invariant NoCloseWithoutAToken {
         run.exit_calls > 0 implies run.has_token
 }
 
--- A task reaches session_wrap-up only with its work committed and, when the repo
--- has one, its verify command run.
+-- A task reaches session_wrap-up only with its work committed and, on the
+-- rebase and pr paths when the repo has one, its verify command run.
 invariant WrapUpFollowsCommitAndVerify {
     for run in WrapUps:
         run.stage in {wrap_up_asked, closing, closed}
@@ -749,12 +762,23 @@ surface WrapUpSession {
         -- left alone (RunRetro, RetroRunsOncePerWrapUp).
 
     @guarantee VerifyBeforeWrapUp
-        -- When task_search prints a Verify command, the agent runs it in its own
-        -- worktree on every path and fixes any failure before session_wrap-up is
-        -- called. Dispatch does not run it and does not check that the agent
-        -- did (mcp-task-tools.allium: AgentsRunTheVerifyCommand). On the pr
-        -- path this also comes before the push, so a red build is not pushed
-        -- (VerifyBeforeCommit).
+        -- When task_search prints a Verify command and the path is rebase or
+        -- pr, the agent runs it in its own worktree and fixes any failure
+        -- before session_wrap-up is called. On the pr path this also comes
+        -- before the push, so a red build is not pushed. The done path runs
+        -- no verify command: nothing from it lands on the base branch. It is
+        -- not run again after session_wrap-up, in particular not after a
+        -- rebase that moved HEAD, because the re-run cost too much compute
+        -- and later agents pick up any breakage the moved base causes. The
+        -- only second run is the pr path's, before the push, when code
+        -- changed after the verify step (DraftPullRequest). Dispatch does not run it and does not check
+        -- that the agent did (mcp-task-tools.allium:
+        -- AgentsRunTheVerifyCommand; VerifyBeforeCommit, WrapUpAnswered).
+        -- The agent runs the command exactly as task_search prints it and
+        -- adds no arguments, not even the task's base branch: the command is
+        -- the repository's, and an argument it does not expect can change
+        -- what it does (`cargo test main` filters the tests). A command
+        -- that scales itself to the change picks its own base.
 
     @guarantee VerifyFailureIsNotWrappedPast
         -- A verify failure the change did not cause, including a broken main, is
@@ -779,12 +803,6 @@ surface WrapUpSession {
         -- pause between them risks going idle with the base branch already
         -- fast-forwarded and the task still in its old status
         -- (RateKnowledgeAndWrapUp, CloseSession).
-
-    @guarantee RebaseReverifiesWhenTold
-        -- After a rebase, when session_wrap-up's response tells the agent to re-run the
-        -- verify command, the agent does that and commits any fix before
-        -- session_exit (WrapUpAnswered; mcp-task-tools.allium:
-        -- AgentsRunTheVerifyCommand).
 
     @guarantee RefusalIsShownAsWritten
         -- A refused session_wrap-up is shown to the operator as the tool wrote it. A

@@ -1044,7 +1044,7 @@ entity SavedRepoPath {
     path: String             -- filesystem path; one row per (path, host), so two machines that both have
                              -- the same path each own a row and each one's feeds resolve it
     last_used: Timestamp     -- updated on each use; drives recency ordering
-    verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
+    verify_command: String?  -- single-line shell command agents run before a rebase or pr wrap-up (a done wrap-up runs none; mcp-task-tools.allium: AgentsRunTheVerifyCommand), e.g. "cargo test"
                              -- Belongs to the REPOSITORY, not to the row (VerifyCommandIsPerRepository).
                              -- A store stamped below rules version 43 gives every row the command of the most recently
                              -- used row that has one in its group, once, on connect. That pass groups rows by

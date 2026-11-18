@@ -16,7 +16,8 @@ fn plugin_hook_scripts_are_executable() {
 
 /// Task #81924: the board no longer runs the verify command
 /// (`AgentsRunTheVerifyCommand`), so the skill sends the agent to run it
-/// before it commits and calls `wrap_up`.
+/// before it commits and calls `wrap_up`. Task #99298: it runs once, with no
+/// re-run after a rebase.
 #[test]
 fn wrap_up_skill_has_the_agent_run_the_verify_command() {
     let content = skill_body("wrap-up");
@@ -30,8 +31,8 @@ fn wrap_up_skill_has_the_agent_run_the_verify_command() {
         "wrap_up no longer refuses a failing verify command, got: {closing}"
     );
     assert!(
-        closing.contains("re-run the verify command"),
-        "the closing sequence must name the re-run after a rebase, got: {closing}"
+        !closing.contains("re-run the verify command"),
+        "the verify command runs once, before session_wrap-up, never after a rebase, got: {closing}"
     );
 }
 

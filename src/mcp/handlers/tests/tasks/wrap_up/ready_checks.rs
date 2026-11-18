@@ -39,7 +39,7 @@ async fn wrap_up_refuses_a_worktree_with_uncommitted_changes_for_every_action() 
 #[tokio::test]
 async fn wrap_up_never_runs_the_verify_command() {
     for action in ["rebase", "pr", "done"] {
-        let (state, task_id, runner) = verify_board(action, HEAD_A, HEAD_A).await;
+        let (state, task_id, runner) = verify_board(action).await;
 
         let resp = wrap_up_call(&state, task_id, action).await;
 
@@ -58,62 +58,40 @@ async fn wrap_up_never_runs_the_verify_command() {
     }
 }
 
+/// `AgentsRunTheVerifyCommand`: the agent runs the verify command once,
+/// before `session_wrap-up`, and never again after it. No answer names the
+/// command or asks for a re-run, not even after a rebase that moved HEAD.
 #[tokio::test]
-async fn a_rebase_that_moved_head_tells_the_agent_to_rerun_the_verify_command() {
-    let (state, task_id, _) = verify_board("rebase", HEAD_A, HEAD_B).await;
-
-    let resp = wrap_up_call(&state, task_id, "rebase").await;
-
-    assert!(!is_error(&resp), "got: {}", error_message(&resp));
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("Re-run `cargo test`"),
-        "the response must name the command to re-run: {text}"
-    );
-    assert!(
-        text.find("Re-run").unwrap() < text.find("session_exit").unwrap(),
-        "the re-run comes before the exit_session instruction: {text}"
-    );
-}
-
-#[tokio::test]
-async fn a_rebase_that_left_head_alone_adds_no_verify_line() {
-    let (state, task_id, _) = verify_board("rebase", HEAD_A, HEAD_A).await;
-
-    let resp = wrap_up_call(&state, task_id, "rebase").await;
-
-    assert!(!is_error(&resp), "got: {}", error_message(&resp));
-    assert!(!extract_response_text(&resp).contains("Re-run"));
-}
-
-#[tokio::test]
-async fn done_and_pr_add_no_verify_line_even_with_a_verify_command() {
-    for action in ["pr", "done"] {
-        let (state, task_id, _) = verify_board(action, HEAD_A, HEAD_B).await;
+async fn no_wrap_up_answer_asks_for_a_verify_rerun() {
+    for action in ["rebase", "pr", "done"] {
+        let (state, task_id, _) = verify_board(action).await;
 
         let resp = wrap_up_call(&state, task_id, action).await;
 
         assert!(!is_error(&resp), "{action}: got: {}", error_message(&resp));
-        assert!(!extract_response_text(&resp).contains("Re-run"), "{action}");
+        let text = extract_response_text(&resp);
+        assert!(
+            !text.contains("Re-run") && !text.contains("cargo test"),
+            "{action}: the answer must not ask for a verify re-run: {text}"
+        );
     }
 }
 
+/// With no re-run to ask for, a rebase has no reason to read where HEAD
+/// stood, so it reads it neither before nor after.
 #[tokio::test]
-async fn a_rebase_without_a_verify_command_reads_no_head_and_adds_no_line() {
-    let script = DispatchScript::finish().no_remote();
-    let runner = checked_runner("", script.responses());
-    let (state, task_id) = wrappable_task_with_verify(runner.clone(), None).await;
+async fn a_rebase_reads_no_head_even_with_a_verify_command() {
+    let (state, task_id, runner) = verify_board("rebase").await;
 
     let resp = wrap_up_call(&state, task_id, "rebase").await;
 
     assert!(!is_error(&resp), "got: {}", error_message(&resp));
-    assert!(!extract_response_text(&resp).contains("Re-run"));
     assert!(
         !runner
             .flattened_calls()
             .iter()
             .any(|c| c.contains("rev-parse HEAD")),
-        "no verify command, so HEAD is not read; got: {:?}",
+        "HEAD is not read; got: {:?}",
         runner.flattened_calls()
     );
 }
@@ -146,20 +124,14 @@ async fn wrap_up_refusal_names_at_most_ten_paths() {
     assert!(msg.contains("and 3 more"), "got: {msg}");
 }
 
-/// A board whose repo has the verify command `cargo test`. For a rebase the
-/// runner answers the HEAD read before the rebase with `head_before` and the
-/// one after it with `head_after`; done and pr read no HEAD.
+/// A board whose repo has the verify command `cargo test`. The runner answers
+/// the commit check, and for a rebase the rebase itself.
 async fn verify_board(
     action: &str,
-    head_before: &str,
-    head_after: &str,
 ) -> (Arc<McpState>, crate::models::TaskId, Arc<MockProcessRunner>) {
-    let head = |h: &str| (None, MockProcessRunner::ok_with_stdout(h.as_bytes()));
     let mut responses = vec![(None, MockProcessRunner::ok_with_stdout(b""))];
     if action == "rebase" {
-        responses.push(head(head_before));
         responses.extend(DispatchScript::finish().no_remote().responses());
-        responses.push(head(head_after));
     }
     let runner = Arc::new(MockProcessRunner::new_with_delays(responses));
     let (state, task_id) = wrappable_task_with_verify(runner.clone(), Some("cargo test")).await;

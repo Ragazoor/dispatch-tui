@@ -5,7 +5,7 @@ description: Use to finish a dispatch task and close its session, when the work 
 
 # Wrap Up
 
-choose the action → `/retro` → verify → commit → `session_wrap-up(action)` → `session_exit(token, action, ...)`.
+choose the action → `/retro` → verify (rebase and pr only) → commit → `session_wrap-up(action)` → `session_exit(token, action, ...)`.
 
 `session_wrap-up` refuses an uncommitted worktree but does not run the verify command: you do, in Step 6. `session_exit` is mandatory on every path: without it the task does not move and the session does not close.
 
@@ -58,7 +58,7 @@ Run `Skill({ skill: "retro" })` and tell it which action you are wrapping up wit
 
 ## Step 6: Verify, then commit
 
-If `task_search` printed a `Verify command:` line, run it in your worktree now, whatever the path, and fix any failure before you go on (on the pr path this is also what keeps a red build out of the push). Dispatch does not run it for you and does not check that you did. If it fails for a reason your change did not cause, do not wrap up past it alone: coordinate with other agents and the board, as `CLAUDE.md` says.
+If `task_search` printed a `Verify command:` line, then on the rebase and pr paths, run it in your worktree now and fix any failure before you go on (on the pr path this is also what keeps a red build out of the push). On the done path, run no verify command: nothing from it lands on `{base_branch}`. Run the command exactly as printed, with no arguments added; it decides for itself how much your change needs checked. If it prints what it ran or skipped, report that and no more. Run it once: do not run it again after `session_wrap-up`, even when the rebase moved your branch. Dispatch does not run it for you and does not check that you did. If it fails for a reason your change did not cause, do not wrap up past it alone: coordinate with other agents and the board, as `CLAUDE.md` says.
 
 Run `git status --porcelain`. If it is not clean, `git add` the relevant files by name, review `git diff --cached`, and `git commit -m "..."` with a short message. `session_wrap-up` refuses a dirty worktree.
 
@@ -67,5 +67,5 @@ Run `git status --porcelain`. If it is not clean, `git add` the relevant files b
 Run these back to back in one turn; any pause risks going idle with `{base_branch}` already fast-forwarded and the task still in its old status.
 
 1. **Rate retrieved knowledge** you acted on and have not rated yet, as the `learnings` skill describes.
-2. **`session_wrap-up(task_id, action)`.** It returns an **Exit token**. After a rebase, if its response tells you to re-run the verify command, do that and commit any fix before `session_exit`. If it refuses — uncommitted changes, a rebase conflict — show the user the exact message. For a dirty tree, commit (Step 6) and call `session_wrap-up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `session_exit` without a token.
+2. **`session_wrap-up(task_id, action)`.** It returns an **Exit token**. If it refuses — uncommitted changes, a rebase conflict — show the user the exact message. For a dirty tree, commit (Step 6) and call `session_wrap-up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `session_exit` without a token.
 3. **`session_exit(task_id, token, action)`**, plus `pr_url` on the pr path only. Make it your final action. If it errors, or succeeds but reports that the close did not take effect, read `references/exit-session-errors.md` before reacting.
