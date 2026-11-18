@@ -112,6 +112,17 @@ impl ListCursor for CommitsSection {
 /// Draw the section into `area`. `selected` is the pane's selected source
 /// (`None` for unstaged work), marked in every state; `focused` decides the
 /// border colour and the cursor highlight; `alert` reddens the border.
+/// The Commits section's border title. Its keys come from the table's
+/// agent_tree.commits rows (keybindings.allium: PaneTitlesNameTheirOwnKeys).
+pub(crate) fn commits_title() -> String {
+    use crate::keybindings::{first_key, KeyNamespace as N};
+    format!(
+        " Commits ({}, {}: agents) ",
+        first_key(N::AgentTreeCommits, "switch_section"),
+        first_key(N::AgentTreeCommits, "toggle_focus")
+    )
+}
+
 pub fn render_commits(
     frame: &mut Frame,
     area: Rect,
@@ -131,7 +142,7 @@ pub fn render_commits(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style(focused, alert))
-        .title(" Commits (Tab, s: agents) ");
+        .title(commits_title());
 
     let unstaged = std::iter::once((None, "unstaged work".to_string()));
     let commits = section.commits.iter().map(|commit| {

@@ -196,6 +196,18 @@ impl ListCursor for AgentsSection {
     }
 }
 
+/// The Agents section's border title. Its keys come from the table's
+/// agent_tree.agents rows (keybindings.allium: PaneTitlesNameTheirOwnKeys).
+pub(crate) fn agents_title(filter: AgentFilter) -> String {
+    use crate::keybindings::{first_key, KeyNamespace as N};
+    let cycle = first_key(N::AgentTreeAgents, "cycle_agent_filter");
+    let focus = first_key(N::AgentTreeAgents, "toggle_focus");
+    match filter {
+        AgentFilter::All => format!(" Agents ({cycle}: running, {focus}: browse) "),
+        AgentFilter::Running => format!(" Agents [running] ({cycle}: all, {focus}: browse) "),
+    }
+}
+
 /// A group's epic ids from the root down to its own: its full path, which
 /// [`compact_paths`] reduces to the headers it draws (`AgentListGroupsByEpic`).
 pub(crate) fn pane_epic_path(epic: &PaneEpic) -> Vec<crate::models::EpicId> {
@@ -423,10 +435,7 @@ pub fn render_agents(
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(border)
-        .title(match section.filter {
-            AgentFilter::All => " Agents (Tab: running, s: browse) ",
-            AgentFilter::Running => " Agents [running] (Tab: all, s: browse) ",
-        });
+        .title(agents_title(section.filter));
     // The agents view is the whole pane, so a notice has no tree border to sit
     // on: it goes on this one (TwoViewsShareThePane).
     if let Some(text) = notice {

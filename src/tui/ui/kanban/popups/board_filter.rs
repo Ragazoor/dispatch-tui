@@ -407,6 +407,7 @@ fn append_windowed_list<'a>(
 fn append_help_lines<'a>(lines: &mut Vec<Line<'a>>, app: &'a App, styles: &HintStyles) {
     match app.mode() {
         InputMode::ConfirmDeleteRepoPath => lines.push(delete_repo_path_help_line(app, styles)),
+        InputMode::BoardFilterSearch => append_search_help_lines(lines, styles),
         _ => append_browse_help_lines(lines, app.filter_overlay.tab, styles),
     }
 }
@@ -427,6 +428,22 @@ fn delete_repo_path_help_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a>
         Span::styled("n/Esc", styles.accent),
         Span::styled(": cancel", styles.note),
     ])
+}
+
+/// The footer while the Epics tab's title search is being typed: only the
+/// keys board.filter_search answers, in two rows like the browse footer so
+/// starting a search never resizes the popup.
+fn append_search_help_lines<'a>(lines: &mut Vec<Line<'a>>, styles: &HintStyles) {
+    let hint = |key: &'static str, label: &'static str| {
+        [
+            Span::styled(key, styles.accent),
+            Span::styled(label, styles.note),
+        ]
+    };
+    lines.extend([
+        Line::from([hint("  [Enter]", " keep  "), hint("[Esc]", " clear")].concat()),
+        Line::from(hint("  [Backspace]", " delete").to_vec()),
+    ]);
 }
 
 /// The two-row default footer, the same height on every tab so switching

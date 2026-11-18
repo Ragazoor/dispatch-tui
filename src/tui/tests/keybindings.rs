@@ -664,6 +664,7 @@ fn a_key_with_no_row_runs_nothing_and_records_nothing() {
     use KeyNamespace as N;
     let typing = [
         N::BoardSearch,
+        N::BoardFilterSearch,
         N::BoardText,
         N::BoardPickerRepoPath,
         N::BoardPickerBaseBranch,
@@ -1121,6 +1122,95 @@ fn mode_bar_keys_are_all_in_the_modes_namespace() {
     assert!(checked > 10, "the test read no hints ({checked})");
 }
 
+/// HintsNameOnlyTableKeys: every bracketed key hint anywhere in the frame a
+/// board mode draws (its popup, form prompt or overlay footer, not just the
+/// status bar) names a key of that mode's namespace. `[x]` and `[ ]` are
+/// checkbox marks, not hints; `Del`, `↑` and `↓` are the hints' short forms
+/// of Delete, Up and Down.
+#[test]
+fn every_bracketed_hint_a_mode_draws_is_a_key_of_that_mode() {
+    fn tokens(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = text;
+        while let Some(open) = rest.find('[') {
+            let Some(close) = rest[open..].find(']') else {
+                break;
+            };
+            let inner = &rest[open + 1..open + close];
+            out.extend(inner.split('/').map(|k| k.trim().to_string()));
+            rest = &rest[open + close + 1..];
+        }
+        out
+    }
+    fn table_form(hint: &str) -> &str {
+        match hint {
+            "Del" => "Delete",
+            "↑" => "Up",
+            "↓" => "Down",
+            other => other,
+        }
+    }
+
+    let mut checked = 0;
+    let mut failures = Vec::new();
+    for ns in board_namespaces() {
+        if matches!(
+            ns,
+            KeyNamespace::BoardNormal
+                | KeyNamespace::BoardDetail
+                | KeyNamespace::BoardHelp
+                | KeyNamespace::BoardError
+        ) {
+            continue;
+        }
+        let rows: Vec<&KeyBinding> = KEY_BINDINGS.iter().filter(|b| b.namespace == ns).collect();
+        let probe = KeyBinding {
+            namespace: ns,
+            keys: &[],
+            context: None,
+            action: "",
+            description: "",
+            note: None,
+            records_usage: true,
+        };
+        for mut app in apps_in(&probe) {
+            let buf = render_to_buffer(&mut app, 160, 50);
+            // The board drawn under the mode (its header's `[N]` bell, its
+            // cards) is board.normal's, not the mode's: a line the mode
+            // leaves as the plain board draws it is not the mode's hint.
+            app.input.mode = InputMode::Normal;
+            let board = render_to_buffer(&mut app, 160, 50);
+            let area = buf.area();
+            for y in area.top()..area.bottom() {
+                let line = buffer_line(&buf, y);
+                if line == buffer_line(&board, y) {
+                    continue;
+                }
+                for hint in tokens(&line) {
+                    // Checkbox and tree marks, not hints.
+                    if matches!(hint.as_str(), "" | "x" | "-" | "~") {
+                        continue;
+                    }
+                    checked += 1;
+                    let key = table_form(&hint);
+                    let known = rows
+                        .iter()
+                        .any(|b| b.keys.contains(&key) || b.keys.contains(&ANY_OTHER_KEY));
+                    if !known {
+                        failures.push(format!("{}: `{hint}` in {:?}", ns.name(), line.trim()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 20, "the test read no hints ({checked})");
+    assert!(
+        failures.is_empty(),
+        "hints naming a key the mode does not have:\n{}",
+        failures.join("\n")
+    );
+}
+
 // ---------------------------------------------------------------------------
 // ModifiedPressMatchesOnlyItsOwnRow
 // ---------------------------------------------------------------------------
@@ -1177,32 +1267,50 @@ fn a_modified_press_is_not_answered_by_a_catch_all() {
     assert!(checked > 0);
 }
 
-/// A modified form of every bare key of every board row, that no row lists,
-/// runs nothing and records nothing.
+/// ModifiedPressDoesNotBorrowTheBareRow: the Ctrl form of every unmodified
+/// key of every board row (letters of either case, digits, punctuation,
+/// Space and the named keys), when no row lists that Ctrl form, runs nothing
+/// and records nothing: no command at all, and the mode is unchanged.
 #[test]
 fn a_modified_bare_key_with_no_row_does_nothing() {
-    let mut checked = 0;
+    let mut seen = std::collections::HashSet::new();
+    let mut failures = Vec::new();
     for ns in board_namespaces() {
         for binding in bindings_in(ns) {
             for key in binding.keys {
-                let bare = key.chars().count() == 1 && key.chars().all(|c| c.is_ascii_lowercase());
-                let modified = format!("Ctrl+{}", key.to_uppercase());
-                if !bare || bindings_in(ns).any(|b| b.keys.contains(&modified.as_str())) {
+                if *key == ANY_OTHER_KEY || *key == "gg" || key.contains('+') {
                     continue;
                 }
-                for mut app in apps_in(binding) {
-                    let cmds = press(&mut app, &modified);
-                    assert!(
-                        no_recorded_usage(&cmds),
-                        "{} {modified}: {cmds:?}",
-                        ns.name()
-                    );
-                    checked += 1;
+                let base = key_event_for(key);
+                let ctrl = KeyEvent::new(base.code, base.modifiers | KeyModifiers::CONTROL);
+                let name = crate::keybindings::key_name(ctrl);
+                if bindings_in(ns).any(|b| b.keys.contains(&name.as_str()))
+                    || !seen.insert((ns, binding.action, binding.context, name.clone()))
+                {
+                    continue;
+                }
+                for (i, mut app) in apps_in(binding).into_iter().enumerate() {
+                    let mode = app.input.mode.clone();
+                    let cmds = app.handle_key(ctrl);
+                    if !cmds.is_empty() || app.input.mode != mode {
+                        failures.push(format!(
+                            "{} {name} (row {} #{i}): {cmds:?}, mode {:?} -> {:?}",
+                            ns.name(),
+                            binding.action,
+                            mode,
+                            app.input.mode
+                        ));
+                    }
                 }
             }
         }
     }
-    assert!(checked > 50, "{checked}");
+    assert!(seen.len() > 150, "{}", seen.len());
+    assert!(
+        failures.is_empty(),
+        "modified presses that acted:\n{}",
+        failures.join("\n")
+    );
 }
 
 /// A modified letter is never typed into a text field.
@@ -1256,6 +1364,76 @@ fn text_editing_keys_edit_the_field_and_record_nothing() {
     press(&mut app, "Home");
     press(&mut app, "Delete");
     assert_eq!(buf(&app), "ello orl");
+}
+
+/// UnrecordedRowsRecordNothing, for every records_usage false row of every
+/// board namespace: each key of the row, pressed with "ab cd ef" in the field
+/// and the caret between `c` and `d`, edits the text or moves the caret as
+/// the row's action says, and records nothing. board.search and
+/// board.filter_search have no caret; their Backspace drops the last char.
+#[test]
+fn every_unrecorded_row_takes_its_effect_and_records_nothing() {
+    use KeyNamespace as N;
+    const SEED: &str = "ab cd ef";
+    let mut checked = 0;
+    let mut failures = Vec::new();
+    for ns in board_namespaces() {
+        for binding in bindings_in(ns).filter(|b| !b.records_usage) {
+            for key in binding.keys {
+                for (i, mut app) in apps_in(binding).into_iter().enumerate() {
+                    // (text, caret) after the press; caret None for a field
+                    // without one.
+                    let got = match ns {
+                        N::BoardSearch => {
+                            app.search.query = SEED.to_string();
+                            let cmds = press(&mut app, key);
+                            (app.search.query.clone(), None, cmds)
+                        }
+                        N::BoardFilterSearch => {
+                            app.filter_overlay.epic_query = SEED.to_string();
+                            let cmds = press(&mut app, key);
+                            (app.filter_overlay.epic_query.clone(), None, cmds)
+                        }
+                        _ => {
+                            app.input.set_buffer(SEED.to_string());
+                            app.input.caret = 4;
+                            let cmds = press(&mut app, key);
+                            (app.input.buffer.clone(), Some(app.input.caret), cmds)
+                        }
+                    };
+                    let want: (&str, Option<usize>) = match (ns, binding.action) {
+                        (N::BoardSearch | N::BoardFilterSearch, "text_backspace") => {
+                            ("ab cd e", None)
+                        }
+                        (_, "text_backspace") => ("ab d ef", Some(3)),
+                        (_, "text_delete_forward") => ("ab c ef", Some(4)),
+                        (_, "text_cursor_left") => (SEED, Some(3)),
+                        (_, "text_cursor_right") => (SEED, Some(5)),
+                        (_, "text_cursor_home") => (SEED, Some(0)),
+                        (_, "text_cursor_end") => (SEED, Some(8)),
+                        (_, "text_cursor_word_left") => (SEED, Some(3)),
+                        (_, "text_cursor_word_right") => (SEED, Some(6)),
+                        (_, other) => panic!(
+                            "{} {other}: no expected effect for this unrecorded row",
+                            ns.name()
+                        ),
+                    };
+                    checked += 1;
+                    let (text, caret, cmds) = got;
+                    if (text.as_str(), caret) != want || !no_recorded_usage(&cmds) {
+                        failures.push(format!(
+                            "{} {key} {} (#{i}): want {want:?}, got ({text:?}, {caret:?}), recorded {:?}",
+                            ns.name(),
+                            binding.action,
+                            recorded(&cmds)
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked >= 40, "only {checked} presses checked");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Backspace in the search bar edits the query and records nothing.

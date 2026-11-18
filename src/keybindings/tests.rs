@@ -869,3 +869,29 @@ fn s_flips_the_agent_tree_view_and_tab_switches_the_browse_section() {
         vec!["Tab", "BackTab"]
     );
 }
+
+/// PaneTitlesNameTheirOwnKeys: the companion pane's section titles name the
+/// keys of the rows they hint at, read from the table, so they cannot name a
+/// key the section does not answer.
+#[test]
+fn pane_section_titles_name_their_rows_keys() {
+    use crate::agent_tree::render::agents::{agents_title, AgentFilter};
+    use crate::agent_tree::render::commits::commits_title;
+    for (ns, action) in [
+        (N::AgentTreeAgents, "cycle_agent_filter"),
+        (N::AgentTreeAgents, "toggle_focus"),
+        (N::AgentTreeCommits, "switch_section"),
+        (N::AgentTreeCommits, "toggle_focus"),
+    ] {
+        assert!(!first_key(ns, action).is_empty(), "{ns:?} {action}");
+    }
+    assert_eq!(
+        agents_title(AgentFilter::All),
+        " Agents (Tab: running, s: browse) "
+    );
+    assert_eq!(
+        agents_title(AgentFilter::Running),
+        " Agents [running] (Tab: all, s: browse) "
+    );
+    assert_eq!(commits_title(), " Commits (Tab, s: agents) ");
+}

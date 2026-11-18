@@ -506,6 +506,17 @@ pub fn help_overlay_title(table: &[KeyBinding]) -> String {
     )
 }
 
+/// The first key of `namespace`'s `action` row, as the table writes it, for a
+/// hint built from the table (`PaneTitlesNameTheirOwnKeys` in
+/// `docs/specs/keybindings.allium`). Empty when no such row exists, which the
+/// drift tests rule out.
+pub fn first_key(namespace: KeyNamespace, action: &str) -> &'static str {
+    bindings_in(namespace)
+        .find(|b| b.action == action)
+        .and_then(|b| b.keys.first().copied())
+        .unwrap_or_default()
+}
+
 /// The rows of one namespace, in table order.
 pub fn bindings_in(namespace: KeyNamespace) -> impl Iterator<Item = &'static KeyBinding> {
     KEY_BINDINGS
