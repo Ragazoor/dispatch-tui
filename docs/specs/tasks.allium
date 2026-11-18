@@ -1182,14 +1182,16 @@ rule ToggleSectionCollapse {
 
 -- == Epic Fold ==
 
--- Folding and unfolding one epic's flattened group in one column. What a
+-- Folding and unfolding one epic's flattened group in one section of one
+-- column. What a
 -- folded epic group looks like, what the cursor can do inside it, and where
 -- the folded set lives are all in board-layout.allium ("Epic Folding").
 
 rule ToggleEpicFold {
-    -- ref names the column and the epic group the cursor is in: the epic of
-    -- the task card under it, or the epic an already-folded header under it
-    -- names. The open epic-header row itself never holds the cursor — it is
+    -- ref names the column, the section and the epic group the cursor is
+    -- in: the epic and section of the task card under it, or the ones an
+    -- already-folded header under it names. The same epic's group in another
+    -- section of the column is a different ref and is left as it was. The open epic-header row itself never holds the cursor — it is
     -- decoration, exactly as an open SubstatusLabel is (board-layout.allium:
     -- "Epic Folding").
     when: ToggleEpicFold(ref)
@@ -1221,6 +1223,7 @@ rule ToggleEpicFold {
         --
         -- Folding the group the cursor is in leaves the cursor on that
         -- group's own header, which becomes selectable in the same moment.
+        -- Unfolding leaves it on the group's first card in the same section.
         -- The cursor never lands on a card that is no longer rendered, and
         -- never jumps to a neighbouring group.
         --
@@ -1244,11 +1247,11 @@ rule ToggleEpicFold {
 }
 
 -- A fold whose epic the compact tree stops drawing moves down to the epics
--- that now head what it hid (board-layout.allium, "Epic Folding"). `skipped` is a recorded fold whose epic is drawn in no section of
--- its column. `takers` are the drawn epics nearest below that epic, one per
--- section where it is skipped and some task below it remains: each is the
--- epic the compact tree draws in its place there (board-layout.allium:
--- EpicGroupTree.drawn_parent). Both are judged on the column unfiltered:
+-- that now head what it hid (board-layout.allium, "Epic Folding"). `skipped`
+-- is a recorded fold whose epic is not drawn in its section. `takers` are
+-- the drawn epics nearest below that epic in that section, where some task
+-- below it remains: each is an epic the compact tree draws in its place there
+-- (board-layout.allium: EpicGroupTree.drawn_parent). Both are judged on the column unfiltered:
 -- every task it holds on the main board, with no search, lens narrowing,
 -- hidden epic, hidden work package or repo filter applied
 -- (board-layout.allium, "Epic Folding"). The trigger fires whenever the
@@ -1262,7 +1265,8 @@ rule FoldMovesToDrawnDescendant {
     ensures:
         folded_epics.folded.remove(skipped)
         for taker in takers:
-            folded_epics.folded.add(board_layout/EpicFoldRef(column: skipped.column, epic: taker))
+            folded_epics.folded.add(board_layout/EpicFoldRef(
+                column: skipped.column, section: skipped.section, epic: taker))
         settings/SaveSetting(key: "collapsed_epics",
             value: serialised(moved_down(folded_epics.folded, skipped, takers)))
 
@@ -1274,16 +1278,16 @@ rule FoldMovesToDrawnDescendant {
         -- epic draws again later, it draws open, and its descendants keep
         -- the folds they inherited.
         --
-        -- It moves only when the epic is drawn in no section of the
-        -- column. While one section still draws it, the fold stays, and in
-        -- the sections that skip it the fold hides nothing.
+        -- It moves within its own section only. A fold on the same epic in
+        -- another section of the column is a separate fold, judged on that
+        -- section's own tree, and is not touched.
         --
-        -- With no taker — no task left below the epic in the column — the
+        -- With no taker — no task left below the epic in the section — the
         -- fold stays recorded and inert, as any fold naming no group is.
         --
         -- == Black boxes ==
         -- moved_down(set, skipped, takers) is `set` without `skipped` and
-        -- with a fold for each taker in skipped's column: the set this rule
+        -- with a fold for each taker in skipped's column and section: the set this rule
         -- leaves.
 }
 
@@ -2623,8 +2627,8 @@ surface BoardLayoutPass {
     facing _: core/BoardProcess
 
     provides:
-        -- skipped: a recorded fold whose epic is drawn in no section of its
-        -- column; takers: the drawn epics now heading what it hid.
+        -- skipped: a recorded fold whose epic is not drawn in its section;
+        -- takers: the drawn epics now heading what it hid there.
         UnfilteredColumnLaidOut(skipped, takers)
 }
 

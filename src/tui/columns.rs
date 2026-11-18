@@ -498,7 +498,7 @@ impl<'a> BoardView<'a> {
             // header alone; an open one contributes the epic header (when
             // the epic resolves) followed by its cards, and an orphan
             // separator when the run transitions away from an epic group.
-            self.push_epic_groups(status, run, &epic_lookup, tree, &mut items);
+            self.push_epic_groups(at, run, &epic_lookup, tree, &mut items);
         }
 
         items
@@ -509,7 +509,7 @@ impl<'a> BoardView<'a> {
     /// (board-layout.allium: "Flattened Mode", `EpicGroupTree`; "Epic Folding").
     pub(in crate::tui) fn push_epic_groups(
         self,
-        status: TaskStatus,
+        at: SectionRef,
         run: &[FlatCard<'a>],
         epic_lookup: &HashMap<EpicId, &'a Epic>,
         tree: &crate::tui::types::EpicTree,
@@ -565,7 +565,7 @@ impl<'a> BoardView<'a> {
                 let Some(&epic) = epic_lookup.get(id) else {
                     continue;
                 };
-                let fold_ref = EpicFoldRef::new(status, epic.id);
+                let fold_ref = EpicFoldRef::new(at.status, at.section, epic.id);
                 if self.epic_group_renders_folded(fold_ref) {
                     folded_at = Some(items.len());
                     items.push(ColumnItem::FoldedEpic(FoldedEpicHeader {
@@ -755,7 +755,9 @@ impl<'a> BoardView<'a> {
     /// `section_renders_collapsed` (board-layout.allium: "Epic Folding").
     pub(in crate::tui) fn epic_group_renders_folded(self, ref_: EpicFoldRef) -> bool {
         self.column_has_rendered_fold(ref_.status)
-            && self.epic_folds.is_folded(ref_.status, ref_.epic)
+            && self
+                .epic_folds
+                .is_folded(ref_.status, ref_.section, ref_.epic)
     }
 
     /// Count the column items that can hold the cursor, for a status. Use this

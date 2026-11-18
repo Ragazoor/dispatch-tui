@@ -72,17 +72,23 @@ pub struct FoldedHeader {
     pub hidden: usize,
 }
 
-/// Names one flattened epic group: the column it is in, and the epic within
-/// it. The same epic in two columns is two independent groups.
+/// Names one flattened epic group: the column it is in, the section within
+/// that column, and the epic within the section. The same epic in two
+/// sections, or in two columns, is two independent groups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EpicFoldRef {
     pub status: TaskStatus,
+    pub section: ColumnSection,
     pub epic: EpicId,
 }
 
 impl EpicFoldRef {
-    pub(in crate::tui) fn new(status: TaskStatus, epic: EpicId) -> Self {
-        Self { status, epic }
+    pub(in crate::tui) fn new(status: TaskStatus, section: ColumnSection, epic: EpicId) -> Self {
+        Self {
+            status,
+            section,
+            epic,
+        }
     }
 }
 

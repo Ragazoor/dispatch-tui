@@ -453,7 +453,11 @@ fn folded_epic_header_names_only_the_nested_epic_itself() {
     let mut leaf = make_epic_with_title(3, "Leaf");
     leaf.parent_epic_id = Some(EpicId(1));
     let header = crate::tui::types::FoldedEpicHeader {
-        at: crate::tui::types::EpicFoldRef::new(TaskStatus::Running, EpicId(3)),
+        at: crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(3),
+        ),
         epic: &leaf,
         hidden: 2,
         depth: 0,
@@ -527,7 +531,11 @@ fn epic_header_row_indents_by_depth_up_to_the_cap() {
 fn folded_epic_header_keeps_its_indent() {
     let leaf = make_epic_with_title(3, "Leaf");
     let header = crate::tui::types::FoldedEpicHeader {
-        at: crate::tui::types::EpicFoldRef::new(TaskStatus::Running, EpicId(3)),
+        at: crate::tui::types::EpicFoldRef::new(
+            TaskStatus::Running,
+            ColumnSection::Active,
+            EpicId(3),
+        ),
         epic: &leaf,
         hidden: 2,
         depth: 1,

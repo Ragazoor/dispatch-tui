@@ -655,14 +655,21 @@ given {
 -- BoardView.draws_epic_headers rather than a fresh per-column check keeps this
 -- from drifting the day flattening's own per-column boundary changes.
 --
--- Identity: a fold is recorded per (column, epic), not per (column,
--- section, epic). A single epic's flattened tasks in one column can
--- straddle more than one substatus section — some needing input, some
--- plain running — and folding the epic hides all of them at once, in every
--- section of that column. The same epic folds independently in each column
--- it appears in, on the same reasoning epic card placement already gives it
--- one independent card, and one independent cursor position, per column
+-- Identity: a fold is recorded per (column, section, epic). A single
+-- epic's flattened tasks in one column can straddle more than one substatus
+-- section — some PRs with changes requested, some awaiting review — and
+-- each section draws its own header for the epic. Folding the epic in one
+-- section hides its cards there only; the same epic's group in every other
+-- section of that column stays as it was. The user folds a group where it
+-- is in the way, and the work in another section is a different pile with a
+-- different next step. The same epic folds independently in each column it
+-- appears in too, on the same reasoning epic card placement already gives
+-- it one independent card, and one independent cursor position, per column
 -- (see "Epic Card Placement").
+--
+-- So a fold follows the section, not the task: a task whose sub-status
+-- changes leaves its folded group and draws in its new section under that
+-- section's header for the epic, open unless the epic is folded there too.
 --
 -- Independent of Collapsed Sections: an epic fold and a section fold are
 -- two separate recorded sets over possibly-overlapping cards, and neither
@@ -688,8 +695,8 @@ given {
 --     back to a group whose cards are all hidden. An open epic-header row
 --     is decoration and does not.
 --   - Folding puts the cursor on the group's own folded header; unfolding
---     puts it on the group's first card — for a parent with no card of its
---     own in the column, the first row of its subtree that holds the
+--     puts it on the group's first card in that same section — for a parent
+--     with no card of its own in the section, the first row of its subtree that holds the
 --     cursor: a card, or a folded descendant's header, whichever is drawn
 --     first. No action but the toggle does
 --     anything with the cursor on a folded header — see Collapsed
@@ -719,18 +726,18 @@ given {
 --     section, folded or not: folding changes what a drawn header hides,
 --     never which headers are drawn. A folded epic with no task of its own
 --     keeps its header while branches still meet at it.
---   - A fold never hides a task without a header above it. In a section
---     where a folded epic is skipped, its fold hides nothing there: the
---     tasks below it draw under their own headers.
---   - When a folded epic is drawn in no section of its column while the
---     column still holds tasks below it, the fold moves down
+--   - A fold never hides a task without a header above it. While its
+--     section skips a folded epic, the fold hides nothing: the tasks below
+--     it draw under their own headers.
+--   - When a folded epic is not drawn in its section while the section
+--     still holds tasks below it, the fold moves down within that section
 --     (tasks.allium: FoldMovesToDrawnDescendant). Each drawn epic that
---     takes its place — the drawn epic nearest below it, in each section
---     where it is skipped — is folded, and the skipped epic's fold is
---     cleared. The
---     user folded it to hide what sits under it, and what still sits there
---     is now headed by those epics. When the skipped epic is drawn again
---     later, it draws open.
+--     takes its place there — the drawn epics nearest below it in that
+--     section — is folded in that section, and the skipped epic's fold is
+--     cleared. The user folded it to hide what sits under it, and what
+--     still sits there is now headed by those epics. When the skipped epic
+--     is drawn there again later, it draws open. No other section's folds
+--     move.
 --   - The move judges the column unfiltered: every task the column holds
 --     on the main board, as if no search, lens narrowing, hidden epic,
 --     hidden work package or repo filter were on. Those narrow the drawn
@@ -742,12 +749,19 @@ given {
 -- Toggling is specified in tasks.allium: ToggleEpicFold.
 --
 -- State model:
---   - The set of folded (column, epic) pairs is user state and persists
---     across app restarts, on the same reasoning as Collapsed Sections:
---     "not this epic, not now" outlives a session.
---   - A recorded pair for an epic that no longer places a flattened group in
---     that column is inert: it names nothing the column renders, and it
+--   - The set of folded (column, section, epic) triples is user state and
+--     persists across app restarts, on the same reasoning as Collapsed
+--     Sections: "not this epic, not now" outlives a session.
+--   - A recorded triple for an epic that no longer places a flattened group
+--     in that section is inert: it names nothing the column renders, and it
 --     neither errors nor folds anything else.
+--   - A fold saved before folds were per section names a column and an
+--     epic only. Reading it back folds the epic in every section of that
+--     column, so the board looks as it did; the next save writes those
+--     folds per section. From then on each is unfolded on its own. One
+--     corner differs: where such a fold names an epic that one section
+--     skips, the per-section move (above) folds the epics heading its tasks
+--     there, which the old fold left open.
 
 -- == Board Vertical Layout ==
 
@@ -1147,10 +1161,12 @@ value SectionRef {
     section: core/ColumnSection
 }
 
--- One folded epic group, named by the column it is in and the epic within
--- it. The same epic in two columns is two independent pairs.
+-- One folded epic group, named by the column it is in, the section within
+-- that column and the epic within the section. The same epic in two
+-- sections, or in two columns, is two independent triples.
 value EpicFoldRef {
     column: core/TaskStatus
+    section: core/ColumnSection
     epic: core/Epic
 }
 

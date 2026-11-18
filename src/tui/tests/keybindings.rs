@@ -191,7 +191,8 @@ fn app_for(binding: &KeyBinding) -> App {
             app.board.epics = vec![make_epic(10)];
             app.filter.lens = crate::tui::types::Lens::Flat;
             app.selection_mut().set_column(2);
-            app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
+            app.epic_folds
+                .toggle(TaskStatus::Running, ColumnSection::Active, EpicId(10));
             app.selection_mut().set_row(2, 0);
             app
         }
