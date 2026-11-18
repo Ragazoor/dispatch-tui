@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Sub-step of wrap-up, never a way to finish a task: to finish a task use wrap-up, which runs this itself. Use it directly only when the user runs /retro or asks for a session retrospective.
+description: "Sub-step of wrap-up, never a way to finish a task: to finish a task use wrap-up, which runs this itself. Use it directly only when the user runs /retro or asks for a session retrospective."
 ---
 
 # Retro

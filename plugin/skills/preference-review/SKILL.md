@@ -24,6 +24,9 @@ Take the PR number or URL from the argument. With none, take it from the task
 description (`task_search` on your task) or the conversation. If there is still
 none, ask the user one question.
 
+Take `<owner>/<repo>` from the URL. For a bare number, use this checkout's
+repo: `gh repo view --json nameWithOwner`. Steps 2 and 7 need them too.
+
 Get the facts with `gh`, passing `--repo <owner>/<repo>` when you have a URL:
 
 ```bash
@@ -118,7 +121,8 @@ that dropped it.
 ## Step 4: Verify
 
 Step 4 always runs, whatever the diff size. Start one `general-purpose` agent
-for all findings. With many, split them by file across agents, in one message. Give each agent its findings and the way to read code
+for all findings. With more than about eight, split them by file into groups of about eight,
+one agent per group, started in one message. Give each agent its findings and the way to read code
 at `headRefOid`. Its job is to **disprove** each finding against the real code:
 read the lines, follow the callers, check the tests. It returns `confirmed`,
 `plausible` or `refuted` with one line of evidence. It compares against the
@@ -146,7 +150,8 @@ one-line note of which entry dropped each, in case the user asks.
 Show a short list, worst first. For each finding:
 
 - `path:line` and a severity (blocking, should fix, nit);
-- the comment, written as the operator would write it on the PR. Follow any
+- the comment, written as the operator would write it on the PR: short and direct,
+  a question when the point is a question, no hedging, no praise. Follow any
   voice notes in `general.md`;
 - the failure scenario in one line;
 - `(plausible)` when step 4 could not confirm it.

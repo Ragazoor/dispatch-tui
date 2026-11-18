@@ -17,6 +17,7 @@
 //! cleanup step can be skipped (keep-awake.allium: HoldDiesWithTheBoard).
 
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader, Lines};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout, Command};
@@ -79,64 +80,155 @@ fn names_gnome(desktop: &str) -> bool {
 /// holds the values of [`DESKTOP_VARS`] that are set; none set counts as
 /// GNOME, since an environment that names no desktop is no evidence against it.
 pub fn hold_command<S: AsRef<str>>(desktops: &[S], gnome_inhibit_on_path: bool) -> HoldCommand {
+    // Never empty: the systemd helper is always last.
+    hold_commands(desktops, gnome_inhibit_on_path).swap_remove(0)
+}
+
+/// The helpers to try, in order. The GNOME helper (when it is the choice)
+/// comes first and `systemd-inhibit` behind it, so a refusal of the first
+/// (an ssh-started tmux server with the helper installed but no desktop
+/// session) is not the end (keep-awake.allium: RequestKeepAwake).
+pub fn hold_commands<S: AsRef<str>>(
+    desktops: &[S],
+    gnome_inhibit_on_path: bool,
+) -> Vec<HoldCommand> {
     // No variable at all means the board's environment says nothing (a tmux
     // server started over ssh), not that the desktop is not GNOME, so the
     // helper is tried when installed.
     let on_gnome = desktops.is_empty() || desktops.iter().any(|d| names_gnome(d.as_ref()));
-    let (program, flags): (&str, Vec<&str>) = if on_gnome && gnome_inhibit_on_path {
-        (
-            "gnome-session-inhibit",
-            vec!["--inhibit", "idle:suspend", "--reason", REASON],
-        )
-    } else {
-        (
-            "systemd-inhibit",
-            vec![
-                "--what=idle:sleep",
-                "--who=dispatch",
-                "--mode=block",
-                WHY_FLAG,
-            ],
-        )
-    };
-    HoldCommand {
+    let build = |program: &str, flags: Vec<&str>| HoldCommand {
         program: program.to_string(),
         args: flags
             .into_iter()
             .chain(INNER.iter().copied())
             .map(str::to_string)
             .collect(),
+    };
+    let systemd = build(
+        "systemd-inhibit",
+        vec![
+            "--what=idle:sleep",
+            "--who=dispatch",
+            "--mode=block",
+            WHY_FLAG,
+        ],
+    );
+    if on_gnome && gnome_inhibit_on_path {
+        let gnome = build(
+            "gnome-session-inhibit",
+            vec!["--inhibit", "idle:suspend", "--reason", REASON],
+        );
+        vec![gnome, systemd]
+    } else {
+        vec![systemd]
     }
 }
 
-/// The helper for this machine, read from its environment.
+/// The helpers for this machine, in the order to try them, read from its
+/// environment.
 ///
 /// Memoized: neither the desktop nor the installed helpers change over the
 /// life of the board, and the PATH scan is filesystem work that must not
-/// repeat on the async command path (docs/conventions.md).
-pub fn hold_command_for_this_machine() -> &'static HoldCommand {
-    static CACHED: std::sync::OnceLock<HoldCommand> = std::sync::OnceLock::new();
+/// repeat on the async command path (docs/conventions.md). Only the order is
+/// kept, never an outcome: a refusal is not remembered, so the next request
+/// tries the first helper again.
+pub fn hold_commands_for_this_machine() -> &'static [HoldCommand] {
+    static CACHED: std::sync::OnceLock<Vec<HoldCommand>> = std::sync::OnceLock::new();
     CACHED.get_or_init(|| {
         let desktops = desktop_vars(|name| std::env::var(name).ok());
-        hold_command(
+        hold_commands(
             &desktops,
             crate::process::program_on_path("gnome-session-inhibit"),
         )
     })
 }
 
+/// The live helper's pipe, and whether the hold was let go. Shared so a
+/// fallback helper started later still belongs to the same [`Hold`].
+#[derive(Debug, Default)]
+struct Slot {
+    stdin: Option<ChildStdin>,
+    released: bool,
+}
+
 /// A requested hold. Dropping it releases the hold.
 #[derive(Debug)]
 pub struct Hold {
-    _stdin: Option<ChildStdin>,
+    slot: Arc<Mutex<Slot>>,
 }
 
-/// Start the helper and report what happens to it through `on_event`:
-/// at most one [`HoldEvent::Granted`], then exactly one
-/// [`HoldEvent::Refused`] or [`HoldEvent::Ended`].
+impl Drop for Hold {
+    fn drop(&mut self) {
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        slot.released = true;
+        slot.stdin.take();
+    }
+}
+
+/// Start one helper and report what happens to it through `on_event`.
 ///
 /// Must be called inside a tokio runtime.
 pub fn start(command: &HoldCommand, on_event: impl Fn(HoldEvent) + Send + Sync + 'static) -> Hold {
+    start_chain(std::slice::from_ref(command), on_event)
+}
+
+/// Start the first of `commands`; when it is refused and another is left,
+/// start the next, and so on. The answer is the first grant, or the last
+/// refusal. Reports at most one [`HoldEvent::Granted`], then exactly one
+/// [`HoldEvent::Refused`] or [`HoldEvent::Ended`]. A refusal that comes after
+/// the hold was released starts nothing.
+///
+/// Must be called inside a tokio runtime.
+pub fn start_chain(
+    commands: &[HoldCommand],
+    on_event: impl Fn(HoldEvent) + Send + Sync + 'static,
+) -> Hold {
+    let slot = Arc::new(Mutex::new(Slot::default()));
+    launch(
+        Arc::new(commands.to_vec()),
+        0,
+        slot.clone(),
+        Arc::new(on_event),
+    );
+    Hold { slot }
+}
+
+type Callback = Arc<dyn Fn(HoldEvent) + Send + Sync>;
+
+fn launch(
+    commands: Arc<Vec<HoldCommand>>,
+    index: usize,
+    slot: Arc<Mutex<Slot>>,
+    on_event: Callback,
+) {
+    let Some(command) = commands.get(index) else {
+        return;
+    };
+    let next = {
+        let (commands, slot, on_event) = (commands.clone(), slot.clone(), on_event.clone());
+        move |event: HoldEvent| match event {
+            HoldEvent::Refused(_) if index + 1 < commands.len() => {
+                let released = slot.lock().unwrap_or_else(|e| e.into_inner()).released;
+                if !released {
+                    launch(commands.clone(), index + 1, slot.clone(), on_event.clone());
+                }
+            }
+            other => on_event(other),
+        }
+    };
+    let stdin = spawn_helper(command, next);
+    if stdin.is_some() {
+        let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if !guard.released {
+            guard.stdin = stdin;
+        }
+    }
+}
+
+fn spawn_helper(
+    command: &HoldCommand,
+    on_event: impl Fn(HoldEvent) + Send + Sync + 'static,
+) -> Option<ChildStdin> {
     let spawned = Command::new(&command.program)
         .args(&command.args)
         .stdin(Stdio::piped())
@@ -151,7 +243,7 @@ pub fn start(command: &HoldCommand, on_event: impl Fn(HoldEvent) + Send + Sync +
                 "could not start {}: {e}",
                 command.program
             )));
-            return Hold { _stdin: None };
+            return None;
         }
     };
     let stdin = child.stdin.take();
@@ -196,7 +288,7 @@ pub fn start(command: &HoldCommand, on_event: impl Fn(HoldEvent) + Send + Sync +
             HoldEvent::Refused(reason)
         });
     });
-    Hold { _stdin: stdin }
+    stdin
 }
 
 /// The future's value if it is ready on its first poll, else `None`.
@@ -275,6 +367,83 @@ mod tests {
             let _ = tx.send(e);
         });
         (hold, rx)
+    }
+
+    fn chain_with_channel(cmds: &[HoldCommand]) -> (Hold, mpsc::UnboundedReceiver<HoldEvent>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let hold = start_chain(cmds, move |e| {
+            let _ = tx.send(e);
+        });
+        (hold, rx)
+    }
+
+    /// R7: a refused first helper is not the answer while another is left.
+    #[tokio::test]
+    async fn a_refused_helper_falls_back_to_the_next_one() {
+        let (hold, mut rx) = chain_with_channel(&[
+            sh("echo 'no session' >&2; exit 1"),
+            sh("echo ready; exec cat"),
+        ]);
+        assert_eq!(rx.recv().await, Some(HoldEvent::Granted));
+        drop(hold);
+        assert!(matches!(rx.recv().await, Some(HoldEvent::Ended(_))));
+        assert_eq!(rx.recv().await, None);
+    }
+
+    #[tokio::test]
+    async fn when_every_helper_refuses_the_last_reason_is_reported_once() {
+        let (_hold, mut rx) =
+            chain_with_channel(&[sh("echo first >&2; exit 1"), sh("echo second >&2; exit 1")]);
+        assert_eq!(
+            rx.recv().await,
+            Some(HoldEvent::Refused("second".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_first_helper_falls_back() {
+        let missing = HoldCommand {
+            program: "dispatch-no-such-inhibit-helper".to_string(),
+            args: vec![],
+        };
+        let (hold, mut rx) = chain_with_channel(&[missing, sh("echo ready; exec cat")]);
+        assert_eq!(rx.recv().await, Some(HoldEvent::Granted));
+        drop(hold);
+    }
+
+    #[tokio::test]
+    async fn a_hold_ended_after_granting_does_not_fall_back() {
+        let (_hold, mut rx) =
+            chain_with_channel(&[sh("echo ready; exit 0"), sh("echo ready; exec cat")]);
+        assert_eq!(rx.recv().await, Some(HoldEvent::Granted));
+        assert!(matches!(rx.recv().await, Some(HoldEvent::Ended(_))));
+    }
+
+    #[tokio::test]
+    async fn releasing_while_a_helper_is_refusing_starts_no_fallback() {
+        let (hold, mut rx) =
+            chain_with_channel(&[sh("sleep 0.3; exit 1"), sh("echo ready; exec cat")]);
+        drop(hold);
+        // The refused first helper must not start the second one.
+        let got = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await;
+        assert!(!matches!(got, Ok(Some(HoldEvent::Granted))), "{got:?}");
+    }
+
+    #[test]
+    fn gnome_is_tried_first_with_systemd_behind_it() {
+        let cmds = hold_commands(&["GNOME"], true);
+        let names: Vec<&str> = cmds.iter().map(|c| c.program.as_str()).collect();
+        assert_eq!(names, ["gnome-session-inhibit", "systemd-inhibit"]);
+        let unknown = hold_commands::<&str>(&[], true);
+        assert_eq!(unknown.len(), 2);
+    }
+
+    #[test]
+    fn without_the_gnome_helper_only_systemd_is_tried() {
+        let cmds = hold_commands(&["GNOME"], false);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].program, "systemd-inhibit");
+        assert_eq!(hold_commands(&["KDE"], true).len(), 1);
     }
 
     #[tokio::test]

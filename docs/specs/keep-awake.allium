@@ -21,7 +21,8 @@
 --     ends, a crash included. It is never remembered across restarts.
 --   - One board key toggles it. A steady badge shows while it holds.
 --   - A refusal, or a hold that ends on its own, turns it off with an error
---     message. There is no automatic retry.
+--     message. There is no automatic retry, except that a refused desktop
+--     facility falls back to the generic one within the same request.
 --   - Linux only; keyboard only; no MCP tool.
 
 use "./core.allium" as core
@@ -108,6 +109,13 @@ rule RequestKeepAwake {
         -- none of them is set the environment says nothing about the desktop,
         -- so the desktop's facility is tried when it is installed; a refusal
         -- then surfaces as KeepAwakeRefused.
+        --
+        -- A refusal by the desktop's facility is not yet the answer while
+        -- the generic system facility is left: it is tried next, and only
+        -- when it too refuses does KeepAwakeRefused fire, with the last
+        -- reason. A refusal that arrives after the operator cancelled starts
+        -- nothing. The outcome is never remembered: the next request tries
+        -- the desktop's facility first again.
 }
 
 rule RefuseKeepAwakeOffLinux {

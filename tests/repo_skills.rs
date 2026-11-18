@@ -66,6 +66,46 @@ fn frontmatter_value(front: &str, key: &str) -> Option<String> {
     Some(folded.join(" "))
 }
 
+/// Why a one-line frontmatter value is not valid YAML, if it is not. An
+/// unquoted (plain) scalar may not hold `: ` or ` #`: a parser reads the first
+/// as a nested mapping and the second as a comment. Quoted and block values
+/// are fine. `frontmatter_value` splits by line prefix, so it cannot see this.
+fn plain_scalar_problem(front: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}:");
+    let first = front.lines().find_map(|l| l.strip_prefix(&prefix))?.trim();
+    if first.is_empty() || first.starts_with(['"', '\'', '>', '|']) {
+        return None;
+    }
+    if first.contains(": ") || first.contains(" #") {
+        return Some(format!("unquoted `{key}` holds `: ` or ` #`: {first}"));
+    }
+    None
+}
+
+#[test]
+fn the_frontmatter_gate_rejects_an_unquoted_colon() {
+    let bad = "name: x\ndescription: Sub-step, never a way: to finish";
+    assert!(plain_scalar_problem(bad, "description").is_some());
+    let quoted = "name: x\ndescription: \"Sub-step, never a way: to finish\"";
+    assert!(plain_scalar_problem(quoted, "description").is_none());
+    let folded = "name: x\ndescription: >-\n  a way: to finish";
+    assert!(plain_scalar_problem(folded, "description").is_none());
+}
+
+#[test]
+fn every_skill_frontmatter_is_strict_yaml() {
+    for root in SKILL_ROOTS {
+        for (name, path) in skills_in(root) {
+            let front = frontmatter(&path);
+            for key in ["name", "description"] {
+                if let Some(p) = plain_scalar_problem(&front, key) {
+                    panic!("{root}/{name}/SKILL.md: {p}");
+                }
+            }
+        }
+    }
+}
+
 /// A loose `.md` file directly under a skills directory is not a skill. Claude
 /// Code discovers `<root>/<name>/SKILL.md`, so a bare file there is never
 /// loaded and its contents reach nobody — which is what happened to a `lint.md`

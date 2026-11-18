@@ -10,8 +10,8 @@ impl super::TuiRuntime {
     /// (AnswersBelongToOneRequest).
     pub(super) fn exec_request_keep_awake(&self, generation: u64) {
         let tx = self.msg_tx.clone();
-        let hold = crate::keep_awake::start(
-            crate::keep_awake::hold_command_for_this_machine(),
+        let hold = crate::keep_awake::start_chain(
+            crate::keep_awake::hold_commands_for_this_machine(),
             move |event| {
                 let _ = tx.send(Message::KeepAwake(KeepAwakeMessage::Answer {
                     generation,
