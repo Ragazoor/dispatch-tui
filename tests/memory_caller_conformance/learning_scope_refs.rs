@@ -188,5 +188,17 @@ fn learning_scope_refs_and_package_sight_match_the_module() {
                 "{side}: {why}"
             );
         }
+
+        // -- rating for a task that does not exist: "task N not found" ----------
+        let callers: [(&str, &dyn ReducerCaller); 2] = [("module", p.real), ("twin", p.mem)];
+        for (side, caller) in callers {
+            let why = refusal(
+                caller
+                    .apply_learning_verdicts(TaskId(999_999), vec![(user, LearningVerdict::Helped)])
+                    .await
+                    .unwrap(),
+            );
+            assert!(why.ends_with("task 999999 not found"), "{side}: {why}");
+        }
     });
 }

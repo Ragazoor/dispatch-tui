@@ -298,9 +298,9 @@ impl LearningService {
     /// Rate learnings for `task_id`. The rules (a retrieval for the task, one
     /// standing verdict per task and learning) live in the store's
     /// `apply_learning_verdicts` reducer; a refusal arrives as
-    /// `ServiceError::Validation`, except that a learning the store answers
-    /// "not found" (missing, or unseen) is `ServiceError::NotFound`, as
-    /// `delete_learning` answers it. See docs/specs/learnings.allium:
+    /// `ServiceError::Validation`, except that a learning or the task the store
+    /// answers "not found" (missing, or unseen) is `ServiceError::NotFound`, as
+    /// `delete_learning` and the task tools answer it. See docs/specs/learnings.allium:
     /// RateLearningViaMcp.
     pub async fn apply_verdicts(
         &self,
@@ -314,9 +314,10 @@ impl LearningService {
             Ok(()) => Ok(()),
             Err(e) => Err(match ServiceError::from(e) {
                 ServiceError::Validation(why)
-                    if verdicts
-                        .iter()
-                        .any(|(id, _)| why.ends_with(&format!("learning {} not found", id.0))) =>
+                    if why.ends_with(&format!("task {} not found", task_id.0))
+                        || verdicts.iter().any(|(id, _)| {
+                            why.ends_with(&format!("learning {} not found", id.0))
+                        }) =>
                 {
                     ServiceError::NotFound(why)
                 }

@@ -235,6 +235,14 @@ async fn record_learning_retrieval_inserts_a_row() {
 
 const RATING_TASK: TaskId = TaskId(7);
 
+/// Tasks 7 and 8 exist: the store refuses a verdict for a missing task.
+async fn with_rating_tasks(caller: &MemoryReducerCaller) {
+    for id in [7, 8] {
+        caller.align_next_task_id(id);
+        caller.create_task(blank_task()).await.unwrap();
+    }
+}
+
 /// Record that `RATING_TASK` was shown `learning`, the precondition of a verdict.
 async fn retrieve(caller: &MemoryReducerCaller, learning: LearningId) {
     caller
@@ -246,6 +254,7 @@ async fn retrieve(caller: &MemoryReducerCaller, learning: LearningId) {
 #[tokio::test]
 async fn apply_learning_verdicts_applies_helped_and_wrong() {
     let (caller, rows) = caller();
+    with_rating_tasks(&caller).await;
     let helped = caller.create_learning(blank_learning()).await.unwrap();
     let wrong = caller.create_learning(blank_learning()).await.unwrap();
     retrieve(&caller, helped).await;
@@ -269,6 +278,7 @@ async fn apply_learning_verdicts_applies_helped_and_wrong() {
 #[tokio::test]
 async fn apply_learning_verdicts_counts_a_repeat_from_one_task_once() {
     let (caller, rows) = caller();
+    with_rating_tasks(&caller).await;
     let id = caller.create_learning(blank_learning()).await.unwrap();
     retrieve(&caller, id).await;
     for _ in 0..2 {
@@ -285,6 +295,7 @@ async fn apply_learning_verdicts_counts_a_repeat_from_one_task_once() {
 #[tokio::test]
 async fn apply_learning_verdicts_latest_verdict_from_a_task_wins() {
     let (caller, rows) = caller();
+    with_rating_tasks(&caller).await;
     let id = caller.create_learning(blank_learning()).await.unwrap();
     retrieve(&caller, id).await;
     caller
@@ -307,6 +318,7 @@ async fn apply_learning_verdicts_latest_verdict_from_a_task_wins() {
 #[tokio::test]
 async fn apply_learning_verdicts_counts_each_task_once() {
     let (caller, rows) = caller();
+    with_rating_tasks(&caller).await;
     let id = caller.create_learning(blank_learning()).await.unwrap();
     for task in [TaskId(7), TaskId(8)] {
         caller
@@ -326,6 +338,7 @@ async fn apply_learning_verdicts_counts_each_task_once() {
 #[tokio::test]
 async fn apply_learning_verdicts_duplicate_entries_in_one_batch_latest_wins() {
     let (caller, rows) = caller();
+    with_rating_tasks(&caller).await;
     let id = caller.create_learning(blank_learning()).await.unwrap();
     retrieve(&caller, id).await;
     caller
@@ -341,6 +354,7 @@ async fn apply_learning_verdicts_duplicate_entries_in_one_batch_latest_wins() {
 #[tokio::test]
 async fn apply_learning_verdicts_refuses_a_learning_never_retrieved_for_the_task() {
     let (caller, rows) = caller();
+    with_rating_tasks(&caller).await;
     let retrieved = caller.create_learning(blank_learning()).await.unwrap();
     let stranger = caller.create_learning(blank_learning()).await.unwrap();
     retrieve(&caller, retrieved).await;
@@ -365,6 +379,7 @@ async fn apply_learning_verdicts_refuses_a_learning_never_retrieved_for_the_task
 #[tokio::test]
 async fn apply_learning_verdicts_refuses_a_missing_learning_as_not_found() {
     let (caller, _rows) = caller();
+    with_rating_tasks(&caller).await;
     retrieve(&caller, LearningId(999)).await;
     let outcome = caller
         .apply_learning_verdicts(

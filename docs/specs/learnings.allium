@@ -414,7 +414,9 @@ rule RateLearningViaMcp {
         -- The retrieval check is the store's (the apply_learning_verdicts
         -- reducer), so every client gets the same answer.
         -- A learning that does not exist, or that the caller cannot see,
-        -- answers not found (-32001), as learning_delete does. A learning not
+        -- answers not found (-32001), as learning_delete does. So does a
+        -- task that does not exist or that the caller cannot see, whether
+        -- named by id or by agent name, as in the other task tools. A learning not
         -- retrieved for the task, an unknown verdict, an empty list and a
         -- repeated learning answer invalid params (-32602).
 }

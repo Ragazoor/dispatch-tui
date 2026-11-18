@@ -266,7 +266,11 @@ impl MemoryReducerCaller {
         let task_id = task_id.0;
         let scope = self.scope();
         let mut tables = self.lock();
-        if scope.on() && tables.visible_task(&scope, task_id).is_none() {
+        // The module refuses a missing task whatever the rules: its
+        // `visible_task` finds no row.
+        if !tables.tasks.contains_key(&task_id)
+            || scope.on() && tables.visible_task(&scope, task_id).is_none()
+        {
             return Ok(ReducerOutcome::Refused(format!("task {task_id} not found")));
         }
         for (learning_id, _) in &verdicts {

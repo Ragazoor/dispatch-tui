@@ -881,6 +881,17 @@ async fn rate_learning_of_a_missing_learning_answers_not_found() {
     let learning_id =
         create_approved_learning(&state, "Tip", crate::models::LearningScope::User, None, &[])
             .await;
+    // An unknown task answers not found too, as an unknown agent name does.
+    let resp = crate::mcp::handlers::learnings::handle_rate_learning(
+        &state,
+        Some(json!(1)),
+        &crate::mcp::identity::CallerIdentity::Session,
+        json!({ "task_id": 99_999, "ratings": [{ "learning_id": learning_id.0, "verdict": "helped" }] }),
+    )
+    .await;
+    assert_error(&resp, "task 99999 not found");
+    assert_eq!(resp.error.as_ref().map(|e| e.code), Some(-32001));
+
     let resp = rate(learning_id.0).await;
     assert_error(&resp, "retriev");
     assert_eq!(resp.error.as_ref().map(|e| e.code), Some(-32602));
