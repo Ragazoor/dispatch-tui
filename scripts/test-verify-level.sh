@@ -29,11 +29,11 @@ fail() {
     exit 1
 }
 
-# A fresh repository on main with one commit, and a branch "work" from it.
-fresh() {
-    rm -rf "$WORKDIR/repo"
-    mkdir -p "$WORKDIR/repo/docs/project" "$WORKDIR/repo/docs/specs" "$WORKDIR/repo/docs/guide" "$WORKDIR/repo/docs/plans" "$WORKDIR/repo/src"
-    cd "$WORKDIR/repo"
+# The template: a repository on main with one commit, and a branch "work"
+# from it. Built once; each case starts from a copy.
+template() {
+    mkdir -p "$WORKDIR/template/docs/project" "$WORKDIR/template/docs/specs" "$WORKDIR/template/docs/guide" "$WORKDIR/template/docs/plans" "$WORKDIR/template/src"
+    cd "$WORKDIR/template"
     git init -q -b main
     git config user.email test@example.com
     git config user.name test
@@ -47,6 +47,13 @@ fresh() {
     git add -A
     git commit -q -m init
     git checkout -q -b work
+}
+template
+
+fresh() {
+    rm -rf "$WORKDIR/repo"
+    cp -a "$WORKDIR/template" "$WORKDIR/repo"
+    cd "$WORKDIR/repo"
 }
 
 expect() {
@@ -139,7 +146,6 @@ expect gates "main moved: only the branch's own change counts"
 fresh
 git checkout -q main
 expect none "explicit base" main
-git checkout -q work
 
 fresh
 git branch -q other

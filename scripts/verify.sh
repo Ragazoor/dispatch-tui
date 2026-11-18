@@ -22,14 +22,13 @@ case "$level" in
         echo "verify: no change against $base, nothing to check"
         exit 0
         ;;
-    gates)
-        echo "verify: only docs no test reads changed against $base, gates only (tests skipped)"
-        ./scripts/gates.sh --check
-        ;;
-    *)
-        echo "verify: code changed against $base, gates and the full test suite"
-        ./scripts/gates.sh --check
-        echo "tests..."
-        cargo test --no-fail-fast
-        ;;
+    gates) echo "verify: only docs no test reads changed against $base, gates only (tests skipped)" ;;
+    *) echo "verify: code changed against $base, gates and the full test suite" ;;
 esac
+
+./scripts/gates.sh --check
+
+if [ "$level" = full ]; then
+    echo "tests..."
+    cargo test --no-fail-fast
+fi

@@ -45,9 +45,9 @@ if [ -z "$changed" ]; then
     exit 0
 fi
 
-level=gates
 # Paths come one per line; a name with a newline in it is code.
-echo "$changed" | while IFS= read -r path; do
-    is_safe "$path" || exit 1
-done || level=full
-echo "$level"
+if echo "$changed" | while IFS= read -r path; do is_safe "$path" || exit 1; done; then
+    echo gates
+else
+    echo full
+fi

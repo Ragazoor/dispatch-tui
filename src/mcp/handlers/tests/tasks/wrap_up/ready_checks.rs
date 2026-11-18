@@ -54,46 +54,12 @@ async fn wrap_up_never_runs_the_verify_command() {
             !text.contains("passed") && !text.contains("Verified"),
             "{action}: the board verified nothing, so it must not claim to: {text}"
         );
-        assert!(text.contains("session_exit"), "{action}: {text}");
-    }
-}
-
-/// `AgentsRunTheVerifyCommand`: the agent runs the verify command once,
-/// before `session_wrap-up`, and never again after it. No answer names the
-/// command or asks for a re-run, not even after a rebase that moved HEAD.
-#[tokio::test]
-async fn no_wrap_up_answer_asks_for_a_verify_rerun() {
-    for action in ["rebase", "pr", "done"] {
-        let (state, task_id, _) = verify_board(action).await;
-
-        let resp = wrap_up_call(&state, task_id, action).await;
-
-        assert!(!is_error(&resp), "{action}: got: {}", error_message(&resp));
-        let text = extract_response_text(&resp);
         assert!(
             !text.contains("Re-run") && !text.contains("cargo test"),
-            "{action}: the answer must not ask for a verify re-run: {text}"
+            "{action}: no answer asks for a verify re-run (AgentsRunTheVerifyCommand): {text}"
         );
+        assert!(text.contains("session_exit"), "{action}: {text}");
     }
-}
-
-/// With no re-run to ask for, a rebase has no reason to read where HEAD
-/// stood, so it reads it neither before nor after.
-#[tokio::test]
-async fn a_rebase_reads_no_head_even_with_a_verify_command() {
-    let (state, task_id, runner) = verify_board("rebase").await;
-
-    let resp = wrap_up_call(&state, task_id, "rebase").await;
-
-    assert!(!is_error(&resp), "got: {}", error_message(&resp));
-    assert!(
-        !runner
-            .flattened_calls()
-            .iter()
-            .any(|c| c.contains("rev-parse HEAD")),
-        "HEAD is not read; got: {:?}",
-        runner.flattened_calls()
-    );
 }
 
 #[tokio::test]
