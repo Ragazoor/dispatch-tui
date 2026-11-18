@@ -261,6 +261,37 @@ fn folding_an_epic_in_one_section_leaves_its_group_in_another_open() {
     );
 }
 
+/// A fold saved column-wide becomes one fold per section, so the column
+/// draws two folded headers for the same epic. Unfolding one leaves the other
+/// folded, and the cursor lands on the unfolded section's card.
+#[test]
+fn unfolding_one_of_two_folded_headers_leaves_the_other_folded() {
+    let mut app = straddling_app();
+    app.epic_folds = EpicFoldState::parse("running/10");
+    match app.selected_column_item() {
+        Some(ColumnItem::FoldedEpic(h)) => assert_eq!(h.at.section, ColumnSection::NeedsInput),
+        other => panic!("setup: cursor should start on the first folded header, got {other:?}"),
+    }
+    app.update(Message::NavigateRow(1));
+    match app.selected_column_item() {
+        Some(ColumnItem::FoldedEpic(h)) => assert_eq!(h.at.section, ColumnSection::Active),
+        other => panic!("setup: cursor should reach the second folded header, got {other:?}"),
+    }
+
+    app.handle_key(make_key(KeyCode::Enter));
+
+    assert!(!app
+        .epic_folds
+        .is_folded(TaskStatus::Running, ColumnSection::Active, EpicId(10)));
+    assert!(app
+        .epic_folds
+        .is_folded(TaskStatus::Running, ColumnSection::NeedsInput, EpicId(10)));
+    match app.selected_column_item() {
+        Some(ColumnItem::Task(t)) => assert_eq!(t.id.0, 1),
+        other => panic!("cursor should rest on task 1, got {other:?}"),
+    }
+}
+
 /// Unfolding puts the cursor on the group's first card in its own section,
 /// not on the epic's first card anywhere in the column.
 #[test]

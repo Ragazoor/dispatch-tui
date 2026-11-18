@@ -719,7 +719,7 @@ given {
 --     draws folded or open exactly as it was recorded before. A folded
 --     header directly under its parent's open header draws no blank line
 --     above it: the two belong together. An open parent header with no
---     task of its own in the column cannot be folded: no card there
+--     task of its own in the section cannot be folded: no card there
 --     belongs to it, and the open header is decoration (tasks.allium:
 --     ToggleEpicFold).
 --   - The compact tree (EpicGroupTree) is built from every task in the
