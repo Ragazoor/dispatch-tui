@@ -121,10 +121,19 @@ def off_scope_metrics(L, R):
     learnings.allium says retrieval returns user + the task's repo + the task's epic.
     Before 2026-10-16 the ranker only left others unboosted. Rows on deleted tasks
     cannot be judged and are skipped, so read this as a ratio, not a count.
+
+    The store keeps only a task's current epic, and a task can move after its prompt was
+    built (run 12: five tasks created in epic 57346 moved to an epic made six hours
+    later read as 12 leaks). So an epic-scoped row is judged against the epic the task
+    was created in, when a create_task trajectory names one, as well as the current
+    epic. A row whose task's current epic was created after the retrieval, with no
+    creation epic known, cannot be judged: it is skipped and counted.
     """
     by = {r["id"]: r for r in L}
     tasks = {t["id"]: t for t in table("tasks")}
-    weeks = collections.defaultdict(lambda: [0, 0])
+    epic_made = {e["id"]: e["created_at"] for e in table("epics")}
+    born_in = creation_epics()
+    weeks = collections.defaultdict(lambda: [0, 0, 0])
     for r in R:
         l, t = by.get(r["learning_id"]), tasks.get(r["task_id"])
         if not l or not t:
@@ -135,14 +144,41 @@ def off_scope_metrics(L, R):
         if sc == "repo":
             inside = repo_ref_covers(ref, t["repo_path"])
         else:
-            inside = ref == str(t["epic_id"])
+            epics = {str(t["epic_id"])}
+            if t["id"] in born_in:
+                epics.add(str(born_in[t["id"]]))
+            elif epic_made.get(t["epic_id"], "") > r["retrieved_at"]:
+                weeks[iso_week(r["retrieved_at"])][2] += 1
+                continue
+            inside = ref in epics
         c = weeks[iso_week(r["retrieved_at"])]
         c[0] += 1
         c[1] += not inside
-    print("repo/epic-scoped retrievals outside the task's scope, per week (off/rows):")
+    print("repo/epic-scoped retrievals outside the task's scope, per week (off/rows, moved-task rows skipped):")
     for wk in sorted(weeks)[-4:]:
-        off, n = weeks[wk][1], weeks[wk][0]
-        print(f"  {wk}  {off:>5}/{n:<5} {100 * off // n}%")
+        n, off, skipped = weeks[wk]
+        print(f"  {wk}  {off:>5}/{n:<5} {100 * off // max(n, 1)}%   skipped {skipped}")
+
+
+def creation_epics():
+    """task id -> the epic_id its create_task call named, from the MCP trajectories.
+
+    Tasks the operator made in the TUI have no such call; they are left out.
+    """
+    out = {}
+    for f in glob.glob(TRAJ):
+        for line in open(f):
+            if '"create_task"' not in line and '"task_create"' not in line:
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            epic = (e.get("args") or {}).get("epic_id")
+            m = re.search(r"Task (\d+) \(", json.dumps(e.get("result")))
+            if epic is not None and m:
+                out[int(m.group(1))] = epic
+    return out
 
 
 LEARNING_TOOLS = ("query_learnings", "record_learning", "rate_learning")
