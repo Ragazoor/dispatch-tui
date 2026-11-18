@@ -508,6 +508,8 @@ fn session_shape(r: &dispatch_tui::models::SessionRequest) -> SessionShape {
 
 #[path = "memory_caller_conformance/agents.rs"]
 mod agents;
+#[path = "memory_caller_conformance/archive_records.rs"]
+mod archive_records;
 #[path = "memory_caller_conformance/bookmarks.rs"]
 mod bookmarks;
 #[path = "memory_caller_conformance/close_and_managed_epics.rs"]

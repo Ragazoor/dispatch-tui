@@ -169,6 +169,9 @@ impl StoreReads for Tables {
     fn archived_tasks_owned_by(&self, who: &str) -> Vec<module::ArchivedTask> {
         keep(self.archived_tasks.values().cloned(), |a| a.owner == who)
     }
+    fn all_archived_tasks(&self) -> Vec<module::ArchivedTask> {
+        self.archived_tasks.values().cloned().collect()
+    }
 }
 
 impl MemoryReducerCaller {

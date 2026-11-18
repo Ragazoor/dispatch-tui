@@ -214,22 +214,34 @@ pub fn retire_task_scoped_learnings(ctx: &ReducerContext) {
         .filter(|l| l.scope == "task")
         .collect();
     for row in rows {
-        // The task the scope named, as the old visibility check read it.
-        let task = row
-            .scope_ref
-            .as_deref()
-            .and_then(|r| r.parse::<i64>().ok())
-            .and_then(|id| ctx.db.tasks().id().find(id));
-        let private_item = task
-            .as_ref()
-            .and_then(|t| ctx.db.epics().id().find(t.epic_id))
-            // The real predicate: a private epic anywhere up the chain.
-            .is_some_and(|e| crate::visibility::private_holder(ctx, &e).is_some());
-        let repo = task.map(|t| t.repo_path);
-        if let Some(retired) = retired_task_scoped_learning(&row, repo, private_item) {
+        if let Some(retired) = retire_task_scoped_learning(ctx, &row) {
             ctx.db.learnings().id().update(retired);
         }
     }
+}
+
+/// The retire step for one row, read against the tasks and epics stored now:
+/// the migration above and `seed_learnings` both call it, so a restored or
+/// imported task-scoped learning lands as a migrated one does
+/// (`spacetime-seed.allium: SeedsNormaliseLikeMigrations`). `None` for any
+/// other scope.
+pub fn retire_task_scoped_learning(ctx: &ReducerContext, row: &Learning) -> Option<Learning> {
+    if row.scope != "task" {
+        return None;
+    }
+    // The task the scope named, as the old visibility check read it.
+    let task = row
+        .scope_ref
+        .as_deref()
+        .and_then(|r| r.parse::<i64>().ok())
+        .and_then(|id| ctx.db.tasks().id().find(id));
+    let private_item = task
+        .as_ref()
+        .and_then(|t| ctx.db.epics().id().find(t.epic_id))
+        // The real predicate: a private epic anywhere up the chain.
+        .is_some_and(|e| crate::visibility::private_holder(ctx, &e).is_some());
+    let repo = task.map(|t| t.repo_path);
+    retired_task_scoped_learning(row, repo, private_item)
 }
 
 /// Change some fields of a learning. A missing learning is a silent no-op,

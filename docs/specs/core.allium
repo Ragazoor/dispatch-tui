@@ -1364,6 +1364,9 @@ entity ArchivedTask {
         -- epic may be deleted or re-parented later; the record does not
         -- follow, because a record that changed audience with a live epic it
         -- no longer belongs to would leak or lose history arbitrarily.
+        -- Decided 2026-11-18: frozen stays. ClaimsFollowSight governs live
+        -- rows; a record is history, and its audience is the one the delete
+        -- found.
         --
         -- NEVER REISSUED. No live Task ever carries an ArchivedTask's id. Task
         -- ids are never reused, and a restore's id ceiling counts archived ids

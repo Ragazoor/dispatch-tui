@@ -635,8 +635,9 @@ pub fn check_new_task_aim(
 /// that leaves the old sub-status behind is the caller's to fix, and a stored
 /// row never holds an odd pair (`SUB_STATUS_FIT_RULES_VERSION` reset the old
 /// ones), so a write that leaves it alone passes. An insert has no prior row
-/// and is judged on its pair alone: a seed or restore carrying an odd row
-/// fails loudly rather than landing it.
+/// and is judged on its pair alone: a create carrying an odd row fails
+/// loudly. A seed or restore normalises the pair before it gets here
+/// (`with_fit_sub_status`).
 pub fn check_sub_status_write(prior: Option<&Task>, row: &Task) -> Result<(), String> {
     match prior {
         Some(prior) if prior.sub_status == row.sub_status => Ok(()),

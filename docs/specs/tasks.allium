@@ -2313,8 +2313,10 @@ rule InsertedTaskSubStatusMustFit {
         -- nothing and reads "sub_status 'x' is not valid for status 'y'",
         -- the same words as SubStatusMovesMustBeLegal. Every creating rule
         -- writes default_sub_status of its status, so only a seed or a
-        -- restore carrying an old row can meet this; that restore fails
-        -- loudly rather than landing a row SubStatusAutoreset forbids.
+        -- restore carrying an old row could meet this, and those do not:
+        -- the seed reducer resets the pair first, as the connect migration
+        -- does (spacetime-seed.allium: SeedsNormaliseLikeMigrations), so a
+        -- restore never fails half-way on it.
 }
 
 rule BatchSubStatusPatchSkipsIllegalEntries {
@@ -2529,7 +2531,7 @@ rule HandStatusWriteReachesTheSchedule {
 --     that moves a sub_status is held to the table at the one task write
 --     (SubStatusMovesMustBeLegal, BatchSubStatusPatchSkipsIllegalEntries),
 --     and an insert whose pair does not fit is refused
---     (InsertedTaskSubStatusMustFit).
+--     (InsertedTaskSubStatusMustFit), except a seed's, which is reset.
 --   * a store stamped below rules version 51 resets every task whose pair
 --     does not fit to default_sub_status(its status) once, on connect
 --     (spacetime/module/src/tasks_epics.rs::reset_unfit_sub_statuses).

@@ -765,6 +765,38 @@ rule StoreRefusesUnknownStatus {
         -- as the earlier, friendlier refusal; this is the guarantee.
 }
 
+rule SeedsNormaliseLikeMigrations {
+    when: RestoreSnapshot(operator, snapshot)
+
+    -- Black boxes: a task row whose sub_status its status does not allow, and
+    -- a learning row recorded under the removed task scope.
+    ensures:
+        for row in snapshot.extract(tasks).rows where has_unfit_sub_status(row):
+            RowStoredWithDefaultSubStatus(row)
+        for row in snapshot.extract(learnings).rows where is_task_scoped(row):
+            RowStoredRetired(row)
+
+    @guidance
+        -- A ONE-TIME MIGRATION SEES ONLY WHAT THE STORE HELD WHEN IT RAN. The
+        -- first connection stamps an empty store at the current version, so a
+        -- later restore or import of older data lands rows the migrations
+        -- already ran past. The seed reducers therefore apply the same
+        -- normalisation themselves, per row, through the function the
+        -- migration calls: seed_tasks resets an unfit sub_status to
+        -- default_sub_status(status) (tasks.allium: SubStatusAutoreset;
+        -- spacetime/module/src/tasks_epics.rs::with_fit_sub_status) and
+        -- seed_learnings retires a task-scoped learning (learnings.allium:
+        -- Scope Model; spacetime/module/src/learning.rs::retire_task_scoped_learning).
+        -- Neither refuses: a refusal half-way through a restore is the failure
+        -- NothingIsWrittenBeforeTheChecksPass exists to prevent. Tasks and
+        -- epics are seeded before learnings, so the retire sees the private
+        -- epic chain of the task the learning named.
+        --
+        -- ANY FUTURE ONE-TIME MIGRATION THAT NORMALISES STORED ROWS gets the
+        -- same treatment: one function, called by the migration and by the
+        -- seed reducer of that table.
+}
+
 rule RefuseImplausibleCeiling {
     when: RestoreSnapshot(operator, snapshot)
 

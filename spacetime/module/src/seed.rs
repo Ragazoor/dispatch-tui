@@ -17,6 +17,9 @@ pub fn seed_tasks(ctx: &ReducerContext, rows: Vec<Task>) -> Result<(), String> {
         if row.id == 0 {
             return Err("seed_tasks needs each task's real id, not a generated one".into());
         }
+        // An unfit pair from an older snapshot is reset as the migration
+        // resets a stored one, not refused half-way through the restore.
+        let row = with_fit_sub_status(row);
         // The session facts of a pre-A4 snapshot are kept for the backfill.
         write_task_keeping_session_facts(ctx, row)?;
     }
@@ -349,6 +352,9 @@ pub fn seed_learnings(ctx: &ReducerContext, rows: Vec<Learning>) -> Result<(), S
         if row.id == 0 {
             return Err("seed_learnings needs each learning's real id".into());
         }
+        // A snapshot older than the task-scope removal still holds task rows;
+        // tasks and epics are seeded first, so the retire sees their chain.
+        let row = retire_task_scoped_learning(ctx, &row).unwrap_or(row);
         if ctx.db.learnings().id().find(row.id).is_some() {
             ctx.db.learnings().id().update(row);
         } else {

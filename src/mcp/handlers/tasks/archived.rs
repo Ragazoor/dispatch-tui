@@ -30,7 +30,7 @@ pub(super) fn archived_detail_text(a: &ArchivedTask) -> String {
         desc = a.description,
     );
     if let Some(agent) = &a.agent_name {
-        text.push_str(&format!("\nAgent: {agent} (archived)"));
+        text.push_str(&format!("\nAgent: {agent} (archived, task {})", a.id));
     }
     if let Some(label) = epic_label(a) {
         text.push_str(&format!("\nEpic: {label}"));

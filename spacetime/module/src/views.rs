@@ -63,12 +63,14 @@ pub trait StoreReads {
     fn archived_task(&self, id: i64) -> Option<ArchivedTask>;
     fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<ArchivedTask>;
     fn archived_tasks_owned_by(&self, who: &str) -> Vec<ArchivedTask>;
+    /// Every record: the operator's listing reads the whole table.
+    fn all_archived_tasks(&self) -> Vec<ArchivedTask>;
 }
 
 /// `StoreReads` over a context whose `db` is a table set: the reducers' and the
 /// views' handles spell every read the same way.
 macro_rules! impl_store_reads {
-    ($ctx:ty) => {
+    ($ctx:ty, $all_archived:expr) => {
         impl StoreReads for $ctx {
             fn epic(&self, id: i64) -> Option<Epic> {
                 self.db.epics().id().find(id)
@@ -303,13 +305,26 @@ macro_rules! impl_store_reads {
                     .filter(&who.to_string())
                     .collect()
             }
+            fn all_archived_tasks(&self) -> Vec<ArchivedTask> {
+                ($all_archived)(self)
+            }
         }
     };
 }
 
-impl_store_reads!(ReducerContext);
-impl_store_reads!(ViewContext);
-impl_store_reads!(spacetimedb::TxContext);
+// A view handle has no `.iter()`, and no view serves the operator (the only
+// caller of `all_archived_tasks`), so the view answers empty.
+impl_store_reads!(ReducerContext, |s: &ReducerContext| s
+    .db
+    .archived_tasks()
+    .iter()
+    .collect());
+impl_store_reads!(ViewContext, |_: &ViewContext| Vec::new());
+impl_store_reads!(spacetimedb::TxContext, |s: &spacetimedb::TxContext| s
+    .db
+    .archived_tasks()
+    .iter()
+    .collect());
 
 // -- The view bodies ----------------------------------------------------------
 

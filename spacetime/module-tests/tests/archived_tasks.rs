@@ -209,6 +209,24 @@ fn an_epic_less_record_is_read_only_by_its_owner() {
     assert!(as_operator.is_some(), "the operator reads every record");
 }
 
+/// K3: the operator's listing holds every record, including another person's
+/// epic-less one that no workspace index reaches.
+#[test]
+fn the_operator_lists_every_record() {
+    let store = Store::new();
+    let id = done_user_task(&store, "mine", "alice");
+    store
+        .call("alice", |ctx| delete_task(ctx, id))
+        .expect("delete_task");
+
+    let listed = store
+        .call("bob", |ctx| {
+            Ok(archived_tasks_for(ctx, true, "operator", 0, &[]))
+        })
+        .expect("list");
+    assert_eq!(listed.iter().map(|a| a.id).collect::<Vec<_>>(), vec![id]);
+}
+
 #[test]
 fn a_record_from_a_private_epic_is_read_only_by_its_holder() {
     let store = Store::new();

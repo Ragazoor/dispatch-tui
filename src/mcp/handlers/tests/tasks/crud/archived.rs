@@ -46,6 +46,16 @@ async fn get_task_reads_an_archived_task() {
     assert!(text.contains("Status: archived"), "{text}");
     assert!(text.contains("Archived: "), "{text}");
     assert!(text.contains("what it did"), "{text}");
+    // A name is reusable once its task is gone, so the record says which task
+    // the archived agent worked.
+    let agent = text
+        .lines()
+        .find(|l| l.starts_with("Agent: "))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        agent.ends_with(&format!("(archived, task {})", id.0)),
+        "{agent}"
+    );
 }
 
 #[tokio::test]

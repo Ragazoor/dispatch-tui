@@ -93,7 +93,7 @@ pub fn archived_task_for(
 /// visibility rule on their own: the owner index holds only the caller's
 /// epic-less records, and the workspace index is read only for workspaces
 /// the caller belongs to, so a workspace record needs just the privacy check.
-/// The operator also reads every listed workspace's records.
+/// The operator reads the whole table instead.
 pub fn archived_tasks_for(
     r: &impl StoreReads,
     operator: bool,
@@ -101,24 +101,29 @@ pub fn archived_tasks_for(
     epic_id: i64,
     repo_paths: &[String],
 ) -> Vec<ArchivedTask> {
-    let mut workspaces: Vec<i64> = r.memberships_of(who).iter().map(|m| m.workspace_id).collect();
-    if operator {
-        workspaces.extend(r.listed_workspaces().iter().map(|w| w.id));
-    }
-    workspaces.sort_unstable();
-    workspaces.dedup();
-    let held_in_workspace = workspaces
-        .into_iter()
-        .flat_map(|ws| r.archived_tasks_in_workspace(ws))
-        .filter(|a| operator || !a.private || (!a.private_holder.is_empty() && a.private_holder == who));
-    let mut rows: Vec<ArchivedTask> = r
-        .archived_tasks_owned_by(who)
-        .into_iter()
-        .filter(|a| a.epic_id == 0)
-        .chain(held_in_workspace)
-        .filter(|a| epic_id == 0 || a.epic_id == epic_id)
-        .filter(|a| repo_paths.is_empty() || repo_paths.contains(&a.repo_path))
-        .collect();
+    let mut rows: Vec<ArchivedTask> = if operator {
+        // The operator sees every record (`core.allium: ArchivedTask`), so the
+        // table is read whole, not through the caller's indexes.
+        r.all_archived_tasks()
+    } else {
+        let mut workspaces: Vec<i64> =
+            r.memberships_of(who).iter().map(|m| m.workspace_id).collect();
+        workspaces.sort_unstable();
+        workspaces.dedup();
+        let held_in_workspace = workspaces
+            .into_iter()
+            .flat_map(|ws| r.archived_tasks_in_workspace(ws))
+            .filter(|a| !a.private || (!a.private_holder.is_empty() && a.private_holder == who));
+        r.archived_tasks_owned_by(who)
+            .into_iter()
+            .filter(|a| a.epic_id == 0)
+            .chain(held_in_workspace)
+            .collect()
+    };
+    rows.retain(|a| {
+        (epic_id == 0 || a.epic_id == epic_id)
+            && (repo_paths.is_empty() || repo_paths.contains(&a.repo_path))
+    });
     rows.sort_by(|a, b| b.archived_at.cmp(&a.archived_at).then(b.id.cmp(&a.id)));
     rows.dedup_by_key(|a| a.id);
     rows

@@ -153,6 +153,9 @@ impl StoreReads for Store {
     fn archived_tasks_owned_by(&self, who: &str) -> Vec<ArchivedTask> {
         keep(&self.archived_tasks, |a| a.owner == who)
     }
+    fn all_archived_tasks(&self) -> Vec<ArchivedTask> {
+        self.archived_tasks.clone()
+    }
 }
 
 fn epic(id: i64, parent: i64, visibility: &str, creator: &str, ws: i64) -> Epic {

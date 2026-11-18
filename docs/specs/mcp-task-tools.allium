@@ -1066,9 +1066,11 @@ rule GetArchivedTaskViaMcp {
         --   Status: archived
         --   Archived: <archived_at>
         --   Repo, Description,
-        --   [Agent: <agent_name> (archived)],
+        --   [Agent: <agent_name> (archived, task <id>)],
         --   [Epic: "<epic_title> (#<epic_id>)"], [Tag], [Plan],
         --   [<url label>: <url>], Base branch, Created, [Completed].
+        -- The agent line names the task, because an agent name is reusable once
+        -- its task is gone (agents.allium: A4) and may now name a live agent.
         -- "Status: archived" is the first thing after the title so a reader
         -- cannot mistake the record for a live task. Nothing that only a live
         -- task has (worktree, window, sub-status, verify command, dispatch

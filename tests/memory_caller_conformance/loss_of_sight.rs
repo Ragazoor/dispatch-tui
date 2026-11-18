@@ -47,7 +47,7 @@ macro_rules! both_apply {
 
 /// An epic in the default workspace, created by the first user with the same id
 /// on both sides.
-async fn make_epic(p: &Pair<'_>, row: bindings::Epic) -> i64 {
+pub(super) async fn make_epic(p: &Pair<'_>, row: bindings::Epic) -> i64 {
     let row = bindings::Epic {
         created_by: p.identity.clone(),
         workspace_id: DEFAULT_WORKSPACE,
@@ -60,7 +60,7 @@ async fn make_epic(p: &Pair<'_>, row: bindings::Epic) -> i64 {
     id
 }
 
-async fn make_task(p: &Pair<'_>, epic: i64) -> TaskId {
+pub(super) async fn make_task(p: &Pair<'_>, epic: i64) -> TaskId {
     let row = bindings::Task {
         created_by: p.identity.clone(),
         ..blank_task_in_epic(epic)

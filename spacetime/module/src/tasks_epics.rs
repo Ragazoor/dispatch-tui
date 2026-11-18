@@ -104,9 +104,19 @@ pub fn reset_unfit_sub_statuses(ctx: &ReducerContext) {
         .filter(|t| validate_sub_status(&t.status, &t.sub_status).is_err())
         .collect();
     for task in odd {
-        let sub_status = default_sub_status(&task.status).to_string();
-        ctx.db.tasks().id().update(Task { sub_status, ..task });
+        ctx.db.tasks().id().update(with_fit_sub_status(task));
     }
+}
+
+/// The task with a sub_status its status allows: unchanged when it already
+/// does, else `default_sub_status(status)`. The migration above and
+/// `seed_tasks` share it (`spacetime-seed.allium: SeedsNormaliseLikeMigrations`).
+pub fn with_fit_sub_status(task: Task) -> Task {
+    if validate_sub_status(&task.status, &task.sub_status).is_ok() {
+        return task;
+    }
+    let sub_status = default_sub_status(&task.status).to_string();
+    Task { sub_status, ..task }
 }
 
 // Seeding

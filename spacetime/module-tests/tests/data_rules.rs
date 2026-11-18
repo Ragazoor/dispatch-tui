@@ -616,19 +616,16 @@ fn unfit_task(id: i64) -> Task {
     }
 }
 
-/// An insert whose pair does not fit is refused, whichever reducer inserts it,
-/// and writes nothing.
+/// A create whose pair does not fit is refused and writes nothing; a seed
+/// resets the pair instead (`SeedsNormaliseLikeMigrations`).
 #[test]
-fn an_insert_with_an_unfit_sub_status_is_refused_and_writes_nothing() {
+fn a_create_with_an_unfit_sub_status_is_refused_and_a_seed_resets_it() {
     let store = Store::new();
-    let why = store
+    store
         .call_as_scheduler(|ctx| seed_tasks(ctx, vec![unfit_task(7)]))
-        .expect_err("a seed carrying an unfit pair");
-    assert!(
-        why.contains("sub_status 'active' is not valid for status 'backlog'"),
-        "{why}"
-    );
-    assert_eq!(store.db().tasks().iter().count(), 0);
+        .expect("a seed carrying an unfit pair is reset");
+    assert_eq!(store.task(7).sub_status, "none");
+    store.db().tasks().id().delete(7);
     let why = store
         .call("alice", |ctx| create_task(ctx, unfit_task(0)))
         .expect_err("a create carrying an unfit pair");
