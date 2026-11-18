@@ -801,9 +801,9 @@ surface WrapUpSession {
         -- from "## Validated knowledge for this task" that did not fit the
         -- task not_applicable, as the learnings skill describes
         -- (RateKnowledgeAndWrapUp). The skill names the not_applicable case
-        -- itself, not only by reference: when its copy said only "knowledge
-        -- you acted on", the share of wrapped-up tasks that rated every
-        -- injected entry fell from 90% to 51% within two days
+        -- itself, not only by reference: after its copy was cut to only
+        -- "knowledge you acted on", the share of wrapped-up tasks that rated
+        -- every injected entry fell from 90% to 51% over the next three days
         -- (docs/plans/2026-11-18-99185-learnings-iteration-11.md). The
         -- injection's not_applicable verdicts are what mute an off-topic
         -- entry in a repo (learnings.allium), so a skipped rating keeps it in.

@@ -32,9 +32,18 @@ Wrapped-up tasks that rated nothing went from about one a day to 8 to 10 a day f
 "... Rate each injected entry that did not fit this task `not_applicable`" to "Rate
 retrieved knowledge you acted on and have not rated yet, as the `learnings` skill
 describes". The board reinstalled the plugin on its next restart; the drop starts the day
-after. An agent that acted on no entry read the new line as "nothing to rate". The
-`learnings` skill and the dispatch prompt still mention `not_applicable`, but the
-closing step is what agents follow at the end.
+after (the installed copy is reinstalled on board restart).
+
+The cause is likely, not proven. For it: four wrapped-up, unrated tasks read in full
+(99227, 99254, 99263, 99290) all loaded the trimmed Step 7.1 and the prompt's
+`not_applicable` line, made no rating call and never mentioned rating. Task 99296 called
+`learning_rate` with an empty list, as if nothing qualified. Against it: the skippers
+cluster by epic. Since 2026-11-16, epics 69703 and 69702 have 11 of 12 wrapped-up tasks
+unrated, while epic 69699 has 16 of 17 rated under the same skill text. And the rated-only
+`helped` share did not jump after the trim (below), which a pure "acted on nothing, so
+rated nothing" effect would cause. So the trim is the change that removed the explicit
+instruction, and some agents still rate without it. This run restores the text that gave
+90%.
 
 This matters beyond the metric: the per-repo mute (run 9) runs on `not_applicable`
 verdicts. Unrated off-topic entries never reach the mute's threshold, so they keep their
@@ -102,7 +111,10 @@ on a skill line that was cut.
    injected pairs fall back under 20%. If not, the closing sequence is not the only
    cause; look at whether `session_wrap-up`'s response should nudge on rebase and done
    too. Today it nudges only on the pr path (`src/mcp/handlers/tasks/wrap_up.rs`).
-2. Any future trim of `plugin/skills/wrap-up/SKILL.md` must keep the
+2. Out-of-scope retrievals came back: 12 of 436 repo or epic-scoped retrievals in W47
+   fell outside the task's scope, after two weeks at 0. List those 12 rows and find the
+   path that leaks.
+3. Any future trim of `plugin/skills/wrap-up/SKILL.md` must keep the
    `not_applicable` line; the guarantee test now fails if it goes.
-3. With W48 verdicts in, re-read the dispatch rated-only `helped` share and bootstrap it
+4. With W48 verdicts in, re-read the dispatch rated-only `helped` share and bootstrap it
    by task. Then put the per-entry `helped` prior to the operator with that number.
