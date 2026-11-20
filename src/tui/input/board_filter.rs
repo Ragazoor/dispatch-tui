@@ -24,6 +24,7 @@ impl App {
     ) -> Vec<Command> {
         use crate::tui::messages::BoardFilterMessage as M;
         let tab = self.filter_overlay.tab;
+        let repo = repo_filter_number(action);
         let msg = match action {
             "filter_close" => M::Close,
             "filter_back" => M::Back,
@@ -35,11 +36,8 @@ impl App {
                 Some(msg) => msg,
                 None => return vec![],
             },
-            _ if tab == FilterTab::Repos && repo_filter_number(action).is_some() => {
-                let Some(n) = repo_filter_number(action) else {
-                    return vec![];
-                };
-                match self.board.repo_paths.get(n - 1) {
+            _ if tab == FilterTab::Repos && repo.is_some() => {
+                match repo.and_then(|n| self.board.repo_paths.get(n - 1)) {
                     Some(path) => M::Toggle(path.clone()),
                     None => return vec![],
                 }

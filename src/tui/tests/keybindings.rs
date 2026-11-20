@@ -725,11 +725,7 @@ fn effect_of(app: &mut App, cmds: &[Command]) -> String {
     app.set_key_table(table);
     let area = buf.area();
     let screen: Vec<String> = (area.top()..area.bottom())
-        .map(|y| {
-            (area.left()..area.right())
-                .map(|x| buf[(x, y)].symbol())
-                .collect::<String>()
-        })
+        .map(|y| buffer_line(&buf, y))
         .collect();
     let commands: Vec<String> = cmds
         .iter()
@@ -738,9 +734,10 @@ fn effect_of(app: &mut App, cmds: &[Command]) -> String {
         .collect();
     // Fixture tasks are stamped with the time they were made, so two boards
     // built a moment apart differ only there.
-    let stamp = regex::Regex::new(r"\d{4}-\d\d-\d\dT[\d:.]+Z").unwrap();
+    static STAMP: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\d{4}-\d\d-\d\dT[\d:.]+Z").unwrap());
     let effect = format!("{state}\n{}\n{commands:?}", screen.join("\n"));
-    stamp.replace_all(&effect, "<time>").into_owned()
+    STAMP.replace_all(&effect, "<time>").into_owned()
 }
 
 /// A tree picker over a parent epic with a child and a third epic, its
@@ -836,50 +833,55 @@ fn effect_apps(binding: &KeyBinding) -> Vec<App> {
 /// every pair or family, so the comparison is not vacuous.
 #[test]
 fn under_the_remapped_table_each_key_goes_the_way_its_row_says_on_the_board() {
-    let remapped = crate::keybindings::remapped_table();
+    use crate::keybindings::{moved_keys, remap_group, remapped_table};
+    let remapped = remapped_table();
     let mut failures = Vec::new();
     let mut moved = std::collections::BTreeSet::new();
     let mut visible = std::collections::BTreeSet::new();
+    // What each row's boards look like before any press, built once a row.
+    let mut untouched: std::collections::HashMap<*const KeyBinding, Vec<String>> =
+        std::collections::HashMap::new();
     for ns in board_namespaces() {
-        for (row, default) in remapped.iter().zip(KEY_BINDINGS.iter()) {
-            if row.namespace != ns || row.keys == default.keys {
-                continue;
-            }
-            moved.insert((ns.name(), row.action));
-            for (n, key) in row.keys.iter().enumerate() {
-                let default_key = default.keys[n % default.keys.len()];
-                for i in 0..effect_apps(default).len() {
-                    let mut untouched = effect_apps(default).remove(i);
-                    let before = effect_of(&mut untouched, &[]);
+        for (row, key, default_key) in moved_keys(remapped, ns) {
+            let group = format!("{} {}", ns.name(), remap_group(row.action));
+            moved.insert(group.clone());
+            let before = untouched.entry(row).or_insert_with(|| {
+                effect_apps(row)
+                    .iter_mut()
+                    .map(|app| effect_of(app, &[]))
+                    .collect()
+            });
+            for (i, before) in before.iter().enumerate() {
+                let mut by_default = effect_apps(row).remove(i);
+                let default_cmds = press(&mut by_default, default_key);
+                let want = effect_of(&mut by_default, &default_cmds);
 
-                    let mut by_default = effect_apps(default).remove(i);
-                    let default_cmds = press(&mut by_default, default_key);
-                    let want = effect_of(&mut by_default, &default_cmds);
+                let mut by_remap = effect_apps(row).remove(i);
+                by_remap.set_key_table(remapped);
+                let remap_cmds = press(&mut by_remap, key);
+                let got = effect_of(&mut by_remap, &remap_cmds);
 
-                    let mut by_remap = effect_apps(default).remove(i);
-                    by_remap.set_key_table(remapped);
-                    let remap_cmds = press(&mut by_remap, key);
-                    let got = effect_of(&mut by_remap, &remap_cmds);
-
-                    let actions = |cmds: &[Command]| -> Vec<String> {
-                        recorded(cmds).into_iter().map(|(a, _)| a).collect()
-                    };
-                    if got != want || actions(&remap_cmds) != actions(&default_cmds) {
-                        let differs = got
-                            .lines()
-                            .zip(want.lines())
-                            .find(|(g, w)| g != w)
-                            .map(|(g, w)| format!("\n    got:  {g}\n    want: {w}"))
-                            .unwrap_or_default();
-                        failures.push(format!(
-                            "{} {}: {key} under the remap did not do what {default_key} does by default{differs}",
-                            ns.name(),
-                            row.action
-                        ));
-                    }
-                    if want != before {
-                        visible.insert((ns.name(), row.action));
-                    }
+                let actions = |cmds: &[Command]| -> Vec<String> {
+                    recorded(cmds).into_iter().map(|(a, _)| a).collect()
+                };
+                if got != want || actions(&remap_cmds) != actions(&default_cmds) {
+                    let differs = got
+                        .lines()
+                        .zip(want.lines())
+                        .find(|(g, w)| g != w)
+                        .map(|(g, w)| format!("\n    got:  {g}\n    want: {w}"))
+                        .unwrap_or_default();
+                    failures.push(format!(
+                        "{} {}: {key} under the remap did not do what {default_key} does by default{differs}",
+                        ns.name(),
+                        row.action
+                    ));
+                }
+                // A pair or family is one group: an "up" at the top of a list
+                // changes nothing, and its "down" shows the pair is read the
+                // right way round.
+                if want != *before {
+                    visible.insert(group.clone());
                 }
             }
         }
@@ -890,26 +892,7 @@ fn under_the_remapped_table_each_key_goes_the_way_its_row_says_on_the_board() {
         "keys that did not follow their row:\n{}",
         failures.join("\n")
     );
-    // A pair or family is one group: an "up" at the top of a list changes
-    // nothing, and its "down" shows the pair is read the right way round.
-    let group = |ns: &str, action: &str| -> String {
-        let name = crate::keybindings::VALUE_FAMILIES
-            .iter()
-            .find(|f| action.starts_with(**f))
-            .map(|f| f.to_string())
-            .unwrap_or_else(|| match crate::keybindings::opposite_action(action) {
-                Some(other) => std::cmp::min(action.to_string(), other),
-                None => action.to_string(),
-            });
-        format!("{ns} {name}")
-    };
-    let seen: std::collections::BTreeSet<String> =
-        visible.iter().map(|(ns, a)| group(ns, a)).collect();
-    let unseen: std::collections::BTreeSet<String> = moved
-        .iter()
-        .map(|(ns, a)| group(ns, a))
-        .filter(|g| !seen.contains(g))
-        .collect();
+    let unseen: Vec<&String> = moved.difference(&visible).collect();
     assert!(
         unseen.is_empty(),
         "moved pairs and families with no visible effect from their setup: {unseen:?}"
@@ -931,18 +914,12 @@ fn a_chord_moved_to_another_row_key_works_on_the_board() {
         .expect("a character board.normal does not use");
     let chord: &'static str = Box::leak(format!("{free}{free}").into_boxed_str());
     let first: &'static str = Box::leak(free.to_string().into_boxed_str());
-    let rows: Vec<KeyBinding> = KEY_BINDINGS
-        .iter()
-        .map(|b| {
-            let mut b = *b;
-            if b.namespace == KeyNamespace::BoardNormal && b.action == "navigate_row_first" {
-                b.keys = Box::leak(vec!["[", chord].into_boxed_slice());
-            }
-            b
-        })
-        .collect();
     let mut app = make_app();
-    app.set_key_table(Box::leak(rows.into_boxed_slice()));
+    app.set_key_table(crate::keybindings::table_with_keys(
+        KeyNamespace::BoardNormal,
+        "navigate_row_first",
+        Box::leak(vec!["[", chord].into_boxed_slice()),
+    ));
     app.selection_mut().set_column(1);
     press(&mut app, "]");
     let last = app.selection().row(1);

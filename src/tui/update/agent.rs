@@ -7,7 +7,7 @@ use crate::models::{SubStatus, Task, TaskId, TaskStatus, TmuxWindow};
 
 use super::super::types::*;
 use super::super::{
-    App, DISPATCH_SPINNER_FRAMES, GG_CHORD_TIMEOUT, PR_POLL_INTERVAL, STATUS_MESSAGE_TTL,
+    App, CHORD_TIMEOUT, DISPATCH_SPINNER_FRAMES, PR_POLL_INTERVAL, STATUS_MESSAGE_TTL,
 };
 
 impl App {
@@ -219,7 +219,7 @@ impl App {
         self.tick_status_ttl();
         self.tick_dispatching();
         self.tick_message_flash();
-        self.tick_gg_chord();
+        self.tick_chord();
 
         let mut cmds = self.tick_window_checks();
         cmds.extend(self.tick_sub_status());
@@ -320,11 +320,11 @@ impl App {
     /// idle (no follow-up keypress completed the chord), clear the stale pending
     /// state once the chord window has elapsed. Nothing fires — the first half
     /// has no action of its own.
-    fn tick_gg_chord(&mut self) {
+    fn tick_chord(&mut self) {
         if self
             .interaction
             .pending_chord
-            .is_some_and(|p| p.started.elapsed() > GG_CHORD_TIMEOUT)
+            .is_some_and(|p| p.started.elapsed() > CHORD_TIMEOUT)
         {
             self.interaction.pending_chord = None;
         }

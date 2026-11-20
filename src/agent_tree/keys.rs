@@ -121,7 +121,9 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
     // docs/specs/agent-tree.allium — there is no deadline, so the only thing
     // that can end a pending chord is the next key, whenever it comes.
     let table = state.key_table;
-    let Some((name, label)) = resolve_chord(&mut state.pending_chord, table, ns, key) else {
+    let Some((name, label)) =
+        crate::keybindings::resolve_chord(&mut state.pending_chord, table, ns, key)
+    else {
         return KeyAction::Continue;
     };
 
@@ -140,32 +142,6 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
         }
         None => KeyAction::Continue,
     }
-}
-
-/// The key's name and label after any chord is resolved, or `None` when the
-/// press only armed a chord and there is nothing to look up yet. Shared by the
-/// tree and diff panes, whose chords carry no deadline. Taking the pending
-/// half disarms it unconditionally: a press that completes a chord some row of
-/// `ns` lists is looked up as that chord, and any other press is looked up on
-/// its own, having quietly cancelled it (or arms a chord of its own).
-pub(crate) fn resolve_chord(
-    pending: &mut Option<char>,
-    table: &[crate::keybindings::KeyBinding],
-    ns: crate::keybindings::KeyNamespace,
-    key: KeyEvent,
-) -> Option<(String, String)> {
-    use crate::keybindings::{completed_chord, key_label, key_name, starts_chord};
-    let name = key_name(key);
-    if let Some(first) = pending.take() {
-        if let Some(chord) = completed_chord(table, ns, first, &name) {
-            return Some((chord.clone(), chord));
-        }
-    }
-    if let Some(first) = starts_chord(table, ns, &name) {
-        *pending = Some(first);
-        return None;
-    }
-    Some((name, key_label(key)))
 }
 
 /// Run one resolved action. `None` means the action had no effect (nothing to

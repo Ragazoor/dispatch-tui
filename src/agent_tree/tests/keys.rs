@@ -493,54 +493,47 @@ pub(super) fn assert_remapped_keys_follow_their_rows(
     build: impl Fn() -> KeyRig,
 ) {
     use crate::agent_tree::pane::test_key_event;
-    use crate::keybindings::{remapped_table, KEY_BINDINGS};
+    use crate::keybindings::{moved_keys, remap_group, remapped_table};
     let remapped = remapped_table();
-    let mut moved = 0;
+    let before = build().view();
+    let mut moved = std::collections::BTreeSet::new();
     let mut visible = std::collections::BTreeSet::new();
     let mut failures = Vec::new();
-    for (row, default) in remapped.iter().zip(KEY_BINDINGS.iter()) {
-        if row.namespace != ns || row.keys == default.keys {
-            continue;
+    for (row, key, default_key) in moved_keys(remapped, ns) {
+        moved.insert(remap_group(row.action));
+        let mut by_default = build();
+        by_default.press_with_event(test_key_event(default_key));
+        let mut by_remap = build();
+        by_remap.state.key_table = remapped;
+        by_remap.press_with_event(test_key_event(key));
+        let actions = |rig: &KeyRig| -> Vec<String> {
+            recorded_usage(&rig.state)
+                .into_iter()
+                .map(|(a, _)| a)
+                .collect()
+        };
+        if by_remap.view() != by_default.view()
+            || by_remap.state.focus != by_default.state.focus
+            || actions(&by_remap) != actions(&by_default)
+        {
+            failures.push(format!(
+                "{} {}: {key} under the remap did not do what {default_key} does by default",
+                ns.name(),
+                row.action
+            ));
         }
-        moved += 1;
-        for (n, key) in row.keys.iter().enumerate() {
-            let default_key = default.keys[n % default.keys.len()];
-            let before = build().view();
-            let mut by_default = build();
-            by_default.press_with_event(test_key_event(default_key));
-            let mut by_remap = build();
-            by_remap.state.key_table = remapped;
-            by_remap.press_with_event(test_key_event(key));
-            let actions = |rig: &KeyRig| -> Vec<String> {
-                recorded_usage(&rig.state)
-                    .into_iter()
-                    .map(|(a, _)| a)
-                    .collect()
-            };
-            if by_remap.view() != by_default.view()
-                || by_remap.state.focus != by_default.state.focus
-                || actions(&by_remap) != actions(&by_default)
-            {
-                failures.push(format!(
-                    "{} {}: {key} under the remap did not do what {default_key} does by default",
-                    ns.name(),
-                    row.action
-                ));
-            }
-            if by_default.view() != before {
-                visible.insert(row.action.trim_end_matches("_down").trim_end_matches("_up"));
-            }
+        if by_default.view() != before {
+            visible.insert(remap_group(row.action));
         }
     }
-    assert!(moved > 0, "{}: no row moved", ns.name());
+    assert!(!moved.is_empty(), "{}: no row moved", ns.name());
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    for family in ["navigate_row", "navigate_half_page"] {
-        assert!(
-            visible.contains(family),
-            "{}: {family} changed nothing from the setup",
-            ns.name()
-        );
-    }
+    let unseen: Vec<&String> = moved.difference(&visible).collect();
+    assert!(
+        unseen.is_empty(),
+        "{}: moved pairs that changed nothing from the setup: {unseen:?}",
+        ns.name()
+    );
 }
 
 impl KeyRig {
@@ -599,19 +592,10 @@ fn under_the_remapped_table_the_agents_keys_go_the_way_their_rows_say() {
 /// chord exactly when a row of the namespace lists a chord starting with it).
 #[test]
 fn a_chord_moved_to_another_row_key_works_and_gg_no_longer_does() {
-    use crate::keybindings::{KeyBinding, KeyNamespace, KEY_BINDINGS};
-    let rows: Vec<KeyBinding> = KEY_BINDINGS
-        .iter()
-        .map(|b| {
-            let mut b = *b;
-            if b.namespace == KeyNamespace::AgentTreeTree && b.action == "navigate_row_first" {
-                b.keys = &["zz"];
-            }
-            b
-        })
-        .collect();
+    use crate::keybindings::{table_with_keys, KeyNamespace};
     let mut rig = KeyRig::new(&many_files());
-    rig.state.key_table = Box::leak(rows.into_boxed_slice());
+    rig.state.key_table =
+        table_with_keys(KeyNamespace::AgentTreeTree, "navigate_row_first", &["zz"]);
     rig.press(KeyCode::Char('G'));
     let last = rig.selected_name();
     rig.press(KeyCode::Char('g'));

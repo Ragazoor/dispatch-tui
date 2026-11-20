@@ -450,7 +450,7 @@ pub fn handle_key(state: &mut DiffState, line_count: usize, key: KeyEvent) -> Di
     let table = state.key_table;
     let ns = KeyNamespace::AgentDiff;
     let Some((name, label)) =
-        crate::agent_tree::keys::resolve_chord(&mut state.pending_chord, table, ns, key)
+        crate::keybindings::resolve_chord(&mut state.pending_chord, table, ns, key)
     else {
         return DiffKeyAction::Continue;
     };

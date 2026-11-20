@@ -533,6 +533,32 @@ pub fn completed_chord(
     .then_some(chord)
 }
 
+/// The key's name and label after any pending chord is resolved, or `None`
+/// when the press only armed a chord and there is nothing to look up yet.
+/// Taking the pending half disarms it unconditionally: a press that completes
+/// a chord some row of `ns` lists is looked up as that chord, and any other
+/// press is looked up on its own, having quietly cancelled it (or arms a
+/// chord of its own). How long a pending half may wait is the caller's
+/// business (the board's times out, the panes' never do).
+pub fn resolve_chord(
+    pending: &mut Option<char>,
+    table: &[KeyBinding],
+    ns: KeyNamespace,
+    key: KeyEvent,
+) -> Option<(String, String)> {
+    let name = key_name(key);
+    if let Some(first) = pending.take() {
+        if let Some(chord) = completed_chord(table, ns, first, &name) {
+            return Some((chord.clone(), chord));
+        }
+    }
+    if let Some(first) = starts_chord(table, ns, &name) {
+        *pending = Some(first);
+        return None;
+    }
+    Some((name, key_label(key)))
+}
+
 /// The `?` overlay's border title, built from `board.help`'s
 /// `scroll_help_down`, `scroll_help_up` and `close_help` rows so rebinding
 /// any of them changes it (`OverlayTitleNamesItsOwnKeys` in
@@ -662,6 +688,61 @@ pub(crate) fn remapped_table() -> &'static [KeyBinding] {
             row.keys = std::slice::from_ref(key);
         }
     }
+    Box::leak(rows.into_boxed_slice())
+}
+
+/// Each key of every row of `ns` that `remapped` moved, with the default
+/// key it stands in for: the key at the same place in the row's default list
+/// (cycling when the new list is longer). Under the default table that key
+/// runs the same row, so the two presses must have the same effect.
+#[cfg(test)]
+pub(crate) fn moved_keys(
+    remapped: &'static [KeyBinding],
+    ns: KeyNamespace,
+) -> impl Iterator<Item = (&'static KeyBinding, &'static str, &'static str)> {
+    remapped
+        .iter()
+        .zip(KEY_BINDINGS.iter())
+        .filter(move |(row, default)| row.namespace == ns && row.keys != default.keys)
+        .flat_map(|(row, default)| {
+            row.keys
+                .iter()
+                .enumerate()
+                .map(move |(n, key)| (row, *key, default.keys[n % default.keys.len()]))
+        })
+}
+
+/// The pair or family a moved row belongs to, for asking whether a remap
+/// test saw any of its rows take a visible effect: the value family's
+/// prefix, the earlier of a motion and its opposite, or the action itself.
+#[cfg(test)]
+pub(crate) fn remap_group(action: &str) -> String {
+    if let Some(family) = VALUE_FAMILIES.iter().find(|f| action.starts_with(**f)) {
+        return (*family).to_string();
+    }
+    match opposite_action(action) {
+        Some(other) => std::cmp::min(action.to_string(), other),
+        None => action.to_string(),
+    }
+}
+
+/// The default table with one row's keys replaced.
+#[cfg(test)]
+pub(crate) fn table_with_keys(
+    ns: KeyNamespace,
+    action: &str,
+    keys: &'static [&'static str],
+) -> &'static [KeyBinding] {
+    let rows: Vec<KeyBinding> = KEY_BINDINGS
+        .iter()
+        .map(|b| {
+            let mut b = *b;
+            if b.namespace == ns && b.action == action {
+                b.keys = keys;
+            }
+            b
+        })
+        .collect();
     Box::leak(rows.into_boxed_slice())
 }
 

@@ -12,11 +12,10 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::super::types::*;
-use super::super::{App, PendingChord, GG_CHORD_TIMEOUT};
-use super::{key_event, key_label};
+use super::super::{App, PendingChord, CHORD_TIMEOUT};
+use super::key_event;
 use crate::keybindings::{
-    completed_chord, key_has_ctrl_or_alt, key_name, lookup, starts_chord, KeyBinding, KeyContext,
-    KeyNamespace,
+    key_has_ctrl_or_alt, lookup, resolve_chord, KeyBinding, KeyContext, KeyNamespace,
 };
 use crate::models::{SubStatus, TaskStatus, TaskTag};
 
@@ -205,29 +204,24 @@ impl App {
     pub(in crate::tui) fn dispatch_key(&mut self, key: KeyEvent) -> Vec<Command> {
         let ns = self.key_namespace();
         let table = self.key_table;
-        let mut name = key_name(key);
-        let mut label = key_label(key);
-        // A pending first half resolves with this press: inside the window,
-        // a press that completes a chord some row of the namespace lists is
-        // looked up as that chord; anything else abandons the chord and is
-        // processed normally.
-        if let Some(p) = self.interaction.pending_chord.take() {
-            if p.namespace == ns && p.started.elapsed() <= GG_CHORD_TIMEOUT {
-                if let Some(chord) = completed_chord(table, ns, p.first, &name) {
-                    name = chord.clone();
-                    label = chord;
-                }
-            }
-        }
-        if let Some(first) = starts_chord(table, ns, &name) {
+        // A pending first half counts only in the namespace it was pressed in
+        // and inside the chord window; past that it is abandoned and this
+        // press is processed normally.
+        let mut pending = self
+            .interaction
+            .pending_chord
+            .take()
+            .filter(|p| p.namespace == ns && p.started.elapsed() <= CHORD_TIMEOUT)
+            .map(|p| p.first);
+        let Some((name, label)) = resolve_chord(&mut pending, table, ns, key) else {
             // First half of a chord: pending input, not a lookup.
-            self.interaction.pending_chord = Some(PendingChord {
+            self.interaction.pending_chord = pending.map(|first| PendingChord {
                 namespace: ns,
                 first,
                 started: Instant::now(),
             });
             return vec![];
-        }
+        };
 
         let rung = std::cell::OnceCell::new();
         let binding = lookup(table, ns, &name, |c| self.context_holds_cached(c, &rung));
@@ -415,20 +409,8 @@ impl App {
             "close_detail" => {
                 self.dispatch_keyed(Message::Task(TaskMessage::CloseDetail), action, label)
             }
-            "scroll_detail_down" | "scroll_detail_up" => {
-                let down = action == "scroll_detail_down";
-                if let ViewMode::TaskDetail {
-                    scroll, max_scroll, ..
-                } = &mut self.board.view_mode
-                {
-                    *scroll = if down {
-                        scroll.saturating_add(1).min(*max_scroll)
-                    } else {
-                        scroll.saturating_sub(1)
-                    };
-                }
-                vec![key_event(action, label)]
-            }
+            "scroll_detail_down" => self.scroll_detail(true, action, label),
+            "scroll_detail_up" => self.scroll_detail(false, action, label),
             "zoom_detail" => {
                 if let ViewMode::TaskDetail { zoomed, .. } = &mut self.board.view_mode {
                     *zoomed = !*zoomed;
@@ -464,19 +446,33 @@ impl App {
             "close_help" => {
                 self.dispatch_keyed(Message::System(SystemMessage::ToggleHelp), action, label)
             }
-            "scroll_help_down" | "scroll_help_up" => {
-                let down = action == "scroll_help_down";
+            "scroll_help_down" => {
                 let max = self.interaction.help_max_scroll.get().unwrap_or(usize::MAX);
-                let now = self.interaction.help_scroll;
-                self.interaction.help_scroll = if down {
-                    now.saturating_add(1).min(max)
-                } else {
-                    now.saturating_sub(1)
-                };
+                self.interaction.help_scroll =
+                    self.interaction.help_scroll.saturating_add(1).min(max);
+                vec![key_event(action, label)]
+            }
+            "scroll_help_up" => {
+                self.interaction.help_scroll = self.interaction.help_scroll.saturating_sub(1);
                 vec![key_event(action, label)]
             }
             _ => vec![],
         }
+    }
+
+    /// Scroll the task detail one line down (`down`) or up, within its range.
+    fn scroll_detail(&mut self, down: bool, action: &'static str, label: &str) -> Vec<Command> {
+        if let ViewMode::TaskDetail {
+            scroll, max_scroll, ..
+        } = &mut self.board.view_mode
+        {
+            *scroll = if down {
+                scroll.saturating_add(1).min(*max_scroll)
+            } else {
+                scroll.saturating_sub(1)
+            };
+        }
+        vec![key_event(action, label)]
     }
 
     /// The text-entry modes and the repo / base-branch pickers.
@@ -602,10 +598,7 @@ impl App {
             "admin_close" => Close,
             _ => return vec![],
         };
-        if matches!(
-            action,
-            "admin_navigate_down" | "admin_navigate_up" | "admin_next_pane" | "admin_previous_pane"
-        ) {
+        if matches!(msg, Move(_) | Pane(_)) {
             return self.dispatch_keyed(Message::Admin(msg), action, label);
         }
         // A per-pane key on another pane, or one the person may not use,
@@ -674,10 +667,13 @@ impl App {
             }
             "tag_picker_default" => InputMessage::SubmitTag(None),
             "tag_picker_cancel" => InputMessage::CancelInput,
-            _ => match tag_for_action(action) {
-                Some(tag) => InputMessage::SubmitTag(Some(tag)),
-                None => return vec![],
-            },
+            "tag_picker_select_bug" => InputMessage::SubmitTag(Some(TaskTag::Bug)),
+            "tag_picker_select_feature" => InputMessage::SubmitTag(Some(TaskTag::Feature)),
+            "tag_picker_select_chore" => InputMessage::SubmitTag(Some(TaskTag::Chore)),
+            "tag_picker_select_pr_review" => InputMessage::SubmitTag(Some(TaskTag::PrReview)),
+            "tag_picker_select_research" => InputMessage::SubmitTag(Some(TaskTag::Research)),
+            "tag_picker_select_fix" => InputMessage::SubmitTag(Some(TaskTag::Fix)),
+            _ => return vec![],
         };
         self.dispatch_keyed(Message::Input(submit), action, label)
     }
@@ -714,18 +710,4 @@ impl App {
         };
         self.dispatch_keyed(Message::Input(submit), action, label)
     }
-}
-
-/// The tag a `tag_picker_select_<tag>` row picks. The row alone says which
-/// tag; the key that ran it does not (`KeypressRunsItsRowsAction`).
-fn tag_for_action(action: &str) -> Option<TaskTag> {
-    Some(match action {
-        "tag_picker_select_bug" => TaskTag::Bug,
-        "tag_picker_select_feature" => TaskTag::Feature,
-        "tag_picker_select_chore" => TaskTag::Chore,
-        "tag_picker_select_pr_review" => TaskTag::PrReview,
-        "tag_picker_select_research" => TaskTag::Research,
-        "tag_picker_select_fix" => TaskTag::Fix,
-        _ => return None,
-    })
 }

@@ -20,8 +20,6 @@ fn key_event(action: &str, key: &str) -> Command {
     }))
 }
 
-use crate::keybindings::key_label;
-
 impl App {
     /// Dispatch `msg` through [`Self::update`], then record the keybinding usage
     /// event. Collapses the update-then-`key_event`-push pattern shared by the
