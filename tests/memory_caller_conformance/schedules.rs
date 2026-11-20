@@ -317,5 +317,42 @@ fn memory_caller_keeps_schedules_like_the_real_module() {
             None,
             "a one-off is spent"
         );
+
+        // SetSchedule after the status effects: one patch that moves a one-off
+        // from running to backlog and sets a schedule leaves it armed.
+        let rescheduled = create(mine("")).await;
+        wait_for!(rows_real.task(rescheduled).is_some());
+        let (r, m) = patch_both(
+            rescheduled,
+            bindings::TaskPatch {
+                status: Some("running".into()),
+                sub_status: Some("active".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await;
+        assert!(r.won() && m.won(), "{r:?} / {m:?}");
+        wait_for!(rows_real
+            .task(rescheduled)
+            .is_some_and(|t| t.status == TaskStatus::Running));
+        let (r, m) = patch_both(
+            rescheduled,
+            bindings::TaskPatch {
+                status: Some("backlog".into()),
+                sub_status: Some("none".into()),
+                schedule: Some(YEARLY.into()),
+                ..blank_task_patch()
+            },
+        )
+        .await;
+        assert!(r.won() && m.won(), "{r:?} / {m:?}");
+        wait_for!(rows_real
+            .task(rescheduled)
+            .is_some_and(|t| t.schedule.is_some()));
+        same_task(rescheduled);
+        assert!(
+            rows_real.task(rescheduled).unwrap().next_due.is_some(),
+            "armed, not stored inert"
+        );
     });
 }

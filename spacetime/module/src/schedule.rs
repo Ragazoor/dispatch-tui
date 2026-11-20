@@ -369,12 +369,31 @@ pub fn schedule_after_failed_launch(
 /// A hand status write's effect on the schedule, `prior_status` the status
 /// before the write and `task` the row after it:
 /// `LeavingBacklogCancelsThePendingRun`, `ClosingCancelsThePendingRun` for a
-/// write into done, `LeavingRunningCancelsThePendingRun`, and `EnteringBacklogRearmsAPhoenixTask`. The one call
-/// `patch_task` and its in-memory twin make, so the two cannot drift.
+/// write into done, `LeavingRunningCancelsThePendingRun`, and `EnteringBacklogRearmsAPhoenixTask`.
+/// A patch reaches it through `schedule_after_patch`.
 pub fn schedule_after_status_write(prior_status: &str, task: Task, now: &str) -> Task {
     let task = cancel_pending_run_on_leaving_backlog(prior_status, task);
     let task = cancel_pending_run_on_close_or_leaving_running(prior_status, task);
     rearm_phoenix_on_entering_backlog(prior_status, task, now)
+}
+
+/// A patch's whole effect on the schedule, `prior_status` the status before the
+/// write, `task` the row after the rest of the patch, and `schedule` the
+/// patch's schedule argument. The status effects (`schedule_after_status_write`)
+/// apply first and the schedule argument last (`SetSchedule`'s guidance), so a
+/// schedule set in the write is armed against the status the write leaves the
+/// task in. The one call `patch_task` and its in-memory twin make.
+pub fn schedule_after_patch(
+    prior_status: &str,
+    task: Task,
+    schedule: Option<&str>,
+    now: &str,
+) -> Result<Task, String> {
+    let task = schedule_after_status_write(prior_status, task, now);
+    match schedule {
+        Some(cron) => apply_schedule(task, cron, now),
+        None => Ok(task),
+    }
 }
 
 /// `EnteringBacklogRearmsAPhoenixTask`: a status write other than the respawn

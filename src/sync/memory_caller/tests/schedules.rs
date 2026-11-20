@@ -101,6 +101,37 @@ async fn a_failed_launch_of_another_origin_leaves_the_schedule_alone() {
     assert_eq!(after.next_due, due_before);
 }
 
+/// `schedules.allium`: a patch's status effects apply before its schedule
+/// argument, so a one-off moved from running to backlog and given a schedule
+/// in the same write is armed.
+#[tokio::test]
+async fn a_schedule_set_while_leaving_running_for_backlog_is_armed() {
+    let (caller, rows, _clock) = caller_with_clock();
+    let task = caller.create_task(blank_task()).await.unwrap();
+    let to_running = bindings::TaskPatch {
+        status: Some("running".into()),
+        sub_status: Some("active".into()),
+        ..blank_task_patch()
+    };
+    assert!(caller.patch_task(task, to_running).await.unwrap().won());
+    let outcome = caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                status: Some("backlog".into()),
+                sub_status: Some("none".into()),
+                schedule: Some("* * * * *".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(outcome.won(), "{outcome:?}");
+    let after = rows.task(task).unwrap();
+    assert_eq!(after.schedule.as_deref(), Some("* * * * *"));
+    assert!(after.next_due.is_some(), "armed, not stored inert");
+}
+
 #[tokio::test]
 async fn a_hand_move_out_of_backlog_cancels_the_pending_run() {
     let (caller, rows, _clock) = caller_with_clock();

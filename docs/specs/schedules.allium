@@ -139,7 +139,14 @@ rule SetSchedule {
         -- Reached from task_create's and task_update's `schedule` argument
         -- (mcp-task-tools.allium: CreateTaskViaMcp, UpdateTaskViaMcp), and
         -- applied by the store in the same write as the rest of the patch, so
-        -- a task is never seen half-scheduled. Re-setting the same cron
+        -- a task is never seen half-scheduled. In that write the status
+        -- rules below (LeavingBacklogCancelsThePendingRun,
+        -- LeavingRunningCancelsThePendingRun, EnteringBacklogRearmsAPhoenixTask,
+        -- ClosingCancelsThePendingRun) apply first and the schedule argument
+        -- (this rule or ClearSchedule) last, so a schedule set in the write is
+        -- armed against the status the write leaves the task in: a one-off
+        -- moved from running to backlog and given a schedule in one patch is
+        -- armed. Re-setting the same cron
         -- recomputes next_due from now and clears a recorded failure: setting
         -- a schedule is how a caller re-arms a one-off that failed.
         -- The refusals read "invalid cron schedule \"<cron>\": <why>" and

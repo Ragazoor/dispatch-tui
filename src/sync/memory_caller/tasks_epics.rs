@@ -389,13 +389,15 @@ impl MemoryReducerCaller {
 
         module::apply_task_patch(&mut row, patch);
         // Mirrors the module: after the rest of the patch, before any write.
-        if let Some(cron) = schedule {
-            row = match module::apply_schedule(row, &cron, &self.now()) {
-                Ok(row) => row,
-                Err(why) => return Ok(ReducerOutcome::Refused(why)),
-            };
-        }
-        row = module::schedule_after_status_write(&prior_status, row, &self.now());
+        row = match module::schedule_after_patch(
+            &prior_status,
+            row,
+            schedule.as_deref(),
+            &self.now(),
+        ) {
+            Ok(row) => row,
+            Err(why) => return Ok(ReducerOutcome::Refused(why)),
+        };
         // Before the first side effect below: a refused patch leaves nothing
         // behind, as the module's rolled-back transaction does.
         if let Err(why) = Self::validate_task_write(tables, &row, &self.now()) {
@@ -589,10 +591,7 @@ impl MemoryReducerCaller {
         let prior_status = row.status.clone();
         let schedule = patch.schedule.clone();
         module::apply_task_patch(&mut row, patch);
-        if let Some(cron) = schedule {
-            row = module::apply_schedule(row, &cron, &self.now())?;
-        }
-        row = module::schedule_after_status_write(&prior_status, row, &self.now());
+        row = module::schedule_after_patch(&prior_status, row, schedule.as_deref(), &self.now())?;
         Self::validate_task_write(tables, &row, &self.now())?;
         Ok(row)
     }

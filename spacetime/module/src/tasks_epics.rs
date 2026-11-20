@@ -243,7 +243,8 @@ pub struct TaskPatch {
     /// (`schedules.allium: SetSchedule`, `ClearSchedule`). Not applied by
     /// [`apply_task_patch`]: `next_due` and `schedule_error` move with it, and
     /// the set can be refused, so `patch_task` applies it through
-    /// [`apply_schedule`] after the rest of the patch.
+    /// [`schedule_after_patch`] after the rest of the patch and its status
+    /// effects.
     pub schedule: Patch<String>,
     /// A model alias sets it, `""` clears it back to the sonnet default
     /// (`tasks.allium: SetModel`).
@@ -522,10 +523,7 @@ pub(crate) fn patch_task_row(
     // After the rest of the patch, so the backlog-or-phoenix check sees the
     // status and flag this same patch sets; before any write, so a refusal
     // leaves the row and its agent untouched.
-    if let Some(cron) = schedule {
-        row = apply_schedule(row, &cron, &now(ctx))?;
-    }
-    row = schedule_after_status_write(&prior_status, row, &now(ctx));
+    row = schedule_after_patch(&prior_status, row, schedule.as_deref(), &now(ctx))?;
     // The session facts go to the current agent (`agents.allium`, A4).
     update_current_agent(&mut AgentTables(ctx), id, |agent| {
         apply_session_patch(agent, &session_patch)

@@ -595,6 +595,44 @@ fn a_phoenix_task_moved_from_running_to_backlog_is_still_rearmed() {
 }
 
 #[test]
+fn a_schedule_set_in_the_write_that_leaves_running_for_backlog_is_armed() {
+    // One patch moves a one-off from running to backlog and sets its schedule:
+    // the status effects apply first, so the schedule arms against backlog.
+    let moved = Task {
+        status: "backlog".into(),
+        schedule: String::new(),
+        ..due_task()
+    };
+    let row = schedule_after_patch("running", moved, Some("0 9 * * 1"), NOW).unwrap();
+    assert_eq!(row.schedule, "0 9 * * 1");
+    assert_eq!(row.next_due, "2026-10-26 09:00:00.000");
+}
+
+#[test]
+fn a_schedule_cleared_in_the_write_that_rearms_a_phoenix_task_stays_cleared() {
+    let moved = Task {
+        status: "backlog".into(),
+        phoenix: true,
+        ..due_task()
+    };
+    let row = schedule_after_patch("running", moved, Some(""), NOW).unwrap();
+    assert_eq!(row.schedule, "");
+    assert_eq!(row.next_due, "");
+}
+
+#[test]
+fn a_patch_without_a_schedule_takes_only_the_status_effects() {
+    let moved = Task {
+        status: "backlog".into(),
+        ..due_task()
+    };
+    assert_eq!(
+        schedule_after_patch("running", moved, None, NOW).unwrap().next_due,
+        ""
+    );
+}
+
+#[test]
 fn a_schedule_request_failed_after_a_hand_move_back_to_backlog_still_marks() {
     // Moved back by hand while the launch was open: no claim left to
     // release, but the one-off must not fire again on its passed due time.
