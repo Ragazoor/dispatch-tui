@@ -94,4 +94,4 @@ resume the calling skill's next instruction in the same turn. Do not stop here.
 - **`learnings`** owns reusable pitfalls, conventions and preferences via
   `learning_record`. If you find one — a convention, a pitfall, a design or
   style choice the user corrected or confirmed — record it right away, and don't wait to
-  be asked.
+  be asked. If its root cause also lies in another repo's tool, still record it, and flag the root cause in the report.
