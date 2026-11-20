@@ -89,7 +89,10 @@ rule SaveSetting {
         -- an upsert on (host, key), so a second save of the same key on the
         -- same host replaces the value rather than adding a row, and a save
         -- from a different host is a different row. The board never names
-        -- another host: every request here is for core/local_host().
+        -- another host: every request here is for core/local_host(). The board
+        -- refuses the identity keys (config.identity_setting_keys) itself
+        -- before it asks (src/store/queries/settings.rs::refuse_identity_key),
+        -- and the store refuses them again.
 }
 
 rule ClearSetting {

@@ -91,61 +91,7 @@ entity HostFile {
     invariant HostFileIsPrivate {
         permissions = config.host_file_mode
     }
-
-
 }
-
-------------------------------------------------------------
--- Invariants
-------------------------------------------------------------
-
--- IdentityLivesInHostFile:
--- This install's identity — host id, host label, user identity and its
--- credential — is read from and written to the host file and nowhere
--- else. Not the store: the store holds a MIRROR of the host row
--- (sync.allium: RegisterHostOnConnect) and never the credential, which
--- is what the install presents to the store and so cannot live in it.
--- Not a local database: dispatch has none, and a leftover one is
--- never read (storage.allium: CodeNeverTouchesLegacyDatabase). An
--- install with no host file mints a fresh identity on its first
--- launch (MintHostIdentity).
---
--- The host file is what core/local_host() resolves. Every reader and
--- every writer of the local Host row in this file — MintHostIdentity,
--- RenameHost, AdoptUserIdentity — is a read or write of it; a one-shot
--- CLI command reads it and never writes it (cli.allium:
--- CliCommandsNeedAHostFile).
-
--- HostFileIsWrittenWhole:
--- Every write replaces the whole file atomically: the new content is
--- written to a temporary file in the same directory, with the private
--- mode already applied, and renamed over the old one. A reader
--- therefore sees the old file or the new one, never half of either;
--- a crash mid-write leaves the old identity intact rather than a
--- damaged file. The private mode is set before the content is
--- written, never afterwards, so the credential is never readable by
--- anyone else for any length of time.
---
--- A field the file holds that this binary does not know is kept
--- through every rewrite, so an older binary never drops what a newer
--- one added.
-
--- HostFileWritersAreSerialised:
--- Whole-file replacement protects readers, not writers: two processes
--- that each read, change and write back can lose one change. The board
--- and a one-shot CLI command are two such processes. So every
--- read-modify-write of the file (RenameHost, AdoptUserIdentity) holds
--- an exclusive advisory lock, on a separate lock file beside the host
--- file, from before the read until after the replacement. A writer
--- that finds the lock held waits for it. Therefore a rename racing an
--- adoption keeps both the new label and the adopted owner with its
--- credential. The first-run mint needs no lock: it creates the file
--- only if absent (MintHostIdentity), so two racing mints leave one id.
---
--- A plain read takes no lock: it sees the old file or the new one
--- (HostFileIsWrittenWhole). The lock file holds no data and is never
--- removed, since removing it would let two writers lock two different
--- files.
 
 ------------------------------------------------------------
 -- Config
@@ -459,6 +405,58 @@ rule RefuseAChangedUserIdentity {
         -- needs to know which one their tasks are under, and the one the board
         -- no longer holds is the one they cannot look up afterwards.
 }
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- IdentityLivesInHostFile:
+-- This install's identity — host id, host label, user identity and its
+-- credential — is read from and written to the host file and nowhere
+-- else. Not the store: the store holds a MIRROR of the host row
+-- (sync.allium: RegisterHostOnConnect) and never the credential, which
+-- is what the install presents to the store and so cannot live in it.
+-- Not a local database: dispatch has none, and a leftover one is
+-- never read (storage.allium: CodeNeverTouchesLegacyDatabase). An
+-- install with no host file mints a fresh identity on its first
+-- launch (MintHostIdentity).
+--
+-- The host file is what core/local_host() resolves. Every reader and
+-- every writer of the local Host row in this file — MintHostIdentity,
+-- RenameHost, AdoptUserIdentity — is a read or write of it; a one-shot
+-- CLI command reads it and never writes it (cli.allium:
+-- CliCommandsNeedAHostFile).
+
+-- HostFileIsWrittenWhole:
+-- Every write replaces the whole file atomically: the new content is
+-- written to a temporary file in the same directory, with the private
+-- mode already applied, and renamed over the old one. A reader
+-- therefore sees the old file or the new one, never half of either;
+-- a crash mid-write leaves the old identity intact rather than a
+-- damaged file. The private mode is set before the content is
+-- written, never afterwards, so the credential is never readable by
+-- anyone else for any length of time.
+--
+-- A field the file holds that this binary does not know is kept
+-- through every rewrite, so an older binary never drops what a newer
+-- one added.
+
+-- HostFileWritersAreSerialised:
+-- Whole-file replacement protects readers, not writers: two processes
+-- that each read, change and write back can lose one change. The board
+-- and a one-shot CLI command are two such processes. So every
+-- read-modify-write of the file (RenameHost, AdoptUserIdentity) holds
+-- an exclusive advisory lock, on a separate lock file beside the host
+-- file, from before the read until after the replacement. A writer
+-- that finds the lock held waits for it. Therefore a rename racing an
+-- adoption keeps both the new label and the adopted owner with its
+-- credential. The first-run mint needs no lock: it creates the file
+-- only if absent (MintHostIdentity), so two racing mints leave one id.
+--
+-- A plain read takes no lock: it sees the old file or the new one
+-- (HostFileIsWrittenWhole). The lock file holds no data and is never
+-- removed, since removing it would let two writers lock two different
+-- files.
 
 ------------------------------------------------------------
 -- Surfaces

@@ -58,7 +58,6 @@
 -- it sits in (host.allium: HostFile.directory).
 entity DataDirectory {
     path: String
-
 }
 
 ------------------------------------------------------------

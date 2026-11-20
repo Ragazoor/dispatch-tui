@@ -1047,8 +1047,8 @@ entity SavedRepoPath {
                              -- fill and a save's join reach only rows whose host owner is the caller or shares a
                              -- workspace with the caller; a stranger's rows of the "same" repository are
                              -- neither written nor read.
-                             -- At startup the board re-saves this host's rows that have no github_path, so a
-                             -- a row with no github_path learns its repository from the clone's origin
+                             -- At startup the board re-saves this host's rows that have no github_path, so such
+                             -- a row learns its repository from the clone's origin
                              -- (src/store/queries/settings.rs::stamp_github_paths_of_this_host); a clone with no
                              -- GitHub origin is skipped.
 
@@ -1311,8 +1311,8 @@ entity ArchivedTask {
     labels: List<String>      -- kept, not shown: stored-only history
     url: TaskUrl?             -- the task's PR or link, if it had one
     plan_path: String?
-    external_id: String?      -- the feed item id, for a feed task
-    created_by: UserIdentity?
+    external_id: String?      -- the feed item id, for a feed task; kept, not shown: stored-only history
+    created_by: UserIdentity? -- kept, not shown: stored-only history
     owner: UserIdentity?              -- set for an epic-less task, as on Task
     created_at: Timestamp
     completed_at: Timestamp?
@@ -1325,8 +1325,10 @@ entity ArchivedTask {
     archived_at: Timestamp
     archived_by: UserIdentity         -- the person whose delete wrote it; kept, not shown: stored-only history
 
-    -- Task.visible_to as frozen at archive time, for a non-operator reader
-    -- (the operator sees every record). has_workspace_member(id, user) is a
+    -- Task.visible_to as frozen at archive time, for every reader but the
+    -- operator (the store's own identity, workspaces.allium), which sees every
+    -- record. owner, workspace_id, private and private_holder are read only
+    -- here: no reply shows them. has_workspace_member(id, user) is a
     -- black box: user is a member of the workspace with that id.
     visible_to(user):
         if epic_id = null: owner = user
@@ -1337,7 +1339,8 @@ entity ArchivedTask {
         -- Task.visible_to gave the moment before the delete, from what was
         -- copied then. An epic-less record is its owner's alone; one that sat
         -- in an epic is seen by members of workspace_id; when private is
-        -- set, only by private_holder, and by nobody when that is null. The operator sees every record. Its
+        -- set, only by private_holder, and by nobody when that is null. The
+        -- operator (the store's own identity) sees every record. Its
         -- epic may be deleted or re-parented later; the record does not
         -- follow, because a record that changed audience with a live epic it
         -- no longer belongs to would leak or lose history arbitrarily.
