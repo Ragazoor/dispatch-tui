@@ -90,10 +90,16 @@ impl PersistFields {
     }
 
     /// Send only what a detach changes: the window release and, when
-    /// `reset_sub_status` is set, the sub_status reset. The board's `status`
-    /// is never sent.
+    /// `reset_sub_status` is set, the sub_status reset. The board's `status`,
+    /// worktree, host, URL and ordering keys are never sent: each can be older
+    /// than the store's (`DetachTmux` in `docs/specs/split-pane.allium`).
     pub fn detaching(mut self, reset_sub_status: bool) -> Self {
         self.release_tmux_window = true;
+        self.worktree = None;
+        self.host = None;
+        self.url = None;
+        self.sort_order = None;
+        self.completed_at = None;
         self.status_write = if reset_sub_status {
             StatusWrite::SubStatusOnly
         } else {

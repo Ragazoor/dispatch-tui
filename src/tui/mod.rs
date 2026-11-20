@@ -975,7 +975,7 @@ impl App {
                     task.sub_status = SubStatus::default_for(task.status);
                 }
                 // Only the window release and that reset are written: the
-                // board's status can be older than the store's.
+                // board's copy can be older than the store's.
                 if released_window || reset {
                     let fields =
                         crate::tui::commands::PersistFields::from_task(task).detaching(reset);

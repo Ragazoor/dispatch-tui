@@ -1838,6 +1838,33 @@ fn detach_does_not_write_back_the_boards_status() {
     assert_eq!(fields.status_write, StatusWrite::Neither);
 }
 
+/// The detach write carries the window release and the sub_status reset and
+/// nothing else from the board's copy: a stale worktree, host, URL or ordering
+/// key would overwrite a newer store-side value (`DetachTmux` in
+/// `docs/specs/split-pane.allium`).
+#[test]
+fn detach_does_not_write_back_the_boards_other_fields() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.worktree = Some("/tmp/wt".to_string());
+    task.host = Some("host-a".to_string());
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
+    task.sort_order = Some(7);
+    task.completed_at = Some(chrono::Utc::now());
+    let mut app = App::new(vec![task]);
+    let cmds = app.detach_tmux_panels(vec![TaskId(3)]);
+    let fields = persist_of(&cmds, 3);
+    assert!(fields.release_tmux_window);
+    assert!(!fields.release_worktree);
+    assert_eq!(fields.worktree, None);
+    assert_eq!(fields.host, None);
+    assert!(fields.url.is_none());
+    assert_eq!(fields.sort_order, None);
+    assert_eq!(fields.completed_at, None);
+}
+
 #[test]
 fn detach_writes_only_the_sub_status_when_it_resets_stale_or_crashed() {
     use crate::tui::commands::StatusWrite;
