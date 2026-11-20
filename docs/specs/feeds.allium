@@ -728,6 +728,7 @@ rule VerifyFeed {
     -- This is the supported way to debug a feed script before wiring it
     -- onto an epic's feed_command. It performs no DB writes.
 
+    -- observable output; no rule listens
     ensures: FeedVerified(command: command)
 
     @guidance
@@ -1155,6 +1156,7 @@ rule ReportShippedFeedScripts {
     let changes    = reportable where outcome != failed
 
     ensures:
+        -- SetupSectionLine: observable output; no rule listens
         if reportable.count = 0:
             SetupSectionLine(section: "Feed scripts", text: "already up to date")
         else:
@@ -1226,6 +1228,7 @@ rule FeedTick {
         for epic in core/Epics where is_feed:
             if epic.feed_interval_secs != null
                and seconds(epic.feed_interval_secs) < core/config.min_feed_interval:
+                -- observable output; no rule listens
                 FeedIntervalBelowMinimumWarned(epic: epic)
             else:
                 let interval =
@@ -1286,9 +1289,9 @@ rule FeedTick {
     -- while this board was down. See ServeFeedRefreshRequest and
     -- ServeFeedTeardownRequest.
     ensures:
-        for request in split/FeedRequests where
-                host = core/local_host() and is_open and not served_by_this_process(this):
-            FeedRequestPickedUp(request: request)
+        for request in split/FeedRequests where host = core/local_host() and is_open:
+            if not served_by_this_process(request):
+                FeedRequestPickedUp(request: request)
 
     @guidance
         -- Each epic's last_run timestamp is bumped before the spawn so
@@ -1589,6 +1592,7 @@ rule SerialisedFeedCycle {
             -- Dropped. Nothing runs, and nothing about the epic's tasks
             -- changes. The requesting surface presents this per its own rule
             -- (silently for FeedTick, as a status line for ManualFeedTrigger).
+            -- observable output; no rule listens
             FeedCycleDropped(epic: epic)
         else:
             -- Claimed for the whole cycle, and released when it ends however it
@@ -1983,6 +1987,10 @@ rule UpsertFeedTasks {
                             null
                 )
             else:
+                -- Read before the writes below.
+                let backfills_url = existing.url = null and item.url != ""
+                let was_left = existing.left_feed
+                let reopens = existing.left_feed and existing.status = done
                 existing.title = item.title
                 existing.description = item.description
                 existing.tag = item.tag
@@ -1994,7 +2002,7 @@ rule UpsertFeedTasks {
                 -- url backfilled from item.url when existing.url is null,
                 -- with the same explicit-wins url_type precedence as
                 -- insert; existing non-null url is preserved.
-                if existing.url = null and item.url != "":
+                if backfills_url:
                     existing.url = core/TaskUrl{url: item.url, url_type: resolved_url_type}
                 -- existing.status, existing.sub_status, existing.repo_path,
                 -- existing.wrap_up_mode preserved, with ONE exception: a task
@@ -2015,11 +2023,11 @@ rule UpsertFeedTasks {
                 -- left as it is (core/Task.completed_at survives a move back
                 -- out of done), and so are the worktree and the agent history:
                 -- the card returns with them.
-                if existing.left_feed:
+                if was_left:
                     existing.left_feed = false
-                    if existing.status = done:
-                        existing.status = backlog
-                        existing.sub_status = default_sub_status(backlog)
+                if reopens:
+                    existing.status = backlog
+                    existing.sub_status = default_sub_status(backlog)
                 -- existing.updated_at moves to now only when one of the
                 -- assignments above changed a value; otherwise the row is
                 -- not written at all (UnchangedFeedItemIsNotRewritten)
@@ -2298,7 +2306,7 @@ rule GroupedFeedUpsert {
     ensures:
         -- A retired item with no task left in the subtree is dropped before
         -- grouping, so no sub-epic is found-or-created just to hold nothing.
-        let admitted = items where not retired_without_task(epic, this)
+        let admitted = items where not retired_without_task(epic, external_id)
         -- One group per distinct repo_name(url) of the admitted items.
         for name in repo_names(admitted):
             let group_items = admitted where repo_name(url) = name
@@ -2309,8 +2317,10 @@ rule GroupedFeedUpsert {
             -- Migration by move: the parent is searched first, then the
             -- sub-epics.
             for item in group_items:
-                let existing = (core/Tasks where external_id = item.external_id
-                                  and (this.epic = epic or this.epic.parent = epic)).first
+                -- grouped_subtree_task(epic, id): the first task carrying id
+                -- on the parent or in one of its direct sub-epics, the parent
+                -- searched first.
+                let existing = grouped_subtree_task(epic, item.external_id)
                 if exists existing and existing.epic != target
                    and not exists core/Task{epic: target, external_id: item.external_id}:
                     existing.epic = target
@@ -2633,7 +2643,7 @@ rule RoleRoutedFeedSync {
 
         -- Retired items with no task left in the subtree are skipped before
         -- routing, so no repo-group sub-epic is found-or-created for them.
-        for item in kept where not retired_without_task(epic, item):
+        for item in kept where not retired_without_task(epic, item.external_id):
             -- route only ever yields my_reviews / team_reviews / bots. It is
             -- never reached for an excluded item.
             let role = route(item.signals)
@@ -2659,11 +2669,8 @@ rule RoleRoutedFeedSync {
             -- grandchildren, then role sub-epics, and the LAST copy found
             -- wins, so a role-sub-epic-direct copy wins a tie over a
             -- repo-group copy. A manual child epic of the parent is not
-            -- scanned.
-            let existing = (core/Tasks where external_id = item.external_id
-                              and (this.epic = epic
-                                   or this.epic in {my, team, bots}
-                                   or this.epic.parent in {my, team, bots})).last
+            -- scanned. routed_subtree_task(epic, id) is that lookup.
+            let existing = routed_subtree_task(epic, item.external_id)
             if exists existing and existing.epic != target:
                 -- MOVE: reassign epic only; state-bearing fields (status,
                 -- sub_status, repo_path, worktree, tmux_window) preserved.
@@ -3066,7 +3073,9 @@ rule FeedCommandFailure {
     -- are unaffected.
 
     ensures:
-        log_warn(epic.id, epic.title, error)
+        -- The warning names the epic's id and title and the error.
+        -- observable output; no rule listens
+        FeedRunWarned(epic: epic, text: error)
 
     @guidance
         -- Implementation: src/feed/mod.rs::FeedRunner::tick spawns a
@@ -3173,7 +3182,8 @@ rule FeedCommandStderrOnSuccess {
     requires: stderr != ""
 
     ensures:
-        log_warn(epic.id, epic.title, truncate(stderr, config.feed_stderr_cap))
+        -- observable output; no rule listens
+        FeedRunWarned(epic: epic, text: truncate(stderr, config.feed_stderr_cap))
         -- and then, when items.count > 0, the emission syncs ADDITIVELY
         -- (DegradedNonEmptyEmission). When items.count = 0 the sync is
         -- suppressed entirely by DegradedEmptyEmission instead.
@@ -3283,7 +3293,7 @@ rule DegradedEmptyEmission {
 
     ensures:
         FeedCommandFailed(epic, truncate(stderr, config.feed_stderr_cap))
-        -- and therefore, by FeedCommandFailure: log_warn. No emission is
+        -- and therefore, by FeedCommandFailure: FeedRunWarned. No emission is
         -- posted, so no
         -- UpsertFeedTasks / GroupedFeedUpsert / FlatFeedReconcile /
         -- RoleRoutedFeedSync pass runs and no task is created, updated,
@@ -3392,12 +3402,11 @@ rule DegradedNonEmptyEmission {
     ensures:
         -- The sync runs exactly as for a trusted emission (the module picks
         -- the strategy), with removals disabled for this cycle.
+        -- Nothing absent from a tainted emission is removed, whatever its
+        -- status and whether or not it carries agent state: additive: true
+        -- carries that.
         FeedEmissionPosted(epic: epic, items: items, additive: true,
                            host: core/local_host())
-        for task in epic.subtree_tasks where task.external_id != null:
-            -- Nothing absent from a tainted emission is removed, whatever
-            -- its status and whether or not it carries agent state.
-            exists task
 
     @guidance
         -- Implementation: src/feed/exec.rs::degraded_partial_emission, the
@@ -3600,13 +3609,11 @@ rule AppendOnlyFeed {
     ensures:
         -- The sync runs exactly as for a trusted emission (the module picks
         -- the strategy), with removals disabled — permanently, for this epic.
+        -- Absence from an append-only feed's emission is not evidence of
+        -- anything, so nothing is removed, whatever its status and whether or
+        -- not it carries agent state: additive: true carries that.
         FeedEmissionPosted(epic: epic, items: items, additive: true,
                            host: core/local_host())
-        for task in epic.subtree_tasks where task.external_id != null:
-            -- Absence from an append-only feed's emission is not evidence of
-            -- anything, so nothing is removed, whatever its status and whether
-            -- or not it carries agent state.
-            exists task
 
     @guidance
         -- Implementation: the flag is read alongside the two degraded
@@ -3650,8 +3657,8 @@ rule AppendOnlyFeed {
 --
 --   - is_retired(feed_epic, external_id): a RetiredFeedItem with that
 --     (feed_epic, external_id) exists.
---   - retired_without_task(epic, item): is_retired(epic, item.external_id),
---     and no task anywhere in epic's subtree carries item.external_id.
+--   - retired_without_task(epic, external_id): is_retired(epic, external_id),
+--     and no task anywhere in epic's subtree carries external_id.
 --
 --   * UpsertFeedTasks refuses the insert when
 --     is_retired(epic.nearest_feed_epic, item.external_id). Every path's
@@ -3923,6 +3930,7 @@ rule ServeFeedTeardownRequest {
 
     ensures:
         split/FeedRequestDelivered(request: request, host: core/local_host())
+        -- observable output; no rule listens
         FeedTaskReleased(
             repo_path: request.repo_path,
             worktree: request.worktree,

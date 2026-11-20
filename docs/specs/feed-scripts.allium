@@ -538,8 +538,8 @@ contract FetchLogWarnings {
         -- (core/Epic.feed_append_only; feeds.allium: AppendOnlyFeed).
 
     @invariant OneItemPerDistinctRecord
-        -- One item per distinct record at one of the LEVELS (default WARN and
-        -- ERROR) in the tracing-formatted LOG_FILE. A record's fingerprint is
+        -- One item per distinct record at one of the LEVELS (default
+        -- config.log_warning_levels) in the tracing-formatted LOG_FILE. A record's fingerprint is
         -- its level, its module target and the static head of its message (up
         -- to the first ":" or " key=", digit runs collapsed to N and
         -- "<org>/<repo>" pairs to R); external_id is
@@ -560,8 +560,8 @@ contract FetchLogWarnings {
 
     @invariant DescriptionStaysCurrent
         -- The description carries the occurrence count, first and last seen
-        -- timestamps, the triage instructions and up to SAMPLES (default 3)
-        -- raw lines, re-applied on every poll, so an open card keeps a
+        -- timestamps, the triage instructions and up to SAMPLES (default
+        -- config.log_warning_samples) raw lines, re-applied on every poll, so an open card keeps a
         -- current count.
 
     @invariant RebaseOnInsert
@@ -604,4 +604,8 @@ config {
     -- fetch-dependabot.sh and fetch-reviews.sh: a PR's body is cut to this
     -- many characters for an item's description.
     pr_description_chars: Integer = 500
+    -- fetch-log-warnings.sh: the levels LEVELS defaults to, "|"-separated.
+    log_warning_levels: String = "WARN|ERROR"
+    -- fetch-log-warnings.sh: the raw sample lines SAMPLES defaults to.
+    log_warning_samples: Integer = 3
 }
