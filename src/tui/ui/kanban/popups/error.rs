@@ -13,7 +13,7 @@ use crate::tui::ui::shared::{centered_rect, open_overlay, titled_block};
 use crate::tui::App;
 
 pub(in crate::tui::ui::kanban) fn render_error_popup(frame: &mut Frame, app: &App, area: Rect) {
-    let Some(error_msg) = &app.status.error_popup else {
+    let Some(error_msg) = app.error_popup() else {
         return;
     };
 

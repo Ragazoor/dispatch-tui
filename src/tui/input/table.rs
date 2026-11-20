@@ -23,7 +23,7 @@ impl App {
     /// The namespace a key press is looked up in right now.
     pub(in crate::tui) fn key_namespace(&self) -> KeyNamespace {
         use KeyNamespace as N;
-        if self.status.error_popup.is_some() {
+        if self.error_popup().is_some() {
             return N::BoardError;
         }
         match &self.input.mode {
@@ -197,7 +197,7 @@ impl App {
     pub fn install_key_table(&mut self, load: &crate::keybindings::KeyTableLoad) {
         self.key_table = load.table;
         if let Some(summary) = load.error_summary() {
-            self.status.error_popup = Some(summary);
+            self.status.key_load_notice = Some(summary);
             self.dirty = true;
         }
     }

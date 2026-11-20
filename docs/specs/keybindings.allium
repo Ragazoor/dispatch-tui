@@ -590,7 +590,9 @@ entity KeyBinding {
     --                    Insert, Up, Down, Left, Right, Home, End, PageUp,
     --                    PageDown, F1 to F12
     --   a modified key   "Ctrl+", "Alt+" or "Ctrl+Alt+" before a character or
-    --                    a named key, a letter uppercase ("Ctrl+D")
+    --                    a named key, a letter uppercase ("Ctrl+D") where
+    --                    it has a one-character uppercase form ("Ctrl+É";
+    --                    "Ctrl+ß" stays as typed), the form a press is named
     --   a chord          exactly two characters pressed one after the other
     --                    ("gg"); no named or modified key, no longer form.
     --                    A two-letter name that is a named key ("Up", "F1"
@@ -740,13 +742,15 @@ enum KeyTableReader { board | companion_pane | diff_pane }
 
 -- Why an entry of the override file is refused. A closed set, so a test can
 -- produce each one (KeybindingDriftGate.EveryRefusalIsExercised).
---   file_unreadable               the file is not valid JSON, or is not a
---                                 list; no entry applies
+--   file_unreadable               the file is not valid JSON, is not a
+--                                 list, or cannot be read (a directory, no
+--                                 permission, not UTF-8); no entry applies
 --   malformed_entry               the entry is not an object, lacks namespace,
 --                                 action or keys, has a field of another
 --                                 name, or keys is not a list of strings
 --   duplicate_entry               two entries name the same row; both are
---                                 refused
+--                                 refused, even when one of them is refused
+--                                 for another problem too
 --   unknown_namespace             namespace is not a published namespace name
 --                                 (a family name is not one)
 --   unknown_action                the namespace has no row with that action
@@ -976,7 +980,11 @@ rule LoadKeyTable {
         -- unknown_context or ambiguous_row, catch_all_row, empty_keys,
         -- unknown_key_name, key_not_allowed_in_namespace. Then, across
         -- entries, duplicate_entry: every entry that names a row another
-        -- entry names. A refused entry leaves its row on its default keys
+        -- entry names. An entry names a row once its namespace, action and
+        -- context resolve to one, whatever its keys; so an entry refused for
+        -- its keys still makes a second entry for its row a duplicate, and
+        -- that row keeps its default keys. An entry keeps the first problem
+        -- found. A refused entry leaves its row on its default keys
         -- and adds one KeyLoadError; the other entries still apply. A file
         -- that is not a JSON list is one file_unreadable error and no entry
         -- applies.
@@ -1030,6 +1038,13 @@ rule BoardShowsKeyLoadErrors {
         -- override can change (CatchAllIsNeverOverridden), so any key
         -- dismisses it. A pane shows nothing: the board is where a load
         -- error is reported, and the same file gives a pane the same errors.
+        --
+        -- Another error the board raises before the popup is dismissed (a
+        -- failed dispatch the restart sweep reports) does not replace it:
+        -- that error shows first, and the load errors once it is dismissed.
+        -- The popup grows to fit the list. A message longer than fits, one
+        -- that lists every valid name, is cut at a list separator with a
+        -- pointer to the log, which holds it whole (KeyLoadErrorsAreLogged).
 }
 
 rule KeyLoadErrorsAreLogged {

@@ -45,13 +45,24 @@ pub fn key_has_ctrl_or_alt(key: KeyEvent) -> bool {
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
+/// A character after a Ctrl/Alt modifier, as the table writes it: uppercase
+/// when the letter has a one-character uppercase form ("D", "É"), else as
+/// typed. `is_key_name` accepts exactly this form.
+pub(crate) fn modified_char(c: char) -> String {
+    let mut upper = c.to_uppercase();
+    match (upper.next(), upper.next()) {
+        (Some(u), None) => u.to_string(),
+        _ => c.to_string(),
+    }
+}
+
 /// A key as the table writes it: "Space", "Enter", "j", "L"; with Ctrl or Alt
 /// held, modifier then key with a letter in uppercase ("Ctrl+D", "Alt+B",
 /// "Ctrl+Left"). Shift alone is never part of the name.
 pub fn key_name(key: KeyEvent) -> String {
     let base = match key.code {
         KeyCode::Char(' ') => "Space".to_string(),
-        KeyCode::Char(c) if key_has_ctrl_or_alt(key) => c.to_ascii_uppercase().to_string(),
+        KeyCode::Char(c) if key_has_ctrl_or_alt(key) => modified_char(c),
         _ => key_label(key),
     };
     let mut name = String::new();

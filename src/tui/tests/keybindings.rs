@@ -1175,6 +1175,43 @@ fn a_refused_entry_is_shown_and_the_rest_of_the_file_applies() {
     );
 }
 
+/// Every refused entry's message, and the dismiss hint, fit an 80x24
+/// board, even when one message lists a whole namespace's actions.
+#[test]
+fn the_key_load_errors_fit_a_small_board() {
+    let (mut app, _dir) = app_loaded_from(
+        r#"[{"namespace": "board.normal", "action": "jump_rope", "keys": ["O"]},
+            {"namespace": "board.normal", "action": "navigate_row_last", "keys": ["ctrl+e"]}]"#,
+    );
+    let buf = render_to_buffer(&mut app, 80, 24);
+    let area = buf.area();
+    let text: String = (area.top()..area.bottom())
+        .map(|y| {
+            (area.left()..area.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Press any key to dismiss"), "{text}");
+    assert!(text.contains("Ctrl+E"), "{text}");
+}
+
+/// A later error does not replace the key-load notice: the error shows
+/// first, and the notice once that is dismissed.
+#[test]
+fn a_later_error_does_not_hide_the_key_load_errors() {
+    let (mut app, _dir) = app_loaded_from(
+        r#"[{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["ctrl+e"]}]"#,
+    );
+    app.handle_error("dispatch failed".to_string());
+    assert_eq!(app.error_popup(), Some("dispatch failed"));
+    press(&mut app, "q");
+    assert!(app.error_popup().unwrap().contains("Ctrl+E"));
+    press(&mut app, "q");
+    assert_eq!(app.error_popup(), None);
+}
+
 #[test]
 fn an_unreadable_file_leaves_the_board_on_its_default_keys() {
     let (mut app, _dir) = app_loaded_from("not json");

@@ -546,8 +546,17 @@ impl App {
     pub fn input_mode(&self) -> &InputMode {
         &self.input.mode
     }
+    /// The table this board looks keys up in.
+    pub fn key_table(&self) -> &'static [crate::keybindings::KeyBinding] {
+        self.key_table
+    }
+    /// The message the error popup shows: the latest error, else what the
+    /// key-table load refused (`StatusState::key_load_notice`).
     pub fn error_popup(&self) -> Option<&str> {
-        self.status.error_popup.as_deref()
+        self.status
+            .error_popup
+            .as_deref()
+            .or(self.status.key_load_notice.as_deref())
     }
     pub fn repo_paths(&self) -> &[String] {
         &self.board.repo_paths

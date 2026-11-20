@@ -174,8 +174,12 @@ impl App {
         )]
     }
 
+    /// Dismiss the error popup's message: the latest error, else what the
+    /// key-table load refused.
     pub(in crate::tui) fn handle_dismiss_error(&mut self) -> Vec<Command> {
-        self.status.error_popup = None;
+        if self.status.error_popup.take().is_none() {
+            self.status.key_load_notice = None;
+        }
         vec![]
     }
 

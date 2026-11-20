@@ -769,6 +769,37 @@ mod bootstrap {
         assert_eq!(bootstrap.app.store_server(), Some(TEST_STORE));
     }
 
+    /// keybindings.allium: LoadKeyTable. The board starts on the table it
+    /// loads from the override file in its data directory, and shows what the
+    /// load refused.
+    #[tokio::test]
+    async fn bootstrap_loads_the_key_table_from_the_data_directory() {
+        let (_dir, data_dir, paths) = fixture().await;
+        std::fs::write(
+            data_dir.join(crate::keybindings::KEY_OVERRIDE_FILE_NAME),
+            r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]},
+                {"namespace": "board.normal", "action": "navigate_row_last", "keys": ["ctrl+e"]}]"#,
+        )
+        .unwrap();
+
+        let bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
+            .await
+            .expect("a bad override never stops the board starting");
+
+        let delete = bootstrap
+            .app
+            .key_table()
+            .iter()
+            .find(|b| {
+                b.namespace == crate::keybindings::KeyNamespace::BoardNormal
+                    && b.action == "delete_task"
+            })
+            .unwrap();
+        assert_eq!(delete.keys, ["O"]);
+        let shown = bootstrap.app.error_popup().expect("the refusal is shown");
+        assert!(shown.contains("Ctrl+E"), "{shown}");
+    }
+
     /// The record a board leaves in its data directory (startup.allium:
     /// StoreAddressRecord).
     fn store_record(data_dir: &std::path::Path) -> std::path::PathBuf {

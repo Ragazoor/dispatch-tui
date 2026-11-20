@@ -148,6 +148,11 @@ pub struct StatusState {
     pub(in crate::tui) message: Option<String>,
     pub(in crate::tui) message_set_at: Option<Instant>,
     pub(in crate::tui) error_popup: Option<String>,
+    /// What the key-table load refused (keybindings.allium:
+    /// BoardShowsKeyLoadErrors). Kept apart from `error_popup` so a later
+    /// error cannot replace it unseen: the error popup shows `error_popup`
+    /// first and this once that is dismissed.
+    pub(in crate::tui) key_load_notice: Option<String>,
     /// When true, the status message survives the [`STATUS_MESSAGE_TTL`](crate::tui::STATUS_MESSAGE_TTL)
     /// auto-clear in `handle_tick`. Used for in-flight dispatch feedback —
     /// the message must persist for the multi-second `git fetch` window

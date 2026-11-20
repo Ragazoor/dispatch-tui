@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::{
-    contexts_overlap, is_chord, KeyBinding, KeyContext, KeyNamespace, ANY_OTHER_KEY, KEY_BINDINGS,
+    contexts_overlap, is_chord, modified_char, KeyBinding, KeyContext, KeyNamespace, ANY_OTHER_KEY,
+    KEY_BINDINGS,
 };
 
 /// The override file's name in the data directory
@@ -82,7 +83,8 @@ fn is_single_key(k: &str) -> bool {
     }
     MODIFIERS.iter().any(|m| {
         k.strip_prefix(m).is_some_and(|base| {
-            is_named_key(base) || (is_character(base) && !base.chars().any(char::is_lowercase))
+            is_named_key(base)
+                || (is_character(base) && base.chars().all(|c| modified_char(c) == base))
         })
     })
 }
@@ -186,13 +188,10 @@ pub fn suggest_key_name(k: &str) -> Option<String> {
     };
     let key = match named {
         Some(n) => n.to_string(),
-        None if base.chars().count() == 1 => {
-            if shift || ctrl || alt {
-                base.to_uppercase()
-            } else {
-                (*base).to_string()
-            }
-        }
+        None if base.chars().count() == 1 => match base.chars().next() {
+            Some(c) if shift || ctrl || alt => modified_char(c),
+            _ => (*base).to_string(),
+        },
         None => return None,
     };
     let mut name = String::new();
@@ -311,10 +310,23 @@ impl KeyTableLoad {
         );
         for e in &self.errors {
             text.push_str("\n- ");
-            text.push_str(&e.message);
+            text.push_str(&popup_message(&e.message));
         }
         Some(text)
     }
+}
+
+/// The longest message the popup shows whole. A longer one (a list of every
+/// valid name) is cut at a list separator; the log keeps it whole.
+const POPUP_MESSAGE_CHARS: usize = 160;
+
+fn popup_message(message: &str) -> String {
+    if message.chars().count() <= POPUP_MESSAGE_CHARS {
+        return message.to_string();
+    }
+    let head: String = message.chars().take(POPUP_MESSAGE_CHARS).collect();
+    let head = head.rsplit_once(", ").map_or(head.as_str(), |(h, _)| h);
+    format!("{head}, … (the whole list is in app.log)")
 }
 
 /// The override file of a data directory.
@@ -517,12 +529,12 @@ fn judge_entry(value: &Value) -> Entry {
         .filter(|&i| KEY_BINDINGS[i].namespace == ns && KEY_BINDINGS[i].action == action)
         .collect();
     if rows.is_empty() {
-        let mut actions: Vec<&str> = KEY_BINDINGS
-            .iter()
-            .filter(|b| b.namespace == ns)
-            .map(|b| b.action)
-            .collect();
-        actions.dedup();
+        let mut actions: Vec<&str> = Vec::new();
+        for b in KEY_BINDINGS.iter().filter(|b| b.namespace == ns) {
+            if !actions.contains(&b.action) {
+                actions.push(b.action);
+            }
+        }
         entry.refuse(
             KeyOverrideProblem::UnknownAction,
             format!(

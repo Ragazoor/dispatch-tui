@@ -128,6 +128,14 @@ fn every_named_key_is_a_name_a_press_produces() {
         assert_eq!(key_name(ctrl), format!("Ctrl+{name}"));
         assert!(is_key_name(&key_name(ctrl)));
     }
+    for c in ['x', 'é', 'ß', '1', '+'] {
+        let ctrl = key_name(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+        assert!(
+            is_key_name(&ctrl),
+            "{ctrl} is what a press of Ctrl+{c} is named"
+        );
+    }
+    assert!(!is_key_name("Ctrl+é"), "a press never produces it");
     let ctrl_alt = KeyEvent::new(
         KeyCode::Char('x'),
         KeyModifiers::CONTROL | KeyModifiers::ALT,
@@ -242,6 +250,17 @@ fn no_file_is_the_default_table() {
     assert!(load.errors.is_empty());
     assert_eq!(load.error_summary(), None);
     assert_eq!(load.file, dir.path().join("keybindings.json"));
+}
+
+#[test]
+fn a_file_that_cannot_be_read_is_one_error_and_the_default_table() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(KEY_OVERRIDE_FILE_NAME)).unwrap();
+    let load = load_key_table(dir.path(), KeyTableReader::Board);
+    assert!(std::ptr::eq(load.table, KEY_BINDINGS));
+    assert_eq!(load.errors.len(), 1);
+    assert_eq!(load.errors[0].problem, KeyOverrideProblem::FileUnreadable);
+    assert!(load.errors[0].message.contains("no override applies"));
 }
 
 #[test]
@@ -446,6 +465,29 @@ fn every_refusal_is_exercised() {
             );
         }
     }
+}
+
+/// An entry refused for its keys still names its row, so a second, good
+/// entry for that row is a duplicate and the row keeps its default keys.
+#[test]
+fn an_entry_refused_for_its_keys_still_makes_a_second_entry_a_duplicate() {
+    let ns = KeyNamespace::BoardNormal;
+    let (table, errors) = merge_overrides(&file_of(&[
+        entry("board.normal", "navigate_row_last", &["ctrl+e"]),
+        entry("board.normal", "navigate_row_last", &[free_key(ns, 0)]),
+    ]));
+    let problems: Vec<KeyOverrideProblem> = errors.iter().map(|e| e.problem).collect();
+    assert_eq!(
+        problems,
+        vec![
+            KeyOverrideProblem::UnknownKeyName,
+            KeyOverrideProblem::DuplicateEntry
+        ]
+    );
+    assert_eq!(
+        keys_of(table, ns, "navigate_row_last"),
+        default_keys(ns, "navigate_row_last")
+    );
 }
 
 #[test]
