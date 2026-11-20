@@ -615,8 +615,9 @@ pub(crate) const VALUE_FAMILIES: [&str; 4] = [
 
 /// The remapped table of `RemappedTableDrivesDispatch`
 /// (`docs/specs/keybindings.allium`): every pair of opposite rows (one
-/// namespace, one context) trades keys, and the rows of every value family
-/// pass their keys on to the next row of the family. Under it a handler that
+/// namespace, one context) trades keys, the rows of every value family pass
+/// their keys on to the next row of the family, and every other namespace
+/// but tmux.global has one row moved to a key it did not list. Under it a handler that
 /// reads the pressed key to pick a direction or a value goes the wrong way.
 #[cfg(test)]
 pub(crate) fn remapped_table() -> &'static [KeyBinding] {
@@ -642,8 +643,32 @@ pub(crate) fn remapped_table() -> &'static [KeyBinding] {
             }
         }
     }
+    // Every other namespace an override may name gets one row rebound to a
+    // key it did not list. A modified key, so a text namespace may take it.
+    for ns in KeyNamespace::ALL {
+        if ns == KeyNamespace::TmuxGlobal
+            || (0..rows.len()).any(|i| rows[i].namespace == ns && rows[i] != KEY_BINDINGS[i])
+        {
+            continue;
+        }
+        let listed = |k: &&str| rows.iter().any(|b| b.namespace == ns && b.keys.contains(k));
+        let Some(key) = REBIND_KEYS.iter().find(|k| !listed(k)) else {
+            continue;
+        };
+        if let Some(row) = rows
+            .iter_mut()
+            .find(|b| b.namespace == ns && b.context.is_none() && b.keys != [ANY_OTHER_KEY])
+        {
+            row.keys = std::slice::from_ref(key);
+        }
+    }
     Box::leak(rows.into_boxed_slice())
 }
+
+/// The keys [`remapped_table`] rebinds a row to in a namespace whose rows it
+/// does not otherwise move.
+#[cfg(test)]
+const REBIND_KEYS: [&str; 3] = ["Ctrl+T", "Ctrl+Y", "Ctrl+O"];
 
 #[cfg(test)]
 mod tests;

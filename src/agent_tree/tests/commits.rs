@@ -638,3 +638,21 @@ mod property_tests {
         }
     }
 }
+
+/// RemappedTableDrivesDispatch in the commits section: under the remapped
+/// table each moved key moves the commits cursor the way its row says.
+#[test]
+fn under_the_remapped_table_the_commits_keys_go_the_way_their_rows_say() {
+    super::keys::assert_remapped_keys_follow_their_rows(
+        crate::keybindings::KeyNamespace::AgentTreeCommits,
+        || {
+            let listed = commits(&(1..=20).rev().collect::<Vec<u32>>());
+            let mut rig = KeyRig::with_commits(&super::keys::many_files(), listed);
+            rig.state.focus = Focus::Commits;
+            for _ in 0..8 {
+                rig.press(KeyCode::Char('j'));
+            }
+            rig
+        },
+    );
+}

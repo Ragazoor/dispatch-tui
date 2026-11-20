@@ -488,7 +488,7 @@ fn v_on_a_file_asks_for_the_editor_and_elsewhere_does_nothing() {
 /// sets the pane up with its cursor away from both ends. At least one row of
 /// every pair has to change what the pane shows, so the comparison is not
 /// vacuous.
-fn assert_remapped_keys_follow_their_rows(
+pub(super) fn assert_remapped_keys_follow_their_rows(
     ns: crate::keybindings::KeyNamespace,
     build: impl Fn() -> KeyRig,
 ) {
@@ -548,10 +548,11 @@ impl KeyRig {
     /// style, not a symbol, so the drawn text alone can miss a one-row move.
     fn view(&self) -> String {
         format!(
-            "{}\n{:?}\n{:?}",
+            "{}\n{:?}\n{:?}\n{:?}",
             self.rendered(),
             self.selected(),
-            self.state.agents.selected().map(|r| r.label().to_string())
+            self.state.agents.selected().map(|r| r.label().to_string()),
+            self.state.commits.cursor_commit().map(|c| c.id.clone())
         )
     }
 
@@ -562,7 +563,7 @@ impl KeyRig {
 }
 
 /// Rows enough that a half page down and back up both move the cursor.
-fn many_files() -> Vec<GitFileChange> {
+pub(super) fn many_files() -> Vec<GitFileChange> {
     (0..20).map(|n| modified(&format!("f{n:02}.rs"))).collect()
 }
 

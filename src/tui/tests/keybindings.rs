@@ -92,9 +92,18 @@ fn detail_for(key: &str) -> String {
 /// A key no row of `ns` lists, to press for its catch-all row (or to show a
 /// namespace without one ignores it).
 fn unlisted_key(ns: KeyNamespace) -> &'static str {
+    unlisted_key_in(KEY_BINDINGS, ns)
+}
+
+/// [`unlisted_key`] for the rows of `table`.
+fn unlisted_key_in(table: &[KeyBinding], ns: KeyNamespace) -> &'static str {
     ["w", "Q", "%", "W", "_"]
         .into_iter()
-        .find(|k| !bindings_in(ns).any(|b| b.keys.contains(k)))
+        .find(|k| {
+            !table
+                .iter()
+                .any(|b| b.namespace == ns && b.keys.contains(k))
+        })
         .unwrap_or_else(|| panic!("{}: every candidate key is listed", ns.name()))
 }
 
@@ -620,7 +629,7 @@ fn press_every_board_row_key(table: &'static [KeyBinding]) -> (Vec<String>, usiz
     for ns in board_namespaces() {
         for binding in table.iter().filter(|b| b.namespace == ns) {
             let keys: Vec<&str> = if binding.keys == [ANY_OTHER_KEY] {
-                vec![unlisted_key(ns)]
+                vec![unlisted_key_in(table, ns)]
             } else {
                 binding.keys.to_vec()
             };
@@ -727,7 +736,11 @@ fn effect_of(app: &mut App, cmds: &[Command]) -> String {
         .filter(|c| !matches!(c, Command::Usage(_)))
         .map(|c| format!("{c:?}"))
         .collect();
-    format!("{state}\n{}\n{commands:?}", screen.join("\n"))
+    // Fixture tasks are stamped with the time they were made, so two boards
+    // built a moment apart differ only there.
+    let stamp = regex::Regex::new(r"\d{4}-\d\d-\d\dT[\d:.]+Z").unwrap();
+    let effect = format!("{state}\n{}\n{commands:?}", screen.join("\n"));
+    stamp.replace_all(&effect, "<time>").into_owned()
 }
 
 /// A tree picker over a parent epic with a child and a third epic, its
@@ -758,8 +771,8 @@ fn tree_picker_app(ns: KeyNamespace) -> App {
 
 /// The boards the effect check presses on: the gate's, with enough to move
 /// for a motion to show — a detail scrolled into its middle, a text field
-/// with words either side of its caret, three workspaces to step between and
-/// a tree with a child epic.
+/// with words either side of its caret, three workspaces to step between, a
+/// tree with a child epic and a task waiting to be moved to Done.
 fn effect_apps(binding: &KeyBinding) -> Vec<App> {
     use KeyNamespace as N;
     let ns = binding.namespace;
@@ -796,6 +809,8 @@ fn effect_apps(binding: &KeyBinding) -> Vec<App> {
                 app.input.set_buffer("main".to_string());
                 app.input.caret = 2;
             }
+            // A task waiting to be confirmed, so yes has one to move.
+            N::BoardConfirmDone => app.prompt_move_to_done(vec![TaskId(3)]),
             N::BoardPickerPlacement => {
                 app.input.workspaces = (1..=3)
                     .map(|id| crate::models::WorkspaceRef {
@@ -850,8 +865,14 @@ fn under_the_remapped_table_each_key_goes_the_way_its_row_says_on_the_board() {
                         recorded(cmds).into_iter().map(|(a, _)| a).collect()
                     };
                     if got != want || actions(&remap_cmds) != actions(&default_cmds) {
+                        let differs = got
+                            .lines()
+                            .zip(want.lines())
+                            .find(|(g, w)| g != w)
+                            .map(|(g, w)| format!("\n    got:  {g}\n    want: {w}"))
+                            .unwrap_or_default();
                         failures.push(format!(
-                            "{} {}: {key} under the remap did not do what {default_key} does by default",
+                            "{} {}: {key} under the remap did not do what {default_key} does by default{differs}",
                             ns.name(),
                             row.action
                         ));
@@ -876,9 +897,9 @@ fn under_the_remapped_table_each_key_goes_the_way_its_row_says_on_the_board() {
             .iter()
             .find(|f| action.starts_with(**f))
             .map(|f| f.to_string())
-            .unwrap_or_else(|| {
-                let other = crate::keybindings::opposite_action(action).unwrap_or_default();
-                std::cmp::min(action.to_string(), other)
+            .unwrap_or_else(|| match crate::keybindings::opposite_action(action) {
+                Some(other) => std::cmp::min(action.to_string(), other),
+                None => action.to_string(),
             });
         format!("{ns} {name}")
     };
