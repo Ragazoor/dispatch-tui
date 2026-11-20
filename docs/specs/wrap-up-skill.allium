@@ -874,11 +874,11 @@ surface WrapUpSession {
     @guarantee RefusalIsShownAsWritten
         -- A refused session_wrap-up is shown to the operator as the tool wrote it. A
         -- dirty tree is committed and session_wrap-up called again; a rebase conflict
-        -- gets suggested resolution steps and the skill stops; any other
-        -- refusal (a backlog or review-tagged task, no worktree, the main
-        -- checkout not on the base branch) stops the skill (WrapUpRefusedDirty,
-        -- WrapUpRefusedConflict, WrapUpRefusedOther). Once the cause of a
-        -- conflict is fixed, session_wrap-up is called again.
+        -- gets suggested resolution steps, and session_wrap-up is called
+        -- again once the cause is fixed; any other refusal (a backlog or
+        -- review-tagged task, no worktree, the main checkout not on the base
+        -- branch) stops the skill (WrapUpRefusedDirty, WrapUpRefusedConflict,
+        -- ConflictWasResolved, WrapUpRefusedOther).
 
     @guarantee ExitSessionNeedsAToken
         -- session_exit is called only with the token a session_wrap-up answered with. A
