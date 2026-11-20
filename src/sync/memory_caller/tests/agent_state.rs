@@ -287,6 +287,86 @@ async fn try_record_stop_flips_immediately_with_no_live_subagents() {
     );
 }
 
+/// Every hook write carries Stop's host check (module twin:
+/// `require_acting_for_task_host`): a viewer who is not the owner of the
+/// task's host is refused, and nothing changes.
+#[tokio::test]
+async fn every_hook_write_refuses_a_caller_who_does_not_own_the_tasks_host() {
+    let (caller, rows) = caller();
+    let bob = caller
+        .with_sender("bob")
+        .with_registered_host("bobs", "bob");
+    let id = bob
+        .create_task(bindings::Task {
+            host: "bobs".into(),
+            owner: "bob".into(),
+            created_by: "bob".into(),
+            ..blank_task()
+        })
+        .await
+        .unwrap();
+    bob.start_agent_for(id.0);
+    run(&bob, id).await;
+    start_subagent(&bob, id, "agent-a", "session-1").await;
+    let deferred = bob
+        .try_record_stop(id, at(TEST_STAMP), crate::models::BackgroundWork::default())
+        .await
+        .unwrap();
+    assert_eq!(deferred, Some(false));
+    let before = rows.task(id).unwrap();
+
+    let alice = bob.as_user("alice");
+    let later = at("2026-01-01 00:10:00.000");
+    for (reducer, outcome) in [
+        (
+            "record_pre_tool_use",
+            alice
+                .record_pre_tool_use(id, SubStatus::Active, later)
+                .await
+                .unwrap(),
+        ),
+        (
+            "record_notification",
+            alice
+                .record_notification(id, NotificationWrite::Raise, later)
+                .await
+                .unwrap(),
+        ),
+        (
+            "record_user_prompt_submit",
+            alice
+                .record_user_prompt_submit(id, later, later)
+                .await
+                .unwrap(),
+        ),
+        (
+            "subagent_clear_and_void_pending_stop",
+            alice
+                .subagent_clear_and_void_pending_stop(id)
+                .await
+                .unwrap(),
+        ),
+    ] {
+        assert!(!outcome.won(), "{reducer} must refuse alice");
+    }
+    assert!(alice
+        .subagent_start(id, "agent-b".into(), "session-1".into(), later)
+        .await
+        .is_err());
+    assert!(alice
+        .subagent_stop(id, "agent-a".into(), "session-1".into())
+        .await
+        .is_err());
+
+    let after = rows.task(id).unwrap();
+    assert!(after.stop_pending, "alice did not void the deferred Stop");
+    assert_eq!(after.live_subagents, 1, "alice neither counted nor drained");
+    assert_eq!(after.status, before.status);
+    assert_eq!(after.sub_status, before.sub_status);
+    assert_eq!(after.last_pre_tool_use_at, before.last_pre_tool_use_at);
+    assert_eq!(after.last_notification_at, before.last_notification_at);
+}
+
 // -- Agent session state: hooks -----------------------------------------------
 
 #[tokio::test]

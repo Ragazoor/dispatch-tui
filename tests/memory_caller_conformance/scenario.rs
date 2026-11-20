@@ -1526,6 +1526,63 @@ fn memory_caller_matches_the_real_reducers() {
             .unwrap();
         compare_task(task_id_real.0);
 
+        // Every hook write requires the caller to act for the task's host
+        // (`agent-health.allium`, "Hook-Based Status Transitions"). A host
+        // nobody registered has no owner, so both sides refuse every hook
+        // write to a task it holds, and write nothing.
+        let held = || bindings::Task {
+            host: "host-unregistered".into(),
+            ..own_task_in_epic(epic_id_real)
+        };
+        let held_real = real.create_task(held()).await.unwrap();
+        wait_for!(rows_real.task(held_real).is_some());
+        mem.align_next_task_id(held_real.0);
+        let held_mem = mem
+            .create_task(bindings::Task {
+                epic_id: epic_id_mem,
+                ..held()
+            })
+            .await
+            .unwrap();
+        compare_task(held_real.0);
+        let later = ts("2026-01-01 02:00:00.000");
+        for (caller, id) in [
+            (&real as &dyn ReducerCaller, held_real),
+            (&mem as &dyn ReducerCaller, held_mem),
+        ] {
+            let refused = [
+                caller.record_pre_tool_use(id, SubStatus::Active, later).await.unwrap(),
+                caller
+                    .record_notification(id, NotificationWrite::Raise, later)
+                    .await
+                    .unwrap(),
+                caller.record_user_prompt_submit(id, later, later).await.unwrap(),
+                caller.subagent_clear_and_void_pending_stop(id).await.unwrap(),
+            ];
+            for outcome in &refused {
+                assert!(!outcome.won(), "a hook write on a host nobody owns: {outcome:?}");
+            }
+            assert!(caller
+                .subagent_start(id, "agent-x".into(), "session-x".into(), later)
+                .await
+                .is_err());
+            assert!(caller
+                .subagent_stop(id, "agent-x".into(), "session-x".into())
+                .await
+                .is_err());
+        }
+        compare_task(held_real.0);
+        // Out of the epic's way before the scenario deletes it.
+        real.patch_task(held_real, mark_done()).await.unwrap();
+        wait_for!(rows_real
+            .task(held_real)
+            .is_some_and(|t| t.status == TaskStatus::Done));
+        mem.patch_task(held_mem, mark_done()).await.unwrap();
+        real.delete_task(held_real).await.unwrap().applied().unwrap();
+        wait_for!(rows_real.task(held_real).is_none());
+        mem.delete_task(held_mem).await.unwrap();
+        assert!(rows_mem.task(held_mem).is_none());
+
         // -- work packages (`work-packages.allium`) -----------------------------
         // `updated_at` is the store's own clock on a patch, so it is left out
         // of the comparison, on `SameEndState`'s reasoning.

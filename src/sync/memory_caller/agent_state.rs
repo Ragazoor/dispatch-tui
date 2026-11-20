@@ -195,6 +195,8 @@ impl MemoryReducerCaller {
         let task_id = task_id.0;
         let started_at = encode::subagent_started_at(started_at);
         let mut tables = self.lock();
+        self.acting_for_task_id_host(&tables, task_id)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         // A hook for a task with no current agent writes no agent fact (A15).
         let Some(owner) = module::current_agent(&self.agent_store(&mut tables), task_id) else {
             return Ok(0);
@@ -220,6 +222,8 @@ impl MemoryReducerCaller {
     ) -> Result<DrainReadBack> {
         let task_id = task_id.0;
         let mut tables = self.lock();
+        self.acting_for_task_id_host(&tables, task_id)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         Self::fence_subagent_session(&mut tables, task_id, &session_id);
         Self::delete_subagent_entry(&mut tables, task_id, &agent_id);
         self.sync_subagent_count(&mut tables, task_id)
@@ -252,6 +256,9 @@ impl MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         let task_id = task_id.0;
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for_task_id_host(&tables, task_id) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         Self::delete_all_subagents(&mut tables, task_id);
         if let Err(why) = self.sync_subagent_count(&mut tables, task_id) {
             return Ok(ReducerOutcome::Refused(why));
@@ -315,6 +322,15 @@ impl MemoryReducerCaller {
         self.acting_for(tables, &row.host)
     }
 
+    /// [`Self::acting_for_task_host`] by id; a missing task passes, and the
+    /// write it guards then finds nothing to change.
+    fn acting_for_task_id_host(&self, tables: &Tables, task_id: i64) -> Result<(), String> {
+        match tables.tasks.get(&task_id) {
+            Some(row) => self.acting_for_task_host(tables, row),
+            None => Ok(()),
+        }
+    }
+
     /// Mirrors the module's `expire_background_wait`: the same predicate,
     /// `module::background_wait_expired`, and the same flip.
     ///
@@ -362,6 +378,9 @@ impl MemoryReducerCaller {
         let Some(row) = tables.tasks.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        if let Err(why) = self.acting_for_task_host(&tables, &row) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         if row.status != RUNNING {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
@@ -389,6 +408,9 @@ impl MemoryReducerCaller {
         let Some(row) = tables.tasks.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        if let Err(why) = self.acting_for_task_host(&tables, &row) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         if row.status != RUNNING {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
@@ -449,6 +471,9 @@ impl MemoryReducerCaller {
         let Some(row) = tables.tasks.get(&id).cloned() else {
             return Ok(ReducerOutcome::Refused(format!("task {id} not found")));
         };
+        if let Err(why) = self.acting_for_task_host(&tables, &row) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         if row.status != RUNNING && row.status != REVIEW {
             return Ok(ReducerOutcome::Refused(format!(
                 "task {id} is neither running nor in review"

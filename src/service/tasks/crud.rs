@@ -896,12 +896,13 @@ impl TaskService {
     /// Clear a task's subagent entries and void any pending Stop **without**
     /// the drain path.
     ///
-    /// Three callers: crash and dispatch-claim already own the resulting status
-    /// (running the drain path there would leave a task Crashed-and-in-Review
-    /// or freshly-dispatched-and-in-Review), and `SessionStart` — where a Stop
-    /// deferred by the *previous* turn is stale by definition and must be
-    /// voided, not applied. See `ClearSubagentsOnSessionStart` in
-    /// `docs/specs/agent-health.allium`.
+    /// Two callers: a crash, which already owns the resulting status (running
+    /// the drain path there would leave a task Crashed-and-in-Review), and
+    /// `SessionStart`, where a Stop deferred by the *previous* turn is stale by
+    /// definition and must be voided, not applied. See
+    /// `ClearSubagentsOnSessionStart` in `docs/specs/agent-health.allium`.
+    /// Both come from the task's own host's board; the store refuses anyone
+    /// else (`require_acting_for_task_host`).
     ///
     /// `NotFound` for an unknown task, matching `record_subagent_event`: the
     /// hook CLI turns that into a silent skip rather than a failed tool call.

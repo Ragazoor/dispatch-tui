@@ -622,13 +622,8 @@ impl App {
             // command below) so the card does not render a pending Stop until
             // the next refresh. `DetectCrashedAgent` in
             // `docs/specs/agent-health.allium` ensures `stop_pending = false`.
-            //
-            // This used to be load-bearing: a tick reconciler read the bit off
-            // this in-memory board and would have flipped a just-Crashed task
-            // to Review. That reconciler is gone — the deferred Stop is now
-            // applied only inside the transaction that drains the count, and
-            // the no-drain clear never touches status — so nothing can produce
-            // the Crashed-and-in-Review contradiction from this bit any more.
+            // Nothing reads this copy to apply the Stop: only a StopApplied
+            // write in the store does, and the no-drain clear raises none.
             task.stop_pending = false;
         }
         if let Some(task) = self.board.find_task(id) {

@@ -354,6 +354,101 @@ fn the_hook_reducers_require_the_caller_to_act_for_the_tasks_host() {
     assert_eq!(current(&store, id).stop_pending_at, "2026-10-10 12:00:00.000");
 }
 
+/// Every hook write carries the same host check as Stop: a viewer who is not
+/// the owner of the task's host can neither pull a task back from review, nor
+/// stamp, raise, count or drain it, nor void its deferred Stop.
+#[test]
+fn every_hook_write_refuses_a_viewer_who_does_not_own_the_tasks_host() {
+    let (store, id) = running_epic_task();
+    try_stop(&store, id, "2026-10-10 12:00:00.000").expect("stop flips");
+    assert_eq!(store.task(id).status, "review");
+
+    let resumed = store.call("bob", |ctx| {
+        record_user_prompt_submit(
+            ctx,
+            id,
+            "2026-10-10 12:01:00".into(),
+            "2026-10-10 12:01:00.000".into(),
+        )
+    });
+    assert!(resumed.is_err(), "bob may not pull alice's task back to running");
+    assert_eq!(store.task(id).status, "review");
+
+    store
+        .call("alice", |ctx| {
+            record_user_prompt_submit(
+                ctx,
+                id,
+                "2026-10-10 12:02:00".into(),
+                "2026-10-10 12:02:00.000".into(),
+            )
+        })
+        .expect("the host's own board resumes it");
+    store
+        .call("alice", |ctx| {
+            subagent_start(ctx, id, "a1".into(), "s1".into(), "2026-10-10 12:03:00".into())
+        })
+        .expect("subagent_start");
+    try_stop(&store, id, "2026-10-10 12:04:00.000").expect("stop defers");
+    let before = current(&store, id);
+    let task_before = store.task(id);
+    assert!(before.stop_pending);
+    assert_eq!(before.live_subagents, 1);
+
+    let refused: [(&str, Result<(), String>); 6] = [
+        (
+            "record_pre_tool_use",
+            store.call("bob", |ctx| {
+                record_pre_tool_use(ctx, id, "active".into(), "2026-10-10 12:05:00".into())
+            }),
+        ),
+        (
+            "record_notification",
+            store.call("bob", |ctx| {
+                record_notification(ctx, id, "raise".into(), "2026-10-10 12:05:00".into())
+            }),
+        ),
+        (
+            "record_user_prompt_submit",
+            store.call("bob", |ctx| {
+                record_user_prompt_submit(
+                    ctx,
+                    id,
+                    "2026-10-10 12:05:00".into(),
+                    "2026-10-10 12:05:00.000".into(),
+                )
+            }),
+        ),
+        (
+            "subagent_start",
+            store.call("bob", |ctx| {
+                subagent_start(ctx, id, "b1".into(), "s1".into(), "2026-10-10 12:05:00".into())
+            }),
+        ),
+        (
+            // An agent id with no entry: the call would delete nothing.
+            "subagent_stop",
+            store.call("bob", |ctx| subagent_stop(ctx, id, "b9".into(), "s1".into())),
+        ),
+        (
+            "subagent_clear_and_void_pending_stop",
+            store.call("bob", |ctx| subagent_clear_and_void_pending_stop(ctx, id)),
+        ),
+    ];
+    for (reducer, outcome) in refused {
+        assert!(outcome.is_err(), "{reducer} must refuse bob");
+    }
+    let after = current(&store, id);
+    assert!(after.stop_pending, "bob did not void the deferred Stop");
+    assert_eq!(after.stop_pending_at, before.stop_pending_at);
+    assert_eq!(after.live_subagents, 1, "bob neither counted nor drained");
+    assert_eq!(after.last_pre_tool_use_at, before.last_pre_tool_use_at);
+    assert_eq!(after.last_notification_at, before.last_notification_at);
+    let task_after = store.task(id);
+    assert_eq!(task_after.status, task_before.status);
+    assert_eq!(task_after.sub_status, task_before.sub_status);
+}
+
 #[test]
 fn background_wait_cutoff_is_the_cap_before_now() {
     assert_eq!(BACKGROUND_WAIT_CAP, chrono::Duration::minutes(30));

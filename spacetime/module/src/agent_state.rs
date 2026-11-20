@@ -366,9 +366,10 @@ pub fn subagent_start(
     started_at: String,
 ) -> Result<(), String> {
     // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    if visible_task(ctx, task_id).is_none() {
+    let Some(row) = visible_task(ctx, task_id) else {
         return Ok(());
-    }
+    };
+    require_acting_for_task_host(ctx, &row)?;
     // A hook for a task with no current agent writes no agent fact (A15).
     let Some(owner) = current_agent(&AgentTables(ctx), task_id) else {
         return Ok(());
@@ -398,9 +399,10 @@ pub fn subagent_stop(
     session_id: String,
 ) -> Result<(), String> {
     // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    if visible_task(ctx, task_id).is_none() {
+    let Some(row) = visible_task(ctx, task_id) else {
         return Ok(());
-    }
+    };
+    require_acting_for_task_host(ctx, &row)?;
     fence_subagent_session(ctx, task_id, &session_id);
     delete_subagent_entry(ctx, task_id, &agent_id);
     sync_subagent_count(ctx, task_id)?;
@@ -432,19 +434,21 @@ pub fn subagent_clear(ctx: &ReducerContext, task_id: i64) -> Result<(), String> 
 }
 
 /// [`subagent_clear`] minus the drain, plus voiding `stop_pending`
-/// unconditionally. For the three non-draining clear points — `SessionStart`
-/// (`ClearSubagentsOnSessionStart`), crash and dispatch-claim — which void a
-/// deferred Stop rather than apply it. A missing task is a silent no-op for
-/// the `stop_pending` write, matching the SQL's `UPDATE ... WHERE id = ?`.
+/// unconditionally. For the two non-draining clear points — `SessionStart`
+/// (`ClearSubagentsOnSessionStart`) and a crash (`DetectCrashedAgent`) —
+/// which void a deferred Stop rather than apply it. Both come from the task's
+/// own host's board, so the caller must act for that host, as every hook
+/// write must. A missing task writes nothing.
 #[spacetimedb::reducer]
 pub fn subagent_clear_and_void_pending_stop(
     ctx: &ReducerContext,
     task_id: i64,
 ) -> Result<(), String> {
     // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    if visible_task(ctx, task_id).is_none() {
+    let Some(row) = visible_task(ctx, task_id) else {
         return Ok(());
-    }
+    };
+    require_acting_for_task_host(ctx, &row)?;
     delete_all_subagents(ctx, task_id);
     sync_subagent_count(ctx, task_id)?;
     update_current_agent(&mut AgentTables(ctx), task_id, |agent| Agent {
@@ -498,9 +502,11 @@ pub fn try_record_stop(
 }
 
 /// An agent's hooks reach the store through its own host's board, so only
-/// the owner of the task's host may record its Stop or end its wait. A task no
-/// host holds (empty `host`) has no agent to protect and is answered by any
-/// board, as the board's own `is_locally_owned` reads it.
+/// the owner of the task's host may write what a hook writes: its activity
+/// stamps, notifications, prompts, subagents and Stop, and the end of its
+/// wait. A task no host holds (empty `host`) has no agent to protect and is
+/// answered by any board, as the board's own `is_locally_owned` reads it.
+/// `agent-health.allium`, "Hook-Based Status Transitions".
 fn require_acting_for_task_host(ctx: &ReducerContext, row: &Task) -> Result<(), String> {
     if row.host.is_empty() {
         return Ok(());
@@ -583,6 +589,7 @@ pub fn record_pre_tool_use(
     let Some(row) = visible_task(ctx, id) else {
         return Ok(());
     };
+    require_acting_for_task_host(ctx, &row)?;
     if row.status != RUNNING {
         return Ok(());
     }
@@ -615,6 +622,7 @@ pub fn record_notification(
     let Some(row) = visible_task(ctx, id) else {
         return Ok(());
     };
+    require_acting_for_task_host(ctx, &row)?;
     if row.status != RUNNING {
         return Ok(());
     }
@@ -690,6 +698,7 @@ pub fn record_user_prompt_submit(
     let Some(row) = visible_task(ctx, id) else {
         return Err(format!("task {id} not found"));
     };
+    require_acting_for_task_host(ctx, &row)?;
     if row.status != RUNNING && row.status != REVIEW {
         return Err(format!("task {id} is neither running nor in review"));
     }
