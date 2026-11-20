@@ -125,9 +125,7 @@ rule AssignAgentOnTaskCreated {
     ensures: core/Agent.created(
         task: task,
         name: name,
-        state: assigned,
-        live_subagents: 0,
-        stop_pending: false
+        state: assigned
     )
 
     @guidance
@@ -180,7 +178,6 @@ rule StartAgentOnFreshLaunch {
             waiting.host = requester
             waiting.start_mode = start_mode
             waiting.started_at = now
-            waiting.tmux_window = null
             waiting.last_pre_tool_use_at = now
         else:
             core/Agent.created(
@@ -191,9 +188,7 @@ rule StartAgentOnFreshLaunch {
                 state: current,
                 started_at: now,
                 tmux_window: null,
-                last_pre_tool_use_at: now,
-                live_subagents: 0,
-                stop_pending: false
+                last_pre_tool_use_at: now
             )
 
     @guidance
@@ -234,9 +229,10 @@ rule StartAgentOnFreshLaunch {
 -- the failure leaves the task with no worktree: the release applies (the task
 -- is still the bare claim, running with no worktree), or the operator already
 -- moved the claim on to backlog or done (store-split.allium:
--- GivingUpTheLaunchCancelsTheDispatch, CloseFailsOpenRequests). A request that fails after its task got a worktree
--- (a dispatch that reused a kept one) leaves the agent current, because the
--- worktree it works in is still there.
+-- GivingUpTheLaunchCancelsTheDispatch, CloseFailsOpenRequests). A request
+-- that fails after its task got a worktree (a dispatch that reused a kept
+-- one) leaves the agent current, because the worktree it works in is still
+-- there.
 rule EndAgentWhenLaunchFails {
     when: store_split/FailedDispatchLeftNoWorktree(task)
 
@@ -329,9 +325,7 @@ rule BackfillCurrentAgents {
             core/Agent.created(
                 task: t,
                 name: fresh_agent_name(),
-                state: assigned,
-                live_subagents: 0,
-                stop_pending: false
+                state: assigned
             )
 
     @guidance
@@ -360,6 +354,7 @@ rule AgentSessionIsNamedAfterTheAgent {
 
     requires: exists agent
 
+    -- observable output; no rule listens
     ensures: LaunchedWithSessionName(task: task, session_name: agent.name)
 }
 
@@ -367,8 +362,8 @@ rule AgentSessionIsNamedAfterTheAgent {
 --
 -- The argument is read as an id when it is all digits. Anything else is looked
 -- up as an agent name, assigned, current or ended, and resolves to that
--- agent's task. A
--- name that names no agent is the same "not found" an unknown id is.
+-- agent's task. A name that names no agent is the same "not found" an
+-- unknown id is.
 rule AgentNameResolvesToTask {
     when: McpToolCalled(task_ref)
 
@@ -378,8 +373,10 @@ rule AgentNameResolvesToTask {
 
     ensures:
         if exists agent:
+            -- observable output; no rule listens
             ResolvedTo(task: agent.task)
         else:
+            -- observable output; no rule listens
             NotFound(reference: task_ref)
 }
 
@@ -497,8 +494,9 @@ surface AgentIdentity {
         -- A resume continues the current agent and never starts one, so the
         -- name a client saw before the resume is the name after it (A2, A7).
         -- Only AssignAgentOnTaskCreated, StartAgentOnFreshLaunch and
-        -- BackfillCurrentAgents create an agent, and a resume (dispatch.allium: ResumeTask, RetryResume)
-        -- emits no DispatchRequested. The resume's window write lands on the
+        -- BackfillCurrentAgents create an agent, and a resume
+        -- (dispatch.allium: ResumeTask, RetryResume) emits no
+        -- DispatchRequested. The resume's window write lands on the
         -- current agent's window: that write is what brings the agent back.
         -- A task with no current agent has nothing to resume into;
         -- ResumeTask's own worktree requirement refuses that case
@@ -547,7 +545,7 @@ surface NamesForPeople {
         -- otherwise give a bare id — task_create, task_update (one, several, done),
         -- epic_update, task_dispatch, task_resume, session_wrap-up, session_exit,
         -- and the work-package replies and their item lists — and the rows
-        -- that name a parent by id alone (epic_search' `(parent:<id>)`).
+        -- that name a parent by id alone (in epic_search, `(parent:<id>)`).
         -- Work-package task items show their display name. The exact reply
         -- strings are in mcp-task-tools.allium, epics.allium and
         -- work-packages.allium. Epic titles are not unique, and a tool never
