@@ -14,9 +14,9 @@
 --           next agent; the fix-or-file split and the done-path exception; the
 --           two tags it files; the root cause that lies outside the repo; the
 --           report and the return to the calling skill.
--- Excludes: where the skill sits in a wrap-up and what refuses a dirty tree
---           (pr-workflow.allium: WrapUpDone, WrapUpPr, WrapUpRebase;
---           mcp-task-tools.allium: WrapUpRefusesUnfinishedWork, which holds a
+-- Excludes: where the skill sits in a wrap-up (wrap-up-skill.allium:
+--           RunRetro) and what refuses a dirty tree
+--           (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork, which holds a
 --           retro fix to the commit but cannot tell whether retro ran); that
 --           a retro task sorts after planned subtasks (epics.allium:
 --           AutoDispatchNextSubtask); how the skill's copy reaches an agent
@@ -46,8 +46,8 @@
 --     worktree that is then removed. A task survives it. Retro therefore
 --     files and never fixes there.
 --   - Retro files bug and chore and nothing else. A speculative refactor or
---     an enhancement idea is a hypothetical, not a finding, and every retro
---     task that was archived had that shape.
+--     an enhancement idea is a hypothetical, not a finding, and it
+--     is not filed.
 --   - A workaround in the repo's docs treats the symptom. When the cause is
 --     the tool or environment running the agent, the defect stays open until
 --     someone files it, and only the repo that owns it may be filed into
@@ -73,11 +73,8 @@ enum ContextSurface {
 -- What a moment led to.
 enum Disposition { fixed | filed | flagged | recorded | dropped }
 
--- The only tags retro files with.
-enum RetroTag { bug | chore }
-
 ------------------------------------------------------------
--- Entities
+-- Entities and Variants
 ------------------------------------------------------------
 
 -- One run of the skill, at the end of one task's work.
@@ -140,7 +137,8 @@ entity Moment {
     is_reusable_convention: Boolean
 
     disposition: Disposition?
-    tag: RetroTag?
+    -- Only bug or chore (OnlyBugAndChoreAreTags).
+    tag: core/TaskTag?
 
     -- Fixable in place: an editable surface, made wrong or proved wrong this session,
     -- small and needing no judgement. A spec edit is allowed only for
@@ -155,6 +153,9 @@ entity Moment {
         and is_small_and_evident
         and not needs_judgement
         and not describes_unimplemented_behaviour
+
+    -- The cause lies in a tool or environment another repo owns.
+    has_foreign_root_cause: root_cause_outside_repo and not owned_by_this_repo
 
     -- A moment retro may act on at all.
     is_admitted: next_agent_would_do_better
@@ -188,8 +189,8 @@ rule StartRetro {
 
     @guidance
         -- Invoked by the /wrap-up skill after the action is settled and
-        -- before its commit step (pr-workflow.allium and mcp-task-tools.allium
-        -- hold the order); the operator may also run /retro or ask for a
+        -- before its commit step (wrap-up-skill.allium: RunRetro holds the
+        -- order); the operator may also run /retro or ask for a
         -- session retrospective. The invocation carries the action; when it
         -- does not, the action is read from wrap_up_mode in task_search, and
         -- when that does not say either, the agent asks
@@ -224,7 +225,7 @@ rule LookForMoments {
 }
 
 rule LookingDone {
-    when: retro: Retrospective.created
+    when: LookingFinished(retro)
 
     requires: retro.stage = looking
 
@@ -301,8 +302,7 @@ rule FileInsteadOfFixing {
             or not moment.is_fixable_in_place
             or moment.is_unfixed_defect
         requires: not moment.is_reusable_convention
-        requires: not moment.root_cause_outside_repo
-            or moment.owned_by_this_repo
+        requires: not moment.has_foreign_root_cause
 
         ensures: moment.disposition = filed
         ensures: moment.tag = if moment.is_unfixed_defect: bug else: chore
@@ -340,8 +340,7 @@ rule FlagForeignRootCause {
     for moment in retro.moments:
         requires: moment.is_admitted
         requires: moment.disposition = null
-        requires: moment.root_cause_outside_repo
-        requires: not moment.owned_by_this_repo
+        requires: moment.has_foreign_root_cause
 
         ensures: moment.disposition = flagged
         ensures: RootCauseFlagged(event: moment.event)
@@ -360,18 +359,22 @@ rule RecordLearning {
 
     for moment in retro.moments:
         requires: moment.is_admitted
-        requires: moment.disposition = null
         requires: moment.is_reusable_convention
 
-        ensures: moment.disposition = recorded
         ensures: LearningRecorded(event: moment.event)
+        ensures:
+            if not moment.has_foreign_root_cause:
+                moment.disposition = recorded
 
     @guidance
         -- A reusable pitfall, convention or preference — a design or style
         -- choice the operator corrected or confirmed — is recorded with
         -- learning_record at once, without waiting to be asked
         -- (LearningsAreRecordedWithoutBeingAsked). The learnings skill owns
-        -- how.
+        -- how. A convention whose root cause lies in another repo's tool is
+        -- still recorded, but the moment is flagged, not recorded: the
+        -- foreign root cause wins the disposition (FlagForeignRootCause,
+        -- RootCauseOutsideTheRepoIsNotClosedByAWorkaround).
 }
 
 -- == Step 4: report ==
@@ -424,8 +427,7 @@ invariant OnlyBugAndChoreAreTags {
 -- that repo's board by retro.
 invariant ForeignRootCauseIsNeverFiled {
     for moment in Moments:
-        (moment.root_cause_outside_repo and not moment.owned_by_this_repo)
-            implies moment.disposition != filed
+        moment.has_foreign_root_cause implies moment.disposition != filed
 }
 
 ------------------------------------------------------------
@@ -458,6 +460,7 @@ surface RetroSession {
 
     provides:
         MomentNoticed(retro, event) when retro.stage = looking
+        LookingFinished(retro) when retro.stage = looking
 
     @guarantee AnnouncesItself
         -- The skill says "I'm using the retro skill to run a session

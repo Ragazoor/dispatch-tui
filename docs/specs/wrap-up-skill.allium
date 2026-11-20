@@ -33,10 +33,9 @@
 --     shared branch, the pr path opens a PR under the operator's identity and
 --     done integrates nothing, so the skill never picks one for itself. An
 --     argument or a preset wrap_up_mode is the operator's earlier answer.
---   - A preset answer is not a pause. A skill that skipped the question and
---     then stopped left agents idle at a blank prompt with the branch
---     unmerged and the task still running, so every step after the answer
---     runs without further input.
+--   - A preset answer is not a pause. A pause leaves the branch unmerged and
+--     the task running, so every step after the answer runs without further
+--     input.
 --   - The retro runs after the path is settled (on done a fix would be
 --     stranded, so the retro files a task instead) and before the commit (so
 --     its fixes travel with the work).
@@ -59,6 +58,7 @@
 --     references/, loaded only by the branch that needs them.
 
 use "./core.allium" as core
+use "./retro-skill.allium" as retro
 
 ------------------------------------------------------------
 -- Enumerations
@@ -67,8 +67,14 @@ use "./core.allium" as core
 -- Where the settled path came from.
 enum ActionSource { argument | preset_mode | operator_choice }
 
+-- Why session_wrap-up refused.
+enum WrapUpRefusal { uncommitted_changes | rebase_conflict | other }
+
+-- How session_exit answered.
+enum ExitOutcome { closed | no_active_session | not_taken_effect | token_refused | action_mismatch }
+
 ------------------------------------------------------------
--- Entities
+-- Entities and Variants
 ------------------------------------------------------------
 
 -- One run of the skill, for one task, in that task's worktree.
@@ -99,6 +105,10 @@ entity WrapUp {
     -- task_search's "Wrap-up: refused" reason; printed only for a task that
     -- cannot be wrapped up.
     refusal: String?
+    -- Why the latest session_wrap-up call was refused.
+    last_refusal: WrapUpRefusal?
+    -- How the latest session_exit call answered.
+    exit_outcome: ExitOutcome?
     -- The PR the agent created, on the pr path only.
     pr_url: String?
     -- Times the skill has invoked the retro.
@@ -117,19 +127,18 @@ entity WrapUp {
         simplified -> cancelled
         settled -> retro_done
         retro_done -> verified
+        retro_done -> stopped
         verified -> committed
         committed -> wrap_up_asked
         committed -> pr_ready
         committed -> stopped
         pr_ready -> wrap_up_asked
-        pr_ready -> stopped
         wrap_up_asked -> committed
         wrap_up_asked -> closing
         wrap_up_asked -> stopped
         closing -> wrap_up_asked
         closing -> closed
         closing -> stopped
-        retro_done -> stopped
         terminal: closed, stopped, cancelled
     }
 
@@ -150,6 +159,8 @@ entity WrapUp {
 config {
     -- What the skill says first.
     announcement: String = "I'm using the wrap-up skill to complete this task."
+    -- What the skill says when the branch has no task ID.
+    unnamed_branch_message: String = "This branch doesn't follow the dispatch naming convention ({id}-{slug}). Cannot determine task ID."
     -- The base branch when task_search prints none.
     default_base_branch: String = "main"
     -- At or above this many changed source lines the skill runs simplify.
@@ -178,6 +189,8 @@ rule StartWrapUp {
         worktree_clean: false,
         exit_token: null,
         refusal: null,
+        last_refusal: null,
+        exit_outcome: null,
         pr_url: null,
         retro_runs: 0,
         exit_calls: 0,
@@ -198,7 +211,7 @@ rule RefuseUnnamedBranch {
 
     requires: not follows_naming_convention(current_branch())
 
-    ensures: BranchNameRefused(text: "This branch doesn't follow the dispatch naming convention ({id}-{slug}). Cannot determine task ID.")
+    ensures: BranchNameRefused(text: config.unnamed_branch_message)
     ensures: run.stage = stopped
 
     @guidance
@@ -337,7 +350,7 @@ rule OperatorCancelled {
 rule RunRetro {
     when: run: WrapUp.stage transitions_to settled
 
-    ensures: RetroInvoked(run: run, action: run.action)
+    ensures: retro/RetroRequested(action: run.action)
     ensures: run.retro_runs = run.retro_runs + 1
     ensures: run.stage = retro_done
 
@@ -356,10 +369,9 @@ rule VerifyBeforeCommit {
     ensures:
         if run.needs_verify:
             VerifyCommandRun(run: run, command: run.verify_command)
-            and run.verify_passed = true
         else:
             run.verify_passed = true
-    ensures: run.stage = verified
+            run.stage = verified
 
     @guidance
         -- When task_search printed a "Verify command:" line and the path is
@@ -372,6 +384,20 @@ rule VerifyBeforeCommit {
         -- change did not cause, including a broken main, the agent does not
         -- wrap up past it alone: it coordinates with other agents and the
         -- board, as the repo's CLAUDE.md says (VerifyFailureIsNotWrappedPast).
+}
+
+rule VerifyPassedOnTheAgentsRun {
+    when: VerifyPassed(run)
+
+    requires: run.stage = retro_done
+    requires: run.needs_verify
+
+    ensures: run.verify_passed = true
+    ensures: run.stage = verified
+
+    @guidance
+        -- The agent ran the command in its worktree and it passed, possibly
+        -- after it fixed a failure (VerifyBeforeWrapUp).
 }
 
 rule VerifyFailedForOtherReasons {
@@ -397,7 +423,7 @@ rule CommitRemainingChanges {
     ensures:
         if not run.worktree_clean:
             ChangesCommitted(run: run)
-            and run.worktree_clean = true
+            run.worktree_clean = true
     ensures: run.stage = committed
 
     @guidance
@@ -462,7 +488,6 @@ rule RateKnowledgeAndWrapUp {
     requires: run.verify_passed
 
     ensures: KnowledgeRated(run: run)
-    ensures: WrapUpAsked(run: run, task_id: run.task_id, action: run.action)
     ensures: run.stage = wrap_up_asked
 
     @guidance
@@ -478,11 +503,21 @@ rule RateKnowledgeAndWrapUpWithPr {
     when: run: WrapUp.stage transitions_to pr_ready
 
     ensures: KnowledgeRated(run: run)
-    ensures: WrapUpAsked(run: run, task_id: run.task_id, action: run.action)
     ensures: run.stage = wrap_up_asked
 
     @guidance
         -- As RateKnowledgeAndWrapUp, once the PR exists.
+}
+
+rule AskDispatchToWrapUp {
+    when: run: WrapUp.stage transitions_to wrap_up_asked
+
+    ensures: WrapUpAsked(run: run, task_id: run.task_id, action: run.action)
+
+    @guidance
+        -- session_wrap-up is called with the task and the action. This runs
+        -- on every way into the stage: after the rating, and again after a
+        -- session_exit that refused its token.
 }
 
 rule WrapUpAnswered {
@@ -505,6 +540,7 @@ rule WrapUpRefusedDirty {
     requires: run.stage = wrap_up_asked
     requires: reason = uncommitted_changes
 
+    ensures: run.last_refusal = reason
     ensures: RefusalShown(run: run, text: exact_message(reason))
     ensures: ChangesCommitted(run: run)
     ensures: run.stage = committed
@@ -521,13 +557,27 @@ rule WrapUpRefusedConflict {
     requires: run.stage = wrap_up_asked
     requires: reason = rebase_conflict
 
+    ensures: run.last_refusal = reason
     ensures: RefusalShown(run: run, text: exact_message(reason))
     ensures: ResolutionStepsSuggested(run: run)
 
     @guidance
         -- The agent shows the exact message and suggests steps to resolve
         -- the conflict, and calls session_wrap-up again once it is resolved
-        -- (WrapUpAnswered; RefusalIsShownAsWritten).
+        -- (ConflictWasResolved; RefusalIsShownAsWritten).
+}
+
+rule ConflictWasResolved {
+    when: ConflictResolved(run)
+
+    requires: run.stage = wrap_up_asked
+    requires: run.last_refusal = rebase_conflict
+
+    ensures: WrapUpAsked(run: run, task_id: run.task_id, action: run.action)
+
+    @guidance
+        -- The cause of the conflict is fixed, so session_wrap-up is called
+        -- again with the same task and action. No new rating is needed.
 }
 
 rule WrapUpRefusedOther {
@@ -536,6 +586,7 @@ rule WrapUpRefusedOther {
     requires: run.stage = wrap_up_asked
     requires: reason = other
 
+    ensures: run.last_refusal = reason
     ensures: RefusalShown(run: run, text: exact_message(reason))
     ensures: run.stage = stopped
 
@@ -575,6 +626,7 @@ rule ExitSessionClosed {
     requires: run.stage = closing
     requires: outcome in {closed, no_active_session}
 
+    ensures: run.exit_outcome = outcome
     ensures: run.stage = closed
 
     @guidance
@@ -589,6 +641,7 @@ rule ExitSessionDidNotTakeEffect {
     requires: run.stage = closing
     requires: outcome = not_taken_effect
 
+    ensures: run.exit_outcome = outcome
     ensures: ExitSessionCalled(
         task_id: run.task_id,
         token: run.exit_token,
@@ -611,6 +664,7 @@ rule ExitSessionTokenRefused {
     requires: run.stage = closing
     requires: outcome = token_refused
 
+    ensures: run.exit_outcome = outcome
     ensures: run.stage = wrap_up_asked
 
     @guidance
@@ -625,6 +679,7 @@ rule ExitSessionActionMismatch {
     requires: run.stage = closing
     requires: outcome = action_mismatch
 
+    ensures: run.exit_outcome = outcome
     ensures: RefusalShown(run: run, text: exact_message(outcome))
     ensures: run.stage = stopped
 
@@ -685,8 +740,10 @@ surface WrapUpToolAnswers {
     provides:
         WrapUpReturnedToken(run, token) when run.stage = wrap_up_asked
         WrapUpRefused(run, reason) when run.stage = wrap_up_asked
+        ConflictResolved(run) when run.stage = wrap_up_asked and run.last_refusal = rebase_conflict
         ExitSessionReturned(run, outcome) when run.stage = closing
-        VerifyFailedNotByTheChange(run) when run.stage = retro_done
+        VerifyPassed(run) when run.stage = retro_done and run.needs_verify
+        VerifyFailedNotByTheChange(run) when run.stage = retro_done and run.needs_verify
         DraftPrOpened(run, url) when run.stage = committed
         PushWasRejected(run) when run.stage = committed
 
@@ -746,9 +803,9 @@ surface WrapUpSession {
         -- An argument or a preset wrap_up_mode is an answer given earlier,
         -- not a pause. Everything after it runs without further input and the
         -- skill does not stop before session_exit returns, including after the
-        -- simplify skill's summary. The failure is silent: agents went idle at
-        -- a blank prompt with the branch unmerged and the task stuck in
-        -- running (SimplifyLargeChange, UsePresetPath).
+        -- simplify skill's summary. The failure is silent: a pause leaves the
+        -- agent idle at a blank prompt with the branch unmerged and the task
+        -- stuck in running (SimplifyLargeChange, UsePresetPath).
 
     @guarantee SimplifyOnlyForLargeChanges
         -- The simplify skill runs only when the changed source lines, committed
@@ -841,7 +898,8 @@ surface WrapUpSession {
         -- valid, so session_exit is called again and session_wrap-up is not, unless the
         -- error says the token is missing or invalid, when session_wrap-up is called
         -- again for a fresh one. "has no active session" counts as already
-        -- wrapped up (pr-workflow.allium: ExitSession; CloseSession,
+        -- wrapped up. A missing or empty pr_url on the pr path is passed
+        -- again with the URL captured at creation (pr-workflow.allium: ExitSession; CloseSession,
         -- ExitSessionDidNotTakeEffect, ExitSessionTokenRefused,
         -- ExitSessionClosed).
 
@@ -849,7 +907,7 @@ surface WrapUpSession {
         -- On the pr path the agent writes the PR itself, from its own diff: a
         -- title and a body that describe the work actually shipped, then
         -- `gh pr create --draft`. Dispatch neither pushes nor authors it, and
-        -- the PR URL travels with session_exit, never with update_task
+        -- the PR URL travels with session_exit, never with task_update
         -- (pr-workflow.allium: WrapUpPr; CloseSession).
 
     @guarantee PrBodyIsWrittenForAReviewer
@@ -857,7 +915,9 @@ surface WrapUpSession {
         -- Summary heading. It opens with the situation and the consequence
         -- because the review feed shows only the first 500 characters, is short
         -- prose and not bullet lists, and passes the test of a reviewer parsing
-        -- it in under a minute. It never references the dispatch task, whose
+        -- it in under a minute. Notes meant for a reviewing agent go in an
+        -- HTML comment at the end of the body, out of GitHub's rendered
+        -- preview. It never references the dispatch task, whose
         -- number GitHub would link to an unrelated issue, and carries a Test
         -- plan only for a dangerous or breaking change (PrPathIsAuthoredByTheAgent).
 

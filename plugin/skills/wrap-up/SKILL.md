@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: Use to finish a dispatch task and close its session, when the work is done and the user says to wrap up, finish or close out. The user chooses the path first (rebase, draft PR, or done); it then runs the retro, verifies, commits and calls session_wrap-up. Always use this, never retro or a hand-called session_wrap-up/exit_session, to finish a task.
+description: Use to finish a dispatch task and close its session, when the work is done and the user says to wrap up, finish or close out. The user chooses the path first (rebase, draft PR, or done); it then runs the retro, verifies, commits and calls session_wrap-up. Always use this, never retro or a hand-called session_wrap-up/session_exit, to finish a task.
 ---
 
 # Wrap Up
