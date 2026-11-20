@@ -1544,12 +1544,26 @@ fn memory_caller_matches_the_real_reducers() {
             })
             .await
             .unwrap();
+        // Running, so Stop's refusal is the host check and not the status.
+        real.patch_task(held_real, run()).await.unwrap().applied().unwrap();
+        wait_for!(rows_real
+            .task(held_real)
+            .is_some_and(|t| t.status == TaskStatus::Running));
+        mem.patch_task(held_mem, run()).await.unwrap().applied().unwrap();
         compare_task(held_real.0);
         let later = ts("2026-01-01 02:00:00.000");
         for (caller, id) in [
             (&real as &dyn ReducerCaller, held_real),
             (&mem as &dyn ReducerCaller, held_mem),
         ] {
+            // Stop reads a refusal as a no-op (`None`), on both sides.
+            assert_eq!(
+                caller
+                    .try_record_stop(id, later, dispatch_tui::models::BackgroundWork::default())
+                    .await
+                    .unwrap(),
+                None
+            );
             let refused = [
                 caller.record_pre_tool_use(id, SubStatus::Active, later).await.unwrap(),
                 caller

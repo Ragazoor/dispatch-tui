@@ -369,16 +369,19 @@ rule ToggleNotifications {
 -- startup.allium).
 --
 -- An agent's hooks reach the store through its own host's board, so every
--- hook write requires that the caller owns the task's host
+-- write a rule in this section makes requires that the caller owns the
+-- task's host
 -- (`task.host = null or task.host.owner = caller()`): another viewer can
 -- neither move a person's task between running and review, nor raise or
 -- clear its needs_input, nor count, drain or void its subagents and deferred
 -- Stop. A task no host holds has no agent to protect and is answered by any
 -- board, as the board's own is_locally_owned reads it. The store refuses a
--- foreign caller's write (spacetime/module/src/agent_state.rs::require_acting_for_task_host);
--- the hook reports the refusal as RejectedEventIsDroppedToo says: it exits
--- non-zero, which Claude Code shows as a non-blocking hook error, and the
--- agent's own tool call or turn goes on.
+-- foreign caller's write in every case (spacetime/module/src/agent_state.rs::require_acting_for_task_host).
+-- What the hook command then reports differs. Stop and UserPromptSubmit
+-- read any refusal as a no-op, the same as a task that is not running, so
+-- the hook exits 0. The others report it as RejectedEventIsDroppedToo says:
+-- the hook exits non-zero, which Claude Code shows as a non-blocking hook
+-- error, and the agent's own tool call or turn goes on.
 
 rule HookPreToolUse {
     when: PreToolUse(task) or PostToolUse(task)

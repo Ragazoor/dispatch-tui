@@ -287,8 +287,11 @@ impl MemoryReducerCaller {
         if row.status != RUNNING {
             return Ok(None);
         }
-        self.acting_for_task_host(&tables, &row)
-            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        // The live store reads every refusal as `None`
+        // (`sdk_connector::outcome::flag_or_refused`), the host check's too.
+        if self.acting_for_task_host(&tables, &row).is_err() {
+            return Ok(None);
+        }
         let background = module::BackgroundWork::from(background);
         // No current agent holds no subagents and no background work: the
         // Stop flips at once (A15).

@@ -28,7 +28,7 @@ pub(crate) fn delete_agent_state_for(ctx: &ReducerContext, task_id: i64) {
 /// Upsert this machine's row into the shared host registry.
 ///
 /// Decided on task #4907, not assumed: `ensure_host_identity`/`rename_host`/
-/// `adopt_user_identity` (`src/db/queries/settings.rs`) keep writing the
+/// `adopt_user_identity` (`src/store/queries/settings.rs`) keep writing the
 /// LOCAL settings row unconditionally, connected or not — that write is the
 /// durable identity credential, not a shared table with one copy, so it is
 /// deliberately NOT routed through `SharedWriter` the way every other method
@@ -215,10 +215,8 @@ pub fn override_poll_owner(
 
 //
 // The denormalised counters (`live_subagents`, `stop_pending`) and the
-// `task_subagents` table that backs them. Mirrors
-// `src/db/queries/{subagents,tasks}.rs` — see `docs/specs/
-// agent-health.allium` for the guarantees these reproduce; nothing here
-// changes what a hook does, only where the counting happens.
+// `task_subagents` table that backs them. See `docs/specs/
+// agent-health.allium` for the guarantees these hold.
 //
 // EVENT TIME, NOT WRITE TIME. `last_pre_tool_use_at`, `last_notification_at`
 // and `stop_pending_at` are the CLIENT's clock — the instant the hook fired —
@@ -249,9 +247,7 @@ pub fn override_poll_owner(
 // (docs/plans/2026-09-21-phase-6b-agent-session-state-reducers.md), decision 3.
 
 /// Recompute `live_subagents` from `task_subagents` and write it, if the task
-/// still exists. Mirrors `src/db/queries/subagents.rs::sync_count`. A missing
-/// task is a silent no-op, matching the SQL `UPDATE ... WHERE id = ?` that
-/// simply touches zero rows.
+/// still exists. A missing task writes nothing.
 pub(crate) fn sync_subagent_count(ctx: &ReducerContext, task_id: i64) -> Result<i64, String> {
     let count = ctx.db.task_subagents().task_id().filter(&task_id).count() as i64;
     // On the task's current agent (`agents.allium`, A4); none, no write.
@@ -263,8 +259,7 @@ pub(crate) fn sync_subagent_count(ctx: &ReducerContext, task_id: i64) -> Result<
 }
 
 /// Evict `task_subagents` rows for `task_id` whose `session_id` differs from
-/// `incoming`. Mirrors `subagents.rs::fence_session` / `agent-health.allium:
-/// SubagentSessionFence`.
+/// `incoming` (`agent-health.allium: SubagentSessionFence`).
 pub(crate) fn fence_subagent_session(ctx: &ReducerContext, task_id: i64, incoming: &str) {
     for row in ctx
         .db
@@ -279,12 +274,11 @@ pub(crate) fn fence_subagent_session(ctx: &ReducerContext, task_id: i64, incomin
 }
 
 /// Apply a deferred `Stop` if this write is the one that drained the last
-/// subagent. Mirrors `src/db/queries/mod.rs::apply_pending_stop_if_drained`
-/// — the SAME shared predicate `subagent_stop` and `subagent_clear` both
-/// route through below.
+/// subagent: the one shared predicate `subagent_stop` and `subagent_clear`
+/// both route through below.
 ///
 /// `last_pre_tool_use_at`/`last_notification_at` are cleared to the module's
-/// empty-string sentinel, matching `STOP_FLIP_SET`'s `NULL`.
+/// empty-string sentinel.
 pub(crate) fn apply_pending_stop_if_drained(
     ctx: &ReducerContext,
     task_id: i64,
@@ -354,8 +348,7 @@ pub(crate) fn delete_all_subagents(ctx: &ReducerContext, task_id: i64) {
 }
 
 /// `HookSubagentStart` in `docs/specs/agent-health.allium`. `started_at` is
-/// the client's clock, stored verbatim (RFC 3339, matching
-/// `subagents.rs::subagent_start`'s `now.to_rfc3339()`) — this column is never
+/// the client's clock, stored verbatim (RFC 3339) — this column is never
 /// compared across rows, so it carries no format requirement of its own.
 #[spacetimedb::reducer]
 pub fn subagent_start(
