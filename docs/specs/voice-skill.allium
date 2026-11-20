@@ -154,7 +154,9 @@ rule ShowDraft {
     ensures: draft.stage = awaiting_final
 
     @guidance
-        -- What the message is about comes from the request or the
+        -- The draft matches the samples, measured by how they open, the
+        -- length and rhythm of sentences and what they never do. What the
+        -- message is about comes from the request or the
         -- conversation; when that is not enough, the skill asks one
         -- question first.
         -- The draft is shown in the chat and nowhere else. The skill never
@@ -326,7 +328,8 @@ surface VoiceSession {
 
     @guarantee NeverTidiesTheOperatorsWords
         -- Grammar and capitalisation in the operator's text stay as written,
-        -- in samples, observations and rules (ProposeChanges).
+        -- in drafts, samples, observations and rules (ShowDraft,
+        -- ProposeChanges).
 
     @guarantee NeverCommitsInTheFolder
         -- The approved write is the only action in the folder. The skill does

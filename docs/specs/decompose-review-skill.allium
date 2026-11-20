@@ -97,8 +97,8 @@ entity Decomposition {
 entity Finding {
     run: Decomposition
     severity: FindingSeverity
-    -- Every file the finding names. A finding may name several, or none with
-    -- a line.
+    -- Every file the finding names. A finding may name several files, and may
+    -- omit the line number.
     files: Set<String>
     issue: String
     suggested_fix: String
@@ -261,7 +261,7 @@ rule GroupFindings {
     @guidance
         -- Every finding goes into a package by default; only one the review
         -- itself marks as needing no change, or that duplicates another
-        -- finding, is left out, with that reason (shown under "Not included").
+        -- finding (for example), is left out, with that reason (shown under "Not included").
         -- Findings are grouped by the files they touch (GroupedByFilesTouched):
         --   1. take the file paths of every file:line reference;
         --   2. group by directory prefix, the first two path components

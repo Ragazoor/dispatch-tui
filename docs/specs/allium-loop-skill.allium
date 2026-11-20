@@ -259,9 +259,7 @@ rule StartLoop {
         --     spec document created or referenced this session (an
         --     .allium spec, a file under docs/superpowers/specs/ or
         --     docs/plans/, a path the user just named); else ask. An
-        --     .allium file is a first-class input, not a fallback — in a
-        --     repo that keeps Allium specs it is the normal input;
-        --     elsewhere expect a docs/plans/ doc. A single clear candidate
+        --     .allium file is a first-class input, not a fallback. A single clear candidate
         --     is used and the user is told which was picked; several, or
         --     none, are asked about (DesignDocumentIsResolved).
         --   * verify command: one already surfaced this session (named by
@@ -362,7 +360,8 @@ rule LaterIterationsTendOnlyOnSpecError {
 
     @guidance
         -- Only when the run's own work shows a test or implementation
-        -- detail contradicting the spec.
+        -- detail contradicting the spec; tend then fixes that error in the
+        -- spec the design document fed.
 }
 
 rule SpecJudgementKeepsItsOwnModel {
