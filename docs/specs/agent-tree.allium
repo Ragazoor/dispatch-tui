@@ -679,11 +679,13 @@ entity AgentTreePane {
     -- When each of the pane's four timed reads is due. A timer fires once,
     -- when its condition turns true, so every guard a read waits on is part
     -- of the condition, not a requires that would block it for good: the
-    -- condition turns true afresh when the pane is shown (ShowAgentTreePane
-    -- restamps the clocks one interval back), when the renderer resolves its
-    -- task (no renderer reads before it knows its worktree; see "Companion
-    -- Pane Startup"), and one interval after each read restamps its clock.
-    -- A hidden pane has no renderer process, so nothing is due while hidden.
+    -- condition turns true afresh when the renderer resolves its task (the
+    -- pane takes no read before it knows its worktree; see "Companion Pane
+    -- Startup"), and one interval after each read restamps its clock. A show
+    -- starts a fresh renderer that resolves afresh (ShowAgentTreePane), with
+    -- the clocks restamped one interval back, so the first reads after a show
+    -- come at once when it resolves. A hidden pane has no renderer process,
+    -- so nothing is due while hidden.
     -- The diff pane is its own process with its own resolution, and needs a
     -- diff pane to exist. The ok and failed rule of each read share its
     -- condition, and exactly one of the two fires each time it turns true.
@@ -2705,8 +2707,8 @@ rule ResumeDetachedAgentFromThePane {
     -- it is never detached here; stated for symmetry with JumpToAgentWindow.
     requires: target != pane.task
 
-    -- observable output; no rule listens: the board answers it by calling
-    -- BoardPaneView.resume_agent
+    -- observable output; no rule listens: the pane sends it to the board
+    -- through BoardPaneView.resume_agent
     ensures: AgentResumeRequested(pane: pane, target: target)
 
     @guidance
