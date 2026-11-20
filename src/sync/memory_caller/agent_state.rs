@@ -407,6 +407,10 @@ impl MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         let id = id.0;
         let at = encode::stamp(at);
+        // The module answers an ignored kind before any check.
+        if matches!(mode, NotificationWrite::Ignore) {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
         let mut tables = self.lock();
         let Some(row) = tables.tasks.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
