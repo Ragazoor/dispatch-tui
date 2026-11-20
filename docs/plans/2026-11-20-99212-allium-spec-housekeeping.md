@@ -147,7 +147,7 @@ still applies. In particular, and newly frequent in this review:
 
 ## Work packages
 
-Epic: (created after this plan). Each package edits mostly its own files; the "Run
+Epic: #69707. Task ids: 1 #99326, 2 #99327, 3 #99328, 4 #99329, 5 #99330, 6 #99331, 7 #99332, 8 #99333, 9 #99334, 10 #99335, 11 #99336, 12 #99337, 13 #99338, 14 #99339, 15 #99340, 16 #99341, 17 #99342, 18 #99343, 19 #99344, 20 #99345, 21 #99346, 22 #99347, 23 #99348, 24 #99349. Each package edits mostly its own files; the "Run
 after" column lists the orderings that matter. Every acceptance check was run at
 `b03f5ba0` and fails today; it passes once the package is done. The checks are in the
 appendix, under "Work packages".
