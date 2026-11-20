@@ -520,9 +520,7 @@ pub(crate) fn patch_task_row(
         .is_some_and(|repo| repo != row.repo_path);
 
     apply_task_patch(&mut row, patch);
-    // After the rest of the patch, so the backlog-or-phoenix check sees the
-    // status and flag this same patch sets; before any write, so a refusal
-    // leaves the row and its agent untouched.
+    // Before any write, so a refusal leaves the row and its agent untouched.
     row = schedule_after_patch(&prior_status, row, schedule.as_deref(), &now(ctx))?;
     // The session facts go to the current agent (`agents.allium`, A4).
     update_current_agent(&mut AgentTables(ctx), id, |agent| {

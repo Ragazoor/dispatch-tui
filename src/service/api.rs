@@ -414,8 +414,9 @@ macro_rules! task_service_api {
             ) -> Result<(), $crate::service::ServiceError>;
 
             /// `pr-workflow.allium: ReportPrStatus`: post what `gh pr view`
-            /// printed, raw; the module writes the task. `false` is a refusal
-            /// of a string the module does not know.
+            /// printed, raw; the module writes the task. `false` is a refusal:
+            /// a string the module does not know, or a caller that does not
+            /// own the host.
             async fn report_pr_status(
                 &self,
                 task_id: $crate::models::TaskId,

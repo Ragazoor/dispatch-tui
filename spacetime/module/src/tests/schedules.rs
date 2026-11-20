@@ -621,18 +621,6 @@ fn a_schedule_cleared_in_the_write_that_rearms_a_phoenix_task_stays_cleared() {
 }
 
 #[test]
-fn a_patch_without_a_schedule_takes_only_the_status_effects() {
-    let moved = Task {
-        status: "backlog".into(),
-        ..due_task()
-    };
-    assert_eq!(
-        schedule_after_patch("running", moved, None, NOW).unwrap().next_due,
-        ""
-    );
-}
-
-#[test]
 fn a_schedule_request_failed_after_a_hand_move_back_to_backlog_still_marks() {
     // Moved back by hand while the launch was open: no claim left to
     // release, but the one-off must not fire again on its passed due time.

@@ -9,7 +9,8 @@ use super::crud::TaskService;
 
 impl TaskService {
     /// `ReportPrStatus`: `true` when the module accepted the report, `false`
-    /// when it refused a string it does not know.
+    /// when it refused it (a string it does not know, or a caller that does
+    /// not own the host).
     pub async fn report_pr_status(
         &self,
         task_id: TaskId,

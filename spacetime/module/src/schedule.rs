@@ -371,7 +371,7 @@ pub fn schedule_after_failed_launch(
 /// `LeavingBacklogCancelsThePendingRun`, `ClosingCancelsThePendingRun` for a
 /// write into done, `LeavingRunningCancelsThePendingRun`, and `EnteringBacklogRearmsAPhoenixTask`.
 /// A patch reaches it through `schedule_after_patch`.
-pub fn schedule_after_status_write(prior_status: &str, task: Task, now: &str) -> Task {
+pub(crate) fn schedule_after_status_write(prior_status: &str, task: Task, now: &str) -> Task {
     let task = cancel_pending_run_on_leaving_backlog(prior_status, task);
     let task = cancel_pending_run_on_close_or_leaving_running(prior_status, task);
     rearm_phoenix_on_entering_backlog(prior_status, task, now)
