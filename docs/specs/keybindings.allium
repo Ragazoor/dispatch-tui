@@ -107,22 +107,26 @@ contract KeybindingDriftGate {
         -- not the row's id, not any id.
 
     @invariant HintsNameOnlyTableKeys
-        -- Every bracketed key hint a board mode draws (status bar, popup,
-        -- form prompt, overlay footer; not the board drawn under it) names
-        -- a key of that mode's namespace, so a hint never advertises a key
-        -- the mode does not answer. It is read on every board.filter tab and
-        -- every board.admin pane. Four namespaces are not read: board.normal
-        -- and board.detail (their frame is the board itself), board.help
-        -- (built from the table) and board.error (its catch-all answers any
-        -- key). Three modes write their keys unbracketed and are named as
-        -- reading no hint: board.picker.move_to_epic,
-        -- board.picker.reparent_epic and board.confirm.delete_repo_path; any
-        -- other mode that reads none fails, so the check cannot go blind.
+        -- Every key hint a board mode draws (status bar, popup, form
+        -- prompt, overlay footer; not the cards of the board drawn under it)
+        -- is built from the row it stands for and names a key of that mode's
+        -- namespace, so a hint never advertises a key the mode does not
+        -- answer. It is read on every board.filter tab and every board.admin
+        -- pane, and in board.normal and board.detail too: there the hints
+        -- read are those of the status bar and the footer. Two namespaces
+        -- are not read: board.help (its body and title are the table;
+        -- ReadersFollowTheRemap) and board.error (its catch-all answers any
+        -- key). Three modes write their keys without brackets —
+        -- board.picker.move_to_epic, board.picker.reparent_epic and
+        -- board.confirm.delete_repo_path — and their hints are read all the
+        -- same, as the keys of the rows they are built from. A mode that
+        -- reads no hint and is not one of the two fails, so the check cannot
+        -- go blind.
         -- The companion pane's section titles are built from the table
         -- (PaneTitlesNameTheirOwnKeys) and asserted to name their rows' keys.
-        -- Every hint is built from the row it stands for (KeyBinding), so it
-        -- is read twice: under the default table and under the remapped table
-        -- of RemappedTableDrivesDispatch, where it names the user's key.
+        -- Every hint is read twice: under the default table and under the
+        -- remapped table of RemappedTableDrivesDispatch, where it names the
+        -- user's key and no longer the default one.
 
     @invariant TmuxGlobalRowsTrackTheirBindings
         -- The key the board binds for the agent-tree toggle is the key of the
@@ -588,7 +592,10 @@ entity KeyBinding {
     --   a modified key   "Ctrl+", "Alt+" or "Ctrl+Alt+" before a character or
     --                    a named key, a letter uppercase ("Ctrl+D")
     --   a chord          exactly two characters pressed one after the other
-    --                    ("gg"); no named or modified key, no longer form
+    --                    ("gg"); no named or modified key, no longer form.
+    --                    A two-letter name that is a named key ("Up", "F1"
+    --                    to "F9") is that named key, never a chord, so those
+    --                    chords cannot be written
     --   a tmux key       "Prefix+" before a character, a named key or a
     --                    modified key; only in tmux_global, and every
     --                    tmux_global key has this form
@@ -1209,7 +1216,8 @@ invariant ActionOncePerContext {
 -- the press would have to both wait for a second character and act at once.
 -- Checked across the whole namespace whatever the rows' contexts, so the
 -- answer never depends on where the cursor is. Two chords may share a first
--- character.
+-- character. is_chord holds for a two-character key name that is not a named
+-- key ("Up" and "F1" to "F9" are named keys).
 invariant ChordPrefixIsFree {
     for a in KeyBindings:
         for b in KeyBindings:

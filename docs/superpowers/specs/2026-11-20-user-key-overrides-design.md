@@ -1,6 +1,7 @@
 # User key overrides — design
 
-Task #99351, epic #69706 (Remap keyboard). Status: design, awaiting approval.
+Task #99351, epic #69706 (Remap keyboard). Status: approved by the operator on 2026-11-20. The spec change is in
+`docs/specs/` (`keybindings.allium` and the specs listed below).
 No code in this task. The spec change follows this document, and tasks 2 to 8
 of the epic build on both.
 
@@ -185,6 +186,8 @@ one of the other keys and answers no.
 **Chords.** A chord is a key name like any other.
 
 - It is exactly two characters. No named or modified keys, no three-key forms.
+  A two-letter name that is a named key (`Up`, `F1` to `F9`) is that named
+  key, so those chords cannot be written.
 - Any row of a namespace that is not a text namespace and not `tmux.global` may
   list one. `navigate_row_first` may drop `gg` for `Home`, and another row may
   take `dd`.
@@ -341,8 +344,11 @@ What the test suite must hold, beyond today's checks on the default table:
    key goes the way its row says, on the board and in both panes.
 6. **Readers follow the remap.** Under the remapped table the `?` overlay,
    `keybinding_search`, the pane titles, the pane startup hint and every
-   bracketed hint name the user's keys, and no description names a key that
-   was rebound.
+   key hint name the user's keys, and no description names a key that was
+   rebound. The hint check reads every board namespace except `board.help`
+   and `board.error`. That now includes the status bar and footer of
+   `board.normal` and `board.detail`, and the three modes that write their
+   keys without brackets.
 7. **tmux rows.** The key the board binds is the merged row's key, and the
    board unbinds what it bound.
 8. **The guide.** `docs/guide/index.html` is a static page, so it is checked
@@ -359,6 +365,8 @@ What the test suite must hold, beyond today's checks on the default table:
 - `mcp-task-tools.allium`: the new tool in the tool lists.
 - `agent-tree.allium`, `split-pane.allium`, `startup.allium`: the bound tmux keys
   come from the merged rows; the sweep of stale bindings at start.
+- `board-layout.allium`, `agent-tree.allium`: the chord rules hold for any
+  chord, not only `gg`.
 - `onboarding-guide.allium`: parity is against default keys.
 - Any spec that cites a retired action id.
 - `settings.allium`: no change. Key overrides are not a store setting.
@@ -391,13 +399,16 @@ this design fixes for it:
 
 ## Effect on the other tasks
 
-- Task 2 uses the id table in section 6 and the chord decision.
+- Task 2 uses the id table in section 6 and the chord decision. It removes the
+  three `allow-phantom-symbol` lines in `keybindings.allium` once the ids
+  exist in the code.
 - Task 3 implements sections 1 to 5 and 7 and makes the context overlap
   relation product code. The file is `keybindings.json`, not the working name
   `keybindings.toml`. No new dependency.
 - Task 4 adds: `keybinding_search` returns context literals, default keys and
   load errors.
-- Task 5 adds: descriptions and notes that refer to another row's key.
+- Task 5 adds: descriptions and notes that refer to another row's key, and
+  the hint check over `board.normal` and `board.detail`.
 - Task 6 builds `keybinding_set` as in section 9, with pending keys in
   `keybinding_search`.
 - Task 7 adds the sweep of stale bindings at start and the key name mapping.

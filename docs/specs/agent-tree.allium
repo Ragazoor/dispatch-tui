@@ -3437,6 +3437,11 @@ surface AgentTreeCompanionPane {
         -- to measure how long it has been pending. That keeps the renderer's
         -- key handling a pure function of the keys pressed, with no clock in
         -- it.
+        --
+        -- `gg` is the default key of the row. The same holds for any chord a
+        -- row of the pane's namespaces lists: its first character arms the
+        -- chord, is bound to nothing else (keybindings.allium:
+        -- ChordPrefixIsFree) and never expires.
 
     @guarantee MergedDirectoryChainRows
         -- A directory that holds nothing but one other directory gets no row

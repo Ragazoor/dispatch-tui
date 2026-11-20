@@ -135,6 +135,11 @@ given {
 --     their own key handling; this navigation does not touch it.
 --
 -- The `gg` chord:
+--   `gg`, `[`, `]` and `G` are the default keys of these rows. What follows is
+--   written for `gg` and holds for any chord a row of the board's namespace
+--   lists, with that chord's first character in place of the lone `g`: a
+--   chord's first character is never a key of its own (keybindings.allium:
+--   ChordPrefixIsFree).
 --   On the board (Normal mode), `gg` is a pure
 --   chord with no other meaning attached to a lone `g`:
 --   - Pressing `g` with no chord pending starts a pending-chord window
