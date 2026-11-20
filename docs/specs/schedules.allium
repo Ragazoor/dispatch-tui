@@ -231,9 +231,9 @@ rule EnteringBacklogRearmsAPhoenixTask {
     ensures: task.next_due = next_match(task.schedule, after: now)
 
     @guidance
-        -- Decided with the user: a phoenix run that fired, was abandoned and is moved back to backlog would
-        -- otherwise sit there with a schedule and no due time, never firing
-        -- and showing nothing wrong. Computed from now, so a slot that passed
+        -- Without it, a phoenix run that fired, was abandoned and is moved
+        -- back to backlog sits there with a schedule and no due time, never
+        -- firing and showing nothing wrong. Computed from now, so a slot that passed
         -- while the task was out of backlog is not fired late (S4).
         -- task.schedule_error is kept: only a launch or setting the schedule
         -- clears a recorded failure. A non-phoenix task is not re-armed; its
@@ -253,10 +253,10 @@ rule ClosingCancelsThePendingRun {
 
     @guidance
         -- A close of a task that was not in backlog is no move out of backlog,
-        -- so LeavingBacklogCancelsThePendingRun does not reach it. Yet a task
-        -- closed while a user-origin request still held its claim kept its
-        -- due time (the claim keeps it until the launch ends), and a later
-        -- move back to backlog would fire it at once. A closed one-off is
+        -- so LeavingBacklogCancelsThePendingRun does not reach it. A
+        -- user-origin claim keeps the due time until the launch ends, so
+        -- without this rule a task closed during that claim keeps a passed
+        -- due time, and a later move back to backlog fires it at once. A closed one-off is
         -- spent. A phoenix task the close moves to done hands its schedule to
         -- the successor its respawn creates, armed there.
         -- A merged PR moving a task from review to done (pr-workflow.allium:
@@ -280,10 +280,10 @@ rule LeavingRunningCancelsThePendingRun {
     ensures: task.next_due = null
 
     @guidance
-        -- Decided with the user: a user-origin dispatch claim keeps a one-off's due time until the
-        -- launch ends, so a hand move out of running on a still-bare claim
-        -- would leave a passed time behind, and a later move back to backlog
-        -- would fire the one-off at once. Any hand write that leaves running
+        -- A user-origin dispatch claim keeps a one-off's due time until the
+        -- launch ends, so without this rule a hand move out of running on a
+        -- still-bare claim leaves a passed time behind, and a later move back
+        -- to backlog fires the one-off at once. Any hand write that leaves running
         -- spends it, as a write out of backlog or into done already does. A
         -- scheduled phoenix task moved to backlog is not this rule's: it is
         -- re-armed from now (EnteringBacklogRearmsAPhoenixTask; the module
