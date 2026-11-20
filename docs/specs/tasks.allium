@@ -1964,8 +1964,9 @@ rule ArchiveDeletedTask {
             completed_at:   task.completed_at,
             epic_id:        if epic != null: epic.id else: null,
             epic_title:     if epic != null: epic.title else: null,
-            agent_name:     task.display_agent_name,
-            workspace_id:   if epic != null: epic.workspace else: null,
+            agent_name:     task.display_name,
+            workspace_id:   if epic != null: epic.workspace.id else: null,
+            private:        if epic != null: epic.is_effectively_private else: false,
             private_holder: if epic != null: epic.private_holder else: null,
             archived_at:    now,
             archived_by:    caller

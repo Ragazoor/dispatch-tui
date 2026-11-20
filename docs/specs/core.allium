@@ -127,7 +127,7 @@ value BackgroundWork {
 -- research "research", fix "fix", dependabot "dep", release_please "rel".
 --
 -- THE REVIEW SET is {pr_review, dependabot, release_please}, read through
--- Task.is_review_tagged (the code's TaskTag::is_review).
+-- Task.is_review_tagged (the code's src/models/tasks.rs::is_review).
 -- A review tag means the task reviews a PR someone else authored: it routes
 -- to a review runbook (dispatch-prompt.allium), bases its worktree on the
 -- PR's head branch (dispatch.allium), is never wrapped up
@@ -360,7 +360,7 @@ enum VerdictKind { helped | wrong | not_applicable }
 --   procedural       — never produced: procedural learnings are recorded as
 --                      prompt_injection like every other kind (learnings.allium).
 --                      Stored rows may still hold it.
---   query_learnings  — returned by an explicit learning_search MCP call (the stored name predates the rename; existing rows keep it)
+--   query_learnings  — returned by an explicit learning_search MCP call (the stored value for a learning_search retrieval)
 enum RetrievalSource { prompt_injection | procedural | query_learnings }
 
 -- WrapUpMode records the preferred wrap-up path for a task, set at creation
@@ -468,36 +468,6 @@ entity Host {
     -- shared store never learns an identity, so no startup gate fills it and
     -- every reader handles its absence. On the local row this field is the
     -- install's only stored answer to "who am I?" (host.allium).
-
-    @invariant LocalHostOwnerIsWrittenOnce
-        -- The local row's owner goes null -> some identity, once, and never
-        -- moves again. host.allium: AdoptUserIdentity is the only writer, and
-        -- it is guarded on the field being null.
-        --
-        -- The store's copy of the row holds to it too: the registry write
-        -- (sync.allium: RegisterHostOnConnect, RegisterHostOnRename) is
-        -- refused when it names an owner other than the calling identity, or
-        -- would change an owner already written. A re-register by the owner
-        -- itself — a rename, a reconnect — passes. store-split.allium's D11
-        -- rests on this: a host's owner is who may act for it.
-        --
-        -- The store's copy is never CREATED ownerless: a registration that
-        -- would add a new row with no owner is refused. Host ids are public,
-        -- so an ownerless row would go to whichever caller next registered
-        -- that id as its own, and a teammate could take a new machine's host
-        -- before its own board did. That is also why the board registers only
-        -- after AdoptUserIdentity has settled the owner (sync.allium:
-        -- RegisterHostOnConnect), never before. A row already stored without
-        -- an owner may still be adopted, once, by the first caller naming
-        -- itself.
-        --
-        -- Not stated as an expression because the claim is about the field's
-        -- HISTORY, and an invariant is evaluated against a single state. What
-        -- is checkable is that no rule writes it twice, which is a property of
-        -- the rule set rather than of the store.
-        --
-        -- It binds the LOCAL row only. A remote row's owner is somebody else's
-        -- identity, arrives already written, and is never written from here.
 }
 
 -- A Subscription is one person's standing interest in one epic: the epic's
@@ -602,7 +572,7 @@ entity Task {
     epic: Epic?
     url: TaskUrl?    -- the single typed URL attached to this task
     tag: TaskTag?
-    sort_order: Integer?  -- manual and feed-driven ordering, and nothing else; lower sorts first, and a null sorts as if it were the row's id (Task::sort_key). No status transition reads or writes it — see completed_at
+    sort_order: Integer?  -- manual and feed-driven ordering, and nothing else; lower sorts first, and a null sorts as if it were the row's id (src/models/tasks.rs::sort_key). No status transition reads or writes it — see completed_at
     completed_at: Timestamp?  -- when this task last entered done; null until it first does. The Done column's ordering key (board-layout.allium, "Done Column Ordering"), stamped by every transition into done and by creation directly into done. Survives a move back out of done: it records the last completion, not the current status. Also writable without a status transition, by a manual reorder of this task's card in the Done column (tasks.allium: ReorderItem) -- the same override the Epic twin below carries
     labels: List<String> = []  -- free-form badges rendered on the card's second line; set by feed scripts via FeedItem.labels.
                                -- Ordered, and the order is load-bearing: badges render in
@@ -694,8 +664,8 @@ entity Task {
 
     -- The mode a dispatch claim uses when its caller names none
     -- (store-split.allium: RequestDispatch, D3): research for an unplanned
-    -- research-tagged task, dispatch otherwise. Never quick. The store's
-    -- spacetime/module/src/dispatch_request.rs::choose_dispatch_mode.
+    -- research-tagged task, dispatch otherwise. Never quick. The store holds it
+    -- (spacetime/module/src/dispatch_request.rs::choose_dispatch_mode).
     default_dispatch_mode: if has_plan or tag != research: dispatch else: research
 
     -- The review set (see TaskTag): the task reviews a PR someone else
@@ -734,7 +704,7 @@ entity Task {
     -- On a single-machine install every task satisfies this: the host is
     -- either null or this machine, so every precondition built on it is a
     -- no-op. That is the point. The gates it feeds (dispatch.allium:
-    -- ResumeTask, RetryResume, RetryFresh) cost nothing today and are the
+    -- ResumeTask, RetryResume, RetryFresh) cost nothing on one machine and are the
     -- difference between a correct and an actively destructive board the
     -- moment a second machine shares one.
     is_locally_owned: host = null or host = local_host()
@@ -957,7 +927,7 @@ entity Epic {
     status: TaskStatus
     plan_path: String?    -- filesystem path to the implementation plan file
     sort_order: Integer?
-    completed_at: Timestamp?  -- when this epic last entered done, on the same terms as Task.completed_at, manual reorder of the card in the Done column included (board-layout.allium, "Done Column Ordering"). Unlike the task field, an override written here is not permanent: EpicStatusRecalculation rewrites it when the epic itself transitions into done
+    completed_at: Timestamp?  -- when this epic last entered done, on the same terms as Task.completed_at, manual reorder of the card in the Done column included (board-layout.allium, "Done Column Ordering"). Unlike the task field, an override written here is not permanent: epics.allium: RecalculateEpicStatus rewrites it when the epic itself transitions into done
     auto_dispatch: Boolean = false
     parent: Epic?         -- null for root epics; set for nested sub-epics
     feed_command: String?           -- shell command that emits FeedItem JSON (see feeds.allium); null for non-feed epics
@@ -1012,12 +982,12 @@ entity Epic {
     -- Every task anywhere in the subtree, at any depth: this epic's own
     -- subtasks plus those of every descendant epic. The epic delete guard
     -- (epics.allium: DeleteEpic) reads it.
-    subtree_tasks: Task with epic = this or epic in this.subtree_epics
+    subtree_tasks: tasks_below(this)
 
     -- Every epic below this one, at any depth (this epic excluded).
-    -- descends_from(e, ancestor) is a black box: e sits below ancestor at
-    -- some depth, following parent links.
-    subtree_epics: Epic with parent = this or (parent != null and descends_from(parent, this))
+    -- epics_below(e) and tasks_below(e) are black boxes: the epics, and the
+    -- tasks, that sit under e at some depth, following parent links.
+    subtree_epics: epics_below(this)
 
     -- Where Enter on this epic's card lands (epics.allium: JumpToDeepestEpic).
     -- Starting here: stay when the epic has a direct task with
@@ -1078,9 +1048,9 @@ entity SavedRepoPath {
                              -- workspace with the caller; a stranger's rows of the "same" repository are
                              -- neither written nor read.
                              -- At startup the board re-saves this host's rows that have no github_path, so a
-                             -- legacy row learns its repository from the clone's origin
-                             -- (src/store/queries/settings.rs::stamp_github_paths_of_this_host); it runs off the
-                             -- command drain and skips a clone with no GitHub origin.
+                             -- a row with no github_path learns its repository from the clone's origin
+                             -- (src/store/queries/settings.rs::stamp_github_paths_of_this_host); a clone with no
+                             -- GitHub origin is skipped.
 
     invariant VerifyCommandSingleLine {
         verify_command = null or is_single_line(verify_command)  -- black box: no "\n" or "\r"; short-circuits, so it is only evaluated when verify_command != null
@@ -1184,7 +1154,7 @@ entity Learning {
     -- only; learning_search ignores it (learnings.allium:
     -- AugmentDispatchPromptWithLearnings).
     -- The verdicts counted are those the dispatching board can see: the ones
-    -- on tasks its user holds (sync.allium: visible_learning_verdicts). On a
+    -- on tasks its user holds (sync.allium: SubscribeOnceIdentityIsSettled, "rows about a held task"). On a
     -- one-operator store that is every task in the repo; in a shared
     -- workspace two operators can mute different sets. Accepted: verdicts
     -- arrive through the same per-user view as retrievals.
@@ -1238,8 +1208,7 @@ entity LearningVerdict {
 -- everywhere, not one answer per process.
 --
 -- A row is claimed once and, deliberately, never expires and never
--- renews. This is not an oversight — a TTL/lease design was proposed and
--- rejected: the people sharing a board are collaborators, not unreliable
+-- renews. This is not an oversight: the people sharing a board are collaborators, not unreliable
 -- infrastructure a watchdog needs to route around, so a claim stays valid
 -- for as long as it is useful. Only an epic-scope row can be moved, and only
 -- by an explicit human action — see feeds.allium: OverrideFeedOwner. A
@@ -1315,9 +1284,9 @@ entity RetiredFeedItem {
 -- task was, so an agent can later read what was done and why
 -- (mcp-task-tools.allium: GetArchivedTaskViaMcp, ListArchivedTasksViaMcp).
 --
--- NOT A TASK STATUS. The board once had an `archived` status and removed it
--- (sync.allium: RowsWithARemovedStatusAreDropped), because every reader of the
--- task table had to skip it. An ArchivedTask is a separate record: no board
+-- NOT A TASK STATUS. There is no archived status (sync.allium:
+-- RowsWithARemovedStatusAreDropped): every reader of the task table would have
+-- to skip it. An ArchivedTask is a separate record: no board
 -- column, epic progress, feed match or dispatch path ever sees it, and that is
 -- what makes "it cannot be resumed or started again" hold by construction.
 -- Rows an older store still carries with the removed status stay dropped;
@@ -1338,9 +1307,9 @@ entity ArchivedTask {
     description: String
     repo_path: String
     base_branch: String
-    tag: String?
-    labels: String
-    url: String?              -- the task's PR or link, if it had one
+    tag: TaskTag?
+    labels: List<String>      -- kept, not shown: stored-only history
+    url: TaskUrl?             -- the task's PR or link, if it had one
     plan_path: String?
     external_id: String?      -- the feed item id, for a feed task
     created_by: UserIdentity?
@@ -1351,20 +1320,28 @@ entity ArchivedTask {
     epic_title: String?       -- that epic's title at archive time
     agent_name: String?       -- the task's display agent at archive time
     workspace_id: Integer?    -- the epic's workspace at archive time
+    private: Boolean          -- the epic chain was private at archive time
     private_holder: UserIdentity?     -- the epic chain's private holder at archive time
     archived_at: Timestamp
-    archived_by: UserIdentity         -- the person whose delete wrote it
+    archived_by: UserIdentity         -- the person whose delete wrote it; kept, not shown: stored-only history
+
+    -- Task.visible_to as frozen at archive time, for a non-operator reader
+    -- (the operator sees every record). has_workspace_member(id, user) is a
+    -- black box: user is a member of the workspace with that id.
+    visible_to(user):
+        if epic_id = null: owner = user
+        else: has_workspace_member(workspace_id, user) and (not private or private_holder = user)
 
     @guidance
         -- WHO MAY READ IT is frozen at archive time: the same answer
         -- Task.visible_to gave the moment before the delete, from what was
         -- copied then. An epic-less record is its owner's alone; one that sat
-        -- in an epic is seen by members of workspace_id, and only by
-        -- private_holder when that is set. The operator sees every record. Its
+        -- in an epic is seen by members of workspace_id; when private is
+        -- set, only by private_holder, and by nobody when that is null. The operator sees every record. Its
         -- epic may be deleted or re-parented later; the record does not
         -- follow, because a record that changed audience with a live epic it
         -- no longer belongs to would leak or lose history arbitrarily.
-        -- Decided 2026-11-18: frozen stays. ClaimsFollowSight governs live
+        -- Operator decision: frozen stays. ClaimsFollowSight governs live
         -- rows; a record is history, and its audience is the one the delete
         -- found.
         --
@@ -1474,7 +1451,7 @@ config {
     -- (agent-tree.allium: OpenAgentTreeFileDiff).
     editor_fallback: String = "vi"
 
-    -- Staleness thresholds used by card age rendering and Staleness::from_age.
+    -- Staleness thresholds used by card age rendering and src/models/tasks.rs::from_age.
     -- Code constants; no rule reads them.
     fresh_threshold: Duration = 3.days
     aging_threshold: Duration = 7.days
@@ -1508,13 +1485,13 @@ config {
     -- How many levels below an epic the store's recursive delete reaches. An
     -- epic delete (single or batch) refuses a subtree nested deeper rather
     -- than stopping there and stranding the rows below (epics.allium:
-    -- DeleteEpic). The module's MAX_EPIC_DEPTH.
+    -- DeleteEpic). The module's spacetime/module/src/tasks_epics.rs::MAX_EPIC_DEPTH.
     max_epic_depth: Integer = 64
 
     -- How many hops up an ancestor chain the store's reparent cycle check
     -- walks. A chain longer than this is already a loop or corrupt, and the
     -- move is refused as a cycle (epics.allium: UpdateEpicViaMcp's
-    -- parent_epic_id check). The module's MAX_ANCESTOR_WALK.
+    -- parent_epic_id check). The module's spacetime/module/src/rules.rs::MAX_ANCESTOR_WALK.
     max_ancestor_walk: Integer = 1024
 }
 
@@ -1573,7 +1550,7 @@ config {
 -- config.min_feed_interval, whatever surface wrote it and however it was
 -- spelled. This is a domain invariant of the field, not a property of any one
 -- entry point, so it is enforced ONCE in the epic service (epics.allium:
--- CreateEpic, UpdateEpic, ManagedFeedConfigViaMcp) where every write path
+-- EditEpic, CreateEpic, UpdateEpicViaMcp, ManagedFeedConfigViaMcp) where every write path
 -- inherits it. A value that reaches the poll loop below the floor anyway -- a
 -- hand-edited row, a writer that bypassed the service -- is refused at read
 -- rather than clamped: feeds.allium's FeedTick skips that epic and warns, on
@@ -1648,6 +1625,36 @@ config {
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
+
+-- LocalHostOwnerIsWrittenOnce:
+-- The local row's owner goes null -> some identity, once, and never
+-- moves again. host.allium: AdoptUserIdentity is the only writer, and
+-- it is guarded on the field being null.
+--
+-- The store's copy of the row holds to it too: the registry write
+-- (sync.allium: RegisterHostOnConnect, RegisterHostOnRename) is
+-- refused when it names an owner other than the calling identity, or
+-- would change an owner already written. A re-register by the owner
+-- itself — a rename, a reconnect — passes. store-split.allium's D11
+-- rests on this: a host's owner is who may act for it.
+--
+-- The store's copy is never CREATED ownerless: a registration that
+-- would add a new row with no owner is refused. Host ids are public,
+-- so an ownerless row would go to whichever caller next registered
+-- that id as its own, and a teammate could take a new machine's host
+-- before its own board did. That is also why the board registers only
+-- after AdoptUserIdentity has settled the owner (sync.allium:
+-- RegisterHostOnConnect), never before. A row already stored without
+-- an owner may still be adopted, once, by the first caller naming
+-- itself.
+--
+-- Not stated as an expression because the claim is about the field's
+-- HISTORY, and an invariant is evaluated against a single state. What
+-- is checkable is that no rule writes it twice, which is a property of
+-- the rule set rather than of the store.
+--
+-- It binds the LOCAL row only. A remote row's owner is somebody else's
+-- identity, arrives already written, and is never written from here.
 
 -- The sub_status a task takes on entering each status. default_sub_status is
 -- the function every status write that names no sub_status applies; this is
@@ -1825,7 +1832,7 @@ actor Operator {
 -- Any client of the dispatch MCP server: a dispatched agent (caller_identity
 -- Task(t)) or a session (caller_identity Session). Code, not a person.
 actor McpClient {
-    identified_by: McpCaller where connected = true
+    identified_by: Host where this = local_host()
 }
 
 -- The system parties. Each is code or the machine, not a person, so each is

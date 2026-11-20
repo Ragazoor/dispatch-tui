@@ -59,27 +59,32 @@
 entity DataDirectory {
     path: String
 
-    @invariant CodeNeverTouchesLegacyDatabase
-        -- No path in dispatch opens, reads, writes, deletes, truncates,
-        -- renames or moves a leftover `tasks.db` or its `-wal` / `-shm`
-        -- companions: not a board launch, not a subcommand, not `uninstall
-        -- --purge`. Its rows are a stale copy of what the store holds, and
-        -- nothing is migrated out of it — a launch with no host file is a
-        -- first run and mints a fresh identity (host.allium:
-        -- MintHostIdentity). Deleting the files is the
-        -- operator's, by hand.
-
-    @invariant NoSqlite
-        -- Dispatch contains no SQLite: no binding is linked, no schema is
-        -- built, no migration runs and no connection is opened, for any
-        -- purpose, in production or in a test. Not for the board, not for
-        -- MCP, not for `repo`, `plan`, `prune-repo-paths`, `agent-tree`,
-        -- `agent-diff`, the hooks, `uninstall` or any subcommand added later.
-        -- The shared domain is read from and written to the store (sync.allium:
-        -- AConnectedBoardDrawsOnlyDeliveredRows, BoardWritesThroughTheStore); this
-        -- install's identity is read from and written to the host file
-        -- (host.allium: IdentityLivesInHostFile).
-        --
-        -- Stated as a property of the CODE rather than of a state, like
-        -- sync.allium's AConnectedBoardDrawsOnlyDeliveredRows.
 }
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- CodeNeverTouchesLegacyDatabase:
+-- No path in dispatch opens, reads, writes, deletes, truncates,
+-- renames or moves a leftover `tasks.db` or its `-wal` / `-shm`
+-- companions: not a board launch, not a subcommand, not `uninstall
+-- --purge`. Its rows are a stale copy of what the store holds, and
+-- nothing is migrated out of it — a launch with no host file is a
+-- first run and mints a fresh identity (host.allium:
+-- MintHostIdentity). Deleting the files is the
+-- operator's, by hand.
+
+-- NoSqlite:
+-- Dispatch contains no SQLite: no binding is linked, no schema is
+-- built, no migration runs and no connection is opened, for any
+-- purpose, in production or in a test. Not for the board, not for
+-- MCP, not for `repo`, `plan`, `prune-repo-paths`, `agent-tree`,
+-- `agent-diff`, the hooks, `uninstall` or any subcommand added later.
+-- The shared domain is read from and written to the store (sync.allium:
+-- AConnectedBoardDrawsOnlyDeliveredRows, BoardWritesThroughTheStore); this
+-- install's identity is read from and written to the host file
+-- (host.allium: IdentityLivesInHostFile).
+--
+-- Stated as a property of the CODE rather than of a state, like
+-- sync.allium's AConnectedBoardDrawsOnlyDeliveredRows.
