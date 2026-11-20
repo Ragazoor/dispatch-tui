@@ -1039,11 +1039,12 @@ rule ActivateTask {
         -- What the operator sees: a message saying that another machine holds
         -- the task's worktree (src/tui/mod.rs::foreign_worktree_refusal). The
         -- board does not resolve the owning host id to that host's label, so
-        -- the message names neither. Nothing else happens -- no write, no teardown, no
-        -- launch -- which is the same shape as no_worktree_to_resume
-        -- below. The key does not silently do nothing, because
-        -- silence here is indistinguishable from a dropped keypress, and the
-        -- one fact the operator needs is which machine to go to.
+        -- the message names neither. Nothing else happens -- no write, no
+        -- teardown, no launch -- which is the same shape as
+        -- no_worktree_to_resume below. The key does not silently do nothing,
+        -- because silence here is indistinguishable from a dropped keypress,
+        -- and the fact the operator needs is that the task lives on another
+        -- machine.
         --
         -- No card indicator is specified: marking owned-elsewhere cards on the
         -- board is a board-visuals concern. On a single-machine install this
@@ -1055,9 +1056,9 @@ rule ActivateTask {
         --   1. Pinned in the split pane: the task's pane has been joined into
         --      the dispatch window via join-pane and the original standalone
         --      window no longer exists, so this calls tmux select-pane on
-        --      split_pane.pane rather than select-window. The branch applies
-        --      only while that pane is recorded; a pinned task whose pane is
-        --      not (yet) recorded falls through to the branches below.
+        --      split_pane.pane rather than select-window. An active split
+        --      always has a pane (ActiveSplitHasAPane), so the branch never
+        --      lacks a target.
         --
         --   2. Split active and the task has a tmux window (and is not the
         --      pinned one): the window is swapped into the split pane in
@@ -1098,11 +1099,11 @@ rule ActivateTask {
         --        ("No worktree to resume, move to Backlog and re-dispatch").
         --
         -- Each branch is one row of the keybinding table (keybindings.allium:
-        -- board.normal, Space, the task_* contexts), and the row's action id
+        -- board.normal, Space, the activation ladder), and the row's action id
         -- is what the press records: activate_unavailable for priority 0, the
         -- dispatch-in-progress hint and the no-worktree hint; jump_to_tmux
-        -- for priorities 1 and 3; swap_split_pane, task_dispatch,
-        -- open_retry_dialog and task_resume for the rest.
+        -- for priorities 1 and 3; swap_split_pane, dispatch_task,
+        -- open_retry_dialog and resume_task for the rest.
         --
         -- Space on an epic row (board view) enters the epic view, not this
         -- rule. Inside the epic, Space on each subtask follows the task rules
