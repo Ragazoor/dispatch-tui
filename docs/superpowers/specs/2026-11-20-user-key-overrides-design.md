@@ -35,46 +35,47 @@ today: one table, read by the handlers, the `?` overlay and `keybinding_search`.
 
 ## 1. The file
 
-Path: `<data directory>/keybindings.toml`. A missing file means defaults and
-is not an error. Dispatch never creates the file on its own; the user or the
-MCP tool does.
+Path: `<data directory>/keybindings.json`. A missing file means defaults and
+is not an error. Dispatch never creates the file on its own. The MCP tool
+writes it, and later the board's key editor does (see "Later task"). Nobody
+is expected to edit it by hand, but it stays readable so a user can fix or
+delete it in an emergency.
 
-**Recommended shape** (open point A):
+The file is a JSON list. Each entry is one override:
 
-```toml
-[board.normal]
-navigate_row_last = ["E"]
-navigate_row_down = ["n", "Down"]
-"select_all@on_column_select_all" = ["Enter"]
-
-[agent_diff]
-exit_pane = ["q"]
-
-[tmux.global]
-toggle_agent_tree = ["Prefix+t"]
+```json
+[
+  {"namespace": "board.normal", "action": "navigate_row_last", "keys": ["E"]},
+  {"namespace": "board.normal", "action": "select_all",
+   "context": "on_column_select_all", "keys": ["Enter"]},
+  {"namespace": "tmux.global", "action": "toggle_agent_tree", "keys": ["Prefix+t"]}
+]
 ```
 
-- A table header is a published namespace name (`board.normal`,
+- `namespace` is a published namespace name (`board.normal`,
   `board.picker.tag`). Family names (`board.confirm`, `board.picker`) are not
-  namespaces and hold no entries of their own.
-- An entry is `action = [keys]`. The list replaces the row's keys.
-- Where an action has more than one row in the namespace, the entry names the
-  row: `"action@context"` for a row with a context, plain `action` for the
-  row with none. `select_all` has both: `a` anywhere and Enter on a select-all
-  row. A plain `action` that matches several rows and no context-free row is
-  refused, and the message lists the contexts.
+  namespaces.
+- `action` is the row's action id.
+- `context` names the row where an action has more than one row in the
+  namespace. Leave it out for the row with no context. `select_all` has both:
+  `a` anywhere and Enter on a select-all row. An entry with no `context` that
+  matches several rows and no context-free row is refused, and the message
+  lists the contexts.
 - The context is the literal (`on_epic_card`), not the display words. So
   `keybinding_search` must return the literal beside the words. The `?`
   overlay keeps the words only.
+- `keys` replaces the row's whole key list.
 
-The alternative is one `[[bind]]` block per row with `namespace`, `action`,
-`context` and `keys` fields. It is four lines per override. Its one gain: a
-repeated row is a row error, where the compact shape makes it a TOML syntax
-error for the whole file. I recommend the compact shape, because the file is
-read and written by hand and a syntax error is whole-file in both shapes.
+Why this shape:
 
-The repo has no TOML crate today. Task 3 adds one and vets it. The MCP tool
-must keep comments, so the crate must edit in place.
+- An entry has the same fields as one item of the MCP tool's argument, so the
+  tool and the file cannot differ.
+- Each entry stands alone. A repeated or broken entry is an error for that row
+  and the rest of the file applies.
+- The repo already reads and writes JSON. TOML or YAML needs a new dependency,
+  and their gain is comments, which a file written by programs does not have.
+  YAML also reads some bare values as other types (`y`, `n`, `no`, numbers),
+  and single letters and digits are exactly what this file holds.
 
 ## 2. Key names
 
@@ -110,12 +111,14 @@ adds one error. The rest of the file applies.
 
 | Problem | Example | Result |
 |---|---|---|
-| File is not valid TOML | missing quote, repeated key | no override applies; one error with the line |
-| Unknown namespace | `[board.nomral]` | every entry under it refused; message lists the namespaces |
+| File is not valid JSON, or not a list | missing bracket | no override applies; one error with the position |
+| Entry is not an object, lacks a field or has an unknown field | `{"action": "quit"}` | refused |
+| Two entries name the same row | `quit` twice | both refused |
+| Unknown namespace | `board.nomral` | refused; message lists the namespaces |
 | Unknown action | `navigate_rwo_last` | refused; message lists the namespace's actions |
-| Unknown or missing context | `"select_all@nowhere"` | refused; message lists the action's contexts |
-| Value is not a list of strings | `quit = "x"` | refused |
-| Empty list | `quit = []` | refused (open point C) |
+| Unknown or missing context | `"context": "nowhere"` | refused; message lists the action's contexts |
+| `keys` is not a list of strings | `"keys": "x"` | refused |
+| Empty list | `"keys": []` | refused |
 | Unknown key name | `["ctrl+d"]` | refused, with the canonical spelling |
 | Key not allowed in the namespace | a plain character in `board.text` | refused (section 4) |
 | The row is a catch-all | `confirm_quit_no` | refused (section 5) |
@@ -176,10 +179,10 @@ rows of the namespace, the editing rows (Backspace, caret motion) included.
 **Catch-all rows are fixed.** "any other key" means "whatever no other row
 lists", so it has no key to replace. An override that targets a catch-all row
 is refused, and "any other key" is not a key name an override may use. The
-rows beside it can be rebound: with `confirm_quit_yes = ["o"]`, `y` becomes one
-of the other keys and answers no.
+rows beside it can be rebound: when `confirm_quit_yes` is given `o`, `y` becomes
+one of the other keys and answers no.
 
-**Chords** (open point B). Recommended: a chord is a key name like any other.
+**Chords.** A chord is a key name like any other.
 
 - It is exactly two characters. No named or modified keys, no three-key forms.
 - Any row of a namespace that is not a text namespace and not `tmux.global` may
@@ -191,9 +194,8 @@ of the other keys and answers no.
 - How long the first half waits stays a property of the handler: the board
   times out, the panes do not.
 
-The smaller alternative: `gg` is the only chord. A user may replace it with a
-single key but may not create a chord. The handlers already look the chord up
-by name, so the general form costs little in task 2.
+The handlers already look the chord up by name, so the general form costs
+little in task 2.
 
 ## 6. One row per direction or value
 
@@ -230,9 +232,9 @@ Not split, because every key of the row does the same thing:
 `placement_picker_visibility`, `switch_section`, `cycle_agent_filter`,
 `collapse_directory`, and the y / Y rows.
 
-### Usage history (open point D)
+### Usage history
 
-Recommended: no rewrite of stored usage events.
+Stored usage events are not rewritten.
 
 - The retired ids stop being recorded on the day task 2 lands. Their counts
   stay in the history under the old ids.
@@ -242,10 +244,6 @@ Recommended: no rewrite of stored usage events.
 - From then on the action alone says what happened, whatever key is bound.
   The detail still holds the key pressed, so two keys for one action stay
   separable.
-
-The alternative is a one-time rewrite of the stored events in the store
-module. It gives one unbroken series. It costs a module change and a
-migration, for counts nobody reads across that date today.
 
 ### Descriptions
 
@@ -311,14 +309,14 @@ tools.
   `namespace`, `action`, optional `context`, and `keys`. The list is applied
   together, so a swap is one call.
 - An empty `keys` list removes the entry and restores the default. (In the
-  file itself an empty list is an error; there the user deletes the line.)
+  file itself an empty list is an error.)
 - It runs the loader's checks on the default table plus the file plus the
   change. If the change adds any error, nothing is written, and the message
   says what to fix.
 - Bad entries already in the file are left alone and reported in the answer.
-- A file that is not valid TOML is not touched: the tool says to fix or
+- A file that is not valid JSON is not touched: the tool says to fix or
   delete it.
-- The write keeps the rest of the file, comments included, and is atomic.
+- The write keeps every other entry and is atomic.
 - The answer shows each row's new keys and says they apply at the next board
   restart (a pane opened sooner already uses them).
 
@@ -365,20 +363,38 @@ What the test suite must hold, beyond today's checks on the default table:
 - Any spec that cites a retired action id.
 - `settings.allium`: no change. Key overrides are not a store setting.
 
-## Open points for the operator
+## Decided with the operator (2026-11-20, this task)
 
-| | Question | Recommendation |
-|---|---|---|
-| A | File shape | Compact: `[namespace]` tables, `action = [keys]`, `"action@context"` |
-| B | Chords | Any two-character chord, with the prefix rule |
-| C | Empty key list | Refused: every row keeps at least one key |
-| D | Usage history | No rewrite; old ids keep their counts |
+| Question | Decision |
+|---|---|
+| File shape | JSON, one entry per row. Programs write the file, not people |
+| Chords | Any two-character chord, with the prefix rule |
+| Empty key list | Refused: every row keeps at least one key |
+| Usage history | No rewrite; old ids keep their counts |
+| A key editor in the board | Yes, as a later task |
+
+## Later task: a key editor in the board
+
+Agents change keys through `keybinding_set`. The user needs the same from the
+board, so a later task adds a key editor there. It is not specified here. What
+this design fixes for it:
+
+- It writes the same file, through the same checks as the loader and the MCP
+  tool. A change that would add an error is refused with the same message.
+- It shows each row's current keys, its default keys, and whether a change is
+  waiting for a restart.
+- It can restore a row's default.
+- Its own keys are rows of the table, in a namespace of their own, so they can
+  be rebound and they appear in the `?` overlay.
+- Capturing a key press as a new binding is a text-like mode: the pressed key
+  is data there, not a binding. The task must say which key leaves that mode.
 
 ## Effect on the other tasks
 
 - Task 2 uses the id table in section 6 and the chord decision.
-- Task 3 implements sections 1 to 5 and 7, adds the TOML crate, and makes the
-  context overlap relation product code.
+- Task 3 implements sections 1 to 5 and 7 and makes the context overlap
+  relation product code. The file is `keybindings.json`, not the working name
+  `keybindings.toml`. No new dependency.
 - Task 4 adds: `keybinding_search` returns context literals, default keys and
   load errors.
 - Task 5 adds: descriptions and notes that refer to another row's key.
@@ -386,3 +402,4 @@ What the test suite must hold, beyond today's checks on the default table:
   `keybinding_search`.
 - Task 7 adds the sweep of stale bindings at start and the key name mapping.
 - Task 8 documents the file and marks the guide's keys as defaults.
+- A new task, after task 6: the key editor in the board.
