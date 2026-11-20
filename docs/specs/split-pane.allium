@@ -15,17 +15,6 @@ given {
     split_pane: SplitPane
 }
 
-config {
-    -- How long a quit waits for the split-pane restore it issued before
-    -- giving up on it and letting the process go
-    -- (see QuitAwaitsSplitPaneRestore below). Long enough for one tmux break-pane
-    -- to complete on a machine under load, short enough that a tmux server
-    -- that has stopped answering costs the user a pause rather than a hang.
-    -- The wait is for a rearrangement already under way, never for a human
-    -- decision -- RefuseExitSplitModeOntoLiveWindow below rules that out.
-    quit_restore_timeout: Duration = 2.seconds
-}
-
 ------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
@@ -198,6 +187,21 @@ entity SplitPane {
 }
 
 ------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- How long a quit waits for the split-pane restore it issued before
+    -- giving up on it and letting the process go
+    -- (see QuitAwaitsSplitPaneRestore below). Long enough for one tmux break-pane
+    -- to complete on a machine under load, short enough that a tmux server
+    -- that has stopped answering costs the user a pause rather than a hang.
+    -- The wait is for a rearrangement already under way, never for a human
+    -- decision -- RefuseExitSplitModeOntoLiveWindow below rules that out.
+    quit_restore_timeout: Duration = 2.seconds
+}
+
+------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
@@ -230,7 +234,7 @@ rule DetachTmux {
         -- sub_statuses are reset to the default for the task's
         -- current status; all other sub_statuses are preserved.
         --
-        -- Those are the only two writes the store receives: the window
+        -- The board's task-row write carries only two fields: the window
         -- release and, when the board's copy was stale or crashed, the
         -- sub_status reset. The board's copy of status and every other
         -- sub_status is not written back, because it can be older than the
@@ -448,8 +452,8 @@ rule ExitSplitMode {
         -- task's tmux_window name, so the agent remains reachable via [Space].
         -- Only an unpinned (bare shell) pane is killed outright.
         --
-        -- Emitted from four places: pressing [s] while split mode is active
-        -- (ToggleSplitMode), confirming quit (QuitExitsSplitMode) — quitting
+        -- SplitExitRequested is raised from four places: pressing [s] while
+        -- split mode is active (ToggleSplitMode), confirming quit (QuitExitsSplitMode) — quitting
         -- dispatch with a task pinned restores that agent rather than ending
         -- its session — and the two settles that replay a toggle or a quit
         -- held during a rearrangement (SplitPaneEntrySettles,
@@ -538,7 +542,7 @@ rule RefuseExitSplitModeOntoLiveWindow {
         -- The refusal is reported on the board through the same error channel
         -- every other failing split-pane tmux operation uses — no signal of
         -- its own, exactly as a refused rename reports through the swap's own
-        -- failure (see SwapSplitPane above).
+        -- failure (see SwapSplitPane below).
         --
         -- Split mode staying active is not a wedged state: pressing [s] again
         -- re-attempts the exit, and it succeeds as soon as the conflicting
@@ -888,7 +892,7 @@ rule SplitPaneRespawnOnWindowCleared {
     requires: split_pane.pinned_task = agent.task
 
     ensures: split_pane.pinned_task = null
-    ensures: split_pane.pane = RespawnedPane(split_pane.pane)
+    ensures: split_pane.pane = respawned_pane(split_pane.pane)
 
     @guidance
         -- The pane content is replaced in-place using tmux respawn-pane,
@@ -963,7 +967,10 @@ rule TrackSplitPaneFocus {
 -- retry dialog is reached only for a windowless Stale/Crashed task (4).
 --
 -- TmuxFocusMoved(target), here and in GoToTaskSpaceResumed and
--- JumpBackToTuiWindow, is observable output; no rule listens.
+-- JumpBackToTuiWindow, is observable output; so are this file's
+-- SplitPaneEntryStarted, SplitPaneSwapStarted, TaskWindowRestored,
+-- SplitPaneKilled, UserInformed, ConfirmRetry and PaneWorkingDirectorySet;
+-- no rule listens to any of them.
 
 rule ActivateTask {
     when: ActivateKeyPressed(task)
@@ -1217,7 +1224,7 @@ rule PinTaskInSplitPane {
     -- rules starting one swap.
     requires: split_pane.pinned_task = null
 
-    ensures: split_pane.in_flight = SwapInFlight.created()
+    ensures: split_pane.in_flight = SwapInFlight.created(task: task)
     ensures: SplitPaneSwapStarted(new_task: task, old_task: null)
     -- split_pane.focused is left alone: focus does NOT transfer.
 
@@ -1291,7 +1298,8 @@ rule PinTaskInSplitPane {
         -- Every kill of a task's window follows this rule, not only the
         -- board's: the reactor's exit_session close, the wrap-up kill of a
         -- failed teardown row and the worktree teardown all go through
-        -- dispatch::kill_task_window (or its if-present twin), so none of
+        -- src/dispatch/split_panes.rs::kill_task_window (or
+        -- src/dispatch/split_panes.rs::kill_task_window_if_present), so none of
         -- them destroys the user's shell. scripts/check-task-window-kills.sh
         -- fails on a plain tmux kill of a task window anywhere else.
         --
@@ -1783,8 +1791,8 @@ rule AgentWindowSplitStartsInTaskWorktree {
 ------------------------------------------------------------
 
 -- The operator's keys on the board that drive this file. Each is a row of the
--- board's keybinding table (keybindings.allium); the two confirmations are the
--- [y] answers to the prompts the [T] key and the quit key open.
+-- board's keybinding table (keybindings.allium); the confirmations are the [y]
+-- answers to the [T] (one task or a selection) and quit prompts.
 surface SplitPaneBoard {
     facing _: core/Operator
 

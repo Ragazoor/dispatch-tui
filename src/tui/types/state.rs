@@ -471,8 +471,8 @@ pub(in crate::tui) enum Settled {
 
 /// Which rearrangement is in flight, and what only that one can hold.
 ///
-/// The spec's `kind` discriminator (`core.allium`: `Rearrangement`, with its
-/// `EntryInFlight` and `SwapInFlight` variants).
+/// The spec's `kind` discriminator (`split-pane.allium`: `Rearrangement`, with
+/// its `EntryInFlight` and `SwapInFlight` variants).
 #[derive(Debug)]
 pub(in crate::tui) enum Rearrangement {
     /// Split-mode entry: the gap between asking for a pane and having one.
@@ -511,7 +511,7 @@ pub(in crate::tui) enum Rearrangement {
 /// whichever rearrangement is in flight, and both settles replay them the same
 /// way. Tying either to the entry would drop it on the swap path, and a dropped
 /// quit is one the user cannot notice, having already asked the application to
-/// close. See `Rearrangement` in `docs/specs/core.allium`.
+/// close. See `Rearrangement` in `docs/specs/split-pane.allium`.
 #[derive(Debug)]
 pub struct InFlight {
     pub(in crate::tui) kind: Rearrangement,
