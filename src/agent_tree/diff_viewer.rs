@@ -319,9 +319,9 @@ pub struct DiffLine {
 /// Build the document for `open` against the selected source (`commit`: `None`
 /// for unstaged work).
 ///
-/// Order is the order of `open`, which is a `BTreeSet` of relative paths and so
-/// is TREE order — the tree is the index the user reads this pane through, so
-/// the two must scroll the same way.
+/// Order is the order of `open`, the open set as the tree published it. It
+/// holds at most one path (`OneOpenFileAtATime` in agent-tree.allium), so no
+/// order between files arises.
 ///
 /// A path git no longer reports contributes nothing and is not an error; a
 /// git failure fails the whole build, which the caller turns into a notice

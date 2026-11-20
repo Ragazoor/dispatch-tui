@@ -2400,7 +2400,9 @@ rule RefreshAgentTreeAgentList {
     -- A shown pane re-reads the board's task list on its own timer.
     -- The agents section starts with the rest of the pane, once the task is
     -- resolved; a pane that never resolves never lists agents
-    -- (agents_refresh_due).
+    -- (agents_refresh_due). The board read behind it may already run during
+    -- the startup wait (see "Latency"): this rule is the pane taking a read,
+    -- and it takes none before the task resolves.
     when: pane: AgentTreePane.agents_refresh_due
 
     requires: board_tasks().ok
