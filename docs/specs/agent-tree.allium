@@ -619,12 +619,12 @@ entity AgentTreePane {
     -- same way and in the same direction — see OpenSetIsNotWorktreeState.
     selected_commit: String?
 
-    -- Whether the tree's renderer has read its task back from the board
-    -- yet. pane.task is what the pane is FOR; this is whether the
-    -- process drawing it has found out. A renderer starts waiting, and
-    -- everything else it does — git, the commits and agents sections, every
-    -- key but the exit key — waits with it. See "Companion Pane Startup" below for why a
-    -- task that certainly exists can be unreadable for a moment.
+    -- Whether the tree's renderer has read its task back from the board yet.
+    -- pane.task is what the pane is FOR; this is whether the process drawing it
+    -- has found out. A renderer starts waiting, and everything else it does —
+    -- git, the commits and agents sections, every key but the exit key — waits
+    -- with it. See "Companion Pane Startup" below for why a task that certainly
+    -- exists can be unreadable for a moment.
     task_resolution: waiting | resolved | unresolved
 
     -- When the tree's current renderer process started. The startup wait
@@ -647,6 +647,16 @@ entity AgentTreePane {
     diff_renderer_started_at: Timestamp
     diff_startup_failure: String when diff_task_resolution = unresolved
 
+    -- The rows the agents section draws and its cursor moves over:
+    -- listed_agents narrowed by agent_filter, in the same order. Everything
+    -- the user sees or selects in the section is a row of this list; the
+    -- resume wait (pending_jump) and "left the list" are judged against
+    -- listed_agents instead, so the pane's own filter never reads as an
+    -- agent that went away. shown_under(f) is the list a filter f would
+    -- draw; CycleAgentListFilter reads it for the filter it moves to.
+    shown_under(f): if f = running: filter(listed_agents, t => is_live_agent(t)) else: listed_agents
+    shown_agents: shown_under(agent_filter)
+
     -- The task row has become readable while a renderer is waiting for it.
     -- board_task(task) is the renderer's own read of the task from the board
     -- (BoardPaneView): null until the row has arrived in the board's rows,
@@ -656,14 +666,6 @@ entity AgentTreePane {
     -- present makes the condition turn true afresh. The diff form also
     -- requires a diff pane, since no diff renderer is waiting until one has
     -- been split; its appearance is what turns the condition true.
-    -- The rows the agents section draws and its cursor moves over:
-    -- listed_agents narrowed by agent_filter, in the same order. Everything
-    -- the user sees or selects in the section is a row of this list; the
-    -- resume wait (pending_jump) and "left the list" are judged against
-    -- listed_agents instead, so the pane's own filter never reads as an
-    -- agent that went away.
-    shown_agents: if agent_filter = running: filter(listed_agents, t => is_live_agent(t)) else: listed_agents
-
     task_arrived: task_resolution = waiting and board_task(task) != null and board_task(task).worktree != null
     diff_task_arrived: diff_pane != null and diff_task_resolution = waiting and board_task(task) != null and board_task(task).worktree != null
 
@@ -807,7 +809,6 @@ config {
     -- and one small read-only query a second costs nothing a user would see.
     agent_tree_agents_refresh_interval: Duration = 1.second
 
-
     -- How long a pane's renderer waits, at startup, for the board to answer
     -- with its task's row before giving up and saying so. The row normally
     -- reaches the board well under a second after dispatch (see "Companion
@@ -835,6 +836,7 @@ rule BindAgentTreeToggle {
     -- bound_toggle_key is the toggle_agent_tree row's key in the board's
     -- key table, translated to tmux's spelling; the default when the user has
     -- not overridden the row.
+    -- observable output; no rule listens
     ensures: AgentTreeToggleBound(
         key: bound_toggle_key(config.agent_tree_toggle_key))
 
@@ -847,9 +849,9 @@ rule BindAgentTreeToggle {
         --
         -- Registered as a prefixed tmux binding alongside the existing
         -- prefix+space jump-back binding (see split-pane.allium:
-        -- JumpBackToTuiWindow), through the same bind_key helper and the same
-        -- board-startup path. Best-effort: a failing tmux call must not
-        -- prevent the board TUI from starting.
+        -- JumpBackToTuiWindow), through the same helper (src/tmux.rs::bind_key)
+        -- and the same board-startup path. Best-effort: a failing tmux call
+        -- must not prevent the board TUI from starting.
         --
         -- The bound command is a format-string-parameterized run-shell, not
         -- a static tmux command like prefix+space's
@@ -859,7 +861,7 @@ rule BindAgentTreeToggle {
         -- (`dispatch toggle-agent-tree-pane <window>`) is handed the name of
         -- whichever window was focused, without having to ask tmux itself.
         -- The `-b` flag backgrounds the shell job so the keypress does not
-        -- block the tmux client while it runs. See ToggleAgentTreePane's own
+        -- block the tmux client while it runs. See HideAgentTreePane's
         -- guidance for what that process does with the window name.
         --
         -- Surfaced in the in-TUI help overlay ([?]) and in keybinding_search
@@ -880,6 +882,7 @@ rule UnbindAgentTreeToggle {
 
     -- The key this board bound when it started, not the key the override
     -- file names by now (keybindings.allium: TheBoardUnbindsWhatItBound).
+    -- observable output; no rule listens
     ensures: AgentTreeToggleUnbound(
         key: bound_toggle_key(config.agent_tree_toggle_key))
 
@@ -967,8 +970,9 @@ rule SplitAgentTreePaneOnAgentLaunch {
         --
         -- The new pane opens on the LEFT of the agent's own pane (tmux
         -- split-window's -b/"before" flag), keeping focus (-d) on the agent's
-        -- pane to its right. Unlike the board's own split_window_horizontal
-        -- (no -b, right pane, used by split-pane.allium), the tree reads
+        -- pane to its right. Unlike the board's own split
+        -- (src/tmux.rs::split_window_horizontal: no -b, right pane, used by
+        -- split-pane.allium), the tree reads
         -- left-to-right the way a file tree conventionally does, with the
         -- agent's CLI output remaining the wider, focused pane.
         --
@@ -1083,22 +1087,23 @@ rule HideAgentTreePane {
         -- drains the companion panes left behind when it moves the agent's
         -- own pane out (see split-pane.allium's
         -- PinTaskInSplitPane guidance) — every pane dispatch put in that
-        -- window, the diff pane and an editor pane included. `exec_swap_split_pane` resyncs a
-        -- renamed window's companion pane to the task the new name implies
+        -- window, the diff pane and an editor pane included. The swap
+        -- (src/runtime/split.rs::exec_swap_split_pane) resyncs a renamed
+        -- window's companion pane to the task the new name implies
         -- (see SwapSplitPane's guidance).
         --
         -- A window name that doesn't parse as `task-<id>` (the inverse of
-        -- TmuxWindow::for_task — the board's own TUI window, an editor
-        -- window, anything else) never reaches the `exists pane` check at
-        -- all: toggle_agent_tree_pane
-        -- (src/dispatch/agents.rs) short-circuits to a no-op before issuing
+        -- src/models/tmux_window.rs::for_task — the board's own TUI window,
+        -- an editor window, anything else) never reaches the `exists pane`
+        -- check at all: src/dispatch/agents.rs::toggle_agent_tree_pane
+        -- short-circuits to a no-op before issuing
         -- any tmux call, which stands in for "not exists pane" without a
         -- record to test.
         --
         -- An argv string that is not a window NAME at all is a third no-op,
         -- one step earlier still. The keybinding hands this process whatever
         -- tmux expanded #{window_name} into, so that argument is parsed at the
-        -- border (cmd_toggle_agent_tree_pane in src/main.rs); the empty string
+        -- border (src/main.rs::cmd_toggle_agent_tree_pane); the empty string
         -- and a pane id are not window names (see core.allium: TmuxWindow), and
         -- for either the process logs and returns without issuing any tmux
         -- call.
@@ -1163,7 +1168,8 @@ rule ShowAgentTreePane {
         -- `pane.status = hidden` above is read the same live way
         -- HideAgentTreePane's guidance describes: no pane in the window carries
         -- the agent-tree role marker. The re-split is the same split
-        -- SplitAgentTreePaneOnAgentLaunch makes (spawn_agent_tree_pane), so the
+        -- SplitAgentTreePaneOnAgentLaunch makes
+        -- (src/dispatch/agents.rs::spawn_agent_tree_pane), so the
         -- show side of the toggle and the initial split are one code path. The
         -- task id it passes to `dispatch agent-tree <task_id>` comes from
         -- parsing the window name (`task-<id>`), never from a stored pane
@@ -1237,8 +1243,6 @@ rule AgentTreePaneResolvesItsTask {
     -- it, and the task has a worktree: the pane proceeds as normal. The first
     -- refresh tick after this is the first git query (RefreshAgentTree).
     when: pane: AgentTreePane.task_arrived
-
-    requires: board_task(pane.task).worktree != null
 
     ensures: pane.task_resolution = resolved
 
@@ -1314,8 +1318,6 @@ rule AgentTreeDiffPaneResolvesItsTask {
     -- The diff pane's counterpart of AgentTreePaneResolvesItsTask. Its first
     -- git read follows on its own timer (RefreshAgentTreeDiff).
     when: pane: AgentTreePane.diff_task_arrived
-
-    requires: board_task(pane.task).worktree != null
 
     ensures: pane.diff_task_resolution = resolved
 }
@@ -1474,13 +1476,14 @@ rule RefreshAgentTree {
         -- reasoning as CollapsedGitStatusLetters: one unreadable field must
         -- not cost the user the row.
         --
-        -- Every step of both forms asks git for NUL-delimited output. Git's default is to C-quote
-        -- any path containing a non-ASCII byte, so a file whose name holds an
-        -- accented letter comes back C-quoted, with the letter replaced by its
-        -- octal escapes — which would be rendered as that literal string and
-        -- would open nothing. NUL delimiting also makes a path containing a space, a tab
-        -- or a newline unambiguous, and means no field may be trimmed: every
-        -- byte between delimiters is part of the filename.
+        -- Every step of both forms asks git for NUL-delimited output. Git's
+        -- default is to C-quote any path containing a non-ASCII byte, so a file
+        -- whose name holds an accented letter comes back C-quoted, with the
+        -- letter replaced by its octal escapes — which would be rendered as
+        -- that literal string and would open nothing. NUL delimiting also makes
+        -- a path containing a space, a tab or a newline unambiguous, and means
+        -- no field may be trimmed: every byte between delimiters is part of the
+        -- filename.
         --
         -- In the unstaged form, the first step covers every change to a
         -- tracked file the agent has made and not yet staged — the work in
@@ -1518,12 +1521,12 @@ rule RefreshAgentTree {
         -- == ChangePrecedence: when both queries name one path ==
         -- Against the index the two listings are DISJOINT: the diff reports
         -- only paths the index holds, and the untracked listing only paths it
-        -- does not, so no path can be named by both. `git rm --cached foo` takes foo out of the index
-        -- and leaves it on disk; the diff does not see foo at all, the
-        -- untracked listing does, and foo is badged added with no counts —
-        -- correctly, since to git it is now an untracked file. A staged
-        -- deletion that also removed the file from disk (`git rm foo`) is in
-        -- neither listing and is not shown: it is staged work.
+        -- does not, so no path can be named by both. `git rm --cached foo`
+        -- takes foo out of the index and leaves it on disk; the diff does not
+        -- see foo at all, the untracked listing does, and foo is badged added
+        -- with no counts — correctly, since to git it is now an untracked file.
+        -- A staged deletion that also removed the file from disk (`git rm foo`)
+        -- is in neither listing and is not shown: it is staged work.
         --
         -- The precedence is kept anyway, as a merge rule that makes the
         -- outcome independent of command order should a path ever reach both
@@ -1678,10 +1681,11 @@ rule AgentTreeGitFailureKeepsLastGoodTree {
         -- == Same notice channel as a failed diff-pane split ==
         -- error_notice is one field with several writers (NoticeSource lists
         -- them), and it is cleared by the next keypress
-        -- (ClearAgentTreeErrorNotice) regardless of which one set it. Clearing a git-failure notice on a keypress is not a lie: if git
-        -- is still failing, the very next tick sets it again. The user is never
-        -- left looking at a stale tree with no notice for longer than one
-        -- refresh interval.
+        -- (ClearAgentTreeErrorNotice) regardless of which one set it. Clearing
+        -- a git-failure notice on a keypress is not a lie: if git is still
+        -- failing, the very next tick sets it again. The user is never left
+        -- looking at a stale tree with no notice for longer than one refresh
+        -- interval.
         --
         -- == Not the same as an empty result ==
         -- A successful query returning nothing is RefreshAgentTree with an
@@ -1992,16 +1996,16 @@ rule KillAgentTreeDiffPaneWithItsTree {
     @guidance
         -- == EditorPaneOutlivesItsTree ==
         -- Keys that would only retire the lower pane — `q`, hiding the tree, a
-        -- resync — leave an editor running. Only opening another file
-        -- replaces it (OpenAgentTreeFileInEditor,
-        -- ReplaceAgentTreeEditorWithDiff), and only pinning the task into the
-        -- board's split pane kills it: the pin moves the agent's own pane out
-        -- and drains every pane dispatch left behind in the window, an editor
-        -- included (split-pane.allium: PinTaskInSplitPane), since nothing
-        -- owns a window once its agent has left it. Opening a file is the user asking
-        -- for the pane, so it is replaced. Leaving the tree is not, so the
-        -- editor and any unsaved work in it stay. An editor pane with no tree
-        -- beside it is harmless, unlike an orphaned diff pane.
+        -- resync — leave an editor running. Only opening another file replaces
+        -- it (OpenAgentTreeFileInEditor, ReplaceAgentTreeEditorWithDiff), and
+        -- only pinning the task into the board's split pane kills it: the pin
+        -- moves the agent's own pane out and drains every pane dispatch left
+        -- behind in the window, an editor included (split-pane.allium:
+        -- PinTaskInSplitPane), since nothing owns a window once its agent has
+        -- left it. Opening a file is the user asking for the pane, so it is
+        -- replaced. Leaving the tree is not, so the editor and any unsaved work
+        -- in it stay. An editor pane with no tree beside it is harmless, unlike
+        -- an orphaned diff pane.
         --
         -- == Why the diff pane goes ==
         -- A diff pane outliving its tree is orphaned: nothing drives its open
@@ -2124,10 +2128,10 @@ rule RefreshAgentTreeDiff {
         -- exactly two cases, and each is a DiffRefusal value carried on the
         -- FileDiff rather than a notice on the tree: git reports it binary, or
         -- its diff exceeds config.agent_tree_diff_max_bytes. Both apply to an
-        -- untracked file's contents as to any other diff — a new binary file
-        -- is refused as binary, a huge new file as too_large. A refusal is a fact about that one
-        -- file and must not cost the user the other diffs in the pane, which is
-        -- why it is not routed through error_notice.
+        -- untracked file's contents as to any other diff — a new binary file is
+        -- refused as binary, a huge new file as too_large. A refusal is a fact
+        -- about that one file and must not cost the user the other diffs in the
+        -- pane, which is why it is not routed through error_notice.
         --
         -- == A path with nothing to show is not an error ==
         -- The open set holds paths, and a path can stop being reported by git
@@ -2410,6 +2414,7 @@ rule RefreshAgentTreeAgentList {
     -- the count reaches its limit.
     ensures:
         if waiting != null and waiting in listed and is_live_agent(waiting):
+            -- observable output; no rule listens
             AgentWindowSelected(window: current_agent(waiting).tmux_window)
     ensures: pane.pending_jump =
         if still_detached: waiting
@@ -2597,9 +2602,7 @@ rule CycleAgentListFilter {
 
     let next = if pane.agent_filter = all: running else: all
     let kept = pane.selected_agent
-    let shown_next =
-        if next = running: filter(pane.listed_agents, t => is_live_agent(t))
-        else: pane.listed_agents
+    let shown_next = pane.shown_under(next)
 
     ensures: pane.agent_filter = next
     -- The cursor stays on its task when that task is still shown. When the
@@ -2649,6 +2652,7 @@ rule JumpToAgentWindow {
     -- not an error, so it neither switches nor raises a notice.
     requires: target != pane.task
 
+    -- observable output; no rule listens
     ensures: AgentWindowSelected(window: current_agent(target).tmux_window)
     -- Jumping to another agent ends any resume wait: the user moved on, and
     -- the resumed agent coming up later must not pull them away. Without the
@@ -2658,8 +2662,9 @@ rule JumpToAgentWindow {
 
     @guidance
         -- The jump selects the window only. It does not move focus into the
-        -- target's own agent-tree pane, and beyond the wait it changes nothing in this pane:
-        -- when the user comes back, the cursor is where they left it.
+        -- target's own agent-tree pane, and beyond the wait it changes nothing
+        -- in this pane: when the user comes back, the cursor is where they left
+        -- it.
         --
         -- The window is named by the task, not by the text on the row, so a
         -- title that changed since the last read still jumps to the right
@@ -2692,6 +2697,8 @@ rule ResumeDetachedAgentFromThePane {
     -- it is never detached here; stated for symmetry with JumpToAgentWindow.
     requires: target != pane.task
 
+    -- observable output; no rule listens: the board answers it by calling
+    -- BoardPaneView.resume_agent
     ensures: AgentResumeRequested(pane: pane, target: target)
 
     @guidance
@@ -2837,10 +2844,10 @@ invariant OneCompanionPanePerAgentWindow {
 -- when pane.diff_pane is null, and the pane it creates is marked immediately
 -- after the split with the diff value of the same role marker the toggle reads
 -- (see HideAgentTreePane's "How the companion pane is identified"). One gap
--- follows from that and is accepted: if the mark cannot be written, the pane is already open and
--- showing the diffs, so the split reports success and a later split, finding
--- no mark, could make a second. Failing the open instead would report a
--- failure that did not happen, over a bookkeeping write.
+-- follows from that and is accepted: if the mark cannot be written, the pane is
+-- already open and showing the diffs, so the split reports success and a later
+-- split, finding no mark, could make a second. Failing the open instead would
+-- report a failure that did not happen, over a bookkeeping write.
 invariant OneDiffPanePerAgentWindow {
     for a in AgentTreePanes:
         for b in AgentTreePanes:
@@ -2900,14 +2907,13 @@ invariant NodeDiffOpenMatchesOpenSet {
             n.kind = file implies n.diff_open = (n.path in p.open_diff_paths)
 }
 
--- An untracked file never carries line counts, and it is the only kind of
--- file that never can. Untracked files appear only in the unstaged-work view,
--- whose baseline IS the index, and a diff against it cannot see a path the
--- index does not hold —
--- an untracked file, or one taken out by `git rm --cached` — so there is no number
--- to show and the pane declines to invent one. Showing "+0 -0" for a file the
--- agent just wrote would be the single most misleading row the pane could
--- draw.
+-- An untracked file never carries line counts, and it is the only kind of file
+-- that never can. Untracked files appear only in the unstaged-work view, whose
+-- baseline IS the index, and a diff against it cannot see a path the index does
+-- not hold — an untracked file, or one taken out by `git rm --cached` — so
+-- there is no number to show and the pane declines to invent one. Showing
+-- "+0 -0" for a file the agent just wrote would be the single most misleading
+-- row the pane could draw.
 --
 -- The diff pane is not bound by this: it shows an untracked file's whole
 -- contents as additions (RefreshAgentTreeDiff's "Untracked files"). The tree
@@ -3114,11 +3120,11 @@ surface AgentTreeCompanionPane {
         -- (tree and commits) and the agents view; Tab and Shift+Tab move
         -- between tree and commits in the browse view, and flip the agents
         -- filter between all and running in the agents view
-        -- (CycleAgentListFilter). With the commits section focused, Space and Enter
-        -- select the row under the cursor as the tree's source; with the
-        -- agents section focused, they jump to an attached agent and resume
-        -- a detached one. See AgentKeysFollowFocus for what every other key
-        -- does there.
+        -- (CycleAgentListFilter). With the commits section focused, Space and
+        -- Enter select the row under the cursor as the tree's source; with the
+        -- agents section focused, they jump to an attached agent and resume a
+        -- detached one. See AgentKeysFollowFocus for what every other key does
+        -- there.
         SwitchAgentTreeViewKeyPressed(user, pane)           -- s
         SwitchAgentTreeBrowseFocusKeyPressed(user, pane)    -- Tab, Shift+Tab (browse view)
         CycleAgentListFilterKeyPressed(user, pane)          -- Tab, Shift+Tab (agents view)
@@ -3149,15 +3155,15 @@ surface AgentTreeCompanionPane {
         -- pane again.
 
     @guarantee PanesReadThroughTheBoard
-        -- A pane's renderer reads its task and the attached and detached
-        -- agents from the running board (BoardPaneView) and from nowhere else. It never opens
-        -- a connection to the shared store, and never opens the store's
-        -- local database for shared rows: the board is the single reader of
-        -- shared rows on a machine, as it is the single writer of hook events
-        -- (agent-health.allium: HooksWriteThroughTheBoard). Two panes per
-        -- agent window, each with a store connection of its own, would be a
-        -- subscription per pane, each re-delivering every row the board
-        -- already holds, to show one task and one list.
+        -- A pane's renderer reads its task and the attached and detached agents
+        -- from the running board (BoardPaneView) and from nowhere else. It
+        -- never opens a connection to the shared store, and never opens the
+        -- store's local database for shared rows: the board is the single
+        -- reader of shared rows on a machine, as it is the single writer of
+        -- hook events (agent-health.allium: HooksWriteThroughTheBoard). Two
+        -- panes per agent window, each with a store connection of its own,
+        -- would be a subscription per pane, each re-delivering every row the
+        -- board already holds, to show one task and one list.
         --
         -- The pane's writes go the same way. A keypress that takes effect is
         -- sent to the board over the same port, and the board records its
@@ -3169,9 +3175,10 @@ surface AgentTreeCompanionPane {
         -- never writes the store itself.
         --
         -- Reading is read-only, in both directions: the pane asks, the board
-        -- answers, and neither the board's rows nor the store change because
-        -- a pane is shown (AskingChangesNothing). It does not bend AgentTreeIsGitDerived
-        -- either: what the pane says about files still comes from git alone.
+        -- answers, and neither the board's rows nor the store change because a
+        -- pane is shown (AskingChangesNothing). It does not bend
+        -- AgentTreeIsGitDerived either: what the pane says about files still
+        -- comes from git alone.
         --
         -- A board that cannot be reached is a failed read, handled where every
         -- failed read already is: while the task is awaited, it is waited out
@@ -3182,28 +3189,29 @@ surface AgentTreeCompanionPane {
         -- (AgentTreeDiffPaneSaysWhatItIsWaitingFor).
 
     @guarantee AgentTreePaneSaysWhatItIsWaitingFor
-        -- Until its task resolves, the pane draws one line in place of the
-        -- tree and the commits and agents sections: `waiting for the task`. It is never
-        -- blank, so a slow store or a restarting board reads as a wait rather than as a broken or
-        -- empty pane. In the common case the task resolves at once and the
-        -- line is never seen (AgentTreePaneResolvesItsTask).
+        -- Until its task resolves, the pane draws one line in place of the tree
+        -- and the commits and agents sections: `waiting for the task`. It is
+        -- never blank, so a slow store or a restarting board reads as a wait
+        -- rather than as a broken or empty pane. In the common case the task
+        -- resolves at once and the line is never seen
+        -- (AgentTreePaneResolvesItsTask).
         --
         -- If the task does not resolve — the wait of
-        -- config.agent_tree_startup_wait ran out, with no row or with a row that
-        -- still has no worktree — the line is replaced by pane.startup_failure, which stays on
-        -- screen for as long as the renderer runs. It is not a notice: it is
-        -- not in the border, and no keypress clears it, because there is
-        -- nothing behind it to reveal.
+        -- config.agent_tree_startup_wait ran out, with no row or with a row
+        -- that still has no worktree — the line is replaced by
+        -- pane.startup_failure, which stays on screen for as long as the
+        -- renderer runs. It is not a notice: it is not in the border, and no
+        -- keypress clears it, because there is nothing behind it to reveal.
         --
-        -- While waiting and after giving up, the exit key is the one key
-        -- that does anything: it closes the pane, as it always does
+        -- While waiting and after giving up, the exit key is the one key that
+        -- does anything: it closes the pane, as it always does
         -- (ExitAgentTreeRenderer). The keys answered are exactly those of the
         -- pane's exit_pane row, looked up in the table, so Alt+q does nothing,
         -- and the press records no usage (keybindings.allium:
-        -- PaneStartupScreenIsOutsideUsage). Every other key is ignored, since there is
-        -- no tree, no commits or agents list and no open set for it to act on. The pane
-        -- never closes itself — see "Companion Pane Startup" for the race
-        -- that would otherwise close it.
+        -- PaneStartupScreenIsOutsideUsage). Every other key is ignored, since
+        -- there is no tree, no commits or agents list and no open set for it to
+        -- act on. The pane never closes itself — see "Companion Pane Startup"
+        -- for the race that would otherwise close it.
 
     @guarantee TwoViewsShareThePane
         -- The pane shows ONE view at a time. The browse view stacks the tree
@@ -3285,8 +3293,7 @@ surface AgentTreeCompanionPane {
         -- addressed by. The numeric id is never on the row; a row the
         -- backfill has not reached yet leads with its title alone. The
         -- window (`task-<id>`) keeps the id. The hooks
-        -- wire (PaneAgent) carries the agent name for the row, not the task's
-        -- alias.
+        -- wire (PaneAgent) carries the agent name for the row.
         --
         -- The pane's own task is drawn dimmed and carries no other mark: its
         -- dot is `●` like any attached agent's. It is listed rather than
@@ -3388,28 +3395,26 @@ surface AgentTreeCompanionPane {
         -- (ClearAgentTreeErrorNotice).
 
     @guarantee CompanionPaneKeysAreTableRows
-        -- The pane loads the keybinding table itself as it starts, the
-        -- user's overrides included (keybindings.allium:
-        -- PanesLoadTheirOwnTable), and the keys named below are the rows'
-        -- default keys.
-        -- The keys listed under provides are rows of the keybinding table
-        -- (keybindings.allium), in three namespaces: agent_tree.tree while the
-        -- tree has focus, agent_tree.commits while the commits section does,
-        -- and agent_tree.agents while the agents section does. The pane-wide
-        -- keys (q, Ctrl-C, `s`) are rows of all three. Tab and Shift+Tab are
+        -- The pane loads the keybinding table itself as it starts, the user's
+        -- overrides included (keybindings.allium: PanesLoadTheirOwnTable), and
+        -- the keys named below are the rows' default keys. The keys listed
+        -- under provides are rows of the keybinding table (keybindings.allium),
+        -- in three namespaces: agent_tree.tree while the tree has focus,
+        -- agent_tree.commits while the commits section does, and
+        -- agent_tree.agents while the agents section does. The pane-wide keys
+        -- (q, Ctrl-C, `s`) are rows of all three. Tab and Shift+Tab are
         -- switch_section rows of agent_tree.tree and agent_tree.commits, and a
         -- separate cycle_agent_filter row of agent_tree.agents
         -- (CycleAgentListFilter): a different action, so its usage is counted
-        -- apart. No key in the
-        -- commits namespace means anything new: Space/Enter is select_source
-        -- there as it is jump_to_agent in the agents namespace, so focus, not
-        -- a new key, decides the meaning. A press is
-        -- looked up in the focused section's namespace and runs that row's
-        -- action; a press no applicable row lists does nothing — h/l and
-        -- Left/Right in the commits and agents sections, l/Right on a file, and Space/Enter
-        -- with a stale or empty selection all land here. A press with Ctrl or
-        -- Alt held matches only a row listing that modified form, so Ctrl-D
-        -- moves half a page and Alt-j does nothing.
+        -- apart. No key in the commits namespace means anything new:
+        -- Space/Enter is select_source there as it is jump_to_agent in the
+        -- agents namespace, so focus, not a new key, decides the meaning. A
+        -- press is looked up in the focused section's namespace and runs that
+        -- row's action; a press no applicable row lists does nothing — h/l and
+        -- Left/Right in the commits and agents sections, l/Right on a file, and
+        -- Space/Enter with a stale or empty selection all land here. A press
+        -- with Ctrl or Alt held matches only a row listing that modified form,
+        -- so Ctrl-D moves half a page and Alt-j does nothing.
         --
         -- Each press that takes effect records keybinding feature usage under
         -- its row's action id: the pane sends the press to the running board
@@ -3501,9 +3506,8 @@ surface AgentTreeCompanionPane {
         -- unmerged, since `agent-health` sorts before `agent/tree` but after
         -- `agent`.
         --
-        -- Nothing outside the tree re-derives this order. The diff pane needs
-        -- it and is GIVEN it — see AgentTreeDiffPane's Order section for why
-        -- it could not compute it for itself.
+        -- Nothing outside the tree uses this order: the diff pane shows one
+        -- file.
 
     @guarantee MergedRoutesClipAtThePaneEdge
         -- A merged route makes a row wider than an unmerged one, and the pane
@@ -3718,10 +3722,10 @@ surface AgentTreeCompanionPane {
         -- the whole bug. The remote name is one decision for the whole system
         -- or none.
         --
-        -- The whole resolution is re-derived from git on every tick and
-        -- nothing about it is remembered between refreshes, which is what
-        -- keeps AgentTreeIsGitDerived true of the commit range as well as of
-        -- the changes. The alternative — recording at provision time which ref the
+        -- The whole resolution is re-derived from git on every tick and nothing
+        -- about it is remembered between refreshes, which is what keeps
+        -- AgentTreeIsGitDerived true of the commit range as well as of the
+        -- changes. The alternative — recording at provision time which ref the
         -- worktree was branched from — is not taken, for that reason: it makes
         -- the pane depend on dispatch-time bookkeeping that no later git
         -- command can confirm or repair, and it says nothing at all about a
@@ -3758,9 +3762,9 @@ surface AgentTreeCompanionPane {
         -- unstaged work; two diffs of a commit against its parent for a
         -- selected commit; and, for the commits section, the fork-point
         -- resolution's merge-base and ancestry probes and a commit listing.
-        -- Selecting a commit checks nothing out. Nothing here fetches, commits, stages, checks out or writes to the
-        -- index, and an agent's own git operations must never be disturbed by
-        -- the pane observing them.
+        -- Selecting a commit checks nothing out. Nothing here fetches, commits,
+        -- stages, checks out or writes to the index, and an agent's own git
+        -- operations must never be disturbed by the pane observing them.
         --
         -- Opening a diff does not breach this and cannot: the diff pane runs
         -- the same read-only git commands this one does, in a pane beside it.
@@ -3907,7 +3911,7 @@ surface AgentTreeDiffPane {
         -- The keys listed under provides are the agent_diff rows of the
         -- keybinding table (keybindings.allium), reusing the board's action
         -- ids where the effect is the same (G is navigate_row_last). A press
-        -- no row lists does nothing — Space, Enter and `a` among them (see
+        -- no row lists does nothing — Space and Enter among them (see
         -- DiffPaneHasNoToggleOfItsOwn) — and a press with Ctrl or Alt held
         -- matches only a row listing that modified form. Each press that
         -- runs a row records keybinding feature usage under the row's action
@@ -3934,12 +3938,12 @@ surface AgentTreeDiffPane {
         -- wrapped, and the rest is not shown on a continuation row.
         --
         -- Wrapping is the tempting alternative and it is worse here, because
-        -- the pane is no wider than the window (config.agent_tree_diff_pane_percent sets its height): one
-        -- long line would wrap into many rows and push the rest of the diff
-        -- off screen, so the cost of a single minified or generated line would
-        -- be paid by every line around it. Truncation costs only the line it
-        -- happens to. The lower pane spans the window, so
-        -- truncation bites rarely.
+        -- the pane is no wider than the window
+        -- (config.agent_tree_diff_pane_percent sets its height): one long line
+        -- would wrap into many rows and push the rest of the diff off screen,
+        -- so the cost of a single minified or generated line would be paid by
+        -- every line around it. Truncation costs only the line it happens to.
+        -- The lower pane spans the window, so truncation bites rarely.
 
     @guarantee DiffPaneIsGitDerivedToo
         -- Everything this pane shows comes from git, exactly as the tree's
@@ -3969,15 +3973,15 @@ surface AgentTreeDiffPane {
         -- Its scroll position lives in the renderer process and is not modelled
         -- here, the same way the tree's cursor is not — see the
         -- AgentTreeViewState open question, which covers both.
-
 }
 
--- What tmux answers when the tree's renderer asks it for something on a
--- keypress: a split it refused, or a window it could not select. Each is the
--- failed outcome of a tmux call the renderer made, raised after the call
--- returns.
-surface AgentTreeTmuxOutcomes {
-    facing _: core/Tmux
+-- What the tree's renderer learns when a keypress asks the machine for
+-- something and it refuses. Two sources answer: tmux (a split or respawn it
+-- refused, a window it could not select) and the file system (`v` on a file
+-- no longer on disk, a failed write to the git admin directory). Each is the
+-- failed outcome of a call the renderer made, raised after the call returns.
+surface AgentTreeRendererOutcomes {
+    facing _: core/OperatingSystem
 
     context pane: AgentTreePane
 
