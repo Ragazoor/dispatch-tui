@@ -32,6 +32,7 @@ pub fn key_label(key: KeyEvent) -> String {
         KeyCode::Right => "Right".to_string(),
         KeyCode::Home => "Home".to_string(),
         KeyCode::End => "End".to_string(),
+        KeyCode::F(n) => format!("F{n}"),
         other => format!("{other:?}"),
     }
 }
@@ -289,6 +290,76 @@ pub enum KeyContext {
 }
 
 impl KeyContext {
+    /// Every context, in the spec's order.
+    pub const ALL: [KeyContext; 27] = [
+        Self::SearchActive,
+        Self::InsideEpicView,
+        Self::InsideNestedView,
+        Self::NestedViewNoSearch,
+        Self::TopLevel,
+        Self::WithSelection,
+        Self::OnColumnSelectAll,
+        Self::OnFoldedSection,
+        Self::OnFoldedEpicGroup,
+        Self::OnEpicCard,
+        Self::OnWorkPackageCard,
+        Self::OnTaskCard,
+        Self::OnFlattenedTaskCard,
+        Self::OnUnflattenedTaskCard,
+        Self::OffEpicCard,
+        Self::OnDirectory,
+        Self::OnFile,
+        Self::TaskOnOtherMachine,
+        Self::TaskPinnedInSplit,
+        Self::TaskWindowSplitOpen,
+        Self::TaskWithWindow,
+        Self::BacklogTask,
+        Self::StuckTask,
+        Self::TaskDispatching,
+        Self::TaskWithWorktree,
+        Self::TaskWithoutWorktree,
+        Self::DetailZoomed,
+    ];
+
+    /// The spec's literal ("on_epic_card"): how the override file and
+    /// keybinding_search name a context.
+    pub fn literal(self) -> &'static str {
+        match self {
+            Self::SearchActive => "search_active",
+            Self::InsideEpicView => "inside_epic_view",
+            Self::InsideNestedView => "inside_nested_view",
+            Self::NestedViewNoSearch => "nested_view_no_search",
+            Self::TopLevel => "top_level",
+            Self::WithSelection => "with_selection",
+            Self::OnColumnSelectAll => "on_column_select_all",
+            Self::OnFoldedSection => "on_folded_section",
+            Self::OnFoldedEpicGroup => "on_folded_epic_group",
+            Self::OnEpicCard => "on_epic_card",
+            Self::OnWorkPackageCard => "on_work_package_card",
+            Self::OnTaskCard => "on_task_card",
+            Self::OnFlattenedTaskCard => "on_flattened_task_card",
+            Self::OnUnflattenedTaskCard => "on_unflattened_task_card",
+            Self::OffEpicCard => "off_epic_card",
+            Self::OnDirectory => "on_directory",
+            Self::OnFile => "on_file",
+            Self::TaskOnOtherMachine => "task_on_other_machine",
+            Self::TaskPinnedInSplit => "task_pinned_in_split",
+            Self::TaskWindowSplitOpen => "task_window_split_open",
+            Self::TaskWithWindow => "task_with_window",
+            Self::BacklogTask => "backlog_task",
+            Self::StuckTask => "stuck_task",
+            Self::TaskDispatching => "task_dispatching",
+            Self::TaskWithWorktree => "task_with_worktree",
+            Self::TaskWithoutWorktree => "task_without_worktree",
+            Self::DetailZoomed => "detail_zoomed",
+        }
+    }
+
+    /// The context a literal names.
+    pub fn parse(literal: &str) -> Option<KeyContext> {
+        Self::ALL.iter().copied().find(|c| c.literal() == literal)
+    }
+
     /// The plain words shown to readers; the literal is never shown.
     pub fn words(self) -> &'static str {
         match self {
@@ -327,7 +398,6 @@ impl KeyContext {
 
 /// Which axis a context talks about. Contexts on different axes can always
 /// hold together; contexts on one axis overlap only where the table below says.
-#[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ContextAxis {
     /// Which view is showing, and whether a search is active.
@@ -342,7 +412,6 @@ enum ContextAxis {
     Zoom,
 }
 
-#[cfg(test)]
 impl KeyContext {
     fn axis(self) -> ContextAxis {
         use KeyContext::*;
@@ -371,7 +440,7 @@ impl KeyContext {
 /// (ContextsDoNotOverlapForAKey). Contexts on different axes can co-occur,
 /// except that a pane row never combines with a board context. Within one
 /// axis only the pairs listed here overlap; every other pair is exclusive.
-#[cfg(test)]
+/// The loader's clash check and the drift gate read this one relation.
 pub fn contexts_overlap(a: KeyContext, b: KeyContext) -> bool {
     use KeyContext::*;
     if a == b {
@@ -459,7 +528,13 @@ impl KeyBinding {
     }
 }
 
+mod overrides;
 mod table;
+pub use overrides::{
+    is_key_name, is_typed_key, key_not_allowed_in, key_override_path, load_key_table,
+    merge_overrides, namespace_takes_text, suggest_key_name, table_clashes, Clash, KeyLoadError,
+    KeyOverrideProblem, KeyTableLoad, KeyTableReader, KEY_OVERRIDE_FILE_NAME, NAMED_KEYS,
+};
 pub use table::KEY_BINDINGS;
 
 /// The row a key runs: among `table`'s rows of `ns` whose context holds, the

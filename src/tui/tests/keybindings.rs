@@ -1096,6 +1096,95 @@ fn the_key_a_row_no_longer_lists_does_nothing() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
+/// The table the board loads from the override file in its data directory
+/// (`LoadKeyTable`), installed the way startup installs it.
+fn app_loaded_from(file: &str) -> (App, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(crate::keybindings::KEY_OVERRIDE_FILE_NAME),
+        file,
+    )
+    .unwrap();
+    let mut app = on_running_card(make_app());
+    app.install_key_table(&crate::keybindings::load_key_table(
+        dir.path(),
+        crate::keybindings::KeyTableReader::Board,
+    ));
+    (app, dir)
+}
+
+const DELETE_ON_O: &str =
+    r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#;
+
+#[test]
+fn the_board_answers_a_key_from_the_override_file() {
+    // Under the default table, x on a Running task asks to move it to Done.
+    let mut by_default = on_running_card(make_app());
+    press(&mut by_default, "x");
+    assert_eq!(by_default.input.mode, InputMode::ConfirmDone);
+
+    let (mut app, _dir) = app_loaded_from(DELETE_ON_O);
+    assert_eq!(app.error_popup(), None, "a good file reports nothing");
+    let cmds = press(&mut app, "O");
+    assert_eq!(
+        recorded(&cmds),
+        vec![("delete_task".to_string(), Some("O".to_string()))]
+    );
+    assert_eq!(app.input.mode, InputMode::ConfirmDone, "O has x's effect");
+
+    let (mut app, _dir) = app_loaded_from(DELETE_ON_O);
+    let cmds = press(&mut app, "x");
+    assert!(cmds.is_empty(), "x is no row's key any more: {cmds:?}");
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn a_refused_entry_is_shown_and_the_rest_of_the_file_applies() {
+    let (mut app, dir) = app_loaded_from(
+        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]},
+            {"namespace": "board.normal", "action": "navigate_row_last", "keys": ["ctrl+e"]}]"#,
+    );
+    let shown = app
+        .error_popup()
+        .expect("the load error is shown")
+        .to_string();
+    assert!(shown.contains("write \"Ctrl+E\""), "{shown}");
+    let path = dir
+        .path()
+        .join(crate::keybindings::KEY_OVERRIDE_FILE_NAME)
+        .display()
+        .to_string();
+    assert!(shown.contains(&path), "{shown}");
+    let last = app
+        .key_table
+        .iter()
+        .find(|b| b.namespace == KeyNamespace::BoardNormal && b.action == "navigate_row_last")
+        .unwrap();
+    let default = bindings_in(KeyNamespace::BoardNormal)
+        .find(|b| b.action == "navigate_row_last")
+        .unwrap();
+    assert_eq!(last.keys, default.keys, "the refused row keeps its keys");
+
+    press(&mut app, "q");
+    assert_eq!(app.error_popup(), None, "any key dismisses the error");
+    press(&mut app, "O");
+    assert_eq!(
+        app.input.mode,
+        InputMode::ConfirmDone,
+        "the good entry applies"
+    );
+}
+
+#[test]
+fn an_unreadable_file_leaves_the_board_on_its_default_keys() {
+    let (mut app, _dir) = app_loaded_from("not json");
+    assert!(app.error_popup().unwrap().contains("no override applies"));
+    assert!(std::ptr::eq(app.key_table, KEY_BINDINGS));
+    press(&mut app, "q");
+    press(&mut app, "x");
+    assert_eq!(app.input.mode, InputMode::ConfirmDone);
+}
+
 #[test]
 fn the_default_table_is_key_bindings() {
     let mut app = on_running_card(make_app());

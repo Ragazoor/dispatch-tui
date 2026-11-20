@@ -1,0 +1,812 @@
+//! The user's key overrides: the file in the data directory that replaces the
+//! keys of chosen rows, and the merge of the default table with the entries
+//! it accepts. See `LoadKeyTable` in `docs/specs/keybindings.allium`.
+//!
+//! The load never fails. Whatever the file holds, the result is a table that
+//! keeps every invariant of the default table: a refused entry leaves its row
+//! on its default keys and adds one [`KeyLoadError`].
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+
+use super::{
+    contexts_overlap, is_chord, KeyBinding, KeyContext, KeyNamespace, ANY_OTHER_KEY, KEY_BINDINGS,
+};
+
+/// The override file's name in the data directory
+/// (`config.key_override_file_name`).
+pub const KEY_OVERRIDE_FILE_NAME: &str = "keybindings.json";
+
+/// The named keys, as the table writes them (`is_key_name`).
+pub const NAMED_KEYS: [&str; 28] = [
+    "Space",
+    "Enter",
+    "Esc",
+    "Tab",
+    "BackTab",
+    "Backspace",
+    "Delete",
+    "Insert",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
+];
+
+/// The three modified names a terminal delivers as another key: Ctrl+I is
+/// Tab, Ctrl+M is Enter and Ctrl+[ is Esc.
+const TERMINAL_ALIASES: [(&str, &str); 3] =
+    [("Ctrl+I", "Tab"), ("Ctrl+M", "Enter"), ("Ctrl+[", "Esc")];
+
+/// The modifier prefixes a modified key may carry, longest first.
+const MODIFIERS: [&str; 3] = ["Ctrl+Alt+", "Ctrl+", "Alt+"];
+
+/// The tmux prefix a tmux.global key starts with.
+const TMUX_PREFIX: &str = "Prefix+";
+
+fn is_named_key(k: &str) -> bool {
+    NAMED_KEYS.contains(&k)
+}
+
+/// One printable character other than space, as typed.
+fn is_character(k: &str) -> bool {
+    let mut chars = k.chars();
+    matches!((chars.next(), chars.next()), (Some(c), None) if !c.is_whitespace() && !c.is_control())
+}
+
+/// A character or a named key, with or without a Ctrl/Alt modifier.
+fn is_single_key(k: &str) -> bool {
+    if is_character(k) || is_named_key(k) {
+        return true;
+    }
+    if TERMINAL_ALIASES.iter().any(|(alias, _)| *alias == k) {
+        return false;
+    }
+    MODIFIERS.iter().any(|m| {
+        k.strip_prefix(m).is_some_and(|base| {
+            is_named_key(base) || (is_character(base) && !base.chars().any(char::is_lowercase))
+        })
+    })
+}
+
+/// Whether `k` is a canonical key name (`is_key_name` in the spec): a
+/// character, a named key, a modified key, a two-character chord, or
+/// `Prefix+` before one of the first three. Lookup is an exact match on the
+/// name, so nothing else may be listed.
+pub fn is_key_name(k: &str) -> bool {
+    if let Some(rest) = k.strip_prefix(TMUX_PREFIX) {
+        return is_single_key(rest);
+    }
+    is_single_key(k) || (is_chord(k) && k.chars().all(|c| is_character(&c.to_string())))
+}
+
+/// A key typed as data in a text namespace: a character or Space.
+pub fn is_typed_key(k: &str) -> bool {
+    is_character(k) || k == "Space"
+}
+
+/// The six namespaces that take typed text (`namespace_takes_text`).
+pub fn namespace_takes_text(ns: KeyNamespace) -> bool {
+    matches!(
+        ns,
+        KeyNamespace::BoardText
+            | KeyNamespace::BoardSearch
+            | KeyNamespace::BoardFilterSearch
+            | KeyNamespace::BoardPickerRepoPath
+            | KeyNamespace::BoardPickerBaseBranch
+            | KeyNamespace::BoardPickerQuickDispatch
+    )
+}
+
+/// Why `key` may not be a key of a row of `ns`, or `None` when it may
+/// (`TextNamespacesBindNoTypedKey`, the tmux.global key form, chords).
+pub fn key_not_allowed_in(ns: KeyNamespace, key: &str) -> Option<String> {
+    let tmux_key = key.starts_with(TMUX_PREFIX);
+    if ns == KeyNamespace::TmuxGlobal {
+        return (!tmux_key).then(|| {
+            format!("tmux.global keys are \"Prefix+\" and one key (\"Prefix+e\"); `{key}` is not")
+        });
+    }
+    if tmux_key {
+        return Some(format!(
+            "`{key}` is a tmux key; only tmux.global rows take \"Prefix+\" keys"
+        ));
+    }
+    if namespace_takes_text(ns) && (is_typed_key(key) || is_chord(key)) {
+        return Some(format!(
+            "{} takes typed text, so `{key}` there is typed, not a key; use a named key other than Space (Esc, F2) or a Ctrl/Alt key (Ctrl+G)",
+            ns.name()
+        ));
+    }
+    None
+}
+
+/// The canonical spelling of a near-miss key name ("ctrl+d" is "Ctrl+D",
+/// "escape" is "Esc"), or `None` when there is no obvious one.
+pub fn suggest_key_name(k: &str) -> Option<String> {
+    if let Some((_, key)) = TERMINAL_ALIASES
+        .iter()
+        .find(|(alias, _)| alias.eq_ignore_ascii_case(k))
+    {
+        return Some((*key).to_string());
+    }
+    let parts: Vec<&str> = if k.len() > 1 && k.ends_with('+') {
+        // "Ctrl++": the key is the plus sign itself.
+        let head = &k[..k.len() - 1];
+        let mut parts: Vec<&str> = head.split('+').filter(|p| !p.is_empty()).collect();
+        parts.push("+");
+        parts
+    } else {
+        k.split('+').collect()
+    };
+    let (base, mods) = parts.split_last()?;
+    let (mut prefix, mut ctrl, mut alt, mut shift) = (false, false, false, false);
+    for m in mods {
+        match m.to_ascii_lowercase().as_str() {
+            "prefix" => prefix = true,
+            "ctrl" | "control" | "c" => ctrl = true,
+            "alt" | "meta" | "option" | "m" => alt = true,
+            "shift" | "s" => shift = true,
+            _ => return None,
+        }
+    }
+    let lower = base.to_ascii_lowercase();
+    let named = match lower.as_str() {
+        "escape" => Some("Esc"),
+        "return" | "enter" => Some("Enter"),
+        "del" => Some("Delete"),
+        "ins" => Some("Insert"),
+        "pgup" => Some("PageUp"),
+        "pgdn" | "pgdown" => Some("PageDown"),
+        "spacebar" | " " => Some("Space"),
+        "backtab" => Some("BackTab"),
+        "tab" if shift => Some("BackTab"),
+        _ => NAMED_KEYS
+            .iter()
+            .copied()
+            .find(|n| n.eq_ignore_ascii_case(base)),
+    };
+    let key = match named {
+        Some(n) => n.to_string(),
+        None if base.chars().count() == 1 => {
+            if shift || ctrl || alt {
+                base.to_uppercase()
+            } else {
+                (*base).to_string()
+            }
+        }
+        None => return None,
+    };
+    let mut name = String::new();
+    if prefix {
+        name.push_str(TMUX_PREFIX);
+    }
+    if ctrl {
+        name.push_str("Ctrl+");
+    }
+    if alt {
+        name.push_str("Alt+");
+    }
+    name.push_str(&key);
+    if let Some((_, key)) = TERMINAL_ALIASES.iter().find(|(alias, _)| *alias == name) {
+        return Some((*key).to_string());
+    }
+    (is_key_name(&name) && name != k).then_some(name)
+}
+
+/// Why an entry of the override file is refused (`KeyOverrideProblem`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyOverrideProblem {
+    FileUnreadable,
+    MalformedEntry,
+    DuplicateEntry,
+    UnknownNamespace,
+    UnknownAction,
+    UnknownContext,
+    AmbiguousRow,
+    EmptyKeys,
+    UnknownKeyName,
+    KeyNotAllowedInNamespace,
+    CatchAllRow,
+    KeyClash,
+    ChordPrefixClash,
+}
+
+impl KeyOverrideProblem {
+    /// Every problem, in the spec's order.
+    pub const ALL: [KeyOverrideProblem; 13] = [
+        Self::FileUnreadable,
+        Self::MalformedEntry,
+        Self::DuplicateEntry,
+        Self::UnknownNamespace,
+        Self::UnknownAction,
+        Self::UnknownContext,
+        Self::AmbiguousRow,
+        Self::EmptyKeys,
+        Self::UnknownKeyName,
+        Self::KeyNotAllowedInNamespace,
+        Self::CatchAllRow,
+        Self::KeyClash,
+        Self::ChordPrefixClash,
+    ];
+
+    /// The spec's literal.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FileUnreadable => "file_unreadable",
+            Self::MalformedEntry => "malformed_entry",
+            Self::DuplicateEntry => "duplicate_entry",
+            Self::UnknownNamespace => "unknown_namespace",
+            Self::UnknownAction => "unknown_action",
+            Self::UnknownContext => "unknown_context",
+            Self::AmbiguousRow => "ambiguous_row",
+            Self::EmptyKeys => "empty_keys",
+            Self::UnknownKeyName => "unknown_key_name",
+            Self::KeyNotAllowedInNamespace => "key_not_allowed_in_namespace",
+            Self::CatchAllRow => "catch_all_row",
+            Self::KeyClash => "key_clash",
+            Self::ChordPrefixClash => "chord_prefix_clash",
+        }
+    }
+}
+
+/// One line of what a load reports: the problem, the entry it is about (by
+/// the names the entry gave; all absent for `file_unreadable`) and a message
+/// that says what to write instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyLoadError {
+    pub problem: KeyOverrideProblem,
+    pub namespace: Option<String>,
+    pub action: Option<String>,
+    pub context: Option<String>,
+    pub message: String,
+}
+
+/// Which process is loading the table (`KeyTableReader`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyTableReader {
+    Board,
+    CompanionPane,
+    DiffPane,
+}
+
+/// One process's load of the table: the merged table, in the default
+/// table's row order, and what the load refused.
+#[derive(Debug, Clone)]
+pub struct KeyTableLoad {
+    pub file: PathBuf,
+    pub table: &'static [KeyBinding],
+    pub errors: Vec<KeyLoadError>,
+}
+
+impl KeyTableLoad {
+    /// The text the board shows for a load that refused anything
+    /// (`BoardShowsKeyLoadErrors`): the file, that the rows keep their
+    /// default keys, and each error's message. `None` with no errors.
+    pub fn error_summary(&self) -> Option<String> {
+        if self.errors.is_empty() {
+            return None;
+        }
+        let mut text = format!(
+            "Key overrides in {} were refused; their rows keep their default keys.",
+            self.file.display()
+        );
+        for e in &self.errors {
+            text.push_str("\n- ");
+            text.push_str(&e.message);
+        }
+        Some(text)
+    }
+}
+
+/// The override file of a data directory.
+pub fn key_override_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(KEY_OVERRIDE_FILE_NAME)
+}
+
+/// Build this process's table (`LoadKeyTable`): the default rows with the
+/// accepted entries of `<data_dir>/keybindings.json` applied. A missing file
+/// is the default table. Every error is logged (`KeyLoadErrorsAreLogged`).
+/// The table is leaked: it is built once per process and lives as long as it.
+pub fn load_key_table(data_dir: &Path, reader: KeyTableReader) -> KeyTableLoad {
+    let file = key_override_path(data_dir);
+    let (table, errors) = match std::fs::read_to_string(&file) {
+        Ok(text) => merge_overrides(&text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (KEY_BINDINGS, Vec::new()),
+        Err(e) => (
+            KEY_BINDINGS,
+            vec![file_unreadable(format!(
+                "{} cannot be read ({e}); no override applies",
+                file.display()
+            ))],
+        ),
+    };
+    for e in &errors {
+        tracing::warn!(
+            ?reader,
+            problem = e.problem.as_str(),
+            file = %file.display(),
+            "key override refused: {}",
+            e.message
+        );
+    }
+    KeyTableLoad {
+        file,
+        table,
+        errors,
+    }
+}
+
+fn file_unreadable(message: String) -> KeyLoadError {
+    KeyLoadError {
+        problem: KeyOverrideProblem::FileUnreadable,
+        namespace: None,
+        action: None,
+        context: None,
+        message,
+    }
+}
+
+/// One entry of the file as the load judged it.
+struct Entry {
+    namespace: Option<String>,
+    action: Option<String>,
+    context: Option<String>,
+    /// The row of `KEY_BINDINGS` the entry names, once resolved.
+    row: Option<usize>,
+    keys: &'static [&'static str],
+    problem: Option<(KeyOverrideProblem, String)>,
+}
+
+impl Entry {
+    fn refuse(&mut self, problem: KeyOverrideProblem, message: String) {
+        if self.problem.is_none() {
+            self.problem = Some((problem, message));
+        }
+    }
+}
+
+/// The merge itself, over the file's text: the merged table (same rows, same
+/// order as `KEY_BINDINGS`) and one error per refused entry, in file order.
+/// Pure, so a writer of the file can run the same checks.
+pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>) {
+    let list = match serde_json::from_str::<Value>(text) {
+        Ok(Value::Array(list)) => list,
+        Ok(_) => {
+            return (
+                KEY_BINDINGS,
+                vec![file_unreadable(format!(
+                    "{KEY_OVERRIDE_FILE_NAME} is not a JSON list; no override applies. Write a list of entries: [{{\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"E\"]}}]"
+                ))],
+            )
+        }
+        Err(e) => {
+            return (
+                KEY_BINDINGS,
+                vec![file_unreadable(format!(
+                    "{KEY_OVERRIDE_FILE_NAME} is not valid JSON ({e}); no override applies"
+                ))],
+            )
+        }
+    };
+    let mut entries: Vec<Entry> = list.iter().map(judge_entry).collect();
+    refuse_duplicates(&mut entries);
+    let table = refuse_clashes(&mut entries);
+    let errors = entries
+        .into_iter()
+        .filter_map(|e| {
+            let (problem, message) = e.problem?;
+            Some(KeyLoadError {
+                problem,
+                namespace: e.namespace,
+                action: e.action,
+                context: e.context,
+                message,
+            })
+        })
+        .collect();
+    (table, errors)
+}
+
+const ENTRY_SHAPE: &str = "an entry is {\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"E\"]}, with an optional \"context\"";
+
+/// A row as an error names it: namespace, action and any context literal.
+fn row_label(b: &KeyBinding) -> String {
+    match b.context {
+        Some(c) => format!(
+            "{} {} (context {})",
+            b.namespace.name(),
+            b.action,
+            c.literal()
+        ),
+        None => format!("{} {}", b.namespace.name(), b.action),
+    }
+}
+
+fn leak_keys(keys: Vec<String>) -> &'static [&'static str] {
+    let keys: Vec<&'static str> = keys
+        .into_iter()
+        .map(|k| &*Box::leak(k.into_boxed_str()))
+        .collect();
+    Box::leak(keys.into_boxed_slice())
+}
+
+/// The per-entry checks, in the spec's order; the first problem found is the
+/// entry's.
+fn judge_entry(value: &Value) -> Entry {
+    let field = |name: &str| value.get(name).and_then(Value::as_str).map(str::to_string);
+    let mut entry = Entry {
+        namespace: field("namespace"),
+        action: field("action"),
+        context: field("context"),
+        row: None,
+        keys: &[],
+        problem: None,
+    };
+    let Some(obj) = value.as_object() else {
+        entry.refuse(
+            KeyOverrideProblem::MalformedEntry,
+            format!("{value} is not an object; {ENTRY_SHAPE}"),
+        );
+        return entry;
+    };
+    if let Some(other) = obj
+        .keys()
+        .find(|k| !matches!(k.as_str(), "namespace" | "action" | "context" | "keys"))
+    {
+        entry.refuse(
+            KeyOverrideProblem::MalformedEntry,
+            format!("an entry has no field \"{other}\"; {ENTRY_SHAPE}"),
+        );
+        return entry;
+    }
+    let keys: Option<Vec<String>> = obj.get("keys").and_then(Value::as_array).and_then(|list| {
+        list.iter()
+            .map(|k| k.as_str().map(str::to_string))
+            .collect()
+    });
+    let missing = ["namespace", "action"]
+        .into_iter()
+        .find(|f| obj.get(*f).and_then(Value::as_str).is_none());
+    let bad_context = obj.get("context").is_some_and(|c| !c.is_string());
+    let (Some(keys), None, false) = (keys, missing, bad_context) else {
+        let what = match (missing, bad_context) {
+            (Some(f), _) => format!("\"{f}\" is missing or not a string"),
+            (None, true) => "\"context\" is not a string".to_string(),
+            (None, false) => "\"keys\" is missing or not a list of strings".to_string(),
+        };
+        entry.refuse(
+            KeyOverrideProblem::MalformedEntry,
+            format!("{what}; {ENTRY_SHAPE}"),
+        );
+        return entry;
+    };
+    let ns_name = entry.namespace.clone().unwrap_or_default();
+    let action = entry.action.clone().unwrap_or_default();
+
+    let Some(ns) = KeyNamespace::parse(&ns_name) else {
+        let valid: Vec<&str> = KeyNamespace::ALL.iter().map(|n| n.name()).collect();
+        entry.refuse(
+            KeyOverrideProblem::UnknownNamespace,
+            format!(
+                "\"{ns_name}\" is not a namespace; write one of: {}",
+                valid.join(", ")
+            ),
+        );
+        return entry;
+    };
+    let rows: Vec<usize> = (0..KEY_BINDINGS.len())
+        .filter(|&i| KEY_BINDINGS[i].namespace == ns && KEY_BINDINGS[i].action == action)
+        .collect();
+    if rows.is_empty() {
+        let mut actions: Vec<&str> = KEY_BINDINGS
+            .iter()
+            .filter(|b| b.namespace == ns)
+            .map(|b| b.action)
+            .collect();
+        actions.dedup();
+        entry.refuse(
+            KeyOverrideProblem::UnknownAction,
+            format!(
+                "{ns_name} has no action \"{action}\"; its actions are: {}",
+                actions.join(", ")
+            ),
+        );
+        return entry;
+    }
+    let contexts_of_rows = || {
+        rows.iter()
+            .map(|&i| {
+                KEY_BINDINGS[i]
+                    .context
+                    .map_or("no context".to_string(), |c| format!("\"{}\"", c.literal()))
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let row = match &entry.context {
+        Some(lit) => {
+            let found = KeyContext::parse(lit).and_then(|c| {
+                rows.iter()
+                    .copied()
+                    .find(|&i| KEY_BINDINGS[i].context == Some(c))
+            });
+            let Some(row) = found else {
+                entry.refuse(
+                    KeyOverrideProblem::UnknownContext,
+                    format!(
+                        "{ns_name} {action} has no row with context \"{lit}\"; its rows have: {}",
+                        contexts_of_rows()
+                    ),
+                );
+                return entry;
+            };
+            row
+        }
+        None => {
+            let free = rows
+                .iter()
+                .copied()
+                .find(|&i| KEY_BINDINGS[i].context.is_none());
+            match (free, rows.as_slice()) {
+                (Some(row), _) | (None, &[row]) => row,
+                (None, _) => {
+                    entry.refuse(
+                        KeyOverrideProblem::AmbiguousRow,
+                        format!(
+                            "{ns_name} {action} has several rows; add \"context\" with one of: {}",
+                            contexts_of_rows()
+                        ),
+                    );
+                    return entry;
+                }
+            }
+        }
+    };
+    entry.row = Some(row);
+    let default = &KEY_BINDINGS[row];
+
+    if default.keys.contains(&ANY_OTHER_KEY) {
+        entry.refuse(
+            KeyOverrideProblem::CatchAllRow,
+            format!(
+                "{} answers any key no other row lists and cannot be rebound; rebind the rows beside it instead",
+                row_label(default)
+            ),
+        );
+        return entry;
+    }
+    if keys.iter().any(|k| k == ANY_OTHER_KEY) {
+        entry.refuse(
+            KeyOverrideProblem::CatchAllRow,
+            format!(
+                "\"{ANY_OTHER_KEY}\" is not a key a row can be given ({}); list the keys themselves",
+                row_label(default)
+            ),
+        );
+        return entry;
+    }
+    if keys.is_empty() {
+        entry.refuse(
+            KeyOverrideProblem::EmptyKeys,
+            format!(
+                "\"keys\" is empty for {}; a row keeps at least one key. To restore its default keys, remove the entry",
+                row_label(default)
+            ),
+        );
+        return entry;
+    }
+    let mut unique: Vec<String> = Vec::new();
+    for k in keys {
+        if !unique.contains(&k) {
+            unique.push(k);
+        }
+    }
+    if let Some(bad) = unique.iter().find(|k| !is_key_name(k)) {
+        let instead = match suggest_key_name(bad) {
+            Some(good) => format!("write \"{good}\""),
+            None => "a key is one character, a named key (Space, Enter, Esc, Tab, Up, F1, …), Ctrl+ or Alt+ before one (\"Ctrl+D\"), or a two-character chord (\"gg\")".to_string(),
+        };
+        entry.refuse(
+            KeyOverrideProblem::UnknownKeyName,
+            format!(
+                "\"{bad}\" is not a key name ({}); {instead}",
+                row_label(default)
+            ),
+        );
+        return entry;
+    }
+    if ns == KeyNamespace::TmuxGlobal && unique.len() > 1 {
+        entry.refuse(
+            KeyOverrideProblem::KeyNotAllowedInNamespace,
+            format!(
+                "{} is one tmux binding and takes exactly one key; list one",
+                row_label(default)
+            ),
+        );
+        return entry;
+    }
+    if let Some(why) = unique.iter().find_map(|k| key_not_allowed_in(ns, k)) {
+        entry.refuse(
+            KeyOverrideProblem::KeyNotAllowedInNamespace,
+            format!("{why} ({})", row_label(default)),
+        );
+        return entry;
+    }
+    entry.keys = leak_keys(unique);
+    entry
+}
+
+/// Every entry that names a row another entry names is refused, all of them.
+fn refuse_duplicates(entries: &mut [Entry]) {
+    let mut by_row: HashMap<usize, usize> = HashMap::new();
+    for e in entries.iter() {
+        if let Some(row) = e.row {
+            *by_row.entry(row).or_default() += 1;
+        }
+    }
+    for e in entries.iter_mut() {
+        if let Some(row) = e.row {
+            let count = by_row.get(&row).copied().unwrap_or_default();
+            if count > 1 {
+                e.refuse(
+                    KeyOverrideProblem::DuplicateEntry,
+                    format!(
+                        "{} is named by {count} entries; keep one",
+                        row_label(&KEY_BINDINGS[row])
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// The default table with every accepted entry applied.
+fn apply(entries: &[Entry]) -> Vec<KeyBinding> {
+    let mut rows = KEY_BINDINGS.to_vec();
+    for e in entries.iter().filter(|e| e.problem.is_none()) {
+        if let Some(row) = e.row {
+            rows[row].keys = e.keys;
+        }
+    }
+    rows
+}
+
+/// Refuse every accepted entry that takes part in a clash, round after round,
+/// until the table has none; return that table.
+fn refuse_clashes(entries: &mut [Entry]) -> &'static [KeyBinding] {
+    loop {
+        let rows = apply(entries);
+        let clashes = table_clashes(&rows);
+        if clashes.is_empty() {
+            if entries
+                .iter()
+                .all(|e| e.problem.is_some() || e.row.is_none())
+            {
+                return KEY_BINDINGS;
+            }
+            return Box::leak(rows.into_boxed_slice());
+        }
+        let mut refused: Vec<(usize, KeyOverrideProblem, String)> = Vec::new();
+        for clash in &clashes {
+            let (problem, message) = clash.describe(&rows);
+            for row in [clash.a, clash.b] {
+                refused.push((row, problem, message.clone()));
+            }
+        }
+        let mut refused_any = false;
+        for (row, problem, message) in refused {
+            if let Some(e) = entries
+                .iter_mut()
+                .find(|e| e.problem.is_none() && e.row == Some(row))
+            {
+                e.refuse(problem, message);
+                refused_any = true;
+            }
+        }
+        if !refused_any {
+            // A clash no entry takes part in is in the default table, which
+            // the drift gate rules out. Stop rather than loop.
+            return Box::leak(rows.into_boxed_slice());
+        }
+    }
+}
+
+/// Two rows of one namespace that a key brings into conflict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Clash {
+    /// For a chord clash, the row listing the chord.
+    pub a: usize,
+    /// For a chord clash, the row listing the chord's first character.
+    pub b: usize,
+    /// The shared key, or the chord.
+    pub key: &'static str,
+    pub chord: bool,
+}
+
+impl Clash {
+    fn describe(&self, rows: &[KeyBinding]) -> (KeyOverrideProblem, String) {
+        let (a, b) = (row_label(&rows[self.a]), row_label(&rows[self.b]));
+        if self.chord {
+            let first: String = self.key.chars().take(1).collect();
+            (
+                KeyOverrideProblem::ChordPrefixClash,
+                format!(
+                    "the chord \"{}\" of {a} starts with \"{first}\", a key of {b}; a chord's first character cannot also be a key in the namespace. Pick another chord or another key",
+                    self.key
+                ),
+            )
+        } else {
+            (
+                KeyOverrideProblem::KeyClash,
+                format!(
+                    "\"{}\" would be a key of both {a} and {b}, which can apply at once; pick a key the other row does not list",
+                    self.key
+                ),
+            )
+        }
+    }
+}
+
+/// Every clash in `rows`: two rows of a namespace that can apply at once
+/// sharing a key (`KeyUniquePerContext`, `ContextsDoNotOverlapForAKey`), and
+/// a chord whose first character is a key of the namespace
+/// (`ChordPrefixIsFree`). Empty for a well-formed table. Row numbers are
+/// indices into `rows`.
+pub fn table_clashes(rows: &[KeyBinding]) -> Vec<Clash> {
+    let mut clashes = Vec::new();
+    for (i, a) in rows.iter().enumerate() {
+        for (j, b) in rows.iter().enumerate() {
+            if a.namespace != b.namespace {
+                continue;
+            }
+            if i < j {
+                let exclusive =
+                    matches!((a.context, b.context), (Some(x), Some(y)) if !contexts_overlap(x, y));
+                if !exclusive {
+                    if let Some(key) = a.keys.iter().find(|k| b.keys.contains(k)) {
+                        clashes.push(Clash {
+                            a: i,
+                            b: j,
+                            key,
+                            chord: false,
+                        });
+                    }
+                }
+            }
+            for chord in a.keys.iter().filter(|k| is_chord(k)) {
+                let first: String = chord.chars().take(1).collect();
+                if b.keys.contains(&first.as_str()) {
+                    clashes.push(Clash {
+                        a: i,
+                        b: j,
+                        key: chord,
+                        chord: true,
+                    });
+                }
+            }
+        }
+    }
+    clashes
+}
+
+#[cfg(test)]
+mod tests;

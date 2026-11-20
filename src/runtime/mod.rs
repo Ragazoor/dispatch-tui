@@ -949,6 +949,12 @@ impl TuiRuntime {
         .await;
 
         let mut app = hydrate_app(tasks, &host_id, &database, &*runner).await;
+        // keybindings.allium: LoadKeyTable. Before the board reads a key or
+        // binds a tmux key; a bad file never stops the board starting.
+        app.install_key_table(&crate::keybindings::load_key_table(
+            &data_dir,
+            crate::keybindings::KeyTableReader::Board,
+        ));
         app.set_store_server(Some(store_server.clone()));
         // The App's first look at this host's dispatch requests is its
         // BASELINE: finished rows in it are history and raise nothing. Taken

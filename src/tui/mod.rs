@@ -329,8 +329,10 @@ pub struct App {
     /// Transient overlay/picker state (pickers, in-progress popup edits, the
     /// one-shot pending action). See [`InteractionState`].
     pub(in crate::tui) interaction: InteractionState,
-    /// The table key presses are looked up in. Always
-    /// [`crate::keybindings::KEY_BINDINGS`] outside tests.
+    /// The table key presses are looked up in: the default rows with the
+    /// user's accepted overrides applied, installed once at startup
+    /// ([`App::install_key_table`]). [`crate::keybindings::KEY_BINDINGS`]
+    /// until then, and in tests that do not set one.
     pub(in crate::tui) key_table: &'static [crate::keybindings::KeyBinding],
     /// Paths in `board.repo_paths` that do not exist on disk (`is_dir()` → false).
     /// Recomputed once in `handle_repo_paths_updated` so the render path is

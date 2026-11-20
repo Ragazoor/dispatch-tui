@@ -190,9 +190,20 @@ impl App {
         }
     }
 
-    /// Replace the table the board looks keys up in. Production boards use
-    /// [`crate::keybindings::KEY_BINDINGS`]; tests install a modified copy to
-    /// show that rebinding is an edit to one row.
+    /// Install the table this board loaded at startup (`LoadKeyTable` in
+    /// `docs/specs/keybindings.allium`). A load that refused anything opens
+    /// the error popup with what it refused (`BoardShowsKeyLoadErrors`); the
+    /// popup's one row is a catch-all, so any key dismisses it.
+    pub fn install_key_table(&mut self, load: &crate::keybindings::KeyTableLoad) {
+        self.key_table = load.table;
+        if let Some(summary) = load.error_summary() {
+            self.status.error_popup = Some(summary);
+            self.dirty = true;
+        }
+    }
+
+    /// Replace the table the board looks keys up in. Tests install a
+    /// modified copy to show that rebinding is an edit to one row.
     #[cfg(test)]
     pub(in crate::tui) fn set_key_table(&mut self, table: &'static [KeyBinding]) {
         self.key_table = table;
