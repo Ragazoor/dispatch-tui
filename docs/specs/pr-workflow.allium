@@ -98,6 +98,7 @@ rule PrLearningsGate {
     -- observable output; no rule listens.
     ensures:
         if first_attempt:
+            -- The board's clock: the reducer stores the time the board sends.
             task.pr_learnings_gate_shown_at = now
             PrCreateBlocked(task: task)
         else:
@@ -1249,7 +1250,9 @@ rule FinishTaskConflict {
     -- No host sends a status line or notification for it. The user learns
     -- of it from the card's conflict section (core.allium, "Column Section
     -- Layout") and from the reason the session_wrap-up call returns to the agent.
-    ensures: task.sub_status = core/SubStatus.conflict
+    ensures:
+        task.sub_status = core/SubStatus.conflict
+        task.updated_at = now
 
     @guidance
         -- Conflict has the highest column-section priority (0, above

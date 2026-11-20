@@ -179,13 +179,16 @@ impl PrReporter {
                 "CLOSED" if !already_closed => PrMessage::Closed(id),
                 _ => PrMessage::ReviewState(id),
             },
-            // A state or review decision the module does not know stays
-            // unknown however often it is retried.
+            // A refusal: a state or review decision the module does not
+            // know, or a caller that does not own the host it names. Neither
+            // changes however often it is retried. The reply does not say
+            // which, so the message names both.
             Ok(false) => PrMessage::CheckFailed {
                 id,
                 permanent: true,
                 error: format!(
-                    "the store does not know PR state {:?} / review decision {:?}",
+                    "the store refused the PR status report (state {:?} / review decision {:?}): \
+                     an unknown state or decision, or this board does not own the task's host",
                     status.state, status.review_decision
                 ),
             },
