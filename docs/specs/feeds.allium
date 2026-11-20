@@ -1893,8 +1893,8 @@ rule UpsertFeedTasks {
     --     updated_at is
     --     bumped only when one of those values actually changes. A match
     --     whose title, description, tag, labels, sort_order, url and
-    --     url_type would all come out as they already are is NOT written
-    --     at all: the row, its updated_at and the store's commit log stay
+    --     url_type would all come out as they already are, and whose
+    --     left_feed is not set, is NOT written at all: the row, its updated_at and the store's commit log stay
     --     as they were (UnchangedFeedItemIsNotRewritten). labels and
     --     sort_order are feed-controlled (never
     --     user-editable), so they are always replaced — on a done task too.
@@ -1914,7 +1914,9 @@ rule UpsertFeedTasks {
     -- every few minutes, that alone grows the log by tens of megabytes a
     -- day. So a match whose feed-owned values (title, description,
     -- tag, labels, sort_order, and url/url_type after the backfill rule)
-    -- equal the stored ones is skipped: no write, updated_at unchanged. A
+    -- equal the stored ones, and that is not a kept task coming back
+    -- (left_feed cleared, a done task reopened), is skipped: no write,
+    -- updated_at unchanged. A
     -- cycle in which no item changed and nothing was inserted, moved or
     -- deleted writes no row at all, and the store logs nothing for it.
     -- updated_at on a feed task therefore means "last time the feed changed
@@ -2171,10 +2173,12 @@ rule KeepWorkedOnFeedTask {
     -- ONCE ONLY. The item stays absent on every later trusted cycle, so
     -- FeedTaskLeftFeed arrives again each time, but the second requires
     -- (not task.left_feed) stops the rule: no new completed_at, no
-    -- updated_at bump, no second close row. That holds whatever the task's status is
-    -- by then: a kept task someone resumed by hand (running or review again,
-    -- left_feed still set) is never moved back to done or closed under its
-    -- agent. Only the first absence acts; the item's return clears left_feed
+    -- updated_at bump, no second close row. That holds for a kept task
+    -- someone resumed by hand (running or review again, left_feed still set):
+    -- it is never moved back to done or closed under its agent. A kept task
+    -- someone moved back to backlog is untouched work again, so the next
+    -- absence removes it (the stale pass's split comes first). Only the first
+    -- absence acts; the item's return clears left_feed
     -- (UpsertFeedTasks' match arm), so a later absence counts as new.
     --
     -- NEVER CLOSES THE PR. The close row is the one a hand move to done
@@ -2243,6 +2247,9 @@ rule KeepWorkedOnFeedTask {
         -- then sets left_feed; mirrored in src/sync/memory_caller/feed.rs.
         -- The pure decision is
         -- spacetime/module/src/feed.rs::left_feed_moves_to_done, shared by both.
+        -- left_feed is set only once the move into done has landed, so a
+        -- move the status write refuses leaves the task unmarked and the next
+        -- trusted cycle tries again.
 }
 
 rule GroupedFeedUpsert {
@@ -3379,7 +3386,10 @@ rule DegradedNonEmptyEmission {
     -- the removal instead: the stale pass removes only an untouched
     -- (backlog) task, and keeps a worked-on one in done
     -- (KeepWorkedOnFeedTask), so a PR merged while its review agent runs
-    -- keeps its card and worktree. The teardown of a row that is removed
+    -- keeps its card and worktree. The one exception is RoleRoutedFeedSync's
+    -- parent sweep, which removes a task stranded on the reviews parent
+    -- whatever its status: it is a stray or a duplicate, not a record of
+    -- work. The teardown of a row that is removed
     -- stays unconditional. The failure this rule addresses is better fixed
     -- by not acting on a wrong absence than by softening its consequences.
     --
