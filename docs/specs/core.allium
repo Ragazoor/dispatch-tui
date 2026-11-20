@@ -1348,6 +1348,13 @@ entity ArchivedTask {
         -- rows; a record is history, and its audience is the one the delete
         -- found.
         --
+        -- Two edges of that copy, both as the store behaves today. A private
+        -- chain longer than spacetime/module/src/visibility.rs::PRIVATE_WALK_LIMIT
+        -- (64 epics) is not followed past that point, so the record is stored
+        -- with private false. A task whose epic row is already gone keeps its
+        -- epic_id but is stored with workspace_id 0 and private false, so only
+        -- the operator can read it (spacetime/module/src/archive.rs::archive_record).
+        --
         -- NEVER REISSUED. No live Task ever carries an ArchivedTask's id. Task
         -- ids are never reused, and a restore's id ceiling counts archived ids
         -- (spacetime-seed.allium: BurnIdSequences).
