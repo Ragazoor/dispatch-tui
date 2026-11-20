@@ -82,7 +82,7 @@ value FeedItem {
                               -- causes parse failure in verify-feed and the
                               -- FeedRunner.
                               --
-                              -- A REVIEW tag (core/TaskTag.is_review — today
+                              -- A REVIEW tag (core/TaskTag.is_review:
                               -- dependabot, pr_review and release_please)
                               -- additionally
                               -- REQUIRES `url` to name a pull request: see
@@ -126,9 +126,8 @@ value FeedItem {
                               -- script picks the path it does is in
                               -- feed-scripts.allium, not here.
                               -- Defaults to absent when the
-                              -- script omits the field, preserving wire
-                              -- compatibility with scripts written before
-                              -- this field existed.
+                              -- script omits the field, so a script that does
+                              -- not emit it stays valid.
     signals: Set<Signal> = {} -- optional routing signals a feed script attaches
                               -- to this item; routed into the right feed bucket
                               -- by the RouteSignals contract. Defaults to the
@@ -268,8 +267,8 @@ contract RouteSignals {
 --
 -- == Rule 1: own-authored ==
 --
--- A PR the user wrote is not review work for the user. Such PRs did reach
--- my_reviews in practice — the involvement qualifiers are not all
+-- A PR the user wrote is not review work for the user. Such PRs can reach
+-- my_reviews without this rule — the involvement qualifiers are not all
 -- self-exclusive (only `commenter:@me -author:@me` spells the exclusion out),
 -- and route's fallback sends an otherwise-unmatched item to my_reviews. Which
 -- qualifier let a given own-authored PR in does not matter here: the item
@@ -1326,7 +1325,7 @@ rule FeedTick {
         --
         -- The obligation on a handler is therefore to EMIT one of those two
         -- events — a handler that emits neither (or only TaskChanged) inherits
-        -- nothing. Today's feed-enabling emitters:
+        -- nothing. The feed-enabling emitters:
         --   1. MCP feed-config_set -> BoardEvent::Refresh
         --   2. MCP epic mutations           -> BoardEvent::EpicChanged
         -- Regression coverage, one test per link in that chain:
@@ -1624,7 +1623,7 @@ rule SerialisedFeedCycle {
         -- parent's cycle writes the subtree, so one key covers everything the
         -- cycle reconciles. Two NESTED feed epics whose subtrees overlap would
         -- still contend, since the subtree stale-delete reaches any child epic;
-        -- not reachable today, and out of scope.
+        -- no path nests feed epics so, and it is out of scope.
         --
         -- BOUNDED COST — a hung feed command
         -- starves its epic for at most feed_command_timeout (core.allium
@@ -2148,9 +2147,8 @@ rule KeepWorkedOnFeedTask {
     -- approved or un-requested, an alert fixed. The feed cannot tell which,
     -- and this rule does not need to.
     --
-    -- WHY KEEP IT. Deleting it — what every mirroring feed did before — took
-    -- the record of a finished review with it, so a past review could not be
-    -- followed up. A task outside backlog is one the user chose to work on;
+    -- WHY KEEP IT. Deleting it would take the record of a finished review
+    -- with it, so a past review could not be followed up. A task outside backlog is one the user chose to work on;
     -- it stays on the board, in done, until the user deletes it
     -- (tasks.allium: DeleteTask). Nothing prunes these automatically.
     --
@@ -2567,8 +2565,8 @@ rule RoleRoutedFeedSync {
     -- (spacetime/module/src/rules.rs::repo_name_from_url of item.url).
     -- Tasks then live at this third level, not
     -- directly on the role sub-epic. When the role sub-epic does NOT have
-    -- grouping enabled the target is the role sub-epic directly — today's
-    -- documented two-level behaviour is the group_by_repo = false case.
+    -- grouping enabled the target is the role sub-epic directly: the
+    -- two-level layout is the group_by_repo = false case.
     --
     -- This is the same group_by_repo grouping GroupedFeedUpsert applies at the
     -- top level of a flat feed epic, but here it is applied to an ALREADY
@@ -2615,7 +2613,7 @@ rule RoleRoutedFeedSync {
     -- removes every feed-managed task (external_id != null) still sitting
     -- directly on the reviews_parent epic. By construction a present
     -- parent-stranded task was already MOVED down by the routing loop, so what
-    -- remains is a merged/closed stray or a legacy duplicate whose routed copy
+    -- remains is a merged/closed stray or a duplicate whose routed copy
     -- already lives in a role sub-epic — both must go so the parent holds no
     -- flat feed task (NoFlatFeedTasksOnReviewsParent). Manual (external_id =
     -- null) tasks on the parent are preserved. This converges the invariant from
@@ -2729,7 +2727,7 @@ rule RoleRoutedFeedSync {
         -- Parent sweep: the reviews_parent epic must hold NO feed task directly
         -- (NoFlatFeedTasksOnReviewsParent). Present parent-stranded tasks were
         -- already moved down by the routing loop, so anything left flat on the
-        -- parent is a merged/closed stray or a legacy duplicate whose routed
+        -- parent is a merged/closed stray or a duplicate whose routed
         -- copy already lives in a role sub-epic — both are removed. Manual
         -- (external_id = null) tasks on the parent are preserved. Removal
         -- deletes-then-tears-down the reported row, as above. Skipped when
@@ -3276,8 +3274,8 @@ rule DegradedEmptyEmission {
     -- of FeedCommandFailure.
     --
     -- The guard applies to EVERY feed epic uniformly — flat, grouped and
-    -- reviews_parent alike — not only to the reviews_parent path where
-    -- the incident was observed.
+    -- reviews_parent alike — not only to the reviews_parent path, whose
+    -- subtree a soft-failing run would wipe.
     --
     -- The cost of this guard is recorded on FeedCommandStderrOnSuccess
     -- above: a script that always chatters on stderr and legitimately
@@ -3330,7 +3328,7 @@ rule DegradedEmptyEmission {
         -- (the manual path ran no sync at all, not merely a quiet one);
         -- src/feed/tests.rs::tick_degraded_empty_emission_does_not_delete_existing_tasks
         -- (auto-poll leaves pre-existing subtree tasks untouched — the direct
-        -- regression test for the reported wipe). The false-positive boundary
+        -- test of a soft-failing run wiping the subtree). The false-positive boundary
         -- is pinned by the existing tests that must stay green unmodified:
         -- src/runtime/tests/feeds.rs::exec_trigger_epic_feed_zero_items (a quiet
         -- empty run still reconciles) and
@@ -3503,8 +3501,7 @@ rule AppendOnlyFeed {
     --
     -- WHY THE SAME MECHANISM AND NOT A NEW ONE. "Perform the insert-and-refresh
     -- half of a sync and none of the removal half" is behaviour the runtime
-    -- already has; today it is reached only by accident, when a script
-    -- soft-fails. An append-only epic wants it deliberately and permanently.
+    -- already has; a degraded emission reaches it when a script soft-fails. An append-only epic wants it deliberately and permanently.
     -- A second mechanism with the same postcondition would be a second thing
     -- to keep correct, and the two would drift. There is exactly one additive
     -- path, and both causes reach it.
@@ -3996,8 +3993,8 @@ invariant NoFlatFeedTasksOnReviewsParent {
 -- fallback an unset epic inherits must itself clear the floor. Were
 -- default_feed_interval to sink below min_feed_interval, leaving the field
 -- blank would poll faster than the fastest value a user is permitted to
--- enter, and the floor would be advice rather than a bound. The two are equal
--- today; raising the default is safe, lowering it past the floor is not.
+-- enter, and the floor would be advice rather than a bound. Raising the
+-- default is safe, lowering it past the floor is not.
 invariant DefaultFeedIntervalClearsTheFloor {
     core/config.default_feed_interval >= core/config.min_feed_interval
 }
@@ -4008,7 +4005,7 @@ invariant DefaultFeedIntervalClearsTheFloor {
 -- following it, or holding its claim does not let a person's host run a
 -- command somebody else wrote. A shared feed is therefore polled by its
 -- setter's host alone, and pauses while that host is offline. A null
--- feed_command_set_by (a command that predates the column) counts as set by
+-- feed_command_set_by (a command with no recorded setter) counts as set by
 -- created_by.
 --
 -- There is no one gate rule: each surface that requests a cycle checks the

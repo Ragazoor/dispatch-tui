@@ -55,8 +55,8 @@ use "./feeds.allium" as feeds
 -- WHY A BAD CONF IS FATAL RATHER THAN A WARNING. The readers consume an entry
 -- in incompatible ways. fetch-reviews.sh derives a PR author login by
 -- stripping "app/" and appending "[bot]"; the gh queries take the entry
--- verbatim. An entry written the other natural way, "dependabot[bot]", became
--- "dependabot[bot][bot]" in the first and matched nothing in the second. Both
+-- verbatim. An entry written the other natural way, "dependabot[bot]", would
+-- become "dependabot[bot][bot]" in the first and match nothing in the second. Both
 -- symptoms look exactly like "this bot has no open PRs", the one reading a
 -- user cannot disprove from the board. A malformed entry is a typo in a
 -- hand-edited file: it does not fix itself, and every cycle it survives
@@ -161,7 +161,7 @@ contract BotsConf {
 -- == scripts/fetch-dependabot.sh ==
 --
 -- Kept for reference and for a user wiring a hand-rolled generic epic.
--- fetch-reviews.sh's bot-author pass now surfaces the same bot PRs under the
+-- fetch-reviews.sh's bot-author pass surfaces the same bot PRs under the
 -- reviews parent, so reaching the bots sub-epic does not depend on it.
 
 contract FetchDependabot {
@@ -527,7 +527,7 @@ contract FetchReviews {
 -- upstream to open a PR against and no third party to review a level change.
 --
 -- WHY THIS IS A TEMPLATE AND NOT A RUNTIME FEATURE. Both halves are policy:
--- which log file, and what counts as one problem. The runtime learned only
+-- which log file, and what counts as one problem. The runtime knows only
 -- that a feed may be append-only, which is upstream-agnostic.
 
 contract FetchLogWarnings {
