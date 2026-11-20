@@ -3,7 +3,7 @@
 //! agent's window. See `docs/specs/keybindings.allium` for the table and the
 //! `AgentTreeCompanionPane` surface for what each key does.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyEvent;
 
 use crate::agent_tree::list_cursor::ListCursor;
 use crate::agent_tree::model::{TreeNode, TreeNodeKind};
@@ -101,22 +101,11 @@ fn tree_context_holds(
 }
 
 fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyAction {
-    use crate::keybindings::{lookup, KeyNamespace, KEY_BINDINGS};
+    use crate::keybindings::{lookup, KeyNamespace};
     // Any key acknowledges a notice — docs/specs/agent-tree.allium's
     // ClearAgentTreeErrorNotice. Cleared before dispatching, so a key that sets
     // a fresh one wins.
     state.notice = None;
-
-    // The `gg` chord: its first half is pending input, not a lookup, and only
-    // the completed chord is looked up. Taking the flag disarms it
-    // unconditionally: a second `g` completes the chord, and any other key
-    // falls through to its own row having quietly cancelled it. See
-    // AgentTreeGgChordNeverExpires in docs/specs/agent-tree.allium — there is
-    // no deadline, so the only thing that can end a pending chord is the next
-    // key, whenever it comes.
-    let Some((name, label)) = resolve_gg_chord(state, key) else {
-        return KeyAction::Continue;
-    };
 
     // The table decides which action this press runs: the pane-wide keys are
     // rows in all three sections (AgentKeysFollowFocus), the cursor keys rows of
@@ -126,13 +115,21 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
         Focus::Commits => KeyNamespace::AgentTreeCommits,
         Focus::Agents => KeyNamespace::AgentTreeAgents,
     };
-    let Some(row) = lookup(KEY_BINDINGS, ns, &name, |c| {
-        tree_context_holds(state, root, c)
-    }) else {
+
+    // A chord (`gg`): its first half is pending input, not a lookup, and only
+    // the completed chord is looked up. See AgentTreeGgChordNeverExpires in
+    // docs/specs/agent-tree.allium — there is no deadline, so the only thing
+    // that can end a pending chord is the next key, whenever it comes.
+    let table = state.key_table;
+    let Some((name, label)) = resolve_chord(&mut state.pending_chord, table, ns, key) else {
+        return KeyAction::Continue;
+    };
+
+    let Some(row) = lookup(table, ns, &name, |c| tree_context_holds(state, root, c)) else {
         return KeyAction::Continue;
     };
     let action = row.action;
-    match run_tree_action(state, root, ns, action, key) {
+    match run_tree_action(state, root, ns, action) {
         Some(result) => {
             if row.records_usage {
                 state
@@ -145,20 +142,30 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
     }
 }
 
-/// The key's name and label after the `gg` chord is resolved, or `None` when
-/// the press only armed the chord and there is nothing to look up yet.
-fn resolve_gg_chord(state: &mut RenderState, key: KeyEvent) -> Option<(String, String)> {
-    use crate::keybindings::{key_label, key_name};
-    let was_pending_g = std::mem::take(&mut state.pending_g);
+/// The key's name and label after any chord is resolved, or `None` when the
+/// press only armed a chord and there is nothing to look up yet. Shared by the
+/// tree and diff panes, whose chords carry no deadline. Taking the pending
+/// half disarms it unconditionally: a press that completes a chord some row of
+/// `ns` lists is looked up as that chord, and any other press is looked up on
+/// its own, having quietly cancelled it (or arms a chord of its own).
+pub(crate) fn resolve_chord(
+    pending: &mut Option<char>,
+    table: &[crate::keybindings::KeyBinding],
+    ns: crate::keybindings::KeyNamespace,
+    key: KeyEvent,
+) -> Option<(String, String)> {
+    use crate::keybindings::{completed_chord, key_label, key_name, starts_chord};
     let name = key_name(key);
-    if name != "g" {
-        return Some((name, key_label(key)));
+    if let Some(first) = pending.take() {
+        if let Some(chord) = completed_chord(table, ns, first, &name) {
+            return Some((chord.clone(), chord));
+        }
     }
-    if !was_pending_g {
-        state.pending_g = true;
+    if let Some(first) = starts_chord(table, ns, &name) {
+        *pending = Some(first);
         return None;
     }
-    Some(("gg".to_string(), "gg".to_string()))
+    Some((name, key_label(key)))
 }
 
 /// Run one resolved action. `None` means the action had no effect (nothing to
@@ -168,7 +175,6 @@ fn run_tree_action(
     root: &TreeNode,
     ns: crate::keybindings::KeyNamespace,
     action: &str,
-    key: KeyEvent,
 ) -> Option<KeyAction> {
     let half_page = state.half_page();
     let result = match action {
@@ -211,8 +217,12 @@ fn run_tree_action(
         // the visible rows — so a collapsed directory's children are skipped
         // and nothing is expanded to reach a target. With nothing selected
         // yet they all land on the first row, as `j`/`k` do from that state.
-        "navigate_row" => {
-            navigate_row(state, ns, key);
+        "navigate_row_down" => {
+            navigate_row(state, ns, Step::Down);
+            KeyAction::Continue
+        }
+        "navigate_row_up" => {
+            navigate_row(state, ns, Step::Up);
             KeyAction::Continue
         }
         "navigate_row_first" => {
@@ -223,8 +233,12 @@ fn run_tree_action(
             navigate_to_edge(state, ns, Edge::Last);
             KeyAction::Continue
         }
-        "navigate_half_page" => {
-            navigate_half_page(state, ns, key, half_page);
+        "navigate_half_page_down" => {
+            navigate_half_page(state, ns, Step::Down, half_page);
+            KeyAction::Continue
+        }
+        "navigate_half_page_up" => {
+            navigate_half_page(state, ns, Step::Up, half_page);
             KeyAction::Continue
         }
         // Nothing closed, nothing to step out to: no effect, no record.
@@ -288,22 +302,29 @@ fn run_tree_action(
     Some(result)
 }
 
+/// Which way a motion goes: the row's action id says, never the key.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Down,
+    Up,
+}
+
 /// Which end of a section a jump motion lands on.
 enum Edge {
     First,
     Last,
 }
 
-/// `j`/`k` and the arrow keys: one row in the focused section.
+/// navigate_row_down / navigate_row_up: one row in the focused section.
 // `TreeState`'s navigation methods return whether anything changed; the loop
 // redraws unconditionally, so the answer is discarded. The jump motions
 // resolve against the identifiers of the last render — the visible rows — so
 // a collapsed directory's children are skipped and nothing is expanded to
 // reach a target. With nothing selected yet they all land on the first row,
 // as `j`/`k` do from that state.
-fn navigate_row(state: &mut RenderState, ns: crate::keybindings::KeyNamespace, key: KeyEvent) {
+fn navigate_row(state: &mut RenderState, ns: crate::keybindings::KeyNamespace, step: Step) {
     use crate::keybindings::KeyNamespace;
-    let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+    let down = step == Step::Down;
     match (ns, down) {
         (KeyNamespace::AgentTreeAgents, true) => state.agents.down(),
         (KeyNamespace::AgentTreeAgents, false) => state.agents.up(),
@@ -318,7 +339,8 @@ fn navigate_row(state: &mut RenderState, ns: crate::keybindings::KeyNamespace, k
     }
 }
 
-/// `gg` and `G`: jump to the first or last row of the focused section.
+/// navigate_row_first / navigate_row_last: jump to the first or last row of
+/// the focused section.
 fn navigate_to_edge(state: &mut RenderState, ns: crate::keybindings::KeyNamespace, edge: Edge) {
     use crate::keybindings::KeyNamespace;
     match (ns, edge) {
@@ -335,15 +357,16 @@ fn navigate_to_edge(state: &mut RenderState, ns: crate::keybindings::KeyNamespac
     }
 }
 
-/// `d`/`u`: half a page in the focused section.
+/// navigate_half_page_down / navigate_half_page_up: half a page in the focused
+/// section.
 fn navigate_half_page(
     state: &mut RenderState,
     ns: crate::keybindings::KeyNamespace,
-    key: KeyEvent,
+    step: Step,
     half_page: usize,
 ) {
     use crate::keybindings::KeyNamespace;
-    let down = matches!(key.code, KeyCode::Char('d' | 'D'));
+    let down = step == Step::Down;
     match (ns, down) {
         (KeyNamespace::AgentTreeAgents, true) => state.agents.half_page_down(),
         (KeyNamespace::AgentTreeAgents, false) => state.agents.half_page_up(),

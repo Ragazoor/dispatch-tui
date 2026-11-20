@@ -1040,16 +1040,6 @@ impl TaskModel {
     /// (`dispatch.allium: EveryTaskAgentLaunchesOnItsModel`).
     pub const DEFAULT: TaskModel = TaskModel::Sonnet;
 
-    /// The model whose alias starts with `key` — the wizard's picker key
-    /// (`tasks.allium: CreateTask`, ModelPicker). Every alias starts with a
-    /// different letter, so the key is always the first letter of its name.
-    pub fn for_key(key: char) -> Option<TaskModel> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|m| m.as_str().starts_with(key))
-    }
-
     /// Every alias, comma-separated, for error messages.
     pub fn valid_list() -> String {
         Self::ALL

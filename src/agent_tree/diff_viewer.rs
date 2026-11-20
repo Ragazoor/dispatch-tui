@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -357,10 +357,13 @@ pub struct DiffState {
     /// half-page motions are defined against the VISIBLE height and
     /// [`handle_key`] never sees a `Rect`.
     viewport_rows: usize,
-    /// Whether a lone `g` is waiting for the second half of the `gg` chord.
-    /// No deadline, exactly as in the tree pane: `g` is bound to nothing else
-    /// here, so nothing is waiting for the chord to expire.
-    pending_g: bool,
+    /// The first half of a chord (`g` of `gg`) waiting for its second key.
+    /// No deadline, exactly as in the tree pane.
+    pending_chord: Option<char>,
+    /// The keybinding table the pane looks keys up in:
+    /// [`crate::keybindings::KEY_BINDINGS`] outside tests, which install a
+    /// remapped copy to show that a row alone decides what its keys do.
+    key_table: &'static [crate::keybindings::KeyBinding],
     /// Keypress usage events for presses that took effect, waiting for the
     /// loop to write them through the pane's store connection.
     pub usage: Vec<crate::models::UsageEvent>,
@@ -382,7 +385,8 @@ impl DiffState {
         Self {
             offset: 0,
             viewport_rows: 0,
-            pending_g: false,
+            pending_chord: None,
+            key_table: crate::keybindings::KEY_BINDINGS,
             usage: Vec::new(),
             notice: None,
         }
@@ -442,34 +446,30 @@ pub fn handle_key(state: &mut DiffState, line_count: usize, key: KeyEvent) -> Di
     // AgentTreeGgChordNeverExpires in docs/specs/agent-tree.allium: there is no
     // deadline, so the only thing that can end a pending chord is the next key,
     // whenever it comes.
-    use crate::keybindings::{key_label, key_name, lookup, KeyNamespace, KEY_BINDINGS};
-    let was_pending_g = std::mem::take(&mut state.pending_g);
-    let mut name = key_name(key);
-    let mut label = key_label(key);
-    if name == "g" {
-        if !was_pending_g {
-            state.pending_g = true;
-            return DiffKeyAction::Continue;
-        }
-        name = "gg".to_string();
-        label = "gg".to_string();
-    }
+    use crate::keybindings::{lookup, KeyNamespace};
+    let table = state.key_table;
+    let ns = KeyNamespace::AgentDiff;
+    let Some((name, label)) =
+        crate::agent_tree::keys::resolve_chord(&mut state.pending_chord, table, ns, key)
+    else {
+        return DiffKeyAction::Continue;
+    };
 
     // The table decides which action this press runs; a press with no row
     // does nothing.
-    let Some(row) = lookup(KEY_BINDINGS, KeyNamespace::AgentDiff, &name, |_| false) else {
+    let Some(row) = lookup(table, ns, &name, |_| false) else {
         return DiffKeyAction::Continue;
     };
     let action = row.action;
     let half_page = state.half_page();
     let result = match action {
         "exit_pane" => DiffKeyAction::Exit,
-        "navigate_row" => {
-            if matches!(key.code, KeyCode::Char('j') | KeyCode::Down) {
-                state.scroll_to(state.offset.saturating_add(1), line_count);
-            } else {
-                state.offset = state.offset.saturating_sub(1);
-            }
+        "navigate_row_down" => {
+            state.scroll_to(state.offset.saturating_add(1), line_count);
+            DiffKeyAction::Continue
+        }
+        "navigate_row_up" => {
+            state.offset = state.offset.saturating_sub(1);
             DiffKeyAction::Continue
         }
         "navigate_row_first" => {
@@ -480,12 +480,12 @@ pub fn handle_key(state: &mut DiffState, line_count: usize, key: KeyEvent) -> Di
             state.offset = state.max_offset(line_count);
             DiffKeyAction::Continue
         }
-        "navigate_half_page" => {
-            if matches!(key.code, KeyCode::Char('d' | 'D')) {
-                state.scroll_to(state.offset.saturating_add(half_page), line_count);
-            } else {
-                state.offset = state.offset.saturating_sub(half_page);
-            }
+        "navigate_half_page_down" => {
+            state.scroll_to(state.offset.saturating_add(half_page), line_count);
+            DiffKeyAction::Continue
+        }
+        "navigate_half_page_up" => {
+            state.offset = state.offset.saturating_sub(half_page);
             DiffKeyAction::Continue
         }
         _ => return DiffKeyAction::Continue,

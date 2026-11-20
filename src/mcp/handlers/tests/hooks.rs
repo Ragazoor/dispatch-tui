@@ -124,7 +124,7 @@ async fn a_pane_keypress_is_recorded_as_keybinding_usage() {
     .await;
     let request = HookRequest::Observe(ObservedEvent::PaneKey {
         task_id: TaskId(1),
-        action: "navigate_half_page".to_string(),
+        action: "navigate_half_page_down".to_string(),
         key: "d".to_string(),
     });
     let Json(answer) = handle_hook(State(state), Json(request)).await;
@@ -138,7 +138,7 @@ async fn a_pane_keypress_is_recorded_as_keybinding_usage() {
         .unwrap();
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].category, "keybinding");
-    assert_eq!(rows[0].action, "navigate_half_page");
+    assert_eq!(rows[0].action, "navigate_half_page_down");
     assert!(notify_rx.try_recv().is_err(), "no refresh for usage");
 }
 

@@ -488,21 +488,72 @@ pub fn lookup<'a>(
     })
 }
 
-/// The `?` overlay's border title, built from `board.help`'s `scroll_help` and
-/// `close_help` rows so rebinding either changes it
-/// (`OverlayTitleNamesItsOwnKeys` in `docs/specs/keybindings.allium`).
-pub fn help_overlay_title(table: &[KeyBinding]) -> String {
-    let keys = |action: &str, sep: &str| {
-        table
+/// Whether a key name is a chord: exactly two characters pressed one after
+/// the other ("gg"). A two-character name that is a named key ("Up", "F1" to
+/// "F9") is that key, never a chord.
+pub fn is_chord(key: &str) -> bool {
+    let mut chars = key.chars();
+    let (Some(first), Some(second), None) = (chars.next(), chars.next(), chars.next()) else {
+        return false;
+    };
+    let named = key == "Up" || (first == 'F' && second.is_ascii_digit());
+    !named
+}
+
+/// Whether a press named `key` is the first half of a chord: some row of
+/// `ns` in `table` lists a chord that starts with it. Such a press is
+/// pending input, not a lookup (`KeypressRunsItsRowsAction`).
+pub fn starts_chord(table: &[KeyBinding], ns: KeyNamespace, key: &str) -> Option<char> {
+    let mut chars = key.chars();
+    let (Some(first), None) = (chars.next(), chars.next()) else {
+        return None;
+    };
+    table
+        .iter()
+        .filter(|b| b.namespace == ns)
+        .flat_map(|b| b.keys.iter())
+        .any(|k| is_chord(k) && k.starts_with(first))
+        .then_some(first)
+}
+
+/// The chord a pending `first` and a press named `second` form, when a row of
+/// `ns` in `table` lists it. `None` abandons the chord: the press is then
+/// looked up on its own.
+pub fn completed_chord(
+    table: &[KeyBinding],
+    ns: KeyNamespace,
+    first: char,
+    second: &str,
+) -> Option<String> {
+    let chord = format!("{first}{second}");
+    (is_chord(&chord)
+        && table
             .iter()
-            .find(|b| b.namespace == KeyNamespace::BoardHelp && b.action == action)
-            .map(|b| b.keys.join(sep))
-            .unwrap_or_default()
+            .any(|b| b.namespace == ns && b.keys.contains(&chord.as_str())))
+    .then_some(chord)
+}
+
+/// The `?` overlay's border title, built from `board.help`'s
+/// `scroll_help_down`, `scroll_help_up` and `close_help` rows so rebinding
+/// any of them changes it (`OverlayTitleNamesItsOwnKeys` in
+/// `docs/specs/keybindings.allium`).
+pub fn help_overlay_title(table: &[KeyBinding]) -> String {
+    let keys = |actions: &[&str], sep: &str| {
+        actions
+            .iter()
+            .filter_map(|action| {
+                table
+                    .iter()
+                    .find(|b| b.namespace == KeyNamespace::BoardHelp && b.action == *action)
+            })
+            .flat_map(|b| b.keys.iter().copied())
+            .collect::<Vec<_>>()
+            .join(sep)
     };
     format!(
         " Help \u{2014} {} scroll, {} close ",
-        keys("scroll_help", "/"),
-        keys("close_help", " or ")
+        keys(&["scroll_help_down", "scroll_help_up"], "/"),
+        keys(&["close_help"], " or ")
     )
 }
 
@@ -522,6 +573,76 @@ pub fn bindings_in(namespace: KeyNamespace) -> impl Iterator<Item = &'static Key
     KEY_BINDINGS
         .iter()
         .filter(move |b| b.namespace == namespace)
+}
+
+/// The opposite of a motion's action id: `_down` and `_up`, `_left` and
+/// `_right`, `_expand` and `_collapse`, `_forward` and `_backward`,
+/// `_next_` and `_previous_`. `None` for an id with no opposite.
+#[cfg(test)]
+pub(crate) fn opposite_action(action: &str) -> Option<String> {
+    let suffixes = [
+        ("_down", "_up"),
+        ("_left", "_right"),
+        ("_expand", "_collapse"),
+        ("_forward", "_backward"),
+    ];
+    for (a, b) in suffixes {
+        if let Some(stem) = action.strip_suffix(a) {
+            return Some(format!("{stem}{b}"));
+        }
+        if let Some(stem) = action.strip_suffix(b) {
+            return Some(format!("{stem}{a}"));
+        }
+    }
+    if action.contains("_next_") {
+        return Some(action.replacen("_next_", "_previous_", 1));
+    }
+    if action.contains("_previous_") {
+        return Some(action.replacen("_previous_", "_next_", 1));
+    }
+    None
+}
+
+/// The value families whose rows pick one value each: the tag, wrap-up-mode
+/// and model letters and the repo digits.
+#[cfg(test)]
+pub(crate) const VALUE_FAMILIES: [&str; 4] = [
+    "tag_picker_select_",
+    "wrap_up_mode_picker_select_",
+    "model_picker_select_",
+    "repo_filter_toggle_repo_",
+];
+
+/// The remapped table of `RemappedTableDrivesDispatch`
+/// (`docs/specs/keybindings.allium`): every pair of opposite rows (one
+/// namespace, one context) trades keys, and the rows of every value family
+/// pass their keys on to the next row of the family. Under it a handler that
+/// reads the pressed key to pick a direction or a value goes the wrong way.
+#[cfg(test)]
+pub(crate) fn remapped_table() -> &'static [KeyBinding] {
+    let mut rows: Vec<KeyBinding> = KEY_BINDINGS.to_vec();
+    for row in &mut rows {
+        let Some(other) = opposite_action(row.action) else {
+            continue;
+        };
+        let partner = KEY_BINDINGS.iter().find(|b| {
+            b.namespace == row.namespace && b.context == row.context && b.action == other
+        });
+        if let Some(partner) = partner {
+            row.keys = partner.keys;
+        }
+    }
+    for ns in KeyNamespace::ALL {
+        for prefix in VALUE_FAMILIES {
+            let family: Vec<usize> = (0..rows.len())
+                .filter(|&i| rows[i].namespace == ns && rows[i].action.starts_with(prefix))
+                .collect();
+            for (n, &i) in family.iter().enumerate() {
+                rows[i].keys = KEY_BINDINGS[family[(n + 1) % family.len()]].keys;
+            }
+        }
+    }
+    Box::leak(rows.into_boxed_slice())
 }
 
 #[cfg(test)]

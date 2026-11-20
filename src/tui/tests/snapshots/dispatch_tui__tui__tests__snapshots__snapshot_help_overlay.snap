@@ -8,12 +8,14 @@ expression: rendered
  ╭──────────────────────────╮ │  ── active                │                              │ ╭──────────────────────────╮
  │  ▎ Task 1            ╔ Help — j/Down/k/Up scroll, ? or Esc close ═══════════════════════════╗Task 4                │
  │   ◦ <1h              ║  == board.normal ==                                                  ║ <1h                  │
- ╰──────────────────────║  h, Left, l, Right                                                   ║──────────────────────╯
- ╭──────────────────────║    Move to the previous column (h, Left) or the next column (l,      ║
- │  ▎ Task 2            ║    Right)                                                            ║
- │   ◦ <1h              ║  j, Down, k, Up                                                      ║
- ╰──────────────────────║    Move to the next card (j, Down) or the previous card (k, Up) in   ║
-                        ║    the column                                                        ║
+ ╰──────────────────────║  h, Left                                                             ║──────────────────────╯
+ ╭──────────────────────║    Move to the previous column                                       ║
+ │  ▎ Task 2            ║  l, Right                                                            ║
+ │   ◦ <1h              ║    Move to the next column                                           ║
+ ╰──────────────────────║  j, Down                                                             ║
+                        ║    Move to the next card in the column                               ║
+                        ║  k, Up                                                               ║
+                        ║    Move to the previous card in the column                           ║
                         ║  [, gg                                                               ║
                         ║    Jump to the first row of the column                               ║
                         ║  ], G                                                                ║
@@ -35,8 +37,6 @@ expression: rendered
                         ║    Quit dispatch                                                     ║
                         ║    (on the top-level board)                                          ║
                         ║  Esc                                                                 ║
-                        ║    Clear the current selection                                       ║
-                        ║    (on the top-level board, no search active, with cards selected or ║
                         ╚══════════════════════════════════════════════════════════════════════╝
                               │                           │                              │
                               │                           │                              │

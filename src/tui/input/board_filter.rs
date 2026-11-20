@@ -1,18 +1,24 @@
 //! Board-filter overlay input handlers, and the repo-path delete confirm.
 
-use crossterm::event::{KeyCode, KeyEvent};
-
 use super::super::types::*;
 use super::super::App;
 use super::key_event;
 
+/// The repo a `repo_filter_toggle_repo_<n>` row toggles: its 1-based place
+/// in the Repos tab's list, read from the row's action id.
+fn repo_filter_number(action: &str) -> Option<usize> {
+    action
+        .strip_prefix("repo_filter_toggle_repo_")
+        .and_then(|n| n.parse().ok())
+        .filter(|n| (1..=9).contains(n))
+}
+
 impl App {
-    /// `action` is the row's action id; `key` supplies the direction and the
-    /// digit where one row covers several keys. A tab-specific key on another
+    /// `action` is the row's action id, which alone says the direction or
+    /// the repo (`KeypressRunsItsRowsAction`). A tab-specific key on another
     /// tab does nothing and records nothing.
     pub(in crate::tui) fn handle_key_board_filter(
         &mut self,
-        key: KeyEvent,
         action: &str,
         label: &str,
     ) -> Vec<Command> {
@@ -23,19 +29,17 @@ impl App {
             "filter_back" => M::Back,
             "filter_next_tab" => M::SwitchTab(MoveDirection::Forward),
             "filter_previous_tab" => M::SwitchTab(MoveDirection::Backward),
-            "filter_move_cursor" => {
-                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
-                M::MoveRowCursor(if down { 1 } else { -1 })
-            }
+            "filter_cursor_down" => M::MoveRowCursor(1),
+            "filter_cursor_up" => M::MoveRowCursor(-1),
             "filter_toggle_row" => match self.filter_row_toggle() {
                 Some(msg) => msg,
                 None => return vec![],
             },
-            "repo_filter_toggle_repo" if tab == FilterTab::Repos => {
-                let KeyCode::Char(c @ '1'..='9') = key.code else {
+            _ if tab == FilterTab::Repos && repo_filter_number(action).is_some() => {
+                let Some(n) = repo_filter_number(action) else {
                     return vec![];
                 };
-                match self.board.repo_paths.get((c as usize) - ('1' as usize)) {
+                match self.board.repo_paths.get(n - 1) {
                     Some(path) => M::Toggle(path.clone()),
                     None => return vec![],
                 }

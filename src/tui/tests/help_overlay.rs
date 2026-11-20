@@ -1,7 +1,7 @@
 //! `HelpOverlayIsTheTable` (`docs/specs/keybindings.allium`): the `?` overlay
 //! is rendered from `KEY_BINDINGS` — every row, grouped under its namespace's
 //! published name, keys beside description, context words and note where
-//! present — and scrolls (board.help's `scroll_help` row) so that every row
+//! present — and scrolls (board.help's `scroll_help_down` and `scroll_help_up` rows) so that every row
 //! is reachable however short the popup.
 //!
 //! These replace the hand-written-overlay checks that parsed `[k]` legends out
@@ -395,7 +395,7 @@ fn j_and_down_scroll_the_overlay_down_k_and_up_scroll_it_up() {
     assert_eq!(app.input.mode, InputMode::Help);
     assert_eq!(
         recorded(&cmds),
-        vec![("scroll_help".to_string(), Some("k".to_string()))],
+        vec![("scroll_help_up".to_string(), Some("k".to_string()))],
         "a press is recorded like any other key"
     );
 }

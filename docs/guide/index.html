@@ -261,10 +261,14 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
 -->
 <script type="application/json" id="dispatch-keys">
 [
-  {"namespace": "board.normal", "action": "navigate_column", "keys": ["h", "Left", "l", "Right"], "when": "any", "label": "column",
-   "description": "Move to the previous column (h, Left) or the next column (l, Right)"},
-  {"namespace": "board.normal", "action": "navigate_row", "keys": ["j", "Down", "k", "Up"], "when": "any", "label": "card",
-   "description": "Move to the next card (j, Down) or the previous card (k, Up) in the column"},
+  {"namespace": "board.normal", "action": "navigate_column_left", "keys": ["h", "Left"], "when": "any", "label": "column",
+   "description": "Move to the previous column"},
+  {"namespace": "board.normal", "action": "navigate_column_right", "keys": ["l", "Right"], "when": "any", "label": "column",
+   "description": "Move to the next column"},
+  {"namespace": "board.normal", "action": "navigate_row_down", "keys": ["j", "Down"], "when": "any", "label": "card",
+   "description": "Move to the next card in the column"},
+  {"namespace": "board.normal", "action": "navigate_row_up", "keys": ["k", "Up"], "when": "any", "label": "card",
+   "description": "Move to the previous card in the column"},
   {"namespace": "board.normal", "action": "toggle_section_collapse", "keys": ["Enter", "Space"], "when": "foldedSection", "label": "unfold",
    "description": "Unfold the folded section"},
   {"namespace": "board.normal", "action": "toggle_section_collapse", "keys": ["z"], "when": "sectioned", "label": "fold",
@@ -299,14 +303,18 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
    "description": "Toggle the help overlay"},
   {"namespace": "board.detail", "action": "close_detail", "keys": ["q", "Esc", "Enter"], "when": "any", "label": "close",
    "description": "Close the task detail panel"},
-  {"namespace": "board.detail", "action": "scroll_detail", "keys": ["j", "Down", "k", "Up"], "when": "any", "label": "scroll",
-   "description": "Scroll the detail down (j, Down) or up (k, Up)"},
+  {"namespace": "board.detail", "action": "scroll_detail_down", "keys": ["j", "Down"], "when": "any", "label": "scroll",
+   "description": "Scroll the detail down"},
+  {"namespace": "board.detail", "action": "scroll_detail_up", "keys": ["k", "Up"], "when": "any", "label": "scroll",
+   "description": "Scroll the detail up"},
   {"namespace": "board.detail", "action": "zoom_detail", "keys": ["z"], "when": "any", "label": "zoom",
    "description": "Zoom the detail to fill the screen, or back"},
   {"namespace": "board.help", "action": "close_help", "keys": ["?", "Esc"], "when": "any", "label": "close",
    "description": "Close the help overlay"},
-  {"namespace": "board.help", "action": "scroll_help", "keys": ["j", "Down", "k", "Up"], "when": "any", "label": "scroll",
-   "description": "Scroll the overlay down (j, Down) or up (k, Up)"},
+  {"namespace": "board.help", "action": "scroll_help_down", "keys": ["j", "Down"], "when": "any", "label": "scroll",
+   "description": "Scroll the overlay down"},
+  {"namespace": "board.help", "action": "scroll_help_up", "keys": ["k", "Up"], "when": "any", "label": "scroll",
+   "description": "Scroll the overlay up"},
   {"namespace": "tmux.global", "action": "jump_to_dispatch", "keys": ["Prefix+Space"], "when": "any", "label": "back to board",
    "description": "Jump back from an agent's window to the dispatch board. Press your tmux prefix, then Space"}
 ]
@@ -699,17 +707,21 @@ function goal(name) {
 function enter(kind, id) { state.stack.push({ kind, id, col: state.col, row: [...state.row] }); state.col = 0; state.row = [0, 0, 0, 0]; }
 function leave(v) { if (v) { state.col = v.col; state.row = v.row; } }
 
+// Each motion is its own row, so the action alone says which way it goes.
+function moveColumn(d) {
+  state.col = Math.max(0, Math.min(3, state.col + d));
+  goal("move");
+}
+function moveRow(d) {
+  state.row[state.col] += d;
+  goal("move");
+}
+
 const ACTIONS = {
-  navigate_column(key) {
-    const d = key === "h" || key === "Left" ? -1 : 1;
-    state.col = Math.max(0, Math.min(3, state.col + d));
-    goal("move");
-  },
-  navigate_row(key) {
-    const d = key === "j" || key === "Down" ? 1 : -1;
-    state.row[state.col] += d;
-    goal("move");
-  },
+  navigate_column_left() { moveColumn(-1); },
+  navigate_column_right() { moveColumn(1); },
+  navigate_row_down() { moveRow(1); },
+  navigate_row_up() { moveRow(-1); },
   toggle_section_collapse() {
     const c = current();
     if (c.kind === "folded") state.folded.delete(c.section);
@@ -776,10 +788,12 @@ const ACTIONS = {
   },
   toggle_help() { state.overlay = "help"; $("t-help-body").scrollTop = 0; },
   close_detail() { state.overlay = null; },
-  scroll_detail(key) { $("t-detail-body").scrollTop += key === "j" || key === "Down" ? 40 : -40; },
+  scroll_detail_down() { $("t-detail-body").scrollTop += 40; },
+  scroll_detail_up() { $("t-detail-body").scrollTop -= 40; },
   zoom_detail() { state.zoom = !state.zoom; },
   close_help() { state.overlay = null; },
-  scroll_help(key) { $("t-help-body").scrollTop += key === "j" || key === "Down" ? 60 : -60; },
+  scroll_help_down() { $("t-help-body").scrollTop += 60; },
+  scroll_help_up() { $("t-help-body").scrollTop -= 60; },
   jump_to_dispatch() { closeAgent(); },
 };
 
@@ -934,6 +948,12 @@ function renderBoard() {
   $("t-top-right").innerHTML = `<span class="ok">${running} agents live</span> &nbsp; ${auto} &nbsp; [${tasks.size} tasks · ${epics.size} epics · ${packages.length} packages]`;
 }
 
+// The status bar shows each motion pair once, under its first row.
+const PAIRED = {
+  navigate_column_left: "navigate_column_right", navigate_column_right: null,
+  navigate_row_down: "navigate_row_up", navigate_row_up: null,
+};
+
 function statusBar(ns) {
   const seen = new Set();
   const parts = [];
@@ -942,7 +962,10 @@ function statusBar(ns) {
     // can apply at once (a Backlog card without a worktree), and the first
     // in block order is the one the press runs.
     if (lookup(ns, b.keys[0]) !== b) continue;
-    const key = b.keys.length === 4 && b.keys[0] === "h" ? "h/l" : b.keys.length === 4 && b.keys[0] === "j" ? "j/k" : b.keys[0];
+    // A motion's two directions are two rows; the bar names them as one pair.
+    if (PAIRED[b.action] === null) continue;
+    const partner = PAIRED[b.action] && KEYS.find(x => x.namespace === ns && x.action === PAIRED[b.action]);
+    const key = partner ? `${b.keys[0]}/${partner.keys[0]}` : b.keys[0];
     const id = key + b.label;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -999,8 +1022,8 @@ function renderHelp() {
   const el = $("t-help");
   el.classList.toggle("open", state.overlay === "help");
   if (state.overlay !== "help") return;
-  const keysOf = (action, sep) => (KEYS.find(b => b.namespace === "board.help" && b.action === action)?.keys || []).join(sep);
-  $("t-help-title").textContent = ` Help — ${keysOf("scroll_help", "/")} scroll, ${keysOf("close_help", " or ")} close `;
+  const keysOf = (actions, sep) => actions.flatMap(action => KEYS.find(b => b.namespace === "board.help" && b.action === action)?.keys || []).join(sep);
+  $("t-help-title").textContent = ` Help — ${keysOf(["scroll_help_down", "scroll_help_up"], "/")} scroll, ${keysOf(["close_help"], " or ")} close `;
   const groups = {};
   for (const b of KEYS) (groups[b.namespace] ||= []).push(b);
   let html = '<p style="margin:0 0 6px;color:var(--t-dim)">The keys this guide answers to, with the real TUI\'s own descriptions. The real TUI has more.</p>';

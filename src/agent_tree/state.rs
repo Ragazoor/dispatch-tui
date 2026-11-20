@@ -135,11 +135,15 @@ pub struct RenderState {
     /// and the user did not ask for it to be closed. See
     /// `OpenDiffPathsMaySurviveTheirFiles` in docs/specs/agent-tree.allium.
     pub(super) open_diffs: BTreeSet<PathBuf>,
-    /// Whether a lone `g` is waiting for the second half of the `gg` chord.
+    /// The first half of a chord (`g` of `gg`) waiting for its second key.
     /// Unlike the board's chord this one carries no deadline, so there is no
     /// timestamp beside it — see `AgentTreeGgChordNeverExpires` in
     /// docs/specs/agent-tree.allium for why a clock would buy nothing here.
-    pub(super) pending_g: bool,
+    pub(super) pending_chord: Option<char>,
+    /// The keybinding table the pane looks keys up in:
+    /// [`crate::keybindings::KEY_BINDINGS`] outside tests, which install a
+    /// remapped copy to show that a row alone decides what its keys do.
+    pub(super) key_table: &'static [crate::keybindings::KeyBinding],
     /// Rows the tree had to draw into at the last render — the pane's height
     /// less its two borders. Recorded by [`render`](crate::agent_tree::render::render) because the half-page
     /// motions are defined against the *visible* height, which only the
@@ -184,7 +188,8 @@ impl RenderState {
             user_collapsed: HashSet::new(),
             notice: None,
             open_diffs: BTreeSet::new(),
-            pending_g: false,
+            pending_chord: None,
+            key_table: crate::keybindings::KEY_BINDINGS,
             viewport_rows: 0,
             focus: Focus::Agents,
             browse_focus: Focus::Tree,

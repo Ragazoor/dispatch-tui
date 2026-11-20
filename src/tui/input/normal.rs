@@ -1,7 +1,5 @@
 //! board.normal: the actions the table's rows run on the board / epic view.
 
-use crossterm::event::{KeyCode, KeyEvent};
-
 use super::super::types::*;
 use super::super::App;
 use crate::keybindings::KeyBinding;
@@ -15,13 +13,8 @@ impl App {
     /// id under the key as typed (`label`); one that finds nothing to act on
     /// records nothing. Navigation is the exception: it records even at an
     /// edge (keybindings.allium, KeyInput's guidance).
-    pub(in crate::tui) fn run_normal(
-        &mut self,
-        b: &KeyBinding,
-        key: KeyEvent,
-        label: &str,
-    ) -> Vec<Command> {
-        self.try_run_normal(b, key, label).unwrap_or_else(|| {
+    pub(in crate::tui) fn run_normal(&mut self, b: &KeyBinding, label: &str) -> Vec<Command> {
+        self.try_run_normal(b, label).unwrap_or_else(|| {
             tracing::warn!(action = b.action, "board.normal action has no handler arm");
             Vec::new()
         })
@@ -32,21 +25,15 @@ impl App {
     pub(in crate::tui) fn try_run_normal(
         &mut self,
         b: &KeyBinding,
-        key: KeyEvent,
         label: &str,
     ) -> Option<Vec<Command>> {
-        self.run_normal_board(b, key, label)
+        self.run_normal_board(b, label)
             .or_else(|| self.run_normal_epic(b, label))
             .or_else(|| self.run_normal_task(b, label))
     }
 
     /// Board-wide actions: navigation, reordering, selection, folding, filters, search and view toggles.
-    fn run_normal_board(
-        &mut self,
-        b: &KeyBinding,
-        key: KeyEvent,
-        label: &str,
-    ) -> Option<Vec<Command>> {
+    fn run_normal_board(&mut self, b: &KeyBinding, label: &str) -> Option<Vec<Command>> {
         use crate::tui::messages::{
             BoardFilterMessage, EpicMessage, InputMessage, SplitMessage, SystemMessage, TaskMessage,
         };
@@ -59,22 +46,10 @@ impl App {
         };
         Some(match action {
             "quit" => keyed(self, Message::System(SystemMessage::Quit)),
-            "navigate_column" => {
-                let d = if matches!(key.code, KeyCode::Char('h') | KeyCode::Left) {
-                    -1
-                } else {
-                    1
-                };
-                keyed(self, Message::NavigateColumn(d))
-            }
-            "navigate_row" => {
-                let d = if matches!(key.code, KeyCode::Char('j') | KeyCode::Down) {
-                    1
-                } else {
-                    -1
-                };
-                keyed(self, Message::NavigateRow(d))
-            }
+            "navigate_column_left" => keyed(self, Message::NavigateColumn(-1)),
+            "navigate_column_right" => keyed(self, Message::NavigateColumn(1)),
+            "navigate_row_down" => keyed(self, Message::NavigateRow(1)),
+            "navigate_row_up" => keyed(self, Message::NavigateRow(-1)),
             "navigate_row_first" => keyed(self, Message::NavigateRowFirst),
             "navigate_row_last" => keyed(self, Message::NavigateRowLast),
             "reorder_task_down" => {

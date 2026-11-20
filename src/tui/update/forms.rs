@@ -81,7 +81,7 @@ pub(in crate::tui) fn cancel_input(
     input.task_draft = None;
     input.copy_flow = false;
     input.pending_epic_id = None;
-    interaction.pending_g = None;
+    interaction.pending_chord = None;
     status.clear();
     vec![]
 }

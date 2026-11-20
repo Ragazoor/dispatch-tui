@@ -204,7 +204,14 @@ static FIXTURE: &[KeyBinding] = &[
         "Stay",
         None,
     ),
-    row(N::BoardNormal, &["j"], None, "navigate_row", "Down", None),
+    row(
+        N::BoardNormal,
+        &["j"],
+        None,
+        "navigate_row_down",
+        "Down",
+        None,
+    ),
     row(
         N::BoardNormal,
         &["q"],
@@ -304,11 +311,11 @@ fn lookup_a_row_whose_context_does_not_hold_does_not_apply() {
 fn lookup_a_row_with_no_context_always_applies() {
     assert_eq!(
         action_of(lookup(FIXTURE, N::BoardNormal, "j", |_| false)),
-        Some("navigate_row")
+        Some("navigate_row_down")
     );
     assert_eq!(
         action_of(lookup(FIXTURE, N::BoardNormal, "j", |_| true)),
-        Some("navigate_row")
+        Some("navigate_row_down")
     );
 }
 
@@ -477,12 +484,17 @@ fn the_error_popup_is_one_catch_all_row_that_dismisses() {
 /// HelpOverlayIsTheTable: the overlay scrolls, so its scroll keys are rows.
 #[test]
 fn the_help_overlay_scrolls_with_j_down_k_up() {
-    let rows: Vec<_> = bindings_in(N::BoardHelp)
-        .filter(|b| b.action == "scroll_help")
-        .collect();
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].keys, &["j", "Down", "k", "Up"]);
-    assert_eq!(rows[0].context, None);
+    for (action, keys) in [
+        ("scroll_help_down", ["j", "Down"]),
+        ("scroll_help_up", ["k", "Up"]),
+    ] {
+        let rows: Vec<_> = bindings_in(N::BoardHelp)
+            .filter(|b| b.action == action)
+            .collect();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].keys, &keys);
+        assert_eq!(rows[0].context, None);
+    }
 }
 
 /// Characters typed into a text-bearing mode are data (observability.allium:
@@ -609,10 +621,12 @@ fn the_commits_namespace_shares_the_pane_wide_keys_with_the_tree() {
     for action in [
         "exit_pane",
         "toggle_focus",
-        "navigate_row",
+        "navigate_row_down",
+        "navigate_row_up",
         "navigate_row_first",
         "navigate_row_last",
-        "navigate_half_page",
+        "navigate_half_page_down",
+        "navigate_half_page_up",
     ] {
         let tree = keys_of(KeyNamespace::AgentTreeTree, action);
         assert!(!tree.is_empty(), "{action}");
@@ -649,10 +663,12 @@ fn the_commits_namespace_has_only_the_pane_wide_rows_and_select_source() {
             "exit_pane",
             "toggle_focus",
             "switch_section",
-            "navigate_row",
+            "navigate_row_down",
+            "navigate_row_up",
             "navigate_row_first",
             "navigate_row_last",
-            "navigate_half_page",
+            "navigate_half_page_down",
+            "navigate_half_page_up",
             "select_source",
         ]
     );
@@ -689,12 +705,20 @@ fn the_help_overlay_title_names_its_own_keys() {
         help_overlay_title(KEY_BINDINGS),
         " Help \u{2014} j/Down/k/Up scroll, ? or Esc close "
     );
-    static REBOUND: [KeyBinding; 2] = [
+    static REBOUND: [KeyBinding; 3] = [
         row(
             KeyNamespace::BoardHelp,
             &["x"],
             None,
-            "scroll_help",
+            "scroll_help_down",
+            "d",
+            None,
+        ),
+        row(
+            KeyNamespace::BoardHelp,
+            &["y"],
+            None,
+            "scroll_help_up",
             "d",
             None,
         ),
@@ -709,7 +733,7 @@ fn the_help_overlay_title_names_its_own_keys() {
     ];
     assert_eq!(
         help_overlay_title(&REBOUND),
-        " Help \u{2014} x scroll, w or Q close "
+        " Help \u{2014} x/y scroll, w or Q close "
     );
 }
 

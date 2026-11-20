@@ -1,5 +1,5 @@
 use super::*;
-use crossterm::event::KeyModifiers;
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -320,4 +320,94 @@ fn a_press_with_no_row_does_nothing_in_the_diff_pane() {
         assert!(rig.state.usage.is_empty(), "{key}");
         assert_eq!(rig.state.offset, 0, "{key}");
     }
+}
+
+// -- a remapped table (keybindings.allium: RemappedTableDrivesDispatch) ----
+
+/// Under the remapped table each key of a moved diff-pane row scrolls the
+/// way its row says, not the way the key scrolled by default.
+#[test]
+fn under_the_remapped_table_each_key_scrolls_the_way_its_row_says() {
+    use crate::agent_tree::pane::test_key_event;
+    use crate::keybindings::{remapped_table, KeyNamespace, KEY_BINDINGS};
+    let remapped = remapped_table();
+    // The document scrolled into its middle, so every motion moves it.
+    let build = || {
+        let mut rig = Rig::new(60, 12);
+        for _ in 0..20 {
+            rig.press(KeyCode::Char('j'));
+        }
+        rig.state.usage.clear();
+        rig
+    };
+    let start = build().state.offset();
+    let mut moved = 0;
+    for (row, default) in remapped.iter().zip(KEY_BINDINGS.iter()) {
+        if row.namespace != KeyNamespace::AgentDiff || row.keys == default.keys {
+            continue;
+        }
+        moved += 1;
+        for (n, key) in row.keys.iter().enumerate() {
+            let default_key = default.keys[n % default.keys.len()];
+            let mut by_default = build();
+            by_default.press_with(
+                test_key_event(default_key).code,
+                test_key_event(default_key).modifiers,
+            );
+            let mut by_remap = build();
+            by_remap.state.key_table = remapped;
+            let event = test_key_event(key);
+            by_remap.press_with(event.code, event.modifiers);
+            assert_ne!(by_default.state.offset(), start, "{}", row.action);
+            assert_eq!(
+                by_remap.state.offset(),
+                by_default.state.offset(),
+                "{}: {key} under the remap did not do what {default_key} does by default",
+                row.action
+            );
+            assert_eq!(
+                by_remap
+                    .state
+                    .usage
+                    .iter()
+                    .map(|e| e.action.clone())
+                    .collect::<Vec<_>>(),
+                vec![row.action.to_string()]
+            );
+        }
+    }
+    assert!(moved > 0, "no agent_diff row moved");
+}
+
+/// A chord moved to another key works in the diff pane, and `gg` no longer
+/// arms once no row lists it.
+#[test]
+fn a_chord_moved_to_another_row_key_scrolls_to_the_top() {
+    use crate::keybindings::{KeyBinding, KeyNamespace, KEY_BINDINGS};
+    let rows: Vec<KeyBinding> = KEY_BINDINGS
+        .iter()
+        .map(|b| {
+            let mut b = *b;
+            if b.namespace == KeyNamespace::AgentDiff && b.action == "navigate_row_first" {
+                b.keys = &["zz"];
+            }
+            b
+        })
+        .collect();
+    let mut rig = Rig::new(60, 12);
+    rig.state.key_table = Box::leak(rows.into_boxed_slice());
+    rig.press(KeyCode::Char('G'));
+    let bottom = rig.state.offset();
+    assert!(bottom > 0);
+    rig.press(KeyCode::Char('g'));
+    rig.press(KeyCode::Char('g'));
+    assert_eq!(rig.state.offset(), bottom, "gg is no row's key any more");
+    rig.press(KeyCode::Char('z'));
+    assert_eq!(
+        rig.state.offset(),
+        bottom,
+        "the first half is pending input"
+    );
+    rig.press(KeyCode::Char('z'));
+    assert_eq!(rig.state.offset(), 0);
 }

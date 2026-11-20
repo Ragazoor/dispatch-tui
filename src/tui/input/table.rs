@@ -12,10 +12,11 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::super::types::*;
-use super::super::{App, GG_CHORD_TIMEOUT};
-use super::{key_event, key_label, tree_nav_for};
+use super::super::{App, PendingChord, GG_CHORD_TIMEOUT};
+use super::{key_event, key_label};
 use crate::keybindings::{
-    key_has_ctrl_or_alt, key_name, lookup, KeyBinding, KeyContext, KeyNamespace,
+    completed_chord, key_has_ctrl_or_alt, key_name, lookup, starts_chord, KeyBinding, KeyContext,
+    KeyNamespace,
 };
 use crate::models::{SubStatus, TaskStatus, TaskTag};
 
@@ -203,36 +204,35 @@ impl App {
     /// the key as data, or ignore it.
     pub(in crate::tui) fn dispatch_key(&mut self, key: KeyEvent) -> Vec<Command> {
         let ns = self.key_namespace();
+        let table = self.key_table;
         let mut name = key_name(key);
         let mut label = key_label(key);
-        if ns != KeyNamespace::BoardNormal {
-            self.interaction.pending_g = None;
-        } else if let Some(started) = self.interaction.pending_g.take() {
-            // A pending `g` resolves with this press: a second `g` inside the
-            // window completes the `gg` chord, which is looked up as one key;
-            // anything else abandons the chord and is processed normally.
-            if name == "g" && started.elapsed() <= GG_CHORD_TIMEOUT {
-                name = "gg".to_string();
-                label = "gg".to_string();
+        // A pending first half resolves with this press: inside the window,
+        // a press that completes a chord some row of the namespace lists is
+        // looked up as that chord; anything else abandons the chord and is
+        // processed normally.
+        if let Some(p) = self.interaction.pending_chord.take() {
+            if p.namespace == ns && p.started.elapsed() <= GG_CHORD_TIMEOUT {
+                if let Some(chord) = completed_chord(table, ns, p.first, &name) {
+                    name = chord.clone();
+                    label = chord;
+                }
             }
         }
-        if ns == KeyNamespace::BoardNormal
-            && name == "g"
-            && self
-                .key_table
-                .iter()
-                .any(|b| b.namespace == ns && b.keys.contains(&"gg"))
-        {
+        if let Some(first) = starts_chord(table, ns, &name) {
             // First half of a chord: pending input, not a lookup.
-            self.interaction.pending_g = Some(Instant::now());
+            self.interaction.pending_chord = Some(PendingChord {
+                namespace: ns,
+                first,
+                started: Instant::now(),
+            });
             return vec![];
         }
 
-        let table = self.key_table;
         let rung = std::cell::OnceCell::new();
         let binding = lookup(table, ns, &name, |c| self.context_holds_cached(c, &rung));
         match binding {
-            Some(b) => self.run_row(ns, b, key, &label),
+            Some(b) => self.run_row(ns, b, &label),
             None => self.unbound_key(ns, key),
         }
     }
@@ -330,13 +330,7 @@ impl App {
     }
 
     /// Run the action of the row a key resolved to.
-    fn run_row(
-        &mut self,
-        ns: KeyNamespace,
-        b: &'static KeyBinding,
-        key: KeyEvent,
-        label: &str,
-    ) -> Vec<Command> {
+    fn run_row(&mut self, ns: KeyNamespace, b: &'static KeyBinding, label: &str) -> Vec<Command> {
         use crate::tui::messages::SystemMessage;
         use KeyNamespace as N;
         let action = b.action;
@@ -344,28 +338,28 @@ impl App {
             return self.run_text_edit(ns, action);
         }
         match ns {
-            N::BoardNormal => self.run_normal(b, key, label),
-            N::BoardDetail => self.run_detail(action, key, label),
+            N::BoardNormal => self.run_normal(b, label),
+            N::BoardDetail => self.run_detail(action, label),
             N::BoardSearch => self.run_search(action, label),
-            N::BoardHelp => self.run_help(action, key, label),
+            N::BoardHelp => self.run_help(action, label),
             N::BoardError => {
                 self.dispatch_keyed(Message::System(SystemMessage::DismissError), action, label)
             }
             N::BoardText
             | N::BoardDescriptionEditor
             | N::BoardPickerRepoPath
-            | N::BoardPickerBaseBranch => self.run_text_mode(action, key, label),
-            N::BoardFilter => self.handle_key_board_filter(key, action, label),
+            | N::BoardPickerBaseBranch => self.run_text_mode(action, label),
+            N::BoardFilter => self.handle_key_board_filter(action, label),
             N::BoardFilterSearch => self.handle_key_board_filter_search(action, label),
-            N::BoardPickerTag => self.run_tag_picker(action, key, label),
-            N::BoardPickerWrapUpMode => self.run_wrap_up_picker(action, key, label),
-            N::BoardPickerModel => self.run_model_picker(action, key, label),
-            N::BoardPickerQuickDispatch => self.run_quick_dispatch_picker(action, key, label),
-            N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, key, label),
-            N::BoardPickerReparentEpic => self.run_reparent_picker(action, key, label),
-            N::BoardPickerWorkPackage => self.run_work_package_picker(action, key, label),
-            N::BoardPickerPlacement => self.run_placement_picker(action, key, label),
-            N::BoardAdmin => self.run_admin(action, key, label),
+            N::BoardPickerTag => self.run_tag_picker(action, label),
+            N::BoardPickerWrapUpMode => self.run_wrap_up_picker(action, label),
+            N::BoardPickerModel => self.run_model_picker(action, label),
+            N::BoardPickerQuickDispatch => self.run_quick_dispatch_picker(action, label),
+            N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, label),
+            N::BoardPickerReparentEpic => self.run_reparent_picker(action, label),
+            N::BoardPickerWorkPackage => self.run_work_package_picker(action, label),
+            N::BoardPickerPlacement => self.run_placement_picker(action, label),
+            N::BoardAdmin => self.run_admin(action, label),
             N::BoardConfirmAdmin => self.dispatch_keyed(
                 Message::Admin(crate::tui::messages::AdminMessage::Confirm(
                     action.ends_with("_yes"),
@@ -415,14 +409,14 @@ impl App {
     }
 
     /// The task detail view: close, scroll, zoom.
-    fn run_detail(&mut self, action: &'static str, key: KeyEvent, label: &str) -> Vec<Command> {
+    fn run_detail(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::TaskMessage;
         match action {
             "close_detail" => {
                 self.dispatch_keyed(Message::Task(TaskMessage::CloseDetail), action, label)
             }
-            "scroll_detail" => {
-                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+            "scroll_detail_down" | "scroll_detail_up" => {
+                let down = action == "scroll_detail_down";
                 if let ViewMode::TaskDetail {
                     scroll, max_scroll, ..
                 } = &mut self.board.view_mode
@@ -464,14 +458,14 @@ impl App {
     }
 
     /// The help overlay: close and scroll.
-    fn run_help(&mut self, action: &'static str, key: KeyEvent, label: &str) -> Vec<Command> {
+    fn run_help(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::SystemMessage;
         match action {
             "close_help" => {
                 self.dispatch_keyed(Message::System(SystemMessage::ToggleHelp), action, label)
             }
-            "scroll_help" => {
-                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+            "scroll_help_down" | "scroll_help_up" => {
+                let down = action == "scroll_help_down";
                 let max = self.interaction.help_max_scroll.get().unwrap_or(usize::MAX);
                 let now = self.interaction.help_scroll;
                 self.interaction.help_scroll = if down {
@@ -486,10 +480,11 @@ impl App {
     }
 
     /// The text-entry modes and the repo / base-branch pickers.
-    fn run_text_mode(&mut self, action: &'static str, key: KeyEvent, label: &str) -> Vec<Command> {
+    fn run_text_mode(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::InputMessage;
         match action {
-            "picker_move_cursor" => self.move_repo_cursor(action, key, label),
+            "picker_cursor_down" => self.move_repo_cursor(1, action, label),
+            "picker_cursor_up" => self.move_repo_cursor(-1, action, label),
             "cancel_input" => {
                 self.dispatch_keyed(Message::Input(InputMessage::CancelInput), action, label)
             }
@@ -504,14 +499,14 @@ impl App {
         }
     }
 
-    /// Move the repo list cursor one row for an Up / Down press.
+    /// Move the repo list cursor one row: `delta` is 1 for a `_down` row and
+    /// -1 for an `_up` row.
     fn move_repo_cursor(
         &mut self,
+        delta: isize,
         action: &'static str,
-        key: KeyEvent,
         label: &str,
     ) -> Vec<Command> {
-        let delta = if key.code == KeyCode::Down { 1 } else { -1 };
         self.dispatch_keyed(
             Message::BoardFilter(crate::tui::messages::BoardFilterMessage::MoveCursor(delta)),
             action,
@@ -520,18 +515,14 @@ impl App {
     }
 
     /// The quick-dispatch repo picker.
-    fn run_quick_dispatch_picker(
-        &mut self,
-        action: &'static str,
-        key: KeyEvent,
-        label: &str,
-    ) -> Vec<Command> {
+    fn run_quick_dispatch_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::InputMessage;
         match action {
             "quick_dispatch_cancel" => {
                 self.dispatch_keyed(Message::Input(InputMessage::CancelInput), action, label)
             }
-            "quick_dispatch_move_cursor" => self.move_repo_cursor(action, key, label),
+            "quick_dispatch_cursor_down" => self.move_repo_cursor(1, action, label),
+            "quick_dispatch_cursor_up" => self.move_repo_cursor(-1, action, label),
             "quick_dispatch_select" => {
                 let idx = self.input.repo_cursor;
                 // A cursor past the list with no typed new repo selects
@@ -547,18 +538,14 @@ impl App {
     }
 
     /// The "move task to epic" tree picker.
-    fn run_move_to_epic_picker(
-        &mut self,
-        action: &'static str,
-        key: KeyEvent,
-        label: &str,
-    ) -> Vec<Command> {
+    fn run_move_to_epic_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::TaskMessage::*;
+        use crate::tui::types::TreeNav;
         let msg = match action {
-            "move_to_epic_picker_navigate" => match tree_nav_for(key) {
-                Some(nav) => MoveToEpicNavigate(nav),
-                None => return vec![],
-            },
+            "move_to_epic_picker_down" => MoveToEpicNavigate(TreeNav::Down),
+            "move_to_epic_picker_up" => MoveToEpicNavigate(TreeNav::Up),
+            "move_to_epic_picker_expand" => MoveToEpicNavigate(TreeNav::Right),
+            "move_to_epic_picker_collapse" => MoveToEpicNavigate(TreeNav::Left),
             "move_to_epic_picker_confirm" => MoveToEpicConfirm,
             "move_to_epic_picker_cancel" => MoveToEpicCancel,
             _ => return vec![],
@@ -567,18 +554,11 @@ impl App {
     }
 
     /// The work-package link picker (`WorkPackageLinkPicker`).
-    fn run_work_package_picker(
-        &mut self,
-        action: &'static str,
-        key: KeyEvent,
-        label: &str,
-    ) -> Vec<Command> {
+    fn run_work_package_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::WorkPackageMessage::*;
         let msg = match action {
-            "work_package_picker_navigate" => {
-                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
-                PickerMove(if down { 1 } else { -1 })
-            }
+            "work_package_picker_down" => PickerMove(1),
+            "work_package_picker_up" => PickerMove(-1),
             "work_package_picker_toggle" => PickerActivate,
             "work_package_picker_close" => PickerClose,
             _ => return vec![],
@@ -588,18 +568,11 @@ impl App {
 
     /// The workspace and visibility step ending the new-epic and
     /// new-package forms.
-    fn run_placement_picker(
-        &mut self,
-        action: &'static str,
-        key: KeyEvent,
-        label: &str,
-    ) -> Vec<Command> {
+    fn run_placement_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::InputMessage::*;
         let msg = match action {
-            "placement_picker_workspace" => {
-                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
-                PlacementMoveWorkspace(if down { 1 } else { -1 })
-            }
+            "placement_picker_workspace_down" => PlacementMoveWorkspace(1),
+            "placement_picker_workspace_up" => PlacementMoveWorkspace(-1),
             "placement_picker_visibility" => PlacementToggleVisibility,
             "placement_picker_create" => SubmitPlacement,
             "placement_picker_cancel" => CancelInput,
@@ -609,14 +582,13 @@ impl App {
     }
 
     /// The admin screen (`admin-surfaces.allium`).
-    fn run_admin(&mut self, action: &'static str, key: KeyEvent, label: &str) -> Vec<Command> {
+    fn run_admin(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::AdminMessage::*;
         let msg = match action {
-            "admin_navigate" => {
-                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
-                Move(if down { 1 } else { -1 })
-            }
-            "admin_pane" => Pane(if key.code == KeyCode::BackTab { -1 } else { 1 }),
+            "admin_navigate_down" => Move(1),
+            "admin_navigate_up" => Move(-1),
+            "admin_next_pane" => Pane(1),
+            "admin_previous_pane" => Pane(-1),
             "admin_new_workspace" => NewWorkspace,
             "admin_rename_workspace" => RenameWorkspace,
             "admin_delete_workspace" => DeleteWorkspace,
@@ -630,7 +602,10 @@ impl App {
             "admin_close" => Close,
             _ => return vec![],
         };
-        if matches!(action, "admin_navigate" | "admin_pane") {
+        if matches!(
+            action,
+            "admin_navigate_down" | "admin_navigate_up" | "admin_next_pane" | "admin_previous_pane"
+        ) {
             return self.dispatch_keyed(Message::Admin(msg), action, label);
         }
         // A per-pane key on another pane, or one the person may not use,
@@ -640,18 +615,14 @@ impl App {
     }
 
     /// The "reparent epic" tree picker.
-    fn run_reparent_picker(
-        &mut self,
-        action: &'static str,
-        key: KeyEvent,
-        label: &str,
-    ) -> Vec<Command> {
+    fn run_reparent_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::EpicMessage::*;
+        use crate::tui::types::TreeNav;
         let msg = match action {
-            "reparent_picker_navigate" => match tree_nav_for(key) {
-                Some(nav) => ReparentNavigate(nav),
-                None => return vec![],
-            },
+            "reparent_picker_down" => ReparentNavigate(TreeNav::Down),
+            "reparent_picker_up" => ReparentNavigate(TreeNav::Up),
+            "reparent_picker_expand" => ReparentNavigate(TreeNav::Right),
+            "reparent_picker_collapse" => ReparentNavigate(TreeNav::Left),
             "reparent_picker_confirm" => ReparentConfirm,
             "reparent_picker_cancel" => ReparentCancel,
             _ => return vec![],
@@ -692,114 +663,69 @@ impl App {
     /// a second `p` finds it armed and does nothing (CreateTask:
     /// PhoenixArming, `docs/specs/tasks.allium`). Every other accepted key is
     /// a letter of the label it selects.
-    fn run_tag_picker(&mut self, action: &str, key: KeyEvent, label: &str) -> Vec<Command> {
+    fn run_tag_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::tui::messages::InputMessage;
-        match action {
+        let submit = match action {
             "phoenix_arm" => {
                 if self.input.phoenix_armed() {
                     return vec![];
                 }
-                self.dispatch_keyed(
-                    Message::Input(InputMessage::ArmPhoenix),
-                    "phoenix_arm",
-                    label,
-                )
+                InputMessage::ArmPhoenix
             }
-            "tag_picker_select" => {
-                let KeyCode::Char(c) = key.code else {
-                    return vec![];
-                };
-                let tag = match c {
-                    'b' => TaskTag::Bug,
-                    'f' => TaskTag::Feature,
-                    'c' => TaskTag::Chore,
-                    'v' => TaskTag::PrReview,
-                    'r' => TaskTag::Research,
-                    'x' => TaskTag::Fix,
-                    _ => return vec![],
-                };
-                self.dispatch_keyed(
-                    Message::Input(InputMessage::SubmitTag(Some(tag))),
-                    "tag_picker_select",
-                    label,
-                )
-            }
-            "tag_picker_default" => self.dispatch_keyed(
-                Message::Input(InputMessage::SubmitTag(None)),
-                "tag_picker_default",
-                label,
-            ),
-            "tag_picker_cancel" => self.dispatch_keyed(
-                Message::Input(InputMessage::CancelInput),
-                "tag_picker_cancel",
-                label,
-            ),
-            _ => vec![],
-        }
+            "tag_picker_default" => InputMessage::SubmitTag(None),
+            "tag_picker_cancel" => InputMessage::CancelInput,
+            _ => match tag_for_action(action) {
+                Some(tag) => InputMessage::SubmitTag(Some(tag)),
+                None => return vec![],
+            },
+        };
+        self.dispatch_keyed(Message::Input(submit), action, label)
     }
 
-    fn run_wrap_up_picker(&mut self, action: &str, key: KeyEvent, label: &str) -> Vec<Command> {
+    fn run_wrap_up_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::models::WrapUpMode;
         use crate::tui::messages::InputMessage;
-        match action {
-            "wrap_up_mode_picker_select" => {
-                let KeyCode::Char(c) = key.code else {
-                    return vec![];
-                };
-                let mode = match c {
-                    'r' => WrapUpMode::Rebase,
-                    'p' => WrapUpMode::Pr,
-                    'd' => WrapUpMode::Done,
-                    _ => return vec![],
-                };
-                self.dispatch_keyed(
-                    Message::Input(InputMessage::SubmitWrapUpMode(Some(mode))),
-                    "wrap_up_mode_picker_select",
-                    label,
-                )
+        let submit = match action {
+            "wrap_up_mode_picker_select_rebase" => {
+                InputMessage::SubmitWrapUpMode(Some(WrapUpMode::Rebase))
             }
-            "wrap_up_mode_picker_default" => self.dispatch_keyed(
-                Message::Input(InputMessage::SubmitWrapUpMode(None)),
-                "wrap_up_mode_picker_default",
-                label,
-            ),
-            "wrap_up_mode_picker_cancel" => self.dispatch_keyed(
-                Message::Input(InputMessage::CancelInput),
-                "wrap_up_mode_picker_cancel",
-                label,
-            ),
-            _ => vec![],
-        }
+            "wrap_up_mode_picker_select_pr" => InputMessage::SubmitWrapUpMode(Some(WrapUpMode::Pr)),
+            "wrap_up_mode_picker_select_done" => {
+                InputMessage::SubmitWrapUpMode(Some(WrapUpMode::Done))
+            }
+            "wrap_up_mode_picker_default" => InputMessage::SubmitWrapUpMode(None),
+            "wrap_up_mode_picker_cancel" => InputMessage::CancelInput,
+            _ => return vec![],
+        };
+        self.dispatch_keyed(Message::Input(submit), action, label)
     }
 
-    fn run_model_picker(&mut self, action: &str, key: KeyEvent, label: &str) -> Vec<Command> {
+    fn run_model_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
         use crate::models::TaskModel;
         use crate::tui::messages::InputMessage;
-        match action {
-            "model_picker_select" => {
-                let KeyCode::Char(c) = key.code else {
-                    return vec![];
-                };
-                let Some(model) = TaskModel::for_key(c) else {
-                    return vec![];
-                };
-                self.dispatch_keyed(
-                    Message::Input(InputMessage::SubmitModel(Some(model))),
-                    "model_picker_select",
-                    label,
-                )
-            }
-            "model_picker_default" => self.dispatch_keyed(
-                Message::Input(InputMessage::SubmitModel(None)),
-                "model_picker_default",
-                label,
-            ),
-            "model_picker_cancel" => self.dispatch_keyed(
-                Message::Input(InputMessage::CancelInput),
-                "model_picker_cancel",
-                label,
-            ),
-            _ => vec![],
-        }
+        let submit = match action {
+            "model_picker_select_haiku" => InputMessage::SubmitModel(Some(TaskModel::Haiku)),
+            "model_picker_select_sonnet" => InputMessage::SubmitModel(Some(TaskModel::Sonnet)),
+            "model_picker_select_opus" => InputMessage::SubmitModel(Some(TaskModel::Opus)),
+            "model_picker_select_fable" => InputMessage::SubmitModel(Some(TaskModel::Fable)),
+            "model_picker_default" => InputMessage::SubmitModel(None),
+            "model_picker_cancel" => InputMessage::CancelInput,
+            _ => return vec![],
+        };
+        self.dispatch_keyed(Message::Input(submit), action, label)
     }
+}
+
+/// The tag a `tag_picker_select_<tag>` row picks. The row alone says which
+/// tag; the key that ran it does not (`KeypressRunsItsRowsAction`).
+fn tag_for_action(action: &str) -> Option<TaskTag> {
+    Some(match action {
+        "tag_picker_select_bug" => TaskTag::Bug,
+        "tag_picker_select_feature" => TaskTag::Feature,
+        "tag_picker_select_chore" => TaskTag::Chore,
+        "tag_picker_select_pr_review" => TaskTag::PrReview,
+        "tag_picker_select_research" => TaskTag::Research,
+        "tag_picker_select_fix" => TaskTag::Fix,
+        _ => return None,
+    })
 }

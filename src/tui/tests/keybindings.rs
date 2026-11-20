@@ -610,15 +610,15 @@ fn board_namespaces() -> Vec<KeyNamespace> {
         .collect()
 }
 
-/// press_every_row_key / RecordedActionMatchesRow, for every board namespace.
-/// A catch-all row is pressed with a key no other row of its namespace lists,
+/// press_every_row_key / RecordedActionMatchesRow over `table`, for every
+/// board namespace: the failures, and how many presses were made. A
+/// catch-all row is pressed with a key no other row of its namespace lists,
 /// and records the key actually pressed.
-#[test]
-fn pressing_each_key_of_each_board_row_records_the_rows_action() {
+fn press_every_board_row_key(table: &'static [KeyBinding]) -> (Vec<String>, usize) {
     let mut failures = Vec::new();
     let mut pressed = 0;
     for ns in board_namespaces() {
-        for binding in bindings_in(ns) {
+        for binding in table.iter().filter(|b| b.namespace == ns) {
             let keys: Vec<&str> = if binding.keys == [ANY_OTHER_KEY] {
                 vec![unlisted_key(ns)]
             } else {
@@ -626,6 +626,7 @@ fn pressing_each_key_of_each_board_row_records_the_rows_action() {
             };
             for key in keys {
                 for (i, mut app) in apps_in(binding).into_iter().enumerate() {
+                    app.set_key_table(table);
                     let cmds = press(&mut app, key);
                     pressed += 1;
                     let got = recorded(&cmds);
@@ -647,11 +648,297 @@ fn pressing_each_key_of_each_board_row_records_the_rows_action() {
             }
         }
     }
+    (failures, pressed)
+}
+
+#[test]
+fn pressing_each_key_of_each_board_row_records_the_rows_action() {
+    let (failures, pressed) = press_every_board_row_key(KEY_BINDINGS);
     assert!(pressed > 0);
     assert!(
         failures.is_empty(),
         "rows whose keys do not record their action:\n{}",
         failures.join("\n")
+    );
+}
+
+/// RemappedTableDrivesDispatch: the same gate over the remapped table, where
+/// every pair of opposite rows trades keys and every value family rotates
+/// them. Each key records the row that lists it now.
+#[test]
+fn under_the_remapped_table_each_key_records_the_row_that_lists_it_now() {
+    let (failures, pressed) = press_every_board_row_key(crate::keybindings::remapped_table());
+    assert!(pressed > 0);
+    assert!(
+        failures.is_empty(),
+        "remapped rows whose keys do not record their action:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// What a press did to the board, for comparing two presses: the state a
+/// motion or a pick moves (the view, the input mode, field and draft, the
+/// cursors and scroll offsets, the tree pickers' cursors), the screen (drawn
+/// with the default table, so the help overlay's title, which names the
+/// table's keys, does not differ) and the commands other than usage.
+fn effect_of(app: &mut App, cmds: &[Command]) -> String {
+    let tree = |state: &std::cell::RefCell<tui_tree_widget::TreeState<String>>| {
+        let state = state.borrow();
+        let mut opened: Vec<_> = state.opened().iter().cloned().collect();
+        opened.sort();
+        format!("{:?} {opened:?}", state.selected())
+    };
+    let pickers = format!(
+        "{:?} {:?}",
+        app.interaction
+            .move_task_picker
+            .as_ref()
+            .map(|p| tree(&p.tree_state)),
+        app.interaction
+            .reparent_picker
+            .as_ref()
+            .map(|p| tree(&p.tree_state))
+    );
+    let state = format!(
+        "{:?}\n{:?}\n{:?} {} {}\n{:?}\n{:?} {}\n{pickers}",
+        app.board.view_mode,
+        app.input.mode,
+        app.input.buffer,
+        app.input.caret,
+        app.input.repo_cursor,
+        app.input.task_draft,
+        app.input.placement.as_ref().map(|p| p.workspace),
+        app.interaction.help_scroll,
+    );
+    let table = app.key_table;
+    app.set_key_table(KEY_BINDINGS);
+    let buf = render_to_buffer(app, 120, 40);
+    app.set_key_table(table);
+    let area = buf.area();
+    let screen: Vec<String> = (area.top()..area.bottom())
+        .map(|y| {
+            (area.left()..area.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect();
+    let commands: Vec<String> = cmds
+        .iter()
+        .filter(|c| !matches!(c, Command::Usage(_)))
+        .map(|c| format!("{c:?}"))
+        .collect();
+    format!("{state}\n{}\n{commands:?}", screen.join("\n"))
+}
+
+/// A tree picker over a parent epic with a child and a third epic, its
+/// cursor on the first row so each motion, expand and collapse has
+/// something to move.
+fn tree_picker_app(ns: KeyNamespace) -> App {
+    let mut app = make_app();
+    let mut child = make_epic(11);
+    child.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), child, make_epic(12)];
+    if ns == KeyNamespace::BoardPickerMoveToEpic {
+        app.update(Message::Task(
+            crate::tui::messages::TaskMessage::StartMoveToEpic(TaskId(1)),
+        ));
+    } else {
+        app.update(Message::Epic(
+            crate::tui::messages::EpicMessage::StartReparent(EpicId(12)),
+        ));
+    }
+    assert_eq!(app.key_namespace(), ns);
+    // The tree widget moves over the rows it drew last, so draw around the
+    // press as the real loop does.
+    render_to_buffer(&mut app, 120, 40);
+    press(&mut app, "j");
+    render_to_buffer(&mut app, 120, 40);
+    app
+}
+
+/// The boards the effect check presses on: the gate's, with enough to move
+/// for a motion to show — a detail scrolled into its middle, a text field
+/// with words either side of its caret, three workspaces to step between and
+/// a tree with a child epic.
+fn effect_apps(binding: &KeyBinding) -> Vec<App> {
+    use KeyNamespace as N;
+    let ns = binding.namespace;
+    let mut apps = match ns {
+        N::BoardPickerMoveToEpic | N::BoardPickerReparentEpic => vec![tree_picker_app(ns)],
+        _ => apps_in(binding),
+    };
+    for app in &mut apps {
+        match ns {
+            N::BoardDetail => {
+                if let ViewMode::TaskDetail {
+                    scroll, max_scroll, ..
+                } = &mut app.board.view_mode
+                {
+                    *scroll = 2;
+                    *max_scroll = 10;
+                }
+            }
+            N::BoardText => {
+                app.input.set_buffer("one two three".to_string());
+                app.input.caret = 5;
+            }
+            // A query every candidate matches, so the list keeps rows for
+            // the cursor to move over.
+            N::BoardPickerRepoPath | N::BoardPickerQuickDispatch => {
+                app.input.set_buffer("/repo/".to_string());
+                app.input.caret = 3;
+            }
+            N::BoardPickerBaseBranch => {
+                app.board.repo_base_branches.insert(
+                    "/repo/a".to_string(),
+                    vec!["main".to_string(), "main-next".to_string()],
+                );
+                app.input.set_buffer("main".to_string());
+                app.input.caret = 2;
+            }
+            N::BoardPickerPlacement => {
+                app.input.workspaces = (1..=3)
+                    .map(|id| crate::models::WorkspaceRef {
+                        id,
+                        name: format!("Workspace {id}"),
+                    })
+                    .collect();
+                if let Some(placement) = app.input.placement.as_mut() {
+                    placement.workspace = 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    apps
+}
+
+/// RemappedTableDrivesDispatch, by effect: under the remapped table each key
+/// of a moved row does what the row's default key does under the default
+/// table, which is the row's own direction or value. A handler that read the
+/// pressed key would go the way the key used to go. Each moved row's effect
+/// is also checked to be visible from its setup for at least one row of
+/// every pair or family, so the comparison is not vacuous.
+#[test]
+fn under_the_remapped_table_each_key_goes_the_way_its_row_says_on_the_board() {
+    let remapped = crate::keybindings::remapped_table();
+    let mut failures = Vec::new();
+    let mut moved = std::collections::BTreeSet::new();
+    let mut visible = std::collections::BTreeSet::new();
+    for ns in board_namespaces() {
+        for (row, default) in remapped.iter().zip(KEY_BINDINGS.iter()) {
+            if row.namespace != ns || row.keys == default.keys {
+                continue;
+            }
+            moved.insert((ns.name(), row.action));
+            for (n, key) in row.keys.iter().enumerate() {
+                let default_key = default.keys[n % default.keys.len()];
+                for i in 0..effect_apps(default).len() {
+                    let mut untouched = effect_apps(default).remove(i);
+                    let before = effect_of(&mut untouched, &[]);
+
+                    let mut by_default = effect_apps(default).remove(i);
+                    let default_cmds = press(&mut by_default, default_key);
+                    let want = effect_of(&mut by_default, &default_cmds);
+
+                    let mut by_remap = effect_apps(default).remove(i);
+                    by_remap.set_key_table(remapped);
+                    let remap_cmds = press(&mut by_remap, key);
+                    let got = effect_of(&mut by_remap, &remap_cmds);
+
+                    let actions = |cmds: &[Command]| -> Vec<String> {
+                        recorded(cmds).into_iter().map(|(a, _)| a).collect()
+                    };
+                    if got != want || actions(&remap_cmds) != actions(&default_cmds) {
+                        failures.push(format!(
+                            "{} {}: {key} under the remap did not do what {default_key} does by default",
+                            ns.name(),
+                            row.action
+                        ));
+                    }
+                    if want != before {
+                        visible.insert((ns.name(), row.action));
+                    }
+                }
+            }
+        }
+    }
+    assert!(!moved.is_empty());
+    assert!(
+        failures.is_empty(),
+        "keys that did not follow their row:\n{}",
+        failures.join("\n")
+    );
+    // A pair or family is one group: an "up" at the top of a list changes
+    // nothing, and its "down" shows the pair is read the right way round.
+    let group = |ns: &str, action: &str| -> String {
+        let name = crate::keybindings::VALUE_FAMILIES
+            .iter()
+            .find(|f| action.starts_with(**f))
+            .map(|f| f.to_string())
+            .unwrap_or_else(|| {
+                let other = crate::keybindings::opposite_action(action).unwrap_or_default();
+                std::cmp::min(action.to_string(), other)
+            });
+        format!("{ns} {name}")
+    };
+    let seen: std::collections::BTreeSet<String> =
+        visible.iter().map(|(ns, a)| group(ns, a)).collect();
+    let unseen: std::collections::BTreeSet<String> = moved
+        .iter()
+        .map(|(ns, a)| group(ns, a))
+        .filter(|g| !seen.contains(g))
+        .collect();
+    assert!(
+        unseen.is_empty(),
+        "moved pairs and families with no visible effect from their setup: {unseen:?}"
+    );
+}
+
+/// A chord the table moves works on the board like the shipped one, and
+/// `gg` no longer arms once no row lists it (KeypressRunsItsRowsAction: a
+/// character is the first half of a chord exactly when a row of the
+/// namespace lists a chord starting with it).
+#[test]
+fn a_chord_moved_to_another_row_key_works_on_the_board() {
+    let free = ['&', '%', '_', '!']
+        .into_iter()
+        .find(|c| {
+            !bindings_in(KeyNamespace::BoardNormal)
+                .any(|b| b.keys.iter().any(|k| k.starts_with(*c)))
+        })
+        .expect("a character board.normal does not use");
+    let chord: &'static str = Box::leak(format!("{free}{free}").into_boxed_str());
+    let first: &'static str = Box::leak(free.to_string().into_boxed_str());
+    let rows: Vec<KeyBinding> = KEY_BINDINGS
+        .iter()
+        .map(|b| {
+            let mut b = *b;
+            if b.namespace == KeyNamespace::BoardNormal && b.action == "navigate_row_first" {
+                b.keys = Box::leak(vec!["[", chord].into_boxed_slice());
+            }
+            b
+        })
+        .collect();
+    let mut app = make_app();
+    app.set_key_table(Box::leak(rows.into_boxed_slice()));
+    app.selection_mut().set_column(1);
+    press(&mut app, "]");
+    let last = app.selection().row(1);
+    assert!(last > 0, "the column has more than one card");
+
+    press(&mut app, "g");
+    let cmds = press(&mut app, "g");
+    assert_eq!(app.selection().row(1), last, "gg is no row's key any more");
+    assert!(recorded(&cmds).is_empty(), "{cmds:?}");
+
+    let cmds = press(&mut app, first);
+    assert!(recorded(&cmds).is_empty(), "the first half records nothing");
+    let cmds = app.handle_key(key_event_for(first));
+    assert_eq!(app.selection().row(1), 0);
+    assert_eq!(
+        recorded(&cmds),
+        vec![("navigate_row_first".to_string(), Some(chord.to_string()))]
     );
 }
 
@@ -667,25 +954,31 @@ fn the_gate_presses_a_row_in_every_board_namespace() {
     assert!(unpressed.is_empty(), "no rows to press in {unpressed:?}");
 }
 
-/// scroll_help is one of the rows the gate presses for board.help.
+/// scroll_help_down and scroll_help_up are rows the gate presses for
+/// board.help.
 #[test]
 fn the_gate_presses_scroll_help() {
-    let binding = bindings_in(KeyNamespace::BoardHelp)
-        .find(|b| b.action == "scroll_help")
-        .expect("board.help has a scroll_help row");
-    for key in ["j", "Down", "k", "Up"] {
-        assert!(binding.keys.contains(&key), "{key}");
-        let mut app = apps_in(binding).remove(0);
-        let cmds = press(&mut app, key);
-        assert_eq!(
-            recorded(&cmds),
-            vec![("scroll_help".to_string(), Some(key.to_string()))]
-        );
-        assert_eq!(
-            app.input.mode,
-            InputMode::Help,
-            "{key} keeps the overlay open"
-        );
+    for (action, keys) in [
+        ("scroll_help_down", ["j", "Down"]),
+        ("scroll_help_up", ["k", "Up"]),
+    ] {
+        let binding = bindings_in(KeyNamespace::BoardHelp)
+            .find(|b| b.action == action)
+            .unwrap_or_else(|| panic!("board.help has a {action} row"));
+        for key in keys {
+            assert!(binding.keys.contains(&key), "{key}");
+            let mut app = apps_in(binding).remove(0);
+            let cmds = press(&mut app, key);
+            assert_eq!(
+                recorded(&cmds),
+                vec![(action.to_string(), Some(key.to_string()))]
+            );
+            assert_eq!(
+                app.input.mode,
+                InputMode::Help,
+                "{key} keeps the overlay open"
+            );
+        }
     }
 }
 
@@ -1239,7 +1532,7 @@ fn ctrl_c_on_the_board_does_not_copy_the_task() {
 #[test]
 fn ctrl_b_at_the_tag_picker_does_not_pick_bug() {
     let binding = bindings_in(KeyNamespace::BoardPickerTag)
-        .find(|b| b.action == "tag_picker_select")
+        .find(|b| b.action == "tag_picker_select_bug")
         .unwrap();
     let mut app = apps_in(binding).remove(0);
     let cmds = press(&mut app, "Ctrl+B");
@@ -1589,8 +1882,7 @@ fn every_board_normal_action_has_a_handler_arm() {
     let mut missing = Vec::new();
     for b in bindings_in(KeyNamespace::BoardNormal) {
         let mut app = App::new(vec![]);
-        let key = make_key(KeyCode::Char('x'));
-        if app.try_run_normal(b, key, "x").is_none() {
+        if app.try_run_normal(b, "x").is_none() {
             missing.push(b.action);
         }
     }

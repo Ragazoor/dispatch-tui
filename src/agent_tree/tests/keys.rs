@@ -479,3 +479,150 @@ fn v_on_a_file_asks_for_the_editor_and_elsewhere_does_nothing() {
     assert_eq!(empty.press(KeyCode::Char('v')), KeyAction::Continue);
     assert!(empty.state.usage.is_empty());
 }
+
+// ---- a remapped table (keybindings.allium: RemappedTableDrivesDispatch) ----
+
+/// Under the remapped table, where every pair of opposite rows trades keys,
+/// each key of a moved row of `ns` does what the row's default key does under
+/// the default table: the row, not the key, picks the direction. `build`
+/// sets the pane up with its cursor away from both ends. At least one row of
+/// every pair has to change what the pane shows, so the comparison is not
+/// vacuous.
+fn assert_remapped_keys_follow_their_rows(
+    ns: crate::keybindings::KeyNamespace,
+    build: impl Fn() -> KeyRig,
+) {
+    use crate::agent_tree::pane::test_key_event;
+    use crate::keybindings::{remapped_table, KEY_BINDINGS};
+    let remapped = remapped_table();
+    let mut moved = 0;
+    let mut visible = std::collections::BTreeSet::new();
+    let mut failures = Vec::new();
+    for (row, default) in remapped.iter().zip(KEY_BINDINGS.iter()) {
+        if row.namespace != ns || row.keys == default.keys {
+            continue;
+        }
+        moved += 1;
+        for (n, key) in row.keys.iter().enumerate() {
+            let default_key = default.keys[n % default.keys.len()];
+            let before = build().view();
+            let mut by_default = build();
+            by_default.press_with_event(test_key_event(default_key));
+            let mut by_remap = build();
+            by_remap.state.key_table = remapped;
+            by_remap.press_with_event(test_key_event(key));
+            let actions = |rig: &KeyRig| -> Vec<String> {
+                recorded_usage(&rig.state)
+                    .into_iter()
+                    .map(|(a, _)| a)
+                    .collect()
+            };
+            if by_remap.view() != by_default.view()
+                || by_remap.state.focus != by_default.state.focus
+                || actions(&by_remap) != actions(&by_default)
+            {
+                failures.push(format!(
+                    "{} {}: {key} under the remap did not do what {default_key} does by default",
+                    ns.name(),
+                    row.action
+                ));
+            }
+            if by_default.view() != before {
+                visible.insert(row.action.trim_end_matches("_down").trim_end_matches("_up"));
+            }
+        }
+    }
+    assert!(moved > 0, "{}: no row moved", ns.name());
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    for family in ["navigate_row", "navigate_half_page"] {
+        assert!(
+            visible.contains(family),
+            "{}: {family} changed nothing from the setup",
+            ns.name()
+        );
+    }
+}
+
+impl KeyRig {
+    /// What the pane shows and where its cursors are: the cursor row is a
+    /// style, not a symbol, so the drawn text alone can miss a one-row move.
+    fn view(&self) -> String {
+        format!(
+            "{}\n{:?}\n{:?}",
+            self.rendered(),
+            self.selected(),
+            self.state.agents.selected().map(|r| r.label().to_string())
+        )
+    }
+
+    /// Press a key given as an event, then redraw.
+    fn press_with_event(&mut self, key: KeyEvent) -> KeyAction {
+        self.press_with(key.code, key.modifiers)
+    }
+}
+
+/// Rows enough that a half page down and back up both move the cursor.
+fn many_files() -> Vec<GitFileChange> {
+    (0..20).map(|n| modified(&format!("f{n:02}.rs"))).collect()
+}
+
+#[test]
+fn under_the_remapped_table_the_tree_keys_go_the_way_their_rows_say() {
+    assert_remapped_keys_follow_their_rows(crate::keybindings::KeyNamespace::AgentTreeTree, || {
+        let mut rig = KeyRig::new(&many_files());
+        for _ in 0..8 {
+            rig.press(KeyCode::Char('j'));
+        }
+        rig
+    });
+}
+
+#[test]
+fn under_the_remapped_table_the_agents_keys_go_the_way_their_rows_say() {
+    assert_remapped_keys_follow_their_rows(
+        crate::keybindings::KeyNamespace::AgentTreeAgents,
+        || {
+            let agents = (1..=20).map(|id| agent(id, id == 1)).collect();
+            let mut rig = KeyRig::with_agents(&[modified("a.rs")], agents);
+            rig.state.focus = Focus::Agents;
+            for _ in 0..8 {
+                rig.press(KeyCode::Char('j'));
+            }
+            rig
+        },
+    );
+}
+
+/// A chord the table moves works like the shipped one, and the old chord no
+/// longer arms (KeypressRunsItsRowsAction: a character is the first half of a
+/// chord exactly when a row of the namespace lists a chord starting with it).
+#[test]
+fn a_chord_moved_to_another_row_key_works_and_gg_no_longer_does() {
+    use crate::keybindings::{KeyBinding, KeyNamespace, KEY_BINDINGS};
+    let rows: Vec<KeyBinding> = KEY_BINDINGS
+        .iter()
+        .map(|b| {
+            let mut b = *b;
+            if b.namespace == KeyNamespace::AgentTreeTree && b.action == "navigate_row_first" {
+                b.keys = &["zz"];
+            }
+            b
+        })
+        .collect();
+    let mut rig = KeyRig::new(&many_files());
+    rig.state.key_table = Box::leak(rows.into_boxed_slice());
+    rig.press(KeyCode::Char('G'));
+    let last = rig.selected_name();
+    rig.press(KeyCode::Char('g'));
+    rig.press(KeyCode::Char('g'));
+    assert_eq!(rig.selected_name(), last, "gg is no row's key any more");
+    rig.state.usage.clear();
+    rig.press(KeyCode::Char('z'));
+    assert!(rig.state.usage.is_empty(), "the first half records nothing");
+    rig.press(KeyCode::Char('z'));
+    assert_eq!(rig.selected_name(), "f00.rs");
+    assert_eq!(
+        recorded_usage(&rig.state),
+        vec![("navigate_row_first".to_string(), Some("zz".to_string()))]
+    );
+}

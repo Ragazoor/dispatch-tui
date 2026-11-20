@@ -83,16 +83,19 @@ pub(in crate::tui) fn without_branch_probe(cmds: Vec<Command>) -> Vec<Command> {
 }
 
 /// A lone `g` press only starts the pending `gg`-chord window (see
-/// `InteractionState::pending_g`); this backdates it past
+/// `InteractionState::pending_chord`); this backdates it past
 /// `GG_CHORD_TIMEOUT` and ticks to simulate the user going idle, so tests can
 /// assert the idle backstop clears the stale chord (with no action firing)
 /// without a real sleep.
 pub(in crate::tui) fn resolve_pending_g_via_idle_tick(app: &mut App) -> Vec<Command> {
-    app.interaction.pending_g = Some(
-        std::time::Instant::now()
-            - crate::tui::GG_CHORD_TIMEOUT
-            - std::time::Duration::from_millis(50),
-    );
+    let pending = app
+        .interaction
+        .pending_chord
+        .as_mut()
+        .expect("a chord's first half is pending");
+    pending.started = std::time::Instant::now()
+        - crate::tui::GG_CHORD_TIMEOUT
+        - std::time::Duration::from_millis(50);
     app.handle_tick()
 }
 

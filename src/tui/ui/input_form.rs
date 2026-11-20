@@ -469,7 +469,8 @@ pub(in crate::tui) fn input_wrap_up_mode_lines(
 /// on entering the step (CreateTask: ModelPicker). `[Enter]` names the model
 /// Enter keeps: the draft's own (a copy's), else the default.
 pub(in crate::tui) fn model_prompt(draft_model: Option<TaskModel>) -> String {
-    // Each key is its alias's first letter (TaskModel::for_key).
+    // Each key is its alias's first letter, the default key of its
+    // model_picker_select_<model> row.
     let keys: Vec<String> = TaskModel::ALL
         .iter()
         .map(|m| {

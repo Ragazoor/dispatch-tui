@@ -316,17 +316,17 @@ impl App {
             .retain(|_, t| t.elapsed() < crate::tui::MESSAGE_FLASH_TTL);
     }
 
-    /// Idle backstop for the `gg` chord: if the user pressed a lone `g` and went
+    /// Idle backstop for a chord: if the user pressed its first half and went
     /// idle (no follow-up keypress completed the chord), clear the stale pending
-    /// state once the chord window has elapsed. Nothing fires — a lone `g` has
-    /// no action of its own.
+    /// state once the chord window has elapsed. Nothing fires — the first half
+    /// has no action of its own.
     fn tick_gg_chord(&mut self) {
         if self
             .interaction
-            .pending_g
-            .is_some_and(|started| started.elapsed() > GG_CHORD_TIMEOUT)
+            .pending_chord
+            .is_some_and(|p| p.started.elapsed() > GG_CHORD_TIMEOUT)
         {
-            self.interaction.pending_g = None;
+            self.interaction.pending_chord = None;
         }
     }
 

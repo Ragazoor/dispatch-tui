@@ -64,16 +64,28 @@ const fn normal(
 pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.normal: navigation ----
     normal(
-        &["h", "Left", "l", "Right"],
+        &["h", "Left"],
         None,
-        "navigate_column",
-        "Move to the previous column (h, Left) or the next column (l, Right)",
+        "navigate_column_left",
+        "Move to the previous column",
     ),
     normal(
-        &["j", "Down", "k", "Up"],
+        &["l", "Right"],
         None,
-        "navigate_row",
-        "Move to the next card (j, Down) or the previous card (k, Up) in the column",
+        "navigate_column_right",
+        "Move to the next column",
+    ),
+    normal(
+        &["j", "Down"],
+        None,
+        "navigate_row_down",
+        "Move to the next card in the column",
+    ),
+    normal(
+        &["k", "Up"],
+        None,
+        "navigate_row_up",
+        "Move to the previous card in the column",
     ),
     normal(
         &["[", "gg"],
@@ -441,9 +453,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     r(
         N::BoardDetail,
-        &["j", "Down", "k", "Up"],
-        "scroll_detail",
-        "Scroll the detail down (j, Down) or up (k, Up)",
+        &["j", "Down"],
+        "scroll_detail_down",
+        "Scroll the detail down",
+    ),
+    r(
+        N::BoardDetail,
+        &["k", "Up"],
+        "scroll_detail_up",
+        "Scroll the detail up",
     ),
     r(
         N::BoardDetail,
@@ -479,9 +497,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     r(
         N::BoardHelp,
-        &["j", "Down", "k", "Up"],
-        "scroll_help",
-        "Scroll the overlay down (j, Down) or up (k, Up)",
+        &["j", "Down"],
+        "scroll_help_down",
+        "Scroll the overlay down",
+    ),
+    r(
+        N::BoardHelp,
+        &["k", "Up"],
+        "scroll_help_up",
+        "Scroll the overlay up",
     ),
     // ---- board.error ----
     r(
@@ -587,9 +611,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     r(
         N::BoardFilter,
-        &["j", "Down", "k", "Up"],
-        "filter_move_cursor",
-        "Move the cursor down (j, Down) or up (k, Up) the current tab's list",
+        &["j", "Down"],
+        "filter_cursor_down",
+        "Move the cursor down the current tab's list",
+    ),
+    r(
+        N::BoardFilter,
+        &["k", "Up"],
+        "filter_cursor_up",
+        "Move the cursor up the current tab's list",
     ),
     r(
         N::BoardFilter,
@@ -599,9 +629,57 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     r(
         N::BoardFilter,
-        &["1", "2", "3", "4", "5", "6", "7", "8", "9"],
-        "repo_filter_toggle_repo",
-        "Repos tab: toggle the repo with that number in the filter",
+        &["1"],
+        "repo_filter_toggle_repo_1",
+        "Repos tab: toggle the first repo of the list in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["2"],
+        "repo_filter_toggle_repo_2",
+        "Repos tab: toggle the second repo of the list in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["3"],
+        "repo_filter_toggle_repo_3",
+        "Repos tab: toggle the third repo of the list in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["4"],
+        "repo_filter_toggle_repo_4",
+        "Repos tab: toggle the fourth repo of the list in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["5"],
+        "repo_filter_toggle_repo_5",
+        "Repos tab: toggle the fifth repo of the list in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["6"],
+        "repo_filter_toggle_repo_6",
+        "Repos tab: toggle the sixth repo of the list in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["7"],
+        "repo_filter_toggle_repo_7",
+        "Repos tab: toggle the seventh repo of the list in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["8"],
+        "repo_filter_toggle_repo_8",
+        "Repos tab: toggle the eighth repo of the list in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["9"],
+        "repo_filter_toggle_repo_9",
+        "Repos tab: toggle the ninth repo of the list in the filter",
     ),
     r(
         N::BoardFilter,
@@ -661,9 +739,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- BoardPickerRepoPath ----
     r(
         N::BoardPickerRepoPath,
-        &["Down", "Up"],
-        "picker_move_cursor",
-        "Move the cursor down or up the candidate list; every printable key filters it",
+        &["Down"],
+        "picker_cursor_down",
+        "Move the cursor down the candidate list; every printable key filters it",
+    ),
+    r(
+        N::BoardPickerRepoPath,
+        &["Up"],
+        "picker_cursor_up",
+        "Move the cursor up the candidate list; every printable key filters it",
     ),
     r(
         N::BoardPickerRepoPath,
@@ -728,9 +812,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- BoardPickerBaseBranch ----
     r(
         N::BoardPickerBaseBranch,
-        &["Down", "Up"],
-        "picker_move_cursor",
-        "Move the cursor down or up the candidate list; every printable key filters it",
+        &["Down"],
+        "picker_cursor_down",
+        "Move the cursor down the candidate list; every printable key filters it",
+    ),
+    r(
+        N::BoardPickerBaseBranch,
+        &["Up"],
+        "picker_cursor_up",
+        "Move the cursor up the candidate list; every printable key filters it",
     ),
     r(
         N::BoardPickerBaseBranch,
@@ -795,9 +885,39 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.tag ----
     r(
         N::BoardPickerTag,
-        &["b", "f", "c", "v", "r", "x"],
-        "tag_picker_select",
-        "Pick the tag whose name holds the letter: [b]ug, [f]eature, [c]hore, pr re[v]iew, [r]esearch, fi[x]",
+        &["b"],
+        "tag_picker_select_bug",
+        "Pick the bug tag",
+    ),
+    r(
+        N::BoardPickerTag,
+        &["f"],
+        "tag_picker_select_feature",
+        "Pick the feature tag",
+    ),
+    r(
+        N::BoardPickerTag,
+        &["c"],
+        "tag_picker_select_chore",
+        "Pick the chore tag",
+    ),
+    r(
+        N::BoardPickerTag,
+        &["v"],
+        "tag_picker_select_pr_review",
+        "Pick the pr review tag",
+    ),
+    r(
+        N::BoardPickerTag,
+        &["r"],
+        "tag_picker_select_research",
+        "Pick the research tag",
+    ),
+    r(
+        N::BoardPickerTag,
+        &["x"],
+        "tag_picker_select_fix",
+        "Pick the fix tag",
     ),
     r(
         N::BoardPickerTag,
@@ -820,9 +940,21 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.wrap_up_mode ----
     r(
         N::BoardPickerWrapUpMode,
-        &["r", "p", "d"],
-        "wrap_up_mode_picker_select",
-        "Pick how the task wraps up: [r]ebase, [p]r or [d]one",
+        &["r"],
+        "wrap_up_mode_picker_select_rebase",
+        "Wrap the task up by rebasing onto its base branch",
+    ),
+    r(
+        N::BoardPickerWrapUpMode,
+        &["p"],
+        "wrap_up_mode_picker_select_pr",
+        "Wrap the task up by opening a pull request",
+    ),
+    r(
+        N::BoardPickerWrapUpMode,
+        &["d"],
+        "wrap_up_mode_picker_select_done",
+        "Wrap the task up as done",
     ),
     r(
         N::BoardPickerWrapUpMode,
@@ -839,9 +971,27 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.model ----
     r(
         N::BoardPickerModel,
-        &["h", "s", "o", "f"],
-        "model_picker_select",
-        "Pick the model the agent runs on: [h]aiku, [s]onnet, [o]pus or [f]able",
+        &["h"],
+        "model_picker_select_haiku",
+        "Run the agent on Haiku",
+    ),
+    r(
+        N::BoardPickerModel,
+        &["s"],
+        "model_picker_select_sonnet",
+        "Run the agent on Sonnet",
+    ),
+    r(
+        N::BoardPickerModel,
+        &["o"],
+        "model_picker_select_opus",
+        "Run the agent on Opus",
+    ),
+    r(
+        N::BoardPickerModel,
+        &["f"],
+        "model_picker_select_fable",
+        "Run the agent on Fable",
     ),
     r(
         N::BoardPickerModel,
@@ -858,9 +1008,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.quick_dispatch ----
     r(
         N::BoardPickerQuickDispatch,
-        &["Down", "Up"],
-        "quick_dispatch_move_cursor",
-        "Move the cursor down or up the repo list; every printable key filters it",
+        &["Down"],
+        "quick_dispatch_cursor_down",
+        "Move the cursor down the repo list; every printable key filters it",
+    ),
+    r(
+        N::BoardPickerQuickDispatch,
+        &["Up"],
+        "quick_dispatch_cursor_up",
+        "Move the cursor up the repo list; every printable key filters it",
     ),
     r(
         N::BoardPickerQuickDispatch,
@@ -925,9 +1081,27 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.move_to_epic ----
     r(
         N::BoardPickerMoveToEpic,
-        &["j", "Down", "k", "Up", "l", "Right", "h", "Left"],
-        "move_to_epic_picker_navigate",
-        "Move through the epic tree: down (j, Down), up (k, Up), expand or descend (l, Right), collapse or ascend (h, Left)",
+        &["j", "Down"],
+        "move_to_epic_picker_down",
+        "Move down the epic tree",
+    ),
+    r(
+        N::BoardPickerMoveToEpic,
+        &["k", "Up"],
+        "move_to_epic_picker_up",
+        "Move up the epic tree",
+    ),
+    r(
+        N::BoardPickerMoveToEpic,
+        &["l", "Right"],
+        "move_to_epic_picker_expand",
+        "Expand the epic under the cursor, or descend into it",
+    ),
+    r(
+        N::BoardPickerMoveToEpic,
+        &["h", "Left"],
+        "move_to_epic_picker_collapse",
+        "Collapse the epic under the cursor, or ascend to its parent",
     ),
     r(
         N::BoardPickerMoveToEpic,
@@ -944,9 +1118,27 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.reparent_epic ----
     r(
         N::BoardPickerReparentEpic,
-        &["j", "Down", "k", "Up", "l", "Right", "h", "Left"],
-        "reparent_picker_navigate",
-        "Move through the epic tree: down (j, Down), up (k, Up), expand or descend (l, Right), collapse or ascend (h, Left)",
+        &["j", "Down"],
+        "reparent_picker_down",
+        "Move down the epic tree",
+    ),
+    r(
+        N::BoardPickerReparentEpic,
+        &["k", "Up"],
+        "reparent_picker_up",
+        "Move up the epic tree",
+    ),
+    r(
+        N::BoardPickerReparentEpic,
+        &["l", "Right"],
+        "reparent_picker_expand",
+        "Expand the epic under the cursor, or descend into it",
+    ),
+    r(
+        N::BoardPickerReparentEpic,
+        &["h", "Left"],
+        "reparent_picker_collapse",
+        "Collapse the epic under the cursor, or ascend to its parent",
     ),
     r(
         N::BoardPickerReparentEpic,
@@ -963,9 +1155,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.work_package ----
     r(
         N::BoardPickerWorkPackage,
-        &["j", "Down", "k", "Up"],
-        "work_package_picker_navigate",
-        "Move through the packages: down (j, Down), up (k, Up)",
+        &["j", "Down"],
+        "work_package_picker_down",
+        "Move down the packages",
+    ),
+    r(
+        N::BoardPickerWorkPackage,
+        &["k", "Up"],
+        "work_package_picker_up",
+        "Move up the packages",
     ),
     r(
         N::BoardPickerWorkPackage,
@@ -982,9 +1180,15 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.placement ----
     r(
         N::BoardPickerPlacement,
-        &["j", "Down", "k", "Up"],
-        "placement_picker_workspace",
-        "Move between your workspaces (shown when you belong to more than one): down (j, Down), up (k, Up)",
+        &["j", "Down"],
+        "placement_picker_workspace_down",
+        "Move to the next of your workspaces (shown when you belong to more than one)",
+    ),
+    r(
+        N::BoardPickerPlacement,
+        &["k", "Up"],
+        "placement_picker_workspace_up",
+        "Move to the previous of your workspaces (shown when you belong to more than one)",
     ),
     r(
         N::BoardPickerPlacement,
@@ -1007,15 +1211,27 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.admin ----
     r(
         N::BoardAdmin,
-        &["j", "Down", "k", "Up"],
-        "admin_navigate",
-        "Move through the pane: down (j, Down), up (k, Up)",
+        &["j", "Down"],
+        "admin_navigate_down",
+        "Move down the pane",
     ),
     r(
         N::BoardAdmin,
-        &["Tab", "BackTab"],
-        "admin_pane",
-        "Next pane (Tab) or previous pane (BackTab): workspaces, members, and for a super-admin super-admins and unseen items",
+        &["k", "Up"],
+        "admin_navigate_up",
+        "Move up the pane",
+    ),
+    r(
+        N::BoardAdmin,
+        &["Tab"],
+        "admin_next_pane",
+        "Next pane: workspaces, members, and for a super-admin super-admins and unseen items",
+    ),
+    r(
+        N::BoardAdmin,
+        &["BackTab"],
+        "admin_previous_pane",
+        "Previous pane: workspaces, members, and for a super-admin super-admins and unseen items",
     ),
     r(
         N::BoardAdmin,
@@ -1322,10 +1538,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeTree,
-        &["j", "Down", "k", "Up"],
+        &["j", "Down"],
         None,
-        "navigate_row",
-        "Move to the next row (j, Down) or the previous row (k, Up)",
+        "navigate_row_down",
+        "Move to the next row",
+        None,
+    ),
+    row(
+        N::AgentTreeTree,
+        &["k", "Up"],
+        None,
+        "navigate_row_up",
+        "Move to the previous row",
         None,
     ),
     row(
@@ -1346,10 +1570,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeTree,
-        &["Ctrl+D", "Ctrl+U"],
+        &["Ctrl+D"],
         None,
-        "navigate_half_page",
-        "Move the cursor half a pane-height down (Ctrl+D) or up (Ctrl+U)",
+        "navigate_half_page_down",
+        "Move the cursor half a pane-height down",
+        None,
+    ),
+    row(
+        N::AgentTreeTree,
+        &["Ctrl+U"],
+        None,
+        "navigate_half_page_up",
+        "Move the cursor half a pane-height up",
         None,
     ),
     row(
@@ -1418,10 +1650,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeCommits,
-        &["j", "Down", "k", "Up"],
+        &["j", "Down"],
         None,
-        "navigate_row",
-        "Move to the next row (j, Down) or the previous row (k, Up)",
+        "navigate_row_down",
+        "Move to the next row",
+        None,
+    ),
+    row(
+        N::AgentTreeCommits,
+        &["k", "Up"],
+        None,
+        "navigate_row_up",
+        "Move to the previous row",
         None,
     ),
     row(
@@ -1442,10 +1682,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeCommits,
-        &["Ctrl+D", "Ctrl+U"],
+        &["Ctrl+D"],
         None,
-        "navigate_half_page",
-        "Move half a page down (Ctrl+D) or up (Ctrl+U)",
+        "navigate_half_page_down",
+        "Move half a page down",
+        None,
+    ),
+    row(
+        N::AgentTreeCommits,
+        &["Ctrl+U"],
+        None,
+        "navigate_half_page_up",
+        "Move half a page up",
         None,
     ),
     row(
@@ -1482,10 +1730,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeAgents,
-        &["j", "Down", "k", "Up"],
+        &["j", "Down"],
         None,
-        "navigate_row",
-        "Move to the next agent (j, Down) or the previous agent (k, Up)",
+        "navigate_row_down",
+        "Move to the next agent",
+        None,
+    ),
+    row(
+        N::AgentTreeAgents,
+        &["k", "Up"],
+        None,
+        "navigate_row_up",
+        "Move to the previous agent",
         None,
     ),
     row(
@@ -1506,10 +1762,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeAgents,
-        &["Ctrl+D", "Ctrl+U"],
+        &["Ctrl+D"],
         None,
-        "navigate_half_page",
-        "Move half a page down (Ctrl+D) or up (Ctrl+U)",
+        "navigate_half_page_down",
+        "Move half a page down",
+        None,
+    ),
+    row(
+        N::AgentTreeAgents,
+        &["Ctrl+U"],
+        None,
+        "navigate_half_page_up",
+        "Move half a page up",
         None,
     ),
     row(
@@ -1530,10 +1794,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentDiff,
-        &["j", "Down", "k", "Up"],
+        &["j", "Down"],
         None,
-        "navigate_row",
-        "Scroll down a line (j, Down) or up a line (k, Up)",
+        "navigate_row_down",
+        "Scroll down a line",
+        None,
+    ),
+    row(
+        N::AgentDiff,
+        &["k", "Up"],
+        None,
+        "navigate_row_up",
+        "Scroll up a line",
         None,
     ),
     row(
@@ -1554,10 +1826,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentDiff,
-        &["Ctrl+D", "Ctrl+U"],
+        &["Ctrl+D"],
         None,
-        "navigate_half_page",
-        "Scroll half a page down (Ctrl+D) or up (Ctrl+U)",
+        "navigate_half_page_down",
+        "Scroll half a page down",
+        None,
+    ),
+    row(
+        N::AgentDiff,
+        &["Ctrl+U"],
+        None,
+        "navigate_half_page_up",
+        "Scroll half a page up",
         None,
     ),
     // ---- tmux.global (catalogue only; tmux handles these) ----

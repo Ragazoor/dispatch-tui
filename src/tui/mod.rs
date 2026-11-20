@@ -176,6 +176,16 @@ pub(in crate::tui) struct MoveTaskPickerState {
 // InteractionState — transient overlay/picker state, one-at-a-time by construction
 // ---------------------------------------------------------------------------
 
+/// A pressed first half of a chord: which namespace it was pressed in, the
+/// character, and when (`KeypressRunsItsRowsAction` in
+/// `docs/specs/keybindings.allium`).
+#[derive(Debug, Clone, Copy)]
+pub(in crate::tui) struct PendingChord {
+    pub(in crate::tui) namespace: crate::keybindings::KeyNamespace,
+    pub(in crate::tui) first: char,
+    pub(in crate::tui) started: Instant,
+}
+
 /// Transient overlay/picker UI state: at most one of these is meaningfully
 /// active at a time (each is gated by a distinct `InputMode`). Grouped so `App`'s own field list only carries genuine
 /// board/session state, not this long tail of "is some popup open" flags.
@@ -185,12 +195,11 @@ pub(in crate::tui) struct MoveTaskPickerState {
 pub(in crate::tui) struct InteractionState {
     pub(in crate::tui) reparent_picker: Option<ReparentPickerState>,
     pub(in crate::tui) move_task_picker: Option<MoveTaskPickerState>,
-    /// A single `g` press awaiting a possible second `g` (the `gg` chord,
-    /// jump to top of column) within [`GG_CHORD_TIMEOUT`]. Holds the press
-    /// instant. Armed only on the board; resolved by the next keypress
-    /// (`dispatch_key`) or, if the user goes idle after a lone `g`,
-    /// by `handle_tick` as a backstop.
-    pub(in crate::tui) pending_g: Option<Instant>,
+    /// The first half of a chord (`gg`, or any chord the table lists)
+    /// awaiting its second key within [`GG_CHORD_TIMEOUT`]. Resolved by the
+    /// next keypress (`dispatch_key`) or, if the user goes idle, by
+    /// `handle_tick` as a backstop.
+    pub(in crate::tui) pending_chord: Option<PendingChord>,
     /// Scroll offset of the `?` help overlay: the body line shown at the top.
     /// Reset to 0 when the overlay opens; rendering clamps an offset past the
     /// end.

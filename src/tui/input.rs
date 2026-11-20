@@ -3,7 +3,7 @@ mod confirm;
 mod normal;
 mod table;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyEvent;
 
 use super::{App, BoardViewMode, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
 use crate::models::{
@@ -21,20 +21,6 @@ fn key_event(action: &str, key: &str) -> Command {
 }
 
 use crate::keybindings::key_label;
-
-/// The tree movement a key requests in either tree picker (reparent-epic,
-/// move-task-to-epic), or `None` for a key that is not a movement. Both
-/// pickers navigate identically; only the message they wrap it in differs.
-fn tree_nav_for(key: KeyEvent) -> Option<crate::tui::types::TreeNav> {
-    use crate::tui::types::TreeNav;
-    match key.code {
-        KeyCode::Char('j') | KeyCode::Down => Some(TreeNav::Down),
-        KeyCode::Char('k') | KeyCode::Up => Some(TreeNav::Up),
-        KeyCode::Char('l') | KeyCode::Right => Some(TreeNav::Right),
-        KeyCode::Char('h') | KeyCode::Left => Some(TreeNav::Left),
-        _ => None,
-    }
-}
 
 impl App {
     /// Dispatch `msg` through [`Self::update`], then record the keybinding usage

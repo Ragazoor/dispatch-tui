@@ -92,20 +92,20 @@ fn recorded_event_is_a_human_keybinding_event() {
 #[test]
 fn column_navigation_records_the_key_that_drove_it() {
     let mut app = make_app();
-    assert_records(&mut app, KeyCode::Char('l'), "navigate_column", "l");
-    assert_records(&mut app, KeyCode::Char('h'), "navigate_column", "h");
-    assert_records(&mut app, KeyCode::Right, "navigate_column", "Right");
-    assert_records(&mut app, KeyCode::Left, "navigate_column", "Left");
+    assert_records(&mut app, KeyCode::Char('l'), "navigate_column_right", "l");
+    assert_records(&mut app, KeyCode::Char('h'), "navigate_column_left", "h");
+    assert_records(&mut app, KeyCode::Right, "navigate_column_right", "Right");
+    assert_records(&mut app, KeyCode::Left, "navigate_column_left", "Left");
 }
 
 #[test]
 fn row_navigation_records_the_key_that_drove_it() {
     let mut app = make_app();
     app.selection_mut().set_column(1);
-    assert_records(&mut app, KeyCode::Char('j'), "navigate_row", "j");
-    assert_records(&mut app, KeyCode::Char('k'), "navigate_row", "k");
-    assert_records(&mut app, KeyCode::Down, "navigate_row", "Down");
-    assert_records(&mut app, KeyCode::Up, "navigate_row", "Up");
+    assert_records(&mut app, KeyCode::Char('j'), "navigate_row_down", "j");
+    assert_records(&mut app, KeyCode::Char('k'), "navigate_row_up", "k");
+    assert_records(&mut app, KeyCode::Down, "navigate_row_down", "Down");
+    assert_records(&mut app, KeyCode::Up, "navigate_row_up", "Up");
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn abandoned_chord_records_only_the_key_that_arrived() {
     app.selection_mut().set_column(1);
     app.handle_key(make_key(KeyCode::Char('g')));
     // `g` then `j`: the chord is abandoned silently and `j` navigates.
-    assert_records(&mut app, KeyCode::Char('j'), "navigate_row", "j");
+    assert_records(&mut app, KeyCode::Char('j'), "navigate_row_down", "j");
 }
 
 #[test]
@@ -205,10 +205,10 @@ fn enter_on_the_header_records_select_all() {
 #[test]
 fn task_detail_keys_record() {
     let mut app = detail_app();
-    assert_records(&mut app, KeyCode::Char('j'), "scroll_detail", "j");
-    assert_records(&mut app, KeyCode::Char('k'), "scroll_detail", "k");
-    assert_records(&mut app, KeyCode::Down, "scroll_detail", "Down");
-    assert_records(&mut app, KeyCode::Up, "scroll_detail", "Up");
+    assert_records(&mut app, KeyCode::Char('j'), "scroll_detail_down", "j");
+    assert_records(&mut app, KeyCode::Char('k'), "scroll_detail_up", "k");
+    assert_records(&mut app, KeyCode::Down, "scroll_detail_down", "Down");
+    assert_records(&mut app, KeyCode::Up, "scroll_detail_up", "Up");
     assert_records(&mut app, KeyCode::Char('z'), "zoom_detail", "z");
     assert_records(&mut app, KeyCode::Char('q'), "close_detail", "q");
 
@@ -336,7 +336,7 @@ fn search_mode_records_commit_and_cancel_but_not_typing() {
 #[test]
 fn tag_picker_records_selection_default_and_cancel() {
     let mut app = app_in_mode(InputMode::InputTag);
-    assert_records(&mut app, KeyCode::Char('b'), "tag_picker_select", "b");
+    assert_records(&mut app, KeyCode::Char('b'), "tag_picker_select_bug", "b");
 
     let mut app = app_in_mode(InputMode::InputTag);
     assert_records(&mut app, KeyCode::Enter, "tag_picker_default", "Enter");
@@ -368,7 +368,7 @@ fn wrap_up_mode_picker_records_selection_default_and_cancel() {
     assert_records(
         &mut app,
         KeyCode::Char('r'),
-        "wrap_up_mode_picker_select",
+        "wrap_up_mode_picker_select_rebase",
         "r",
     );
 
@@ -390,10 +390,10 @@ fn quick_dispatch_picker_records_navigation_select_and_cancel() {
     assert_records(
         &mut app,
         KeyCode::Down,
-        "quick_dispatch_move_cursor",
+        "quick_dispatch_cursor_down",
         "Down",
     );
-    assert_records(&mut app, KeyCode::Up, "quick_dispatch_move_cursor", "Up");
+    assert_records(&mut app, KeyCode::Up, "quick_dispatch_cursor_up", "Up");
     assert_silent(&mut app, KeyCode::Char('r')); // filtering, not an action
     assert_records(&mut app, KeyCode::Enter, "quick_dispatch_select", "Enter");
 
@@ -418,8 +418,8 @@ fn repo_path_picker_records_cursor_moves() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.input.mode = InputMode::InputRepoPath;
-    assert_records(&mut app, KeyCode::Down, "picker_move_cursor", "Down");
-    assert_records(&mut app, KeyCode::Up, "picker_move_cursor", "Up");
+    assert_records(&mut app, KeyCode::Down, "picker_cursor_down", "Down");
+    assert_records(&mut app, KeyCode::Up, "picker_cursor_up", "Up");
 }
 
 #[test]
@@ -438,14 +438,19 @@ fn repo_filter_toggles_record() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.handle_key(make_key(KeyCode::Char('f')));
-    assert_records(&mut app, KeyCode::Char('j'), "filter_move_cursor", "j");
-    assert_records(&mut app, KeyCode::Char('k'), "filter_move_cursor", "k");
+    assert_records(&mut app, KeyCode::Char('j'), "filter_cursor_down", "j");
+    assert_records(&mut app, KeyCode::Char('k'), "filter_cursor_up", "k");
     // Cursor position 0 is the first repo: the overlay has no "only active"
     // row, and no toggle-all key (board-layout.allium).
     assert_records(&mut app, KeyCode::Char(' '), "filter_toggle_row", " ");
     assert_silent(&mut app, KeyCode::Char('a'));
     assert_records(&mut app, KeyCode::Char('i'), "repo_filter_toggle_mode", "i");
-    assert_records(&mut app, KeyCode::Char('1'), "repo_filter_toggle_repo", "1");
+    assert_records(
+        &mut app,
+        KeyCode::Char('1'),
+        "repo_filter_toggle_repo_1",
+        "1",
+    );
     // The former preset keys (task #4972) are inert, so record nothing.
     assert_silent(&mut app, KeyCode::Char('s'));
     assert_silent(&mut app, KeyCode::Char('x'));
@@ -474,12 +479,7 @@ fn repo_filter_out_of_range_selections_are_silent() {
 fn reparent_picker_records_navigation_confirm_and_cancel() {
     let mut app = make_app_with_epic_selected();
     app.handle_key(make_key(KeyCode::Char('m')));
-    assert_records(
-        &mut app,
-        KeyCode::Char('j'),
-        "reparent_picker_navigate",
-        "j",
-    );
+    assert_records(&mut app, KeyCode::Char('j'), "reparent_picker_down", "j");
     assert_records(&mut app, KeyCode::Enter, "reparent_picker_confirm", "Enter");
 
     let mut app = make_app_with_epic_selected();
@@ -495,7 +495,7 @@ fn move_to_epic_picker_records_navigation_confirm_and_cancel() {
     assert_records(
         &mut app,
         KeyCode::Char('j'),
-        "move_to_epic_picker_navigate",
+        "move_to_epic_picker_down",
         "j",
     );
     assert_records(
