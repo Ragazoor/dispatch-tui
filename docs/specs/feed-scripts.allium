@@ -214,8 +214,10 @@ contract FetchDependabot {
 -- approving anything.
 --
 -- A linked item keeps the ALERT as its url because the runbook reads the
--- advisory from it, and the feed's reconcile already removes the task once
--- the merged PR closes the alert, so nothing tracks the PR's own state.
+-- advisory from it. Once the merged PR closes the alert, the alert leaves the
+-- feed's reconcile: an untouched task is removed, and a worked-on one moves
+-- to done and its agent window closes (feeds.allium: KeepWorkedOnFeedTask).
+-- So nothing tracks the PR's own state.
 
 contract FetchCve {
     fetch_cve: (repos: List<String>, bot_authors: List<String>) -> List<feeds/FeedItem>
@@ -281,7 +283,8 @@ contract FetchCve {
         -- 2 and 3). If either fails, the script warns on stderr and emits that
         -- repo's alerts without the links that call would have supplied. It
         -- never drops an alert for it: an unlinked alert is still correct
-        -- work, while a missing one deletes its task under reconcile. A PR
+        -- work, while a missing one leaves the feed under reconcile: an
+        -- untouched task is removed, a worked-on one moves to done. A PR
         -- list that reaches its limit warns too, since a fix PR past the cut
         -- goes unlinked.
 

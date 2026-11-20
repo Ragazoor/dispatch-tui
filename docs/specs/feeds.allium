@@ -107,11 +107,13 @@ value FeedItem {
                               -- conflict (re-poll of the same external_id) the
                               -- existing Task's wrap_up_mode is preserved, like
                               -- status/sub_status/repo_path, so a user's manual
-                              -- change survives feed refreshes — as long as the
-                              -- item remains present in every emission (an item
-                              -- that drops out and later reappears is deleted
-                              -- and reinserted, taking the feed value again;
-                              -- same tradeoff as status/repo_path). Absent
+                              -- change survives feed refreshes. It also survives
+                              -- the item leaving and coming back when the task
+                              -- was worked on (KeepWorkedOnFeedTask keeps the
+                              -- row). An untouched (backlog) task whose item
+                              -- drops out is removed, and the item's return
+                              -- inserts it afresh, taking the feed value again
+                              -- (same tradeoff as status/repo_path). Absent
                               -- leaves the Task's wrap_up_mode null (decide at
                               -- wrap-up time). Used by the CVE-alert feed
                               -- scripts (fetch-cve.sh, fetch-security.sh) to
@@ -254,8 +256,9 @@ contract RouteSignals {
 -- ExcludeFromReviews is the pure predicate that decides whether a PR item
 -- reaches the review subtree AT ALL. It runs BEFORE RouteSignals: an excluded
 -- item is never routed, never inserted, and never enters the reconcile's
--- keep-set, so an existing task for it is deleted by the same stale pass that
--- removes a merged PR.
+-- keep-set, so an existing task for it meets the same stale pass as a merged
+-- PR: an untouched (backlog) one is removed, a worked-on one is kept
+-- (KeepWorkedOnFeedTask).
 --
 -- TWO INDEPENDENT EXCLUSION RULES, either of which is enough on its own:
 --
@@ -1528,9 +1531,10 @@ rule SerialisedFeedCycle {
     -- one module transaction (IngestFeedEmission), so two cycles cannot
     -- interleave inside it. The claim still matters: a cycle reconciling against an emission fetched before the
     -- other cycle's writes landed can see a task the other has moved or
-    -- inserted as absent from its own (older) emission, delete it, and —
-    -- since the delete feeds TaskTeardown — force remove a live review
-    -- agent's worktree. So the claim spans the exec too. It also
+    -- inserted as absent from its own (older) emission and act on that
+    -- absence: an untouched task is deleted and torn down (TaskTeardown), and
+    -- a running review is moved to done with its agent window closed
+    -- (KeepWorkedOnFeedTask). So the claim spans the exec too. It also
     -- halves the upstream API spend of a double refresh.
     --
     -- Dropping rather than queueing: even with the exec bounded at
@@ -1571,14 +1575,14 @@ rule SerialisedFeedCycle {
     -- reconciled subtree mid-cycle — an MCP task update carrying a new epic, an
     -- epic reparent, a flatten, a board move — can place a feed task under a
     -- role sub-epic while it is absent from the in-flight emission, and the
-    -- stale delete will then remove it and tear down its worktree. Same
+    -- stale pass then acts on that absence: an untouched task is removed and
+    -- torn down, a running one is moved to done and its window closed. Same
     -- mechanism, same consequence, one leg simply is not a feed cycle. The
     -- invariant below is therefore worded "another cycle", not "another
     -- writer". DegradedNonEmptyEmission does NOT help here: this race needs no
-    -- degraded emission, so its additive gate never fires for it. The
-    -- alternative that would have covered it — refusing to tear down a task
-    -- carrying live agent state — was considered and rejected there, on the
-    -- cost it charges to legitimate removals.
+    -- degraded emission, so its additive gate never fires for it. Deleting
+    -- the row but skipping its teardown would not help either; that
+    -- alternative is rejected there (DegradedNonEmptyEmission).
 
     ensures:
         if in_flight_cycle(epic):
@@ -1864,12 +1868,14 @@ rule UpsertFeedTasks {
     --   - Match: title, description, tag, labels, and sort_order on the
     --     existing Task are updated to the new values; status, sub_status,
     --     repo_path, and wrap_up_mode are NOT touched (wrap_up_mode is
-    --     insert-only, so a user's manual wrap-up choice survives — but note
-    --     an item that drops out of an emission and later reappears is
-    --     deleted and reinserted, taking the feed's wrap_up_mode again, the
-    --     same reappear-caveat as status/repo_path). model is not touched
-    --     either, so the user's choice survives a re-poll, and a reinserted
-    --     item starts from the insert value again. A flat or grouped feed
+    --     insert-only, so a user's manual wrap-up choice survives a re-poll,
+    --     and survives the item leaving and coming back on a worked-on task,
+    --     which KeepWorkedOnFeedTask keeps. Only an untouched (backlog) task
+    --     whose item drops out is removed; the item's return inserts it
+    --     afresh, taking the feed's wrap_up_mode again, the same
+    --     reappear-caveat as status/repo_path). model is not touched either,
+    --     so the user's choice survives a re-poll and a kept task's return,
+    --     and a task inserted afresh starts from the insert value again. A flat or grouped feed
     --     never sets it, so that value is the default; a reviews_parent feed
     --     sets it on insert by the routed role (ReviewTaskModelIsSetByRole).
     --     url (and its url_type) are
@@ -1911,11 +1917,12 @@ rule UpsertFeedTasks {
     -- updated_at on a feed task therefore means "last time the feed changed
     -- it", which is what the card's age shows.
     --
-    -- Tasks present locally that are NOT in the latest emission are
-    -- removed. The dispatch runtime treats the feed as the source of
-    -- truth: any feed-managed task (external_id IS NOT NULL) that does
-    -- not appear in the current emission is deleted from the epic.
-    -- Non-feed tasks (external_id = null) in the same epic are never
+    -- Tasks present locally that are NOT in the latest emission have left
+    -- the feed. The dispatch runtime treats the feed as the source of truth
+    -- for untouched work: a feed-managed task (external_id IS NOT NULL) still
+    -- in backlog that does not appear in the current emission is removed
+    -- from the epic. A worked-on one (any other status) is kept, in done
+    -- (KeepWorkedOnFeedTask). Non-feed tasks (external_id = null) in the same epic are never
     -- touched by this rule.
     --
     -- That source-of-truth reading holds only for an emission dispatch
@@ -2024,9 +2031,9 @@ rule UpsertFeedTasks {
         -- bare row drop: the row is deleted and reported, and the reported
         -- row then gets tasks.allium's TaskTeardown — tmux window killed,
         -- git worktree removed, best-effort branch deletion — exactly the
-        -- teardown DeleteTask performs. A stale feed task
-        -- can carry an in-flight agent's session, and dropping the row
-        -- alone orphans that worktree on disk.
+        -- teardown DeleteTask performs. A stale backlog task can still hold
+        -- a worktree or a window (a task moved back to backlog keeps them),
+        -- and dropping the row alone orphans that worktree on disk.
         --
         -- SKIPPED ENTIRELY when the cycle is additive, for either reason.
         -- Under DegradedNonEmptyEmission, absence from a tainted emission is
@@ -2155,10 +2162,10 @@ rule KeepWorkedOnFeedTask {
     -- (UpsertFeedTasks' match arm). It is set on a done task too, so a card
     -- the user finished by hand reopens if its item leaves and later returns.
     --
-    -- IDEMPOTENT, AND ONCE ONLY. The item stays absent on every later trusted
-    -- cycle, so this rule fires again each time. Every later firing finds
-    -- left_feed set and writes nothing: no new completed_at, no updated_at
-    -- bump, no second close row. That holds whatever the task's status is
+    -- ONCE ONLY. The item stays absent on every later trusted cycle, so
+    -- FeedTaskLeftFeed arrives again each time, but the second requires
+    -- (not task.left_feed) stops the rule: no new completed_at, no
+    -- updated_at bump, no second close row. That holds whatever the task's status is
     -- by then: a kept task someone resumed by hand (running or review again,
     -- left_feed still set) is never moved back to done or closed under its
     -- agent. Only the first absence acts; the item's return clears left_feed
@@ -2182,11 +2189,11 @@ rule KeepWorkedOnFeedTask {
     let teardown_host = if task.host != null: task.host else: ingest_host
     let may_tear_down = teardown_host != null
         and teardown_host.owner != null and teardown_host.owner = caller()
+    let finishing = task.status in {running, review}
 
     ensures:
-        if not task.left_feed:
-            task.left_feed = true
-        if task.status in {running, review}:
+        task.left_feed = true
+        if finishing:
             task.status = done
             task.sub_status = default_sub_status(done)
             task.completed_at = now
@@ -2245,11 +2252,12 @@ rule GroupedFeedUpsert {
     -- UpsertFeedTasks is called per sub-epic. Sub-epics that the
     -- current emission no longer names (their repo contributed no item) are
     -- reconciled too: UpsertFeedTasks is called on each with an empty list,
-    -- so the feed-as-source-of-truth deletion in UpsertFeedTasks extends
-    -- across the whole grouped subtree rather than only the present repos.
-    -- Finally UpsertFeedTasks is called on the parent with an empty list,
-    -- which the same deletion rule uses to remove all flat feed tasks from
-    -- the parent.
+    -- so the stale pass in UpsertFeedTasks (an untouched task removed, a
+    -- worked-on one kept) extends across the whole grouped subtree rather
+    -- than only the present repos. Finally UpsertFeedTasks is called on the
+    -- parent with an empty list, which the same pass uses to clear the flat
+    -- feed tasks left on the parent: an untouched one is removed, a worked-on
+    -- one is kept in done (KeepWorkedOnFeedTask).
     --
     -- MIGRATION BY MOVE. On the first run after the flag is enabled the
     -- parent still holds its flat feed tasks. Before a group is upserted,
@@ -2258,7 +2266,8 @@ rule GroupedFeedUpsert {
     -- MOVED into the group's sub-epic: its epic is rewritten in place, and
     -- its status, sub_status, repo_path, worktree, tmux window and agent are
     -- kept. The upsert then refreshes it like any task already there. Only a
-    -- task whose item is gone from the emission is deleted. This is the
+    -- task whose item is gone from the emission leaves: removed if untouched,
+    -- kept if worked on. This is the
     -- ON-side twin of FlatFeedReconcile's re-home, and the same move
     -- RoleRoutedFeedSync makes between role sub-epics. Every move lands
     -- before any group is upserted, as RoleRoutedFeedSync routes every item
@@ -2350,10 +2359,11 @@ rule GroupedFeedUpsert {
         -- sub-epics remain for the user to clean up manually. The
         -- reconciliation only clears their feed tasks — it never removes the
         -- sub-epic row itself.
-        -- UpsertFeedTasks(epic, []) uses the existing deletion rule to remove
-        -- all feed-managed tasks (external_id IS NOT NULL) directly under the
-        -- parent epic; the same call on an absent sub-epic clears that
-        -- sub-epic's feed tasks while preserving any manual (external_id =
+        -- UpsertFeedTasks(epic, []) runs the existing stale pass over every
+        -- feed-managed task (external_id IS NOT NULL) directly under the
+        -- parent epic: an untouched one is removed, a worked-on one is kept
+        -- in done. The same call on an absent sub-epic clears that sub-epic's
+        -- feed tasks the same way, while preserving any manual (external_id =
         -- null) tasks the user added there.
         -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_grouped — the
         -- present groups and the absent-sub-epic reconciliation share the same
@@ -2400,13 +2410,14 @@ rule FlatFeedReconcile {
     -- After re-homing, UpsertFeedTasks runs on the parent with the current
     -- emission. Re-homed feed tasks (external_id != null) are now direct
     -- children of the parent, so UpsertFeedTasks matches them by
-    -- (epic, external_id) and either refreshes them (still emitted) or removes
-    -- them as stale (absent from the emission) — the ordinary
-    -- feed-as-source-of-truth behaviour. Removing such a stale task deletes and
-    -- reports the row and then performs tasks.allium's TaskTeardown on the
-    -- reported row — tmux window killed, git worktree removed, best-effort
-    -- branch deletion — so a re-homed task that still
-    -- carries an in-flight agent is released rather than orphaned. This is what
+    -- (epic, external_id) and either refreshes them (still emitted) or treats
+    -- them as left (absent from the emission): an untouched one is removed as
+    -- stale and a worked-on one is kept in done (KeepWorkedOnFeedTask) — the
+    -- ordinary feed-as-source-of-truth behaviour. Removing such a stale task
+    -- deletes and reports the row and then performs tasks.allium's
+    -- TaskTeardown on the reported row — tmux window killed, git worktree
+    -- removed, best-effort branch deletion — so a re-homed task that still
+    -- holds a worktree releases it rather than orphaning it. This is what
     -- makes the flat path self-healing on the first poll after the user
     -- un-groups, with no manual cleanup step. Running it when the parent has no RepoGroup sub-epics is a
     -- harmless no-op (empty loop), so it fires on every flat sync, not only the
@@ -2510,10 +2521,13 @@ rule RoleRoutedFeedSync {
     -- this rule is what heals it. For each emitted PR,
     -- route(item.signals) (the RouteSignals contract) picks the target role:
     --
-    --   - Present in the subtree, SAME role  -> fields updated in place
-    --     (title, description, tag, labels, sort_order), as UpsertFeedTasks.
+    --   - Present in the subtree, SAME epic -> refreshed by UpsertFeedTasks'
+    --     match arm, run on the target with the items routed there: fields,
+    --     url backfill, the coming-back reopen and
+    --     UnchangedFeedItemIsNotRewritten all apply.
     --   - Present in the subtree, DIFFERENT epic -> a MOVE: the task's epic_id
-    --     is reassigned to the target sub-epic, THEN its fields are updated.
+    --     is reassigned to the target sub-epic, THEN the target's upsert
+    --     refreshes it as above.
     --     "Different epic" INCLUDES a task currently on the parent — it is
     --     moved down into its routed role sub-epic, not duplicate-inserted.
     --     The reassignment touches only epic_id/updated_at, so status,
@@ -2522,8 +2536,8 @@ rule RoleRoutedFeedSync {
     --     across a my<->team<->bots reclassification or a parent->role rescue.
     --     This is the core fix: a bucket change is a true move, not
     --     delete+recreate.
-    --   - Absent from the subtree -> inserted into the target sub-epic (fresh
-    --     task, exactly as UpsertFeedTasks' insert path).
+    --   - Absent from the subtree -> inserted into the target sub-epic by the
+    --     same upsert (UpsertFeedTasks' insert path).
     --
     -- Because a parent-stranded task is MOVED (not re-inserted), it never
     -- collides with itself under the subtree-uniqueness constraint:
@@ -2561,13 +2575,19 @@ rule RoleRoutedFeedSync {
     --
     -- == Subtree-scoped delete (the reason this is not UpsertFeedTasks) ==
     --
-    -- UpsertFeedTasks' delete pass is PER-EPIC: it removes feed tasks absent
-    -- from THAT epic's emission. Run per-role that would delete a task the
-    -- moment it moved to another role (it is absent from the losing role's
-    -- keep-set). So the stale-delete here is SUBTREE-SCOPED and uses a SINGLE
-    -- union keep-set of every emitted external_id: a task that merely moved is
-    -- still in the keep-set and survives, while a PR absent from the whole
-    -- emission (merged or closed) is removed. Because the delete SQL is one
+    -- UpsertFeedTasks' stale pass is PER-EPIC: it acts on feed tasks absent
+    -- from THAT epic's items. Each target's upsert gets only the items routed
+    -- to it, and every move lands before any upsert, so a task that moved is
+    -- in its new target's items and that target's pass leaves it alone. But
+    -- the per-target pass reaches only the targets that received an item
+    -- this cycle. So a SUBTREE-SCOPED stale pass follows, with a SINGLE
+    -- union keep-set of every emitted external_id: a PR absent from the
+    -- whole emission (merged or closed) has left the feed wherever its task
+    -- sits — an untouched (backlog) task is removed, a worked-on one is kept
+    -- (KeepWorkedOnFeedTask). A second copy of one external_id sitting in a
+    -- target that received other items is absent from that target's own
+    -- items, so the per-target pass treats it as left although the union
+    -- keep-set holds it. Because the delete SQL is one
     -- level deep, that single keep-set is applied with the PARENT as root
     -- (reaching the role sub-epics' tasks) AND once per ROLE SUB-EPIC as root
     -- (reaching that role's repo-group grandchildren — the third level above).
@@ -2644,30 +2664,28 @@ rule RoleRoutedFeedSync {
                               and (this.epic = epic
                                    or this.epic in {my, team, bots}
                                    or this.epic.parent in {my, team, bots})).last
-            if exists existing:
-                if existing.epic != target:
-                    -- MOVE: reassign epic only; state-bearing fields preserved.
-                    -- Covers parent->role rescue as well as my<->team<->bots.
-                    existing.epic = target
-                -- Field refresh (same as UpsertFeedTasks' match path).
-                existing.title = item.title
-                existing.description = item.description
-                existing.tag = item.tag
-                existing.labels = item.labels
-                existing.sort_order = item.sort_order
-                -- existing.status, sub_status, repo_path, worktree,
-                -- tmux_window preserved by the move.
-            else:
-                -- First sight: insert into the routed sub-epic exactly as
-                -- UpsertFeedTasks' insert path (repo_path/base_branch/url all
-                -- resolved identically, and a retired id refused the same
-                -- way — though the filter on this loop has already dropped it).
-                -- Insert only: this rule runs its own stale delete below.
-                UpsertFeedItems(target, {item}, true, host)
+            if exists existing and existing.epic != target:
+                -- MOVE: reassign epic only; state-bearing fields (status,
+                -- sub_status, repo_path, worktree, tmux_window) preserved.
+                -- Covers parent->role rescue as well as my<->team<->bots.
+                existing.epic = target
 
-        -- Subtree-scoped delete with the union of all emitted ids: removes
-        -- merged/closed PRs and clears buckets absent from this emission,
-        -- without deleting a just-moved task (it is in the keep-set) or any
+        -- Every move above lands before any target is upserted. Then each
+        -- target gets ONE UpsertFeedTasks pass with the items routed to it
+        -- (routed_to: the items the loop above sent to that target), in the
+        -- cycle's own mode: the match arm refreshes a task already there
+        -- (fields, url backfill, the coming-back reopen,
+        -- UnchangedFeedItemIsNotRewritten), the insert path adds one on
+        -- first sight (a retired id refused, though the filter on the loop
+        -- has already dropped it), and on a trusted cycle the target's own
+        -- per-epic stale pass runs too. A task moved this cycle is in its
+        -- new target's items, so that pass never acts on it.
+        for target in routed_targets(epic, kept):
+            UpsertFeedItems(target, routed_to(epic, kept, target), additive, host)
+
+        -- Subtree-scoped stale pass with the union of all emitted ids: acts on
+        -- merged/closed PRs and on buckets absent from this emission,
+        -- without touching a just-moved task (it is in the keep-set) or any
         -- manual task. The delete SQL is one level deep, so the union keep-set
         -- is applied with the PARENT as root (role sub-epics' tasks) AND once
         -- per ROLE SUB-EPIC as root (repo-group grandchildren). The role-level
@@ -2771,15 +2789,17 @@ rule RoleRoutedFeedSync {
         -- cycle, not once per feed path. It groups by repo_path and tears down sequentially within a repo (git worktree
         -- remove / branch -D contend on the shared checkout's index lock) and
         -- in parallel across repos. Teardown is best-effort and warn-logged;
-        -- it never fails the sync. It is also unconditional on task state —
-        -- no clause here consults status or sub_status, so any task that
-        -- reaches it is force-torn-down even with a live agent in it. That is
-        -- deliberate and stays: the protection against tearing down a live
-        -- agent lives UPSTREAM, in whether the delete happens at all
-        -- (DegradedNonEmptyEmission, or AppendOnlyFeed for an epic that
-        -- never removes at all), not in a state check here. See
-        -- DegradedNonEmptyEmission's "why not gate the teardown on task state
-        -- instead" for the alternative that was rejected.
+        -- it never fails the sync. It is also unconditional on task state:
+        -- nothing at this seam consults status or sub_status, so every row
+        -- that reaches it is torn down. Removal is decided upstream of it.
+        -- The stale passes remove only an untouched (backlog) task and keep a
+        -- worked-on one (KeepWorkedOnFeedTask); the parent sweep removes
+        -- whatever the status, since a task left on the parent is a stray or
+        -- a duplicate. Whether a cycle removes at all is decided further up
+        -- still (DegradedNonEmptyEmission, or AppendOnlyFeed for an epic that
+        -- never removes). See DegradedNonEmptyEmission's "why not gate the
+        -- teardown on task state instead" for the alternative that is
+        -- rejected.
         --
         -- Sequencing note — the ensures clauses of this rule and of
         -- UpsertFeedTasks / GroupedFeedUpsert write `not exists task` BEFORE
@@ -2846,8 +2866,8 @@ rule RoleRoutedFeedSync {
         -- parent.
         -- Coverage:
         -- src/feed/ingest/tests.rs (move preserves in-flight worktree/status;
-        -- moved task not deleted same cycle; insert on first sight; delete on
-        -- merge/close; manual-task preservation; multi-role single emission;
+        -- moved task not deleted same cycle; insert on first sight; an
+        -- untouched task removed on merge/close; manual-task preservation; multi-role single emission;
         -- two back-to-back zero-interval ticks lose nothing; a feed task
         -- stranded on the parent is moved down to its routed role sub-epic with
         -- state preserved; a parent-stranded task absent from the emission is
@@ -2961,8 +2981,11 @@ rule ReviewTaskModelIsSetByRole {
         -- so a model the operator picked by hand survives a re-poll. A MOVE
         -- between role sub-epics (Team Reviews into My Reviews, Bots into Team
         -- Reviews) keeps the model it had: the task is not new, and a move is
-        -- not a change the operator asked for. A PR removed as stale and later
-        -- emitted again is a new insert and takes the role's model.
+        -- not a change the operator asked for. A worked-on task whose PR
+        -- leaves and comes back is kept (KeepWorkedOnFeedTask) and refreshed
+        -- on its return, so it keeps its model. An untouched task removed as
+        -- stale whose PR is later emitted again is a new insert and takes the
+        -- role's model.
         --
         -- FIXED, NOT CONFIGURED. The mapping is written in the rule. No role
         -- sub-epic carries a model setting.
@@ -3228,8 +3251,9 @@ rule DegradedEmptyEmission {
     -- rule must not cross:
     --
     --   - ZERO items with EMPTY stderr is a clean empty run. It still
-    --     reconciles normally, and it still removes merged/closed PRs and
-    --     every other task absent from the emission.
+    --     reconciles normally: every task absent from the emission has left
+    --     the feed, so an untouched one is removed and a worked-on one is
+    --     kept in done (KeepWorkedOnFeedTask).
     --   - A NON-EMPTY emission still SYNCS regardless of stderr — one item
     --     alongside stderr is a sync, not a failure — but when the stderr
     --     is non-empty that sync is ADDITIVE, per
@@ -3340,21 +3364,22 @@ rule DegradedNonEmptyEmission {
     -- additive keeps it useful and merely conservative.
     --
     -- WHY NOT GATE THE TEARDOWN ON TASK STATE INSTEAD. The rejected
-    -- alternative was to keep deleting, but refuse the TaskTeardown for a
-    -- removed task that still carries live agent state (a worktree plus a
-    -- non-terminal status), leaving the agent and its branch alive for the
-    -- human to reclaim. Rejected because it pays its cost on the LEGITIMATE
-    -- case: a PR merged while its review agent is still running is ordinary,
-    -- and it is the exact case feed-driven teardown exists for. Under a
-    -- state gate every such merge leaves a worktree, a branch and a tmux
-    -- window on disk with no card left to find them from, forever. The
-    -- failure this rule addresses is better fixed by not performing the
-    -- wrong delete than by softening its consequences.
+    -- alternative is to delete the row but skip its TaskTeardown when the
+    -- task still carries live agent state, leaving the agent and its branch
+    -- for the human to reclaim. It leaves a worktree, a branch and a tmux
+    -- window on disk with no card left to find them from. Task state decides
+    -- the removal instead: the stale pass removes only an untouched
+    -- (backlog) task, and keeps a worked-on one in done
+    -- (KeepWorkedOnFeedTask), so a PR merged while its review agent runs
+    -- keeps its card and worktree. The teardown of a row that is removed
+    -- stays unconditional. The failure this rule addresses is better fixed
+    -- by not acting on a wrong absence than by softening its consequences.
     --
     -- RESIDUAL RISK, stated honestly: this rule keys on stderr, so a feed
     -- script that degrades SILENTLY — soft-failing a sub-query without
-    -- printing anything — is not detected, and its omissions still delete and
-    -- tear down. The script contract (FeedCommandFailure) requires errors to
+    -- printing anything — is not detected, and its omissions are still acted
+    -- on: an untouched task is removed and torn down, a worked-on one is moved
+    -- to done. The script contract (FeedCommandFailure) requires errors to
     -- be reported, so a silent soft-fail is a script bug; dispatch cannot
     -- distinguish it from a genuine removal. It has no known instance and no
     -- cheaper detector.
@@ -3455,9 +3480,9 @@ rule AppendOnlyFeed {
     -- motivating one: it happened, once, at a point in time, and nothing
     -- upstream ever retracts it. Absence from a later emission is evidence of
     -- nothing at all — only that the scanned window moved on, or the file
-    -- rotated. Read as a mirror, such a feed would tear down a task, and with
-    -- it a worktree, a branch and a tmux window, on the very next poll after
-    -- creating it.
+    -- rotated. Read as a mirror, such a feed would remove an untouched task,
+    -- and tear down any worktree, branch or tmux window it holds, on the very
+    -- next poll after creating it, and move a worked-on one to done.
     --
     -- core/Epic.feed_append_only = true is how an epic says which kind it is.
     -- The effect is exactly DegradedNonEmptyEmission's: the sync runs
@@ -3510,8 +3535,10 @@ rule AppendOnlyFeed {
     -- THE FLAG IS NOT RETROACTIVE, IN EITHER DIRECTION. Turning it ON stops
     -- future removals; it does not restore a task an earlier trusted cycle
     -- already removed. Turning it OFF makes the very next cycle a mirroring
-    -- one, which removes every accumulated task the current emission does not
-    -- name — for a log feed, potentially all of them. That is the honest
+    -- one: every accumulated task the current emission does not name has
+    -- left the feed, so every untouched one is removed — for a log feed,
+    -- potentially all of its backlog — and every worked-on one is kept in
+    -- done. That is the honest
     -- consequence of the flag meaning what it says, and it is why the flag
     -- belongs to wiring an epic up rather than to a board keybinding. The epic
     -- header does still SURFACE the flag, read-only and with no key hint
@@ -3936,8 +3963,9 @@ rule ServeFeedTeardownRequest {
 -- cycle's keep-set comes from the emission it fetched, and the argument that "a
 -- task in the subtree but absent from this emission is stale" holds only if no
 -- other cycle for the same epic wrote between this cycle's exec and its sync.
--- Because the stale-delete feeds TaskTeardown, breaking it destroys a live
--- agent's worktree rather than merely losing a row.
+-- Because the stale pass removes an untouched task with its TaskTeardown and
+-- moves a running one to done with its window closed, breaking it loses real
+-- state rather than merely a row.
 --
 -- Deliberately scoped to "another CYCLE", not "another writer": a concurrent
 -- non-feed writer moving a task into the reconciled subtree can still produce
