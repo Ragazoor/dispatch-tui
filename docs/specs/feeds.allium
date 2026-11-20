@@ -494,8 +494,8 @@ contract FeedCommandExec {
         -- a valid emission into a timeout.
 
     @invariant StderrIsLoggedOnSuccess
-        -- A run that exits 0 with stderr logs it at warn level before the
-        -- stdout is parsed (FeedCommandStderrOnSuccess).
+        -- A run that exits 0 with stderr logs it at warn level, notice lines
+        -- included, before the stdout is parsed (FeedCommandStderrOnSuccess).
 
     @guidance
         -- Implementation: src/feed/exec.rs::run_feed_command_bounded (shared
@@ -2050,7 +2050,7 @@ rule UpsertFeedTasks {
         -- row then gets tasks.allium's TaskTeardown — tmux window killed,
         -- git worktree removed, best-effort branch deletion — exactly the
         -- teardown DeleteTask performs. A stale backlog task can still hold
-        -- a worktree or a window (a task moved back to backlog keeps them),
+        -- a worktree (a kept task reopened on its item's return keeps it),
         -- and dropping the row alone orphans that worktree on disk.
         --
         -- SKIPPED ENTIRELY when the cycle is additive, for either reason.
@@ -3205,8 +3205,9 @@ rule FeedCommandStderrOnSuccess {
 
     @guidance
         -- Implementation: src/feed/exec.rs::exec_feed_command logs the
-        -- warning and returns the trimmed, truncated text on its
-        -- FeedOutput so callers can surface it too. It is the SINGLE exec
+        -- warning (the whole trimmed stderr, notices included) and returns
+        -- the notice-free, trimmed, truncated text on its FeedOutput, which
+        -- the taint reads and callers can surface. It is the SINGLE exec
         -- for both feed paths: they share src/feed/cycle.rs::FeedCycle::run,
         -- which is the single place it is called from, so neither can regress
         -- to a private spawn that drops stderr. The manual path surfaces it in the TUI as a FAILURE
