@@ -229,7 +229,7 @@ value PaneView {
     task: PaneTask?
     live_agents: [core/Task]
     -- Empty from a board that predates detached agents: the pane then lists
-    -- the attached agents alone, as it did before.
+    -- the attached agents alone.
     detached_agents: [core/Task]
     -- How many attached and detached agents the board's filter left out of
     -- the two lists above. Zero from a board that predates the filter, which
@@ -532,7 +532,7 @@ entity AgentTreePane {
     -- diff_pane is null.
     diff_pane_content: LowerPaneContent when diff_pane != null
 
-    -- Whether dispatch created diff_pane. Always true today: the lower pane is
+    -- Whether dispatch created diff_pane. Always true: the lower pane is
     -- only ever one this renderer split itself (see SplitAgentTreeDiffPane);
     -- dispatch never takes over a pane it did not create. Kept as a field so a
     -- reader sees the ownership rule instead of inferring it.
@@ -1348,7 +1348,7 @@ rule AgentTreeDiffPaneTaskNeverArrives {
 
     @guidance
         -- The diff pane stays open saying why, exactly as the tree does. It
-        -- is still closed by everything that closes it today — emptying the
+        -- is still closed by everything that closes it — emptying the
         -- open set (CloseAgentTreeDiffPaneWhenEmpty), hiding its tree
         -- (KillAgentTreeDiffPaneWithItsTree), or the exit key inside it —
         -- because those are the user's choices, not the pane giving up.
@@ -1531,7 +1531,7 @@ rule RefreshAgentTree {
         -- ran last. Added wins because a file that is listed as present is
         -- there; deleted beats modified because a deletion is the more
         -- consequential fact and the one a file tree exists to show. It costs
-        -- nothing and decides no case git produces today. The commit form has
+        -- nothing and decides no case git produces. The commit form has
         -- only one listing, so the question does not arise there.
         --
         -- == The four rendering rules, in one place ==
@@ -3359,7 +3359,7 @@ surface AgentTreeCompanionPane {
         -- sends the full path ends with too. Its ancestors (id and own title,
         -- root first) come beside it; a board that predates them sends none,
         -- and every group then reads as top-level: headers in ascending epic
-        -- id, nothing indented, as before. A board that predates the epic
+        -- id, nothing indented. A board that predates the epic
         -- itself sends none, and every agent then reads as epicless: the list
         -- is the plain id-ordered list with no headers and no rule.
 
@@ -4015,7 +4015,7 @@ surface AgentTreeBoardAnswers {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "AgentTreeViewState: the renderer's cursor position and the set of directories the user has manually expanded or collapsed are real, observable state — CollapseSelectedAgentTreeNode and friends act on them, DirectoryExpansionFollowsChangedDescendants only constrains the first render, not what the user does afterwards, and CountsShowOnTheFolderNearestTheFiles now READS live expansion to decide whether a directory row draws its sum. They are currently modelled nowhere. Should AgentTreePane carry them as fields (making the manual-override behaviour rule-expressible and the invariant honest about when it applies), or is per-process view state deliberately below this spec's abstraction line?"
+open question "AgentTreeViewState: the renderer's cursor position and the set of directories the user has manually expanded or collapsed are real, observable state — CollapseSelectedAgentTreeNode and friends act on them, DirectoryExpansionFollowsChangedDescendants only constrains the first render, not what the user does afterwards, and CountsShowOnTheFolderNearestTheFiles reads live expansion to decide whether a directory row draws its sum. They are currently modelled nowhere. Should AgentTreePane carry them as fields (making the manual-override behaviour rule-expressible and the invariant honest about when it applies), or is per-process view state deliberately below this spec's abstraction line?"
 
 open question "MergedRouteWidth: a chain-merged directory row carries its whole route, so a deep one can be wider than the pane — around forty columns — and MergedRoutesClipAtThePaneEdge says it is then clipped from the right, losing the last segment, the badge and the counts. Those are the parts of the row the merging was meant to make prominent, so clipping is the least useful place to lose width. Should a route too wide for the pane elide its middle segments instead, keeping the first and last, should the row drop leading segments until it fits, or is clipping plus the user's own tmux resize the intended answer here as it is for the diff pane?"
 
