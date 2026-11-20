@@ -1387,11 +1387,8 @@ surface HookDelivery {
         -- board" where it would like to say "each board". One machine runs
         -- one board; a second board started beside the first takes the
         -- address over, and afterwards the first board's own new sessions
-        -- deliver their hooks to the second. The agent tool endpoint has
-        -- always carried the same constraint through the same kind of shared
-        -- file (startup.allium: mcp_server_entry), so this is an existing
-        -- limit reaching one more artefact rather than a new one, and it is
-        -- written down here because nothing else wrote it down. Both boards
+        -- deliver their hooks to the second. The agent tool endpoint has the
+        -- same limit (startup.allium: mcp_server_entry). Both boards
         -- report the other's address as configuration drift, which is the
         -- one place the situation is visible to the operator.
         --
