@@ -529,6 +529,61 @@ fn a_tmux_row_takes_one_prefix_key() {
     assert_eq!(row.keys, ["Prefix+a"]);
 }
 
+/// The popup shows every message whole but a long list of valid names,
+/// which it cuts and points to the log; the log keeps it whole.
+#[test]
+fn the_popup_cuts_only_a_long_list_of_names() {
+    for problem in KeyOverrideProblem::ALL {
+        let (mut entries, _) = bad_file(problem);
+        let text = if problem == KeyOverrideProblem::FileUnreadable {
+            entries.remove(0)
+        } else {
+            file_of(&entries)
+        };
+        let (_, errors) = merge_overrides(&text);
+        for e in &errors {
+            let listing = matches!(
+                problem,
+                KeyOverrideProblem::UnknownNamespace | KeyOverrideProblem::UnknownAction
+            );
+            if listing {
+                assert!(e.popup_message.contains("app.log"), "{}", e.popup_message);
+                assert!(e.popup_message.len() < e.message.len());
+            } else {
+                assert_eq!(e.popup_message, e.message, "{}", problem.as_str());
+            }
+        }
+    }
+}
+
+/// Past a few refusals the popup names how many more there are.
+#[test]
+fn the_popup_lists_a_few_refusals_and_counts_the_rest() {
+    let entries: Vec<String> = [
+        "navigate_row_last",
+        "navigate_row_first",
+        "navigate_row_down",
+        "navigate_row_up",
+        "navigate_column_left",
+        "navigate_column_right",
+    ]
+    .iter()
+    .map(|a| entry("board.normal", a, &["ctrl+x"]))
+    .collect();
+    let (table, errors) = merge_overrides(&file_of(&entries));
+    let load = KeyTableLoad {
+        file: PathBuf::from("/data/keybindings.json"),
+        table,
+        errors,
+    };
+    let summary = load.error_summary().unwrap();
+    assert_eq!(summary.matches("\n- ").count(), POPUP_ERRORS);
+    assert!(
+        summary.ends_with("and 3 more, listed in app.log"),
+        "{summary}"
+    );
+}
+
 #[test]
 fn the_summary_names_the_file_and_each_message() {
     let dir = tempfile::tempdir().unwrap();

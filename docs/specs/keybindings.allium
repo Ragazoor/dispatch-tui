@@ -1042,9 +1042,12 @@ rule BoardShowsKeyLoadErrors {
         -- Another error the board raises before the popup is dismissed (a
         -- failed dispatch the restart sweep reports) does not replace it:
         -- that error shows first, and the load errors once it is dismissed.
-        -- The popup grows to fit the list. A message longer than fits, one
-        -- that lists every valid name, is cut at a list separator with a
-        -- pointer to the log, which holds it whole (KeyLoadErrorsAreLogged).
+        -- The popup grows to fit the list and fits an 80x24 board: it shows
+        -- the first three errors and says how many more there are, and a
+        -- message that lists every valid name (unknown_namespace,
+        -- unknown_action) shows the first five names and how many more.
+        -- Every other message shows whole. The log holds every error, each
+        -- message whole (KeyLoadErrorsAreLogged).
 }
 
 rule KeyLoadErrorsAreLogged {

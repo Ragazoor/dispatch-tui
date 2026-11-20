@@ -1195,6 +1195,27 @@ fn the_key_load_errors_fit_a_small_board() {
         .join("\n");
     assert!(text.contains("Press any key to dismiss"), "{text}");
     assert!(text.contains("Ctrl+E"), "{text}");
+
+    // Many refusals of the longest kind still leave the hint on screen.
+    let many: Vec<String> = (0..10)
+        .map(|n| {
+            format!(
+                r#"{{"namespace": "board.normal", "action": "no_such_action_{n}", "keys": ["O"]}}"#
+            )
+        })
+        .collect();
+    let (mut app, _dir) = app_loaded_from(&format!("[{}]", many.join(",")));
+    let buf = render_to_buffer(&mut app, 80, 24);
+    let text: String = (area.top()..area.bottom())
+        .map(|y| {
+            (area.left()..area.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Press any key to dismiss"), "{text}");
+    assert!(text.contains("7 more"), "{text}");
 }
 
 /// A later error does not replace the key-load notice: the error shows

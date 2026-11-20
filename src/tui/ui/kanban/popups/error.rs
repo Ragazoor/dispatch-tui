@@ -12,6 +12,27 @@ use crate::palette::{FG, MUTED, RED};
 use crate::tui::ui::shared::{centered_rect, open_overlay, titled_block};
 use crate::tui::App;
 
+/// The rows a line takes when wrapped at word boundaries to `width`, as the
+/// popup's paragraph wraps it. A word longer than the width is split.
+fn wrapped_rows(line: &str, width: usize) -> usize {
+    let mut rows = 1;
+    let mut used = 0;
+    for word in line.split_whitespace() {
+        let len = word.chars().count();
+        let needed = if used == 0 { len } else { used + 1 + len };
+        if needed <= width {
+            used = needed;
+        } else if len <= width {
+            rows += usize::from(used > 0);
+            used = len;
+        } else {
+            rows += usize::from(used > 0) + (len - 1) / width;
+            used = (len - 1) % width + 1;
+        }
+    }
+    rows
+}
+
 pub(in crate::tui::ui::kanban) fn render_error_popup(frame: &mut Frame, app: &App, area: Rect) {
     let Some(error_msg) = app.error_popup() else {
         return;
@@ -21,14 +42,14 @@ pub(in crate::tui::ui::kanban) fn render_error_popup(frame: &mut Frame, app: &Ap
     // each line its own row, left-aligned, the popup as tall as it needs.
     let multi_line = error_msg.contains('\n');
     let popup_width = if multi_line {
-        (area.width * 80 / 100).clamp(30, 100)
+        area.width.saturating_sub(4).clamp(30, 100)
     } else {
         (area.width * 60 / 100).clamp(30, 60)
     };
     let inner_width = usize::from(popup_width.saturating_sub(2)).max(1);
     let message_rows: usize = error_msg
         .lines()
-        .map(|l| l.chars().count().div_ceil(inner_width).max(1))
+        .map(|l| wrapped_rows(l, inner_width))
         .sum();
     // Border (2), blank lines (2), the dismiss hint (1).
     let wanted = u16::try_from(message_rows + 5).unwrap_or(u16::MAX);

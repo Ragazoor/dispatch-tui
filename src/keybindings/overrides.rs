@@ -277,6 +277,9 @@ pub struct KeyLoadError {
     pub action: Option<String>,
     pub context: Option<String>,
     pub message: String,
+    /// The message as the board's popup shows it: a long list of valid names
+    /// cut short. Equal to `message` for every other message.
+    pub popup_message: String,
 }
 
 /// Which process is loading the table (`KeyTableReader`).
@@ -308,26 +311,41 @@ impl KeyTableLoad {
             "Key overrides in {} were refused; their rows keep their default keys.",
             self.file.display()
         );
-        for e in &self.errors {
+        for e in self.errors.iter().take(POPUP_ERRORS) {
             text.push_str("\n- ");
-            text.push_str(&popup_message(&e.message));
+            text.push_str(&e.popup_message);
+        }
+        if self.errors.len() > POPUP_ERRORS {
+            text.push_str(&format!(
+                "\n… and {} more, listed in app.log",
+                self.errors.len() - POPUP_ERRORS
+            ));
         }
         Some(text)
     }
 }
 
-/// The longest message the popup shows whole. A longer one (a list of every
-/// valid name) is cut at a list separator; the log keeps it whole.
-const POPUP_MESSAGE_CHARS: usize = 160;
+/// How many valid names a popup message lists before it points to the log,
+/// which holds the whole list.
+const POPUP_LIST_NAMES: usize = 5;
 
-fn popup_message(message: &str) -> String {
-    if message.chars().count() <= POPUP_MESSAGE_CHARS {
-        return message.to_string();
+/// A message that ends in a list of valid names: whole for the log, and for
+/// the popup with the list cut after [`POPUP_LIST_NAMES`] names.
+fn listing(head: &str, names: &[String]) -> (String, String) {
+    let whole = format!("{head}{}", names.join(", "));
+    if names.len() <= POPUP_LIST_NAMES {
+        return (whole.clone(), whole);
     }
-    let head: String = message.chars().take(POPUP_MESSAGE_CHARS).collect();
-    let head = head.rsplit_once(", ").map_or(head.as_str(), |(h, _)| h);
-    format!("{head}, … (the whole list is in app.log)")
+    let short = format!(
+        "{head}{}, … and {} more (all are listed in app.log)",
+        names[..POPUP_LIST_NAMES].join(", "),
+        names.len() - POPUP_LIST_NAMES
+    );
+    (whole, short)
 }
+
+/// How many refusals the popup lists before it points to the log.
+const POPUP_ERRORS: usize = 3;
 
 /// The override file of a data directory.
 pub fn key_override_path(data_dir: &Path) -> PathBuf {
@@ -373,6 +391,7 @@ fn file_unreadable(message: String) -> KeyLoadError {
         namespace: None,
         action: None,
         context: None,
+        popup_message: message.clone(),
         message,
     }
 }
@@ -385,20 +404,32 @@ struct Entry {
     /// The row of `KEY_BINDINGS` the entry names, once resolved.
     row: Option<usize>,
     keys: &'static [&'static str],
-    problem: Option<(KeyOverrideProblem, String)>,
+    /// The problem, its message and the message as the popup shows it.
+    problem: Option<(KeyOverrideProblem, String, String)>,
 }
 
 impl Entry {
     fn refuse(&mut self, problem: KeyOverrideProblem, message: String) {
         if self.problem.is_none() {
-            self.problem = Some((problem, message));
+            self.problem = Some((problem, message.clone(), message));
+        }
+    }
+
+    /// Refuse with a message that ends in a list of valid names.
+    fn refuse_listing(&mut self, problem: KeyOverrideProblem, head: &str, names: &[String]) {
+        if self.problem.is_none() {
+            let (whole, short) = listing(head, names);
+            self.problem = Some((problem, whole, short));
         }
     }
 }
 
 /// The merge itself, over the file's text: the merged table (same rows, same
 /// order as `KEY_BINDINGS`) and one error per refused entry, in file order.
-/// Pure, so a writer of the file can run the same checks.
+/// Pure, so a writer of the file can run the same checks. It leaks the
+/// merged table (and each accepted entry's keys), which is right once per
+/// process at startup; a caller that checks a file per request should split
+/// the checks from the leak rather than call this each time.
 pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>) {
     let list = match serde_json::from_str::<Value>(text) {
         Ok(Value::Array(list)) => list,
@@ -425,13 +456,14 @@ pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>)
     let errors = entries
         .into_iter()
         .filter_map(|e| {
-            let (problem, message) = e.problem?;
+            let (problem, message, popup_message) = e.problem?;
             Some(KeyLoadError {
                 problem,
                 namespace: e.namespace,
                 action: e.action,
                 context: e.context,
                 message,
+                popup_message,
             })
         })
         .collect();
@@ -515,13 +547,14 @@ fn judge_entry(value: &Value) -> Entry {
     let action = entry.action.clone().unwrap_or_default();
 
     let Some(ns) = KeyNamespace::parse(&ns_name) else {
-        let valid: Vec<&str> = KeyNamespace::ALL.iter().map(|n| n.name()).collect();
-        entry.refuse(
+        let valid: Vec<String> = KeyNamespace::ALL
+            .iter()
+            .map(|n| n.name().to_string())
+            .collect();
+        entry.refuse_listing(
             KeyOverrideProblem::UnknownNamespace,
-            format!(
-                "\"{ns_name}\" is not a namespace; write one of: {}",
-                valid.join(", ")
-            ),
+            &format!("\"{ns_name}\" is not a namespace; write one of: "),
+            &valid,
         );
         return entry;
     };
@@ -529,18 +562,16 @@ fn judge_entry(value: &Value) -> Entry {
         .filter(|&i| KEY_BINDINGS[i].namespace == ns && KEY_BINDINGS[i].action == action)
         .collect();
     if rows.is_empty() {
-        let mut actions: Vec<&str> = Vec::new();
+        let mut actions: Vec<String> = Vec::new();
         for b in KEY_BINDINGS.iter().filter(|b| b.namespace == ns) {
-            if !actions.contains(&b.action) {
-                actions.push(b.action);
+            if !actions.iter().any(|a| a == b.action) {
+                actions.push(b.action.to_string());
             }
         }
-        entry.refuse(
+        entry.refuse_listing(
             KeyOverrideProblem::UnknownAction,
-            format!(
-                "{ns_name} has no action \"{action}\"; its actions are: {}",
-                actions.join(", ")
-            ),
+            &format!("{ns_name} has no action \"{action}\"; its actions are: "),
+            &actions,
         );
         return entry;
     }
