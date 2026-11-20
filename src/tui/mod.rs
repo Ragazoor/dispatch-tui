@@ -108,17 +108,15 @@ pub(in crate::tui) const DISPATCH_SPINNER_FRAMES: u8 = 10;
 
 /// The one phrasing of "another machine holds this task's worktree", shared by
 /// every handler that refuses on `Task::is_locally_owned` — the activate key
-/// (`src/tui/input.rs`) and both retry arms (`src/tui/update/retry.rs`). They
-/// state one condition and had drifted into three near-identical strings.
+/// (`src/tui/input.rs`) and both retry arms (`src/tui/update/retry.rs`), so
+/// the one condition reads the same everywhere.
 ///
 /// `verb` names the action being refused ("resume", "retry") and produces
 /// `Cannot <verb>: …`; `None` is the bare statement, for a caller whose
 /// refused action is the keypress itself and has no verb to name.
 ///
-/// Deliberately does not name the owning host's label — resolving a foreign
-/// host id to a label needs the shared-host registry that is out of scope for
-/// this session (see the distributed-dispatch design doc's "Explicitly not in
-/// this session").
+/// Does not name the owning host: the board does not resolve a foreign host id
+/// to its label (`ActivateTask` in `docs/specs/split-pane.allium`).
 pub(in crate::tui) fn foreign_worktree_refusal(verb: Option<&str>) -> String {
     const PHRASE: &str = "this task's worktree is on another machine";
     match verb {

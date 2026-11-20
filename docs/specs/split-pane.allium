@@ -1036,22 +1036,18 @@ rule ActivateTask {
         -- local tmux target or acts on a local directory, and none of those
         -- exist on this machine.
         --
-        -- What the operator sees: a message naming the owning host's LABEL,
-        -- not its id (core/Host keeps the two apart precisely so the readable
-        -- one can be shown). Nothing else happens -- no write, no teardown, no
+        -- What the operator sees: a message saying that another machine holds
+        -- the task's worktree (src/tui/mod.rs::foreign_worktree_refusal). The
+        -- board does not resolve the owning host id to that host's label, so
+        -- the message names neither. Nothing else happens -- no write, no teardown, no
         -- launch -- which is the same shape as no_worktree_to_resume
         -- below. The key does not silently do nothing, because
         -- silence here is indistinguishable from a dropped keypress, and the
         -- one fact the operator needs is which machine to go to.
         --
-        -- The board does not yet resolve a foreign host id to that host's
-        -- label, so the message says "another machine" rather than naming it
-        -- (src/tui/mod.rs::foreign_worktree_refusal). On a single-machine
-        -- install this branch is unreachable, so the gap has no effect there.
-        --
-        -- No card indicator is specified. Marking owned-elsewhere cards on the
-        -- board is a board-visuals concern and there are no remote hosts to
-        -- mark yet; on a single-machine install this branch is unreachable.
+        -- No card indicator is specified: marking owned-elsewhere cards on the
+        -- board is a board-visuals concern. On a single-machine install this
+        -- branch is unreachable.
         --
         -- Space is the unified activate action. The branches, in priority
         -- order:
