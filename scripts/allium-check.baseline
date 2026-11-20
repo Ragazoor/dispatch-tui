@@ -17,9 +17,6 @@
 #     parameter (juxt/allium-tools#118) is not credited. No form types such a
 #     parameter: a typed `provides:` entry clears the warning but is not
 #     validated, so do not use it.
-#     A value named only as what a black-box function returns, through a
-#     derived value (agent-tree's AgentTreeNode and FileDiff), is not
-#     credited either: a derived value cannot carry a type.
 #   externalEntity.missingSourceHint: the external entities are governed by a
 #     tool (git, tmux) or the store, with no spec to import. Any `use` in
 #     core.allium silences all four, but meaninglessly, so the entries stay.
@@ -30,8 +27,6 @@
 
 docs/specs/agent-tree.allium	allium.definition.unused	Value 'PaneView' is declared but not referenced elsewhere.
 docs/specs/agent-tree.allium	allium.definition.unused	Value 'PaneResumeAnswer' is declared but not referenced elsewhere.
-docs/specs/agent-tree.allium	allium.definition.unused	Value 'FileDiff' is declared but not referenced elsewhere.
-docs/specs/agent-tree.allium	allium.definition.unused	Value 'AgentTreeNode' is declared but not referenced elsewhere.
 docs/specs/dispatch-prompt.allium	allium.definition.unused	Value 'Bump' is declared but not referenced elsewhere.
 docs/specs/dispatch-prompt.allium	allium.definition.unused	Value 'Preceding' is declared but not referenced elsewhere.
 docs/specs/feeds.allium	allium.definition.unused	Value 'FeedCommandRun' is declared but not referenced elsewhere.

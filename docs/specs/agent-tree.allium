@@ -126,10 +126,6 @@ value LineCounts {
 -- changed lines. It is not parsed, re-indented or re-coloured beyond marking
 -- additions and removals, because anything this pane invented about the text
 -- would be a second source of truth about the change.
---
--- Named only through the derived AgentTreePane.rendered_diffs, which cannot
--- carry a type, FileDiff is reported as definition.unused: allium check does
--- not count a type a black-box function returns as a use.
 value FileDiff {
     path: String            -- relative to the pane root; matches a GitFileChange.path
     body: String?           -- null exactly when refusal != null
@@ -155,9 +151,6 @@ value FileDiff {
 -- it — a worktree whose every change is under one directory renders that
 -- directory as the single top-level row, and there is nothing above it to
 -- merge into.
---
--- Named only through the derived AgentTreePane.rendered_nodes, AgentTreeNode
--- is reported as definition.unused for the same reason FileDiff is.
 value AgentTreeNode {
     pane_root: String            -- the pane root this node was rendered under
 
@@ -255,6 +248,20 @@ value PaneResumeAnswer {
 ------------------------------------------------------------
 -- Contracts
 ------------------------------------------------------------
+
+-- The two pure functions a pane's renderers draw from: the tree's rows and
+-- the diff pane's diffs. AgentTreePane.rendered_nodes and rendered_diffs call
+-- them; both are recomputed from a fresh git answer on every refresh and
+-- remember nothing between calls. RefreshAgentTree ("How a row is built")
+-- and RefreshAgentTreeDiff ("How a diff is built") say what each builds.
+contract AgentTreeRendering {
+    -- One AgentTreeNode per entry of changed_tree(changes) under root, with
+    -- the files whose path is in open marked as open.
+    rendered_tree: (root: String, changes: List<GitFileChange>, open: List<String>) -> List<AgentTreeNode>
+    -- One FileDiff per path in open that the source touches; commit null is
+    -- the worktree's unstaged work.
+    rendered_file_diffs: (root: String, commit: String?, open: List<String>) -> List<FileDiff>
+}
 
 -- The read a companion pane's renderer makes of the running board, in place of
 -- a store connection of its own, and the one request it makes of it: resume a
@@ -3141,6 +3148,9 @@ surface AgentTreeCompanionPane {
         AgentTreeKeyPressed(pane)
         AgentTreeAgentCursorMoved(pane)
 
+    contracts:
+        fulfils AgentTreeRendering
+
     @guarantee FailuresNeverCloseThePane
         -- A failed read or a refused request never closes a pane: not a task
         -- that never arrives or has no worktree, not a failed git query,
@@ -3878,6 +3888,9 @@ surface AgentTreeDiffPane {
         ScrollAgentTreeDiffHalfPageDown(user, pane)         -- Ctrl-D
         JumpAgentTreeDiffToTop(user, pane)                  -- gg
         JumpAgentTreeDiffToBottom(user, pane)               -- G
+
+    contracts:
+        fulfils AgentTreeRendering
 
     @guarantee AgentTreeDiffPaneSaysWhatItIsWaitingFor
         -- The diff pane's form of AgentTreePaneSaysWhatItIsWaitingFor, and
