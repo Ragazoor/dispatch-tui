@@ -15,7 +15,7 @@
 --           the rules after it); provisioning (dispatch.allium: ProvisionDispatch);
 --           the card and detail rendering (board-visuals.allium: "Schedule
 --           marker"); the MCP argument contracts (mcp-task-tools.allium).
--- Dependencies: Task, Host and local_host() from core.allium;
+-- Dependencies: Task, Host and core/local_host() from core.allium;
 --               DispatchRequest and DispatchRequestOrigin from
 --               store-split.allium; PhoenixRespawn from tasks.allium.
 --
@@ -273,6 +273,9 @@ rule LeavingRunningCancelsThePendingRun {
     when: tasks/TaskStatusWrittenByHand(task, from, to)
 
     requires: from = running and to != running
+    -- A scheduled phoenix task moved into backlog is re-armed instead
+    -- (EnteringBacklogRearmsAPhoenixTask).
+    requires: not (to = backlog and task.phoenix and task.schedule != null)
 
     ensures: task.next_due = null
 
@@ -282,10 +285,12 @@ rule LeavingRunningCancelsThePendingRun {
         -- would leave a passed time behind, and a later move back to backlog
         -- would fire the one-off at once. Any hand write that leaves running
         -- spends it, as a write out of backlog or into done already does. A
-        -- phoenix task moved to backlog is then re-armed from now
-        -- (EnteringBacklogRearmsAPhoenixTask); one moved to review keeps its
-        -- schedule and no due time, as LeavingBacklogCancelsThePendingRun
-        -- leaves it. task.schedule and task.schedule_error are kept.
+        -- scheduled phoenix task moved to backlog is not this rule's: it is
+        -- re-armed from now (EnteringBacklogRearmsAPhoenixTask; the module
+        -- clears and then re-arms in one write,
+        -- spacetime/module/src/schedule.rs::schedule_after_status_write). One
+        -- moved to review keeps its schedule and no due time, as
+        -- LeavingBacklogCancelsThePendingRun leaves it. task.schedule and task.schedule_error are kept.
 }
 
 rule DispatchConsumesTheDueTime {

@@ -92,8 +92,12 @@ entity PrPollState {
 rule PrLearningsGate {
     when: cli/PrLearningsGateCheck(task)
 
+    let first_attempt = task.pr_learnings_gate_shown_at = null
+
+    -- PrCreateBlocked and PrCreateAllowed are the hook's verdict:
+    -- observable output; no rule listens.
     ensures:
-        if task.pr_learnings_gate_shown_at = null:
+        if first_attempt:
             task.pr_learnings_gate_shown_at = now
             PrCreateBlocked(task: task)
         else:
@@ -378,6 +382,7 @@ rule PrPollGaveUp {
 
     -- The module writes sub_status = pr_unreachable (ReportPrUnreadable).
     ensures: PrUnreadableReported(task: task, host: core/local_host(), reason: reason)
+    -- Observable output; no rule listens.
     ensures: UserInformed(about: pr_unreachable, task: task)
 
     @guidance
@@ -419,7 +424,8 @@ rule PrMerged {
     requires: task.status in { review, done }
 
     -- The window the task had before the report: the module cleared it from
-    -- the task, and only this host can kill it.
+    -- the task, and only this host can kill it. TmuxWindowKilled and
+    -- DesktopNotification are observable output; no rule listens.
     ensures:
         if window != null:
             TmuxWindowKilled(window: window)
@@ -458,6 +464,7 @@ rule PrClosed {
     -- left alone.
     requires: task.status in { review }
 
+    -- Observable output; no rule listens.
     ensures:
         if notifications_enabled:
             DesktopNotification(task: task, urgency: normal, about: pr_closed)
@@ -498,10 +505,14 @@ rule ReportPrStatus {
     -- store-split D11: only the host's own owner may speak for it.
     requires: host.owner != null and host.owner = caller()
 
+    -- The task as the report finds it, before this write.
+    let in_review_with_pr = task.status = review and task.url.url_type = pr
+    let prior_sub_status = task.sub_status
+
     ensures:
         -- A report for a task that is gone or no longer in review changes
         -- nothing and is accepted: the host's read raced a close.
-        if task.status = review and task.url.url_type = pr:
+        if in_review_with_pr:
             if upper(state) = "MERGED":
                 task.status = done
                 task.sub_status = default_sub_status(done)
@@ -511,15 +522,15 @@ rule ReportPrStatus {
                 -- the epic rollup and the phoenix successor follow, as for
                 -- any route into done
             else if upper(state) = "CLOSED":
-                if task.sub_status != core/SubStatus.pr_closed:
+                if prior_sub_status != core/SubStatus.pr_closed:
                     task.sub_status = core/SubStatus.pr_closed
                     task.updated_at = now
-            else if task.sub_status != core/SubStatus.conflict:
+            else if prior_sub_status != core/SubStatus.conflict:
                 let new_sub =
                     if upper(review_decision) = "APPROVED": core/SubStatus.approved
                     else if upper(review_decision) = "CHANGES_REQUESTED": core/SubStatus.changes_requested
                     else: core/SubStatus.awaiting_review
-                if task.sub_status != new_sub:
+                if prior_sub_status != new_sub:
                     task.sub_status = new_sub
                     task.updated_at = now
 
@@ -549,9 +560,12 @@ rule ReportPrUnreadable {
 
     requires: host.owner != null and host.owner = caller()
 
+    -- The task as the report finds it, before this write.
+    let in_review_with_pr = task.status = review and task.url.url_type = pr
+    let already_unreachable = task.sub_status = core/SubStatus.pr_unreachable
+
     ensures:
-        if task.status = review and task.url.url_type = pr
-           and task.sub_status != core/SubStatus.pr_unreachable:
+        if in_review_with_pr and not already_unreachable:
             task.sub_status = core/SubStatus.pr_unreachable
             task.updated_at = now
 
@@ -699,8 +713,7 @@ rule WrapUpRebase {
         -- terminal write belongs to ExitSession. The token the agent receives
         -- is the request row's id once the module records it done
         -- (store-split.allium, W3); the MCP tool waits for that
-        -- (mcp-task-tools.allium: WrapUpViaMcp). Do not re-add an
-        -- unconditional updated_at assertion: when the task was not in
+        -- (mcp-task-tools.allium: WrapUpViaMcp). When the task was not in
         -- conflict, nothing about the task changes.
         --
         -- WrapUpRebase is the rebase mechanic only — it does NOT change
@@ -877,8 +890,7 @@ rule WrapUpDone {
         -- RequestWrapUp, W2, W3), and the tool returns prose, so there is
         -- nothing observable to assert about the task here — in particular no
         -- updated_at. The whole terminal write (status,
-        -- sub_status, cleared tmux_window, updated_at) is ExitSession's. Do not
-        -- re-add an updated_at assertion.
+        -- sub_status, cleared tmux_window, updated_at) is ExitSession's.
         --
         -- Closes a task without any git operations (no rebase, no push, no
         -- PR creation). Useful for tasks whose work requires no branch
@@ -1091,7 +1103,7 @@ rule ExitSession {
         -- fixed: making the close a fifth clear point needs a decision about
         -- whether it drains (it assigns its own terminal status, so by the
         -- "the rule that owns the resulting status wins" split it should
-        -- not), and nothing observable depends on it today.
+        -- not), and nothing observable depends on it.
         --
         -- Boards learn of the close through their subscriptions; there is no
         -- separate task/epic-changed notification to send.
@@ -1189,7 +1201,8 @@ rule KillWindowOfFailedExitSession {
     requires: request.tmux_window != null
 
     -- The window the row names is killed, best effort; tmux_window is the
-    -- window's name, not an entity, so the kill is an outcome, not a removal.
+    -- window's name, not an entity, so the kill is an outcome, not a removal:
+    -- observable output; no rule listens.
     ensures: TmuxWindowKilled(window: request.tmux_window)
 
     @guidance
@@ -1233,11 +1246,10 @@ rule FinishTaskConflict {
     -- still running or review (store-split.allium:
     -- HostReportsSessionRequestFailed). The board writes no sub_status.
 
-    ensures: task.sub_status = core/SubStatus.conflict
     -- No host sends a status line or notification for it. The user learns
     -- of it from the card's conflict section (core.allium, "Column Section
     -- Layout") and from the reason the session_wrap-up call returns to the agent.
-    ensures: UserInformed(about: rebase_conflict, task: task)
+    ensures: task.sub_status = core/SubStatus.conflict
 
     @guidance
         -- Conflict has the highest column-section priority (0, above
