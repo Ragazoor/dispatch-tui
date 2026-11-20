@@ -34,7 +34,7 @@ Mark a finding as a **decision item** when the agent that implements it cannot c
 
 ## Step 3: Confirm the Work Packages
 
-Nothing is created until the user confirms. Show a numbered list — each package's name, finding count by severity, decision item count, files and a one-line summary — and ask with `AskUserQuestion` whether to confirm all, drop or merge some. Apply what they ask for.
+Nothing is created until the user confirms. Show a numbered list — each package's name, finding count by severity, decision item count, files and a one-line summary — and ask with `AskUserQuestion` whether to confirm all, drop or merge some. Apply what they ask for.  If they drop every package, tell them there is nothing to create and stop: create no epic.
 
 Every finding goes into a package by default. Under the list, add a "Not included" section that names each finding left out of every package, with the reason (for example, the review marks it as no change needed, or it duplicates another finding). Write "Not included: none" when nothing is left out, so the user can see that nothing was dropped.
 

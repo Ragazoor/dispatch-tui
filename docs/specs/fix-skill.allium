@@ -208,7 +208,7 @@ rule ConfirmWithUser {
 }
 
 rule ApplyEditAndAskAgain {
-    when: UserChoseEdit(request, title, description)
+    when: UserChoseEdit(request, title?, description?)
 
     requires: request.stage = confirming
 

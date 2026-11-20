@@ -9,7 +9,7 @@
 -- Includes: Decomposition (one per invocation) and its pipeline — extract
 --           the findings, group them into work packages, confirm, resolve the
 --           repo path, create the epic, write each plan and create its
---           subtask, report; Finding, WorkPackage and the decision item; the
+--           subtask, report; Finding, ReviewPackage and the decision item; the
 --           confirmation that gates every write; the plan directory rule;
 --           the fields every subtask is created with.
 -- Excludes: when a review produces findings (preference-review.allium and
@@ -48,7 +48,7 @@ use "./core.allium" as core
 enum FindingSeverity { blocker | high | medium | low }
 
 ------------------------------------------------------------
--- Entities
+-- Entities and Variants
 ------------------------------------------------------------
 
 -- One run of the skill against one review report.
@@ -57,8 +57,10 @@ entity Decomposition {
     date: String
     -- The main repo root, never a worktree path; absent until resolved.
     repo_path: String?
+    -- The code review in the conversation, whose findings the run extracts.
+    report: String
     -- Absent until the epic is created.
-    epic_id: Integer?
+    epic_id: core/Epic?
     -- The directory every plan of this run is written into; absent until
     -- the plan step picks it.
     plan_directory: String?
@@ -66,7 +68,7 @@ entity Decomposition {
     confirmed: Boolean
 
     findings: Finding with run = this
-    packages: WorkPackage with run = this
+    packages: ReviewPackage with run = this
 
     stage: extracting | grouping | confirming | resolving | creating | reporting | done
 
@@ -75,6 +77,7 @@ entity Decomposition {
         extracting -> done
         grouping -> confirming
         confirming -> resolving
+        confirming -> done
         resolving -> creating
         creating -> reporting
         reporting -> done
@@ -103,13 +106,13 @@ entity Finding {
     -- offers more than one fix, the fix changes behaviour or a spec, or it
     -- removes something the user may want to keep.
     decision_item: Boolean
-    package: WorkPackage?
+    package: ReviewPackage?
     -- Set when the finding is in no package; shown in the Not included list.
     left_out_reason: String?
 }
 
 -- One group of findings that becomes one subtask.
-entity WorkPackage {
+entity ReviewPackage {
     run: Decomposition
     -- Named for its primary directory or module; "Cleanups" for the Low-only
     -- groups.
@@ -122,7 +125,7 @@ entity WorkPackage {
     -- Absolute path; absent until the plan is written.
     plan_path: String?
     -- Absent until the subtask is created.
-    task_id: Integer?
+    task_id: core/Task?
 
     status: proposed | confirmed | dropped | created
 
@@ -133,7 +136,7 @@ entity WorkPackage {
         terminal: dropped, created
     }
 
-    max_severity: findings.max(f => f.severity)
+    max_severity: worst_severity(findings)
     decision_items: findings where decision_item
     has_decision_items: decision_items.count > 0
     -- Confirmed, and the run has its epic: the plan and subtask may be made.
@@ -152,7 +155,9 @@ config {
     plan_directory_pattern: String = "docs/plans/review-<YYYY-MM-DD>"
     plan_file_pattern: String = "wp-<N>-<slug>.md"
     plan_template: String = "references/plan-template.md"
+    -- A core/TaskTag value; a config default cannot carry a qualified type.
     task_tag: String = "chore"
+    -- A core/WrapUpMode value.
     task_wrap_up_mode: String = "rebase"
     task_auto_run_plan: Boolean = true
 }
@@ -167,10 +172,12 @@ rule StartDecomposition {
     when: DecompositionRequested(report)
 
     ensures: Decomposition.created(
+        report: report,
         date: today(),
         confirmed: false,
         stage: extracting
     )
+    -- observable output; no rule listens
     ensures: DecompositionAnnounced()
 
     @guidance
@@ -185,7 +192,7 @@ rule ExtractFindings {
 
     requires: run.stage = extracting
 
-    for item in report_findings(run):
+    for item in report_findings(run.report):
         ensures: Finding.created(
             run: run,
             severity: item.severity,
@@ -206,8 +213,9 @@ rule NothingToDecompose {
     when: run: Decomposition.created
 
     requires: run.stage = extracting
-    requires: report_findings(run).count = 0
+    requires: report_findings(run.report).count = 0
 
+    -- observable output; no rule listens
     ensures: NothingToDecomposeReported()
     ensures: run.stage = done
 
@@ -220,7 +228,7 @@ rule FindingsExtracted {
     when: run: Decomposition.created
 
     requires: run.stage = extracting
-    requires: report_findings(run).count > 0
+    requires: report_findings(run.report).count > 0
 
     ensures: run.stage = grouping
 }
@@ -230,8 +238,12 @@ rule FindingsExtracted {
 rule GroupFindings {
     when: run: Decomposition.stage transitions_to grouping
 
-    for group in groups_by_directory(run.findings, config.group_prefix_components):
-        ensures: WorkPackage.created(
+    for group in groups_by_directory(
+            run.findings,
+            config.group_prefix_components,
+            config.cleanups_name
+        ):
+        ensures: ReviewPackage.created(
             run: run,
             name: group.name,
             is_cleanups: group.is_low_only,
@@ -283,6 +295,7 @@ rule ConfirmPackages {
     when: UserConfirmedPackages(run)
 
     requires: run.stage = confirming
+    requires: (run.packages where status = proposed).count > 0
 
     for package in run.packages where status = proposed:
         ensures: package.status = confirmed
@@ -300,6 +313,22 @@ rule ConfirmPackages {
         -- (ConfirmationNamesLeftOutFindings).
 }
 
+rule NothingLeftToCreate {
+    when: UserConfirmedPackages(run)
+
+    requires: run.stage = confirming
+    requires: (run.packages where status = proposed).count = 0
+
+    -- observable output; no rule listens
+    ensures: NothingToCreateReported()
+    ensures: run.stage = done
+
+    @guidance
+        -- The user dropped every package, so there is nothing to confirm:
+        -- the skill tells the user there is nothing to create and stops. No
+        -- epic, plan or subtask is made (NothingCreatedBeforeConfirmation).
+}
+
 rule DropPackage {
     when: UserDroppedPackage(package)
 
@@ -307,8 +336,9 @@ rule DropPackage {
     requires: package.status = proposed
 
     ensures: package.status = dropped
-    ensures: package.findings.each(f => f.package = null)
-    ensures: package.findings.each(f => f.left_out_reason = "dropped by the user")
+    for f in package.findings:
+        ensures: f.package = null
+        ensures: f.left_out_reason = "dropped by the user"
 
     @guidance
         -- The user asked for the drop, so it is not silent; the skill applies
@@ -337,9 +367,10 @@ rule CreateEpic {
     when: run: Decomposition.stage transitions_to creating
 
     requires: run.confirmed
+    requires: run.pending_packages.count > 0
 
     ensures: run.epic_id = created_epic(
-        title: "Code Review: " + run.date,
+        title: titled(config.epic_title_pattern, run.date),
         description: executive_summary(run)
     )
 
@@ -371,7 +402,7 @@ rule ChoosePlanDirectory {
 }
 
 rule WritePlanAndCreateTask {
-    when: package: WorkPackage.ready_to_create
+    when: package: ReviewPackage.ready_to_create
 
     requires: package.status = confirmed
 
@@ -380,7 +411,11 @@ rule WritePlanAndCreateTask {
         file_pattern: config.plan_file_pattern,
         template: config.plan_template,
         findings: package.findings,
-        decisions: package.decision_items
+        decisions:
+            if package.has_decision_items:
+                package.decision_items
+            else:
+                null
     )
     ensures: package.task_id = created_task(
         title: package.name,
@@ -424,11 +459,15 @@ rule CreationDone {
 rule ReportResults {
     when: run: Decomposition.stage transitions_to reporting
 
+    -- observable output; no rule listens
     ensures: ResultsReported(
         epic_id: run.epic_id,
         tasks: run.packages where status = created,
         plan_directory: run.plan_directory
     )
+    for package in run.packages where status = created:
+        -- observable output; no rule listens
+        ensures: TaskReported(task_id: package.task_id, severity: package.max_severity)
     ensures: run.stage = done
 
     @guidance
@@ -448,7 +487,7 @@ invariant NothingCreatedBeforeConfirmation {
 
 -- A created package has its plan and its task.
 invariant EveryCreatedPackageHasAPlanAndATask {
-    for package in WorkPackages:
+    for package in ReviewPackages:
         package.status = created implies (package.plan_path != null and package.task_id != null)
 }
 

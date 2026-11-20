@@ -32,9 +32,9 @@
 -- Design decisions:
 --   - Fresh agent per run, never a fork. Each iteration has no memory of
 --     the last: only the repo's own state (git history, a clean tree)
---     carries over, so every iteration commits its work before it ends, unless the tree is
---     genuinely clean and there was nothing to commit. A fork would
---     also ignore the model pin and run on the session model.
+--     carries over, so every iteration commits its work before it ends,
+--     unless the tree is genuinely clean and there was nothing to commit.
+--     A fork would also ignore the model pin and run on the session model.
 --   - The driver never does the cycle's work itself. It dispatches, reads
 --     the report and decides whether to continue.
 --   - The loop is stack-agnostic: it never assumes a test runner. The
@@ -55,6 +55,24 @@
 use "./core.allium" as core
 
 ------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- What an iteration ends with: exactly the two-line CONVERGED / SUMMARY
+-- block, which the driver parses literally.
+value IterationReport {
+    -- Absent when the label is missing.
+    converged: Boolean?
+    -- Absent when the label is missing.
+    summary: String?
+    -- The agent's own claim that nothing changed this run.
+    reports_no_change: Boolean
+
+    -- A report missing either label is an error, not a result.
+    is_parseable: converged != null and summary != null
+}
+
+------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
@@ -62,7 +80,7 @@ use "./core.allium" as core
 enum StopReason { budget_spent | no_progress | failed_twice | abandoned }
 
 ------------------------------------------------------------
--- Entities
+-- The loop and its iterations
 ------------------------------------------------------------
 
 -- One invocation of the skill. Its persisted form is the state file
@@ -80,7 +98,7 @@ entity AlliumLoop {
     max_iterations: Integer
     -- The model each iteration agent runs on.
     model: String
-    started_at: String
+    started_at: Timestamp
     -- Iterations that returned a real report.
     runs_completed: Integer
     -- 1 after one errored or unparseable report, so the same iteration is
@@ -108,6 +126,7 @@ entity AlliumLoop {
     next_iteration_number: runs_completed + 1
     budget_spent: runs_completed >= max_iterations
     stalled: consecutive_no_change_runs >= config.no_change_limit
+    -- The state file exists exactly while the loop is active.
     state_file_exists: stage in {kickoff, running}
 }
 
@@ -130,20 +149,6 @@ entity Iteration {
         dispatched -> errored
         terminal: reported, errored
     }
-}
-
--- What an iteration ends with: exactly the two-line CONVERGED / SUMMARY
--- block, which the driver parses literally.
-value IterationReport {
-    -- Absent when the label is missing.
-    converged: Boolean?
-    -- Absent when the label is missing.
-    summary: String?
-    -- The agent's own claim that nothing changed this run.
-    reports_no_change: Boolean
-
-    -- A report missing either label is an error, not a result.
-    is_parseable: converged != null and summary != null
 }
 
 ------------------------------------------------------------
@@ -171,9 +176,11 @@ config {
 rule ActiveLoopIsNeverOverwritten {
     when: AlliumLoopRequested(request)
 
-    requires: active_state_file_exists()
+    requires: exists AlliumLoop{state_file_exists: true}
 
+    -- observable output; no rule listens
     ensures: ExistingLoopReported(progress: existing_loop_progress())
+    -- observable output; no rule listens
     ensures: ResumeOrAbandonOrCancelAsked()
 
     @guidance
@@ -189,7 +196,7 @@ rule ResumeLoop {
 
     requires: loop.stage = running
 
-    ensures: DispatchRequested(loop)
+    ensures: IterationDispatchRequested(loop)
 
     @guidance
         -- Resume dispatches the next iteration from the existing file's
@@ -204,20 +211,20 @@ rule AbandonLoop {
 
     ensures: loop.stage = stopped
     ensures: loop.stop_reason = abandoned
-    ensures: state_file_deleted()
     ensures: AlliumLoopRequested(request: request_of(loop))
 
     @guidance
-        -- Abandon deletes the state file and continues with a fresh
-        -- kickoff.
+        -- Abandon deletes the state file (it exists only while the loop is
+        -- active) and continues with a fresh kickoff.
 }
 
 rule CancelLoopRequest {
-    when: UserChoseCancel(loop)
+    when: UserChoseCancelLoop(loop)
 
     requires: loop.stage = running
 
-    ensures: NothingFurtherDone()
+    -- observable output; no rule listens
+    ensures: ActiveLoopLeftAsIs(loop)
 
     @guidance
         -- Cancel stops here and leaves the active loop as it was.
@@ -226,7 +233,7 @@ rule CancelLoopRequest {
 rule StartLoop {
     when: AlliumLoopRequested(request)
 
-    requires: not active_state_file_exists()
+    requires: not exists AlliumLoop{state_file_exists: true}
 
     ensures: AlliumLoop.created(
         design_doc: resolved_design_doc(request),
@@ -240,6 +247,10 @@ rule StartLoop {
         consecutive_no_change_runs: 0,
         stage: kickoff
     )
+    -- observable output; no rule listens
+    ensures: PromptFileRead(path: config.prompt_file)
+    -- observable output; no rule listens
+    ensures: StateFileWritten(path: config.state_file)
 
     @guidance
         -- Each input is resolved in priority order, and asked for when
@@ -280,13 +291,13 @@ rule LoopBegins {
     requires: loop.stage = kickoff
 
     ensures: loop.stage = running
-    ensures: DispatchRequested(loop)
+    ensures: IterationDispatchRequested(loop)
 }
 
 -- == Dispatching an iteration ==
 
 rule DispatchIteration {
-    when: DispatchRequested(loop)
+    when: IterationDispatchRequested(loop)
 
     requires: loop.stage = running
 
@@ -316,6 +327,7 @@ rule DispatchIteration {
 rule IterationRebases {
     when: iteration: Iteration.created
 
+    -- observable output; no rule listens
     ensures: RebasedOnto(branch: iteration.loop.base_branch)
 
     @guidance
@@ -356,7 +368,8 @@ rule LaterIterationsTendOnlyOnSpecError {
 rule SpecJudgementKeepsItsOwnModel {
     when: SpecTended(source) or WeedRun(iteration)
 
-    ensures: not model_override_passed()
+    -- observable output; no rule listens
+    ensures: SpecJudgementRun(model_override: null)
 
     @guidance
         -- allium:tend and allium:weed pin a strong model in their own
@@ -370,8 +383,10 @@ rule OpenQuestionsStopTheIteration {
 
     requires: touched_spec_has_open_question(iteration)
 
+    -- observable output; no rule listens
     ensures: UserAsked(topic: open_question)
-    ensures: resolution_written_into_spec_and_committed(iteration)
+    -- observable output; no rule listens
+    ensures: OpenQuestionResolutionCommitted(iteration)
 
     @guidance
         -- The open questions section of each spec touched this run (found
@@ -380,9 +395,11 @@ rule OpenQuestionsStopTheIteration {
         -- the user; the answer is written into the spec and committed
         -- before the run ends, since the next agent is fresh
         -- (OpenQuestionsAreAskedAndWrittenDown). Resolving one and
-        -- committing is itself a complete run: the run goes straight to the
-        -- commit and the report, skipping propagate, red check, implement,
-        -- verify and weed, and counts as a change.
+        -- committing is itself a complete run: the run may end there, going
+        -- straight to the commit and the report, skipping propagate, red
+        -- check, implement, verify and weed, and counts as a change. The
+        -- prompt also lets it continue into the next step; either is
+        -- acceptable.
 }
 
 rule IterationPropagatesTests {
@@ -401,7 +418,8 @@ rule IterationPropagatesTests {
 rule NewTestsMustFailFirst {
     when: TestsPropagated()
 
-    ensures: new_tests_failed_before_implementing()
+    -- observable output; no rule listens
+    ensures: RedCheckRun(failed_before_implementing: true)
 
     @guidance
         -- The new tests are run, by the verify command or a narrower
@@ -415,7 +433,8 @@ rule IterationImplements {
 
     requires: not ended_after_open_question_resolution(iteration)
 
-    ensures: minimum_code_written(
+    -- observable output; no rule listens
+    ensures: CodeWritten(
         satisfying: [spec, failing_tests],
         edits_generated_tests: false
     )
@@ -431,8 +450,10 @@ rule VerifyFixesCodeNotTests {
 
     requires: not ended_after_open_question_resolution(iteration)
 
-    ensures: verify_command_run(iteration.loop.verify_command)
-    ensures: failures_fixed_in_code_not_tests()
+    -- observable output; no rule listens
+    ensures: VerifyRun(command: iteration.loop.verify_command)
+    -- observable output; no rule listens
+    ensures: FailuresFixed(in: code, edits_tests: false)
 
     @guidance
         -- A test that genuinely contradicts correct code means the spec is
@@ -446,7 +467,8 @@ rule IterationWeeds {
     requires: not ended_after_open_question_resolution(iteration)
 
     ensures: WeedRun(iteration)
-    ensures: divergence_reconciled()
+    -- observable output; no rule listens
+    ensures: DivergenceReconciled(iteration)
 
     @guidance
         -- allium:weed in check mode compares all of docs/specs/ with the
@@ -460,21 +482,21 @@ rule IterationCommits {
 
     requires: has_uncommitted_changes()
 
-    ensures: committed(
-        message: if verify_passes(iteration):
-                     "<what changed>, e.g. feat(specs): ..."
-                 else:
-                     config.wip_commit_prefix + " iteration " + iteration.number
-                         + ", verify failing — <what is broken and why>"
+    -- observable output; no rule listens
+    ensures: CommitMade(
+        wip: not verify_passes(iteration),
+        excluding: config.state_file
     )
-    ensures: not state_file_committed()
 
     @guidance
         -- Every iteration commits its work before it ends (a genuinely clean
         -- tree needs no commit), so the next fresh agent
         -- sees its progress in git and starts its rebase from a clean tree.
         -- A failing verify still commits, with the wip prefix, and the
-        -- report says so plainly; the next iteration fixes it first.
+        -- report says so plainly; the next iteration fixes it first. The
+        -- message is "<what changed>, e.g. feat(specs): ..." when verify
+        -- passes, else config.wip_commit_prefix + " iteration <number>,
+        -- verify failing — <what is broken and why>".
         -- The loop's own state file is never staged
         -- (EveryIterationEndsWithACommit, StateFileIsNeverCommitted).
 }
@@ -482,6 +504,7 @@ rule IterationCommits {
 rule IterationReports {
     when: iteration: Iteration.created
 
+    -- observable output; no rule listens
     ensures: ReportEmitted(iteration)
 
     @guidance
@@ -541,7 +564,7 @@ rule IterationFailed {
     requires: loop.retry_count < config.max_retries
 
     ensures: loop.retry_count = loop.retry_count + 1
-    ensures: DispatchRequested(loop)
+    ensures: IterationDispatchRequested(loop)
 
     @guidance
         -- The agent errored, was skipped, or returned an unparseable
@@ -559,7 +582,7 @@ rule IterationFailedTwice {
 
     ensures: loop.stage = stopped
     ensures: loop.stop_reason = failed_twice
-    ensures: state_file_deleted()
+    -- observable output; no rule listens
     ensures: UserToldFailedTwice()
 
     @guidance
@@ -575,7 +598,7 @@ rule LoopConverged {
 
     ensures: loop.stage = converged
     ensures: loop.final_summary = report.summary
-    ensures: state_file_deleted()
+    -- observable output; no rule listens
     ensures: UserToldConverged(summary: report.summary)
 
     @guidance
@@ -593,7 +616,7 @@ rule LoopStopsUnconverged {
     ensures: loop.stage = stopped
     ensures: loop.stop_reason =
         if loop.budget_spent: budget_spent else: no_progress
-    ensures: state_file_deleted()
+    -- observable output; no rule listens
     ensures: UserToldWhatIsUnresolved()
 
     @guidance
@@ -611,7 +634,7 @@ rule LoopContinues {
     requires: not loop.budget_spent
     requires: not loop.stalled
 
-    ensures: DispatchRequested(loop)
+    ensures: IterationDispatchRequested(loop)
 
     @guidance
         -- The next iteration number advances by itself: runs_completed was
@@ -624,8 +647,9 @@ rule LoopContinues {
 
 -- Iterations are fresh agents on the pinned model, never forks.
 invariant IterationsAreFreshAgentsOnThePinnedModel {
-    for iteration in Iterations:
-        not iteration.is_fork and iteration.model = iteration.loop.model
+    for loop in AlliumLoops:
+        for iteration in loop.iterations:
+            not iteration.is_fork and iteration.model = loop.model
 }
 
 -- A converged loop kept the SUMMARY of the report that converged it.
@@ -652,7 +676,7 @@ surface AlliumLoopInvocation {
         AlliumLoopRequested(request)
         UserChoseResume(loop)
         UserChoseAbandon(loop)
-        UserChoseCancel(loop)
+        UserChoseCancelLoop(loop)
 
     @guidance
         -- The user invokes the skill as /allium-loop, or asks to run the

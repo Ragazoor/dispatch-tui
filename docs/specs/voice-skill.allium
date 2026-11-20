@@ -72,6 +72,8 @@ entity ProposedChange {
     approved: Boolean
     -- For a rule: how many messages showed the same change.
     repeats: Integer
+    -- The change has been written into the folder.
+    written: Boolean
 }
 
 ------------------------------------------------------------
@@ -96,11 +98,12 @@ rule StartVoiceDraft {
 
     ensures: VoiceDraft.created(
         request: request,
-        context_dir: resolve_context_dir(),
+        context_dir: resolve_context_dir(config.default_context_dir),
         draft: null,
         final_text: null,
         stage: loading
     )
+    -- observable output; no rule listens
     ensures: VoiceAnnounced(request: request)
 
     @guidance
@@ -114,17 +117,26 @@ rule StartVoiceDraft {
 }
 
 rule LoadVoiceContext {
-    when: draft: VoiceDraft.stage transitions_to loading
+    when: draft: VoiceDraft.created
+
+    requires: draft.stage = loading
 
     ensures:
         if draft.has_voice:
-            VoiceContextLoaded(files: [rules_file(draft), sample_files(draft)])
+            -- observable output; no rule listens
+            VoiceContextLoaded(files: [
+                rules_file(draft),
+                sample_files(draft),
+                observations_file(draft)
+            ])
         else:
+            -- observable output; no rule listens
             NoVoiceReported()
     ensures: draft.stage = drafting
 
     @guidance
-        -- rules.md is read first, then every file in samples/. The skill
+        -- rules.md is read first, then every file in samples/, then
+        -- observations.md when it exists. The skill
         -- tells the operator which files it loaded, by resolved path, in a
         -- message of its own before the draft (RulesBeforeSamples). With no
         -- folder it says so in one line and drafts without a voice
@@ -137,10 +149,14 @@ rule ShowDraft {
     when: draft: VoiceDraft.stage transitions_to drafting
 
     ensures: draft.draft = written_in_voice(draft)
+    -- observable output; no rule listens
     ensures: DraftShown(text: draft.draft)
     ensures: draft.stage = awaiting_final
 
     @guidance
+        -- What the message is about comes from the request or the
+        -- conversation; when that is not enough, the skill asks one
+        -- question first.
         -- The draft is shown in the chat and nowhere else. The skill never
         -- posts it to Slack, or sends or schedules it, unless the operator
         -- asks in this session (DraftStaysInChat).
@@ -172,7 +188,8 @@ rule ProposeChanges {
         path: new_sample_path(draft),
         lines: draft.final_text,
         approved: false,
-        repeats: 0
+        repeats: 0,
+        written: false
     )
     ensures: ProposedChange.created(
         draft_of: draft,
@@ -180,7 +197,8 @@ rule ProposeChanges {
         path: observations_path(draft),
         lines: new_observation_section(draft),
         approved: false,
-        repeats: 0
+        repeats: 0,
+        written: false
     )
     ensures:
         for change in repeated:
@@ -190,7 +208,8 @@ rule ProposeChanges {
                 path: rules_path(draft),
                 lines: rule_edit(change),
                 approved: false,
-                repeats: change.repeats
+                repeats: change.repeats,
+                written: false
             )
 
     @guidance
@@ -211,6 +230,8 @@ rule OperatorApproved {
     requires: change.draft_of.stage = learning
 
     ensures: change.approved = true
+    ensures: change.written = true
+    -- observable output; no rule listens
     ensures: ContextFileWritten(path: change.path, lines: change.lines)
 }
 
@@ -229,7 +250,7 @@ rule LearningDone {
 -- A change reaches the folder only after the operator approved it.
 invariant NothingIsWrittenUnapproved {
     for change in ProposedChanges:
-        ContextFileWritten(path: change.path, lines: change.lines) implies change.approved
+        change.written implies change.approved
 }
 
 -- A rule changes only for a pattern seen at least twice.
@@ -275,8 +296,9 @@ surface VoiceSession {
         -- (StartVoiceDraft).
 
     @guarantee RulesBeforeSamples
-        -- rules.md is read first, then all of samples/. The operator is told
-        -- which files loaded before the draft appears (LoadVoiceContext).
+        -- rules.md is read first, then all of samples/, then observations.md
+        -- when it exists. The operator is told which files loaded before the
+        -- draft appears (LoadVoiceContext).
 
     @guarantee MissingFolderStillDrafts
         -- With no folder the skill drafts without a voice, says so in one
