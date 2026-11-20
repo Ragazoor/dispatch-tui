@@ -768,7 +768,7 @@ async fn undelivered_message_to_an_unknown_name_adds_nothing() {
 // 3. Structural: no hook path opens the database
 // ---------------------------------------------------------------------------
 
-/// The cheap half of `HookNeverOpensTheDatabase`
+/// The cheap half of `HookNeverOpensTheStore`
 /// (`docs/specs/agent-health.allium`): the hook implementations live in one
 /// subtree, and nothing in it may name the database. Catches the literal
 /// reintroduction at the point of writing it, which is worth having — but it
@@ -920,7 +920,7 @@ fn the_invocation_table_covers_every_installed_entry_point() {
 }
 
 /// The behavioural half, and the one that actually holds
-/// `HookNeverOpensTheDatabase`: run every installed hook entry point as a real
+/// `HookNeverOpensTheStore`: run every installed hook entry point as a real
 /// process, pointed at a database path that does not exist and a port nothing
 /// is listening on. None may bring a database into being.
 ///

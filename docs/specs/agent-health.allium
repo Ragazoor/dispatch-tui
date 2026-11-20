@@ -182,9 +182,8 @@ rule DetectCrashedAgent {
         -- task Crashed-and-in-Review. Crashed is the more informative
         -- state and wins. stop_pending is still cleared, so the bit cannot
         -- survive into the next session and fire a spurious flip later.
-        -- A deferred Stop is applied only inside the write that drains the
-        -- count to zero (see HookSubagentStop), and this clear is the
-        -- non-draining kind, which never assigns status. So there is no
+        -- A deferred Stop is applied only by a StopApplied write
+        -- (FlipTaskToReview), and this clear raises none. So there is no
         -- separate step that could observe a crashed task carrying the bit
         -- and flip it.
         -- The crash pauses the agent, it does not end it (agents.allium, A7):
@@ -230,7 +229,11 @@ rule ForgetWindowOfStoppedAgent {
 -- status, or the turn that deferred the Stop is over. split-pane.allium's
 -- DetachTmux raises it together with StopApplied when a Stop is pending, so
 -- a detach applies the Stop rather than voiding it. With no current agent
--- there is nothing to clear (A15).
+-- there is nothing to clear (A15). The non-draining clear, the one
+-- DetectCrashedAgent and ClearSubagentsOnSessionStart raise, is the write
+-- the section header below guards: only the owner of the task's host makes
+-- it, and the crash path is that board by being locally owned. DetachTmux's
+-- draining clear does not carry that check.
 rule VoidSubagentsAndPendingStop {
     when: SubagentsVoided(task)
     let agent = current_agent(task)
@@ -280,6 +283,8 @@ rule FlipTaskToReview {
 }
 
 -- == Notifications ==
+-- DesktopNotification, raised here, by DetectCrashedAgent and in other
+-- specs, is observable output; no rule listens.
 
 rule NotifyNeedsInput {
     when: task: core/Task.sub_status transitions_to needs_input
@@ -362,12 +367,23 @@ rule ToggleNotifications {
 -- session lifecycle to task status. These rules describe the CLI hook
 -- script `dispatch tui`'s startup configuration check installs (see
 -- startup.allium).
+--
+-- An agent's hooks reach the store through its own host's board, so every
+-- hook write requires that the caller owns the task's host
+-- (`task.host = null or task.host.owner = caller()`): another viewer can
+-- neither move a person's task between running and review, nor raise or
+-- clear its needs_input, nor count, drain or void its subagents and deferred
+-- Stop. A task no host holds has no agent to protect and is answered by any
+-- board, as the board's own is_locally_owned reads it. The store refuses a
+-- foreign caller's write (spacetime/module/src/agent_state.rs::require_acting_for_task_host);
+-- the hook reports the refusal as RejectedEventIsDroppedToo says.
 
 rule HookPreToolUse {
     when: PreToolUse(task) or PostToolUse(task)
     let agent = current_agent(task)
 
     requires: task.status = running
+    requires: task.host = null or task.host.owner = caller()
 
     ensures: task.sub_status = default_sub_status(running)
     ensures:
@@ -431,9 +447,8 @@ rule HookStop {
     let agent = current_agent(task)
 
     requires: task.status = running
-    -- An agent's hooks reach the store through its own host's board: only the
-    -- owner of the task's host may record its Stop. A task no host holds is
-    -- answered by any board.
+    -- Only the owner of the task's host may record its Stop (see the section
+    -- header above).
     requires: task.host = null or task.host.owner = caller()
 
     ensures:
@@ -539,7 +554,7 @@ rule HookStop {
 -- operator something in plain text while such work runs.
 rule ExpireBackgroundWait {
     when: core/Tick()
-    for task in core/Tasks where status = running and is_locally_owned:
+    for task in core/Tasks where status = running and is_locally_owned and (host = null or host.owner = caller()):
         let agent = current_agent(task)
         ensures:
             if exists agent
@@ -562,7 +577,7 @@ rule ExpireBackgroundWait {
         -- that runs tools is plainly not waiting.
         --
         -- The store decides and applies the move in one conditional write
-        -- (spacetime/module/src/agent_state.rs), the same flip HookStop's
+        -- (spacetime/module/src/agent_state.rs::expire_background_wait), the same flip HookStop's
         -- write makes, re-checking every condition above against committed
         -- state. A tick that read the task and then patched its status
         -- would race the wake-up prompt: the prompt could void the Stop in
@@ -605,6 +620,7 @@ rule HookSubagentStart {
     let agent = current_agent(task)
 
     requires: exists agent
+    requires: task.host = null or task.host.owner = caller()
 
     ensures:
         let existing = core/SubagentEntry{agent, agent_id}
@@ -629,6 +645,7 @@ rule HookSubagentStop {
     let agent = current_agent(task)
 
     requires: exists agent
+    requires: task.host = null or task.host.owner = caller()
 
     ensures:
         not exists core/SubagentEntry{agent, agent_id}
@@ -735,6 +752,7 @@ rule SubagentSessionFence {
     let agent = current_agent(task)
 
     requires: exists agent
+    requires: task.host = null or task.host.owner = caller()
 
     ensures:
         for entry in core/SubagentEntries where agent = agent and session_id != incoming_session_id:
@@ -750,6 +768,8 @@ rule SubagentSessionFence {
 
 rule ClearSubagentsOnSessionStart {
     when: SessionStart(task)
+
+    requires: task.host = null or task.host.owner = caller()
 
     ensures: SubagentsVoided(task: task)
 
@@ -786,6 +806,7 @@ rule HookUserPromptSubmit {
     let agent = current_agent(task)
 
     requires: task.status in {running, review}
+    requires: task.host = null or task.host.owner = caller()
 
     ensures: task.status = running
     ensures: task.sub_status = default_sub_status(running)
@@ -873,6 +894,7 @@ rule HookNotification {
     -- report to. The predicate rides in the write itself (see below), so a
     -- task that leaves running concurrently simply matches no row.
     requires: task.status = running
+    requires: task.host = null or task.host.owner = caller()
 
     ensures:
         if (kind = null or kind in {permission_prompt, elicitation_dialog})
@@ -901,7 +923,7 @@ rule HookNotification {
         -- shell hook (task-status-hook) reads the payload's `notification_type`
         -- and forwards it as an optional `--kind` argument:
         --   dispatch hook <id> notification [--kind <notification_type>]
-        -- `NotificationWrite::from_kind` (src/models/agent_events.rs) resolves
+        -- `src/models/agent_events.rs::NotificationWrite::from_kind` resolves
         -- the kind alone into the write to apply; the board hands that
         -- straight to the store
         -- (src/store/queries/tasks.rs::record_notification), whose reducer
@@ -1010,7 +1032,8 @@ rule HookNotification {
         -- `kind = null` guard and raise.
         --
         -- CLI surface note: `dispatch hook <id> notification [--kind K]` is a
-        -- non-MCP, hook-driven entry point (src/main.rs, Commands::Hook). Unlike the
+        -- non-MCP, hook-driven entry point (`src/main.rs::Commands`, its Hook
+        -- variant). Unlike the
         -- MCP task_update tool — which blocks generic transitions into `done`
         -- so agents cannot self-promote past Review — the hook CLI drives the
         -- lifecycle steps that agents must not perform on their own.
@@ -1047,34 +1070,24 @@ rule HookPeerMessageSent {
         -- since the docs describing this feature don't spell out the
         -- payload shape). It may carry a disambiguating `" [ref]"` suffix
         -- per `ListAgents`' listing format.
-        -- `TaskService::resolve_peer_message_target` (src/service/tasks/crud.rs
-        -- — the black box `task_for_session_name` of the rule body above)
-        -- strips it, matches the agent names first, and falls back to
-        -- `parse_peer_message_target_name`, which delegates to
-        -- `TmuxWindow::task_id` (src/models/tmux_window.rs), the same
-        -- parser tmux window names go through, so the two conventions
-        -- cannot drift apart.
+        -- `task_for_session_name` strips it, matches the agent names first,
+        -- and otherwise reads the name as a tmux window name, with the same
+        -- parser window names go through, so the two conventions cannot
+        -- drift apart (`src/service/tasks/crud.rs::parse_peer_message_target_name`).
         -- A `to` that doesn't parse to that shape, or a task id that no
         -- longer exists, is not an error — the sender addressed a session
         -- outside dispatch's own fleet, or one since deleted — only
         -- `sender.last_peer_message_sent_at` is stamped in that case.
         --
-        -- Implemented by `dispatch hook-peer-message <sender_id> --target
-        -- <to> --body <message>` (`src/hooks/mod.rs::run_peer_message`),
-        -- invoked from `plugin/hooks/scripts/task-status-hook`'s
-        -- `PostToolUse` case — one of that case's additive observers, gated
-        -- on `tool_name == "SendMessage"`
-        -- rather than the `mcp__dispatch__*` skip (a native tool call is
-        -- never skipped by that filter). The board does the rest:
-        -- `TaskService::record_peer_message_sent` (src/service/tasks/crud.rs)
-        -- does the two stamps, and the hook handler appends a `SendMessage`
-        -- trajectory entry for the sender
-        -- (`src/mcp/handlers/hooks.rs::append_peer_message_trajectory`) —
+        -- The PostToolUse hook observes every SendMessage call, including a
+        -- native one the `mcp__dispatch__*` skip never filters, and hands it
+        -- to the board (`src/hooks/mod.rs::run_peer_message`). The board does
+        -- the two stamps and appends a `SendMessage` trajectory entry for the
+        -- sender (`src/mcp/handlers/hooks.rs::append_peer_message_trajectory`),
         -- the only audit record this call gets, since it never reaches
         -- dispatch's own MCP tools.
         --
-        -- Both timestamps are read by the TUI's tick-driven task diff
-        -- (`detect_task_transition_notifications`, src/tui/update/agent.rs)
+        -- Both timestamps are read by the board's tick-driven task diff
         -- the same way `last_notification_at` already drives `needs_input`
         -- detection: a changed value inserts into the corresponding
         -- sent/received flash map. See board-visuals.allium's "Message flash" for the
@@ -1155,6 +1168,9 @@ rule UndeliveredPeerMessage {
         -- `SendMessage` trajectory entry, marked `delivered: false`; a
         -- delivered one is marked `delivered: true`.
         --
+        -- SenderToldToResume and SenderToldWhyNotResumable are observable
+        -- output; no rule listens.
+        --
         -- == Why the sender resumes, not dispatch ==
         -- The operator chose this over resuming inside the hook. The sender
         -- sees the outcome of its own task_resume call, a resume costs the
@@ -1164,7 +1180,7 @@ rule UndeliveredPeerMessage {
         -- == How it is observed ==
         -- The PostToolUse hook already sees every SendMessage call
         -- (HookPeerMessageSent). A failed send carries `success: false` in
-        -- the tool response — checked on 2026-11-02: a send to an unknown
+        -- the tool response. Observed: a send to an unknown
         -- name fired PostToolUse (its trajectory entry was written) and its
         -- structured result was `{"success": false, "message": "No agent
         -- named '…' is reachable. …"}`; Claude Code's hook docs say
@@ -1209,7 +1225,7 @@ rule UndeliveredPeerMessage {
 -- observations: the PR gate (pr-workflow.allium: PrLearningsGate), and
 -- `hook-peer-message --undelivered` (UndeliveredPeerMessage), whose
 -- answer is printed as the PostToolUse hook's additionalContext for the
--- sender to read. HookNeverOpensTheDatabase covers both; the outcome
+-- sender to read. HookNeverOpensTheStore covers both; the outcome
 -- guarantees below do not, because an event they could merely drop is
 -- not what they have.
 --
@@ -1291,7 +1307,7 @@ surface HookDelivery {
         -- write this push misses; the operator's sub_status label does not
         -- wait on it to catch up.
 
-    @guarantee HookNeverOpensTheDatabase
+    @guarantee HookNeverOpensTheStore
         -- A process delivering one of the events above opens no store, not
         -- even to read: no connection to the shared store and no local file.
         -- Running it does not create the data directory. This is

@@ -417,7 +417,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["N"],
         None,
         "toggle_notifications",
-        "Toggle the notification panel",
+        "Toggle desktop notifications",
     ),
     normal(
         &["W"],
