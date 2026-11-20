@@ -359,10 +359,9 @@ pub fn subagent_start(
     started_at: String,
 ) -> Result<(), String> {
     // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    let Some(row) = visible_task(ctx, task_id) else {
+    let Some(row) = visible_hook_task(ctx, task_id)? else {
         return Ok(());
     };
-    require_acting_for_task_host(ctx, &row)?;
     // A hook for a task with no current agent writes no agent fact (A15).
     let Some(owner) = current_agent(&AgentTables(ctx), task_id) else {
         return Ok(());
@@ -392,10 +391,9 @@ pub fn subagent_stop(
     session_id: String,
 ) -> Result<(), String> {
     // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    let Some(row) = visible_task(ctx, task_id) else {
+    let Some(row) = visible_hook_task(ctx, task_id)? else {
         return Ok(());
     };
-    require_acting_for_task_host(ctx, &row)?;
     fence_subagent_session(ctx, task_id, &session_id);
     delete_subagent_entry(ctx, task_id, &agent_id);
     sync_subagent_count(ctx, task_id)?;
@@ -438,10 +436,9 @@ pub fn subagent_clear_and_void_pending_stop(
     task_id: i64,
 ) -> Result<(), String> {
     // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    let Some(row) = visible_task(ctx, task_id) else {
+    let Some(row) = visible_hook_task(ctx, task_id)? else {
         return Ok(());
     };
-    require_acting_for_task_host(ctx, &row)?;
     delete_all_subagents(ctx, task_id);
     sync_subagent_count(ctx, task_id)?;
     update_current_agent(&mut AgentTables(ctx), task_id, |agent| Agent {
@@ -501,10 +498,32 @@ pub fn try_record_stop(
 /// answered by any board, as the board's own `is_locally_owned` reads it.
 /// `agent-health.allium`, "Hook-Based Status Transitions".
 fn require_acting_for_task_host(ctx: &ReducerContext, row: &Task) -> Result<(), String> {
-    if row.host.is_empty() {
+    let host = ctx.db.hosts().id().find(&row.host);
+    validate_task_host_acting_for(&row.host, host.as_ref(), &caller_identity(ctx))
+}
+
+/// The rule [`require_acting_for_task_host`] applies, pure so the board's
+/// in-memory twin shares it: an empty `task_host` passes, any other must be
+/// registered to `caller` (`validate_host_acting_for`).
+pub fn validate_task_host_acting_for(
+    task_host: &str,
+    host: Option<&Host>,
+    caller: &str,
+) -> Result<(), String> {
+    if task_host.is_empty() {
         return Ok(());
     }
-    require_acting_for(ctx, &row.host)
+    validate_host_acting_for(host, task_host, caller)
+}
+
+/// A hook's task: the visible row, once the caller is shown to act for its
+/// host. `None` for a task this caller cannot see (`UnseenIsAsMissing`).
+fn visible_hook_task(ctx: &ReducerContext, id: i64) -> Result<Option<Task>, String> {
+    let Some(row) = visible_task(ctx, id) else {
+        return Ok(None);
+    };
+    require_acting_for_task_host(ctx, &row)?;
+    Ok(Some(row))
 }
 
 /// `agent-health.allium: config.background_wait_cap`: how long a Stop deferred
@@ -540,10 +559,9 @@ pub fn expire_background_wait(
     // Not the argument: see above.
     let _ = now;
     let cutoff = background_wait_cutoff(&crate::support::now(ctx))?;
-    let Some(row) = visible_task(ctx, id) else {
+    let Some(row) = visible_hook_task(ctx, id)? else {
         return Ok(());
     };
-    require_acting_for_task_host(ctx, &row)?;
     let Some(agent) = current_agent(&AgentTables(ctx), id) else {
         return Ok(());
     };
@@ -579,10 +597,9 @@ pub fn record_pre_tool_use(
     sub_status: String,
     at: String,
 ) -> Result<(), String> {
-    let Some(row) = visible_task(ctx, id) else {
+    let Some(row) = visible_hook_task(ctx, id)? else {
         return Ok(());
     };
-    require_acting_for_task_host(ctx, &row)?;
     if row.status != RUNNING {
         return Ok(());
     }
@@ -612,10 +629,9 @@ pub fn record_notification(
     if mode == "ignore" {
         return Ok(());
     }
-    let Some(row) = visible_task(ctx, id) else {
+    let Some(row) = visible_hook_task(ctx, id)? else {
         return Ok(());
     };
-    require_acting_for_task_host(ctx, &row)?;
     if row.status != RUNNING {
         return Ok(());
     }
@@ -688,10 +704,9 @@ pub fn record_user_prompt_submit(
     activity_at: String,
     prompt_at: String,
 ) -> Result<(), String> {
-    let Some(row) = visible_task(ctx, id) else {
+    let Some(row) = visible_hook_task(ctx, id)? else {
         return Err(format!("task {id} not found"));
     };
-    require_acting_for_task_host(ctx, &row)?;
     if row.status != RUNNING && row.status != REVIEW {
         return Err(format!("task {id} is neither running nor in review"));
     }

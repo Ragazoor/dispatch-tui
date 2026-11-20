@@ -319,10 +319,7 @@ impl MemoryReducerCaller {
     /// Mirrors the module's `require_acting_for_task_host`: a task no host
     /// holds is answered by any board.
     fn acting_for_task_host(&self, tables: &Tables, row: &module::Task) -> Result<(), String> {
-        if row.host.is_empty() {
-            return Ok(());
-        }
-        self.acting_for(tables, &row.host)
+        module::validate_task_host_acting_for(&row.host, tables.hosts.get(&row.host), &self.sender)
     }
 
     /// [`Self::acting_for_task_host`] by id; a missing task passes, and the
