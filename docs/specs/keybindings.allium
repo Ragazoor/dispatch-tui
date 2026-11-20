@@ -747,7 +747,8 @@ enum KeyTableReader { board | companion_pane | diff_pane }
 --                                 permission, not UTF-8); no entry applies
 --   malformed_entry               the entry is not an object, lacks namespace,
 --                                 action or keys, has a field of another
---                                 name, or keys is not a list of strings
+--                                 name, keys is not a list of strings, or
+--                                 a context is given that is not a string
 --   duplicate_entry               two entries name the same row; both are
 --                                 refused, even when one of them is refused
 --                                 for another problem too
@@ -980,10 +981,11 @@ rule LoadKeyTable {
         -- unknown_context or ambiguous_row, catch_all_row, empty_keys,
         -- unknown_key_name, key_not_allowed_in_namespace. Then, across
         -- entries, duplicate_entry: every entry that names a row another
-        -- entry names. An entry names a row once its namespace, action and
-        -- context resolve to one, whatever its keys; so an entry refused for
-        -- its keys still makes a second entry for its row a duplicate, and
-        -- that row keeps its default keys. An entry keeps the first problem
+        -- entry names. An entry names a row once it is well formed and its
+        -- namespace, action and context resolve to one, whatever its keys
+        -- say; so an entry refused for its keys still makes a second entry
+        -- for its row a duplicate, and that row keeps its default keys. A
+        -- malformed entry names no row. An entry keeps the first problem
         -- found. A refused entry leaves its row on its default keys
         -- and adds one KeyLoadError; the other entries still apply. A file
         -- that is not a JSON list is one file_unreadable error and no entry
@@ -1046,8 +1048,9 @@ rule BoardShowsKeyLoadErrors {
         -- the first three errors and says how many more there are, and a
         -- message that lists every valid name (unknown_namespace,
         -- unknown_action) shows the first five names and how many more.
-        -- Every other message shows whole. The log holds every error, each
-        -- message whole (KeyLoadErrorsAreLogged).
+        -- Every other message shows whole, except that a message repeats at
+        -- most forty characters of what the file wrote. The log holds every
+        -- error, each message whole (KeyLoadErrorsAreLogged).
 }
 
 rule KeyLoadErrorsAreLogged {

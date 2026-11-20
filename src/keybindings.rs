@@ -582,7 +582,7 @@ pub fn is_chord(key: &str) -> bool {
     let (Some(first), Some(second), None) = (chars.next(), chars.next(), chars.next()) else {
         return false;
     };
-    let named = key == "Up" || (first == 'F' && second.is_ascii_digit());
+    let named = key == "Up" || (first == 'F' && ('1'..='9').contains(&second));
     !named
 }
 

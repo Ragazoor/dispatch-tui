@@ -161,6 +161,10 @@ fn key_names_are_canonical_only() {
     ] {
         assert!(is_key_name(good), "{good}");
     }
+    assert!(
+        is_key_name("F0") && is_chord("F0"),
+        "F0 is a chord, not a named key"
+    );
     for bad in [
         "ctrl+d",
         "Ctrl+d",
@@ -261,6 +265,9 @@ fn a_file_that_cannot_be_read_is_one_error_and_the_default_table() {
     assert_eq!(load.errors.len(), 1);
     assert_eq!(load.errors[0].problem, KeyOverrideProblem::FileUnreadable);
     assert!(load.errors[0].message.contains("no override applies"));
+    assert!(load.errors[0]
+        .message
+        .contains("remove it to use the default keys"));
 }
 
 #[test]
@@ -376,7 +383,7 @@ fn bad_file(problem: KeyOverrideProblem) -> (Vec<String>, &'static str) {
     use KeyOverrideProblem as P;
     let ns = KeyNamespace::BoardNormal;
     match problem {
-        P::FileUnreadable => (vec!["{not json".to_string()], "not valid JSON"),
+        P::FileUnreadable => (vec!["{not json".to_string()], "Fix the JSON"),
         P::MalformedEntry => (vec![serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "key": ["E"]}).to_string()], "an entry is"),
         P::DuplicateEntry => (
             vec![
@@ -512,6 +519,29 @@ fn other_malformed_and_disallowed_entries_are_refused() {
         assert_eq!(errors[0].problem, problem, "{text}: {errors:?}");
         assert_eq!(table, KEY_BINDINGS);
     }
+}
+
+#[test]
+fn a_tmux_key_name_with_no_suggestion_is_told_the_prefix_form() {
+    let (_, errors) = merge_overrides(&file_of(&[entry(
+        "tmux.global",
+        "toggle_agent_tree",
+        &["Hyper+e"],
+    )]));
+    assert_eq!(errors[0].problem, KeyOverrideProblem::UnknownKeyName);
+    assert!(
+        errors[0].message.contains("\"Prefix+\" and one key"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn a_message_repeats_little_of_a_long_entry() {
+    let long = "x".repeat(500);
+    let (_, errors) = merge_overrides(&format!("[\"{long}\"]"));
+    assert_eq!(errors[0].problem, KeyOverrideProblem::MalformedEntry);
+    assert!(errors[0].message.len() < 300, "{}", errors[0].message);
 }
 
 #[test]

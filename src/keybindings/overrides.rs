@@ -364,7 +364,7 @@ pub fn load_key_table(data_dir: &Path, reader: KeyTableReader) -> KeyTableLoad {
         Err(e) => (
             KEY_BINDINGS,
             vec![file_unreadable(format!(
-                "{} cannot be read ({e}); no override applies",
+                "{} cannot be read ({e}); no override applies. Make it a readable file, or remove it to use the default keys",
                 file.display()
             ))],
         ),
@@ -445,7 +445,7 @@ pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>)
             return (
                 KEY_BINDINGS,
                 vec![file_unreadable(format!(
-                    "{KEY_OVERRIDE_FILE_NAME} is not valid JSON ({e}); no override applies"
+                    "{KEY_OVERRIDE_FILE_NAME} is not valid JSON ({e}); no override applies. Fix the JSON at that place, or remove the file to use the default keys"
                 ))],
             )
         }
@@ -471,6 +471,19 @@ pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>)
 }
 
 const ENTRY_SHAPE: &str = "an entry is {\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"E\"]}, with an optional \"context\"";
+
+/// The longest piece of the file a message repeats.
+const ECHO_CHARS: usize = 40;
+
+/// Text from the file as a message repeats it: cut past [`ECHO_CHARS`] so a
+/// long entry cannot crowd the popup.
+fn echo(text: &str) -> String {
+    if text.chars().count() <= ECHO_CHARS {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(ECHO_CHARS).collect();
+    format!("{head}…")
+}
 
 /// A row as an error names it: namespace, action and any context literal.
 fn row_label(b: &KeyBinding) -> String {
@@ -508,7 +521,10 @@ fn judge_entry(value: &Value) -> Entry {
     let Some(obj) = value.as_object() else {
         entry.refuse(
             KeyOverrideProblem::MalformedEntry,
-            format!("{value} is not an object; {ENTRY_SHAPE}"),
+            format!(
+                "{} is not an object; {ENTRY_SHAPE}",
+                echo(&value.to_string())
+            ),
         );
         return entry;
     };
@@ -518,7 +534,7 @@ fn judge_entry(value: &Value) -> Entry {
     {
         entry.refuse(
             KeyOverrideProblem::MalformedEntry,
-            format!("an entry has no field \"{other}\"; {ENTRY_SHAPE}"),
+            format!("an entry has no field \"{}\"; {ENTRY_SHAPE}", echo(other)),
         );
         return entry;
     }
@@ -553,7 +569,7 @@ fn judge_entry(value: &Value) -> Entry {
             .collect();
         entry.refuse_listing(
             KeyOverrideProblem::UnknownNamespace,
-            &format!("\"{ns_name}\" is not a namespace; write one of: "),
+            &format!("\"{}\" is not a namespace; write one of: ", echo(&ns_name)),
             &valid,
         );
         return entry;
@@ -570,7 +586,10 @@ fn judge_entry(value: &Value) -> Entry {
         }
         entry.refuse_listing(
             KeyOverrideProblem::UnknownAction,
-            &format!("{ns_name} has no action \"{action}\"; its actions are: "),
+            &format!(
+                "{ns_name} has no action \"{}\"; its actions are: ",
+                echo(&action)
+            ),
             &actions,
         );
         return entry;
@@ -596,7 +615,8 @@ fn judge_entry(value: &Value) -> Entry {
                 entry.refuse(
                     KeyOverrideProblem::UnknownContext,
                     format!(
-                        "{ns_name} {action} has no row with context \"{lit}\"; its rows have: {}",
+                        "{ns_name} {action} has no row with context \"{}\"; its rows have: {}",
+                        echo(lit),
                         contexts_of_rows()
                     ),
                 );
@@ -666,12 +686,14 @@ fn judge_entry(value: &Value) -> Entry {
     if let Some(bad) = unique.iter().find(|k| !is_key_name(k)) {
         let instead = match suggest_key_name(bad) {
             Some(good) => format!("write \"{good}\""),
+            None if ns == KeyNamespace::TmuxGlobal => "a tmux.global key is \"Prefix+\" and one key: a character, a named key or a Ctrl/Alt key (\"Prefix+e\", \"Prefix+Space\")".to_string(),
             None => "a key is one character, a named key (Space, Enter, Esc, Tab, Up, F1, …), Ctrl+ or Alt+ before one (\"Ctrl+D\"), or a two-character chord (\"gg\")".to_string(),
         };
         entry.refuse(
             KeyOverrideProblem::UnknownKeyName,
             format!(
-                "\"{bad}\" is not a key name ({}); {instead}",
+                "\"{}\" is not a key name ({}); {instead}",
+                echo(bad),
                 row_label(default)
             ),
         );
