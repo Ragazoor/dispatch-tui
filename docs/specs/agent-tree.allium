@@ -669,6 +669,22 @@ entity AgentTreePane {
     task_arrived: task_resolution = waiting and board_task(task) != null and board_task(task).worktree != null
     diff_task_arrived: diff_pane != null and diff_task_resolution = waiting and board_task(task) != null and board_task(task).worktree != null
 
+    -- When each of the pane's four timed reads is due. A timer fires once,
+    -- when its condition turns true, so every guard a read waits on is part
+    -- of the condition, not a requires that would block it for good: the
+    -- condition turns true afresh when the pane is shown (ShowAgentTreePane
+    -- restamps the clocks one interval back), when the renderer resolves its
+    -- task (no renderer reads before it knows its worktree; see "Companion
+    -- Pane Startup"), and one interval after each read restamps its clock.
+    -- A hidden pane has no renderer process, so nothing is due while hidden.
+    -- The diff pane is its own process with its own resolution, and needs a
+    -- diff pane to exist. The ok and failed rule of each read share its
+    -- condition, and exactly one of the two fires each time it turns true.
+    tree_refresh_due: status = shown and task_resolution = resolved and last_rendered_at + config.agent_tree_refresh_interval <= now
+    diff_refresh_due: diff_pane != null and diff_task_resolution = resolved and last_diff_rendered_at + config.agent_tree_refresh_interval <= now
+    commits_refresh_due: status = shown and task_resolution = resolved and last_commits_listed_at + config.agent_tree_commits_refresh_interval <= now
+    agents_refresh_due: status = shown and task_resolution = resolved and last_agents_listed_at + config.agent_tree_agents_refresh_interval <= now
+
     -- The rows the tree draws: one AgentTreeNode per entry of
     -- changed_tree(rendered_changes), built as RefreshAgentTree's "How a
     -- row is built" describes. Derived, never stored; the invariants about
@@ -1365,16 +1381,10 @@ rule AgentTreeDiffPaneTaskNeverArrives {
 rule RefreshAgentTree {
     -- A shown pane redraws on a timer, asking git afresh each time what has
     -- changed — in the worktree's unstaged work, or in the selected commit.
-    when: pane: AgentTreePane.last_rendered_at + config.agent_tree_refresh_interval <= now
-
-    -- Hidden panes have no renderer process. The timestamp is not advanced
-    -- while hidden, so the trigger stays satisfied and the first refresh
-    -- happens immediately on show.
-    requires: pane.status = shown
-
-    -- The renderer knows its worktree. Until it does there is nothing to ask
-    -- git about (see "Companion Pane Startup").
-    requires: pane.task_resolution = resolved
+    -- Only a shown pane whose renderer knows its worktree refreshes
+    -- (tree_refresh_due). Showing the pane or resolving its task makes the
+    -- first refresh happen at once, not one interval later.
+    when: pane: AgentTreePane.tree_refresh_due
 
     -- The git query succeeded. A failed query is the other rule
     -- (AgentTreeGitFailureKeepsLastGoodTree), and the two are mutually
@@ -1650,10 +1660,8 @@ rule AgentTreeGitFailureKeepsLastGoodTree {
     -- branch is NOT among them: the tree's query names no branch, and a
     -- base branch that will not resolve fails the commits section instead
     -- (AgentTreeCommitListFailureKeepsLastList), leaving the tree working.
-    when: pane: AgentTreePane.last_rendered_at + config.agent_tree_refresh_interval <= now
+    when: pane: AgentTreePane.tree_refresh_due
 
-    requires: pane.status = shown
-    requires: pane.task_resolution = resolved
     requires: not git_changes(pane.root, pane.selected_commit).ok
 
     -- Stamped anyway, so the next tick is a normal tick rather than an
@@ -2058,10 +2066,7 @@ rule AgentTreeDiffPaneFailureIsVisible {
 rule RefreshAgentTreeDiff {
     -- The diff pane redraws on the same timer the tree does, asking git afresh
     -- for the contents of whatever is currently open.
-    when: pane: AgentTreePane.last_diff_rendered_at + config.agent_tree_refresh_interval <= now
-
-    requires: pane.diff_pane != null
-    requires: pane.diff_task_resolution = resolved
+    when: pane: AgentTreePane.diff_refresh_due
 
     ensures: pane.last_diff_rendered_at = now
 
@@ -2228,12 +2233,11 @@ rule ClearAgentTreeErrorNotice {
 
 rule RefreshAgentTreeCommitList {
     -- A shown pane re-reads the agent's commits on its own timer.
-    when: pane: AgentTreePane.last_commits_listed_at + config.agent_tree_commits_refresh_interval <= now
-
-    requires: pane.status = shown
     -- The commits section starts with the rest of the pane, once the task is
-    -- resolved; a pane that never resolves never lists commits.
-    requires: pane.task_resolution = resolved
+    -- resolved; a pane that never resolves never lists commits
+    -- (commits_refresh_due).
+    when: pane: AgentTreePane.commits_refresh_due
+
     requires: git_branch_commits(pane.root, pane.task.base_branch).ok
 
     let commits = git_branch_commits(pane.root, pane.task.base_branch).value
@@ -2304,10 +2308,8 @@ rule RefreshAgentTreeCommitList {
 
 rule AgentTreeCommitListFailureKeepsLastList {
     -- The same tick, when the commits could not be read.
-    when: pane: AgentTreePane.last_commits_listed_at + config.agent_tree_commits_refresh_interval <= now
+    when: pane: AgentTreePane.commits_refresh_due
 
-    requires: pane.status = shown
-    requires: pane.task_resolution = resolved
     requires: not git_branch_commits(pane.root, pane.task.base_branch).ok
 
     -- Stamped anyway, so a persistently broken read does not spin.
@@ -2389,12 +2391,11 @@ rule SelectAgentTreeSource {
 
 rule RefreshAgentTreeAgentList {
     -- A shown pane re-reads the board's task list on its own timer.
-    when: pane: AgentTreePane.last_agents_listed_at + config.agent_tree_agents_refresh_interval <= now
-
-    requires: pane.status = shown
     -- The agents section starts with the rest of the pane, once the task is
-    -- resolved; a pane that never resolves never lists agents.
-    requires: pane.task_resolution = resolved
+    -- resolved; a pane that never resolves never lists agents
+    -- (agents_refresh_due).
+    when: pane: AgentTreePane.agents_refresh_due
+
     requires: board_tasks().ok
 
     -- Every task the board lists is attached (is_live_agent) or detached
@@ -2517,10 +2518,8 @@ rule RefreshAgentTreeAgentList {
 rule AgentTreeAgentListFailureKeepsLastList {
     -- The same tick, when the board could not be reached or its answer
     -- could not be read.
-    when: pane: AgentTreePane.last_agents_listed_at + config.agent_tree_agents_refresh_interval <= now
+    when: pane: AgentTreePane.agents_refresh_due
 
-    requires: pane.status = shown
-    requires: pane.task_resolution = resolved
     requires: not board_tasks().ok
 
     -- Stamped anyway, so an absent board does not spin.
