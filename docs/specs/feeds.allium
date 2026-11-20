@@ -194,6 +194,11 @@ value FeedCommandRun {
                         -- characters, in that order, so a long run of notices
                         -- cannot push a real error past the cut. "" when the
                         -- command wrote nothing else to stderr
+    logged_stderr: String -- the whole stderr of a zero-exit run, notice
+                        -- lines INCLUDED, trimmed and cut to
+                        -- config.feed_stderr_cap characters: what the warn
+                        -- log carries (FeedCommandStderrOnSuccess). "" when
+                        -- the command wrote nothing to stderr
     error: String?      -- spawn error, non-zero exit (naming the status),
                         -- timeout, or output over config.feed_output_cap_bytes
 }
@@ -1698,12 +1703,16 @@ rule RunFeedCommand {
             let run = run_feed_command(epic.feed_command)
             if run.error != null:
                 FeedCommandFailed(epic, run.error)
-            else if feed_parse_error(run.stdout) != null:
-                FeedCommandFailed(epic, feed_parse_error(run.stdout))
             else:
-                FeedCommandCompleted(epic: epic,
-                                     items: parse_feed_items(run.stdout),
-                                     stderr: run.stderr)
+                -- Before the parse, so it also precedes a parse failure.
+                if run.logged_stderr != "":
+                    FeedCommandWroteStderr(epic: epic, text: run.logged_stderr)
+                if feed_parse_error(run.stdout) != null:
+                    FeedCommandFailed(epic, feed_parse_error(run.stdout))
+                else:
+                    FeedCommandCompleted(epic: epic,
+                                         items: parse_feed_items(run.stdout),
+                                         stderr: run.stderr)
 
     @guidance
         -- feed_parse_error is FeedItemParse's failure arm: the error that
@@ -3120,12 +3129,13 @@ rule FeedCommandFailure {
 }
 
 rule FeedCommandStderrOnSuccess {
-    when: FeedCommandCompleted(epic, items, stderr)
+    when: FeedCommandWroteStderr(epic, text)
 
-    -- The warning is emitted by the exec layer BEFORE the stdout parse,
-    -- so it also precedes a FeedCommandFailed outcome when the stdout is
-    -- malformed. The stderr text is not carried on the event: it reaches
-    -- callers on FeedOutput (see @guidance).
+    -- The warning is emitted by the exec layer BEFORE the stdout parse
+    -- (RunFeedCommand), so it also precedes a FeedCommandFailed outcome
+    -- when the stdout is malformed. It carries the whole stderr, notice
+    -- lines included (FeedCommandRun.logged_stderr): the warn log is where
+    -- a notice reaches the user. Only the taint below ignores notices.
 
     -- A feed command that exits 0 while writing to stderr is NOT by
     -- itself a failure: its stdout parsed, and a NON-EMPTY emission is
@@ -3182,14 +3192,14 @@ rule FeedCommandStderrOnSuccess {
     -- back.
     --
     -- The logged text is trimmed and truncated to config.feed_stderr_cap
-    -- characters.
-
-    requires: stderr != ""
+    -- characters, notices included.
 
     ensures:
         -- observable output; no rule listens
-        FeedRunWarned(epic: epic, text: truncate(stderr, config.feed_stderr_cap))
-        -- and then, when items.count > 0, the emission syncs ADDITIVELY
+        FeedRunWarned(epic: epic, text: text)
+        -- and then, when the stdout parses and the significant stderr
+        -- (notices dropped) is non-empty: when items.count > 0, the
+        -- emission syncs ADDITIVELY
         -- (DegradedNonEmptyEmission). When items.count = 0 the sync is
         -- suppressed entirely by DegradedEmptyEmission instead.
 
