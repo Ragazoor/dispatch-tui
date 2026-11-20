@@ -21,10 +21,10 @@
 --           still: it is what PROVES that identity and never appears in a
 --           shared table at all. All four live in the host file (host.allium:
 --           IdentityLivesInHostFile), and the store refuses a setting write
---           that names one (save_setting), whoever sends it. Also excluded: which rows a board is sent and how
---           they get there (see sync.allium: SubscribeToThisHostsSettings) —
---           this file says whose a setting is, not how that fact is
---           transported.
+--           that names one (store-split.allium: SaveSettingForHost), whoever
+--           sends it. Also excluded: which rows a board is sent and how they
+--           get there (see sync.allium: SubscribeToThisHostsSettings) — this
+--           file says whose a setting is, not how that fact is transported.
 --
 -- WHY HOST, NOT UserIdentity. A setting describes one machine: a feed command
 -- names a script path on that machine's disk, a fold or a filter is one
@@ -43,6 +43,9 @@ use "./core.allium" as core
 ------------------------------------------------------------
 
 config {
+    -- The four identity and credential keys: never settings (Excludes above); the
+    -- store refuses a write that names one.
+    identity_setting_keys: Set<String> = {"host_id", "host_label", "user_identity", "user_identity_token"}
     -- The four managed-feed settings (epics.allium: ManagedFeedConfigViaMcp):
     -- a command and a poll interval for each of the reviews and CVE feeds.
     managed_feed_setting_keys: Set<String> = {"reviews_feed_command", "reviews_feed_interval_secs", "cve_feed_command", "cve_feed_interval_secs"}
@@ -99,9 +102,9 @@ rule ClearSetting {
         -- SetManagedFeedSettings. It is the general clear, kept for the next
         -- preference that needs one. Clearing a key that was never set is a
         -- no-op rather than a refusal: a caller is restoring a default, and
-        -- finding it already in effect is not a mistake worth reporting. The store judges the
-        -- request and deletes the row if there is one (store-split.allium:
-        -- ClearSettingForHost).
+        -- finding it already in effect is not a mistake worth reporting. The
+        -- store judges the request and deletes the row if there is one
+        -- (store-split.allium: ClearSettingForHost).
 }
 
 rule SetManagedFeedSettings {

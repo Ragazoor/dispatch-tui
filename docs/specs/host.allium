@@ -287,11 +287,11 @@ rule RenameHost {
         -- treats the same way -- is refused because a label's whole job is
         -- to be recognisable, and a blank-looking one is worse than the
         -- hostname the prompt offered, or than the name it would replace. The
-        -- stored label is the
-        -- TRIMMED text, not the raw input, so leading/trailing whitespace
-        -- from a pasted or padded value never becomes part of what other
-        -- rules compare or display. No other validation: beyond trimming, a
-        -- label is free text shown to the person who typed it.
+        -- stored label is the TRIMMED text, not the raw input, so
+        -- leading/trailing whitespace from a pasted or padded value never
+        -- becomes part of what other rules compare or display. No other
+        -- validation: beyond trimming, a label is free text shown to the
+        -- person who typed it.
         --
         -- THIS IS THE ONLY RULE THAT WRITES THE LABEL, and it covers both
         -- writes that exist: the first one, where the label is null and the

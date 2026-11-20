@@ -456,7 +456,7 @@ enum WorkspaceRole { admin | member }
 entity Host {
     id: String       -- opaque and generated; not derived from anything about the machine. Minted once on first run and stable across restarts, upgrades and renames
     label: String?   -- human-readable name for the machine. Null until a human names it: minting does not seed it, and the startup gate asks for it before the board draws (startup.allium: PromptForHostLabelWhenUnnamed) with the machine's hostname pre-filled. Editable afterwards through host.allium: RenameHost. This is the string a card would display
-    owner: UserIdentity?  -- the person this machine belongs to. Null until this install has connected once and learned who it is: the id above is minted offline on first run, and no identity exists at that moment. Written once, by host.allium: AdoptUserIdentity, and never rewritten — see LocalHostOwnerIsWrittenOnce below
+    owner: UserIdentity?  -- the person this machine belongs to. Null until this install has connected once and learned who it is: the id above is minted offline on first run, and no identity exists at that moment. Written once, by host.allium: AdoptUserIdentity, and never rewritten — see LocalHostOwnerIsWrittenOnce in the Invariants section
 
     -- `owner` is what makes one person on several machines real: a laptop and
     -- a desktop are two Host rows carrying the same UserIdentity. It changes no

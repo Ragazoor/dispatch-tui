@@ -2190,7 +2190,7 @@ rule SaveSettingForHost {
 
     -- The four identity/credential keys are never settings (settings.allium
     -- Excludes): the store refuses them, not only the board.
-    requires: key not in {"host_id", "host_label", "user_identity", "user_identity_token"}
+    requires: key not in settings/config.identity_setting_keys
 
     -- Bound before the ensures, which reads the resulting state.
     let had_row = exists core/Setting{host: host, key: key}
