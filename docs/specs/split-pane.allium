@@ -1164,6 +1164,14 @@ rule JumpBackToTuiWindow {
         -- The TUI window is renamed to the fixed "TUI" constant at startup so
         -- the binding can target it by name. Both the binding and the rename
         -- are torn down on exit (unbind-key space; rename restored).
+        -- Space is the DEFAULT key. The key bound is the key of the
+        -- tmux.global jump_to_dispatch row of the board's key table, which a
+        -- user's override may have changed (keybindings.allium:
+        -- TmuxKeysComeFromTheTable). On exit the board unbinds the key it
+        -- bound, and before it binds it removes any other prefix key still
+        -- running this command, left by a board that was killed
+        -- (keybindings.allium: TheBoardUnbindsWhatItBound,
+        -- NoStalePrefixKeySurvivesAStart).
         --
         -- The rename, outbound and restoring, targets this board's own pane
         -- (`$TMUX_PANE`), scoped to its session. A lookup by the name "TUI" is

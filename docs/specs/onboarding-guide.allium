@@ -83,7 +83,8 @@ contract GuideKeyParityGate {
         -- <script type="application/json" id="dispatch-keys"> block, and
         -- asserts, for every entry and every key in it, that some
         -- KEY_BINDINGS row has that namespace (by its published dotted name)
-        -- and that action, and lists that key; and, for every entry, that
+        -- and that action, and lists that key among its default keys; and,
+        -- for every entry, that
         -- some row with that namespace and action has the entry's
         -- description, word for word. This is GuideKeysAreRealBindings and
         -- GuideDescriptionsAreTheTables checked over the real page and the
@@ -120,7 +121,7 @@ enum GuideStep { explore_board | graph }
 -- {namespace, action, keys, when, label, description}:
 --   namespace    the published dotted name of a KeyNamespace (board.normal,
 --                board.detail, board.help, tmux.global, …)
---   action       the keybinding table's action id (navigate_row, exit_epic,
+--   action       the keybinding table's action id (navigate_row_down, exit_epic,
 --                toggle_help, jump_to_dispatch, …)
 --   keys         the keys, written exactly as the table writes them ("j",
 --                "Space", "Esc", "Prefix+Space")
@@ -277,12 +278,15 @@ rule GuideKeyOutsideTheBlockDoesNothing {
 -- key) the guide declares is listed by some row of the real keybinding table
 -- with that namespace and that action. The guide may declare a subset of the
 -- table, never a key or action the table lacks. Checked by
--- GuideKeyParityGate.
+-- GuideKeyParityGate. The keys are the rows' DEFAULT keys: the page is
+-- static and cannot read a user's override file (keybindings.allium:
+-- LoadKeyTable), so it shows the keys the product ships with and says so.
 invariant GuideKeysAreRealBindings {
     for g in GuideBindings:
         for k in g.keys:
             (keybindings/KeyBindings
-                where namespace = g.namespace and action = g.action and k in keys
+                where namespace = g.namespace and action = g.action
+                      and k in default_keys
             ).count >= 1
 }
 

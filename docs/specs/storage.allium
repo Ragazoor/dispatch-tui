@@ -45,7 +45,9 @@
 -- What lives here: the host file (host.allium: HostFile), app.log, the store
 -- address record (startup.allium: StoreAddressRecord), the store pin file
 -- `store-identity` (startup.allium: StoreIdentityPin), trajectories
--- (observability.allium) and the shipped feed scripts (feeds.allium). An older
+-- (observability.allium), the shipped feed scripts (feeds.allium) and the
+-- user's key override file `keybindings.json` (keybindings.allium:
+-- KeyOverrideFile), which the board and its panes read as they start. An older
 -- install may also hold a `tasks.db` (with `-wal` and `-shm`), an inert
 -- leftover nothing opens (CodeNeverTouchesLegacyDatabase). The managed store's
 -- own data is NOT here when --data-dir is overridden: it is always under the

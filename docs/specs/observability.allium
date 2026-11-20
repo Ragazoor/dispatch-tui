@@ -96,7 +96,7 @@ value DecodeFallbackWarning {
 -- point.
 value FeatureUsageEvent {
     category: UsageCategory
-    action:   String          -- what the use did, e.g. "navigate_row",
+    action:   String          -- what the use did, e.g. "navigate_row_down",
                               -- named after the effect rather than the key,
                               -- so a rebound key keeps its history
     detail:   String?         -- the key as typed, e.g. "j", " ", "Enter",
@@ -349,7 +349,12 @@ rule KeypressRecordsFeatureUsage {
         -- "times pressed", not "work done".
         -- action names the effect, not the key: two bindings for the same
         -- effect share an action and are told apart by detail, and rebinding
-        -- a key preserves the action's history across the rename. That is
+        -- a key preserves the action's history across the rename. An action
+        -- id names one direction or value (keybindings.allium:
+        -- KeyBinding.action: navigate_row_down, not a navigate_row that goes
+        -- either way), so the action alone says what happened whatever key
+        -- the user has bound to it (keybindings.allium: LoadKeyTable), and
+        -- detail says only which key they pressed. That is
         -- also why the count for an action retired and later reused under the
         -- same name needs a `since` window to read correctly.
         -- took_effect(namespace, action) is judged after the row's action

@@ -756,6 +756,11 @@ config {
     -- The tmux key (pressed after the tmux prefix) that toggles the companion
     -- pane. "e" for explorer: unbound in tmux's default key table, so the
     -- binding shadows nothing, and it does not collide with prefix+space.
+    -- This is the DEFAULT. The key the board binds is the key of the
+    -- tmux.global toggle_agent_tree row of the key table it loaded, which a
+    -- user's override may have changed (keybindings.allium:
+    -- TmuxKeysComeFromTheTable); with no override that row's key is
+    -- "Prefix+" and this key.
     agent_tree_toggle_key: String = "e"
 
     -- Height of the lower pane as a percentage of the AGENT WINDOW. The lower
@@ -827,9 +832,19 @@ config {
 rule BindAgentTreeToggle {
     when: startup/BoardDrawn()
 
-    ensures: AgentTreeToggleBound(key: config.agent_tree_toggle_key)
+    -- bound_toggle_key is the toggle_agent_tree row's key in the board's
+    -- key table, translated to tmux's spelling; the default when the user has
+    -- not overridden the row.
+    ensures: AgentTreeToggleBound(
+        key: bound_toggle_key(config.agent_tree_toggle_key))
 
     @guidance
+        -- Before it binds, the board removes every prefix binding whose
+        -- command is this toggle command, whatever key holds it: a board
+        -- that was killed left its key bound, and the user may have moved
+        -- the toggle to another key since (keybindings.allium:
+        -- NoStalePrefixKeySurvivesAStart).
+        --
         -- Registered as a prefixed tmux binding alongside the existing
         -- prefix+space jump-back binding (see split-pane.allium:
         -- JumpBackToTuiWindow), through the same bind_key helper and the same
@@ -863,7 +878,10 @@ rule UnbindAgentTreeToggle {
     -- before the binding exists.
     requires: cause = quit
 
-    ensures: AgentTreeToggleUnbound(key: config.agent_tree_toggle_key)
+    -- The key this board bound when it started, not the key the override
+    -- file names by now (keybindings.allium: TheBoardUnbindsWhatItBound).
+    ensures: AgentTreeToggleUnbound(
+        key: bound_toggle_key(config.agent_tree_toggle_key))
 
     @guidance
         -- Torn down with the rest of the board's tmux setup, so the key is
@@ -3037,7 +3055,8 @@ surface AgentTreeCompanionPane {
         demands BoardPaneView
 
     provides:
-        -- The global tmux binding (prefix + config.agent_tree_toggle_key).
+        -- The global tmux binding (prefix + the toggle key the board bound;
+        -- BindAgentTreeToggle).
         -- Acts on the pane belonging to the currently focused window. See
         -- HideAgentTreePane / ShowAgentTreePane / BindAgentTreeToggle for the
         -- implementation.
@@ -3369,6 +3388,10 @@ surface AgentTreeCompanionPane {
         -- (ClearAgentTreeErrorNotice).
 
     @guarantee CompanionPaneKeysAreTableRows
+        -- The pane loads the keybinding table itself as it starts, the
+        -- user's overrides included (keybindings.allium:
+        -- PanesLoadTheirOwnTable), and the keys named below are the rows'
+        -- default keys.
         -- The keys listed under provides are rows of the keybinding table
         -- (keybindings.allium), in three namespaces: agent_tree.tree while the
         -- tree has focus, agent_tree.commits while the commits section does,

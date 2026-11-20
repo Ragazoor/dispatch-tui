@@ -2322,8 +2322,10 @@ rule AbortWhenTheAgentPortIsTaken {
 -- or suffixed name. Two boards would contend for one agent port and one set of
 -- tmux keybindings.
 --
--- The supported shape is one board per tmux SERVER. The board binds Prefix+Space
--- and Prefix+e server-wide when it starts and unbinds them when it exits, so a
+-- The supported shape is one board per tmux SERVER. The board binds its two
+-- prefix keys (Prefix+Space and Prefix+e, unless the user's key overrides name
+-- others; keybindings.allium: TmuxKeysComeFromTheTable) server-wide when it
+-- starts and unbinds them when it exits, so a
 -- second board in another session of the same server loses its keys when
 -- either one quits, until the next launch binds them again. That is accepted,
 -- not guarded: per-board key tables would cost more than the second-board case

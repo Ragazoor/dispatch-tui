@@ -4,7 +4,9 @@
 -- Scope: The keybinding table — the one place every key the product answers to
 --        is declared — and the three things it drives: which action a pressed
 --        key runs, the `?` help overlay, and the read-only `keybinding_search`
---        MCP tool through which an agent can see every key at once.
+--        MCP tool through which an agent can see every key at once. Also the
+--        user's key overrides: a file that replaces the keys of chosen rows,
+--        read once when a process starts.
 -- Includes: KeyNamespace (one per input mode a key is looked up in);
 --           KeyBinding (one row: namespace, keys, optional context guard,
 --           action id, description, optional note); the rule that a keypress
@@ -13,6 +15,10 @@
 --           catalogue as two projections of the same table; the uniqueness
 --           invariants and the drift-gate obligations that keep the table and
 --           the key handlers from diverging.
+--           The override file and its entries (KeyOverride); the merge of
+--           the default keys and the accepted overrides into the one table
+--           every reader uses; the canonical key names; what a bad entry
+--           does; and keybinding_set, the MCP tool that writes the file.
 -- Excludes: What each action DOES once run — that belongs to the spec owning
 --           the behaviour (core, tasks, epics, split-pane, agent-tree,
 --           …). This spec says `G` runs navigate_row_last; it does
@@ -27,8 +33,9 @@
 --           motion) DO have rows, marked records_usage false, and so do the
 --           commit/cancel keys of a text-bearing mode (recorded as usual).
 --           Installing and removing the tmux-global bindings (split-pane.allium,
---           agent-tree.allium, startup.allium). Their rows here are a
---           catalogue entry, not the mechanism.
+--           agent-tree.allium, startup.allium). Their rows here give the key
+--           the board binds (TmuxKeysComeFromTheTable); tmux answers the
+--           press, not a dispatch handler.
 --
 -- Why this exists: an agent with no overview of the keys guesses them, and
 -- reads `G` as "enter the epic" (it jumps to the last row of the column;
@@ -39,6 +46,7 @@
 
 use "./core.allium" as core
 use "./observability.allium" as observability
+use "./storage.allium" as storage
 
 ------------------------------------------------------------
 -- External Entities
@@ -72,9 +80,12 @@ contract KeybindingDriftGate {
         -- context has drifted from what its key actually does.
 
     @invariant TableIsWellFormed
-        -- KeyUniquePerContext, ContextsDoNotOverlapForAKey and
-        -- ActionOncePerContext are asserted over the real table, not over a
-        -- fixture.
+        -- KeyUniquePerContext, ContextsDoNotOverlapForAKey,
+        -- ActionOncePerContext, ChordPrefixIsFree,
+        -- TextNamespacesBindNoTypedKey, TmuxGlobalRowsHaveOneKey and
+        -- KeysAreCanonical are asserted over the real default table, not over
+        -- a fixture. The relation ContextsDoNotOverlapForAKey reads
+        -- (contexts_overlap) is the one the loader uses, not a test-only copy.
 
     @invariant EveryNamespaceHasRows
         -- Non-vacuity: every KeyNamespace other than tmux_global has at
@@ -109,19 +120,66 @@ contract KeybindingDriftGate {
         -- other mode that reads none fails, so the check cannot go blind.
         -- The companion pane's section titles are built from the table
         -- (PaneTitlesNameTheirOwnKeys) and asserted to name their rows' keys.
+        -- Every hint is built from the row it stands for (KeyBinding), so it
+        -- is read twice: under the default table and under the remapped table
+        -- of RemappedTableDrivesDispatch, where it names the user's key.
 
     @invariant TmuxGlobalRowsTrackTheirBindings
-        -- The tmux.global toggle_agent_tree row's key is `Prefix+` followed
-        -- by the key the runtime actually binds (agent-tree.allium:
-        -- config.agent_tree_toggle_key), so changing the toggle key without
-        -- the row, or the row without the key, fails here. Likewise the
-        -- jump_to_dispatch row's key is `Prefix+` followed by the jump-back
-        -- key the board binds and unbinds (split-pane.allium:
-        -- JumpBackToTuiWindow), written capitalised as the table writes
-        -- keys: `Prefix+Space`. The jump-back key is a named key in the
-        -- runtime (JUMP_BACK_KEY, beside AGENT_TREE_TOGGLE_KEY), not a
-        -- literal at the bind site, so the binding and the row read the same
-        -- value and changing either without the other fails here.
+        -- The key the board binds for the agent-tree toggle is the key of the
+        -- tmux.global toggle_agent_tree row of the table it loaded, and the
+        -- key it binds for the jump back is the key of the jump_to_dispatch
+        -- row (TmuxKeysComeFromTheTable). Both are asserted under the default
+        -- table and under a table with both rows overridden. Each row's
+        -- default key is `Prefix+` followed by the runtime's default for that
+        -- binding (agent-tree.allium: config.agent_tree_toggle_key;
+        -- split-pane.allium: JumpBackToTuiWindow), written as the table
+        -- writes keys (`Prefix+Space`), so changing a default in one place
+        -- and not the other fails here. On quit the board unbinds the keys it
+        -- bound, whatever the file says by then.
+
+    @invariant NoFileIsTheDefaultTable
+        -- With no override file in the data directory, every row's keys are
+        -- its default_keys and the load reports no error.
+
+    @invariant AnyOverrideFileGivesAWellFormedTable
+        -- For generated override files, good and bad (unknown names, clashes,
+        -- typed keys in text namespaces, chords, empty lists, entries that
+        -- are not objects), the table the load produces satisfies
+        -- HasAtLeastOneKey, KeyUniquePerContext, ContextsDoNotOverlapForAKey,
+        -- ChordPrefixIsFree, TextNamespacesBindNoTypedKey,
+        -- CatchAllIsNeverOverridden, TmuxGlobalRowsHaveOneKey and
+        -- KeysAreCanonical. The load never fails: it always produces a table.
+
+    @invariant EveryRefusalIsExercised
+        -- Every KeyOverrideProblem literal has a test: an entry with that
+        -- problem is refused with a message that says what to write instead,
+        -- its row keeps its default keys, and a good entry in the same file
+        -- still applies (for file_unreadable: no entry applies and the load
+        -- reports the one error).
+
+    @invariant RemappedTableDrivesDispatch
+        -- press_every_row_key and RecordedActionMatchesRow also run over a
+        -- remapped table, not only the default one. The remapped table swaps
+        -- the keys of every pair of opposite rows (navigate_row_down and
+        -- navigate_row_up, navigate_column_left and navigate_column_right,
+        -- every _down / _up, _expand / _collapse and next / previous pair in
+        -- every namespace, the companion and diff panes included), rotates
+        -- the keys of every value family (the tag, wrap-up-mode and model
+        -- letters, the repo digits) and rebinds at least one row in every
+        -- namespace an override may name. Under it each key runs the row
+        -- that lists it now, and a key the row no longer lists does not run
+        -- it. A handler that reads the pressed key to pick a direction or a
+        -- value fails here.
+
+    @invariant ReadersFollowTheRemap
+        -- Under the remapped table the help overlay and its title,
+        -- keybinding_search, the companion pane's section titles and the
+        -- pane startup screen's close hint name the user's keys
+        -- (CatalogueIsTheDispatchTable, OverlayIsGeneratedNotWritten,
+        -- OverlayTitleNamesItsOwnKeys, PaneTitlesNameTheirOwnKeys,
+        -- PaneStartupScreenIsOutsideUsage), and no description or note shows
+        -- a default key of a row that was rebound
+        -- (DescriptionsNameNoKeyOfTheirOwn).
 }
 
 ------------------------------------------------------------
@@ -205,6 +263,16 @@ contract KeybindingDriftGate {
 -- repo_filter_delete_repo_path and stays recorded. board.filter_search carries
 -- only text_backspace [Backspace], records_usage false, like board.search.
 --
+-- Text namespaces. Six namespaces take typed text, and a plain character or
+-- Space pressed there is data, not a binding: board.text, board.search,
+-- board.filter_search, board.picker.repo_path, board.picker.base_branch and
+-- board.picker.quick_dispatch. namespace_takes_text holds for exactly these.
+-- No row of a text namespace lists a key that can be typed
+-- (TextNamespacesBindNoTypedKey).
+--
+-- The keys shown in the inventories of this file are the DEFAULT keys. A
+-- user's override may replace them (LoadKeyTable).
+--
 -- The panes' rows (agent_tree.tree, agent_tree.commits, agent_tree.agents,
 -- agent_diff). The companion pane's three sections share the pane-wide keys
 -- — all act in whichever section has focus — and differ in what Space/Enter
@@ -220,10 +288,12 @@ contract KeybindingDriftGate {
 --     exit_pane                  q, Ctrl+C
 --     toggle_focus               s
 --     switch_section             Tab, BackTab
---     navigate_row               j, Down, k, Up
+--     navigate_row_down          j, Down
+--     navigate_row_up            k, Up
 --     navigate_row_first         gg
 --     navigate_row_last          G
---     navigate_half_page         Ctrl+D, Ctrl+U
+--     navigate_half_page_down    Ctrl+D
+--     navigate_half_page_up      Ctrl+U
 --     collapse_directory         h, Left        collapses the directory under
 --                                               the cursor, or steps out to
 --                                               its parent
@@ -232,8 +302,9 @@ contract KeybindingDriftGate {
 --     open_in_editor             v              context on_file
 --     toggle_directory           Space, Enter   context on_directory
 --   agent_tree.commits
---     exit_pane, toggle_focus, switch_section, navigate_row,
---     navigate_row_first, navigate_row_last, navigate_half_page — the same
+--     exit_pane, toggle_focus, switch_section, navigate_row_down,
+--     navigate_row_up, navigate_row_first, navigate_row_last,
+--     navigate_half_page_down, navigate_half_page_up — the same
 --     keys as in agent_tree.tree
 --     select_source              Space, Enter   selects the row under the
 --                                               cursor ("unstaged work" or a
@@ -246,8 +317,9 @@ contract KeybindingDriftGate {
 --                                               records nothing
 --     h, l, Left and Right have no row here and do nothing.
 --   agent_tree.agents
---     exit_pane, toggle_focus, navigate_row,
---     navigate_row_first, navigate_row_last, navigate_half_page — the same
+--     exit_pane, toggle_focus, navigate_row_down, navigate_row_up,
+--     navigate_row_first, navigate_row_last, navigate_half_page_down,
+--     navigate_half_page_up — the same
 --     keys as in agent_tree.tree
 --     cycle_agent_filter         Tab, BackTab   flips the section between
 --                                               every listed agent and the
@@ -264,10 +336,12 @@ contract KeybindingDriftGate {
 --     h, l, Left and Right have no row here and do nothing.
 --   agent_diff
 --     exit_pane                  q, Ctrl+C
---     navigate_row               j, Down, k, Up
+--     navigate_row_down          j, Down
+--     navigate_row_up            k, Up
 --     navigate_row_first         gg
 --     navigate_row_last          G
---     navigate_half_page         Ctrl+D, Ctrl+U
+--     navigate_half_page_down    Ctrl+D
+--     navigate_half_page_up      Ctrl+U
 --     Space, Enter and a have no row here and do nothing.
 -- The panes' `gg` chord never times out (agent-tree.allium), unlike the
 -- board's; that is the handler's property, not the row's (see
@@ -315,7 +389,8 @@ enum KeyReceiver { dispatch | tmux }
 -- The condition a context-guarded row applies under. A fixed set, so a test
 -- can set each one up and the overlap check is a table lookup rather than a
 -- reading of prose. Each literal carries plain words as its display text
--- (the help overlay and keybinding_search show the words, never the literal).
+-- (the help overlay shows the words, never the literal; keybinding_search
+-- returns both, because an override names a context by its literal).
 --
 -- Inventoried from the board's and the companion pane's handlers. The
 -- conditions for one key are defined to be mutually exclusive: where a handler
@@ -467,9 +542,18 @@ enum KeyContext {
 -- One row of the keybinding table. The table is the set of all KeyBindings;
 -- every key handler, the help overlay and keybinding_search read it, and no
 -- handler keeps a key list of its own. The short key hints in the status
--- bar, popups and form prompts are hand-written text, checked against the
--- table (KeybindingDriftGate.HintsNameOnlyTableKeys); the help overlay's
--- title and the companion pane's section titles are built from it.
+-- bar, popups and form prompts, the help overlay's title and the companion
+-- pane's section titles are each built from the row they stand for, so a
+-- rebound row changes its hint with no second edit
+-- (KeybindingDriftGate.HintsNameOnlyTableKeys checks them).
+--
+-- The table is the MERGED table: the rows the product ships with, each with
+-- its default keys, and on top of them the user's accepted overrides
+-- (KeyOverride, LoadKeyTable). An override replaces the keys of one row and
+-- nothing else: it never adds or removes a row, and never changes an action,
+-- context, description or note. Every reader reads the merged table; none
+-- reads the defaults apart from it, except to show them beside an overridden
+-- row.
 entity KeyBinding {
     namespace:   KeyNamespace
 
@@ -493,6 +577,31 @@ entity KeyBinding {
     -- modifiers ("Ctrl+D" is recorded as "d"). Do not treat the two
     -- forms as identical when matching usage counts to rows.
     --
+    -- Canonical key names. A key is written in exactly one way, and the
+    -- table, the override file, the help overlay and keybinding_search all
+    -- use it (is_key_name):
+    --   a character      one printable character other than space, as typed;
+    --                    case matters ("g" and "G" are two keys)
+    --   a named key      Space, Enter, Esc, Tab, BackTab, Backspace, Delete,
+    --                    Insert, Up, Down, Left, Right, Home, End, PageUp,
+    --                    PageDown, F1 to F12
+    --   a modified key   "Ctrl+", "Alt+" or "Ctrl+Alt+" before a character or
+    --                    a named key, a letter uppercase ("Ctrl+D")
+    --   a chord          exactly two characters pressed one after the other
+    --                    ("gg"); no named or modified key, no longer form
+    --   a tmux key       "Prefix+" before a character, a named key or a
+    --                    modified key; only in tmux_global, and every
+    --                    tmux_global key has this form
+    -- Nothing else is a key name: not "ctrl+d", "enter", "Escape" or
+    -- "Shift+G". Lookup is an exact match on the name, so a near-miss
+    -- accepted silently would be a dead key. Three modified names are not key
+    -- names either, because a terminal delivers another key for them:
+    -- "Ctrl+I" (Tab), "Ctrl+M" (Enter) and "Ctrl+[" (Esc).
+    -- A chord may be listed by any row outside the text namespaces and
+    -- tmux_global. Its first character is pending input until the second
+    -- arrives, so that character may not be a key of its own in the
+    -- namespace (ChordPrefixIsFree).
+    --
     -- One reserved entry, "any other key", is the catch-all: it matches a
     -- press no other applicable row in the namespace lists, and only then
     -- (lowest priority). It exists for the modes that answer
@@ -503,7 +612,19 @@ entity KeyBinding {
     -- and the two tree-picker confirmations, board.confirm.move_to_epic and
     -- board.confirm.reparent_epic (y, n, Esc/q). It is listed, so it is visible — the help overlay and
     -- keybinding_search show it like any other row.
+    -- A catch-all row is fixed: it means "whatever no other row lists", so
+    -- it has no key to replace, and no override names it
+    -- (CatchAllIsNeverOverridden). The rows beside it can be rebound, and
+    -- the catch-all then covers whatever they no longer list: when
+    -- confirm_quit_yes lists only "o", y answers confirm_quit_no.
     keys:        Set<String>
+
+    -- The keys the row ships with. keys equals default_keys unless an
+    -- accepted override replaced them. Shown beside an overridden row by
+    -- keybinding_search, and what the onboarding guide is checked against
+    -- (onboarding-guide.allium), since a static page cannot follow a user's
+    -- file.
+    default_keys: Set<String>
 
     -- When the row applies: one KeyContext condition, shown to readers as
     -- its plain words ("on an epic card", "inside an epic view"). Absent
@@ -521,9 +642,48 @@ entity KeyBinding {
     -- the key: rebinding edits `keys`, not `action`. The agent-tree and diff
     -- panes name their actions the same way, reusing a board id where the effect is the same
     -- (`G` in agent_diff is navigate_row_last).
+    -- An action id names ONE effect, in one direction and with one value.
+    -- Moving down and moving up are two rows with two ids, and so is each
+    -- value a key can pick. No row lists keys that do different things, and
+    -- no handler reads the pressed key to decide what to do: the row alone
+    -- decides, so rebinding is an edit to that row's keys and nothing else.
+    -- The families, by namespace:
+    --   board.normal                navigate_column_left, navigate_column_right;
+    --                               navigate_row_down, navigate_row_up
+    --   agent_tree.*, agent_diff    navigate_row_down, navigate_row_up;
+    --                               navigate_half_page_down, navigate_half_page_up
+    --   board.detail                scroll_detail_down, scroll_detail_up
+    --   board.help                  scroll_help_down, scroll_help_up
+    --   board.filter                filter_cursor_down, filter_cursor_up;
+    -- allow-phantom-symbol: an action id this spec names before the table has it
+    --                               repo_filter_toggle_repo_1 … repo_filter_toggle_repo_9
+    --   board.picker.repo_path,     picker_cursor_down, picker_cursor_up
+    --   board.picker.base_branch
+    --   board.picker.quick_dispatch quick_dispatch_cursor_down, quick_dispatch_cursor_up
+    --   board.picker.tag            tag_picker_select_bug, _feature, _chore,
+    --                               _pr_review, _research, _fix
+    -- allow-phantom-symbol: an action id this spec names before the table has it
+    --   board.picker.wrap_up_mode   wrap_up_mode_picker_select_rebase, _pr, _done
+    --   board.picker.model          model_picker_select_haiku, _sonnet, _opus, _fable
+    -- allow-phantom-symbol: an action id this spec names before the table has it
+    --   board.picker.move_to_epic   move_to_epic_picker_down, _up, _expand, _collapse
+    --   board.picker.reparent_epic  reparent_picker_down, _up, _expand, _collapse
+    --   board.picker.work_package   work_package_picker_down, work_package_picker_up
+    --   board.picker.placement      placement_picker_workspace_down,
+    --                               placement_picker_workspace_up
+    --   board.admin                 admin_navigate_down, admin_navigate_up;
+    --                               admin_next_pane, admin_previous_pane
+    -- A row whose keys all do the same thing stays one row:
+    -- placement_picker_visibility, switch_section and cycle_agent_filter flip
+    -- between two states whichever key is pressed, and y / Y both confirm.
     action:      String
 
     -- One line saying what pressing the key does, in the user's terms.
+    -- It names none of the row's own keys: the keys are shown beside it and
+    -- may be the user's. Where a description or note must point at ANOTHER
+    -- row's key (the last-row note: "does not enter an epic, use" the
+    -- enter_epic key), it refers to that row, and every reader shows the
+    -- row's first current key in its place (DescriptionsNameNoKeyOfTheirOwn).
     description: String
 
     -- A warning or clarification that a reader — human or agent — needs to
@@ -561,6 +721,124 @@ entity KeyBinding {
     invariant CatchAllStandsAlone {
         "any other key" in keys implies keys.count = 1
     }
+
+    -- A catch-all row keeps its one reserved key whatever the override file
+    -- says. With the error popup's dismiss_error among them, a load error
+    -- can always be dismissed.
+    invariant CatchAllIsNeverOverridden {
+        "any other key" in default_keys implies keys = default_keys
+    }
+}
+
+-- Which process is loading the table. The board, the agent-tree companion
+-- pane and the diff pane are three processes, and each loads its own.
+enum KeyTableReader { board | companion_pane | diff_pane }
+
+-- Why an entry of the override file is refused. A closed set, so a test can
+-- produce each one (KeybindingDriftGate.EveryRefusalIsExercised).
+--   file_unreadable               the file is not valid JSON, or is not a
+--                                 list; no entry applies
+--   malformed_entry               the entry is not an object, lacks namespace,
+--                                 action or keys, has a field of another
+--                                 name, or keys is not a list of strings
+--   duplicate_entry               two entries name the same row; both are
+--                                 refused
+--   unknown_namespace             namespace is not a published namespace name
+--                                 (a family name is not one)
+--   unknown_action                the namespace has no row with that action
+--   unknown_context               the action has no row with that context
+--   ambiguous_row                 no context is given, the action has several
+--                                 rows in the namespace and none is
+--                                 context-free
+--   empty_keys                    keys is an empty list: a row always keeps
+--                                 at least one key
+--   unknown_key_name              a key is not a canonical key name
+--   key_not_allowed_in_namespace  a character, Space or a chord in a text
+--                                 namespace; a chord, or a key that is not
+--                                 "Prefix+" and one key, in tmux_global; a
+--                                 "Prefix+" key anywhere else; more than one
+--                                 key for a tmux_global row
+--   catch_all_row                 the entry names a catch-all row, or lists
+--                                 "any other key"
+--   key_clash                     with the override applied, two rows of the
+--                                 namespace would answer one key at once
+--                                 (KeyUniquePerContext,
+--                                 ContextsDoNotOverlapForAKey)
+--   chord_prefix_clash            with the override applied, the first
+--                                 character of a chord would also be a key
+--                                 of a row in the namespace
+--                                 (ChordPrefixIsFree)
+enum KeyOverrideProblem {
+    file_unreadable | malformed_entry | duplicate_entry | unknown_namespace |
+    unknown_action | unknown_context | ambiguous_row | empty_keys |
+    unknown_key_name | key_not_allowed_in_namespace | catch_all_row |
+    key_clash | chord_prefix_clash
+}
+
+-- The user's override file: config.key_override_file_name in the data
+-- directory (storage.allium: DataDirectory), the one --data-dir names. It is
+-- a JSON list, one object per override:
+--   [{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["E"]},
+--    {"namespace": "board.normal", "action": "select_all",
+--     "context": "on_column_select_all", "keys": ["Enter"]}]
+-- It is not a store setting (settings.allium): keys belong to this machine's
+-- keyboard, and the panes, which open no store connection, read it too.
+-- Dispatch never creates it unasked; keybinding_set writes it. A missing
+-- file is not an error and means every row keeps its default keys.
+entity KeyOverrideFile {
+    directory: storage/DataDirectory
+    path: String              -- <data directory>/config.key_override_file_name
+    present: Boolean
+    -- Parses as a JSON list. A file that does not is refused whole
+    -- (file_unreadable): no entry applies.
+    well_formed: Boolean
+    -- The file's entries, in file order. Empty when the file is missing or
+    -- unreadable.
+    entries: List<KeyOverride>
+}
+
+-- One entry of the override file: the keys the user wants for one row. The
+-- row is named by its namespace's published name and its action id, plus
+-- the context literal where the action has more than one row in the
+-- namespace. With no context the entry names the action's context-free row
+-- when there is one, else its only row. select_all has both kinds of row in
+-- board.normal: "a" anywhere, and Enter "on a column's select-all row".
+entity KeyOverride {
+    namespace: String
+    action:    String
+    context:   String?
+    -- Replaces the row's whole key list. A key listed twice counts once.
+    keys:      Set<String>
+
+    -- Why the entry is refused; absent when it is accepted. Decided by
+    -- LoadKeyTable.
+    problem:   KeyOverrideProblem?
+    accepted:  Boolean = problem = null
+}
+
+-- One line of what a load reports: the problem, the entry it is about (by
+-- the names the entry gave, absent for file_unreadable) and a message that
+-- says what to write instead.
+value KeyLoadError {
+    problem:   KeyOverrideProblem
+    namespace: String?
+    action:    String?
+    context:   String?
+    message:   String
+}
+
+-- One process's load of the table: who loaded, from which file, and what
+-- the load refused. A process has one, made as it starts
+-- (KeyTableLoading.OneLoadPerProcess).
+entity KeyTableLoad {
+    reader: KeyTableReader
+    file:   KeyOverrideFile
+    errors: List<KeyLoadError>
+}
+
+config {
+    -- The override file's name in the data directory.
+    key_override_file_name: String = "keybindings.json"
 }
 
 ------------------------------------------------------------
@@ -574,11 +852,10 @@ rule KeypressRunsItsRowsAction {
     -- handler dispatch owns (every board mode, the companion pane's tree,
     -- Commits and Agents sections, the diff pane) answers a key by finding
     -- the row in its namespace that lists the key and whose context holds
-    -- right now, and running that row's action. Rebinding a row's only key
-    -- is an edit to that row and nothing else. A row whose keys pick a
-    -- direction or value (navigate_row's j/k, navigate_half_page's Ctrl+D /
-    -- Ctrl+U, the tag and wrap-up pickers' letters) also has its handler
-    -- match the key itself, so rebinding one of those keys is two edits.
+    -- right now, and running that row's action. The handler never reads the
+    -- pressed key to choose what the action does: a direction or a value is
+    -- the row's own (KeyBinding.action), so rebinding any key is a change to
+    -- that row's keys and nothing else, and an override file can make it.
     when: KeyPressed(user, namespace, key)
 
     requires: namespace != tmux_global
@@ -619,6 +896,10 @@ rule KeypressRunsItsRowsAction {
         -- (ModifiedPressMatchesOnlyItsOwnRow).
         -- A chord ("gg") is one key for this rule: its first half is pending
         -- input, not a lookup, and only the completed chord is looked up.
+        -- A character is the first half of a chord exactly when some row of
+        -- the active namespace lists a chord that starts with it, in the
+        -- table as loaded, so a chord the user gave a row works like the
+        -- shipped one and a namespace whose chord was rebound away has none.
         -- How long a chord waits differs by namespace (the board's times out,
         -- the companion pane's does not — see agent-tree.allium); that is a
         -- property of the handler, not of the row.
@@ -666,6 +947,145 @@ rule KeyWithoutARowCannotAct {
         -- SplitPaneRespawnOnWindowCleared). None of these records usage.
 }
 
+-- == Loading the table ==
+
+rule LoadKeyTable {
+    -- Each process builds its table once, as it starts: the board when it
+    -- starts, a pane when it opens. The table is the default rows with the
+    -- accepted entries of the override file applied.
+    when: KeyTableReaderStarted(reader)
+
+    let file = key_override_file(data_directory())
+
+    -- BoardShowsKeyLoadErrors and KeyLoadErrorsAreLogged listen.
+    ensures: KeyTableLoad.created(reader: reader, file: file,
+                                  errors: key_load_errors(file))
+
+    @guidance
+        -- The load never fails and never stops a process starting. Whatever
+        -- the file holds, the result is a table that satisfies every
+        -- invariant of this spec, so a bad file cannot lock the user out.
+        --
+        -- Each entry is judged on its own, in this order, and the first
+        -- problem found is the entry's problem (KeyOverrideProblem):
+        -- malformed_entry, unknown_namespace, unknown_action,
+        -- unknown_context or ambiguous_row, catch_all_row, empty_keys,
+        -- unknown_key_name, key_not_allowed_in_namespace. Then, across
+        -- entries, duplicate_entry: every entry that names a row another
+        -- entry names. A refused entry leaves its row on its default keys
+        -- and adds one KeyLoadError; the other entries still apply. A file
+        -- that is not a JSON list is one file_unreadable error and no entry
+        -- applies.
+        --
+        -- Clashes are judged over the whole table, never entry by entry:
+        -- swapping two rows' keys is two entries, and either alone would
+        -- clash with the other row's default. With every surviving entry
+        -- applied, each one that takes part in a key_clash or a
+        -- chord_prefix_clash — its row is one of the two rows — is refused,
+        -- all of them together, and the check runs again on what is left,
+        -- because a refused entry puts a default key back and that key can
+        -- clash with another entry. It ends when no clash is left. The
+        -- default table has none, so it always ends, and the result does not
+        -- depend on the order of the file. The error names both rows and the
+        -- key. A row added to the default table on a key a user's entry
+        -- already took makes that entry clash: it is refused and reported
+        -- like any other, and the new row keeps its key.
+        --
+        -- A message says what was wrong and what to write instead: an
+        -- unknown key name gives the canonical spelling ("ctrl+d" is not a
+        -- key name; write "Ctrl+D"), an unknown namespace, action or context
+        -- lists the valid ones.
+        --
+        -- Nothing watches the file. A change applies to a process the next
+        -- time that process starts. So a pane opened after a change uses the
+        -- new keys while the running board still uses the ones it loaded;
+        -- the two agree again once the board restarts. A pane sends the
+        -- board the action id and key of each press
+        -- (PanesRecordUsageLikeTheBoard), so recording does not depend on
+        -- the two tables agreeing.
+        --
+        -- KeyTableReaderStarted is raised by the board as it starts, before
+        -- it reads a key or binds a tmux key, and by each pane's renderer as
+        -- it starts.
+}
+
+rule BoardShowsKeyLoadErrors {
+    -- A load that refused anything tells the user, on the board.
+    when: load: KeyTableLoad.created
+
+    requires: load.reader = board
+    requires: load.errors.count > 0
+
+    -- observable output; no rule listens.
+    ensures: KeyLoadErrorsShown(errors: load.errors)
+
+    @guidance
+        -- Shown in the error popup once the board has drawn. It names the
+        -- file, says the rows listed keep their default keys, and lists each
+        -- error's message. The popup's one row is a catch-all, which no
+        -- override can change (CatchAllIsNeverOverridden), so any key
+        -- dismisses it. A pane shows nothing: the board is where a load
+        -- error is reported, and the same file gives a pane the same errors.
+}
+
+rule KeyLoadErrorsAreLogged {
+    -- Every reader, board or pane, writes its load errors to the log.
+    when: load: KeyTableLoad.created
+
+    requires: load.errors.count > 0
+
+    -- observable output; no rule listens.
+    ensures: KeyLoadErrorsLogged(reader: load.reader, errors: load.errors)
+}
+
+-- == Writing the override file ==
+
+rule SetKeyOverridesViaMcp {
+    -- keybinding_set: an agent changes the user's keys the way the file
+    -- does, one or more rows in one call.
+    when: McpSetKeybindings(agent, changes)
+
+    requires: changes.count >= 1
+    -- A file that is not a JSON list is never written over.
+    requires: not key_override_file_is_unreadable()
+    -- The change must not add a problem the file did not already have.
+    requires: not change_adds_a_problem(changes)
+
+    -- observable output; no rule listens.
+    ensures: KeyOverrideFileWritten(changes: changes)
+
+    @guidance
+        -- Each change names a row as an entry does — namespace, action,
+        -- optional context — and gives its keys. A non-empty list sets the
+        -- row's entry, replacing one the file already has. An EMPTY list
+        -- removes the row's entry, which restores its default keys; that is
+        -- how a default is restored, and the only place an empty list is
+        -- accepted (in the file itself it is empty_keys).
+        --
+        -- The changes of one call are applied together and checked together,
+        -- by the checks LoadKeyTable runs, over the default table plus the
+        -- file's entries plus the changes. So a swap of two rows' keys is
+        -- one call. If any change would be refused at load — an unknown
+        -- name, a key the namespace does not allow, a clash with a row the
+        -- call does not change — nothing is written, and the rejection gives
+        -- each problem's message. An entry already in the file that the load
+        -- refuses is not this call's problem: it is left as it is and named
+        -- in the answer.
+        --
+        -- The write keeps every entry the call did not name and replaces the
+        -- file in one step, so no reader sees half of it. With no file, the
+        -- first accepted change creates it; removing the last entry leaves
+        -- an empty list.
+        --
+        -- Nothing changes in the running board: the answer lists each row's
+        -- new keys and says they apply when the board next starts, and that
+        -- a pane opened before then already uses them (LoadKeyTable).
+        -- Idempotent: repeating a call leaves the same file
+        -- (mcp-task-tools.allium: ToolsAdvertiseAnnotations).
+        -- A rejection is JSON-RPC -32602, as for an invalid namespace in
+        -- keybinding_search.
+}
+
 -- == Reading the table ==
 
 rule ListKeybindingsViaMcp {
@@ -687,11 +1107,23 @@ rule ListKeybindingsViaMcp {
 
     @guidance
         -- Read-only: no argument changes the table, and the call has no side
-        -- effect beyond the usual mcp_tool usage record.
+        -- effect beyond the usual mcp_tool usage record. Changing keys is
+        -- keybinding_set (SetKeyOverridesViaMcp).
+        -- The rows are the table the running board loaded (LoadKeyTable), so
+        -- the keys are the user's where an override was accepted. A row
+        -- whose keys are not its defaults also carries its default keys. A
+        -- row whose entry in the override file no longer matches what the
+        -- board loaded — set, changed or removed since — also carries its
+        -- pending keys, and the reply says they apply when the board next
+        -- starts. A context is returned as its words and as its literal,
+        -- since keybinding_set and the file name it by the literal.
+        -- The index also lists the errors of the board's load, each with its
+        -- message, and says so in one line when there are none to list.
         -- The whole table is about 44 KB, so a call with neither namespace
         -- nor query returns an index and not the table: one entry per
         -- namespace, in the KeyNamespace order above, with its published
-        -- dotted name, receiver and number of rows, and a last line saying to
+        -- dotted name, receiver, number of rows and number of overridden
+        -- rows, and a last line saying to
         -- pass namespace for a group's keys or query to search every group.
         -- With a namespace or a query the output is grouped by namespace, in
         -- KeyNamespace order; within a group, every row with its keys,
@@ -773,6 +1205,59 @@ invariant ActionOncePerContext {
                 implies a.action != b.action
 }
 
+-- A chord's first character is pending input, so it cannot also be a key:
+-- the press would have to both wait for a second character and act at once.
+-- Checked across the whole namespace whatever the rows' contexts, so the
+-- answer never depends on where the cursor is. Two chords may share a first
+-- character.
+invariant ChordPrefixIsFree {
+    for a in KeyBindings:
+        for b in KeyBindings:
+            a.namespace = b.namespace
+                implies not a.keys.any(c => is_chord(c) and chord_first_key(c) in b.keys)
+}
+
+-- In a text namespace a character or Space is typed data, so no row there
+-- lists one, nor a chord, which is made of characters. A row of a text
+-- namespace lists only named keys other than Space, and modified keys: Esc,
+-- F2, Ctrl+G, Alt+Backspace. It holds for every row of the namespace, the
+-- editing rows included.
+invariant TextNamespacesBindNoTypedKey {
+    for b in KeyBindings:
+        namespace_takes_text(b.namespace)
+            implies not b.keys.any(c => is_typed_key(c) or is_chord(c))
+}
+
+-- A tmux_global row is one tmux binding, so it has exactly one key, and no
+-- two of them share it (KeyUniquePerContext already forbids the second).
+invariant TmuxGlobalRowsHaveOneKey {
+    for b in KeyBindings:
+        b.namespace = tmux_global implies b.keys.count = 1
+}
+
+-- Every key of every row is a canonical key name or the reserved catch-all
+-- (see KeyBinding.keys). An override with any other spelling is refused at
+-- load (unknown_key_name), so the merged table holds none either.
+invariant KeysAreCanonical {
+    for b in KeyBindings:
+        b.keys.all(c => is_key_name(c) or c = "any other key")
+}
+
+-- An accepted override sets its row's keys, exactly.
+invariant AcceptedOverrideSetsItsRowsKeys {
+    for o in KeyOverrides:
+        for b in KeyBindings:
+            (o.accepted and override_names_row(o, b)) implies b.keys = o.keys
+}
+
+-- Nothing else moves a row off its default keys: not a refused entry, not a
+-- missing or unreadable file. With no file the table is the default table.
+invariant OnlyAnAcceptedOverrideChangesKeys {
+    for b in KeyBindings:
+        b.keys != b.default_keys
+            implies KeyOverrides.any(o => o.accepted and override_names_row(o, b))
+}
+
 -- The `G` row carries the warning this spec exists for (see "Why this
 -- exists" above). Expressed on the
 -- one row that must carry it rather than as a general rule, because a note is
@@ -821,12 +1306,14 @@ surface KeyInput {
         -- In a y/Y confirmation dialog Ctrl+y leaves the dialog open, and in
         -- the error popup a Ctrl/Alt press does not dismiss.
         -- Every modified key that acts therefore has a row: Ctrl+D / Ctrl+U
-        -- (navigate_half_page) and Ctrl+C (exit_pane) in the panes, and
+        -- (navigate_half_page_down / _up) and Ctrl+C (exit_pane) in the panes, and
         -- Ctrl+Left / Ctrl+Right / Alt+Left / Alt+Right / Alt+B / Alt+F
         -- (text_cursor_word_left / _right) in the text fields.
         -- Recorded usage detail drops modifiers (key_label; see
         -- KeyBinding.keys), so Ctrl+D is recorded as "d". The action id
-        -- (navigate_half_page) tells what ran; the detail alone does not.
+        -- (navigate_half_page_down) tells what ran; the detail alone does not.
+        -- The keys named in this guarantee are the default keys; the rule is
+        -- the same for whatever modified key a row lists.
 
     @guarantee PanesRecordUsageLikeTheBoard
         -- The agent-tree companion pane and the diff pane record each press
@@ -858,6 +1345,13 @@ surface KeyInput {
         -- (agent_tree.tree, agent_tree.commits, agent_tree.agents, agent_diff)
         -- have rows like the
         -- board's — see the pane inventory under KeyNamespace.
+
+    @guarantee PanesLoadTheirOwnTable
+        -- The companion pane and the diff pane are handed the data directory
+        -- and load the table themselves, from the same override file and by
+        -- the same rule as the board (LoadKeyTable). They do not ask the
+        -- board for it. A pane's keys, section titles and startup-screen
+        -- hint all come from the table it loaded.
 
     @guarantee DescriptionEditorTakesOnlyEsc
         -- The new-task and new-epic forms open the description in $EDITOR, in
@@ -904,8 +1398,9 @@ surface KeyInput {
 
     @guidance
         -- Accepted limitation, kept deliberately: a navigation press
-        -- (navigate_row, navigate_row_first, navigate_row_last,
-        -- navigate_half_page and the board's column and scroll motions) is
+        -- (navigate_row_down, navigate_row_up, navigate_row_first,
+        -- navigate_row_last, navigate_half_page_down, navigate_half_page_up
+        -- and the board's column and scroll motions) is
         -- recorded even when the cursor or scroll is already at the edge and
         -- nothing moves. The board and both panes behave this way, so a
         -- navigation count means the same in every pane and across the whole
@@ -922,6 +1417,7 @@ surface KeybindingCatalogue {
         for binding in KeyBindings:
             binding.namespace
             binding.keys
+            binding.default_keys
             binding.context
             binding.action
             binding.description
@@ -934,7 +1430,16 @@ surface KeybindingCatalogue {
     @guarantee CatalogueIsTheDispatchTable
         -- The rows returned are the rows the key handlers look keys up in, not
         -- a copy maintained beside them. Adding, removing or rebinding a key
-        -- changes this output with no second edit.
+        -- changes this output with no second edit. That holds for a key the
+        -- user rebound as for one the product ships: the rows are the merged
+        -- table the board loaded.
+
+    @guarantee OverridesAreVisible
+        -- An agent can tell a user's key from a shipped one and can undo it:
+        -- an overridden row carries its default keys, a row with a change
+        -- waiting for a restart carries its pending keys, every context
+        -- carries its literal, and the index lists the load errors
+        -- (ListKeybindingsViaMcp).
 
     @guarantee NotesTravelWithTheirRows
         -- A row's note and context are returned with it whenever the row is
@@ -962,10 +1467,19 @@ surface HelpOverlay {
         -- Same table, same rows, same contexts and notes as
         -- KeybindingCatalogue. The two may differ in layout, never in content.
 
+    @guarantee DescriptionsNameNoKeyOfTheirOwn
+        -- No description or note spells out a key of its own row; the keys
+        -- shown beside it are the row's current keys. Where one points at
+        -- another row's key, the overlay and keybinding_search show that
+        -- row's first current key (KeyBinding.description). So after a
+        -- remap no line of the overlay names a key that no longer does what
+        -- the line says.
+
     @guarantee OverlayTitleNamesItsOwnKeys
         -- The overlay's border title is built from the table too: it names
-        -- the keys of board.help's scroll_help row and of its close_help row
-        -- (e.g. "j/Down/k/Up scroll, ? or Esc close"). Rebinding either row
+        -- the keys of board.help's scroll_help_down and scroll_help_up rows
+        -- and of its close_help row (with the default keys, "j/Down/k/Up
+        -- scroll, ? or Esc close"). Rebinding any of these rows
         -- changes the title with no second edit; the title never names a key
         -- the overlay does not answer to.
 
@@ -976,6 +1490,71 @@ surface HelpOverlay {
         -- no worktree, how `/` matches ids, …) lives in the owning row's
         -- description or note, so it is reachable from both readers rather
         -- than from neither.
+}
+
+-- Where a change to the user's keys enters: keybinding_set.
+surface KeyOverrideWrites {
+    facing agent: core/McpClient
+
+    provides:
+        McpSetKeybindings(agent, changes)
+
+    @guarantee ARefusedChangeWritesNothing
+        -- A call is all or nothing. If any of its changes would be refused
+        -- at load, the file is left exactly as it was
+        -- (SetKeyOverridesViaMcp).
+
+    @guarantee WritersShareTheLoadersChecks
+        -- Whatever writes the override file checks a change with the checks
+        -- LoadKeyTable runs, not with a copy of them, so nothing dispatch
+        -- writes is refused at the next start.
+
+    @guarantee TheAnswerSaysWhenItApplies
+        -- The answer lists each changed row with its new keys and says the
+        -- change applies when the board next starts.
+}
+
+-- Where a process announces that it needs its table. The board and the two
+-- panes each raise it once, as they start.
+surface KeyTableLoading {
+    facing _: core/BoardProcess
+
+    provides:
+        KeyTableReaderStarted(reader)
+
+    @guarantee OneLoadPerProcess
+        -- A process loads its table once and keeps it until it exits. No
+        -- later change to the file reaches it.
+}
+
+-- The tmux_global rows and the keys tmux is told to bind.
+surface TmuxPrefixKeys {
+    facing _: core/Tmux
+
+    exposes:
+        for binding in KeyBindings where namespace = tmux_global:
+            binding.keys
+            binding.action
+
+    @guarantee TmuxKeysComeFromTheTable
+        -- The board binds, for jump_to_dispatch and for toggle_agent_tree,
+        -- the key of that row in the table it loaded (split-pane.allium:
+        -- JumpBackToTuiWindow; agent-tree.allium: BindAgentTreeToggle). The
+        -- row's key is "Prefix+" and one key, and the part after "Prefix+"
+        -- is translated to tmux's own spelling in one place: a character as
+        -- itself, a named key by tmux's name for it, "Ctrl+X" as "C-x" and
+        -- "Alt+X" as "M-x".
+
+    @guarantee TheBoardUnbindsWhatItBound
+        -- On quit the board unbinds the keys it bound when it started, not
+        -- the keys the file names by then.
+
+    @guarantee NoStalePrefixKeySurvivesAStart
+        -- A board that was killed leaves its keys bound. Before it binds,
+        -- a starting board removes every prefix binding whose command is one
+        -- of its own two commands, whatever key holds it, so a key the user
+        -- has since moved away from does not go on jumping to the board or
+        -- toggling the pane.
 }
 
 surface KeybindingTestSuite {

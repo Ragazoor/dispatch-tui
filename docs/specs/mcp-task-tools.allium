@@ -88,8 +88,10 @@ rule ToolsAdvertiseAnnotations {
     -- feed-config_read). The core/Retrieval rows learning_search records are
     -- bookkeeping of what the caller was shown, not a change the caller makes,
     -- so they do not count. A tool that reads in one call and writes in
-    -- another is split (docs/adr/0002, decision 4): review-command_set and
-    -- feed-config_set are idempotent, and each has a read twin.
+    -- another is split (docs/adr/0002, decision 4): review-command_set,
+    -- feed-config_set and keybinding_set are idempotent, and each has a read
+    -- twin (keybinding_search is keybinding_set's; keybindings.allium:
+    -- SetKeyOverridesViaMcp).
     -- destructiveHint is true only where a call removes or closes something
     -- that cannot be restored by another call (learning_delete, session_exit,
     -- task_update, whose status="done" form tears down the agent's window and
