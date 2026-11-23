@@ -52,7 +52,7 @@ repo-path & quick-dispatch query) shares one caret model:
 - Key routing for caret motions is rows in the keybinding table: `text_backspace`,
   `text_delete_forward`, `text_cursor_*` in the text-field and quick-dispatch
   namespaces, run by `run_text_edit` in `src/tui/input/table.rs`. They have
-  `records_usage` false, like typed characters. `Ctrl+←/→` are the primary
+  `records_usage` false, like typed characters. `Ctrl+←/→` are the default
   word-motion keys; `Alt+←/→` and readline `Alt+B`/`Alt+F` are the
   modifier-free fallback for tmux without `xterm-keys`. A Ctrl/Alt press with no
   row does nothing and is never typed as a character.

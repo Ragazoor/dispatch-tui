@@ -2,8 +2,8 @@
 
 ## Key Bindings
 
-The keybinding table (`src/keybindings/table.rs::KEY_BINDINGS`) is the one place every key is declared, and
-the board, the agent-tree and diff panes, the `?` help overlay and the MCP tool all read
+The keybinding table (`src/keybindings/table.rs::KEY_BINDINGS`) is the one place every key is declared with its
+default keys, and the board, the agent-tree and diff panes, the `?` help overlay and the MCP tool all read
 it. There is no key list in this document to drift out of date:
 
 - **In the TUI**: press `?` for the overlay, generated from the table and grouped by mode.
@@ -18,9 +18,81 @@ it. There is no key list in this document to drift out of date:
 - **Changing keys from an agent**: call `keybinding_set`. It writes the user's `keybindings.json` in
   the data directory with the loader's own checks, refuses a change the board would refuse, and an
   empty key list restores a row's default. The running board keeps its keys until it restarts.
+- **By hand**: edit the same file. See [Changing keys](#changing-keys).
 
 A Ctrl or Alt press matches only a row that lists the modified form (`Ctrl+D`), never
 the bare key's row. See `docs/specs/keybindings.allium`.
+
+### Changing keys
+
+Every key in the table is a default. To change a key, give its row new keys in
+`keybindings.json` in the data directory (`~/.local/share/dispatch/keybindings.json`
+by default; `--data-dir` moves it; `src/keybindings/overrides.rs::KEY_OVERRIDE_FILE_NAME`).
+Dispatch never creates the file itself; only `keybinding_set` writes it. With no file,
+every row keeps its default keys.
+
+The file is a JSON list with one entry per row:
+
+```json
+[
+  {"namespace": "board.normal", "action": "navigate_row_last", "keys": ["O"]},
+  {"namespace": "board.normal", "action": "select_all", "context": "on_column_select_all", "keys": ["Enter"]},
+  {"namespace": "tmux.global", "action": "toggle_agent_tree", "keys": ["Prefix+t"]}
+]
+```
+
+- `namespace` is a namespace name such as `board.normal`, `agent_diff` or
+  `tmux.global`. A family name such as `board.confirm` is not one.
+- `action` is the row's action id. `keybinding_search` lists the namespaces and
+  action ids.
+- `context` names the row when the action has more than one row in the namespace.
+  Without it, the entry names the action's row with no context, or its only row; when
+  the action has several rows and none is without a context, the entry is refused. Write
+  the context's id (`on_epic_card`), which `keybinding_search` shows next to its words.
+- `keys` replaces the row's whole key list. It may not be empty. To get a row's
+  default back, delete its entry.
+
+A key name is spelled one way, and case matters:
+
+- One printable character: `j`, `G`, `?`. A capital letter is the shifted key: write
+  `G`, never `Shift+G`.
+- A named key: `Space`, `Enter`, `Esc`, `Tab`, `BackTab`, `Backspace`, `Delete`,
+  `Insert`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`,
+  `F1` to `F12`.
+- A modified key: `Ctrl+`, `Alt+` or `Ctrl+Alt+` before a character or a named key,
+  with a letter in capitals: `Ctrl+D`, `Alt+Left`. `ctrl+d` is refused.
+  `Ctrl+I`, `Ctrl+M` and `Ctrl+[` are refused too: a terminal sends Tab, Enter
+  and Esc for them.
+- A chord: two characters pressed one after the other, such as `gg`. Its first
+  character cannot also be a key of its own in that namespace.
+- In `tmux.global` only: `Prefix+` and one key (`Prefix+e`, `Prefix+Ctrl+T`), one
+  key per row. Nowhere else takes `Prefix+`.
+
+The six namespaces where you type text (text fields, search, filter search and the
+repo path, base branch and quick dispatch pickers) refuse characters, `Space` and
+chords: there those are typed text. Use a named key or a `Ctrl`/`Alt` key. No entry
+can change an "any other key" row, or list that key.
+
+**A bad file never locks you out.** Each entry is checked on its own. A refused entry
+leaves its row on its default keys, and the other entries still apply. A file that is
+not a JSON list, or cannot be read, is refused whole. Two entries for one row are both
+refused. An entry whose keys would make two rows answer one key at the same place is
+refused; if the other row has an entry too, that one is refused as well. The check runs over the whole file, so
+two entries that swap two rows' keys both apply.
+
+When the board starts, it shows what it refused in an error popup. Any key closes it.
+The popup lists the first three errors, and each says what to write instead.
+`app.log` holds every error, from the board and from the panes.
+
+**Changes apply at restart.** Nothing watches the file. The board reads it when it
+starts, so run `dispatch tui` again to use new keys. The agent-tree and diff panes read
+it each time they open, so a pane opened after the change already uses the new keys.
+The board binds the `tmux.global` keys when it starts. If tmux refuses a key the file
+gives, the board binds the row's default key instead and shows an error.
+
+The `?` overlay and `keybinding_search` show your keys. `keybinding_search` also
+shows a changed row's default keys, any change that waits for a restart, and the
+errors of the board's last load.
 
 ### Agent-tree companion pane
 
@@ -130,7 +202,7 @@ RUST_LOG=dispatch_tui=debug cargo run -- tui      # then tail the log file (see 
   from inside one) before launching it.
 - **Where the live data is**: in the SpacetimeDB store. The board's tasks and epics are served by the store at `DISPATCH_SPACETIME_SERVER` (the managed store defaults to `127.0.0.1:3000`; the operator's board uses `127.0.0.1:3001`, database `dispatch`; the running address is in `~/.local/share/dispatch/store-server`, and the managed store's files are in `~/.local/share/dispatch/spacetime/`). A `tasks.db` left over from before the move is never opened, read or migrated (`storage.allium: NoSqlite`). Query the store through the MCP tools (`task_search`, `task_search`) or `spacetime sql`.
 - **What SQLite still stores**: nothing. Dispatch links no SQLite since task #36865; the data directory's `tasks.db` is never opened. A handle with no store attached refuses every shared read and write with a "no shared store attached" error.
-- **Data directory**: `$XDG_DATA_HOME/dispatch`, else `~/.local/share/dispatch/` (`default_data_dir()` in `src/lib.rs`). The default needs an absolute `$XDG_DATA_HOME` or `$HOME`; with neither, the commands that need it fail naming `$HOME` and the rest (`statusline`, hooks, `caller-headers`, `verify-feed`) never look. `--data-dir` / `DISPATCH_DATA_DIR` picks it; the old `--db` / `DISPATCH_DB` is gone. The directory holds `host.json` (this machine's identity: host id, label, user identity and its credential; mode 0600, written whole by rename), `app.log`, the `store-server` record and the `store-identity` pin. The pin holds the identity of the store database the last board connected to; a launch whose store holds a different database stops before connecting, naming both, and `dispatch tui --accept-store-switch` lets one launch through and re-pins (`startup.allium: AbortWhenTheStoreIsNotTheOneThisInstallUses`, task #28710). Both `http://` and `https://` stores are checked (TLS uses the bundled web roots); a store that cannot be asked, such as one behind a certificate only the OS trusts, connects unchecked with a warning in `app.log`. A board launch with no `host.json` is a first run and mints one; one that exists but cannot be read or parsed is never overwritten, and the launch aborts naming it. One-shot commands (`repo`, `plan`, `prune-repo-paths`, the agent-tree panes) only read it and fail with "run `dispatch tui` once" when it is missing. To forget this machine's identity, `dispatch uninstall --purge` (or delete `host.json`): the next launch mints a new one.
+- **Data directory**: `$XDG_DATA_HOME/dispatch`, else `~/.local/share/dispatch/` (`default_data_dir()` in `src/lib.rs`). The default needs an absolute `$XDG_DATA_HOME` or `$HOME`; with neither, the commands that need it fail naming `$HOME` and the rest (`statusline`, hooks, `caller-headers`, `verify-feed`) never look. `--data-dir` / `DISPATCH_DATA_DIR` picks it; the old `--db` / `DISPATCH_DB` is gone. The directory holds `keybindings.json` when you have changed keys (see "Changing keys" under Key Bindings), `host.json` (this machine's identity: host id, label, user identity and its credential; mode 0600, written whole by rename), `app.log`, the `store-server` record and the `store-identity` pin. The pin holds the identity of the store database the last board connected to; a launch whose store holds a different database stops before connecting, naming both, and `dispatch tui --accept-store-switch` lets one launch through and re-pins (`startup.allium: AbortWhenTheStoreIsNotTheOneThisInstallUses`, task #28710). Both `http://` and `https://` stores are checked (TLS uses the bundled web roots); a store that cannot be asked, such as one behind a certificate only the OS trusts, connects unchecked with a warning in `app.log`. A board launch with no `host.json` is a first run and mints one; one that exists but cannot be read or parsed is never overwritten, and the launch aborts naming it. One-shot commands (`repo`, `plan`, `prune-repo-paths`, the agent-tree panes) only read it and fail with "run `dispatch tui` once" when it is missing. To forget this machine's identity, `dispatch uninstall --purge` (or delete `host.json`): the next launch mints a new one.
 - **Logs do not go to stderr.** `cmd_tui` installs a `tracing_subscriber` that appends to `app.log` **next to the database file** (`init_app_log_subscriber` in `src/main.rs`), because stderr belongs to the TUI. Watch it with `tail -f ~/.local/share/dispatch/app.log`. The floor is `INFO`; `RUST_LOG` (crate name `dispatch_tui`) raises it.
 - **MCP port**: `DEFAULT_PORT = 3142` (`src/lib.rs`), override with `--port` on `tui`/`setup` or `DISPATCH_PORT`.
 - **Exercising MCP by hand**: see `docs/mcp.md`. Identity comes from headers, and **exactly one** of the two must be set (`src/mcp/identity.rs::from_headers`, applied by the `src/mcp/middleware.rs` middleware). A bare `curl` sends neither, so it resolves to `IdentityError::Missing` and any handler that requires authorization rejects it. Send `-H 'X-Caller-Task-Id: <id>'` to act as that task's agent, or `-H 'X-Caller-Kind: session'` to act as the human session; sending both is a `Conflict`.
@@ -199,7 +271,7 @@ updating a task.
 
 | Flag | Env Var | Default |
 |------|---------|---------|
-| `--data-dir` | `DISPATCH_DATA_DIR` | `~/.local/share/dispatch` — the data directory (`host.json`, `app.log`, store records) |
+| `--data-dir` | `DISPATCH_DATA_DIR` | `~/.local/share/dispatch` — the data directory (`host.json`, `app.log`, store records, `keybindings.json`) |
 | `--port` | `DISPATCH_PORT` | `3142` |
 | `--spacetime-server` | `DISPATCH_SPACETIME_SERVER` | none — `dispatch tui` runs its own managed store on `127.0.0.1:3000` |
 

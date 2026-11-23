@@ -27,6 +27,8 @@ Agents let me take on more work than before. Dispatch is my way of organising th
 
 ## A look around
 
+The keys in this README are the defaults. Press `?` on the board for the keys you have, and see [Changing keys](docs/reference.md#changing-keys) to change them.
+
 **The board.** Each column shows what needs you first. Running cards are grouped by what the agent is doing: *needs input* at the top, then *active*. Review cards are grouped by where the work is: *changes requested*, *approved*, then *awaiting review*.
 
 ![The board, with an agent waiting for input at the top of Running](docs/images/board.png)
@@ -116,7 +118,7 @@ In a hurry? Press `D` instead. It skips the form, dispatches at once, and the ag
 ## Docs
 
 - [Guided tour](docs/guide/index.html) — try the board in your browser
-- [Reference](docs/reference.md) — key bindings, configuration, CLI, feeds, troubleshooting
+- [Reference](docs/reference.md) — key bindings and how to change them, configuration, CLI, feeds, troubleshooting
 - [MCP](docs/mcp.md) — the tools agents call
 - [Specs](docs/specs/) — what the system is meant to do
 - [CLAUDE.md](CLAUDE.md) — building, testing, and contributing
