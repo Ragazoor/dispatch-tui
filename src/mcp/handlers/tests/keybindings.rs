@@ -288,14 +288,11 @@ async fn the_esc_exit_epic_row_shows_its_context_words() {
 /// query for the user's key finds it.
 #[tokio::test]
 async fn the_catalogue_shows_the_users_keys_from_the_override_file() {
-    let Ok(mut state) = Arc::try_unwrap(test_state().await) else {
-        panic!("the test state is shared");
-    };
-    state.key_table = crate::keybindings::loaded_table(
+    let state = state_with_key_table(crate::keybindings::loaded_table(
         crate::keybindings::KeyTableReader::Board,
         r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#,
-    );
-    let state = Arc::new(state);
+    ))
+    .await;
 
     let resp = list(&state, json!({"namespace": "board.normal"})).await;
     let gs = groups(&resp);
@@ -321,12 +318,10 @@ async fn the_catalogue_shows_the_users_keys_from_the_override_file() {
 /// namespace's rows come back with the keys they have there, in table order.
 #[tokio::test]
 async fn the_catalogue_follows_the_remapped_table() {
-    let Ok(mut state) = Arc::try_unwrap(test_state().await) else {
-        panic!("the test state is shared");
-    };
     let table = crate::keybindings::remapped_table();
-    state.key_table.table = table;
-    let state = Arc::new(state);
+    let mut load = crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir());
+    load.table = table;
+    let state = state_with_key_table(load).await;
     for ns in crate::keybindings::KeyNamespace::ALL {
         let resp = list(&state, json!({"namespace": ns.name()})).await;
         let got: Vec<Value> = groups(&resp)[0]["bindings"]
@@ -340,4 +335,13 @@ async fn the_catalogue_follows_the_remapped_table() {
             .collect();
         assert_eq!(got, want, "{}", ns.name());
     }
+}
+
+/// A test state whose board loaded `load`.
+async fn state_with_key_table(load: crate::keybindings::KeyTableLoad) -> Arc<McpState> {
+    let Ok(mut state) = Arc::try_unwrap(test_state().await) else {
+        panic!("the test state is shared");
+    };
+    state.key_table = load;
+    Arc::new(state)
 }

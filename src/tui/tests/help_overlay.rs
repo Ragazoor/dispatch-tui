@@ -263,30 +263,7 @@ fn row_problem(
 /// note.
 #[test]
 fn every_row_of_the_table_is_in_the_overlay_under_its_namespace() {
-    let body = overlay_body();
-    let tokens = tokens_of(&body);
-    let spans = group_spans(&body);
-    let mut failures = Vec::new();
-    for binding in KEY_BINDINGS {
-        let &(_, from, to) = spans
-            .iter()
-            .find(|(ns, _, _)| *ns == binding.namespace)
-            .unwrap();
-        if let Some(problem) = row_problem(&body, &tokens, binding, (from, to)) {
-            failures.push(format!(
-                "{} {} {:?}: {problem}",
-                binding.namespace.name(),
-                binding.action,
-                binding.keys
-            ));
-        }
-    }
-    assert!(
-        failures.is_empty(),
-        "rows the help overlay does not show:\n{}\n--- overlay body ---\n{}",
-        failures.join("\n"),
-        body.join("\n")
-    );
+    assert_overlay_shows_every_row(&overlay_body(), KEY_BINDINGS);
 }
 
 /// OverlayIsGeneratedNotWritten for the merged table (LoadKeyTable): with an
@@ -299,60 +276,25 @@ fn the_overlay_shows_the_users_keys_from_the_override_file() {
         crate::keybindings::KeyTableReader::Board,
         r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#,
     );
-    let mut app = App::new(vec![]);
-    app.install_key_table(&load);
-    app.update(Message::System(
-        crate::tui::messages::SystemMessage::ToggleHelp,
-    ));
-    assert_eq!(app.input.mode, InputMode::Help);
-    let body = overlay_body_of(app);
-    let tokens = tokens_of(&body);
-    let spans = group_spans(&body);
-    let span_of = |ns: KeyNamespace| {
-        let &(_, from, to) = spans.iter().find(|(n, _, _)| *n == ns).unwrap();
-        (from, to)
-    };
-    let mut failures = Vec::new();
-    for binding in load.table {
-        if let Some(problem) = row_problem(&body, &tokens, binding, span_of(binding.namespace)) {
-            failures.push(format!(
-                "{} {}: {problem}",
-                binding.namespace.name(),
-                binding.action
-            ));
-        }
-    }
-    assert!(
-        failures.is_empty(),
-        "rows of the loaded table the overlay does not show:
-{}
---- overlay body ---
-{}",
-        failures.join(
-            "
-"
-        ),
-        body.join(
-            "
-"
-        )
-    );
+    let body = overlay_body_of(help_app_with(&load));
+    assert_overlay_shows_every_row(&body, load.table);
+
     // The key line of the rebound row is the user's key alone: the default
     // key is not shown beside it.
+    let tokens = tokens_of(&body);
     let row = load
         .table
         .iter()
         .find(|b| b.namespace == KeyNamespace::BoardNormal && b.action == "delete_task")
         .unwrap();
-    let (from, to) = span_of(KeyNamespace::BoardNormal);
-    let first_word = row.description.split_whitespace().next().unwrap();
-    let key_lines: Vec<&str> = (from + 1..to)
-        .filter(|&i| {
-            body[i].trim_start().starts_with(first_word)
-                && phrase_matches(&tokens, row.description, 0, tokens.len())
-                    .iter()
-                    .any(|&(s, _)| tokens[s].line == i)
-        })
+    let &(_, from, to) = group_spans(&body)
+        .iter()
+        .find(|(ns, _, _)| *ns == KeyNamespace::BoardNormal)
+        .unwrap();
+    let key_lines: Vec<&str> = phrase_matches(&tokens, row.description, 0, tokens.len())
+        .iter()
+        .map(|&(s, _)| tokens[s].line)
+        .filter(|&i| i > from && i < to)
         .map(|i| body[i - 1].trim())
         .collect();
     assert_eq!(key_lines, vec!["O"], "{}", body.join("\n"));
@@ -364,12 +306,9 @@ fn the_overlay_shows_the_users_keys_from_the_override_file() {
 #[test]
 fn the_overlay_and_its_title_follow_the_remapped_table() {
     let table = crate::keybindings::remapped_table();
-    let mut app = App::new(vec![]);
-    app.set_key_table(table);
-    app.update(Message::System(
-        crate::tui::messages::SystemMessage::ToggleHelp,
-    ));
-    assert_eq!(app.input.mode, InputMode::Help);
+    let mut load = crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir());
+    load.table = table;
+    let mut app = help_app_with(&load);
 
     let buf = render_to_buffer(&mut app, WIDTH, HEIGHT);
     let screen: String = (buf.area().top()..buf.area().bottom())
@@ -387,27 +326,43 @@ fn the_overlay_and_its_title_follow_the_remapped_table() {
         "{title:?} not on screen:\n{screen}"
     );
 
-    let body = overlay_body_of(app);
-    let tokens = tokens_of(&body);
-    let spans = group_spans(&body);
-    let mut failures = Vec::new();
-    for binding in table {
-        let &(_, from, to) = spans
-            .iter()
-            .find(|(ns, _, _)| *ns == binding.namespace)
-            .unwrap();
-        if let Some(problem) = row_problem(&body, &tokens, binding, (from, to)) {
-            failures.push(format!(
-                "{} {}: {problem}",
+    assert_overlay_shows_every_row(&overlay_body_of(app), table);
+}
+
+/// The help overlay open on a board that loaded `load`.
+fn help_app_with(load: &crate::keybindings::KeyTableLoad) -> App {
+    let mut app = App::new(vec![]);
+    app.install_key_table(load);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::ToggleHelp,
+    ));
+    assert_eq!(app.input.mode, InputMode::Help);
+    app
+}
+
+/// Every row of `table` is in `body` under its namespace, with the keys it
+/// has in `table` beside its description.
+fn assert_overlay_shows_every_row(body: &[String], table: &[KeyBinding]) {
+    let tokens = tokens_of(body);
+    let spans = group_spans(body);
+    let failures: Vec<String> = table
+        .iter()
+        .filter_map(|binding| {
+            let &(_, from, to) = spans.iter().find(|(ns, _, _)| *ns == binding.namespace)?;
+            let problem = row_problem(body, &tokens, binding, (from, to))?;
+            Some(format!(
+                "{} {} {:?}: {problem}",
                 binding.namespace.name(),
-                binding.action
-            ));
-        }
-    }
+                binding.action,
+                binding.keys
+            ))
+        })
+        .collect();
     assert!(
         failures.is_empty(),
-        "rows of the remapped table the overlay does not show:\n{}",
-        failures.join("\n")
+        "rows the help overlay does not show:\n{}\n--- overlay body ---\n{}",
+        failures.join("\n"),
+        body.join("\n")
     );
 }
 

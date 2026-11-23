@@ -969,15 +969,13 @@ fn the_drawn_section_titles_name_the_users_keys_from_the_override_file() {
     let mut state = RenderState::new(remapped);
     let agents = draw(&mut state);
     assert!(
-        agents.contains(agents_title_text(remapped).trim()),
+        agents.contains(
+            crate::agent_tree::render::agents::agents_title(remapped, AgentFilter::All).trim()
+        ),
         "{agents}"
     );
     state.focus = Focus::Tree;
     let browse = draw(&mut state);
     let commits = crate::agent_tree::render::commits::commits_title(remapped);
     assert!(browse.contains(commits.trim()), "{browse}");
-}
-
-fn agents_title_text(table: &'static [crate::keybindings::KeyBinding]) -> String {
-    crate::agent_tree::render::agents::agents_title(table, AgentFilter::All)
 }

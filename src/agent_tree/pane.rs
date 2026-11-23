@@ -302,10 +302,7 @@ fn exit_keys(
     table: &'static [crate::keybindings::KeyBinding],
     ns: crate::keybindings::KeyNamespace,
 ) -> Vec<&'static str> {
-    crate::keybindings::bindings_in(table, ns)
-        .filter(|b| b.action == "exit_pane")
-        .flat_map(|b| b.keys.iter().copied())
-        .collect()
+    crate::keybindings::keys_of(table, ns, "exit_pane")
 }
 
 /// Resolve the pane's task, drawing progress. `None` means the user closed the

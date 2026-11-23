@@ -95,13 +95,10 @@ fn the_failure_screens_close_hint_names_the_users_exit_key() {
 /// names the keys of its own exit_pane row in that table.
 #[test]
 fn the_close_hint_names_the_exit_keys_of_the_remapped_table() {
-    use crate::keybindings::{bindings_in, remapped_table, KeyNamespace};
+    use crate::keybindings::{keys_of, remapped_table, KeyNamespace};
     let table = remapped_table();
     for ns in [KeyNamespace::AgentTreeTree, KeyNamespace::AgentDiff] {
-        let keys: Vec<&str> = bindings_in(table, ns)
-            .filter(|b| b.action == "exit_pane")
-            .flat_map(|b| b.keys.iter().copied())
-            .collect();
+        let keys = keys_of(table, ns, "exit_pane");
         let out = drawn_in(&StartupStep::Fail("gone".into()), table, ns);
         let hint = format!("press {} to close", keys.join(" or "));
         assert!(out.contains(&hint), "{ns:?}: {hint:?} not in\n{out}");

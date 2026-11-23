@@ -678,6 +678,20 @@ pub fn first_key(
         .unwrap_or_default()
 }
 
+/// Every key of `namespace`'s `action` rows in `table`, in table order:
+/// what a hint that names a row's keys shows (OverlayTitleNamesItsOwnKeys,
+/// PaneStartupScreenIsOutsideUsage).
+pub fn keys_of(
+    table: &'static [KeyBinding],
+    namespace: KeyNamespace,
+    action: &str,
+) -> Vec<&'static str> {
+    bindings_in(table, namespace)
+        .filter(|b| b.action == action)
+        .flat_map(|b| b.keys.iter().copied())
+        .collect()
+}
+
 /// The rows of one namespace of `table`, in table order. Every reader passes
 /// the table its process loaded (`LoadKeyTable`), so what it shows or answers
 /// is the user's keys where an override was accepted.
