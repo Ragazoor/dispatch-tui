@@ -22,7 +22,7 @@ impl Rig {
             .collect();
         let mut rig = Self {
             lines,
-            state: DiffState::new(),
+            state: DiffState::new(crate::keybindings::KEY_BINDINGS),
             terminal: Terminal::new(TestBackend::new(40, rows)).unwrap(),
         };
         rig.draw();
@@ -274,9 +274,9 @@ fn a_long_line_is_truncated_rather_than_wrapped() {
 /// press_every_row_key / RecordedActionMatchesRow for the diff pane.
 #[test]
 fn pressing_each_key_of_each_diff_row_records_the_rows_action() {
-    use crate::keybindings::{bindings_in, KeyNamespace};
+    use crate::keybindings::{default_bindings_in, KeyNamespace};
     let mut pressed = 0;
-    for binding in bindings_in(KeyNamespace::AgentDiff) {
+    for binding in default_bindings_in(KeyNamespace::AgentDiff) {
         assert_eq!(binding.context, None);
         for key in binding.keys {
             let mut rig = Rig::new(60, 12);
@@ -371,6 +371,28 @@ fn under_the_remapped_table_each_key_scrolls_the_way_its_row_says() {
         );
     }
     assert!(moved > 0, "no agent_diff row moved");
+}
+
+/// PanesLoadTheirOwnTable: the diff pane answers the keys of the table it
+/// loads from the override file.
+#[test]
+fn the_diff_pane_answers_the_users_key_from_the_override_file() {
+    let table = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::DiffPane,
+        r#"[{"namespace": "agent_diff", "action": "navigate_row_first", "keys": ["zz"]}]"#,
+    )
+    .table;
+    let mut rig = Rig::new(60, 12);
+    rig.state.key_table = table;
+    rig.press(KeyCode::Char('G'));
+    let bottom = rig.state.offset();
+    assert!(bottom > 0);
+    rig.press(KeyCode::Char('g'));
+    rig.press(KeyCode::Char('g'));
+    assert_eq!(rig.state.offset(), bottom, "gg is no row's key any more");
+    rig.press(KeyCode::Char('z'));
+    rig.press(KeyCode::Char('z'));
+    assert_eq!(rig.state.offset(), 0);
 }
 
 /// A chord moved to another key works in the diff pane, and `gg` no longer

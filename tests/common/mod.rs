@@ -34,6 +34,7 @@ pub async fn test_router_with_data_dir(
             runner,
             embedding_service: EmbeddingService::new_noop(),
             data_dir: data_dir.to_path_buf(),
+            key_table: dispatch_tui::keybindings::KeyTableLoad::defaults(data_dir),
         },
         None,
     );
@@ -60,6 +61,7 @@ pub async fn test_router_with_bg_done(
             runner,
             embedding_service: EmbeddingService::new_noop(),
             data_dir: data_dir.to_path_buf(),
+            key_table: dispatch_tui::keybindings::KeyTableLoad::defaults(data_dir),
         },
         None,
         Some(tx),
@@ -175,6 +177,7 @@ pub async fn spawn_board() -> Board {
             runner,
             embedding_service: EmbeddingService::new_noop(),
             data_dir: dir.path().to_path_buf(),
+            key_table: dispatch_tui::keybindings::KeyTableLoad::defaults(dir.path()),
         },
         None,
         Some(bg_tx),

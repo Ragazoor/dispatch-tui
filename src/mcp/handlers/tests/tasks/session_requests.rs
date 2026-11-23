@@ -51,6 +51,7 @@ fn state_over_db(db: Arc<dyn store::TaskStore>, cap: Duration, answers: usize) -
             runner,
             embedding_service: EmbeddingService::new_test(),
             data_dir: std::env::temp_dir(),
+            key_table: crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
         },
         None,
     );
@@ -184,6 +185,7 @@ async fn a_refusal_in_the_tool_writes_no_request_row() {
                 runner,
                 embedding_service: EmbeddingService::new_test(),
                 data_dir: std::env::temp_dir(),
+                key_table: crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
             },
             None,
         );
@@ -638,6 +640,7 @@ async fn update_tasks_done_closes_in_the_module_and_writes_a_close_row_without_a
                     runner: runner.clone(),
                     embedding_service: EmbeddingService::new_test(),
                     data_dir: std::env::temp_dir(),
+                    key_table: crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
                 },
                 None,
             );

@@ -472,7 +472,7 @@ async fn cmd_agent_diff(
     task_id: TaskId,
 ) -> Result<()> {
     let _ = init_app_log_subscriber(data_dir);
-    dispatch_tui::cli::agent_diff::run(board_port, task_id).await
+    dispatch_tui::cli::agent_diff::run(data_dir, board_port, task_id).await
 }
 
 /// Initialise a `tracing_subscriber` writing to **stderr**, for `verify-feed`.

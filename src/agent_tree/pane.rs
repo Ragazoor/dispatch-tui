@@ -264,13 +264,14 @@ pub(crate) fn render_startup_notice(
     frame: &mut ratatui::Frame,
     area: ratatui::layout::Rect,
     step: &StartupStep,
+    table: &'static [crate::keybindings::KeyBinding],
     ns: crate::keybindings::KeyNamespace,
 ) {
     let text = match step {
         StartupStep::Fail(reason) => {
             format!(
                 "{reason}\n\npress {} to close this pane",
-                exit_keys(ns).join(" or ")
+                exit_keys(table, ns).join(" or ")
             )
         }
         _ => "waiting for the task".to_string(),
@@ -284,20 +285,24 @@ pub(crate) fn render_startup_notice(
 }
 
 /// Whether the press is one of the pane's exit keys: the keys of the
-/// `exit_pane` row, so the startup screen and the pane proper agree. Nothing is
+/// `exit_pane` row of the pane's loaded table, so the startup screen and the pane proper agree. Nothing is
 /// recorded: the pane has not resolved a task yet, and the screen answers one
 /// key only (`PaneStartupScreenIsOutsideUsage` in `docs/specs/keybindings.allium`).
 pub(crate) fn is_quit_key(
     key: &crossterm::event::KeyEvent,
+    table: &'static [crate::keybindings::KeyBinding],
     ns: crate::keybindings::KeyNamespace,
 ) -> bool {
     let name = crate::keybindings::key_name(*key);
-    exit_keys(ns).contains(&name.as_str())
+    exit_keys(table, ns).contains(&name.as_str())
 }
 
-/// The keys of `ns`'s `exit_pane` row.
-fn exit_keys(ns: crate::keybindings::KeyNamespace) -> Vec<&'static str> {
-    crate::keybindings::bindings_in(ns)
+/// The keys of `ns`'s `exit_pane` row in `table`.
+fn exit_keys(
+    table: &'static [crate::keybindings::KeyBinding],
+    ns: crate::keybindings::KeyNamespace,
+) -> Vec<&'static str> {
+    crate::keybindings::bindings_in(table, ns)
         .filter(|b| b.action == "exit_pane")
         .flat_map(|b| b.keys.iter().copied())
         .collect()
@@ -313,6 +318,7 @@ fn wait_for_pane_task(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     source: &dyn PaneViewSource,
     task_id: TaskId,
+    table: &'static [crate::keybindings::KeyBinding],
     ns: crate::keybindings::KeyNamespace,
 ) -> Result<Option<(PathBuf, String)>> {
     let handle = tokio::runtime::Handle::current();
@@ -324,16 +330,17 @@ fn wait_for_pane_task(
             StartupStep::Proceed { root, base_branch } => return Ok(Some((root, base_branch))),
             StartupStep::Fail(reason) => break StartupStep::Fail(reason),
             StartupStep::Wait => {
-                terminal.draw(|f| render_startup_notice(f, f.area(), &StartupStep::Wait, ns))?;
-                if quit_requested(STARTUP_POLL, ns)? {
+                terminal
+                    .draw(|f| render_startup_notice(f, f.area(), &StartupStep::Wait, table, ns))?;
+                if quit_requested(STARTUP_POLL, table, ns)? {
                     return Ok(None);
                 }
             }
         }
     };
     loop {
-        terminal.draw(|f| render_startup_notice(f, f.area(), &failure, ns))?;
-        if quit_requested(STARTUP_POLL, ns)? {
+        terminal.draw(|f| render_startup_notice(f, f.area(), &failure, table, ns))?;
+        if quit_requested(STARTUP_POLL, table, ns)? {
             return Ok(None);
         }
     }
@@ -342,28 +349,31 @@ fn wait_for_pane_task(
 /// Wait up to `timeout` for a key; true if it was a quit key.
 fn quit_requested(
     timeout: std::time::Duration,
+    table: &'static [crate::keybindings::KeyBinding],
     ns: crate::keybindings::KeyNamespace,
 ) -> Result<bool> {
     use crossterm::event::{self, Event, KeyEventKind};
     if event::poll(timeout)? {
         if let Event::Key(key) = event::read()? {
-            return Ok(key.kind == KeyEventKind::Press && is_quit_key(&key, ns));
+            return Ok(key.kind == KeyEventKind::Press && is_quit_key(&key, table, ns));
         }
     }
     Ok(false)
 }
 
 /// [`with_pane_terminal`] for a pane that works from a task: waits for the
-/// task, then hands `body` its worktree and base branch. Closing the pane from
+/// task, answering the exit keys of `ns` in `table` (the pane's loaded
+/// table), then hands `body` its worktree and base branch. Closing the pane from
 /// the wait screen returns `Ok(())` without running `body`.
 pub(crate) fn with_pane_task(
     source: &dyn PaneViewSource,
     task_id: TaskId,
+    table: &'static [crate::keybindings::KeyBinding],
     ns: crate::keybindings::KeyNamespace,
     body: impl FnOnce(&mut Terminal<CrosstermBackend<io::Stdout>>, PathBuf, String) -> Result<()>,
 ) -> Result<()> {
     with_pane_terminal(
-        |terminal| match wait_for_pane_task(terminal, source, task_id, ns)? {
+        |terminal| match wait_for_pane_task(terminal, source, task_id, table, ns)? {
             Some((root, base_branch)) => body(terminal, root, base_branch),
             None => Ok(()),
         },

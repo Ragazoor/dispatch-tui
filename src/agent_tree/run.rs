@@ -196,13 +196,15 @@ struct DiffPaneTeardown<'a> {
     runner: &'a dyn ProcessRunner,
     /// Set while the lower pane runs the editor; cleared when a diff opens.
     editor_took_over: &'a std::cell::Cell<bool>,
+    /// The pane's loaded table, for the fresh state.
+    key_table: &'static [crate::keybindings::KeyBinding],
 }
 
 impl Drop for DiffPaneTeardown<'_> {
     fn drop(&mut self) {
         tear_down_diff_pane(
             self.context,
-            &mut RenderState::new(),
+            &mut RenderState::new(self.key_table),
             self.runner,
             self.editor_took_over.get(),
         );
@@ -379,6 +381,7 @@ fn run_loop<B: Backend>(
     commit_reads: &CommitReads,
     runner: &dyn ProcessRunner,
     usage: &mut crate::agent_tree::pane::PaneUsage,
+    key_table: &'static [crate::keybindings::KeyBinding],
 ) -> Result<()> {
     let root = context.root;
     // Retires the diff pane on every way out, an error from a draw or a poll
@@ -388,8 +391,9 @@ fn run_loop<B: Backend>(
         context,
         runner,
         editor_took_over: &editor_took_over,
+        key_table,
     };
-    let mut state = RenderState::new();
+    let mut state = RenderState::new(key_table);
     let mut tree = build_tree(root, &[]);
     // `build_tree` names the root node after the worktree directory, which is
     // exactly the pane title — so there is one basename computation, not two.
@@ -522,10 +526,18 @@ pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()
         spawn_agent_list_poller(source.clone(), task_id, AGENTS_REFRESH_INTERVAL);
     let (resumes, resume_worker) = spawn_resume_worker(source.clone());
     let mut usage = crate::agent_tree::pane::PaneUsage::new(board_port, task_id);
+    // Before the startup screen, which already answers the exit keys
+    // (keybindings.allium: PanesLoadTheirOwnTable).
+    let key_table = crate::keybindings::load_key_table(
+        data_dir,
+        crate::keybindings::KeyTableReader::CompanionPane,
+    )
+    .table;
 
     let result = crate::agent_tree::pane::with_pane_task(
         &*source,
         task_id,
+        key_table,
         crate::keybindings::KeyNamespace::AgentTreeTree,
         |terminal, root, base_branch| {
             // Start from a clean slate. The open set is view state, like the cursor and
@@ -550,6 +562,7 @@ pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()
                 &commit_reads,
                 &RealProcessRunner::default(),
                 &mut usage,
+                key_table,
             )
         },
     );

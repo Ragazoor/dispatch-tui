@@ -663,22 +663,38 @@ pub fn help_overlay_title(table: &[KeyBinding]) -> String {
     )
 }
 
-/// The first key of `namespace`'s `action` row, as the table writes it, for a
-/// hint built from the table (`PaneTitlesNameTheirOwnKeys` in
-/// `docs/specs/keybindings.allium`). Empty when no such row exists, which the
-/// drift tests rule out.
-pub fn first_key(namespace: KeyNamespace, action: &str) -> &'static str {
-    bindings_in(namespace)
+/// The first key of `namespace`'s `action` row in `table`, as the table
+/// writes it, for a hint built from the table (`PaneTitlesNameTheirOwnKeys`
+/// in `docs/specs/keybindings.allium`). Empty when no such row exists, which
+/// the drift tests rule out.
+pub fn first_key(
+    table: &'static [KeyBinding],
+    namespace: KeyNamespace,
+    action: &str,
+) -> &'static str {
+    bindings_in(table, namespace)
         .find(|b| b.action == action)
         .and_then(|b| b.keys.first().copied())
         .unwrap_or_default()
 }
 
-/// The rows of one namespace, in table order.
-pub fn bindings_in(namespace: KeyNamespace) -> impl Iterator<Item = &'static KeyBinding> {
-    KEY_BINDINGS
-        .iter()
-        .filter(move |b| b.namespace == namespace)
+/// The rows of one namespace of `table`, in table order. Every reader passes
+/// the table its process loaded (`LoadKeyTable`), so what it shows or answers
+/// is the user's keys where an override was accepted.
+pub fn bindings_in(
+    table: &'static [KeyBinding],
+    namespace: KeyNamespace,
+) -> impl Iterator<Item = &'static KeyBinding> {
+    table.iter().filter(move |b| b.namespace == namespace)
+}
+
+/// The rows of one namespace of the DEFAULT table, for tests that ask about
+/// the shipped keys. Test-only, so no reader can show the defaults by mistake.
+#[cfg(test)]
+pub(crate) fn default_bindings_in(
+    namespace: KeyNamespace,
+) -> impl Iterator<Item = &'static KeyBinding> {
+    bindings_in(KEY_BINDINGS, namespace)
 }
 
 /// The opposite of a motion's action id: `_down` and `_up`, `_left` and
@@ -824,6 +840,20 @@ pub(crate) fn table_with_keys(
         })
         .collect();
     Box::leak(rows.into_boxed_slice())
+}
+
+/// The table `reader` loads from a data directory whose override file holds
+/// `json`, as a process builds it at start (`LoadKeyTable`). Panics when
+/// the load refused anything, so a test of a reader cannot pass on a table
+/// that quietly kept its defaults.
+#[cfg(test)]
+pub(crate) fn loaded_table(reader: KeyTableReader, json: &str) -> KeyTableLoad {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join(KEY_OVERRIDE_FILE_NAME), json).expect("write overrides");
+    let load = load_key_table(dir.path(), reader);
+    assert!(load.errors.is_empty(), "{:?}", load.errors);
+    assert_ne!(load.table, KEY_BINDINGS, "the override changed nothing");
+    load
 }
 
 /// The keys [`remapped_table`] rebinds a row to in a namespace whose rows it

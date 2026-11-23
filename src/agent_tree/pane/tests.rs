@@ -55,6 +55,10 @@ fn a_task_that_never_gets_a_worktree_fails_at_the_limit() {
 }
 
 fn drawn(step: &StartupStep) -> String {
+    drawn_with(step, crate::keybindings::KEY_BINDINGS)
+}
+
+fn drawn_with(step: &StartupStep, table: &'static [crate::keybindings::KeyBinding]) -> String {
     let backend = ratatui::backend::TestBackend::new(40, 6);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -63,11 +67,28 @@ fn drawn(step: &StartupStep) -> String {
                 f,
                 f.area(),
                 step,
+                table,
                 crate::keybindings::KeyNamespace::AgentTreeTree,
             )
         })
         .unwrap();
     buffer_to_string(terminal.backend().buffer())
+}
+
+/// PaneStartupScreenIsOutsideUsage and PanesLoadTheirOwnTable: the failure
+/// screen's close hint names the keys of the exit_pane row in the table the
+/// pane loaded, so after a remap it names the user's key and not `q`.
+#[test]
+fn the_failure_screens_close_hint_names_the_users_exit_key() {
+    let table = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::CompanionPane,
+        r#"[{"namespace": "agent_tree.tree", "action": "exit_pane", "keys": ["Ctrl+X"]}]"#,
+    )
+    .table;
+    let out = drawn_with(&StartupStep::Fail("gone".into()), table);
+    assert!(out.contains("press Ctrl+X to close"), "{out}");
+    let default = drawn(&StartupStep::Fail("gone".into()));
+    assert!(default.contains("press q or Ctrl+C to close"), "{default}");
 }
 
 #[test]

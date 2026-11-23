@@ -36,6 +36,7 @@ fn state_with_wait_cap(cap: Duration) -> (Arc<McpState>, Arc<dyn store::TaskStor
             runner: Arc::new(MockProcessRunner::new(vec![])),
             embedding_service: EmbeddingService::new_test(),
             data_dir: std::env::temp_dir(),
+            key_table: crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
         },
         None,
     );

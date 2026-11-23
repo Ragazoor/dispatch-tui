@@ -14,7 +14,7 @@ use super::render::*;
 use super::run::*;
 use super::state::*;
 use super::test_repo::TestRepo;
-use crate::keybindings::{bindings_in, KeyContext, KeyNamespace, ANY_OTHER_KEY};
+use crate::keybindings::{default_bindings_in, KeyContext, KeyNamespace, ANY_OTHER_KEY};
 use crate::models::{test_tmux_window, TaskId};
 use crate::palette::{FG, MUTED, RED};
 use crate::process::MockProcessRunner;
@@ -32,7 +32,7 @@ use std::path::PathBuf;
 /// A fresh pane starts on the agents view; most tests are about the tree, so
 /// they start from the browse view instead.
 fn browse_state() -> RenderState {
-    let mut state = RenderState::new();
+    let mut state = RenderState::new(crate::keybindings::KEY_BINDINGS);
     state.focus = Focus::Tree;
     state
 }

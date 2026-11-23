@@ -1,5 +1,6 @@
 //! `HelpOverlayIsTheTable` (`docs/specs/keybindings.allium`): the `?` overlay
-//! is rendered from `KEY_BINDINGS` — every row, grouped under its namespace's
+//! is rendered from the board's key table (the default rows, or the merged
+//! table when an override file is in place) — every row, grouped under its namespace's
 //! published name, keys beside description, context words and note where
 //! present — and scrolls (board.help's `scroll_help_down` and `scroll_help_up` rows) so that every row
 //! is reachable however short the popup.
@@ -10,7 +11,7 @@
 //! drift.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
-use crate::keybindings::{bindings_in, KeyBinding, KeyNamespace, KEY_BINDINGS};
+use crate::keybindings::{default_bindings_in, KeyBinding, KeyNamespace, KEY_BINDINGS};
 use crate::tui::commands::UsageCommand;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -61,7 +62,11 @@ fn page(app: &mut App, offset: usize) -> Vec<String> {
 /// full. The rendering clamps an offset past the end, which is how the end is
 /// found: the page stops changing.
 fn overlay_body() -> Vec<String> {
-    let mut app = help_app();
+    overlay_body_of(help_app())
+}
+
+/// [`overlay_body`] of a given app, which may have a loaded table installed.
+fn overlay_body_of(mut app: App) -> Vec<String> {
     let mut pages: Vec<Vec<String>> = Vec::new();
     for offset in 0..5000 {
         let p = page(&mut app, offset);
@@ -156,7 +161,7 @@ fn namespaces_with_rows() -> Vec<KeyNamespace> {
     KeyNamespace::ALL
         .iter()
         .copied()
-        .filter(|ns| bindings_in(*ns).next().is_some())
+        .filter(|ns| default_bindings_in(*ns).next().is_some())
         .collect()
 }
 
@@ -284,13 +289,82 @@ fn every_row_of_the_table_is_in_the_overlay_under_its_namespace() {
     );
 }
 
+/// OverlayIsGeneratedNotWritten for the merged table (LoadKeyTable): with an
+/// override file in place, every row of the board's loaded table is in the
+/// overlay with its keys, so the rebound row shows the user's key, and the
+/// row's default key is not shown beside it.
+#[test]
+fn the_overlay_shows_the_users_keys_from_the_override_file() {
+    let load = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::Board,
+        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#,
+    );
+    let mut app = App::new(vec![]);
+    app.install_key_table(&load);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::ToggleHelp,
+    ));
+    assert_eq!(app.input.mode, InputMode::Help);
+    let body = overlay_body_of(app);
+    let tokens = tokens_of(&body);
+    let spans = group_spans(&body);
+    let span_of = |ns: KeyNamespace| {
+        let &(_, from, to) = spans.iter().find(|(n, _, _)| *n == ns).unwrap();
+        (from, to)
+    };
+    let mut failures = Vec::new();
+    for binding in load.table {
+        if let Some(problem) = row_problem(&body, &tokens, binding, span_of(binding.namespace)) {
+            failures.push(format!(
+                "{} {}: {problem}",
+                binding.namespace.name(),
+                binding.action
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "rows of the loaded table the overlay does not show:
+{}
+--- overlay body ---
+{}",
+        failures.join(
+            "
+"
+        ),
+        body.join(
+            "
+"
+        )
+    );
+    // The key line of the rebound row is the user's key alone: the default
+    // key is not shown beside it.
+    let row = load
+        .table
+        .iter()
+        .find(|b| b.namespace == KeyNamespace::BoardNormal && b.action == "delete_task")
+        .unwrap();
+    let (from, to) = span_of(KeyNamespace::BoardNormal);
+    let first_word = row.description.split_whitespace().next().unwrap();
+    let key_lines: Vec<&str> = (from + 1..to)
+        .filter(|&i| {
+            body[i].trim_start().starts_with(first_word)
+                && phrase_matches(&tokens, row.description, 0, tokens.len())
+                    .iter()
+                    .any(|&(s, _)| tokens[s].line == i)
+        })
+        .map(|i| body[i - 1].trim())
+        .collect();
+    assert_eq!(key_lines, vec!["O"], "{}", body.join("\n"));
+}
+
 /// The `G` row's note is the warning that motivated the table; it must be on
 /// screen in the overlay, not only in keybinding_search.
 #[test]
 fn the_last_row_keys_warning_is_in_the_overlay() {
     let body = overlay_body();
     let tokens = tokens_of(&body);
-    let g = bindings_in(KeyNamespace::BoardNormal)
+    let g = default_bindings_in(KeyNamespace::BoardNormal)
         .find(|b| b.action == "navigate_row_last")
         .unwrap();
     let note = g.note.unwrap();
@@ -319,7 +393,7 @@ fn tmux_global_rows_are_in_the_overlay() {
         .iter()
         .find(|(ns, _, _)| *ns == KeyNamespace::TmuxGlobal)
         .expect("a tmux.global group");
-    let rows: Vec<_> = bindings_in(KeyNamespace::TmuxGlobal).collect();
+    let rows: Vec<_> = default_bindings_in(KeyNamespace::TmuxGlobal).collect();
     assert!(rows.len() >= 2);
     for b in rows {
         assert_eq!(

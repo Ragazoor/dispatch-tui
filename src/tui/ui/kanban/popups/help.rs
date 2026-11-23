@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::keybindings::{bindings_in, KeyNamespace, KeyReceiver};
+use crate::keybindings::{bindings_in, KeyBinding, KeyNamespace, KeyReceiver};
 use crate::palette::CYAN;
 use crate::tui::ui::shared::{centered_rect, open_overlay, titled_block, HintStyles};
 use crate::tui::{App, InputMode};
@@ -33,15 +33,20 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-/// The overlay body: every row of the table, grouped by namespace in
+/// The overlay body: every row of `table` (the board's loaded table, so the
+/// user's keys where an override was accepted), grouped by namespace in
 /// `KeyNamespace` order, wrapped to `width`.
-fn body_lines(width: usize, styles: &HintStyles) -> Vec<Line<'static>> {
+fn body_lines(
+    table: &'static [KeyBinding],
+    width: usize,
+    styles: &HintStyles,
+) -> Vec<Line<'static>> {
     let (header, key, desc, note) = (styles.accent, styles.accent, styles.desc, styles.note);
     let indent = "    ";
     let wrap_width = width.saturating_sub(indent.len()).max(10);
     let mut lines = Vec::new();
     for ns in KeyNamespace::ALL {
-        let mut rows = bindings_in(ns).peekable();
+        let mut rows = bindings_in(table, ns).peekable();
         if rows.peek().is_none() {
             continue;
         }
@@ -95,7 +100,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
     let styles = HintStyles::new(CYAN);
     let inner = open_overlay(frame, popup_area, block);
 
-    let lines = body_lines(inner.width as usize, &styles);
+    let lines = body_lines(app.key_table, inner.width as usize, &styles);
     let max_scroll = lines.len().saturating_sub(inner.height as usize);
     app.interaction.help_max_scroll.set(Some(max_scroll));
     let offset = app.interaction.help_scroll.min(max_scroll);

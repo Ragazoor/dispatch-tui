@@ -343,7 +343,7 @@ fn selecting_a_source_empties_the_tree_at_once_and_publishes_the_selection() {
 #[test]
 fn pressing_each_key_of_each_commits_row_records_the_rows_action() {
     let mut pressed = 0;
-    for binding in bindings_in(KeyNamespace::AgentTreeCommits) {
+    for binding in default_bindings_in(KeyNamespace::AgentTreeCommits) {
         assert!(!binding.keys.contains(&ANY_OTHER_KEY));
         for key in binding.keys {
             let mut rig = KeyRig::with_commits(&three_node_changes(), commits(&[2, 1]));

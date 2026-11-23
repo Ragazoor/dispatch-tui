@@ -301,6 +301,16 @@ pub struct KeyTableLoad {
 }
 
 impl KeyTableLoad {
+    /// The load of a data directory with no override file: the default
+    /// table and no errors. For a caller with no file to read, such as a test.
+    pub fn defaults(data_dir: &Path) -> Self {
+        Self {
+            file: data_dir.join(KEY_OVERRIDE_FILE_NAME),
+            table: KEY_BINDINGS,
+            errors: Vec::new(),
+        }
+    }
+
     /// The text the board shows for a load that refused anything
     /// (`BoardShowsKeyLoadErrors`): the file, that the rows keep their
     /// default keys, and each error's message. `None` with no errors.

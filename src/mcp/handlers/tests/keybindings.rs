@@ -65,7 +65,8 @@ async fn without_a_filter_an_index_of_namespaces_is_returned_in_table_order() {
         .unwrap();
     assert_eq!(
         normal["bindings"],
-        crate::keybindings::bindings_in(crate::keybindings::KeyNamespace::BoardNormal).count()
+        crate::keybindings::default_bindings_in(crate::keybindings::KeyNamespace::BoardNormal)
+            .count()
     );
     assert!(index.iter().all(|g| g["bindings"].is_number()));
 }
@@ -132,7 +133,8 @@ async fn a_namespace_name_returns_exactly_that_group() {
     let rows = gs[0]["bindings"].as_array().unwrap();
     assert_eq!(
         rows.len(),
-        crate::keybindings::bindings_in(crate::keybindings::KeyNamespace::BoardNormal).count()
+        crate::keybindings::default_bindings_in(crate::keybindings::KeyNamespace::BoardNormal)
+            .count()
     );
 }
 
@@ -278,4 +280,39 @@ async fn the_esc_exit_epic_row_shows_its_context_words() {
         esc["context"],
         "inside an epic or work package view, no search active"
     );
+}
+
+/// CatalogueIsTheDispatchTable for the merged table (LoadKeyTable): with an
+/// override file in the data directory, keybinding_search answers from the
+/// table the board loaded, so a rebound row shows the user's keys, and a
+/// query for the user's key finds it.
+#[tokio::test]
+async fn the_catalogue_shows_the_users_keys_from_the_override_file() {
+    let Ok(mut state) = Arc::try_unwrap(test_state().await) else {
+        panic!("the test state is shared");
+    };
+    state.key_table = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::Board,
+        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#,
+    );
+    let state = Arc::new(state);
+
+    let resp = list(&state, json!({"namespace": "board.normal"})).await;
+    let gs = groups(&resp);
+    let row = gs[0]["bindings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["action"] == "delete_task")
+        .unwrap()
+        .clone();
+    assert_eq!(row["keys"], json!(["O"]));
+
+    // A query matches on the user's key, not the default.
+    let resp = list(
+        &state,
+        json!({"namespace": "board.normal", "query": "delete_task"}),
+    )
+    .await;
+    assert_eq!(groups(&resp)[0]["bindings"][0]["keys"], json!(["O"]));
 }

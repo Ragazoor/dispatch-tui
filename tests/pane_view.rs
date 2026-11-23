@@ -147,6 +147,7 @@ async fn asking_pushes_no_refresh_to_the_board() {
             runner: std::sync::Arc::new(dispatch_tui::process::MockProcessRunner::new(vec![])),
             embedding_service: dispatch_tui::embeddings::EmbeddingService::new_noop(),
             data_dir: std::env::temp_dir(),
+            key_table: dispatch_tui::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
         },
         Some(notify_tx),
     );

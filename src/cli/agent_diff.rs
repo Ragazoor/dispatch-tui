@@ -6,6 +6,6 @@ use anyhow::Result;
 
 use crate::models::TaskId;
 
-pub async fn run(board_port: u16, task_id: TaskId) -> Result<()> {
-    crate::agent_tree::diff_viewer::run(board_port, task_id).await
+pub async fn run(data_dir: &std::path::Path, board_port: u16, task_id: TaskId) -> Result<()> {
+    crate::agent_tree::diff_viewer::run(data_dir, board_port, task_id).await
 }

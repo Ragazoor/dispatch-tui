@@ -109,23 +109,25 @@ impl ListCursor for CommitsSection {
     }
 }
 
-/// The Commits section's border title. Its keys come from the table's
+/// The Commits section's border title. Its keys come from `table`'s
 /// agent_tree.commits rows (keybindings.allium: PaneTitlesNameTheirOwnKeys).
-pub(crate) fn commits_title() -> String {
+pub(crate) fn commits_title(table: &'static [crate::keybindings::KeyBinding]) -> String {
     use crate::keybindings::{first_key, KeyNamespace as N};
     format!(
         " Commits ({}, {}: agents) ",
-        first_key(N::AgentTreeCommits, "switch_section"),
-        first_key(N::AgentTreeCommits, "toggle_focus")
+        first_key(table, N::AgentTreeCommits, "switch_section"),
+        first_key(table, N::AgentTreeCommits, "toggle_focus")
     )
 }
 
 /// Draw the section into `area`. `selected` is the pane's selected source
 /// (`None` for unstaged work), marked in every state; `focused` decides the
-/// border colour and the cursor highlight; `alert` reddens the border.
+/// border colour and the cursor highlight; `alert` reddens the border. The
+/// title's keys come from `table`, the pane's loaded table.
 pub fn render_commits(
     frame: &mut Frame,
     area: Rect,
+    table: &'static [crate::keybindings::KeyBinding],
     section: &mut CommitsSection,
     selected: Option<&str>,
     focused: bool,
@@ -142,7 +144,7 @@ pub fn render_commits(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style(focused, alert))
-        .title(commits_title());
+        .title(commits_title(table));
 
     let unstaged = std::iter::once((None, "unstaged work".to_string()));
     let commits = section.commits.iter().map(|commit| {

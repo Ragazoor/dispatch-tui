@@ -352,7 +352,7 @@ fn rig_for(binding: &crate::keybindings::KeyBinding) -> KeyRig {
 fn pressing_each_key_of_each_pane_row_records_the_rows_action() {
     let mut pressed = 0;
     for ns in [KeyNamespace::AgentTreeTree, KeyNamespace::AgentTreeAgents] {
-        for binding in bindings_in(ns) {
+        for binding in default_bindings_in(ns) {
             assert!(!binding.keys.contains(&ANY_OTHER_KEY));
             for key in binding.keys {
                 let mut rig = rig_for(binding);
@@ -585,6 +585,28 @@ fn under_the_remapped_table_the_agents_keys_go_the_way_their_rows_say() {
             rig
         },
     );
+}
+
+/// PanesLoadTheirOwnTable: the companion pane answers the keys of the table
+/// it loads from the override file. The rebound key acts and the default one
+/// no longer does.
+#[test]
+fn the_tree_answers_the_users_key_from_the_override_file() {
+    let table = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::CompanionPane,
+        r#"[{"namespace": "agent_tree.tree", "action": "navigate_row_first", "keys": ["zz"]}]"#,
+    )
+    .table;
+    let mut rig = KeyRig::new(&many_files());
+    rig.state.key_table = table;
+    rig.press(KeyCode::Char('G'));
+    let last = rig.selected_name();
+    rig.press(KeyCode::Char('g'));
+    rig.press(KeyCode::Char('g'));
+    assert_eq!(rig.selected_name(), last, "gg is no row's key any more");
+    rig.press(KeyCode::Char('z'));
+    rig.press(KeyCode::Char('z'));
+    assert_eq!(rig.selected_name(), "f00.rs");
 }
 
 /// A chord the table moves works like the shipped one, and the old chord no

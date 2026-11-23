@@ -196,12 +196,15 @@ impl ListCursor for AgentsSection {
     }
 }
 
-/// The Agents section's border title. Its keys come from the table's
+/// The Agents section's border title. Its keys come from `table`'s
 /// agent_tree.agents rows (keybindings.allium: PaneTitlesNameTheirOwnKeys).
-pub(crate) fn agents_title(filter: AgentFilter) -> String {
+pub(crate) fn agents_title(
+    table: &'static [crate::keybindings::KeyBinding],
+    filter: AgentFilter,
+) -> String {
     use crate::keybindings::{first_key, KeyNamespace as N};
-    let cycle = first_key(N::AgentTreeAgents, "cycle_agent_filter");
-    let focus = first_key(N::AgentTreeAgents, "toggle_focus");
+    let cycle = first_key(table, N::AgentTreeAgents, "cycle_agent_filter");
+    let focus = first_key(table, N::AgentTreeAgents, "toggle_focus");
     match filter {
         AgentFilter::All => format!(" Agents ({cycle}: running, {focus}: browse) "),
         AgentFilter::Running => format!(" Agents [running] ({cycle}: all, {focus}: browse) "),
@@ -382,10 +385,12 @@ pub(crate) fn test_pane_epic(id: i64, breadcrumb: &[&str]) -> PaneEpic {
 
 /// Draw the section into `area`. `focused` decides the border colour and
 /// whether the cursor highlight is drawn; `alert` reddens the border, and wins
-/// over focus (`AgentTreeNoticeRedensBorder`).
+/// over focus (`AgentTreeNoticeRedensBorder`). The title's keys come from
+/// `table`, the pane's loaded table.
 pub fn render_agents(
     frame: &mut Frame,
     area: Rect,
+    table: &'static [crate::keybindings::KeyBinding],
     section: &mut AgentsSection,
     focused: bool,
     alert: bool,
@@ -435,7 +440,7 @@ pub fn render_agents(
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(border)
-        .title(agents_title(section.filter));
+        .title(agents_title(table, section.filter));
     // The agents view is the whole pane, so a notice has no tree border to sit
     // on: it goes on this one (TwoViewsShareThePane).
     if let Some(text) = notice {
@@ -503,6 +508,7 @@ pub fn render_agents(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keybindings::KEY_BINDINGS;
     use crate::models::test_tmux_window;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -518,7 +524,17 @@ mod tests {
     fn rendered_at(section: &mut AgentsSection, focused: bool, width: u16, height: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
         terminal
-            .draw(|frame| render_agents(frame, frame.area(), section, focused, false, None))
+            .draw(|frame| {
+                render_agents(
+                    frame,
+                    frame.area(),
+                    KEY_BINDINGS,
+                    section,
+                    focused,
+                    false,
+                    None,
+                )
+            })
             .expect("draw");
         crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
     }
@@ -924,7 +940,17 @@ mod tests {
         section.set_rows(vec![row(1, true), test_detached_row(2)]);
         let mut terminal = Terminal::new(TestBackend::new(30, 4)).expect("terminal");
         terminal
-            .draw(|frame| render_agents(frame, frame.area(), &mut section, false, false, None))
+            .draw(|frame| {
+                render_agents(
+                    frame,
+                    frame.area(),
+                    KEY_BINDINGS,
+                    &mut section,
+                    false,
+                    false,
+                    None,
+                )
+            })
             .expect("draw");
         let buffer = terminal.backend().buffer();
         // Row 1 (inside the border) is the own task, row 2 the detached one;

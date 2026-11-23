@@ -302,11 +302,13 @@ pub fn render_pane(
     title: &str,
 ) {
     let alert = state.notice.is_some();
+    let table = state.key_table;
     if state.focus == Focus::Agents {
         let notice = state.notice.as_ref().map(|n| n.text().to_string());
         render_agents(
             frame,
             area,
+            table,
             &mut state.agents,
             true,
             alert,
@@ -332,6 +334,7 @@ pub fn render_pane(
     render_commits(
         frame,
         commits_area,
+        table,
         &mut state.commits,
         state.selected_commit.as_deref(),
         state.focus == Focus::Commits,

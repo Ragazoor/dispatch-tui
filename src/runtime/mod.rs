@@ -929,11 +929,21 @@ impl TuiRuntime {
         let services =
             crate::service::Services::new(database.clone(), runner.clone(), emb_svc.clone());
 
+        // keybindings.allium: LoadKeyTable. Once, before the MCP server
+        // answers keybinding_search or the board reads a key or binds a tmux
+        // key; both read this one load. A bad file never stops the board
+        // starting.
+        let key_table = crate::keybindings::load_key_table(
+            &data_dir,
+            crate::keybindings::KeyTableReader::Board,
+        );
+
         let mcp_deps = mcp::McpDeps {
             db: database.clone(),
             runner: runner.clone(),
             embedding_service: emb_svc.clone(),
             data_dir: data_dir.clone(),
+            key_table: key_table.clone(),
         };
 
         let tasks = database.list_all().await;
@@ -949,12 +959,7 @@ impl TuiRuntime {
         .await;
 
         let mut app = hydrate_app(tasks, &host_id, &database, &*runner).await;
-        // keybindings.allium: LoadKeyTable. Before the board reads a key or
-        // binds a tmux key; a bad file never stops the board starting.
-        app.install_key_table(&crate::keybindings::load_key_table(
-            &data_dir,
-            crate::keybindings::KeyTableReader::Board,
-        ));
+        app.install_key_table(&key_table);
         app.set_store_server(Some(store_server.clone()));
         // The App's first look at this host's dispatch requests is its
         // BASELINE: finished rows in it are history and raise nothing. Taken

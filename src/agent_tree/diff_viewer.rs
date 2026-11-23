@@ -360,9 +360,10 @@ pub struct DiffState {
     /// The first half of a chord (`g` of `gg`) waiting for its second key.
     /// No deadline, exactly as in the tree pane.
     pending_chord: Option<char>,
-    /// The keybinding table the pane looks keys up in:
-    /// [`crate::keybindings::KEY_BINDINGS`] outside tests, which install a
-    /// remapped copy to show that a row alone decides what its keys do.
+    /// The keybinding table the pane looks keys up in: the table this
+    /// process loaded (`PanesLoadTheirOwnTable` in
+    /// docs/specs/keybindings.allium). Tests install a remapped copy to show
+    /// that a row alone decides what its keys do.
     key_table: &'static [crate::keybindings::KeyBinding],
     /// Keypress usage events for presses that took effect, waiting for the
     /// loop to write them through the pane's store connection.
@@ -374,19 +375,21 @@ pub struct DiffState {
     pub notice: Option<String>,
 }
 
+#[cfg(test)]
 impl Default for DiffState {
     fn default() -> Self {
-        Self::new()
+        Self::new(crate::keybindings::KEY_BINDINGS)
     }
 }
 
 impl DiffState {
-    pub fn new() -> Self {
+    /// A fresh state that looks keys up in `key_table`.
+    pub fn new(key_table: &'static [crate::keybindings::KeyBinding]) -> Self {
         Self {
             offset: 0,
             viewport_rows: 0,
             pending_chord: None,
-            key_table: crate::keybindings::KEY_BINDINGS,
+            key_table,
             usage: Vec::new(),
             notice: None,
         }
@@ -717,8 +720,9 @@ fn run_loop<B: Backend>(
     root: &Path,
     runner: &dyn ProcessRunner,
     usage: &mut crate::agent_tree::pane::PaneUsage,
+    key_table: &'static [crate::keybindings::KeyBinding],
 ) -> Result<()> {
-    let mut state = DiffState::new();
+    let mut state = DiffState::new(key_table);
     let mut lines: Vec<DiffLine> = Vec::new();
     let mut last = LastSeen::default();
 
@@ -764,17 +768,30 @@ fn run_loop<B: Backend>(
 /// Takes the task id rather than a worktree path so the two panes cannot
 /// disagree about which worktree they are looking at, and so this pane reads
 /// the same selected source the tree publishes.
-pub async fn run(board_port: u16, task_id: TaskId) -> Result<()> {
+///
+/// The keys come from the table this pane loads from `data_dir` before its
+/// startup screen (keybindings.allium: PanesLoadTheirOwnTable).
+pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()> {
     let source = crate::agent_tree::pane::BoardPaneSource { port: board_port };
     let mut usage = crate::agent_tree::pane::PaneUsage::new(board_port, task_id);
+    let key_table =
+        crate::keybindings::load_key_table(data_dir, crate::keybindings::KeyTableReader::DiffPane)
+            .table;
     let result = crate::agent_tree::pane::with_pane_task(
         &source,
         task_id,
+        key_table,
         crate::keybindings::KeyNamespace::AgentDiff,
         // The diff pane needs no base branch: its source is the tree's
         // selection (AgentTreeSourceIsOneSelection).
         |terminal, root, _base_branch| {
-            run_loop(terminal, &root, &RealProcessRunner::default(), &mut usage)
+            run_loop(
+                terminal,
+                &root,
+                &RealProcessRunner::default(),
+                &mut usage,
+                key_table,
+            )
         },
     );
     // An exit through an error path leaves sends outstanding.

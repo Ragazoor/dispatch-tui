@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn the_pane_starts_on_the_agents_view() {
-    let state = RenderState::new();
+    let state = RenderState::new(crate::keybindings::KEY_BINDINGS);
     assert_eq!(state.focus, Focus::Agents);
     assert_eq!(state.browse_focus, Focus::Tree);
 }
@@ -343,7 +343,7 @@ fn space_on_a_detached_agent_requests_a_resume() {
 // ---- The resume's answer and the jump that follows it ----------------
 
 fn pane_with(rows: Vec<AgentRow>) -> RenderState {
-    let mut state = RenderState::new();
+    let mut state = RenderState::new(crate::keybindings::KEY_BINDINGS);
     state.adopt_agent_list(Ok(rows));
     state
 }
@@ -884,7 +884,7 @@ async fn the_agent_read_carries_the_boards_hidden_count() {
 #[test]
 fn a_failed_read_keeps_the_last_hidden_count() {
     use crate::agent_tree::render::agents::AgentList;
-    let mut state = RenderState::new();
+    let mut state = RenderState::new(crate::keybindings::KEY_BINDINGS);
     state.adopt_agent_read(Ok(AgentList {
         rows: vec![agent(1, false)],
         hidden: 2,

@@ -7,8 +7,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::keybindings::{
-    bindings_in, namespaces_matching, KeyBinding, KeyContext as C, KeyNamespace, ANY_OTHER_KEY,
-    KEY_BINDINGS,
+    default_bindings_in, namespaces_matching, KeyBinding, KeyContext as C, KeyNamespace,
+    ANY_OTHER_KEY, KEY_BINDINGS,
 };
 use crate::models::test_pane_id;
 use crate::models::{ColumnSection, DispatchMode, EpicId, SubStatus, TaskStatus};
@@ -908,7 +908,7 @@ fn a_chord_moved_to_another_row_key_works_on_the_board() {
     let free = ['&', '%', '_', '!']
         .into_iter()
         .find(|c| {
-            !bindings_in(KeyNamespace::BoardNormal)
+            !default_bindings_in(KeyNamespace::BoardNormal)
                 .any(|b| b.keys.iter().any(|k| k.starts_with(*c)))
         })
         .expect("a character board.normal does not use");
@@ -946,7 +946,7 @@ fn a_chord_moved_to_another_row_key_works_on_the_board() {
 fn the_gate_presses_a_row_in_every_board_namespace() {
     let unpressed: Vec<&str> = board_namespaces()
         .into_iter()
-        .filter(|ns| bindings_in(*ns).next().is_none())
+        .filter(|ns| default_bindings_in(*ns).next().is_none())
         .map(|ns| ns.name())
         .collect();
     assert!(unpressed.is_empty(), "no rows to press in {unpressed:?}");
@@ -960,7 +960,7 @@ fn the_gate_presses_scroll_help() {
         ("scroll_help_down", ["j", "Down"]),
         ("scroll_help_up", ["k", "Up"]),
     ] {
-        let binding = bindings_in(KeyNamespace::BoardHelp)
+        let binding = default_bindings_in(KeyNamespace::BoardHelp)
             .find(|b| b.action == action)
             .unwrap_or_else(|| panic!("board.help has a {action} row"));
         for key in keys {
@@ -1000,10 +1000,11 @@ fn a_key_with_no_row_runs_nothing_and_records_nothing() {
     ];
     let mut checked = 0;
     for ns in board_namespaces() {
-        if typing.contains(&ns) || bindings_in(ns).any(|b| b.keys.contains(&ANY_OTHER_KEY)) {
+        if typing.contains(&ns) || default_bindings_in(ns).any(|b| b.keys.contains(&ANY_OTHER_KEY))
+        {
             continue;
         }
-        let Some(sample) = bindings_in(ns).next() else {
+        let Some(sample) = default_bindings_in(ns).next() else {
             continue;
         };
         let key = unlisted_key(ns);
@@ -1160,7 +1161,7 @@ fn a_refused_entry_is_shown_and_the_rest_of_the_file_applies() {
         .iter()
         .find(|b| b.namespace == KeyNamespace::BoardNormal && b.action == "navigate_row_last")
         .unwrap();
-    let default = bindings_in(KeyNamespace::BoardNormal)
+    let default = default_bindings_in(KeyNamespace::BoardNormal)
         .find(|b| b.action == "navigate_row_last")
         .unwrap();
     assert_eq!(last.keys, default.keys, "the refused row keeps its keys");
@@ -1478,7 +1479,7 @@ fn q_and_esc_contexts_are_mutually_exclusive() {
 /// where the handler reached the row's action by some other path.
 #[test]
 fn each_board_normal_rows_setup_satisfies_its_context() {
-    for binding in bindings_in(KeyNamespace::BoardNormal) {
+    for binding in default_bindings_in(KeyNamespace::BoardNormal) {
         if let Some(ctx) = binding.context {
             let app = app_for(binding);
             assert!(
@@ -1676,7 +1677,7 @@ fn ctrl_c_on_the_board_does_not_copy_the_task() {
 /// Ctrl+b at the tag step does not pick Bug.
 #[test]
 fn ctrl_b_at_the_tag_picker_does_not_pick_bug() {
-    let binding = bindings_in(KeyNamespace::BoardPickerTag)
+    let binding = default_bindings_in(KeyNamespace::BoardPickerTag)
         .find(|b| b.action == "tag_picker_select_bug")
         .unwrap();
     let mut app = apps_in(binding).remove(0);
@@ -1691,10 +1692,10 @@ fn ctrl_b_at_the_tag_picker_does_not_pick_bug() {
 fn a_modified_press_is_not_answered_by_a_catch_all() {
     let mut checked = 0;
     for ns in board_namespaces() {
-        if !bindings_in(ns).any(|b| b.keys.contains(&ANY_OTHER_KEY)) {
+        if !default_bindings_in(ns).any(|b| b.keys.contains(&ANY_OTHER_KEY)) {
             continue;
         }
-        let binding = bindings_in(ns)
+        let binding = default_bindings_in(ns)
             .find(|b| b.keys.contains(&ANY_OTHER_KEY))
             .unwrap();
         for mut app in apps_in(binding) {
@@ -1719,7 +1720,7 @@ fn a_modified_bare_key_with_no_row_does_nothing() {
     let mut seen = std::collections::HashSet::new();
     let mut failures = Vec::new();
     for ns in board_namespaces() {
-        for binding in bindings_in(ns) {
+        for binding in default_bindings_in(ns) {
             for key in binding.keys {
                 if *key == ANY_OTHER_KEY || *key == "gg" || key.contains('+') {
                     continue;
@@ -1727,7 +1728,7 @@ fn a_modified_bare_key_with_no_row_does_nothing() {
                 let base = key_event_for(key);
                 let ctrl = KeyEvent::new(base.code, base.modifiers | KeyModifiers::CONTROL);
                 let name = crate::keybindings::key_name(ctrl);
-                if bindings_in(ns).any(|b| b.keys.contains(&name.as_str()))
+                if default_bindings_in(ns).any(|b| b.keys.contains(&name.as_str()))
                     || !seen.insert((ns, binding.action, binding.context, name.clone()))
                 {
                     continue;
@@ -1759,7 +1760,7 @@ fn a_modified_bare_key_with_no_row_does_nothing() {
 /// A modified letter is never typed into a text field.
 #[test]
 fn a_modified_letter_is_not_typed_into_a_text_field() {
-    let binding = bindings_in(KeyNamespace::BoardText).next().unwrap();
+    let binding = default_bindings_in(KeyNamespace::BoardText).next().unwrap();
     let mut app = apps_in(binding).remove(0);
     let before = app.input.buffer.clone();
     press(&mut app, "Ctrl+X");
@@ -1777,7 +1778,7 @@ fn a_modified_letter_is_not_typed_into_a_text_field() {
 /// their action and record nothing.
 #[test]
 fn text_editing_keys_edit_the_field_and_record_nothing() {
-    let binding = bindings_in(KeyNamespace::BoardText).next().unwrap();
+    let binding = default_bindings_in(KeyNamespace::BoardText).next().unwrap();
     let mut app = apps_in(binding).remove(0);
     for c in "hello world".chars() {
         press(&mut app, &c.to_string());
@@ -1821,7 +1822,7 @@ fn every_unrecorded_row_takes_its_effect_and_records_nothing() {
     let mut checked = 0;
     let mut failures = Vec::new();
     for ns in board_namespaces() {
-        for binding in bindings_in(ns).filter(|b| !b.records_usage) {
+        for binding in default_bindings_in(ns).filter(|b| !b.records_usage) {
             for key in binding.keys {
                 for (i, mut app) in apps_in(binding).into_iter().enumerate() {
                     // (text, caret) after the press; caret None for a field
@@ -1882,7 +1883,9 @@ fn every_unrecorded_row_takes_its_effect_and_records_nothing() {
 /// Backspace in the search bar edits the query and records nothing.
 #[test]
 fn backspace_in_the_search_bar_edits_the_query_silently() {
-    let binding = bindings_in(KeyNamespace::BoardSearch).next().unwrap();
+    let binding = default_bindings_in(KeyNamespace::BoardSearch)
+        .next()
+        .unwrap();
     let mut app = apps_in(binding).remove(0);
     app.search.query = "abc".to_string();
     let cmds = press(&mut app, "Backspace");
@@ -1997,7 +2000,7 @@ fn quick_dispatch_select_with_no_repo_records_nothing() {
 /// that has children fold nothing, so they record nothing.
 #[test]
 fn filter_folds_with_nothing_to_fold_record_nothing() {
-    let binding = bindings_in(KeyNamespace::BoardFilter)
+    let binding = default_bindings_in(KeyNamespace::BoardFilter)
         .find(|b| b.action == "filter_fold_epics")
         .unwrap();
     let mut app = apps_in(binding).remove(0);
@@ -2014,7 +2017,9 @@ fn filter_folds_with_nothing_to_fold_record_nothing() {
 /// the search's own keys, not the tab's.
 #[test]
 fn the_filter_search_footer_names_the_search_keys() {
-    let binding = bindings_in(KeyNamespace::BoardFilterSearch).next().unwrap();
+    let binding = default_bindings_in(KeyNamespace::BoardFilterSearch)
+        .next()
+        .unwrap();
     let mut app = apps_in(binding).remove(0);
     let buf = render_to_buffer(&mut app, 160, 50);
     assert!(buffer_contains_ignore_case(&buf, "[Backspace] delete"));
@@ -2023,9 +2028,9 @@ fn the_filter_search_footer_names_the_search_keys() {
 
 #[test]
 fn every_board_normal_action_has_a_handler_arm() {
-    use crate::keybindings::{bindings_in, KeyNamespace};
+    use crate::keybindings::{default_bindings_in, KeyNamespace};
     let mut missing = Vec::new();
-    for b in bindings_in(KeyNamespace::BoardNormal) {
+    for b in default_bindings_in(KeyNamespace::BoardNormal) {
         let mut app = App::new(vec![]);
         if app.try_run_normal(b, "x").is_none() {
             missing.push(b.action);

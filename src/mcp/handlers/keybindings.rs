@@ -1,5 +1,7 @@
 //! `keybinding_search`: the read-only catalogue of the keybinding table
-//! (`ListKeybindingsViaMcp` in `docs/specs/keybindings.allium`).
+//! (`ListKeybindingsViaMcp` in `docs/specs/keybindings.allium`). It reads
+//! the table the board loaded, so it shows the user's keys where an override
+//! was accepted (`CatalogueIsTheDispatchTable`).
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -20,7 +22,7 @@ pub(super) struct KeybindingSearchArgs {
 }
 
 pub(crate) async fn handle_keybinding_search(
-    _state: &McpState,
+    state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
     args: Value,
@@ -36,6 +38,8 @@ pub(crate) async fn handle_keybinding_search(
         .filter(|q| !q.is_empty())
         .map(str::to_lowercase);
 
+    let table = state.key_table.table;
+
     // The whole table is about 44 KB: with no filter, answer with an index.
     if args.namespace.is_none() && query.is_none() {
         let index: Vec<Value> = KeyNamespace::ALL
@@ -44,7 +48,7 @@ pub(crate) async fn handle_keybinding_search(
                 json!({
                     "namespace": ns.name(),
                     "receiver": ns.receiver().as_str(),
-                    "bindings": bindings_in(*ns).count(),
+                    "bindings": bindings_in(table, *ns).count(),
                 })
             })
             .collect();
@@ -80,7 +84,7 @@ pub(crate) async fn handle_keybinding_search(
     let groups: Vec<Value> = namespaces
         .into_iter()
         .map(|ns| {
-            let bindings: Vec<Value> = bindings_in(ns)
+            let bindings: Vec<Value> = bindings_in(table, ns)
                 .filter(|b| {
                     query.as_deref().is_none_or(|q| {
                         b.keys.iter().any(|k| k.to_lowercase().contains(q))

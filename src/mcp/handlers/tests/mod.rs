@@ -74,6 +74,7 @@ fn state_over(
             runner,
             embedding_service: EmbeddingService::new_test(),
             data_dir: std::env::temp_dir(),
+            key_table: crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
         },
         notify_tx,
     );

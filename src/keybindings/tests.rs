@@ -117,7 +117,7 @@ fn an_action_has_one_row_per_context_in_a_namespace() {
 /// LastRowKeyWarnsItDoesNotEnterAnEpic
 #[test]
 fn the_last_row_key_carries_its_warning() {
-    let rows: Vec<_> = bindings_in(KeyNamespace::BoardNormal)
+    let rows: Vec<_> = default_bindings_in(KeyNamespace::BoardNormal)
         .filter(|b| b.action == "navigate_row_last")
         .collect();
     assert!(!rows.is_empty());
@@ -261,7 +261,7 @@ fn action_of(b: Option<&KeyBinding>) -> Option<&'static str> {
 
 /// Every key `ns`'s rows bind to `action`, in table order.
 fn keys_of(ns: KeyNamespace, action: &str) -> Vec<&'static str> {
-    bindings_in(ns)
+    default_bindings_in(ns)
         .filter(|b| b.action == action)
         .flat_map(|b| b.keys.iter().copied())
         .collect()
@@ -386,7 +386,7 @@ fn view_level_context_words_are_the_specs() {
 /// the epic view, q ignores search, so the two keys need two literals.
 #[test]
 fn q_and_esc_exit_the_epic_under_different_contexts() {
-    let exit: Vec<_> = bindings_in(N::BoardNormal)
+    let exit: Vec<_> = default_bindings_in(N::BoardNormal)
         .filter(|b| b.action == "exit_epic")
         .collect();
     assert_eq!(exit.len(), 2, "{exit:?}");
@@ -413,7 +413,7 @@ fn every_board_namespace_has_at_least_one_row() {
         .iter()
         .copied()
         .filter(|n| is_board(*n))
-        .filter(|n| bindings_in(*n).next().is_none())
+        .filter(|n| default_bindings_in(*n).next().is_none())
         .map(|n| n.name())
         .collect();
     assert!(empty.is_empty(), "board namespaces with no rows: {empty:?}");
@@ -424,7 +424,7 @@ fn confirm_namespaces() -> Vec<KeyNamespace> {
 }
 
 fn catch_all_rows(n: KeyNamespace) -> Vec<&'static KeyBinding> {
-    bindings_in(n)
+    default_bindings_in(n)
         .filter(|b| b.keys.contains(&ANY_OTHER_KEY))
         .collect()
 }
@@ -451,7 +451,8 @@ fn confirm_dialogs_with_a_yes_row_catch_every_other_key_as_no() {
             );
             continue;
         }
-        let has_yes = bindings_in(n).any(|b| b.keys.contains(&"y") || b.keys.contains(&"Y"));
+        let has_yes =
+            default_bindings_in(n).any(|b| b.keys.contains(&"y") || b.keys.contains(&"Y"));
         if !has_yes {
             continue;
         }
@@ -463,7 +464,7 @@ fn confirm_dialogs_with_a_yes_row_catch_every_other_key_as_no() {
             n.name(),
             catch_all[0].action
         );
-        let yes = bindings_in(n)
+        let yes = default_bindings_in(n)
             .find(|b| b.keys.contains(&"y"))
             .unwrap_or_else(|| panic!("{} binds Y but not y", n.name()));
         assert!(yes.keys.contains(&"Y"), "{}: y and Y are one row", n.name());
@@ -474,7 +475,7 @@ fn confirm_dialogs_with_a_yes_row_catch_every_other_key_as_no() {
 
 #[test]
 fn the_error_popup_is_one_catch_all_row_that_dismisses() {
-    let rows: Vec<_> = bindings_in(N::BoardError).collect();
+    let rows: Vec<_> = default_bindings_in(N::BoardError).collect();
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].keys, &[ANY_OTHER_KEY]);
     assert_eq!(rows[0].action, "dismiss_error");
@@ -488,7 +489,7 @@ fn the_help_overlay_scrolls_with_j_down_k_up() {
         ("scroll_help_down", ["j", "Down"]),
         ("scroll_help_up", ["k", "Up"]),
     ] {
-        let rows: Vec<_> = bindings_in(N::BoardHelp)
+        let rows: Vec<_> = default_bindings_in(N::BoardHelp)
             .filter(|b| b.action == action)
             .collect();
         assert_eq!(rows.len(), 1, "{rows:?}");
@@ -509,7 +510,7 @@ fn typing_modes_have_no_rows_for_printable_characters() {
         N::BoardPickerBaseBranch,
         N::BoardPickerQuickDispatch,
     ] {
-        for b in bindings_in(n) {
+        for b in default_bindings_in(n) {
             for k in b.keys {
                 let printable = k.chars().count() == 1 && !k.chars().all(char::is_whitespace);
                 assert!(
@@ -532,7 +533,7 @@ fn every_namespace_but_tmux_global_has_at_least_one_row() {
         .iter()
         .copied()
         .filter(|n| *n != KeyNamespace::TmuxGlobal)
-        .filter(|n| bindings_in(*n).next().is_none())
+        .filter(|n| default_bindings_in(*n).next().is_none())
         .map(|n| n.name())
         .collect();
     assert!(empty.is_empty(), "namespaces with no rows: {empty:?}");
@@ -642,7 +643,7 @@ fn the_commits_namespace_shares_the_pane_wide_keys_with_the_tree() {
 /// as it is jump_to_agent in the agents namespace.
 #[test]
 fn select_source_is_space_and_enter_in_the_commits_namespace() {
-    let rows: Vec<&KeyBinding> = bindings_in(KeyNamespace::AgentTreeCommits)
+    let rows: Vec<&KeyBinding> = default_bindings_in(KeyNamespace::AgentTreeCommits)
         .filter(|b| b.action == "select_source")
         .collect();
     assert_eq!(rows.len(), 1, "{rows:?}");
@@ -654,7 +655,7 @@ fn select_source_is_space_and_enter_in_the_commits_namespace() {
 /// but the pane-wide rows and select_source is there at all.
 #[test]
 fn the_commits_namespace_has_only_the_pane_wide_rows_and_select_source() {
-    let actions: Vec<&str> = bindings_in(KeyNamespace::AgentTreeCommits)
+    let actions: Vec<&str> = default_bindings_in(KeyNamespace::AgentTreeCommits)
         .map(|b| b.action)
         .collect();
     assert_eq!(
@@ -674,7 +675,7 @@ fn the_commits_namespace_has_only_the_pane_wide_rows_and_select_source() {
     );
     for key in ["h", "l", "Left", "Right"] {
         assert!(
-            !bindings_in(KeyNamespace::AgentTreeCommits).any(|b| b.keys.contains(&key)),
+            !default_bindings_in(KeyNamespace::AgentTreeCommits).any(|b| b.keys.contains(&key)),
             "{key}"
         );
     }
@@ -689,7 +690,7 @@ fn pane_modified_keys_have_rows() {
         KeyNamespace::AgentTreeAgents,
         KeyNamespace::AgentDiff,
     ] {
-        let has = |k: &str| bindings_in(ns).any(|b| b.keys.contains(&k));
+        let has = |k: &str| default_bindings_in(ns).any(|b| b.keys.contains(&k));
         assert!(
             has("Ctrl+D") && has("Ctrl+U") && has("Ctrl+C"),
             "{}",
@@ -742,7 +743,7 @@ fn the_help_overlay_title_names_its_own_keys() {
 fn the_tmux_toggle_row_names_the_bound_key() {
     let want = format!("Prefix+{}", crate::runtime::AGENT_TREE_TOGGLE_KEY);
     assert!(
-        bindings_in(KeyNamespace::TmuxGlobal)
+        default_bindings_in(KeyNamespace::TmuxGlobal)
             .any(|b| b.action == "toggle_agent_tree" && b.keys.contains(&want.as_str())),
         "{want}"
     );
@@ -754,8 +755,9 @@ fn the_tmux_toggle_row_names_the_bound_key() {
 fn the_startup_screens_exit_keys_are_the_exit_pane_rows_keys() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     for ns in [KeyNamespace::AgentTreeTree, KeyNamespace::AgentDiff] {
-        let press =
-            |code, mods| crate::agent_tree::pane::is_quit_key(&KeyEvent::new(code, mods), ns);
+        let press = |code, mods| {
+            crate::agent_tree::pane::is_quit_key(&KeyEvent::new(code, mods), KEY_BINDINGS, ns)
+        };
         assert!(press(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(press(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(!press(KeyCode::Char('q'), KeyModifiers::ALT));
@@ -770,7 +772,7 @@ fn the_tmux_jump_back_row_names_the_bound_key() {
     let first = chars.next().unwrap().to_ascii_uppercase();
     let want = format!("Prefix+{first}{}", chars.as_str());
     assert!(
-        bindings_in(KeyNamespace::TmuxGlobal)
+        default_bindings_in(KeyNamespace::TmuxGlobal)
             .any(|b| b.action == "jump_to_dispatch" && b.keys.contains(&want.as_str())),
         "{want}"
     );
@@ -832,7 +834,7 @@ fn guide_declares_only_real_bindings() {
             .as_str()
             .unwrap_or_else(|| panic!("{ns_name}/{action}: guide entry has no description"));
         assert!(
-            bindings_in(ns).any(|b| b.action == action && b.description == description),
+            default_bindings_in(ns).any(|b| b.action == action && b.description == description),
             "guide's description of {ns_name}/{action} is not the table's"
         );
         let keys = entry["keys"].as_array().expect("keys");
@@ -843,7 +845,7 @@ fn guide_declares_only_real_bindings() {
         for key in keys {
             let key = key.as_str().expect("key is a string");
             assert!(
-                bindings_in(ns).any(|b| b.action == action && b.keys.contains(&key)),
+                default_bindings_in(ns).any(|b| b.action == action && b.keys.contains(&key)),
                 "guide binds {key} to {ns_name}/{action}, which the table does not"
             );
         }
@@ -861,7 +863,8 @@ fn no_agent_tree_namespace_binds_an_all_files_key() {
         KeyNamespace::AgentTreeAgents,
     ] {
         assert!(
-            bindings_in(ns).all(|b| b.action != "toggle_all_diffs" && !b.keys.contains(&"a")),
+            default_bindings_in(ns)
+                .all(|b| b.action != "toggle_all_diffs" && !b.keys.contains(&"a")),
             "{ns:?}"
         );
     }
@@ -907,15 +910,68 @@ fn pane_section_titles_name_their_rows_keys() {
         (N::AgentTreeCommits, "switch_section"),
         (N::AgentTreeCommits, "toggle_focus"),
     ] {
-        assert!(!first_key(ns, action).is_empty(), "{ns:?} {action}");
+        assert!(
+            !first_key(KEY_BINDINGS, ns, action).is_empty(),
+            "{ns:?} {action}"
+        );
     }
     assert_eq!(
-        agents_title(AgentFilter::All),
+        agents_title(KEY_BINDINGS, AgentFilter::All),
         " Agents (Tab: running, s: browse) "
     );
     assert_eq!(
-        agents_title(AgentFilter::Running),
+        agents_title(KEY_BINDINGS, AgentFilter::Running),
         " Agents [running] (Tab: all, s: browse) "
     );
-    assert_eq!(commits_title(), " Commits (Tab, s: agents) ");
+    assert_eq!(commits_title(KEY_BINDINGS), " Commits (Tab, s: agents) ");
+}
+
+/// PaneTitlesNameTheirOwnKeys and PanesLoadTheirOwnTable: with an override
+/// file in the data directory, the titles of the table the companion pane
+/// loads name the user's keys.
+#[test]
+fn pane_section_titles_name_the_users_keys_from_the_override_file() {
+    use crate::agent_tree::render::agents::{agents_title, AgentFilter};
+    use crate::agent_tree::render::commits::commits_title;
+    let table = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::CompanionPane,
+        r#"[
+            {"namespace": "agent_tree.agents", "action": "cycle_agent_filter", "keys": ["Ctrl+F"]},
+            {"namespace": "agent_tree.agents", "action": "toggle_focus", "keys": ["Ctrl+B"]},
+            {"namespace": "agent_tree.commits", "action": "switch_section", "keys": ["Ctrl+W"]}
+        ]"#,
+    )
+    .table;
+    assert_eq!(
+        agents_title(table, AgentFilter::All),
+        " Agents (Ctrl+F: running, Ctrl+B: browse) "
+    );
+    assert_eq!(
+        agents_title(table, AgentFilter::Running),
+        " Agents [running] (Ctrl+F: all, Ctrl+B: browse) "
+    );
+    assert_eq!(commits_title(table), " Commits (Ctrl+W, s: agents) ");
+}
+
+/// PaneStartupScreenIsOutsideUsage and PanesLoadTheirOwnTable: the startup
+/// screen answers the keys of the pane's own exit_pane row in the table it
+/// loaded. Rebinding the companion pane's row leaves the diff pane's alone.
+#[test]
+fn the_startup_screens_exit_keys_follow_the_override_file() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let table = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::CompanionPane,
+        r#"[{"namespace": "agent_tree.tree", "action": "exit_pane", "keys": ["Ctrl+X"]}]"#,
+    )
+    .table;
+    let press = |code, mods, ns| {
+        crate::agent_tree::pane::is_quit_key(&KeyEvent::new(code, mods), table, ns)
+    };
+    let tree = KeyNamespace::AgentTreeTree;
+    assert!(press(KeyCode::Char('x'), KeyModifiers::CONTROL, tree));
+    assert!(!press(KeyCode::Char('q'), KeyModifiers::NONE, tree));
+    assert!(!press(KeyCode::Char('c'), KeyModifiers::CONTROL, tree));
+    let diff = KeyNamespace::AgentDiff;
+    assert!(press(KeyCode::Char('q'), KeyModifiers::NONE, diff));
+    assert!(!press(KeyCode::Char('x'), KeyModifiers::CONTROL, diff));
 }

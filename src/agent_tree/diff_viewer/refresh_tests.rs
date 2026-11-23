@@ -18,7 +18,7 @@ impl Pane {
             repo: TestRepo::new(),
             last: LastSeen::default(),
             lines: Vec::new(),
-            state: DiffState::new(),
+            state: DiffState::new(crate::keybindings::KEY_BINDINGS),
         }
     }
 
@@ -101,7 +101,7 @@ fn an_empty_open_set_blanks_the_pane_without_asking_git() {
         kind: DiffLineKind::Context,
         text: "stale".into(),
     }];
-    let mut state = DiffState::new();
+    let mut state = DiffState::new(crate::keybindings::KEY_BINDINGS);
     state.notice = Some("old".into());
     let runner = MockProcessRunner::new(vec![]);
 
@@ -268,7 +268,7 @@ fn a_failed_git_query_keeps_the_last_document_and_sets_a_notice() {
         text: "the last good document".into(),
     }];
     let mut lines = kept.clone();
-    let mut state = DiffState::new();
+    let mut state = DiffState::new(crate::keybindings::KEY_BINDINGS);
     let runner = MockProcessRunner::new(vec![MockProcessRunner::fail(
         "fatal: unable to read index.lock",
     )]);

@@ -69,6 +69,9 @@ pub struct McpDeps {
     pub runner: Arc<dyn ProcessRunner>,
     pub embedding_service: Arc<EmbeddingService>,
     pub data_dir: std::path::PathBuf,
+    /// The board's load of the key table (`LoadKeyTable`), which
+    /// `keybinding_search` answers from (`CatalogueIsTheDispatchTable`).
+    pub key_table: crate::keybindings::KeyTableLoad,
 }
 
 /// `mcp-task-tools.allium: config.dispatch_task_wait_cap`: how long
@@ -109,6 +112,10 @@ pub struct McpState {
     /// Dispatch data directory (where the store's local files live). Trajectory files are
     /// written here under `trajectories/<task_id>.jsonl`.
     pub data_dir: std::path::PathBuf,
+    /// The board's load of the key table: the table its key handlers look
+    /// keys up in, so `keybinding_search` shows the user's keys
+    /// (`CatalogueIsTheDispatchTable`).
+    pub(crate) key_table: crate::keybindings::KeyTableLoad,
     /// This install's host id (`HostStore::host_id`): what `task_resume`
     /// compares a task's `host` against (`Task::is_locally_owned`).
     pub(crate) host_id: String,
@@ -181,6 +188,7 @@ impl McpState {
             notify_tx,
             embedding_service: deps.embedding_service,
             data_dir: deps.data_dir,
+            key_table: deps.key_table,
             host_id,
             dispatch_task_wait_cap: DISPATCH_TASK_WAIT_CAP,
             wrap_up_wait_cap: WRAP_UP_WAIT_CAP,
@@ -354,6 +362,7 @@ mod services_tests {
                 runner,
                 embedding_service,
                 data_dir: std::env::temp_dir(),
+                key_table: crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
             },
             services.clone(),
             None,
@@ -379,6 +388,7 @@ mod origin_tests {
                 runner: crate::process::MockProcessRunner::unused(),
                 embedding_service: EmbeddingService::new_test(),
                 data_dir: std::env::temp_dir(),
+                key_table: crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
             },
             None,
         )

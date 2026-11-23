@@ -140,9 +140,10 @@ pub struct RenderState {
     /// timestamp beside it — see `AgentTreeGgChordNeverExpires` in
     /// docs/specs/agent-tree.allium for why a clock would buy nothing here.
     pub(super) pending_chord: Option<char>,
-    /// The keybinding table the pane looks keys up in:
-    /// [`crate::keybindings::KEY_BINDINGS`] outside tests, which install a
-    /// remapped copy to show that a row alone decides what its keys do.
+    /// The keybinding table the pane looks keys up in and builds its section
+    /// titles from: the table this process loaded (`PanesLoadTheirOwnTable`
+    /// in docs/specs/keybindings.allium). Tests install a remapped copy to
+    /// show that a row alone decides what its keys do.
     pub(super) key_table: &'static [crate::keybindings::KeyBinding],
     /// Rows the tree had to draw into at the last render — the pane's height
     /// less its two borders. Recorded by [`render`](crate::agent_tree::render::render) because the half-page
@@ -182,14 +183,15 @@ pub struct RenderState {
 pub const RESUME_JUMP_MAX_READS: u32 = 30;
 
 impl RenderState {
-    pub fn new() -> Self {
+    /// A fresh state that looks keys up in `key_table`.
+    pub fn new(key_table: &'static [crate::keybindings::KeyBinding]) -> Self {
         Self {
             tree_state: TreeState::default(),
             user_collapsed: HashSet::new(),
             notice: None,
             open_diffs: BTreeSet::new(),
             pending_chord: None,
-            key_table: crate::keybindings::KEY_BINDINGS,
+            key_table,
             viewport_rows: 0,
             focus: Focus::Agents,
             browse_focus: Focus::Tree,
@@ -487,8 +489,9 @@ impl RenderState {
     }
 }
 
+#[cfg(test)]
 impl Default for RenderState {
     fn default() -> Self {
-        Self::new()
+        Self::new(crate::keybindings::KEY_BINDINGS)
     }
 }
