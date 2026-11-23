@@ -317,7 +317,7 @@ usually the right answer.",
                 },
                 "ready": {
                     "type": "boolean",
-                    "description": tasks::READY_DESCRIPTION
+                    "description": tasks::READY_CREATE_DESCRIPTION
                 }
             },
             "required": ["title", "repo_path", "epic_id"]

@@ -508,3 +508,119 @@ async fn a_move_under_an_orchestrated_epic_names_the_switch_it_turned_off() {
     );
     assert!(state.db.epic_orchestration(moved).await.is_none());
 }
+
+// -- refusals the handler owns -------------------------------------------------
+
+#[tokio::test]
+async fn an_agent_with_no_name_cannot_mark_and_nothing_is_written() {
+    let state = test_state().await;
+    let e = epic(&state, "E", None).await;
+    let task = task_in(&state, e, json!({})).await;
+
+    let resp = tool_as(
+        &state,
+        "task_update",
+        json!({ "task_ids": [task.0], "title": "renamed", "ready": true }),
+        CallerIdentity::Task(TaskId(9999)),
+    )
+    .await;
+    assert!(is_error(&resp));
+    assert!(
+        error_message(&resp).contains("no agent name"),
+        "{}",
+        error_message(&resp)
+    );
+    assert!(state.db.ready_mark(task).await.is_none());
+    assert_eq!(state.db.get_task(task).await.unwrap().title, "T");
+}
+
+/// The real task service, with `mark_task_ready` refused as the store would
+/// refuse it after the fields have landed.
+struct RefusesTheMark(Arc<dyn crate::service::TaskServiceApi>);
+
+#[async_trait::async_trait]
+impl crate::service::TaskServiceApiStub for RefusesTheMark {
+    async fn update_task(
+        &self,
+        params: crate::service::UpdateTaskParams,
+    ) -> Result<crate::service::UpdateTaskResult, crate::service::ServiceError> {
+        self.0.update_task(params).await
+    }
+    async fn create_task(
+        &self,
+        params: crate::service::CreateTaskParams,
+    ) -> Result<TaskId, crate::service::ServiceError> {
+        self.0.create_task(params).await
+    }
+    async fn get_task(
+        &self,
+        id: TaskId,
+    ) -> Result<crate::models::Task, crate::service::ServiceError> {
+        self.0.get_task(id).await
+    }
+    async fn mark_task_ready(
+        &self,
+        _: TaskId,
+        _: ReadyMarker,
+        _: Option<&str>,
+    ) -> Result<(), crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Validation(
+            "only a backlog task can be marked ready".into(),
+        ))
+    }
+}
+
+crate::task_service_api!(service_api_stub_bridge, RefusesTheMark);
+
+async fn state_refusing_the_mark() -> Arc<McpState> {
+    let real = test_state().await;
+    let (state, _) = state_over(
+        real.db_write().clone(),
+        Arc::new(crate::process::MockProcessRunner::new(vec![])),
+        None,
+        Some(Arc::new(RefusesTheMark(real.task_svc.clone()))),
+        None,
+    );
+    state
+}
+
+#[tokio::test]
+async fn a_refused_mark_after_the_fields_says_the_fields_landed() {
+    let state = state_refusing_the_mark().await;
+    let e = epic(&state, "E", None).await;
+    let task = task_in(&state, e, json!({})).await;
+
+    let resp = tool(
+        &state,
+        "task_update",
+        json!({ "task_ids": [task.0], "title": "renamed", "ready": true }),
+    )
+    .await;
+    assert!(is_error(&resp));
+    let message = error_message(&resp);
+    assert!(
+        message.contains("the fields were written (title), but the ready mark was not"),
+        "{message}"
+    );
+    assert_eq!(state.db.get_task(task).await.unwrap().title, "renamed");
+}
+
+#[tokio::test]
+async fn a_refused_mark_after_creation_names_the_created_task() {
+    let state = state_refusing_the_mark().await;
+    let e = epic(&state, "E", None).await;
+
+    let resp = tool(
+        &state,
+        "task_create",
+        json!({ "title": "T", "repo_path": "/repo", "epic_id": e.0, "ready": true }),
+    )
+    .await;
+    assert!(is_error(&resp));
+    assert!(
+        error_message(&resp).contains("was created, but not marked ready"),
+        "{}",
+        error_message(&resp)
+    );
+    assert_eq!(state.db.list_all().await.len(), 1);
+}

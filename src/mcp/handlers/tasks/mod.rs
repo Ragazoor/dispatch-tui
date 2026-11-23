@@ -192,6 +192,10 @@ mcp_args! {
 /// The `ready` argument's one wording, on `task_create` and `task_update`.
 pub(super) const READY_DESCRIPTION: &str = "Mark the task ready (true) or not ready (false): an orchestrator of its epic starts only ready tasks. Mark one ready only when the work is already wanted: the operator asked for it, or it is a step of the epic's plan. Only a backlog task can be ready, and the mark ends when the task leaves backlog. It locks nothing and nobody else reads it.";
 
+/// `task_create`'s wording of `ready`: the shared one, plus what leaving it
+/// out means there.
+pub(super) const READY_CREATE_DESCRIPTION: &str = "Mark the task ready (true) or not ready (false): an orchestrator of its epic starts only ready tasks. Mark one ready only when the work is already wanted: the operator asked for it, or it is a step of the epic's plan. Only a backlog task can be ready, and the mark ends when the task leaves backlog. It locks nothing and nobody else reads it. Defaults to false: a new task is not ready.";
+
 /// The `task_update` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
 /// of `task_id`, so the field set is declared once.
 pub(super) fn update_tasks_schema() -> serde_json::Value {
