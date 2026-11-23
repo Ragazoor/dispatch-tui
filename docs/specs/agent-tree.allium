@@ -564,8 +564,8 @@ entity AgentTreePane {
     listed_agents: [core/Task]
 
     -- Which of listed_agents the section shows (CycleAgentListFilter). Starts
-    -- on `all` in every fresh renderer and is never saved: like focus, it is
-    -- per-process view state, and a hide ends it.
+    -- on `running` in every fresh renderer and is never saved: like focus, it
+    -- is per-process view state, and a hide ends it.
     agent_filter: AgentListFilter
 
     -- How many agents the board's filter left out of listed_agents, as the
@@ -946,7 +946,7 @@ rule SplitAgentTreePaneOnAgentLaunch {
         focus: agents,
         browse_focus: tree,
         listed_agents: [],
-        agent_filter: all,
+        agent_filter: running,
         hidden_agent_count: 0,
         selected_agent: null,
         pending_jump: null,
@@ -1155,8 +1155,10 @@ rule ShowAgentTreePane {
     -- A fresh renderer also starts with an empty agents list and reads the
     -- board straight away, rather than one interval after it appears.
     ensures: pane.listed_agents = []
-    -- The agents filter is view state too: a fresh renderer shows every agent.
-    ensures: pane.agent_filter = all
+    -- The agents filter is view state too: a fresh renderer shows the running
+    -- agents alone, because the agents the user can jump to are the ones the
+    -- view is for. Every listed agent is one Tab away (CycleAgentListFilter).
+    ensures: pane.agent_filter = running
     ensures: pane.hidden_agent_count = 0
     ensures: pane.last_agents_listed_at = now - config.agent_tree_agents_refresh_interval
     ensures: pane.selected_agent = null
@@ -3253,8 +3255,10 @@ surface AgentTreeCompanionPane {
         -- In the agents view the section fills the pane and scrolls to keep its
         -- cursor in view. With no agents shown it still shows its border and
         -- one empty row, so `s` always has somewhere visible to go. That
-        -- includes the `running` filter with only detached agents listed:
-        -- the badge in the title says why the list is empty.
+        -- includes the `running` filter with only detached agents listed,
+        -- which is how a fresh pane opens when no listed agent has a live
+        -- window (ShowAgentTreePane starts on `running`): the badge in the
+        -- title says why the list is empty, and Tab shows the rest.
         --
         -- The focused section's border is drawn in the focus colour and the
         -- other browse section's in the ordinary border colour. A notice

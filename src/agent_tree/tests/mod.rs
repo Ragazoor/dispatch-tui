@@ -397,7 +397,20 @@ fn unstaged_out_counted(
 }
 
 impl KeyRig {
+    /// A rig with `agents` listed, on the agents section's `all` filter:
+    /// the tests built on it draw detached rows or flip to `running`
+    /// themselves. `with_agents_fresh` keeps the fresh pane's default.
     fn with_agents(changes: &[GitFileChange], agents: Vec<AgentRow>) -> Self {
+        let mut rig = Self::new(changes);
+        rig.state.agents.set_filter(AgentFilter::All);
+        rig.state.adopt_agent_list(Ok(agents));
+        rig.draw();
+        rig
+    }
+
+    /// A rig with `agents` listed and the agents filter left where a fresh
+    /// pane starts it (ShowAgentTreePane).
+    fn with_agents_fresh(changes: &[GitFileChange], agents: Vec<AgentRow>) -> Self {
         let mut rig = Self::new(changes);
         rig.state.adopt_agent_list(Ok(agents));
         rig.draw();

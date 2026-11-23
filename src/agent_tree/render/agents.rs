@@ -63,11 +63,12 @@ pub struct AgentList {
 
 /// Which listed agents the section shows — the spec's `AgentListFilter`
 /// (`CycleAgentListFilter`). `Running` is the attached agents alone: a live
-/// window, the board's `is_live_agent`.
+/// window, the board's `is_live_agent`. A fresh pane starts on `Running`
+/// (`ShowAgentTreePane`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentFilter {
-    #[default]
     All,
+    #[default]
     Running,
 }
 
@@ -119,6 +120,15 @@ impl AgentsSection {
 
     pub fn filter(&self) -> AgentFilter {
         self.filter
+    }
+
+    /// Put the section on `filter`, as `cycle_filter` would land it. Tests
+    /// written against one filter set it here rather than counting flips
+    /// from the default.
+    #[cfg(test)]
+    pub fn set_filter(&mut self, filter: AgentFilter) {
+        self.filter = filter;
+        self.reshow();
     }
 
     /// Adopt a fresh read. The cursor follows the task it was on, not the
@@ -539,6 +549,15 @@ mod tests {
         crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
     }
 
+    /// A section on the `all` filter. Most tests here draw detached rows or
+    /// flip to `running` themselves, so they start from every listed agent
+    /// rather than the fresh pane's `running` default.
+    fn on_all() -> AgentsSection {
+        let mut section = AgentsSection::new();
+        section.set_filter(AgentFilter::All);
+        section
+    }
+
     fn in_epic(id: i64, epic: i64, breadcrumb: &[&str]) -> AgentRow {
         AgentRow {
             epic: Some(test_pane_epic(epic, breadcrumb)),
@@ -557,7 +576,7 @@ mod tests {
 
     #[test]
     fn hidden_agents_are_named_on_a_muted_last_line() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![in_epic(7, 3, &["Three"]), row(4, false)]);
         section.set_hidden(3);
         let out = rendered(&mut section, true, 8);
@@ -573,7 +592,7 @@ mod tests {
 
     #[test]
     fn nothing_hidden_draws_no_hint_line() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![row(4, false)]);
         let out = rendered(&mut section, true, 6);
         assert!(!out.contains("hidden by board"), "{out}");
@@ -581,7 +600,7 @@ mod tests {
 
     #[test]
     fn a_list_whose_every_agent_is_hidden_shows_the_hint_alone() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_hidden(2);
         let out = rendered(&mut section, true, 5);
         assert!(out.contains("2 agents hidden by board"), "{out}");
@@ -590,7 +609,7 @@ mod tests {
 
     #[test]
     fn the_cursor_on_the_last_agent_brings_the_hint_into_view() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows((1..=6).map(|id| row(id, false)).collect());
         section.set_hidden(1);
         rendered(&mut section, true, 5);
@@ -648,7 +667,7 @@ mod tests {
 
     #[test]
     fn an_epic_header_reads_id_then_own_title_above_its_agents() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![
             in_epic(41, 314, &["Dispatch"]),
             in_epic(42, 320, &["Dispatch", "Pane"]),
@@ -729,7 +748,7 @@ mod tests {
                 DrawnLine::Agent(2),
             ]
         );
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(rows);
         let out = rendered(&mut section, true, 14);
         let lines: Vec<&str> = out.lines().collect();
@@ -745,7 +764,7 @@ mod tests {
     /// per level; the epicless agents below the rule do not.
     #[test]
     fn a_nested_groups_header_and_agents_are_indented() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![
             nested(2, 30, "Thirty", &[(10, "Ten")]),
             nested(3, 40, "Forty", &[(10, "Ten")]),
@@ -762,7 +781,7 @@ mod tests {
 
     #[test]
     fn the_cursor_steps_over_headers_from_agent_to_agent() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![in_epic(1, 3, &["Three"]), in_epic(2, 5, &["Five"])]);
         section.down();
         assert_eq!(section.selected().unwrap().id, TaskId(2));
@@ -770,7 +789,7 @@ mod tests {
 
     #[test]
     fn with_headers_a_short_pane_still_scrolls_the_last_agent_into_view() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(
             (1..=20)
                 .map(|id| in_epic(id, id, &[&format!("E{id}")]))
@@ -783,7 +802,7 @@ mod tests {
 
     #[test]
     fn scrolling_up_onto_a_groups_first_agent_brings_its_header_into_view() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         let mut rows: Vec<AgentRow> = (1..=10).map(|id| in_epic(id, 3, &["Three"])).collect();
         rows.extend((11..=20).map(|id| in_epic(id, 5, &["Five"])));
         section.set_rows(rows);
@@ -799,7 +818,7 @@ mod tests {
 
     #[test]
     fn in_a_one_line_pane_the_cursors_row_wins_over_its_header() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![in_epic(1, 3, &["Three"]), in_epic(2, 5, &["Five"])]);
         section.down();
         for _ in 0..2 {
@@ -810,7 +829,7 @@ mod tests {
 
     #[test]
     fn at_the_top_the_first_groups_header_is_in_view() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         let mut rows: Vec<AgentRow> = (1..=10).map(|id| in_epic(id, 3, &["Three"])).collect();
         rows.extend((11..=20).map(|id| in_epic(id, 5, &["Five"])));
         section.set_rows(rows);
@@ -825,7 +844,7 @@ mod tests {
 
     #[test]
     fn a_row_with_an_agent_name_leads_with_it_and_not_the_id() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![AgentRow {
             agent_name: "scar".into(),
             ..row(4941, false)
@@ -837,7 +856,7 @@ mod tests {
 
     #[test]
     fn a_row_without_an_agent_name_leads_with_its_title_alone() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![row(4941, false)]);
         let out = rendered(&mut section, true, 6);
         assert!(out.contains("● task 4941"), "{out}");
@@ -848,7 +867,7 @@ mod tests {
 
     #[test]
     fn the_cursor_follows_its_task_when_an_agent_starts_above_it() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![row(5, false), row(9, false)]);
         section.down();
         assert_eq!(section.selected().unwrap().id, TaskId(9));
@@ -859,7 +878,7 @@ mod tests {
 
     #[test]
     fn the_cursor_clamps_when_its_task_leaves_the_list() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![row(1, false), row(2, false), row(3, false)]);
         section.bottom();
         section.set_rows(vec![row(1, false)]);
@@ -868,7 +887,7 @@ mod tests {
 
     #[test]
     fn motions_clamp_at_both_ends() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![row(1, false), row(2, false)]);
         section.up();
         assert_eq!(section.selected().unwrap().id, TaskId(1));
@@ -881,7 +900,7 @@ mod tests {
 
     #[test]
     fn motions_on_an_empty_section_are_no_ops() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.down();
         section.bottom();
         section.half_page_down();
@@ -892,7 +911,7 @@ mod tests {
 
     #[test]
     fn space_on_an_attached_agent_jumps_to_its_window() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![row(1, false), row(2, true)]);
         assert_eq!(
             section.space_action(),
@@ -902,7 +921,7 @@ mod tests {
 
     #[test]
     fn the_own_task_has_no_space_action() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![row(1, false), row(2, true)]);
         section.down();
         assert_eq!(section.space_action(), None);
@@ -910,7 +929,7 @@ mod tests {
 
     #[test]
     fn space_on_a_detached_agent_resumes_it() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![test_detached_row(3)]);
         assert_eq!(section.space_action(), Some(KeyAction::Resume(TaskId(3))));
     }
@@ -919,7 +938,7 @@ mod tests {
 
     #[test]
     fn every_row_leads_with_its_dot_and_the_own_task_has_no_trailing_mark() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![
             row(4941, false),
             row(4942, true),
@@ -936,7 +955,7 @@ mod tests {
     #[test]
     fn a_detached_row_is_drawn_in_the_ordinary_colour_and_the_own_row_dimmed() {
         use crate::palette::MUTED;
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![row(1, true), test_detached_row(2)]);
         let mut terminal = Terminal::new(TestBackend::new(30, 4)).expect("terminal");
         terminal
@@ -963,7 +982,7 @@ mod tests {
     fn the_title_names_tab_and_s_whichever_section_has_focus() {
         // TwoViewsShareThePane: the hints name the filter Tab moves to and
         // the key that leaves the view.
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         for focused in [true, false] {
             let out = rendered_at(&mut section, focused, 50, 6);
             assert!(
@@ -975,7 +994,7 @@ mod tests {
 
     #[test]
     fn under_running_the_title_carries_the_badge_and_names_all() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.cycle_filter();
         let out = rendered_at(&mut section, true, 50, 6);
         assert!(
@@ -986,7 +1005,7 @@ mod tests {
 
     #[test]
     fn a_narrow_border_clips_the_hints_and_keeps_the_badge() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.cycle_filter();
         let out = rendered(&mut section, true, 3);
         assert!(out.contains("Agents [running]"), "{out}");
@@ -996,7 +1015,7 @@ mod tests {
 
     #[test]
     fn under_running_an_epic_of_only_detached_agents_draws_no_header() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         let detached_in_epic = AgentRow {
             window: None,
             ..in_epic(2, 5, &["Five"])
@@ -1011,7 +1030,7 @@ mod tests {
 
     #[test]
     fn a_filter_that_shrinks_the_list_scrolls_the_shown_rows_back_into_view() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         let mut rows: Vec<AgentRow> = (1..=10).map(test_detached_row).collect();
         rows.insert(0, row(100, false));
         section.set_rows(rows);
@@ -1023,8 +1042,22 @@ mod tests {
     }
 
     #[test]
-    fn the_filter_shows_attached_agents_and_keeps_every_listed_one() {
+    fn a_fresh_section_starts_on_running() {
         let mut section = AgentsSection::new();
+        assert_eq!(section.filter(), AgentFilter::Running);
+        section.set_rows(vec![row(1, false), test_detached_row(2)]);
+        let shown: Vec<i64> = section.rows().iter().map(|r| r.id.0).collect();
+        assert_eq!(shown, vec![1]);
+        let out = rendered_at(&mut section, true, 50, 6);
+        assert!(
+            out.contains("Agents [running] (Tab: all, s: browse)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn the_filter_shows_attached_agents_and_keeps_every_listed_one() {
+        let mut section = on_all();
         section.set_rows(vec![row(1, true), test_detached_row(2), row(3, false)]);
         section.cycle_filter();
         assert_eq!(section.filter(), AgentFilter::Running);
@@ -1038,7 +1071,7 @@ mod tests {
 
     #[test]
     fn in_a_short_pane_the_section_scrolls_to_keep_the_cursor_in_view() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows((1..=20).map(|id| row(id, false)).collect());
         section.bottom();
         let out = rendered(&mut section, true, 10);
@@ -1056,7 +1089,7 @@ mod tests {
         // A second branch under 10, so 10 draws (two branches meet there).
         let mut sibling = test_pane_epic(40, &["Forty"]);
         sibling.ancestors = nested.ancestors.clone();
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows(vec![
             in_epic(1, 5, &["Five"]),
             in_epic(2, 5, &["Five"]),
@@ -1082,7 +1115,7 @@ mod tests {
 
     #[test]
     fn half_a_page_is_half_the_sections_visible_height() {
-        let mut section = AgentsSection::new();
+        let mut section = on_all();
         section.set_rows((1..=20).map(|id| row(id, false)).collect());
         rendered(&mut section, true, 10);
         section.half_page_down();

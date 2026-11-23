@@ -76,12 +76,28 @@ fn shown_ids(state: &RenderState) -> Vec<i64> {
     state.agents.rows().iter().map(|row| row.id.0).collect()
 }
 
-/// A fresh pane shows every listed agent, attached and detached.
+/// ShowAgentTreePane: a fresh pane shows the running agents alone, and keeps
+/// every listed one behind the filter.
 #[test]
-fn the_agents_filter_starts_on_all() {
-    let rig = agents_rig(vec![agent(1, false), detached(2)]);
-    assert_eq!(rig.state.agents.filter(), AgentFilter::All);
-    assert_eq!(shown_ids(&rig.state), vec![1, 2]);
+fn the_agents_filter_starts_on_running() {
+    let rig = KeyRig::with_agents_fresh(&[modified("a.rs")], vec![agent(1, false), detached(2)]);
+    assert_eq!(rig.state.agents.filter(), AgentFilter::Running);
+    assert_eq!(shown_ids(&rig.state), vec![1]);
+    assert_eq!(rig.state.agents.listed().len(), 2);
+}
+
+/// A fresh pane with only detached agents listed opens empty, and its title
+/// says the list is narrowed (TwoViewsShareThePane).
+#[test]
+fn a_fresh_pane_with_only_detached_agents_shows_none_under_a_running_badge() {
+    let rig = KeyRig::with_agents_fresh(&[modified("a.rs")], vec![detached(1), detached(2)]);
+    assert!(shown_ids(&rig.state).is_empty());
+    assert_eq!(rig.state.agents.listed().len(), 2);
+    let title = crate::agent_tree::render::agents::agents_title(
+        crate::keybindings::KEY_BINDINGS,
+        rig.state.agents.filter(),
+    );
+    assert!(title.contains("[running]"), "{title}");
 }
 
 /// CycleAgentListFilter: in the agents view Tab flips to the running agents
@@ -643,7 +659,8 @@ fn the_agents_view_fills_the_pane_with_agents_and_hides_the_tree() {
     state.adopt_agent_list(Ok(vec![agent(4941, false), agent(4942, true)]));
     state.focus = Focus::Agents;
     let out = render_pane_to_string(&mut state, &tree, 12);
-    assert!(out.contains("Agents (Tab: running, s: browse)"), "{out}");
+    // The pane is narrow enough to clip the title's tail.
+    assert!(out.contains("Agents [running] (Tab: all, s: "), "{out}");
     assert!(
         out.contains("task 4941") && out.contains("task 4942"),
         "{out}"
@@ -953,7 +970,7 @@ fn the_drawn_section_titles_name_the_users_keys_from_the_override_file() {
     let mut state = RenderState::new(table);
     let agents = draw(&mut state);
     assert!(
-        agents.contains("Agents (Ctrl+F: running, Ctrl+B: browse)"),
+        agents.contains("Agents [running] (Ctrl+F: all, Ctrl+B: browse)"),
         "{agents}"
     );
     state.focus = Focus::Tree;
@@ -970,7 +987,7 @@ fn the_drawn_section_titles_name_the_users_keys_from_the_override_file() {
     let agents = draw(&mut state);
     assert!(
         agents.contains(
-            crate::agent_tree::render::agents::agents_title(remapped, AgentFilter::All).trim()
+            crate::agent_tree::render::agents::agents_title(remapped, AgentFilter::Running).trim()
         ),
         "{agents}"
     );
