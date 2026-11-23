@@ -69,6 +69,8 @@ pub mod dispatch_request;
 pub use dispatch_request::*;
 pub mod agents;
 pub use agents::*;
+pub mod orchestration;
+pub use orchestration::*;
 pub mod feed_request;
 pub use feed_request::*;
 pub mod session_request;

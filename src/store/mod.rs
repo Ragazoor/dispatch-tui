@@ -123,6 +123,9 @@ pub trait TaskRead: Send + Sync {
     /// Bookmark`), ascending. Drives the board's bookmark mark and the MCP
     /// `bookmarked` line and filter.
     async fn bookmarked_task_ids(&self) -> Vec<TaskId>;
+    /// `core.allium: ReadyMark`: the ready mark on `id`, if it has one. A
+    /// row that does not decode reads as none.
+    async fn ready_mark(&self, id: TaskId) -> Option<crate::models::ReadyMark>;
     /// One archived task (`core.allium: ArchivedTask`), asked of the STORE:
     /// the board holds no archived records. `Ok(None)` means never archived;
     /// `Err` means the store could not be asked.
@@ -176,6 +179,17 @@ pub trait TaskCrud: TaskRead {
     /// bookmark on `id`. Refused for a Done task, an unseen one, and on a
     /// board that does not yet know who its person is.
     async fn set_bookmark(&self, id: TaskId, bookmarked: bool) -> Result<()>;
+    /// `tasks.allium: MarkTaskReady`. `agent_name` is `Some` exactly for an
+    /// agent's mark; the store refuses any other pairing, and a task outside
+    /// backlog.
+    async fn mark_task_ready(
+        &self,
+        id: TaskId,
+        marked_by: crate::models::ReadyMarker,
+        agent_name: Option<&str>,
+    ) -> Result<()>;
+    /// `tasks.allium: ClearReadyMark`.
+    async fn clear_ready_mark(&self, id: TaskId) -> Result<()>;
     /// `tasks.allium: BatchDelete`'s atomic counterpart to looping
     /// [`Self::delete_task`]/[`EpicCrud::delete_epic`] once per selected item.
     /// Validates every task and epic against the store's TRUE state and
@@ -622,6 +636,9 @@ pub trait EpicRead: Send + Sync {
     /// Fetch all tasks that have a non-null epic_id in a single query.
     /// Use instead of looping over epics and calling list_tasks_for_epic() per epic.
     async fn list_all_tasks_with_epic_id(&self) -> Vec<Task>;
+    /// `core.allium: EpicOrchestration`: the orchestrator switch on `id`
+    /// itself, if it is on. A row that does not decode reads as none.
+    async fn epic_orchestration(&self, id: EpicId) -> Option<crate::models::EpicOrchestration>;
 }
 
 /// The optional fields an epic can be created with.
@@ -688,6 +705,23 @@ pub trait EpicCrud: EpicRead {
     /// `epics.allium: SetEpicGroupByRepoIsOneTransaction`: the flag and
     /// its regroup or flatten, in one transaction.
     async fn set_epic_group_by_repo(&self, id: EpicId, group_by_repo: bool) -> Result<()>;
+    /// `orchestrators.allium: SwitchOrchestratorOn`. `None` takes the
+    /// default start rule, or the default limit.
+    async fn switch_orchestrator_on(
+        &self,
+        id: EpicId,
+        start_rule: Option<crate::models::StartRule>,
+        max_parallel: Option<i64>,
+    ) -> Result<()>;
+    /// `orchestrators.allium: ChangeOrchestratorSettings`. `None` leaves it.
+    async fn change_orchestrator_settings(
+        &self,
+        id: EpicId,
+        start_rule: Option<crate::models::StartRule>,
+        max_parallel: Option<i64>,
+    ) -> Result<()>;
+    /// `orchestrators.allium: SwitchOrchestratorOff`.
+    async fn switch_orchestrator_off(&self, id: EpicId) -> Result<()>;
 }
 
 /// Read-only work-package queries (`work-packages.allium`). Held (via

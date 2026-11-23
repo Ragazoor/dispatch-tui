@@ -674,3 +674,46 @@ pub fn feed_request(row: &bindings::FeedRequest) -> Decoded<FeedRequest> {
         reason: text(&row.reason).map(str::to_owned),
     })
 }
+
+// ---------------------------------------------------------------------------
+// Orchestration (orchestrators.allium, step 1's rows)
+// ---------------------------------------------------------------------------
+
+/// The store's `epic_orchestrations` row. `max_parallel` 0 is absence: the
+/// epic follows the default limit. An unknown start rule refuses the row.
+pub fn epic_orchestration(
+    row: &bindings::EpicOrchestration,
+) -> Decoded<crate::models::EpicOrchestration> {
+    const T: &str = "epic_orchestrations";
+    let start_rule = crate::models::StartRule::parse(&row.start_rule).ok_or_else(|| {
+        DecodeError::new(
+            T,
+            row.epic_id,
+            format!("unknown start rule {:?}", row.start_rule),
+        )
+    })?;
+    Ok(crate::models::EpicOrchestration {
+        epic_id: EpicId(row.epic_id),
+        start_rule,
+        max_parallel: id(row.max_parallel),
+        switched_on_at: required_timestamp(T, row.epic_id, "switched_on_at", &row.switched_on_at)?,
+    })
+}
+
+/// The store's `ready_marks` row. An unknown marker refuses the row.
+pub fn ready_mark(row: &bindings::ReadyMark) -> Decoded<crate::models::ReadyMark> {
+    const T: &str = "ready_marks";
+    let marked_by = crate::models::ReadyMarker::parse(&row.marked_by).ok_or_else(|| {
+        DecodeError::new(
+            T,
+            row.task_id,
+            format!("unknown marker {:?}", row.marked_by),
+        )
+    })?;
+    Ok(crate::models::ReadyMark {
+        task_id: TaskId(row.task_id),
+        marked_by,
+        agent_name: text(&row.agent_name).map(str::to_owned),
+        marked_at: required_timestamp(T, row.task_id, "marked_at", &row.marked_at)?,
+    })
+}

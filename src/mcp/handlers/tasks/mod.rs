@@ -179,7 +179,18 @@ mcp_args! {
         "type": "boolean",
         "description": "Bookmark the task for the person whose board this is (true) or remove the bookmark (false). The task and every epic above it are marked on their board until it is removed or the task is done. A done task cannot be bookmarked."
     };
+
+    // Not a Task field: the task's ready mark (`core.allium: ReadyMark`),
+    // written after the fields.
+    #[serde(default)]
+    optional ready: Option<bool> = [manual] {
+        "type": "boolean",
+        "description": READY_DESCRIPTION
+    };
 }
+
+/// The `ready` argument's one wording, on `task_create` and `task_update`.
+pub(super) const READY_DESCRIPTION: &str = "Mark the task ready (true) or not ready (false): an orchestrator of its epic starts only ready tasks. Mark one ready only when the work is already wanted: the operator asked for it, or it is a step of the epic's plan. Only a backlog task can be ready, and the mark ends when the task leaves backlog. It locks nothing and nobody else reads it.";
 
 /// The `task_update` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
 /// of `task_id`, so the field set is declared once.
@@ -279,6 +290,9 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) schedule: Option<String>,
     #[serde(default)]
     pub(super) signal: bool,
+    /// The new task's ready mark (`CreateTaskViaMcp`). Absent is not ready.
+    #[serde(default)]
+    pub(super) ready: bool,
 }
 
 // WrapUpAction lives in `crate::mcp` — it's shared between session_wrap-up (whose
@@ -364,7 +378,7 @@ pub(super) async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, Strin
 /// The text `task_search` returns with `task_id` for `task`; `dispatch://task/self` serves the
 /// same rendering (`task_detail_text` in the spec).
 pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
-    let (epic_titles, verify_command, dispatch_request, agent, bookmarks) = tokio::join!(
+    let (epic_titles, verify_command, dispatch_request, agent, bookmarks, mark, covered_by) = tokio::join!(
         build_epic_titles(state),
         crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path),
         state.db.latest_dispatch_request_for_task(task.id),
@@ -372,16 +386,26 @@ pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
             let agents = state.db.list_agents().await;
             crate::models::display_agent(agents.iter().filter(|a| a.task_id == task.id)).cloned()
         },
-        state.db.bookmarked_task_ids()
+        state.db.bookmarked_task_ids(),
+        state.db.ready_mark(task.id),
+        super::orchestration::covering(state, task.epic_id)
     );
-    format_task_detail(
+    let mut text = format_task_detail(
         task,
         agent.as_ref(),
         &epic_titles,
         verify_command.as_deref(),
         dispatch_request.as_ref(),
         bookmarks.contains(&task.id),
-    )
+    );
+    // GetTaskViaMcp: [Ready] and [Orchestrated by] sit after [Bookmarked],
+    // before Created.
+    let created_at = text.rfind("\nCreated: ").unwrap_or(text.len());
+    text.insert_str(
+        created_at,
+        &super::orchestration::task_lines(task.status, mark.as_ref(), covered_by.as_ref()),
+    );
+    text
 }
 
 /// `GetTaskViaMcp`'s `[Dispatch request]` line: the task's most recent
@@ -546,6 +570,7 @@ pub(super) fn goal_line(s: &str) -> String {
 fn format_task_line(
     t: &Task,
     bookmarked: bool,
+    ready: bool,
     agent: Option<&Agent>,
     epic_titles: &HashMap<EpicId, String>,
     goal: &str,
@@ -577,11 +602,13 @@ fn format_task_line(
     // mcp-task-tools.allium: ListTasksViaMcp, "bookmarked narrows to the board
     // person's bookmarks".
     let bookmark_indicator = if bookmarked { " bookmarked" } else { "" };
+    let ready_indicator = if ready { " ready" } else { "" };
     format!(
-        "- [{}] {}{}{} ({}/{}){}{} | Base: {} | Updated: {} | Completed: {}{}{}",
+        "- [{}] {}{}{}{} ({}/{}){}{} | Base: {} | Updated: {} | Completed: {}{}{}",
         t.id,
         collapse_whitespace(&t.title),
         bookmark_indicator,
+        ready_indicator,
         agent_indicator,
         t.status.as_str(),
         t.sub_status.as_str(),
@@ -717,8 +744,14 @@ mod tests {
     #[test]
     fn format_task_line_names_a_live_agent() {
         let agent = make_agent(Some("task-1"));
-        let line =
-            super::format_task_line(&make_task("main"), false, Some(&agent), &HashMap::new(), "");
+        let line = super::format_task_line(
+            &make_task("main"),
+            false,
+            false,
+            Some(&agent),
+            &HashMap::new(),
+            "",
+        );
         assert!(line.contains(" agent:ada (live)"), "{line}");
     }
 

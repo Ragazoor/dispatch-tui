@@ -60,6 +60,13 @@ impl super::super::TaskRead for Store {
     async fn bookmarked_task_ids(&self) -> Vec<TaskId> {
         self.rows.bookmarked_task_ids()
     }
+
+    async fn ready_mark(&self, id: TaskId) -> Option<crate::models::ReadyMark> {
+        let row = self.rows.ready_mark(id)?;
+        decode::ready_mark(&row)
+            .map_err(|e| tracing::warn!("{e}"))
+            .ok()
+    }
 }
 
 #[async_trait::async_trait]
@@ -162,6 +169,26 @@ impl TaskCrud for Store {
             .set_bookmark(identity, id, bookmarked)
             .await?
             .applied()
+    }
+
+    async fn mark_task_ready(
+        &self,
+        id: TaskId,
+        marked_by: crate::models::ReadyMarker,
+        agent_name: Option<&str>,
+    ) -> Result<()> {
+        self.caller
+            .mark_task_ready(
+                id,
+                marked_by.as_str().to_string(),
+                agent_name.unwrap_or_default().to_string(),
+            )
+            .await?
+            .applied()
+    }
+
+    async fn clear_ready_mark(&self, id: TaskId) -> Result<()> {
+        self.caller.clear_ready_mark(id).await?.applied()
     }
 
     /// tasks.allium: `BatchDelete`'s atomic counterpart to `delete_task`/

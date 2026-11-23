@@ -454,6 +454,41 @@ impl EpicService {
         Ok(self.db.set_epic_group_by_repo(id, group_by_repo).await?)
     }
 
+    /// `orchestrators.allium: SwitchOrchestratorOn`. Every refusal is the
+    /// store's; a missing epic answers not found.
+    pub async fn switch_orchestrator_on(
+        &self,
+        id: EpicId,
+        start_rule: Option<crate::models::StartRule>,
+        max_parallel: Option<i64>,
+    ) -> Result<(), ServiceError> {
+        self.get_epic(id).await?;
+        Ok(self
+            .db
+            .switch_orchestrator_on(id, start_rule, max_parallel)
+            .await?)
+    }
+
+    /// `orchestrators.allium: ChangeOrchestratorSettings`.
+    pub async fn change_orchestrator_settings(
+        &self,
+        id: EpicId,
+        start_rule: Option<crate::models::StartRule>,
+        max_parallel: Option<i64>,
+    ) -> Result<(), ServiceError> {
+        self.get_epic(id).await?;
+        Ok(self
+            .db
+            .change_orchestrator_settings(id, start_rule, max_parallel)
+            .await?)
+    }
+
+    /// `orchestrators.allium: SwitchOrchestratorOff`.
+    pub async fn switch_orchestrator_off(&self, id: EpicId) -> Result<(), ServiceError> {
+        self.get_epic(id).await?;
+        Ok(self.db.switch_orchestrator_off(id).await?)
+    }
+
     /// The delete pre-check (`DeleteEpic`, epics.allium): every task in the
     /// subtree must be done in the store's true rows.
     ///

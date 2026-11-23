@@ -3,8 +3,8 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{Epic, EpicId, TaskStatus};
-use crate::service::{CreateEpicParams, UpdateEpicParams};
+use crate::models::{Epic, EpicId, StartRule, TaskStatus};
+use crate::service::{CreateEpicParams, ServiceError, UpdateEpicParams};
 
 use super::time_filter;
 use super::types::{
@@ -80,6 +80,13 @@ pub(super) struct UpdateEpicArgs {
     pub(super) feed_append_only: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_id")]
     pub(super) parent_epic_id: Option<Option<EpicId>>,
+    /// The orchestrator arguments (`UpdateEpicViaMcp`), which travel alone.
+    #[serde(default)]
+    pub(super) orchestrator: Option<bool>,
+    #[serde(default)]
+    pub(super) start_rule: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) max_parallel: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +167,7 @@ async fn get_epic(state: &McpState, id: Option<Value>, epic_id: EpicId) -> JsonR
         epic.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
     ));
     text.push_str(&format!("\nSubtasks: {done_count}/{total} done"));
+    text.push_str(&super::orchestration::epic_line(state, &epic).await);
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
@@ -363,6 +371,17 @@ pub(super) async fn handle_epic_update(
     };
     tracing::info!(epic_id = parsed.epic_id.0, "MCP epic_update");
 
+    if parsed.orchestrator.is_some() || parsed.start_rule.is_some() || parsed.max_parallel.is_some()
+    {
+        return update_orchestration(state, id, parsed).await;
+    }
+    let moved = match parsed.parent_epic_id {
+        Some(new_parent) => {
+            Some(switches_a_move_turns_off(state, parsed.epic_id, new_parent).await)
+        }
+        None => None,
+    };
+
     let params = UpdateEpicParams {
         epic_id: parsed.epic_id,
         title: parsed.title,
@@ -394,6 +413,136 @@ pub(super) async fn handle_epic_update(
     let epic_id = result.epic_id;
     state.notify_epic_changed(epic_id);
     let epic_ref = super::types::epic_ref(state, epic_id).await;
-    let text = format!("{epic_ref} updated ({})", field_names.join(", "));
+    let mut text = format!("{epic_ref} updated ({})", field_names.join(", "));
+    if let Some((above, off)) = moved.and_then(|(above, off)| above.map(|a| (a, off))) {
+        for (off_id, off_title) in off {
+            text.push_str(&format!(
+                "\nSwitched off the orchestrator of epic {} ({off_title}): epic {} above it has one.",
+                off_id.0, above.0
+            ));
+        }
+    }
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+}
+
+/// `epics.allium: ReparentingKeepsOneOrchestratorOnAPath`, read before the
+/// move: the epic whose switch covers `new_parent`, and the switched-on epics
+/// of the moved subtree (`epic_id` included), which the move turns off when
+/// there is such an epic.
+async fn switches_a_move_turns_off(
+    state: &McpState,
+    epic_id: EpicId,
+    new_parent: Option<EpicId>,
+) -> (Option<EpicId>, Vec<(EpicId, String)>) {
+    let above = super::orchestration::covering(state, new_parent)
+        .await
+        .map(|(e, _)| e.id);
+    if above.is_none() {
+        return (None, Vec::new());
+    }
+    let epics = state.db.list_epics().await;
+    let mut subtree = vec![epic_id];
+    let mut i = 0;
+    while i < subtree.len() {
+        let parent = subtree[i];
+        subtree.extend(
+            epics
+                .iter()
+                .filter(|e| e.parent_epic_id == Some(parent) && !subtree.contains(&e.id))
+                .map(|e| e.id)
+                .collect::<Vec<_>>(),
+        );
+        i += 1;
+    }
+    let mut off = Vec::new();
+    for id in subtree {
+        if state.db.epic_orchestration(id).await.is_some() {
+            let title = epics
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.title.clone())
+                .unwrap_or_default();
+            off.push((id, title));
+        }
+    }
+    (above, off)
+}
+
+/// `UpdateEpicViaMcp`'s orchestrator arguments: switch on, switch off, or
+/// change the settings, each one store write.
+async fn update_orchestration(
+    state: &McpState,
+    id: Option<Value>,
+    parsed: UpdateEpicArgs,
+) -> JsonRpcResponse {
+    let also_set: Vec<&str> = [
+        ("title", parsed.title.is_some()),
+        ("description", parsed.description.is_some()),
+        ("status", parsed.status.is_some()),
+        ("plan_path", parsed.plan_path.is_some()),
+        ("sort_order", parsed.sort_order.is_some()),
+        ("feed_command", parsed.feed_command.is_some()),
+        ("feed_interval_secs", parsed.feed_interval_secs.is_some()),
+        ("group_by_repo", parsed.group_by_repo.is_some()),
+        ("feed_append_only", parsed.feed_append_only.is_some()),
+        ("parent_epic_id", parsed.parent_epic_id.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(name, set)| set.then_some(name))
+    .collect();
+    if !also_set.is_empty() {
+        return service_err_to_response(
+            id,
+            ServiceError::Validation(format!(
+                "the orchestrator arguments go in a call of their own (also set: {})",
+                also_set.join(", ")
+            )),
+        );
+    }
+    let start_rule = match parsed.start_rule.as_deref().map(StartRule::parse) {
+        None => None,
+        Some(Some(rule)) => Some(rule),
+        Some(None) => {
+            return service_err_to_response(
+                id,
+                ServiceError::Validation("start_rule must be marked_only or everything".into()),
+            )
+        }
+    };
+    let epic_id = parsed.epic_id;
+    let (result, done) = match parsed.orchestrator {
+        Some(false) if start_rule.is_some() || parsed.max_parallel.is_some() => {
+            return service_err_to_response(
+                id,
+                ServiceError::Validation(
+                    "switching the orchestrator off takes no start_rule or max_parallel".into(),
+                ),
+            )
+        }
+        Some(false) => (
+            state.epic_svc.switch_orchestrator_off(epic_id).await,
+            "orchestrator switched off",
+        ),
+        Some(true) => (
+            state
+                .epic_svc
+                .switch_orchestrator_on(epic_id, start_rule, parsed.max_parallel)
+                .await,
+            "orchestrator switched on",
+        ),
+        None => (
+            state
+                .epic_svc
+                .change_orchestrator_settings(epic_id, start_rule, parsed.max_parallel)
+                .await,
+            "orchestrator settings changed",
+        ),
+    };
+    if let Err(e) = result {
+        return service_err_to_response(id, e);
+    }
+    state.notify_epic_changed(epic_id);
+    let epic_ref = super::types::epic_ref(state, epic_id).await;
+    let text = format!("{epic_ref}: {done}");
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }

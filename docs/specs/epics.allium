@@ -960,9 +960,10 @@ rule UpdateEpicViaMcp {
         -- operator was away.
         --
         -- == The reply to a move names the switches it turned off ==
-        -- A call that sets parent_epic_id reads which epics of the moved
-        -- subtree had their orchestrator on before the move, and after it.
-        -- Each one that went off (ReparentingKeepsOneOrchestratorOnAPath) is
+        -- A call that sets parent_epic_id reads, before the move, which epics
+        -- of the moved subtree have their orchestrator on and which epic
+        -- covers the new parent. When one does, the move switched every one
+        -- of them off (ReparentingKeepsOneOrchestratorOnAPath), and each is
         -- named in the reply: "Switched off the orchestrator of epic <id>
         -- (<title>): epic <id> above it has one."
         -- feed_command and feed_interval_secs use triple-state JSON

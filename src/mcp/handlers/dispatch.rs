@@ -240,7 +240,7 @@ mcp_tools! {
     async destructive "task_update" => tasks::handle_update_tasks,
         "Update one or many tasks. Pass task_ids (one id updates one task) plus the fields to set: \
 status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
-epic_id, base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule, and bookmarked. At least one field \
+epic_id, base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule, bookmarked, and ready. At least one field \
 must be provided; every field left out is untouched. Every named task is updated whatever its status; \
 pick many ids with task_search (epic_id, recursive, status, base_branch), and check its reply for a last line saying rows were cut (it returns 50 unless limit says otherwise). With one id the reply is \
 \"Task N updated (fields)\" or an error. With several it is not atomic: one line per task, success \
@@ -314,6 +314,10 @@ usually the right answer.",
                 "signal": {
                     "type": "boolean",
                     "description": "When true, signal the user that a new task arrived: the new task and every epic on the path to it are marked on the board until the user enters the epic. Every known person is marked when the task is created. Ignored when epic_id is null. Defaults to false."
+                },
+                "ready": {
+                    "type": "boolean",
+                    "description": tasks::READY_DESCRIPTION
                 }
             },
             "required": ["title", "repo_path", "epic_id"]
@@ -463,11 +467,17 @@ parent_epic_id, and the feed settings feed_command, feed_interval_secs, group_by
 feed_append_only. Every field left out is untouched; the nullable ones take an explicit null to \
 clear. Setting status by hand is rarely right — an epic's status is recalculated from its \
 subtasks whenever they change. Re-parenting is cycle-checked and rejected if it would create a \
-loop.",
+loop. The orchestrator arguments (orchestrator, start_rule, max_parallel) go in a call of their own: \
+orchestrator true switches the epic's orchestrator on, false switches it off, and start_rule or \
+max_parallel alone change the settings of one that is on. The limit cannot yet be set back to the \
+default.",
         {
             "type": "object",
             "properties": {
                 "epic_id": { "type": "integer", "description": "The epic ID" },
+                "orchestrator": { "type": "boolean", "description": "Switch the epic's orchestrator on (true) or off (false). An orchestrator starts the epic's tasks, watches their agents and answers their questions; it covers the epic's whole subtree, so switching on is refused while an epic above or below has one. Switching off takes no start_rule or max_parallel." },
+                "start_rule": { "type": "string", "description": "Which backlog tasks the orchestrator may start: marked_only (only tasks marked ready, the default when switching on) or everything (every backlog task counts as ready).", "enum": crate::models::StartRule::ALL.iter().map(|r| r.as_str()).collect::<Vec<_>>() },
+                "max_parallel": { "type": "integer", "minimum": 1, "description": "How many of the epic's task agents may run at once on a machine. Without it a newly switched-on epic follows the default of 3." },
                 "title": { "type": "string", "description": "New title" },
                 "description": { "type": "string", "description": "New description" },
                 "status": { "type": "string", "description": "New status: backlog, running, review, or done", "enum": crate::models::TaskStatus::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>() },

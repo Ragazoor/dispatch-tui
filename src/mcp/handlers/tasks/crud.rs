@@ -68,6 +68,32 @@ async fn handle_update_task(
     // rides in the same `UpdateTaskParams`, so the store writes it with the
     // fields in one transaction (`UpdateTaskViaMcp`).
     let bookmarked = parsed.bookmarked.take();
+    // `ready` is the task's ready mark, a second store write after the fields
+    // (`UpdateTaskViaMcp`, "ready is a second write"). Everything it can be
+    // refused for is checked here, before the first write.
+    let ready = parsed.ready.take();
+    let marker = match ready {
+        Some(true) => {
+            let status_after = match parsed.status {
+                Some(status) => status,
+                None => match state.task_svc.get_task(task_id).await {
+                    Ok(task) => task.status,
+                    Err(e) => return service_err_to_response(id, e),
+                },
+            };
+            if status_after != TaskStatus::Backlog {
+                return service_err_to_response(
+                    id,
+                    super::super::orchestration::not_backlog_refusal(),
+                );
+            }
+            match super::super::orchestration::ready_marker(state, identity).await {
+                Ok(marker) => Some(marker),
+                Err(e) => return service_err_to_response(id, e),
+            }
+        }
+        _ => None,
+    };
     let mut params = parsed.apply_to_params(params);
     if let Some(bookmarked) = bookmarked {
         params = params.bookmarked(bookmarked);
@@ -83,8 +109,10 @@ async fn handle_update_task(
     // `update_task`, which refuses it as it always has.
     // A call that sets only the bookmark writes no task field, so it leaves
     // `updated_at` alone: a person's own mark is not an edit of the shared task
-    // (`UpdateTaskViaMcp`). That is `SetBookmark` itself.
-    if let (true, Some(bookmarked)) = (params.is_bookmark_only(), params.bookmarked) {
+    // (`UpdateTaskViaMcp`). That is `SetBookmark` itself. A call that sets only
+    // `ready` writes nothing here.
+    if fields.is_empty() && ready.is_some() {
+    } else if let (true, Some(bookmarked)) = (params.is_bookmark_only(), params.bookmarked) {
         if let Err(e) = state.task_svc.set_bookmark(task_id, bookmarked).await {
             return service_err_to_response(id, e);
         }
@@ -96,6 +124,30 @@ async fn handle_update_task(
         if result.was_pr_finalisation {
             nudge = super::reflection_nudge(&*state.db).await;
         }
+    }
+    let mut fields = fields;
+    if let Some(ready) = ready {
+        let written = super::super::orchestration::write_ready(
+            state,
+            task_id,
+            if ready { marker.as_ref() } else { None },
+        )
+        .await;
+        if let Err(e) = written {
+            if fields.is_empty() {
+                return service_err_to_response(id, e);
+            }
+            state.notify_task_changed(task_id);
+            let task_ref = super::super::types::task_ref(state, task_id).await;
+            return tool_error(
+                id,
+                format!(
+                    "{task_ref}: the fields were written ({}), but the ready mark was not: {e}",
+                    fields.join(", ")
+                ),
+            );
+        }
+        fields.push("ready".to_string());
     }
     state.notify_task_changed(task_id);
     let task_ref = super::super::types::task_ref(state, task_id).await;
@@ -263,6 +315,7 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
         phoenix,
         schedule,
         bookmarked,
+        ready,
     } = parsed;
 
     [
@@ -283,6 +336,7 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
         ("phoenix", phoenix.is_some()),
         ("schedule", schedule.is_some()),
         ("bookmarked", bookmarked.is_some()),
+        ("ready", ready.is_some()),
     ]
     .into_iter()
     .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -434,6 +488,16 @@ pub(crate) async fn handle_create_task(
     };
 
     let signal = parsed.signal;
+    // CreateTaskViaMcp: the ready mark is a second write after the creation;
+    // who it names is settled before anything is created.
+    let marker = if parsed.ready {
+        match super::super::orchestration::ready_marker(state, identity).await {
+            Ok(marker) => Some(marker),
+            Err(e) => return service_err_to_response(id, e),
+        }
+    } else {
+        None
+    };
     let params = CreateTaskParams {
         title: parsed.title,
         description: parsed.description,
@@ -458,10 +522,28 @@ pub(crate) async fn handle_create_task(
         Ok(task_id) => task_id,
         Err(e) => return service_err_to_response(id, e),
     };
+    if let Some(marker) = &marker {
+        if let Err(e) = super::super::orchestration::write_ready(state, task_id, Some(marker)).await
+        {
+            state.notify_task_changed(task_id);
+            return tool_error(
+                id,
+                format!(
+                    "{} was created, but not marked ready: {e}",
+                    super::super::types::task_ref(state, task_id).await
+                ),
+            );
+        }
+    }
     state.notify_task_changed(task_id);
     let text = format!(
-        "{} created",
-        super::super::types::task_ref(state, task_id).await
+        "{} created{}",
+        super::super::types::task_ref(state, task_id).await,
+        if marker.is_some() {
+            " and marked ready"
+        } else {
+            ""
+        }
     );
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
@@ -737,6 +819,13 @@ async fn list_tasks(
             crate::models::display_agent(of_task.iter().copied()).map(|a| (task, a))
         })
         .collect();
+    // ListTasksViaMcp: " ready" on a task with a ready mark.
+    let mut ready = std::collections::HashSet::new();
+    for t in &filtered {
+        if state.db.ready_mark(t.id).await.is_some() {
+            ready.insert(t.id);
+        }
+    }
     let mut lines: Vec<String> = filtered
         .iter()
         .map(|t| {
@@ -747,6 +836,7 @@ async fn list_tasks(
             super::format_task_line(
                 t,
                 bookmarks.contains(&t.id),
+                ready.contains(&t.id),
                 current_agents.get(&t.id).copied(),
                 &epic_titles,
                 &super::goal_line(&goal),
@@ -865,6 +955,7 @@ mod tests {
             phoenix: None,
             schedule: None,
             bookmarked: None,
+            ready: None,
         }
     }
 
@@ -996,6 +1087,13 @@ mod tests {
                 "bookmarked",
                 UpdateTaskArgs {
                     bookmarked: Some(true),
+                    ..base_args()
+                },
+            ),
+            (
+                "ready",
+                UpdateTaskArgs {
+                    ready: Some(true),
                     ..base_args()
                 },
             ),

@@ -218,6 +218,20 @@ macro_rules! task_service_api {
                 bookmarked: bool
             ) -> Result<(), $crate::service::ServiceError>;
 
+            /// `tasks.allium: MarkTaskReady`.
+            async fn mark_task_ready(
+                &self,
+                task_id: $crate::models::TaskId,
+                marked_by: $crate::models::ReadyMarker,
+                agent_name: Option<&str>
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            /// `tasks.allium: ClearReadyMark`.
+            async fn clear_ready_mark(
+                &self,
+                task_id: $crate::models::TaskId
+            ) -> Result<(), $crate::service::ServiceError>;
+
             /// `tasks.allium: BatchDelete`'s atomic call — every task and epic
             /// in the selection, deleted together in one operation. See
             /// `TaskService::batch_delete`'s doc comment.
@@ -519,6 +533,28 @@ macro_rules! epic_service_api {
                 &self,
                 id: $crate::models::EpicId,
                 group_by_repo: bool
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            /// `orchestrators.allium: SwitchOrchestratorOn`.
+            async fn switch_orchestrator_on(
+                &self,
+                id: $crate::models::EpicId,
+                start_rule: Option<$crate::models::StartRule>,
+                max_parallel: Option<i64>
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            /// `orchestrators.allium: ChangeOrchestratorSettings`.
+            async fn change_orchestrator_settings(
+                &self,
+                id: $crate::models::EpicId,
+                start_rule: Option<$crate::models::StartRule>,
+                max_parallel: Option<i64>
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            /// `orchestrators.allium: SwitchOrchestratorOff`.
+            async fn switch_orchestrator_off(
+                &self,
+                id: $crate::models::EpicId
             ) -> Result<(), $crate::service::ServiceError>;
 
             /// Materialise the managed feed-epic tree from already-read settings. The

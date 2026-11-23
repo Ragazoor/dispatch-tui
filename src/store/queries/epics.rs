@@ -31,6 +31,13 @@ impl super::super::EpicRead for Store {
     async fn list_all_tasks_with_epic_id(&self) -> Vec<Task> {
         self.rows.tasks_with_epic()
     }
+
+    async fn epic_orchestration(&self, id: EpicId) -> Option<crate::models::EpicOrchestration> {
+        let row = self.rows.epic_orchestration(id)?;
+        crate::sync::decode::epic_orchestration(&row)
+            .map_err(|e| tracing::warn!("{e}"))
+            .ok()
+    }
 }
 
 #[async_trait::async_trait]
@@ -143,5 +150,37 @@ impl super::super::EpicCrud for Store {
             .set_epic_group_by_repo(id, group_by_repo)
             .await?
             .applied()
+    }
+
+    async fn switch_orchestrator_on(
+        &self,
+        id: EpicId,
+        start_rule: Option<crate::models::StartRule>,
+        max_parallel: Option<i64>,
+    ) -> Result<()> {
+        self.caller
+            .switch_orchestrator_on(id, start_rule.map(|r| r.as_str().to_string()), max_parallel)
+            .await?
+            .applied()
+    }
+
+    async fn change_orchestrator_settings(
+        &self,
+        id: EpicId,
+        start_rule: Option<crate::models::StartRule>,
+        max_parallel: Option<i64>,
+    ) -> Result<()> {
+        self.caller
+            .change_orchestrator_settings(
+                id,
+                start_rule.map(|r| r.as_str().to_string()),
+                max_parallel,
+            )
+            .await?
+            .applied()
+    }
+
+    async fn switch_orchestrator_off(&self, id: EpicId) -> Result<()> {
+        self.caller.switch_orchestrator_off(id).await?.applied()
     }
 }

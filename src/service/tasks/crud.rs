@@ -488,6 +488,28 @@ impl TaskService {
             .map_err(|e| Self::refusal_as_not_found(e, task_id, None))
     }
 
+    /// `tasks.allium: MarkTaskReady`. The store refuses a task outside
+    /// backlog and a marker that does not fit the name.
+    pub async fn mark_task_ready(
+        &self,
+        task_id: TaskId,
+        marked_by: crate::models::ReadyMarker,
+        agent_name: Option<&str>,
+    ) -> Result<(), ServiceError> {
+        self.db
+            .mark_task_ready(task_id, marked_by, agent_name)
+            .await
+            .map_err(|e| Self::refusal_as_not_found(e, task_id, None))
+    }
+
+    /// `tasks.allium: ClearReadyMark`.
+    pub async fn clear_ready_mark(&self, task_id: TaskId) -> Result<(), ServiceError> {
+        self.db
+            .clear_ready_mark(task_id)
+            .await
+            .map_err(|e| Self::refusal_as_not_found(e, task_id, None))
+    }
+
     pub async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
         self.get_task(task_id).await?;
         self.db
